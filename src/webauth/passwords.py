@@ -56,7 +56,7 @@ _COMMON_PASSWORDS = frozenset({
 })
 
 
-_DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
+_DUMMY_HASH: Final = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
 
 
 def hash_password(password: str) -> str:
@@ -70,6 +70,22 @@ def verify_password(password: str, password_hash: str) -> bool:
 def verify_password_constant_time(password: str, password_hash: str | None) -> bool:
     """Verify password, using a dummy hash if None to prevent timing oracle."""
     return bcrypt.checkpw(password.encode(), (password_hash or _DUMMY_HASH).encode())
+
+
+class BcryptPasswordHasher:
+    """The bcrypt ``PasswordHasher`` this library provides out of the box.
+
+    A host that wants a different algorithm supplies its own implementation of
+    the ``webauth.ports.PasswordHasher`` protocol instead.
+    """
+
+    def hash(self, password: str) -> str:
+        return hash_password(password)
+
+    def verify(self, password: str, stored_hash: str | None) -> bool:
+        if stored_hash is None:
+            return verify_password(password, _DUMMY_HASH)
+        return verify_password(password, stored_hash)
 
 
 def check_password_strength(cls_or_value: str, *_args: object) -> str:

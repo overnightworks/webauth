@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Final
 from fastapi import HTTPException
 
 from webauth.cookies import generate_csrf_token, sign_session_id
-from webauth.passwords import verify_password_constant_time
 from webauth.proxies import request_is_https
 
 if TYPE_CHECKING:
@@ -23,7 +22,7 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
     from webauth.config import WebAuthConfig
-    from webauth.ports import LoginAttemptStore, UserRecord
+    from webauth.ports import LoginAttemptStore, PasswordHasher, UserRecord
 
 ACCOUNT_LOCKED_DETAIL: Final = (
     "Account temporarily locked due to repeated failed attempts. Try again later."
@@ -118,14 +117,16 @@ def enforce_login_attempt_limits(
         )
 
 
-def password_admits_account(password: str, user: UserRecord | None) -> bool:
+def password_admits_account(
+    password: str, user: UserRecord | None, *, hasher: PasswordHasher,
+) -> bool:
     """Whether ``password`` signs ``user`` in, at the same cost when it does not.
 
     A username nobody holds is verified against a dummy hash and a deactivated
     account is judged only after that verification, so neither answers faster
     than a plain wrong password does.
     """
-    password_matches = verify_password_constant_time(
+    password_matches = hasher.verify(
         password, user.password_hash if user else None,
     )
     return user is not None and password_matches and user.is_active

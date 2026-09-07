@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from redis import Redis
     from starlette.applications import Starlette
 
+    from webauth.ports import PasswordHasher
     from webauth.proxies import TrustedProxies
 
 MIN_SESSION_SECRET_CHARS: Final = 32
@@ -59,6 +60,7 @@ class WebAuthConfig:
     session_secret: SecretStr
     redis: Redis
     trusted_proxies: TrustedProxies
+    password_hasher: PasswordHasher
     session_key_prefixes: SessionKeyPrefixes
     rate_limit_key_prefixes: RateLimitKeyPrefixes
     allowed_hosts_exact: frozenset[str]
