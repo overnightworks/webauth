@@ -19,7 +19,6 @@ from pydantic import SecretStr
 
 from webauth.config import (
     MIN_SESSION_SECRET_CHARS,
-    SessionKeyPrefixes,
     WebAuthConfig,
     install_web_auth_config,
 )
@@ -36,7 +35,7 @@ from webauth.policies import (
 from webauth.ports import RateLimitBackend, SessionIdentityChanged
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
-from webauth.session_store import SessionCache, install_session_cache
+from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 SESSION_KEY_PREFIXES = SessionKeyPrefixes(
@@ -56,7 +55,7 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
         "password_hasher": BcryptPasswordHasher(),
         "rate_limits": SingleProcessRateLimitBackend(),
-        "session_key_prefixes": SESSION_KEY_PREFIXES,
+        "session_cache": None,
         "allowed_hosts_exact": frozenset({"songmaker.example"}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "session_max_age_seconds": 3600,
@@ -126,9 +125,9 @@ def a_class_split_rate_limited_client(
     return _rate_limited_client(rate_limits, policy, (API_PATH, MEDIA_PATH))
 
 
-def a_session_cache(redis: object | None = None) -> SessionCache:
+def a_session_cache(redis: object | None = None) -> RedisSessionCache:
     """A real cache over a Redis that lives only for this test."""
-    return SessionCache(
+    return RedisSessionCache(
         redis or fakeredis.FakeRedis(decode_responses=True), SESSION_KEY_PREFIXES,
     )
 
@@ -146,9 +145,9 @@ class _RedisFailingOn:
         return getattr(self._redis, name)
 
 
-def a_session_cache_failing_on(command: str) -> SessionCache:
+def a_session_cache_failing_on(command: str) -> RedisSessionCache:
     """A cache whose Redis refuses exactly one command and serves the rest."""
-    return SessionCache(
+    return RedisSessionCache(
         _RedisFailingOn(fakeredis.FakeRedis(decode_responses=True), command),
         SESSION_KEY_PREFIXES,
     )
@@ -264,10 +263,10 @@ def a_session(
 
 
 def an_auth_app(
-    record: FakeSessionRecord | None, cache: SessionCache | None = None,
+    record: FakeSessionRecord | None, cache: RedisSessionCache | None = None,
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route."""
-    config = a_web_auth_config(admin_role=ADMIN_ROLE)
+    config = a_web_auth_config(admin_role=ADMIN_ROLE, session_cache=cache)
     sessions = SessionRecordsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
@@ -280,8 +279,6 @@ def an_auth_app(
 
     app = FastAPI()
     install_web_auth_config(app, config)
-    if cache is not None:
-        install_session_cache(app, cache)
 
     @app.get("/me")
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
