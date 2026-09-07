@@ -57,12 +57,18 @@ the fake stores, so the shape of a login is visible without a database. Run
 this from `tests/`:
 
 ```python
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from webauth_arrangement import FakeUser, a_web_auth_config
 
 from webauth.config import install_web_auth_config
-from webauth.login import issue_session_cookies, password_admits_account
+from webauth.login import (
+    LoginOutcome,
+    LoginRefusal,
+    http_refusal,
+    issue_session_cookies,
+    judge_credentials,
+)
 from webauth.passwords import hash_password
 
 config = a_web_auth_config()
@@ -73,8 +79,9 @@ alice = FakeUser(password_hash=hash_password("the-correct-password"))
 
 @app.post("/login")
 def login(request: Request, response: Response, password: str) -> dict[str, str]:
-    if not password_admits_account(password, alice, hasher=config.password_hasher):
-        raise HTTPException(401, "Invalid username or password")
+    outcome = judge_credentials(password, alice, hasher=config.password_hasher)
+    if outcome is not LoginOutcome.ADMITTED:
+        raise http_refusal(LoginRefusal(outcome))
     issue_session_cookies(response, request, "session-1", config)
     return {"status": "ok"}
 
@@ -84,8 +91,9 @@ print(signed_in.status_code, signed_in.cookies[config.session_cookie_name])
 ```
 
 The real application replaces `FakeUser` with a lookup through its `UserStore`,
-wraps the attempt in `enforce_login_attempt_limits`, and records the failed
-attempt itself — the library never writes.
+guards the attempt with `login_attempt_budget` (raising `http_refusal` on the
+`LoginRefusal` it returns), and records the failed attempt itself — the library
+never writes.
 
 ## PasswordHasher
 
