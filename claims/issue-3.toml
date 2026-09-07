@@ -1,0 +1,8 @@
+claim_id = "9a40fae7d49d4029990c984ddb24a9db"
+agent = "songmaker-d8"
+role = "builder"
+base = "1cdac5127b76bbb9efaaba1f9c9ffb931a370a5a"
+branch = "songmaker-d8/issue-3-passwordhasher"
+scope = ["src/webauth/ports.py", "src/webauth/passwords.py", "src/webauth/config.py", "src/webauth/login.py", "tests/test_passwords.py", "tests/webauth_arrangement.py", "README.md"]
+opened_commit = "546159a1a78936ff782291ac1fa5de10d29245c9"
+whole_reason = "W1 PasswordHasher-Port: ports+passwords+config+login mit zwei Tests und README = eine kohaerente Slice"
