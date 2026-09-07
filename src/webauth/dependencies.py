@@ -25,13 +25,11 @@ from webauth.ports import (
     SessionRecordStore,
 )
 from webauth.proxies import client_user_agent, resolve_client_ip
-from webauth.session_store import installed_session_cache
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from webauth.ports import SessionRecord
-    from webauth.session_store import SessionCache
+    from webauth.ports import SessionCache, SessionRecord
 
 log = logging.getLogger(__name__)
 
@@ -189,7 +187,7 @@ def _authenticate_from_cache(
     request: Request, audit: AuditSink, session_id: str, config: WebAuthConfig,
 ) -> AuthenticatedUser | None:
     """The cached account, or None when the cache cannot answer for it."""
-    session_cache = installed_session_cache(request.app)
+    session_cache = config.session_cache
     if session_cache is None:
         return None
 
@@ -275,7 +273,7 @@ def _authenticate_from_store(
         expires_at=now + timedelta(seconds=config.session_max_age_seconds),
     )
 
-    _populate_cache(installed_session_cache(request.app), record, config)
+    _populate_cache(config.session_cache, record, config)
 
     return AuthenticatedUser(
         id=record.user.id,

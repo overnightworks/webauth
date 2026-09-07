@@ -8,8 +8,7 @@ from unittest.mock import MagicMock
 import fakeredis
 import pytest
 
-from webauth.config import SessionKeyPrefixes
-from webauth.session_store import SessionCache
+from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
 
 _PREFIXES = SessionKeyPrefixes(session="app:session", user_sessions="app:user_sessions")
 
@@ -20,11 +19,11 @@ def fake_redis():
 
 
 class TestSessionCache:
-    def _make_cache(self, fake_redis) -> SessionCache:
-        return SessionCache(fake_redis, _PREFIXES)
+    def _make_cache(self, fake_redis) -> RedisSessionCache:
+        return RedisSessionCache(fake_redis, _PREFIXES)
 
     def _store_sample(
-        self, cache: SessionCache, session_id: str = "sess1",
+        self, cache: RedisSessionCache, session_id: str = "sess1",
         user_id: str = "user1", username: str = "alice",
     ) -> None:
         now = datetime.now(timezone.utc)
@@ -113,6 +112,6 @@ class TestSessionCache:
     def test_raises_on_redis_failure(self) -> None:
         broken = MagicMock()
         broken.get.side_effect = ConnectionError("down")
-        cache = SessionCache(broken, _PREFIXES)
+        cache = RedisSessionCache(broken, _PREFIXES)
         with pytest.raises(ConnectionError):
             cache.get("sess1")

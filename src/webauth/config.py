@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from pydantic import SecretStr
     from starlette.applications import Starlette
 
-    from webauth.ports import PasswordHasher, RateLimitBackend
+    from webauth.ports import PasswordHasher, RateLimitBackend, SessionCache
     from webauth.proxies import TrustedProxies
 
 MIN_SESSION_SECRET_CHARS: Final = 32
@@ -38,20 +38,11 @@ WEB_AUTH_STATE_ATTRIBUTE: Final = "webauth"
 
 
 @dataclass(frozen=True)
-class SessionKeyPrefixes:
-    """Where the session cache keeps its two kinds of Redis key."""
-
-    session: str
-    user_sessions: str
-
-
-@dataclass(frozen=True)
 class WebAuthConfig:
     session_secret: SecretStr
     trusted_proxies: TrustedProxies
     password_hasher: PasswordHasher
     rate_limits: RateLimitBackend
-    session_key_prefixes: SessionKeyPrefixes
     allowed_hosts_exact: frozenset[str]
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
     session_max_age_seconds: int
@@ -66,6 +57,7 @@ class WebAuthConfig:
     max_user_agent_chars: int = DEFAULT_MAX_USER_AGENT_CHARS
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
+    session_cache: SessionCache | None = None
 
     def __post_init__(self) -> None:
         if len(self.session_secret.get_secret_value()) < MIN_SESSION_SECRET_CHARS:

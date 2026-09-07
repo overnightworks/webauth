@@ -20,7 +20,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.session_store` | The Redis session cache — Redis owns expiry |
+| `webauth.session_store` | The optional Redis-backed `SessionCache` a host may put on its config |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 
 It leaves the application everything that touches the application's own truth:
@@ -126,6 +126,21 @@ Two backends implement it:
 
 Redis is therefore an optional dependency: a deployment that supplies the
 in-process backend and no Redis session cache installs plain `webauth`.
+
+## The session cache, or none
+
+`WebAuthConfig.session_cache` is a `webauth.ports.SessionCache` or `None`, and
+that single field decides how a live session's idle expiry is owned. With a
+cache, Redis TTL owns idle expiry and the host reconciles the store; with
+`session_cache=None`, the store's `touch` on every request owns idle expiry and
+there is no sync loop. There is no app-state install: the config carries the
+cache, so any code that holds the config — not only a request handler — can
+reach it.
+
+`webauth.session_store.RedisSessionCache` is the one implementation shipped
+here; it needs the client library, so a host that uses it installs
+`webauth[redis]`. A host that supplies its own cache implements the same
+protocol.
 
 ## Development
 

@@ -19,14 +19,14 @@ from webauth_arrangement import (
 
 from webauth.dependencies import ACCOUNT_DISABLED_DETAIL, SESSION_EXPIRED_DETAIL
 from webauth.ports import SessionIdentityChange
-from webauth.session_store import SessionCache
+from webauth.session_store import RedisSessionCache
 
 CACHED_MAX_AGE_SECONDS = 3600
 A_STORED_SESSION_STILL_STANDS = a_session
 
 
 def a_cached_session(
-    cache: SessionCache,
+    cache: RedisSessionCache,
     *,
     user: FakeUser | None = None,
     created_at: datetime | None = None,
@@ -133,3 +133,22 @@ def test_a_cached_session_arriving_from_a_new_address_is_reported_and_remembered
 
     assert [event.change for event in app.audit.events] == [SessionIdentityChange.IP_ADDRESS]
     assert cache.get(SESSION_ID).ip_address == CLIENT_ADDRESS
+
+
+def test_a_config_without_a_cache_authenticates_from_the_store_and_builds_no_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caches_built = 0
+
+    def _count_construction(self: RedisSessionCache, *args: object, **kwargs: object) -> None:
+        nonlocal caches_built
+        caches_built += 1
+
+    monkeypatch.setattr(RedisSessionCache, "__init__", _count_construction)
+    app = an_auth_app(a_session())
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 200
+    assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
+    assert caches_built == 0
