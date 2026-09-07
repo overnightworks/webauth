@@ -11,10 +11,10 @@ dependencies = [
     "fastapi>=0.100,<1",
     "pydantic>=2,<3",
     "bcrypt>=4.0,<6",
-    "redis>=5.0,<9",
 ]
 
 [project.optional-dependencies]
+redis = ["redis>=5.0,<9"]
 dev = [
     "pytest>=7,<10",
     "fakeredis[lua]>=2,<3",

@@ -19,16 +19,18 @@ from pydantic import SecretStr
 
 from webauth.config import (
     MIN_SESSION_SECRET_CHARS,
-    RateLimitKeyPrefixes,
     SessionKeyPrefixes,
     WebAuthConfig,
     install_web_auth_config,
 )
 from webauth.cookies import sign_session_id
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
+from webauth.middleware import IpRateLimitMiddleware
 from webauth.passwords import BcryptPasswordHasher
-from webauth.ports import SessionIdentityChanged
+from webauth.policies import RateLimitBudget, RateLimitClass, RateLimitPolicy
+from webauth.ports import RateLimitBackend, SessionIdentityChanged
 from webauth.proxies import TrustedProxies
+from webauth.rate_limit import SingleProcessRateLimitBackend
 from webauth.session_store import SessionCache, install_session_cache
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
@@ -46,13 +48,10 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
     """A complete configuration; a keyword replaces the field it names."""
     defaults = {
         "session_secret": SecretStr("s" * MIN_SESSION_SECRET_CHARS),
-        "redis": object(),
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
         "password_hasher": BcryptPasswordHasher(),
+        "rate_limits": SingleProcessRateLimitBackend(),
         "session_key_prefixes": SESSION_KEY_PREFIXES,
-        "rate_limit_key_prefixes": RateLimitKeyPrefixes(
-            api="rl:ip", media="rl:ip-media", stream="rl:ip-stream",
-        ),
         "allowed_hosts_exact": frozenset({"songmaker.example"}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "session_max_age_seconds": 3600,
@@ -62,6 +61,36 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
         "login_lockout_window_seconds": 3600,
     }
     return WebAuthConfig(**{**defaults, **overrides})
+
+
+RATE_LIMITED_PATH = "/api/thing"
+DEFAULT_RATE_WINDOW_SECONDS = 60
+
+
+def a_rate_limited_client(
+    rate_limits: RateLimitBackend,
+    *,
+    max_requests: int,
+    window_seconds: int = DEFAULT_RATE_WINDOW_SECONDS,
+) -> TestClient:
+    """A client whose every request spends one budget of ``rate_limits``.
+
+    Every class shares one budget so the test drives the limiter through the
+    real middleware regardless of how a path classifies.
+    """
+    budget = RateLimitBudget(max_requests, window_seconds)
+    policy = RateLimitPolicy(
+        budgets={rate_limit_class: budget for rate_limit_class in RateLimitClass},
+    )
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config(rate_limits=rate_limits))
+    app.add_middleware(IpRateLimitMiddleware, policy=policy)
+
+    @app.get(RATE_LIMITED_PATH)
+    def thing() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return TestClient(app)
 
 
 def a_session_cache(redis: object | None = None) -> SessionCache:

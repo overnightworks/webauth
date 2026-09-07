@@ -28,8 +28,10 @@ than the owner needs.
   reaches it through the Protocols in `webauth.ports`, which the host
   application implements over the persistence it already owns. `.importlinter`
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
-- No host application is a dependency. `webauth` depends on FastAPI, Pydantic,
-  bcrypt and redis, and on nothing else at runtime.
+- No host application is a dependency. `webauth` depends on FastAPI, Pydantic
+  and bcrypt at runtime, and on nothing else. Redis is optional — install
+  `webauth[redis]` for the Redis rate-limit and session backends; a single-node
+  host that supplies the in-process rate-limit backend needs no Redis at all.
 - Application concerns — the user model, roles, first-run setup, and the login
   route's transaction boundary — belong to the host, not here.
 

@@ -389,7 +389,6 @@ dependencies = [
     { name = "bcrypt" },
     { name = "fastapi" },
     { name = "pydantic" },
-    { name = "redis" },
 ]
 
 [package.optional-dependencies]
@@ -399,6 +398,9 @@ dev = [
     { name = "import-linter" },
     { name = "pytest" },
     { name = "ruff" },
+]
+redis = [
+    { name = "redis" },
 ]
 
 [package.metadata]
@@ -410,10 +412,10 @@ requires-dist = [
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2,<3" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7,<10" },
-    { name = "redis", specifier = ">=5.0,<9" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0,<9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4,<1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["redis", "dev"]
 
 [[package]]
 name = "packaging"
