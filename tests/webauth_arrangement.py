@@ -26,6 +26,7 @@ from webauth.config import (
 )
 from webauth.cookies import sign_session_id
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
+from webauth.passwords import BcryptPasswordHasher
 from webauth.ports import SessionIdentityChanged
 from webauth.proxies import TrustedProxies
 from webauth.session_store import SessionCache, install_session_cache
@@ -47,6 +48,7 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
         "session_secret": SecretStr("s" * MIN_SESSION_SECRET_CHARS),
         "redis": object(),
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
+        "password_hasher": BcryptPasswordHasher(),
         "session_key_prefixes": SESSION_KEY_PREFIXES,
         "rate_limit_key_prefixes": RateLimitKeyPrefixes(
             api="rl:ip", media="rl:ip-media", stream="rl:ip-stream",
@@ -97,6 +99,23 @@ class FakeUser:
     role: str = MEMBER_ROLE
     is_active: bool = True
     password_hash: str = "unused"
+
+
+@dataclass
+class Argon2idStyleHasher:
+    """A non-bcrypt ``PasswordHasher`` double whose hashes are legible.
+
+    It stands in for a host that plugs in its own algorithm: a test can inject
+    it and read straight off the stored hash which password produced it.
+    """
+
+    prefix: str = "argon2"
+
+    def hash(self, password: str) -> str:
+        return f"{self.prefix}:{password}"
+
+    def verify(self, password: str, stored_hash: str | None) -> bool:
+        return stored_hash == f"{self.prefix}:{password}"
 
 
 @dataclass

@@ -1,4 +1,4 @@
-"""What the host application supplies: its users, sessions, attempts, and audit.
+"""What the host application supplies: its users, sessions, attempts, audit, and hasher.
 
 Each port is a Protocol the application implements over the persistence it
 already owns, so the library needs no schema and no ORM of its own. None of
@@ -98,6 +98,23 @@ class LoginAttemptStore(Protocol):
         username: str | None = None,
     ) -> int:
         """Failures within the window, by username when given, else by address."""
+        ...
+
+
+@runtime_checkable
+class PasswordHasher(Protocol):
+    """The algorithm the host chose to hash and check its passwords with."""
+
+    def hash(self, password: str) -> str: ...
+
+    def verify(self, password: str, stored_hash: str | None) -> bool:
+        """Whether ``password`` matches ``stored_hash``, at full cost when it cannot.
+
+        A ``None`` hash — a username nobody holds, or an account with no
+        password set — is still verified against a fixed dummy hash rather than
+        rejected outright, so a missing account cannot be told from a wrong
+        password by how long the answer takes.
+        """
         ...
 
 

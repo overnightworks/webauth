@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import pytest
+from webauth_arrangement import Argon2idStyleHasher, FakeUser
 
+from webauth.login import password_admits_account
 from webauth.passwords import (
+    _DUMMY_HASH,
     BCRYPT_ROUNDS,
     MIN_PASSWORD_LENGTH,
+    BcryptPasswordHasher,
     check_password_strength,
     hash_password,
     verify_password,
@@ -58,3 +62,34 @@ def test_strong_password_accepted() -> None:
 
 def test_none_password_passes() -> None:
     assert check_password_strength(None) is None
+
+
+def test_an_injected_hasher_admits_the_account_it_signed() -> None:
+    hasher = Argon2idStyleHasher()
+    user = FakeUser(password_hash=hasher.hash("open-sesame-42"))
+    assert password_admits_account("open-sesame-42", user, hasher=hasher) is True
+    assert password_admits_account("not-the-password", user, hasher=hasher) is False
+
+
+def test_bcrypt_hasher_round_trips_a_password() -> None:
+    hasher = BcryptPasswordHasher()
+    stored = hasher.hash("s3cur3P@ss!")
+    assert hasher.verify("s3cur3P@ss!", stored) is True
+    assert hasher.verify("wrong-password", stored) is False
+
+
+def test_bcrypt_verify_with_no_hash_still_pays_the_full_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing hash must be checked against the dummy, or the timing gap
+    tells an attacker the account does not exist."""
+    verified_against: list[str] = []
+
+    def spy(password: str, password_hash: str) -> bool:
+        verified_against.append(password_hash)
+        return False
+
+    monkeypatch.setattr("webauth.passwords.verify_password", spy)
+
+    assert BcryptPasswordHasher().verify("any-password", None) is False
+    assert verified_against == [_DUMMY_HASH]

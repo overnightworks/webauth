@@ -28,9 +28,9 @@ the user model, roles, first-run setup, and the login route with its
 transaction boundary. The library persists nothing itself — it holds no schema
 and no ORM, and an import-linter contract keeps it that way. What it needs
 reaches it through the Protocols in `webauth.ports`: `UserStore`,
-`SessionRecordStore`, `LoginAttemptStore`, and `AuditSink`. None of them
-commits; the caller owns the transaction, so a request that fails leaves
-nothing behind that the auth machinery wrote.
+`SessionRecordStore`, `LoginAttemptStore`, `AuditSink`, and `PasswordHasher`.
+None of the stores commits; the caller owns the transaction, so a request that
+fails leaves nothing behind that the auth machinery wrote.
 
 ## Install
 
@@ -73,7 +73,7 @@ alice = FakeUser(password_hash=hash_password("the-correct-password"))
 
 @app.post("/login")
 def login(request: Request, response: Response, password: str) -> dict[str, str]:
-    if not password_admits_account(password, alice):
+    if not password_admits_account(password, alice, hasher=config.password_hasher):
         raise HTTPException(401, "Invalid username or password")
     issue_session_cookies(response, request, "session-1", config)
     return {"status": "ok"}
@@ -86,6 +86,18 @@ print(signed_in.status_code, signed_in.cookies[config.session_cookie_name])
 The real application replaces `FakeUser` with a lookup through its `UserStore`,
 wraps the attempt in `enforce_login_attempt_limits`, and records the failed
 attempt itself — the library never writes.
+
+## PasswordHasher
+
+The library hardcodes no hashing algorithm: `WebAuthConfig` requires a
+`password_hasher`, a `webauth.ports.PasswordHasher` with two methods —
+`hash(password) -> str` and `verify(password, stored_hash) -> bool`. `verify`
+must check even a `None` `stored_hash` against a fixed dummy at full cost, so a
+username nobody holds cannot be told from a wrong password by timing.
+
+`webauth.passwords.BcryptPasswordHasher` is provided and honours that contract.
+A host that prefers Argon2id supplies its own class implementing the same
+protocol.
 
 ## Development
 
