@@ -1,0 +1,7 @@
+claim_id = "5f612011c8b44d4993ca204a28d8e443"
+agent = "songmaker-d8"
+role = "builder"
+base = "0b87e3a65fb293b50b632281931959cfed7932cf"
+branch = "songmaker-d8/issue-7-loginvalue"
+scope = ["src/webauth/login.py", "tests/test_login.py", "README.md"]
+opened_commit = "13dfade2b3e41f2f52a288b7e744c7cc216c6cc7"
