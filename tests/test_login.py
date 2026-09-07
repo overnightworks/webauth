@@ -21,7 +21,7 @@ from webauth.login import (
     issue_session_cookies,
     password_admits_account,
 )
-from webauth.passwords import hash_password
+from webauth.passwords import BcryptPasswordHasher, hash_password
 
 SESSION_ID = "session-1"
 CLIENT_ADDRESS = "203.0.113.7"
@@ -247,4 +247,7 @@ AN_ACCOUNT = StoredAccount(password_hash=hash_password(A_CORRECT_PASSWORD))
 def test_only_an_active_account_with_its_own_password_is_admitted(
     password: str, user: StoredAccount | None, admitted: bool,
 ) -> None:
-    assert password_admits_account(password, user) is admitted
+    assert (
+        password_admits_account(password, user, hasher=BcryptPasswordHasher())
+        is admitted
+    )
