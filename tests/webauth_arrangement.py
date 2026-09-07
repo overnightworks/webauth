@@ -27,7 +27,12 @@ from webauth.cookies import sign_session_id
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
 from webauth.middleware import IpRateLimitMiddleware
 from webauth.passwords import BcryptPasswordHasher
-from webauth.policies import RateLimitBudget, RateLimitClass, RateLimitPolicy
+from webauth.policies import (
+    PathRules,
+    RateLimitBudget,
+    RateLimitClass,
+    RateLimitPolicy,
+)
 from webauth.ports import RateLimitBackend, SessionIdentityChanged
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
@@ -63,8 +68,21 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
     return WebAuthConfig(**{**defaults, **overrides})
 
 
-RATE_LIMITED_PATH = "/api/thing"
+API_PATH = "/api/thing"
+RATE_LIMITED_PATH = API_PATH
+MEDIA_PATH = "/media/thing"
 DEFAULT_RATE_WINDOW_SECONDS = 60
+
+
+def _rate_limited_client(
+    rate_limits: RateLimitBackend, policy: RateLimitPolicy, paths: tuple[str, ...],
+) -> TestClient:
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config(rate_limits=rate_limits))
+    app.add_middleware(IpRateLimitMiddleware, policy=policy)
+    for path in paths:
+        app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET"])
+    return TestClient(app)
 
 
 def a_rate_limited_client(
@@ -82,15 +100,30 @@ def a_rate_limited_client(
     policy = RateLimitPolicy(
         budgets={rate_limit_class: budget for rate_limit_class in RateLimitClass},
     )
-    app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config(rate_limits=rate_limits))
-    app.add_middleware(IpRateLimitMiddleware, policy=policy)
+    return _rate_limited_client(rate_limits, policy, (API_PATH,))
 
-    @app.get(RATE_LIMITED_PATH)
-    def thing() -> dict[str, str]:
-        return {"status": "ok"}
 
-    return TestClient(app)
+def a_class_split_rate_limited_client(
+    rate_limits: RateLimitBackend,
+    *,
+    api_max_requests: int,
+    media_max_requests: int,
+    window_seconds: int = DEFAULT_RATE_WINDOW_SECONDS,
+) -> TestClient:
+    """A client whose API and media paths spend separate budgets.
+
+    ``MEDIA_PATH`` classifies as the media budget, ``API_PATH`` as the API one,
+    so a test can prove one class's exhaustion never spends another's.
+    """
+    policy = RateLimitPolicy(
+        budgets={
+            RateLimitClass.API: RateLimitBudget(api_max_requests, window_seconds),
+            RateLimitClass.MEDIA: RateLimitBudget(media_max_requests, window_seconds),
+            RateLimitClass.STREAM: RateLimitBudget(media_max_requests, window_seconds),
+        },
+        media=PathRules(prefixes=(MEDIA_PATH,)),
+    )
+    return _rate_limited_client(rate_limits, policy, (API_PATH, MEDIA_PATH))
 
 
 def a_session_cache(redis: object | None = None) -> SessionCache:

@@ -48,7 +48,7 @@ class IpRateLimitMiddleware(BaseHTTPMiddleware):
                 window_seconds=budget.window_seconds,
             )
         except Exception:
-            log.warning("IP rate limiter unavailable -- rejecting request")
+            log.exception("IP rate limiter unavailable -- rejecting request")
             return JSONResponse(
                 {"detail": "Rate limiter unavailable"}, status_code=503,
                 headers={"Retry-After": str(LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},

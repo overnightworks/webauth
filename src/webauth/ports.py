@@ -125,12 +125,11 @@ class RateLimitBackend(Protocol):
     def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
         """Whether ``key`` still fits ``limit`` events in the last ``window_seconds``.
 
-        The caller owns the window — a per-address budget and a per-account
-        one measure the same key over different spans — so the backend bakes
-        in neither the window nor the limit. The check counts the current
-        event, so a caller told yes has already spent one of the budget. A
-        backend that cannot answer raises rather than guessing, and the caller
-        fails the request closed.
+        The caller owns the window and the limit, so the backend bakes in
+        neither: each budget measures its own key, and a key is always checked
+        with one window. The check counts the current event, so a caller told
+        yes has already spent one of the budget. A backend that cannot answer
+        raises rather than guessing, and the caller fails the request closed.
         """
         ...
 

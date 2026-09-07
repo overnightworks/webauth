@@ -5,9 +5,16 @@ from __future__ import annotations
 import threading
 from unittest.mock import patch
 
-from webauth_arrangement import RATE_LIMITED_PATH, a_rate_limited_client
+import pytest
+from webauth_arrangement import (
+    API_PATH,
+    MEDIA_PATH,
+    RATE_LIMITED_PATH,
+    a_class_split_rate_limited_client,
+    a_rate_limited_client,
+)
 
-from webauth.rate_limit import SingleProcessRateLimitBackend
+from webauth.rate_limit import PRUNE_INTERVAL_SECONDS, SingleProcessRateLimitBackend
 
 
 class TestCountingAndExpiry:
@@ -29,6 +36,12 @@ class TestCountingAndExpiry:
             monotonic.return_value = 111.0
             assert backend.is_allowed("addr", limit=1, window_seconds=10) is True
 
+    def test_reusing_a_key_with_a_different_window_raises(self) -> None:
+        backend = SingleProcessRateLimitBackend()
+        backend.is_allowed("addr", limit=1, window_seconds=60)
+        with pytest.raises(ValueError, match="window"):
+            backend.is_allowed("addr", limit=1, window_seconds=30)
+
 
 class TestIsolationAndBounds:
     def test_two_backends_count_independently(self) -> None:
@@ -47,12 +60,24 @@ class TestIsolationAndBounds:
             backend.is_allowed("active-addr", limit=5, window_seconds=60)
         assert backend.active_key_count() == 1
 
-    def test_a_short_window_check_does_not_evict_a_long_window_key(self) -> None:
+    def test_the_full_sweep_clears_stale_keys_once_the_interval_elapses(self) -> None:
         backend = SingleProcessRateLimitBackend()
         with patch("webauth.rate_limit.time.monotonic") as monotonic:
             monotonic.return_value = 1_000.0
-            backend.is_allowed("long-lived", limit=1, window_seconds=3_600)
-            monotonic.return_value = 1_000.0 + 120
+            for n in range(5):
+                backend.is_allowed(f"addr-{n}", limit=1, window_seconds=10)
+            assert backend.active_key_count() == 5
+            monotonic.return_value = 1_000.0 + PRUNE_INTERVAL_SECONDS + 1
+            backend.is_allowed("fresh", limit=1, window_seconds=10)
+        assert backend.active_key_count() == 1
+
+    def test_a_sweep_respects_each_keys_own_window(self) -> None:
+        backend = SingleProcessRateLimitBackend()
+        with patch("webauth.rate_limit.time.monotonic") as monotonic:
+            monotonic.return_value = 1_000.0
+            assert backend.is_allowed("long-lived", limit=1, window_seconds=3_600) is True
+            monotonic.return_value = 1_000.0 + PRUNE_INTERVAL_SECONDS + 1
+            backend.is_allowed("noise", limit=5, window_seconds=30)
             assert backend.is_allowed("long-lived", limit=1, window_seconds=3_600) is False
 
 
@@ -88,3 +113,13 @@ class TestMiddlewareOverSingleProcessBackend:
         blocked = client.get(RATE_LIMITED_PATH)
         assert blocked.status_code == 429
         assert blocked.headers["Retry-After"] == "60"
+
+    def test_exhausting_the_api_budget_leaves_the_media_path_answering(self) -> None:
+        client = a_class_split_rate_limited_client(
+            SingleProcessRateLimitBackend(),
+            api_max_requests=1,
+            media_max_requests=5,
+        )
+        assert client.get(API_PATH).status_code == 200
+        assert client.get(API_PATH).status_code == 429
+        assert client.get(MEDIA_PATH).status_code == 200

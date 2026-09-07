@@ -9,7 +9,9 @@ import fakeredis
 import pytest
 from webauth_arrangement import RATE_LIMITED_PATH, a_rate_limited_client
 
-from webauth.rate_limit import RedisRateLimitBackend, RedisRateLimiter
+from webauth.rate_limit import RedisRateLimitBackend
+
+HOST_PREFIX = "host"
 
 
 @pytest.fixture
@@ -19,36 +21,44 @@ def fake_redis():
 
 class TestRedisRateLimitBackend:
     def test_allows_within_limit(self, fake_redis) -> None:
-        backend = RedisRateLimitBackend(fake_redis)
+        backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
         assert backend.is_allowed("rl:test", limit=3, window_seconds=60) is True
         assert backend.is_allowed("rl:test", limit=3, window_seconds=60) is True
         assert backend.is_allowed("rl:test", limit=3, window_seconds=60) is True
 
     def test_blocks_over_limit(self, fake_redis) -> None:
-        backend = RedisRateLimitBackend(fake_redis)
+        backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
         backend.is_allowed("rl:test", limit=2, window_seconds=60)
         backend.is_allowed("rl:test", limit=2, window_seconds=60)
         assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is False
 
     def test_counts_requests_with_identical_timestamps(self, fake_redis) -> None:
-        backend = RedisRateLimitBackend(fake_redis)
+        backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
         with patch("webauth.rate_limit.time.time", return_value=1234.5):
             assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is True
             assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is True
             assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is False
             for _ in range(1_000):
                 assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is False
-            assert fake_redis.zcard("rl:test") == 2
+            assert fake_redis.zcard(f"{HOST_PREFIX}:rl:test") == 2
 
     def test_different_keys_independent(self, fake_redis) -> None:
-        backend = RedisRateLimitBackend(fake_redis)
+        backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
         assert backend.is_allowed("rl:a", limit=1, window_seconds=60) is True
         assert backend.is_allowed("rl:b", limit=1, window_seconds=60) is True
         assert backend.is_allowed("rl:a", limit=1, window_seconds=60) is False
         assert backend.is_allowed("rl:b", limit=1, window_seconds=60) is False
 
+    def test_two_prefixes_over_one_redis_count_independently(self, fake_redis) -> None:
+        host_a = RedisRateLimitBackend(fake_redis, "host-a")
+        host_b = RedisRateLimitBackend(fake_redis, "host-b")
+        assert host_a.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is True
+        assert host_b.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is True
+        assert host_a.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is False
+        assert host_b.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is False
+
     def test_window_expiry(self, fake_redis) -> None:
-        backend = RedisRateLimitBackend(fake_redis)
+        backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
         assert backend.is_allowed("rl:test", limit=1, window_seconds=1) is True
         assert backend.is_allowed("rl:test", limit=1, window_seconds=1) is False
         with patch("webauth.rate_limit.time") as mock_time:
@@ -58,18 +68,15 @@ class TestRedisRateLimitBackend:
     def test_raises_on_redis_failure(self) -> None:
         broken = MagicMock()
         broken.eval.side_effect = ConnectionError("down")
-        backend = RedisRateLimitBackend(broken)
+        backend = RedisRateLimitBackend(broken, HOST_PREFIX)
         with pytest.raises(ConnectionError):
             backend.is_allowed("rl:test", limit=10, window_seconds=60)
-
-    def test_legacy_name_is_the_same_backend(self) -> None:
-        assert RedisRateLimiter is RedisRateLimitBackend
 
 
 class TestMiddlewareOverRedisBackend:
     def test_allows_within_budget_then_blocks(self) -> None:
         client = a_rate_limited_client(
-            RedisRateLimitBackend(fakeredis.FakeRedis(decode_responses=True)),
+            RedisRateLimitBackend(fakeredis.FakeRedis(decode_responses=True), HOST_PREFIX),
             max_requests=2,
         )
         assert client.get(RATE_LIMITED_PATH).status_code == 200

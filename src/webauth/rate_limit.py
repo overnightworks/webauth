@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -29,10 +29,15 @@ class RedisRateLimitBackend:
     trimming, counting, and recording cannot interleave with another request.
     A Redis that cannot answer raises, and the middleware fails the request
     closed rather than guessing.
+
+    ``key_prefix`` namespaces this host's keys inside the shared store, so two
+    applications on one Redis do not spend each other's budgets. The host
+    supplies its own prefix when it constructs the backend.
     """
 
-    def __init__(self, redis: Redis) -> None:
+    def __init__(self, redis: Redis, key_prefix: str) -> None:
         self._redis = redis
+        self._key_prefix = key_prefix
 
     _LUA_SLIDING_WINDOW = """
     local key = KEYS[1]
@@ -53,7 +58,7 @@ class RedisRateLimitBackend:
         count = self._redis.eval(
             self._LUA_SLIDING_WINDOW,
             1,
-            key,
+            f"{self._key_prefix}:{key}",
             now,
             window_seconds,
             limit,
@@ -62,7 +67,7 @@ class RedisRateLimitBackend:
         return count <= limit
 
 
-RedisRateLimiter = RedisRateLimitBackend
+PRUNE_INTERVAL_SECONDS: Final = 60
 
 
 @dataclass
@@ -81,24 +86,35 @@ class SingleProcessRateLimitBackend:
     single-node only: a deployment that runs more than one worker, or more
     than one host, needs `RedisRateLimitBackend` so the budget is shared.
 
-    Each check prunes keys whose newest event has aged past their own window,
-    so a key touched once and never again does not linger — the store stays
-    bounded by the addresses currently active, not by every address ever seen.
+    A key is always checked with the one window it was created with; checking
+    it with a different window is a caller bug and raises rather than silently
+    dropping a long budget on a short check.
+
+    The key it is checked with is trimmed to its window on every check; the
+    whole store is swept for keys aged out of their window only every
+    ``PRUNE_INTERVAL_SECONDS``, so a many-address flood cannot turn each request
+    into a full scan while the store still stays bounded by the addresses
+    currently active rather than by every address ever seen.
     """
 
     def __init__(self) -> None:
         self._events: dict[str, _WindowedEvents] = {}
         self._lock = threading.Lock()
+        self._next_prune_at = 0.0
 
     def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
         now = time.monotonic()
         with self._lock:
-            self._drop_expired(now)
+            self._sweep_expired_when_due(now)
             entry = self._events.get(key)
             if entry is None:
                 entry = _WindowedEvents(window_seconds=window_seconds)
                 self._events[key] = entry
-            entry.window_seconds = window_seconds
+            elif entry.window_seconds != window_seconds:
+                raise ValueError(
+                    f"Key {key!r} was created with a {entry.window_seconds}s window "
+                    f"and cannot be checked against a {window_seconds}s one.",
+                )
             cutoff = now - window_seconds
             entry.timestamps = [stamp for stamp in entry.timestamps if stamp > cutoff]
             if len(entry.timestamps) >= limit:
@@ -107,11 +123,14 @@ class SingleProcessRateLimitBackend:
             return True
 
     def active_key_count(self) -> int:
-        """How many keys the store currently holds, after the last check's pruning."""
+        """How many keys the store currently holds, after the last sweep."""
         with self._lock:
             return len(self._events)
 
-    def _drop_expired(self, now: float) -> None:
+    def _sweep_expired_when_due(self, now: float) -> None:
+        if now < self._next_prune_at:
+            return
+        self._next_prune_at = now + PRUNE_INTERVAL_SECONDS
         expired = [
             key
             for key, entry in self._events.items()
