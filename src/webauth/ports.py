@@ -9,13 +9,11 @@ fails leaves nothing behind that the auth machinery wrote.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, TypeVar, runtime_checkable
 
-if TYPE_CHECKING:
-    from datetime import datetime
-
-    from webauth.session_store import CachedSessionData
+from pydantic import BaseModel
 
 
 class UserRecord(Protocol):
@@ -29,14 +27,18 @@ class UserRecord(Protocol):
 
 
 class SessionRecord(Protocol):
-    """One stored session and the account it belongs to."""
+    """One stored session and the account it belongs to.
+
+    The fields every liveness policy leaves alone: identity and origin. When
+    and whether the session still stands is the policy's to read from the
+    concrete record its own store produces — the base contract assumes no
+    ``created_at``, ``expires_at``, or ``last_seen``.
+    """
 
     id: str
     user_id: str
     ip_address: str
     user_agent: str
-    created_at: datetime
-    expires_at: datetime
     user: UserRecord
 
 
@@ -74,9 +76,14 @@ class SessionRecordStore(Protocol):
         *,
         ip_address: str,
         user_agent: str,
-        expires_at: datetime,
+        now: datetime,
     ) -> None:
-        """Write the current identity and expiry onto ``record`` in place."""
+        """Renew ``record`` in place: its origin, and an expiry the store owns.
+
+        The store computes its own new expiry from the max age it was built
+        with; the caller passes only ``now``, so no code outside
+        ``dependencies`` reads the clock.
+        """
         ...
 
     def delete(self, session_id: str) -> None: ...
@@ -85,6 +92,30 @@ class SessionRecordStore(Protocol):
 
     def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
         """Drop the oldest sessions above ``max_sessions``, newest kept."""
+        ...
+
+
+StoredSessionT = TypeVar("StoredSessionT", contravariant=True)
+
+
+class SessionLivenessPolicy(Protocol[StoredSessionT]):
+    """Whether a session still stands, decided without reading the wall clock.
+
+    ``now`` is passed in by ``dependencies`` — the one place that reads the
+    clock — so a policy is a pure function of a session and that instant. The
+    two questions differ by who owns idle expiry. A session loaded from the
+    store is judged whole. A session read from a cache has already had idle
+    expiry enforced by the cache's own TTL, so only the caps the cache cannot
+    see remain — never the cached ``expires_at``, which can lag the real TTL
+    after a refresh and would expire a live session if it were trusted here.
+    """
+
+    def admits_stored_session(self, record: StoredSessionT, now: datetime) -> bool:
+        """Whether a session loaded from the store still stands at ``now``."""
+        ...
+
+    def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
+        """Whether a cached session still stands, its idle already the cache's."""
         ...
 
 
@@ -134,6 +165,19 @@ class RateLimitBackend(Protocol):
         raises rather than guessing, and the caller fails the request closed.
         """
         ...
+
+
+class CachedSessionData(BaseModel):
+    """The session payload a `SessionCache` stores and returns."""
+
+    user_id: str
+    username: str
+    role: str
+    is_active: bool
+    ip_address: str
+    user_agent: str
+    expires_at: datetime
+    created_at: datetime
 
 
 @runtime_checkable

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from webauth.ports import CachedSessionData
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from redis import Redis
 
 
@@ -19,19 +20,6 @@ class SessionKeyPrefixes:
 
     session: str
     user_sessions: str
-
-
-class CachedSessionData(BaseModel):
-    """Structured session payload stored in Redis."""
-
-    user_id: str
-    username: str
-    role: str
-    is_active: bool
-    ip_address: str
-    user_agent: str
-    expires_at: datetime
-    created_at: datetime
 
 
 class RedisSessionCache:
