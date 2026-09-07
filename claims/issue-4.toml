@@ -1,0 +1,8 @@
+claim_id = "9f05f14115cd43e3a41ef4220613b41c"
+agent = "songmaker-d8"
+role = "builder"
+base = "0b87e3a65fb293b50b632281931959cfed7932cf"
+branch = "songmaker-d8/issue-4-ratelimit"
+scope = ["src/webauth/ports.py", "src/webauth/rate_limit.py", "src/webauth/config.py", "src/webauth/middleware/rate_limit.py", "tests/test_redis_rate_limiter.py", "tests/test_single_process_rate_limiter.py", "tests/webauth_arrangement.py", "pyproject.toml", "AGENTS.md", "README.md"]
+opened_commit = "727f7c3f344b3666f180792b8ff8814ee87244b9"
+whole_reason = "W2 RateLimitBackend-Port: ports+rate_limit+config+middleware mit Tests, pyproject und Docs = eine kohaerente Slice"
