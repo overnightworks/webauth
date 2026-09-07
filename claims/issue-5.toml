@@ -1,8 +1,0 @@
-claim_id = "f617b12d2dc74bc1a53e1d0354144046"
-agent = "songmaker-d8"
-role = "builder"
-base = "8cff2f41cb9eed5d57eff0602c79080431f2c366"
-branch = "songmaker-d8/issue-5-sessioncache"
-scope = ["src/webauth/ports.py", "src/webauth/session_store.py", "src/webauth/config.py", "src/webauth/dependencies.py", "tests/test_cached_authentication.py", "tests/test_session_store.py", "tests/webauth_arrangement.py", "README.md"]
-opened_commit = "70fec456fcec4c0e017105f481d592921b6177e8"
-whole_reason = "W3 SessionCache config-owned: ports+session_store+config+dependencies mit drei Tests und README = eine kohaerente Slice"
