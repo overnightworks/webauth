@@ -23,10 +23,9 @@ if TYPE_CHECKING:
     import re
 
     from pydantic import SecretStr
-    from redis import Redis
     from starlette.applications import Starlette
 
-    from webauth.ports import PasswordHasher
+    from webauth.ports import PasswordHasher, RateLimitBackend
     from webauth.proxies import TrustedProxies
 
 MIN_SESSION_SECRET_CHARS: Final = 32
@@ -47,22 +46,12 @@ class SessionKeyPrefixes:
 
 
 @dataclass(frozen=True)
-class RateLimitKeyPrefixes:
-    """One Redis key prefix per per-IP budget, so no budget starves another."""
-
-    api: str
-    media: str
-    stream: str
-
-
-@dataclass(frozen=True)
 class WebAuthConfig:
     session_secret: SecretStr
-    redis: Redis
     trusted_proxies: TrustedProxies
     password_hasher: PasswordHasher
+    rate_limits: RateLimitBackend
     session_key_prefixes: SessionKeyPrefixes
-    rate_limit_key_prefixes: RateLimitKeyPrefixes
     allowed_hosts_exact: frozenset[str]
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
     session_max_age_seconds: int

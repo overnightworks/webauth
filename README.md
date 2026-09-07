@@ -19,7 +19,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.passwords` | Password hashing and the strength rules a chosen password must meet |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
-| `webauth.rate_limit` | The sliding-window counter every per-address budget is measured with |
+| `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
 | `webauth.session_store` | The Redis session cache — Redis owns expiry |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 
@@ -106,6 +106,26 @@ username nobody holds cannot be told from a wrong password by timing.
 `webauth.passwords.BcryptPasswordHasher` is provided and honours that contract.
 A host that prefers Argon2id supplies its own class implementing the same
 protocol.
+
+## Rate limiting, and the optional Redis extra
+
+`WebAuthConfig` requires a `rate_limits`, a `webauth.ports.RateLimitBackend`
+with one method — `is_allowed(key, *, limit, window_seconds) -> bool` — that
+counts the current event against a sliding window and raises rather than
+guessing when it cannot answer, so the middleware fails the request closed.
+
+Two backends implement it:
+
+- `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
+  process that reaches the same Redis. It needs the client library, so a host
+  that uses it installs `webauth[redis]`.
+- `webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
+  process's memory and needs no Redis — for a single-node host that runs one
+  worker. Two processes or two hosts count independently, so a multi-worker
+  deployment uses the Redis backend instead.
+
+Redis is therefore an optional dependency: a deployment that supplies the
+in-process backend and no Redis session cache installs plain `webauth`.
 
 ## Development
 

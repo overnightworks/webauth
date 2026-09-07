@@ -1,4 +1,4 @@
-"""What the host application supplies: its users, sessions, attempts, audit, and hasher.
+"""What the host supplies: its users, sessions, attempts, audit, hasher, and rate limiter.
 
 Each port is a Protocol the application implements over the persistence it
 already owns, so the library needs no schema and no ORM of its own. None of
@@ -114,6 +114,22 @@ class PasswordHasher(Protocol):
         password set — is still verified against a fixed dummy hash rather than
         rejected outright, so a missing account cannot be told from a wrong
         password by how long the answer takes.
+        """
+        ...
+
+
+@runtime_checkable
+class RateLimitBackend(Protocol):
+    """A per-key request budget: one sliding window, counted as it is spent."""
+
+    def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
+        """Whether ``key`` still fits ``limit`` events in the last ``window_seconds``.
+
+        The caller owns the window and the limit, so the backend bakes in
+        neither: each budget measures its own key, and a key is always checked
+        with one window. The check counts the current event, so a caller told
+        yes has already spent one of the budget. A backend that cannot answer
+        raises rather than guessing, and the caller fails the request closed.
         """
         ...
 
