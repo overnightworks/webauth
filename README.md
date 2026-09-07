@@ -20,7 +20,8 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.session_store` | The optional Redis-backed `SessionCache` a host may put on its config |
+| `webauth.session_store` | `RedisSessionCache`, the one `SessionCache` implementation a host may put on its config |
+| `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 
 It leaves the application everything that touches the application's own truth:
@@ -133,9 +134,22 @@ in-process backend and no Redis session cache installs plain `webauth`.
 that single field decides how a live session's idle expiry is owned. With a
 cache, Redis TTL owns idle expiry and the host reconciles the store; with
 `session_cache=None`, the store's `touch` on every request owns idle expiry and
-there is no sync loop. There is no app-state install: the config carries the
-cache, so any code that holds the config — not only a request handler — can
-reach it.
+there is no sync loop. Either way `WebAuthConfig.session_liveness` — a
+`webauth.ports.SessionLivenessPolicy` — makes the admit-or-refuse decision, and
+`webauth.dependencies` alone reads the wall clock and passes the instant in.
+`webauth.liveness` ships two: `ExpiryColumnLiveness`, for a store with
+`created_at`/`expires_at` columns, and `IdleWindowLiveness`, for one that keeps
+only `last_seen`. On the cache path a policy never trusts the cached
+`expires_at`, which can lag the real TTL after a refresh — Redis TTL owns idle
+there, and only a policy's own caps remain. There is no app-state install: the
+config carries the cache, so any code that holds the config — not only a
+request handler — can reach it.
+
+The Redis `SessionCache` is an expiry-column feature: a cached session carries
+`created_at`/`expires_at`, so it pairs only with `ExpiryColumnLiveness`. The
+idle-window model is store-only — it keeps just `last_seen` and reads every
+request from its store — so `WebAuthConfig` refuses a `session_cache` alongside
+`IdleWindowLiveness` at construction rather than failing per request.
 
 `webauth.session_store.RedisSessionCache` is the one implementation shipped
 here; it needs the client library, so a host that uses it installs

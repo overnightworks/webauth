@@ -8,7 +8,11 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from webauth_arrangement import a_web_auth_config
+from webauth_arrangement import (
+    IDLE_WINDOW_SECONDS,
+    a_session_cache,
+    a_web_auth_config,
+)
 
 from webauth.config import (
     MIN_SESSION_SECRET_CHARS,
@@ -16,6 +20,7 @@ from webauth.config import (
     install_web_auth_config,
     web_auth_config,
 )
+from webauth.liveness import IdleWindowLiveness
 
 
 def test_a_secret_shorter_than_the_floor_is_refused() -> None:
@@ -24,6 +29,17 @@ def test_a_secret_shorter_than_the_floor_is_refused() -> None:
 
     with pytest.raises(ValueError, match="at least 32 characters"):
         a_web_auth_config(session_secret=short)
+
+
+def test_a_session_cache_needs_expiry_column_liveness() -> None:
+    """A cached session carries created_at/expires_at; the idle-window model has
+    neither, so pairing it with a cache is a construction-time error, not a
+    per-request silent populate failure."""
+    with pytest.raises(ValueError, match="expiry-column liveness"):
+        a_web_auth_config(
+            session_cache=a_session_cache(),
+            session_liveness=IdleWindowLiveness(IDLE_WINDOW_SECONDS),
+        )
 
 
 def test_a_secret_at_the_floor_is_accepted() -> None:

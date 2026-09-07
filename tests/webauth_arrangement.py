@@ -24,6 +24,7 @@ from webauth.config import (
 )
 from webauth.cookies import sign_session_id
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
+from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
 from webauth.passwords import BcryptPasswordHasher
 from webauth.policies import (
@@ -46,6 +47,9 @@ CLIENT_ADDRESS = "testclient"
 CLIENT_USER_AGENT = "TestBrowser/1.0"
 ADMIN_ROLE = "admin"
 MEMBER_ROLE = "user"
+SESSION_MAX_AGE_SECONDS = 3600
+SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
+IDLE_WINDOW_SECONDS = 1800
 
 
 def a_web_auth_config(**overrides: object) -> WebAuthConfig:
@@ -58,8 +62,8 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
         "session_cache": None,
         "allowed_hosts_exact": frozenset({"songmaker.example"}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
-        "session_max_age_seconds": 3600,
-        "session_absolute_max_age_seconds": 86400,
+        "session_max_age_seconds": SESSION_MAX_AGE_SECONDS,
+        "session_liveness": ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS),
         "login_rate_limit": 5,
         "login_lockout_threshold": 15,
         "login_lockout_window_seconds": 3600,
@@ -195,9 +199,14 @@ class FakeSessionRecord:
 
 @dataclass
 class SessionRecordsInMemory:
-    """The one stored session, renewed in place and never committed."""
+    """The one stored session, renewed in place and never committed.
+
+    The expiry-column store owns its max age and computes the new expiry from
+    the ``now`` the caller passes, so no clock is read outside ``dependencies``.
+    """
 
     record: FakeSessionRecord | None
+    max_age_seconds: int = SESSION_MAX_AGE_SECONDS
 
     def load(self, session_id: str) -> FakeSessionRecord | None:
         if self.record is None or self.record.id != session_id:
@@ -210,11 +219,52 @@ class SessionRecordsInMemory:
         *,
         ip_address: str,
         user_agent: str,
-        expires_at: datetime,
+        now: datetime,
     ) -> None:
         record.ip_address = ip_address
         record.user_agent = user_agent
-        record.expires_at = expires_at
+        record.expires_at = now + timedelta(seconds=self.max_age_seconds)
+
+
+@dataclass
+class IdleSessionRecord:
+    """A session an idle-window store keeps: identity, origin, and when last seen.
+
+    It has no ``created_at``/``expires_at``, which is why the idle-window model
+    cannot ride the Redis cache — liveness is ``last_seen`` alone.
+    """
+
+    id: str
+    user: FakeUser
+    last_seen: datetime
+    ip_address: str = CLIENT_ADDRESS
+    user_agent: str = CLIENT_USER_AGENT
+
+    @property
+    def user_id(self) -> str:
+        return self.user.id
+
+
+@dataclass
+class IdleSessionsInMemory:
+    """The one idle-window session; a touch puts ``last_seen`` at ``now``."""
+
+    record: IdleSessionRecord | None
+
+    def load(self, session_id: str) -> IdleSessionRecord | None:
+        if self.record is None or self.record.id != session_id:
+            return None
+        return self.record
+
+    def touch(
+        self,
+        record: IdleSessionRecord,
+        *,
+        ip_address: str,
+        user_agent: str,
+        now: datetime,
+    ) -> None:
+        record.last_seen = now
 
 
 @dataclass
@@ -293,6 +343,45 @@ def an_auth_app(
         verified: str = Depends(dependencies.verified_session_id),
     ) -> dict[str, str]:
         return {"session_id": verified}
+
+    return AuthApp(
+        client=TestClient(app, cookies={}, headers={"user-agent": CLIENT_USER_AGENT}),
+        sessions=sessions,
+        audit=audit,
+        authenticated=authenticated,
+        signing_key=config.signing_key,
+    )
+
+
+def an_idle_session(
+    *, seen_ago: timedelta = timedelta(minutes=5), user: FakeUser | None = None,
+) -> IdleSessionRecord:
+    return IdleSessionRecord(
+        id=SESSION_ID, user=user or FakeUser(), last_seen=datetime.now(timezone.utc) - seen_ago,
+    )
+
+
+def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
+    """The supported presentator config: idle-window liveness, no session cache."""
+    config = a_web_auth_config(
+        admin_role=ADMIN_ROLE, session_liveness=IdleWindowLiveness(IDLE_WINDOW_SECONDS),
+    )
+    sessions = IdleSessionsInMemory(record)
+    audit = RecordingAuditSink()
+    authenticated: list[AuthenticatedUser] = []
+
+    dependencies = current_user_dependency(
+        session_store=lambda: sessions,
+        audit_sink=lambda: audit,
+        on_authenticated=authenticated.append,
+    )
+
+    app = FastAPI()
+    install_web_auth_config(app, config)
+
+    @app.get("/me")
+    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
+        return {"username": user.username, "role": user.role}
 
     return AuthApp(
         client=TestClient(app, cookies={}, headers={"user-agent": CLIENT_USER_AGENT}),

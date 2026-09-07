@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Final
 
 from fastapi import Depends, HTTPException, Request
@@ -176,13 +176,6 @@ def _record_identity_changes(
     return ip_changed or user_agent_changed
 
 
-def _reject_session_older_than_absolute_limit(
-    created_at: datetime, now: datetime, config: WebAuthConfig,
-) -> None:
-    if (now - created_at).total_seconds() > config.session_absolute_max_age_seconds:
-        raise HTTPException(401, SESSION_EXPIRED_DETAIL)
-
-
 def _authenticate_from_cache(
     request: Request, audit: AuditSink, session_id: str, config: WebAuthConfig,
 ) -> AuthenticatedUser | None:
@@ -200,10 +193,9 @@ def _authenticate_from_cache(
     if cached is None:
         return None
 
-    created_at = cached.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    _reject_session_older_than_absolute_limit(created_at, datetime.now(timezone.utc), config)
+    now = datetime.now(timezone.utc)
+    if not config.session_liveness.admits_cached_session(cached, now):
+        raise HTTPException(401, SESSION_EXPIRED_DETAIL)
 
     if not cached.is_active:
         raise HTTPException(403, ACCOUNT_DISABLED_DETAIL)
@@ -245,11 +237,8 @@ def _authenticate_from_store(
 ) -> AuthenticatedUser:
     record = sessions.load(session_id)
     now = datetime.now(timezone.utc)
-    if record is None or record.expires_at.replace(tzinfo=timezone.utc) < now:
+    if record is None or not config.session_liveness.admits_stored_session(record, now):
         raise HTTPException(401, SESSION_EXPIRED_DETAIL)
-
-    created_at = record.created_at.replace(tzinfo=timezone.utc)
-    _reject_session_older_than_absolute_limit(created_at, now, config)
 
     if not record.user.is_active:
         raise HTTPException(403, ACCOUNT_DISABLED_DETAIL)
@@ -270,7 +259,7 @@ def _authenticate_from_store(
         record,
         ip_address=current_ip,
         user_agent=current_user_agent,
-        expires_at=now + timedelta(seconds=config.session_max_age_seconds),
+        now=now,
     )
 
     _populate_cache(config.session_cache, record, config)

@@ -18,6 +18,7 @@ from webauth.cookies import (
     DEFAULT_CSRF_HEADER_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
 )
+from webauth.liveness import ExpiryColumnLiveness
 
 if TYPE_CHECKING:
     import re
@@ -25,7 +26,12 @@ if TYPE_CHECKING:
     from pydantic import SecretStr
     from starlette.applications import Starlette
 
-    from webauth.ports import PasswordHasher, RateLimitBackend, SessionCache
+    from webauth.ports import (
+        PasswordHasher,
+        RateLimitBackend,
+        SessionCache,
+        SessionLivenessPolicy,
+    )
     from webauth.proxies import TrustedProxies
 
 MIN_SESSION_SECRET_CHARS: Final = 32
@@ -46,7 +52,7 @@ class WebAuthConfig:
     allowed_hosts_exact: frozenset[str]
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
     session_max_age_seconds: int
-    session_absolute_max_age_seconds: int
+    session_liveness: SessionLivenessPolicy
     login_rate_limit: int
     login_lockout_threshold: int
     login_lockout_window_seconds: int
@@ -64,6 +70,13 @@ class WebAuthConfig:
             raise ValueError(
                 "The session secret is too short — it signs every session cookie and "
                 f"must be at least {MIN_SESSION_SECRET_CHARS} characters.",
+            )
+        if self.session_cache is not None and not isinstance(
+            self.session_liveness, ExpiryColumnLiveness,
+        ):
+            raise ValueError(
+                "a session cache requires expiry-column liveness; the idle-window "
+                "model reads sessions straight from the store",
             )
 
     @property
