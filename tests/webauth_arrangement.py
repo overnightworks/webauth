@@ -24,7 +24,7 @@ from webauth.config import (
 )
 from webauth.cookies import sign_session_id
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
-from webauth.liveness import ExpiryColumnLiveness
+from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
 from webauth.passwords import BcryptPasswordHasher
 from webauth.policies import (
@@ -228,11 +228,21 @@ class SessionRecordsInMemory:
 
 @dataclass
 class IdleSessionRecord:
-    """A session an idle-window store keeps: only when it was last seen."""
+    """A session an idle-window store keeps: identity, origin, and when last seen.
+
+    It has no ``created_at``/``expires_at``, which is why the idle-window model
+    cannot ride the Redis cache — liveness is ``last_seen`` alone.
+    """
 
     id: str
-    user_id: str
+    user: FakeUser
     last_seen: datetime
+    ip_address: str = CLIENT_ADDRESS
+    user_agent: str = CLIENT_USER_AGENT
+
+    @property
+    def user_id(self) -> str:
+        return self.user.id
 
 
 @dataclass
@@ -333,6 +343,45 @@ def an_auth_app(
         verified: str = Depends(dependencies.verified_session_id),
     ) -> dict[str, str]:
         return {"session_id": verified}
+
+    return AuthApp(
+        client=TestClient(app, cookies={}, headers={"user-agent": CLIENT_USER_AGENT}),
+        sessions=sessions,
+        audit=audit,
+        authenticated=authenticated,
+        signing_key=config.signing_key,
+    )
+
+
+def an_idle_session(
+    *, seen_ago: timedelta = timedelta(minutes=5), user: FakeUser | None = None,
+) -> IdleSessionRecord:
+    return IdleSessionRecord(
+        id=SESSION_ID, user=user or FakeUser(), last_seen=datetime.now(timezone.utc) - seen_ago,
+    )
+
+
+def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
+    """The supported presentator config: idle-window liveness, no session cache."""
+    config = a_web_auth_config(
+        admin_role=ADMIN_ROLE, session_liveness=IdleWindowLiveness(IDLE_WINDOW_SECONDS),
+    )
+    sessions = IdleSessionsInMemory(record)
+    audit = RecordingAuditSink()
+    authenticated: list[AuthenticatedUser] = []
+
+    dependencies = current_user_dependency(
+        session_store=lambda: sessions,
+        audit_sink=lambda: audit,
+        on_authenticated=authenticated.append,
+    )
+
+    app = FastAPI()
+    install_web_auth_config(app, config)
+
+    @app.get("/me")
+    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
+        return {"username": user.username, "role": user.role}
 
     return AuthApp(
         client=TestClient(app, cookies={}, headers={"user-agent": CLIENT_USER_AGENT}),

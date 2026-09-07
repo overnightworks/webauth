@@ -60,8 +60,9 @@ class IdleWindowLiveness:
     """Agent-presentator's model: a stored row that keeps only ``last_seen``.
 
     A session stands while it was seen within the idle window; a ``touch`` is a
-    put with ``last_seen == now``. There is no absolute cap, so a cached
-    session — its idle already owned by the cache's TTL — always stands.
+    put with ``last_seen == now``. The model is store-only: it has no
+    ``created_at``/``expires_at``, so it cannot ride the Redis `SessionCache`,
+    and `WebAuthConfig` refuses that pairing at construction.
     """
 
     def __init__(self, idle_window_seconds: int) -> None:
@@ -71,4 +72,7 @@ class IdleWindowLiveness:
         return (now - record.last_seen).total_seconds() <= self._idle_window_seconds
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
-        return True
+        raise NotImplementedError(
+            "the idle-window model does not use the Redis session cache; a host "
+            "that wants a cache uses expiry-column liveness",
+        )

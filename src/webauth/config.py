@@ -18,6 +18,7 @@ from webauth.cookies import (
     DEFAULT_CSRF_HEADER_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
 )
+from webauth.liveness import ExpiryColumnLiveness
 
 if TYPE_CHECKING:
     import re
@@ -69,6 +70,13 @@ class WebAuthConfig:
             raise ValueError(
                 "The session secret is too short — it signs every session cookie and "
                 f"must be at least {MIN_SESSION_SECRET_CHARS} characters.",
+            )
+        if self.session_cache is not None and not isinstance(
+            self.session_liveness, ExpiryColumnLiveness,
+        ):
+            raise ValueError(
+                "a session cache requires expiry-column liveness; the idle-window "
+                "model reads sessions straight from the store",
             )
 
     @property

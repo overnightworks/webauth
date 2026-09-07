@@ -11,6 +11,7 @@ from webauth_arrangement import (
     CLIENT_USER_AGENT,
     IDLE_WINDOW_SECONDS,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
+    FakeUser,
     IdleSessionRecord,
     IdleSessionsInMemory,
 )
@@ -136,21 +137,23 @@ def test_the_idle_window_policy_admits_a_session_seen_within_the_window(
     idle_age: timedelta, admitted: bool,
 ) -> None:
     now = datetime.now(timezone.utc)
-    record = IdleSessionRecord(id="session-1", user_id="user-1", last_seen=now - idle_age)
+    record = IdleSessionRecord(id="session-1", user=FakeUser(), last_seen=now - idle_age)
 
     assert IDLE_POLICY.admits_stored_session(record, now) is admitted
 
 
-def test_the_idle_window_policy_has_no_absolute_cap_for_a_cached_session() -> None:
+def test_the_idle_window_policy_never_answers_for_a_cached_session() -> None:
+    """The idle model is store-only; a cache pairing is refused at config time."""
     now = datetime.now(timezone.utc)
 
-    assert IDLE_POLICY.admits_cached_session(_cached(now - timedelta(days=365)), now) is True
+    with pytest.raises(NotImplementedError, match="does not use the Redis session cache"):
+        IDLE_POLICY.admits_cached_session(_cached(now - timedelta(days=365)), now)
 
 
 def test_the_idle_window_policy_follows_the_injected_clock_not_the_real_one() -> None:
     record = IdleSessionRecord(
         id="session-1",
-        user_id="user-1",
+        user=FakeUser(),
         last_seen=A_TIME_FAR_FROM_REAL_NOW - timedelta(seconds=1),
     )
 
@@ -160,7 +163,7 @@ def test_the_idle_window_policy_follows_the_injected_clock_not_the_real_one() ->
 def test_a_touch_puts_last_seen_at_now() -> None:
     now = datetime.now(timezone.utc)
     record = IdleSessionRecord(
-        id="session-1", user_id="user-1", last_seen=A_TIME_FAR_FROM_REAL_NOW,
+        id="session-1", user=FakeUser(), last_seen=A_TIME_FAR_FROM_REAL_NOW,
     )
     store = IdleSessionsInMemory(record)
 

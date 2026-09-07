@@ -9,6 +9,7 @@ from webauth_arrangement import (
     ADMIN_ROLE,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
+    IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
     SESSION_ID,
     AuthApp,
@@ -16,6 +17,8 @@ from webauth_arrangement import (
     FakeUser,
     a_session,
     an_auth_app,
+    an_idle_auth_app,
+    an_idle_session,
 )
 
 from webauth.cookies import sign_session_id
@@ -223,3 +226,23 @@ def test_no_session_is_named_where_no_account_would_be_admitted(
 
     assert response.status_code == status
     assert response.json()["detail"] == detail
+
+
+def test_an_idle_window_host_authenticates_from_its_store() -> None:
+    app = an_idle_auth_app(an_idle_session())
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 200
+    assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
+
+
+def test_an_idle_window_host_refuses_a_session_past_its_window() -> None:
+    app = an_idle_auth_app(
+        an_idle_session(seen_ago=timedelta(seconds=IDLE_WINDOW_SECONDS + 1)),
+    )
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == SESSION_EXPIRED_DETAIL

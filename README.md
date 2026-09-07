@@ -145,6 +145,12 @@ there, and only a policy's own caps remain. There is no app-state install: the
 config carries the cache, so any code that holds the config — not only a
 request handler — can reach it.
 
+The Redis `SessionCache` is an expiry-column feature: a cached session carries
+`created_at`/`expires_at`, so it pairs only with `ExpiryColumnLiveness`. The
+idle-window model is store-only — it keeps just `last_seen` and reads every
+request from its store — so `WebAuthConfig` refuses a `session_cache` alongside
+`IdleWindowLiveness` at construction rather than failing per request.
+
 `webauth.session_store.RedisSessionCache` is the one implementation shipped
 here; it needs the client library, so a host that uses it installs
 `webauth[redis]`. A host that supplies its own cache implements the same
