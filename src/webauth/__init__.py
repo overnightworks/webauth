@@ -1,14 +1,13 @@
-"""The future auth library extracted per #825.
+"""Authentication machinery a FastAPI application should not rebuild.
 
-Will own sessions with Redis-backed expiry, HMAC cookies, admin/owner checks,
-rate limits, and audit — the authentication machinery a host application
-should not rebuild. Application concerns — the user model, first-run setup,
-roles, and login routes with their advisory lock and commit-then-raise — stay
-with the application, which supplies them through ports.
+Owns sessions with Redis-backed expiry, HMAC-signed cookies, CSRF, admin and
+owner checks, rate limits, and the audit events they raise. Application
+concerns — the user model, first-run setup, roles, and the login route with
+its transaction boundary — stay with the host application, which supplies
+them through the ports in `webauth.ports`.
 
-Independent of `songmaker_cli` and of `agent_providers` so it can be released
-as its own distribution; the boundary is enforced by the `.importlinter`
-contract.
+The library persists nothing itself: it holds no schema and no ORM, and the
+`.importlinter` contract keeps it that way.
 """
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"
