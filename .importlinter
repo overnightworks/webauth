@@ -1,0 +1,16 @@
+# The library holds no schema and no ORM: everything durable reaches it
+# through the ports the host application implements. CI runs `lint-imports`
+# over the real import graph, so an indirect chain is caught as well as a
+# direct import.
+[importlinter]
+include_external_packages = True
+root_packages =
+    webauth
+
+[importlinter:contract:webauth-does-not-import-sqlalchemy]
+name = webauth persists nothing itself
+type = forbidden
+source_modules =
+    webauth
+forbidden_modules =
+    sqlalchemy
