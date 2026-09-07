@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from webauth_arrangement import Argon2idStyleHasher, FakeUser
 
-from webauth.login import password_admits_account
+from webauth.login import LoginOutcome, judge_credentials
 from webauth.passwords import (
     _DUMMY_HASH,
     BCRYPT_ROUNDS,
@@ -67,8 +67,14 @@ def test_none_password_passes() -> None:
 def test_an_injected_hasher_admits_the_account_it_signed() -> None:
     hasher = Argon2idStyleHasher()
     user = FakeUser(password_hash=hasher.hash("open-sesame-42"))
-    assert password_admits_account("open-sesame-42", user, hasher=hasher) is True
-    assert password_admits_account("not-the-password", user, hasher=hasher) is False
+    assert (
+        judge_credentials("open-sesame-42", user, hasher=hasher)
+        is LoginOutcome.ADMITTED
+    )
+    assert (
+        judge_credentials("not-the-password", user, hasher=hasher)
+        is LoginOutcome.WRONG_PASSWORD
+    )
 
 
 def test_bcrypt_hasher_round_trips_a_password() -> None:

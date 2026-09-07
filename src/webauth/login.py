@@ -10,6 +10,8 @@ none of it can leave half a login behind.
 
 from __future__ import annotations
 
+import enum
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from fastapi import HTTPException
@@ -28,10 +30,38 @@ ACCOUNT_LOCKED_DETAIL: Final = (
     "Account temporarily locked due to repeated failed attempts. Try again later."
 )
 TOO_MANY_LOGIN_ATTEMPTS_DETAIL: Final = "Too many login attempts. Try again later."
+INVALID_CREDENTIALS_DETAIL: Final = "Invalid username or password"
 RETRY_AFTER_HEADER: Final = "Retry-After"
 
 COOKIE_PATH: Final = "/"
 COOKIE_SAME_SITE: Final = "strict"
+
+
+class LoginOutcome(enum.Enum):
+    """Every way a login attempt can end, before any transport decides its shape."""
+
+    ADMITTED = enum.auto()
+    UNKNOWN_USER = enum.auto()
+    WRONG_PASSWORD = enum.auto()
+    DEACTIVATED = enum.auto()
+    ACCOUNT_LOCKED = enum.auto()
+    RATE_LIMITED = enum.auto()
+
+
+@dataclass(frozen=True)
+class LoginRefusal:
+    """A login that will not proceed, and how long the refusal stands.
+
+    ``retry_after_seconds`` is ``None`` for a refusal a caller cannot wait out —
+    a wrong password reopens the moment the right one is offered, not on a clock.
+    """
+
+    outcome: LoginOutcome
+    retry_after_seconds: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome is LoginOutcome.ADMITTED:
+            raise ValueError("ADMITTED is an admission, not a refusal")
 
 
 def issue_session_cookies(
@@ -74,14 +104,14 @@ def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     response.delete_cookie(config.csrf_cookie_name, path=COOKIE_PATH)
 
 
-def enforce_login_attempt_limits(
+def login_attempt_budget(
     attempts: LoginAttemptStore,
     *,
     ip_address: str,
     username: str,
     config: WebAuthConfig,
-) -> None:
-    """Refuse an attempt that has spent either failure budget.
+) -> LoginRefusal | None:
+    """The refusal an attempt has earned from either failure budget, else ``None``.
 
     The lockout counts this account's failures over a long window wherever
     they came from; the rate limit counts the address on its own and the
@@ -93,10 +123,9 @@ def enforce_login_attempt_limits(
         username=username,
     )
     if lockout_failures >= config.login_lockout_threshold:
-        raise HTTPException(
-            429,
-            ACCOUNT_LOCKED_DETAIL,
-            headers={RETRY_AFTER_HEADER: str(config.login_lockout_window_seconds)},
+        return LoginRefusal(
+            LoginOutcome.ACCOUNT_LOCKED,
+            retry_after_seconds=config.login_lockout_window_seconds,
         )
 
     window = config.login_rate_window_seconds
@@ -110,23 +139,53 @@ def enforce_login_attempt_limits(
         address_failures >= config.login_rate_limit
         or account_failures >= config.login_rate_limit
     ):
-        raise HTTPException(
-            429,
-            TOO_MANY_LOGIN_ATTEMPTS_DETAIL,
-            headers={RETRY_AFTER_HEADER: str(window)},
-        )
+        return LoginRefusal(LoginOutcome.RATE_LIMITED, retry_after_seconds=window)
+
+    return None
 
 
-def password_admits_account(
+def judge_credentials(
     password: str, user: UserRecord | None, *, hasher: PasswordHasher,
-) -> bool:
-    """Whether ``password`` signs ``user`` in, at the same cost when it does not.
+) -> LoginOutcome:
+    """Which outcome ``password`` earns against ``user``, at one hash cost.
 
     A username nobody holds is verified against a dummy hash and a deactivated
     account is judged only after that verification, so neither answers faster
-    than a plain wrong password does.
+    than a plain wrong password does: exactly one full verification runs on
+    every path.
     """
     password_matches = hasher.verify(
         password, user.password_hash if user else None,
     )
-    return user is not None and password_matches and user.is_active
+    if user is None:
+        return LoginOutcome.UNKNOWN_USER
+    if not password_matches:
+        return LoginOutcome.WRONG_PASSWORD
+    if not user.is_active:
+        return LoginOutcome.DEACTIVATED
+    return LoginOutcome.ADMITTED
+
+
+_REFUSAL_RESPONSES: Final[dict[LoginOutcome, tuple[int, str]]] = {
+    LoginOutcome.ACCOUNT_LOCKED: (429, ACCOUNT_LOCKED_DETAIL),
+    LoginOutcome.RATE_LIMITED: (429, TOO_MANY_LOGIN_ATTEMPTS_DETAIL),
+    LoginOutcome.UNKNOWN_USER: (401, INVALID_CREDENTIALS_DETAIL),
+    LoginOutcome.WRONG_PASSWORD: (401, INVALID_CREDENTIALS_DETAIL),
+    LoginOutcome.DEACTIVATED: (401, INVALID_CREDENTIALS_DETAIL),
+}
+
+
+def http_refusal(refusal: LoginRefusal) -> HTTPException:
+    """The FastAPI error a host raises for ``refusal`` by default.
+
+    An unknown username and a wrong password share one 401, so the response
+    never reveals which of the two occurred; a spent budget adds the
+    ``Retry-After`` the refusal carries.
+    """
+    status_code, detail = _REFUSAL_RESPONSES[refusal.outcome]
+    headers = (
+        {RETRY_AFTER_HEADER: str(refusal.retry_after_seconds)}
+        if refusal.retry_after_seconds is not None
+        else None
+    )
+    return HTTPException(status_code, detail, headers=headers)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from httpx import Response as ClientResponse
 from webauth_arrangement import a_web_auth_config
@@ -14,14 +14,19 @@ from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import verify_csrf_token, verify_session_cookie
 from webauth.login import (
     ACCOUNT_LOCKED_DETAIL,
+    INVALID_CREDENTIALS_DETAIL,
     RETRY_AFTER_HEADER,
     TOO_MANY_LOGIN_ATTEMPTS_DETAIL,
+    LoginOutcome,
+    LoginRefusal,
     clear_session_cookies,
-    enforce_login_attempt_limits,
+    http_refusal,
     issue_session_cookies,
-    password_admits_account,
+    judge_credentials,
+    login_attempt_budget,
 )
 from webauth.passwords import BcryptPasswordHasher, hash_password
+from webauth.ports import PasswordHasher
 
 SESSION_ID = "session-1"
 CLIENT_ADDRESS = "203.0.113.7"
@@ -162,30 +167,26 @@ def a_login_limit(**failures: int) -> tuple[FailuresInMemory, WebAuthConfig]:
     return FailuresInMemory(config.login_lockout_window_seconds, **failures), config
 
 
-def refuse_or_admit(attempts: FailuresInMemory, config: WebAuthConfig) -> None:
-    enforce_login_attempt_limits(
+def budget_for(attempts: FailuresInMemory, config: WebAuthConfig) -> LoginRefusal | None:
+    return login_attempt_budget(
         attempts, ip_address=CLIENT_ADDRESS, username=USERNAME, config=config,
     )
 
 
-def test_an_attempt_within_both_budgets_is_admitted() -> None:
+def test_an_attempt_within_both_budgets_is_allowed_to_proceed() -> None:
     attempts, config = a_login_limit(
         for_the_account_over_the_lockout_window=14, from_the_address=4, for_the_account=4,
     )
 
-    refuse_or_admit(attempts, config)
+    assert budget_for(attempts, config) is None
 
 
 def test_an_account_that_kept_failing_is_locked_for_the_lockout_window() -> None:
     attempts, config = a_login_limit(for_the_account_over_the_lockout_window=15)
 
-    with pytest.raises(HTTPException) as refusal:
-        refuse_or_admit(attempts, config)
-
-    assert refusal.value.status_code == 429
-    assert refusal.value.detail == ACCOUNT_LOCKED_DETAIL
-    assert refusal.value.headers[RETRY_AFTER_HEADER] == str(
-        config.login_lockout_window_seconds,
+    assert budget_for(attempts, config) == LoginRefusal(
+        LoginOutcome.ACCOUNT_LOCKED,
+        retry_after_seconds=config.login_lockout_window_seconds,
     )
 
 
@@ -199,12 +200,10 @@ def test_an_account_that_kept_failing_is_locked_for_the_lockout_window() -> None
 def test_a_spent_rate_budget_is_refused_for_the_rate_window(spent: dict[str, int]) -> None:
     attempts, config = a_login_limit(**spent)
 
-    with pytest.raises(HTTPException) as refusal:
-        refuse_or_admit(attempts, config)
-
-    assert refusal.value.status_code == 429
-    assert refusal.value.detail == TOO_MANY_LOGIN_ATTEMPTS_DETAIL
-    assert refusal.value.headers[RETRY_AFTER_HEADER] == str(config.login_rate_window_seconds)
+    assert budget_for(attempts, config) == LoginRefusal(
+        LoginOutcome.RATE_LIMITED,
+        retry_after_seconds=config.login_rate_window_seconds,
+    )
 
 
 def test_a_locked_account_hears_about_the_lockout_not_the_rate_limit() -> None:
@@ -212,10 +211,58 @@ def test_a_locked_account_hears_about_the_lockout_not_the_rate_limit() -> None:
         for_the_account_over_the_lockout_window=15, from_the_address=5, for_the_account=5,
     )
 
-    with pytest.raises(HTTPException) as refusal:
-        refuse_or_admit(attempts, config)
+    refusal = budget_for(attempts, config)
 
-    assert refusal.value.detail == ACCOUNT_LOCKED_DETAIL
+    assert refusal is not None
+    assert refusal.outcome is LoginOutcome.ACCOUNT_LOCKED
+
+
+def test_a_locked_refusal_maps_to_todays_429_and_retry_after() -> None:
+    _, config = a_login_limit()
+    refusal = LoginRefusal(
+        LoginOutcome.ACCOUNT_LOCKED,
+        retry_after_seconds=config.login_lockout_window_seconds,
+    )
+
+    error = http_refusal(refusal)
+
+    assert error.status_code == 429
+    assert error.detail == ACCOUNT_LOCKED_DETAIL
+    assert error.headers[RETRY_AFTER_HEADER] == str(config.login_lockout_window_seconds)
+
+
+def test_a_rate_limited_refusal_maps_to_todays_429_and_retry_after() -> None:
+    _, config = a_login_limit()
+    refusal = LoginRefusal(
+        LoginOutcome.RATE_LIMITED,
+        retry_after_seconds=config.login_rate_window_seconds,
+    )
+
+    error = http_refusal(refusal)
+
+    assert error.status_code == 429
+    assert error.detail == TOO_MANY_LOGIN_ATTEMPTS_DETAIL
+    assert error.headers[RETRY_AFTER_HEADER] == str(config.login_rate_window_seconds)
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [LoginOutcome.UNKNOWN_USER, LoginOutcome.WRONG_PASSWORD, LoginOutcome.DEACTIVATED],
+    ids=["a username nobody holds", "a wrong password", "a deactivated account"],
+)
+def test_a_credential_refusal_maps_to_one_indistinguishable_401(
+    outcome: LoginOutcome,
+) -> None:
+    error = http_refusal(LoginRefusal(outcome))
+
+    assert error.status_code == 401
+    assert error.detail == INVALID_CREDENTIALS_DETAIL
+    assert error.headers is None
+
+
+def test_an_admission_is_never_a_refusal() -> None:
+    with pytest.raises(ValueError, match="admission"):
+        LoginRefusal(LoginOutcome.ADMITTED)
 
 
 @dataclass(frozen=True)
@@ -228,26 +275,65 @@ class StoredAccount:
 
 
 AN_ACCOUNT = StoredAccount(password_hash=hash_password(A_CORRECT_PASSWORD))
+A_DEACTIVATED_ACCOUNT = StoredAccount(
+    password_hash=AN_ACCOUNT.password_hash, is_active=False,
+)
+
+
+@dataclass
+class VerificationSpy:
+    """A hasher that counts how many full verifications a decision runs."""
+
+    delegate: PasswordHasher
+    verify_calls: int = 0
+
+    def hash(self, password: str) -> str:
+        return self.delegate.hash(password)
+
+    def verify(self, password: str, stored_hash: str | None) -> bool:
+        self.verify_calls += 1
+        return self.delegate.verify(password, stored_hash)
 
 
 @pytest.mark.parametrize(
-    ("password", "user", "admitted"),
+    ("password", "user", "outcome"),
     [
-        pytest.param(A_CORRECT_PASSWORD, AN_ACCOUNT, True, id="the account's own password"),
-        pytest.param(A_WRONG_PASSWORD, AN_ACCOUNT, False, id="a password that is not it"),
-        pytest.param(A_CORRECT_PASSWORD, None, False, id="a username nobody holds"),
         pytest.param(
-            A_CORRECT_PASSWORD,
-            StoredAccount(password_hash=AN_ACCOUNT.password_hash, is_active=False),
-            False,
+            A_CORRECT_PASSWORD, AN_ACCOUNT, LoginOutcome.ADMITTED,
+            id="the account's own password",
+        ),
+        pytest.param(
+            A_WRONG_PASSWORD, AN_ACCOUNT, LoginOutcome.WRONG_PASSWORD,
+            id="a password that is not it",
+        ),
+        pytest.param(
+            A_CORRECT_PASSWORD, None, LoginOutcome.UNKNOWN_USER,
+            id="a username nobody holds",
+        ),
+        pytest.param(
+            A_CORRECT_PASSWORD, A_DEACTIVATED_ACCOUNT, LoginOutcome.DEACTIVATED,
             id="a deactivated account and its right password",
         ),
     ],
 )
-def test_only_an_active_account_with_its_own_password_is_admitted(
-    password: str, user: StoredAccount | None, admitted: bool,
+def test_judge_credentials_names_the_outcome_of_each_attempt(
+    password: str, user: StoredAccount | None, outcome: LoginOutcome,
 ) -> None:
-    assert (
-        password_admits_account(password, user, hasher=BcryptPasswordHasher())
-        is admitted
-    )
+    assert judge_credentials(password, user, hasher=BcryptPasswordHasher()) is outcome
+
+
+@pytest.mark.parametrize(
+    ("password", "user"),
+    [
+        pytest.param(A_CORRECT_PASSWORD, None, id="a username nobody holds"),
+        pytest.param(A_WRONG_PASSWORD, AN_ACCOUNT, id="a wrong password"),
+    ],
+)
+def test_a_refused_credential_runs_exactly_one_full_verification(
+    password: str, user: StoredAccount | None,
+) -> None:
+    spy = VerificationSpy(BcryptPasswordHasher())
+
+    judge_credentials(password, user, hasher=spy)
+
+    assert spy.verify_calls == 1
