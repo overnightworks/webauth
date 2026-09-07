@@ -1,8 +1,0 @@
-claim_id = "60b85f36ad154dbe8b2f0fcef0122fe5"
-agent = "songmaker-d8"
-role = "builder"
-base = "d3e129657eaf832727b0516f1c173c42f5530f3b"
-branch = "songmaker-d8/issue-6-liveness"
-scope = ["src/webauth/ports.py", "src/webauth/config.py", "src/webauth/dependencies.py", "src/webauth/session_store.py", "src/webauth/liveness.py", "tests/test_dependencies.py", "tests/test_cached_authentication.py", "tests/test_liveness.py", "tests/webauth_arrangement.py", "README.md", "pyproject.toml", "src/webauth/__init__.py"]
-opened_commit = "3de58441441a50bc7a4188b52ee3aa45e293d92d"
-whole_reason = "W4 SessionLivenessPolicy + clock-free store + 3 Gate-Nachtraege + Version 0.2.0 = eine kohaerente Abschluss-Slice"
