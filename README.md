@@ -33,6 +33,14 @@ reaches it through the Protocols in `webauth.ports`: `UserStore`,
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote.
 
+## Configuration
+
+The host builds one `WebAuthConfig` and installs it. Cookie flags a host may name:
+
+| Field | Default | Values |
+|---|---|---|
+| `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
+
 ## Install
 
 The wheel is published as an asset on each tag's release:

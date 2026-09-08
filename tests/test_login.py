@@ -33,6 +33,14 @@ CLIENT_ADDRESS = "203.0.113.7"
 USERNAME = "alice"
 PLAIN_HTTP = "http://songmaker.example"
 OVER_HTTPS = "https://songmaker.example"
+V0_2_0_SESSION_SET_COOKIE = (
+    "session_id=session-1.69aa4d225bc23dcce050c2be44156a8b099336a14cc6eb8fcebb4b350bc4f2ee; "
+    "HttpOnly; Max-Age=3600; Path=/; SameSite=strict; Secure"
+)
+V0_2_0_CSRF_SET_COOKIE = (
+    "csrf_token=c2c5cecdd7ae3886e360411f973c9aa43a9e31840585dad8625d47ce82059851; "
+    "Max-Age=3600; Path=/; SameSite=strict; Secure"
+)
 
 A_CORRECT_PASSWORD = "the-correct-password"
 A_WRONG_PASSWORD = "something-else-entirely"
@@ -59,8 +67,8 @@ class CookieApp:
         )
 
 
-def a_cookie_app(*, base_url: str = OVER_HTTPS) -> CookieApp:
-    config = a_web_auth_config()
+def a_cookie_app(*, base_url: str = OVER_HTTPS, **config_overrides: object) -> CookieApp:
+    config = a_web_auth_config(**config_overrides)
     app = FastAPI()
     install_web_auth_config(app, config)
 
@@ -102,6 +110,35 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
     assert "SameSite=strict" in header
     assert f"Max-Age={cookie_app.config.session_max_age_seconds}" in header
     assert "Path=/" in header
+
+
+def test_a_host_that_configures_nothing_gets_the_v0_2_0_set_cookie_bytes() -> None:
+    app = a_cookie_app()
+    response = app.issue()
+
+    assert app.set_cookie_header(response, "session_id") == V0_2_0_SESSION_SET_COOKIE
+    assert app.set_cookie_header(response, "csrf_token") == V0_2_0_CSRF_SET_COOKIE
+
+
+def test_a_host_that_configures_lax_gets_lax_on_both_cookies_and_their_clearing() -> None:
+    app = a_cookie_app(cookie_samesite="lax")
+
+    issued = app.issue()
+    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
+        header = app.set_cookie_header(issued, name)
+        assert "SameSite=lax" in header
+        assert "SameSite=strict" not in header
+
+    cleared = app.clear()
+    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
+        assert "SameSite=lax" in app.set_cookie_header(cleared, name)
+
+
+def test_clearing_carries_the_configured_samesite(cookie_app: CookieApp) -> None:
+    cleared = cookie_app.clear()
+
+    for name in (cookie_app.config.session_cookie_name, cookie_app.config.csrf_cookie_name):
+        assert "SameSite=strict" in cookie_app.set_cookie_header(cleared, name)
 
 
 def test_the_csrf_token_is_readable_by_the_client_and_bound_to_the_session(

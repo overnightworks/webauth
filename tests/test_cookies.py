@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from webauth.cookies import (
+    DEFAULT_COOKIE_SAMESITE,
     DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_CSRF_HEADER_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
@@ -21,6 +22,10 @@ def test_default_names_are_what_the_browser_already_carries() -> None:
     assert DEFAULT_SESSION_COOKIE_NAME == "session_id"
     assert DEFAULT_CSRF_COOKIE_NAME == "csrf_token"
     assert DEFAULT_CSRF_HEADER_NAME == "x-csrf-token"
+
+
+def test_the_default_samesite_is_the_one_songmaker_already_ships() -> None:
+    assert DEFAULT_COOKIE_SAMESITE == "strict"
 
 
 def test_sign_and_verify_session() -> None:

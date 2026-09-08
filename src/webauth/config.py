@@ -14,9 +14,11 @@ from typing import TYPE_CHECKING, Final
 from starlette.requests import Request
 
 from webauth.cookies import (
+    DEFAULT_COOKIE_SAMESITE,
     DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_CSRF_HEADER_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
+    CookieSameSite,
 )
 from webauth.liveness import ExpiryColumnLiveness
 
@@ -60,6 +62,7 @@ class WebAuthConfig:
     session_cookie_name: str = DEFAULT_SESSION_COOKIE_NAME
     csrf_cookie_name: str = DEFAULT_CSRF_COOKIE_NAME
     csrf_header_name: str = DEFAULT_CSRF_HEADER_NAME
+    cookie_samesite: CookieSameSite = DEFAULT_COOKIE_SAMESITE
     max_user_agent_chars: int = DEFAULT_MAX_USER_AGENT_CHARS
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
@@ -70,6 +73,11 @@ class WebAuthConfig:
             raise ValueError(
                 "The session secret is too short — it signs every session cookie and "
                 f"must be at least {MIN_SESSION_SECRET_CHARS} characters.",
+            )
+        if self.cookie_samesite not in ("strict", "lax"):
+            raise ValueError(
+                "cookie_samesite must be 'strict' or 'lax'; a cross-site cookie "
+                "is not what this library issues",
             )
         if self.session_cache is not None and not isinstance(
             self.session_liveness, ExpiryColumnLiveness,
