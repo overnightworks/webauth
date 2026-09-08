@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Final
+from urllib.parse import urlencode
 
 from fastapi import Depends, HTTPException, Request
 
@@ -55,6 +56,21 @@ class AuthenticatedUser:
 
 
 @dataclass(frozen=True)
+class LoginRedirect:
+    """Where a server-rendered host sends a browser holding no live session.
+
+    ``redirect_query_param`` is the host's own name for the query key that
+    carries the address the browser asked for, so the login page reads it
+    back under a name the host already chose rather than one this library
+    invents. A request whose ``Accept`` header does not prefer HTML — an API
+    call, a fetch — still gets 401: only a browser navigation is redirected.
+    """
+
+    path: str
+    redirect_query_param: str
+
+
+@dataclass(frozen=True)
 class AuthDependencies:
     """The route dependencies built from one set of stores.
 
@@ -73,6 +89,7 @@ def current_user_dependency(
     session_store: Callable[..., SessionRecordStore],
     audit_sink: Callable[..., AuditSink],
     on_authenticated: Callable[[AuthenticatedUser], None],
+    login_redirect: LoginRedirect | None = None,
 ) -> AuthDependencies:
     """Bind the auth dependencies to one application's stores.
 
@@ -81,6 +98,8 @@ def current_user_dependency(
     session renewal and the audit record are written into.
     ``on_authenticated`` is handed the account once the request's identity is
     established, so the application can bind it into its own log context.
+    ``login_redirect`` is unset by default: a missing or dead session then
+    keeps answering 401, byte-identically to a host that never names one.
     """
 
     def current_user(
@@ -89,11 +108,13 @@ def current_user_dependency(
         audit: AuditSink = Depends(audit_sink),
     ) -> AuthenticatedUser:
         config = web_auth_config(request)
-        session_id = _session_id_from_cookie(request, config)
+        session_id = _session_id_from_cookie(request, config, login_redirect)
 
-        user = _authenticate_from_cache(request, audit, session_id, config)
+        user = _authenticate_from_cache(request, audit, session_id, config, login_redirect)
         if user is None:
-            user = _authenticate_from_store(request, sessions, audit, session_id, config)
+            user = _authenticate_from_store(
+                request, sessions, audit, session_id, config, login_redirect,
+            )
         on_authenticated(user)
         return user
 
@@ -118,7 +139,7 @@ def current_user_dependency(
         this line, so a route can delete what it names here without checking
         anything again.
         """
-        return _session_id_from_cookie(request, web_auth_config(request))
+        return _session_id_from_cookie(request, web_auth_config(request), login_redirect)
 
     return AuthDependencies(
         current_user=current_user,
@@ -127,13 +148,30 @@ def current_user_dependency(
     )
 
 
-def _session_id_from_cookie(request: Request, config: WebAuthConfig) -> str:
+def _unauthenticated(
+    request: Request, detail: str, login_redirect: LoginRedirect | None,
+) -> HTTPException:
+    """The refusal for a missing or dead session: a 401, or a login redirect.
+
+    A browser navigation is one whose ``Accept`` header prefers HTML; every
+    other request — an API call, a fetch — keeps the 401 even when the host
+    named a ``login_redirect``, because it cannot follow one.
+    """
+    if login_redirect is not None and "text/html" in request.headers.get("accept", ""):
+        query = urlencode({login_redirect.redirect_query_param: request.url.path})
+        return HTTPException(302, headers={"Location": f"{login_redirect.path}?{query}"})
+    return HTTPException(401, detail)
+
+
+def _session_id_from_cookie(
+    request: Request, config: WebAuthConfig, login_redirect: LoginRedirect | None,
+) -> str:
     raw_cookie = request.cookies.get(config.session_cookie_name)
     if not raw_cookie or len(raw_cookie) > MAX_SESSION_COOKIE_CHARS:
-        raise HTTPException(401, AUTHENTICATION_REQUIRED_DETAIL)
+        raise _unauthenticated(request, AUTHENTICATION_REQUIRED_DETAIL, login_redirect)
     session_id = verify_session_cookie(raw_cookie, config.signing_key)
     if session_id is None:
-        raise HTTPException(401, INVALID_SESSION_DETAIL)
+        raise _unauthenticated(request, INVALID_SESSION_DETAIL, login_redirect)
     return session_id
 
 
@@ -177,7 +215,11 @@ def _record_identity_changes(
 
 
 def _authenticate_from_cache(
-    request: Request, audit: AuditSink, session_id: str, config: WebAuthConfig,
+    request: Request,
+    audit: AuditSink,
+    session_id: str,
+    config: WebAuthConfig,
+    login_redirect: LoginRedirect | None,
 ) -> AuthenticatedUser | None:
     """The cached account, or None when the cache cannot answer for it."""
     session_cache = config.session_cache
@@ -195,7 +237,7 @@ def _authenticate_from_cache(
 
     now = datetime.now(timezone.utc)
     if not config.session_liveness.admits_cached_session(cached, now):
-        raise HTTPException(401, SESSION_EXPIRED_DETAIL)
+        raise _unauthenticated(request, SESSION_EXPIRED_DETAIL, login_redirect)
 
     if not cached.is_active:
         raise HTTPException(403, ACCOUNT_DISABLED_DETAIL)
@@ -234,11 +276,12 @@ def _authenticate_from_store(
     audit: AuditSink,
     session_id: str,
     config: WebAuthConfig,
+    login_redirect: LoginRedirect | None,
 ) -> AuthenticatedUser:
     record = sessions.load(session_id)
     now = datetime.now(timezone.utc)
     if record is None or not config.session_liveness.admits_stored_session(record, now):
-        raise HTTPException(401, SESSION_EXPIRED_DETAIL)
+        raise _unauthenticated(request, SESSION_EXPIRED_DETAIL, login_redirect)
 
     if not record.user.is_active:
         raise HTTPException(403, ACCOUNT_DISABLED_DETAIL)

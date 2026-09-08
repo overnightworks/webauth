@@ -96,6 +96,13 @@ guards the attempt with `login_attempt_budget` (raising `http_refusal` on the
 `LoginRefusal` it returns), and records the failed attempt itself — the library
 never writes.
 
+`webauth.dependencies.current_user_dependency` answers 401 for a missing or
+dead session by default. A server-rendered host instead passes
+`login_redirect=LoginRedirect(path="/login", redirect_query_param="next")`; a
+browser navigation with no live session then answers 302 to that path with the
+asked-for address under the query key it named, while a request whose
+`Accept` header does not prefer HTML still gets 401.
+
 ## PasswordHasher
 
 The library hardcodes no hashing algorithm: `WebAuthConfig` requires a

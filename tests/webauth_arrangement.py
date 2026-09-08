@@ -23,7 +23,7 @@ from webauth.config import (
     install_web_auth_config,
 )
 from webauth.cookies import sign_session_id
-from webauth.dependencies import AuthenticatedUser, current_user_dependency
+from webauth.dependencies import AuthenticatedUser, LoginRedirect, current_user_dependency
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
 from webauth.passwords import BcryptPasswordHasher
@@ -285,9 +285,11 @@ class AuthApp:
     authenticated: list[AuthenticatedUser]
     signing_key: bytes
 
-    def get(self, path: str, *, cookie: str | None = None) -> Response:
+    def get(self, path: str, *, cookie: str | None = None, accept: str | None = None) -> Response:
         headers = {} if cookie is None else {"cookie": f"session_id={cookie}"}
-        return self.client.get(path, headers=headers)
+        if accept is not None:
+            headers["accept"] = accept
+        return self.client.get(path, headers=headers, follow_redirects=False)
 
     def signed_cookie(self, session_id: str = SESSION_ID) -> str:
         return sign_session_id(session_id, self.signing_key)
@@ -313,7 +315,10 @@ def a_session(
 
 
 def an_auth_app(
-    record: FakeSessionRecord | None, cache: RedisSessionCache | None = None,
+    record: FakeSessionRecord | None,
+    cache: RedisSessionCache | None = None,
+    *,
+    login_redirect: LoginRedirect | None = None,
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route."""
     config = a_web_auth_config(admin_role=ADMIN_ROLE, session_cache=cache)
@@ -325,6 +330,7 @@ def an_auth_app(
         session_store=lambda: sessions,
         audit_sink=lambda: audit,
         on_authenticated=authenticated.append,
+        login_redirect=login_redirect,
     )
 
     app = FastAPI()
