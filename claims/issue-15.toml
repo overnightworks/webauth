@@ -1,0 +1,7 @@
+claim_id = "5f9c2afb97bf4bdd9a11afc4be30fbb7"
+agent = "Claude head (coordinator)"
+role = "coordinator"
+base = "1a970b2b217f7286be9e4bde2e426d8dd91bf308"
+branch = "claude/issue-15-sec-fetch-site"
+scope = ["src/webauth/middleware/csrf.py", "README.md", "tests/test_csrf.py"]
+opened_commit = "9b9a4b68a5bc88cbf7d63e53a466d3f62eb1defe"
