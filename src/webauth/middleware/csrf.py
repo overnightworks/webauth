@@ -27,6 +27,10 @@ _FORM_CONTENT_TYPES: Final = frozenset({
 
 _LOCALHOST_PATTERN: Final = re.compile(r"^(localhost|127\.0\.0\.1)(:\d+)?$")
 
+_SEC_FETCH_SITE: Final = "sec-fetch-site"
+_SAME_ORIGIN: Final = "same-origin"
+_NONE: Final = "none"
+
 
 class CsrfTokenMiddleware(BaseHTTPMiddleware):
     """Reject a state-changing request whose CSRF token does not match its session."""
@@ -69,8 +73,23 @@ def _is_allowed_host(
     return bool(_LOCALHOST_PATTERN.match(netloc))
 
 
+def _sec_fetch_site_allows(fetch_site: str, method: str) -> bool:
+    if fetch_site == _SAME_ORIGIN:
+        return True
+    if fetch_site == _NONE:
+        return method not in _MUTATING_METHODS
+    return False
+
+
 class CsrfOriginMiddleware(BaseHTTPMiddleware):
-    """Reject a state-changing request that a foreign page originated."""
+    """Reject a state-changing request that a foreign page originated.
+
+    Sec-Fetch-Site is read first: same-origin passes; cross-site and
+    same-site are refused; none (a typed address or a bookmark) passes
+    for a safe method only. When that header is absent, the Origin
+    allowlist is applied as before. When both are absent, a form POST
+    is refused — the named rule for a client that sends neither.
+    """
 
     def __init__(self, app, policy: CsrfPolicy, **kwargs):  # type: ignore[no-untyped-def]
         super().__init__(app, **kwargs)
@@ -81,6 +100,14 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
             request.method in _MUTATING_METHODS
             and self._policy.requires_same_origin(request.url.path)
         ):
+            fetch_site = request.headers.get(_SEC_FETCH_SITE)
+            if fetch_site is not None:
+                if _sec_fetch_site_allows(fetch_site, request.method):
+                    return await call_next(request)
+                return JSONResponse(
+                    {"detail": "Cross-origin request rejected"},
+                    status_code=403,
+                )
             origin = request.headers.get("origin") or request.headers.get("referer")
             if origin:
                 config = web_auth_config(request)

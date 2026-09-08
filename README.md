@@ -156,6 +156,15 @@ here; it needs the client library, so a host that uses it installs
 `webauth[redis]`. A host that supplies its own cache implements the same
 protocol.
 
+## CSRF origin
+
+`CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
+request: `same-origin` passes; `cross-site` and `same-site` are refused;
+`none` (a typed address or a bookmark) passes for a safe method only. When
+that header is absent, the Origin allowlist is applied as before. When both
+are absent, a form POST is refused — the named rule for a client that sends
+neither.
+
 ## Development
 
 ```bash
