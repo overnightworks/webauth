@@ -33,6 +33,18 @@ reaches it through the Protocols in `webauth.ports`: `UserStore`,
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote.
 
+## Configuration
+
+The host builds one `WebAuthConfig` and installs it. Cookie flags a host may name:
+
+| Field | Default | Values |
+|---|---|---|
+| `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
+
+v0.3.0 clears the session cookies with the configured SameSite (`"strict"` by
+default), where v0.2.0 cleared them with `lax`. A cookie is deleted by name,
+domain and path, so the attribute does not affect the clearing.
+
 ## Install
 
 The wheel is published as an asset on each tag's release:
@@ -166,6 +178,15 @@ request from its store — so `WebAuthConfig` refuses a `session_cache` alongsid
 here; it needs the client library, so a host that uses it installs
 `webauth[redis]`. A host that supplies its own cache implements the same
 protocol.
+
+## CSRF origin
+
+`CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
+request: the header overrides the Origin allowlist for `same-origin`
+(passes) and `cross-site` (refused), while `same-site` is decided by the
+allowlist; when the header is absent the allowlist is applied as before.
+When both are absent, a form POST is refused — a JSON POST with neither
+header still passes.
 
 ## Development
 

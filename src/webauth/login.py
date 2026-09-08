@@ -34,7 +34,6 @@ INVALID_CREDENTIALS_DETAIL: Final = "Invalid username or password"
 RETRY_AFTER_HEADER: Final = "Retry-After"
 
 COOKIE_PATH: Final = "/"
-COOKIE_SAME_SITE: Final = "strict"
 
 
 class LoginOutcome(enum.Enum):
@@ -78,12 +77,13 @@ def issue_session_cookies(
     """
     secure = request_is_https(request)
     max_age = config.session_max_age_seconds
+    samesite = config.cookie_samesite
     response.set_cookie(
         config.session_cookie_name,
         sign_session_id(session_id, config.signing_key),
         max_age=max_age,
         httponly=True,
-        samesite=COOKIE_SAME_SITE,
+        samesite=samesite,
         secure=secure,
         path=COOKIE_PATH,
     )
@@ -92,7 +92,7 @@ def issue_session_cookies(
         generate_csrf_token(session_id, config.signing_key),
         max_age=max_age,
         httponly=False,
-        samesite=COOKIE_SAME_SITE,
+        samesite=samesite,
         secure=secure,
         path=COOKIE_PATH,
     )
@@ -100,8 +100,13 @@ def issue_session_cookies(
 
 def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     """Take both cookies back, so the browser stops carrying a dead session."""
-    response.delete_cookie(config.session_cookie_name, path=COOKIE_PATH)
-    response.delete_cookie(config.csrf_cookie_name, path=COOKIE_PATH)
+    samesite = config.cookie_samesite
+    response.delete_cookie(
+        config.session_cookie_name, path=COOKIE_PATH, samesite=samesite,
+    )
+    response.delete_cookie(
+        config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite,
+    )
 
 
 def login_attempt_budget(

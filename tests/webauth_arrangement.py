@@ -39,6 +39,8 @@ from webauth.rate_limit import SingleProcessRateLimitBackend
 from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
+ALLOWED_HOST = "songmaker.example"
+ALLOWED_ORIGIN = f"https://{ALLOWED_HOST}"
 SESSION_KEY_PREFIXES = SessionKeyPrefixes(
     session="app:session", user_sessions="app:user_sessions",
 )
@@ -60,7 +62,7 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
         "password_hasher": BcryptPasswordHasher(),
         "rate_limits": SingleProcessRateLimitBackend(),
         "session_cache": None,
-        "allowed_hosts_exact": frozenset({"songmaker.example"}),
+        "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "session_max_age_seconds": SESSION_MAX_AGE_SECONDS,
         "session_liveness": ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS),
