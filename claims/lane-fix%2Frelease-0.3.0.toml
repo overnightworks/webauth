@@ -1,0 +1,7 @@
+claim_id = "509e43125569434fbf21659e2a2dfcbe"
+agent = "Claude head (coordinator)"
+role = "coordinator"
+base = "6178f8694dcc6155287adc91de7e9ef18bfc420e"
+branch = "fix/release-0.3.0"
+scope = ["pyproject.toml", "README.md", "uv.lock"]
+opened_commit = "76bc889eeb4fcd649fdd2de90a8e93eed4cea9be"
