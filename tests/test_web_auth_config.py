@@ -63,9 +63,18 @@ def test_names_and_roles_default_to_the_conventional_ones() -> None:
     assert config.session_cookie_name == "session_id"
     assert config.csrf_cookie_name == "csrf_token"
     assert config.csrf_header_name == "x-csrf-token"
+    assert config.cookie_samesite == "strict"
     assert config.admin_role == "admin"
     assert config.user_role == "user"
     assert config.login_rate_window_seconds == 300
+
+
+@pytest.mark.parametrize("value", [None, "none"])
+def test_a_cross_site_cookie_samesite_is_refused_at_configuration_time(
+    value: str | None,
+) -> None:
+    with pytest.raises(ValueError, match="cross-site cookie"):
+        a_web_auth_config(cookie_samesite=value)
 
 
 def test_a_deployment_may_name_the_cookies_itself() -> None:

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from typing import Final
+from typing import Final, Literal
 
 DEFAULT_SESSION_COOKIE_NAME: Final = "session_id"
 DEFAULT_CSRF_COOKIE_NAME: Final = "csrf_token"
 DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
+
+CookieSameSite = Literal["strict", "lax"]
+DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
 
 
 def sign_session_id(session_id: str, secret: bytes) -> str:
