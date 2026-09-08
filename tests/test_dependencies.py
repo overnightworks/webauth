@@ -30,13 +30,30 @@ from webauth.dependencies import (
     MAX_SESSION_COOKIE_CHARS,
     SESSION_EXPIRED_DETAIL,
     AuthenticatedUser,
+    LoginRedirect,
 )
 from webauth.ports import SessionIdentityChange, SessionIdentityChanged
+
+A_LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 
 
 @pytest.fixture
 def auth_app() -> AuthApp:
     return an_auth_app(a_session())
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("login", id="no leading slash"),
+        pytest.param("//evil.example/login", id="a scheme-relative address"),
+        pytest.param("https://evil.example/login", id="an absolute URL"),
+        pytest.param("javascript:alert(1)", id="a non-http scheme"),
+    ],
+)
+def test_a_login_redirect_refuses_a_path_that_is_not_same_origin(path: str) -> None:
+    with pytest.raises(ValueError, match="same-origin"):
+        LoginRedirect(path=path, redirect_query_param="next")
 
 
 def test_a_signed_cookie_names_the_account_behind_the_request(auth_app: AuthApp) -> None:
@@ -246,3 +263,137 @@ def test_an_idle_window_host_refuses_a_session_past_its_window() -> None:
 
     assert response.status_code == 401
     assert response.json()["detail"] == SESSION_EXPIRED_DETAIL
+
+
+def test_a_missing_cookie_401_stays_byte_identical_without_a_login_redirect(
+    auth_app: AuthApp,
+) -> None:
+    response = auth_app.get("/me")
+
+    assert response.status_code == 401
+    assert response.headers["content-type"] == "application/json"
+    assert "location" not in response.headers
+    assert response.content == b'{"detail":"Authentication required"}'
+
+
+def test_an_invalid_signature_401_stays_byte_identical_without_a_login_redirect(
+    auth_app: AuthApp,
+) -> None:
+    response = auth_app.get("/me", cookie="unsigned")
+
+    assert response.status_code == 401
+    assert response.headers["content-type"] == "application/json"
+    assert "location" not in response.headers
+    assert response.content == b'{"detail":"Invalid session"}'
+
+
+def test_an_expired_session_401_stays_byte_identical_without_a_login_redirect() -> None:
+    app = an_auth_app(a_session(remaining=-timedelta(seconds=1)))
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 401
+    assert response.headers["content-type"] == "application/json"
+    assert "location" not in response.headers
+    assert response.content == b'{"detail":"Session expired"}'
+
+
+def test_a_browser_with_no_cookie_at_all_is_sent_to_the_login_page() -> None:
+    """The redirect's own status, ``Location``, and body — pinned once here.
+
+    A dependency cannot answer with anything but an ``HTTPException``, so the
+    302 still carries FastAPI's JSON body; every other redirect test below
+    checks only the status and ``Location`` this one already proves the body of.
+    """
+    app = an_auth_app(a_session(), login_redirect=A_LOGIN_REDIRECT)
+
+    response = app.get("/me", accept="text/html")
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?next=%2Fme"
+    assert response.headers["content-type"] == "application/json"
+    assert response.content == b'{"detail":"Found"}'
+
+
+def test_a_browser_with_an_invalid_signature_is_sent_to_the_login_page() -> None:
+    app = an_auth_app(a_session(), login_redirect=A_LOGIN_REDIRECT)
+
+    response = app.get("/me", cookie="unsigned", accept="text/html")
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?next=%2Fme"
+
+
+def test_a_browser_whose_session_expired_is_sent_to_the_login_page() -> None:
+    app = an_auth_app(
+        a_session(remaining=-timedelta(seconds=1)), login_redirect=A_LOGIN_REDIRECT,
+    )
+
+    response = app.get("/me", cookie=app.signed_cookie(), accept="text/html")
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?next=%2Fme"
+
+
+def test_the_redirect_keeps_the_asked_for_query_string() -> None:
+    app = an_auth_app(None, login_redirect=A_LOGIN_REDIRECT)
+
+    response = app.get("/me?tab=1", accept="text/html")
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?next=%2Fme%3Ftab%3D1"
+
+
+@pytest.mark.parametrize(
+    ("accept", "status"),
+    [
+        pytest.param("*/*", 401, id="a bare wildcard prefers html no more than json"),
+        pytest.param("text/html;q=0", 401, id="html explicitly refused"),
+        pytest.param(
+            "application/json, text/html;q=0.1",
+            401,
+            id="json preferred over low-quality html",
+        ),
+        pytest.param(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            302,
+            id="a browser's default Accept header",
+        ),
+    ],
+)
+def test_the_redirect_follows_accept_quality_negotiation(accept: str, status: int) -> None:
+    app = an_auth_app(None, login_redirect=A_LOGIN_REDIRECT)
+
+    response = app.get("/me", accept=accept)
+
+    assert response.status_code == status
+
+
+def test_a_request_that_does_not_prefer_html_stays_401_with_a_login_redirect() -> None:
+    app = an_auth_app(None, login_redirect=A_LOGIN_REDIRECT)
+
+    response = app.get("/me", accept="application/json")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL
+
+
+def test_a_live_session_authenticates_regardless_of_a_configured_login_redirect() -> None:
+    app = an_auth_app(a_session(), login_redirect=A_LOGIN_REDIRECT)
+
+    response = app.get("/me", cookie=app.signed_cookie(), accept="text/html")
+
+    assert response.status_code == 200
+    assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
+
+
+def test_a_deactivated_account_still_answers_403_not_a_redirect() -> None:
+    app = an_auth_app(
+        a_session(user=FakeUser(is_active=False)), login_redirect=A_LOGIN_REDIRECT,
+    )
+
+    response = app.get("/me", cookie=app.signed_cookie(), accept="text/html")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == ACCOUNT_DISABLED_DETAIL
+    assert "location" not in response.headers

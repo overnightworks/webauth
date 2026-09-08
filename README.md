@@ -108,6 +108,17 @@ guards the attempt with `login_attempt_budget` (raising `http_refusal` on the
 `LoginRefusal` it returns), and records the failed attempt itself — the library
 never writes.
 
+`webauth.dependencies.current_user_dependency` answers 401 for a missing or
+dead session by default. A server-rendered host instead passes
+`login_redirect=LoginRedirect(path="/login", redirect_query_param="next")` —
+`path` must be a same-origin absolute path, never a scheme or `//` address —
+and a browser navigation (`Accept` rating `text/html` above
+`application/json` by q-value) with no live session then answers 302 to that
+path, with the asked-for address and query string under the query key it
+named, while every other request still gets 401. A dependency can only raise
+an `HTTPException`, so the 302 still carries FastAPI's default JSON body
+(`{"detail":"Found"}`) alongside its `Location` header.
+
 ## PasswordHasher
 
 The library hardcodes no hashing algorithm: `WebAuthConfig` requires a
