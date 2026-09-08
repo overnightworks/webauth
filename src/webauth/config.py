@@ -9,7 +9,7 @@ environment variable, a settings singleton, or the application's own context.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, get_args
 
 from starlette.requests import Request
 
@@ -74,7 +74,7 @@ class WebAuthConfig:
                 "The session secret is too short — it signs every session cookie and "
                 f"must be at least {MIN_SESSION_SECRET_CHARS} characters.",
             )
-        if self.cookie_samesite not in ("strict", "lax"):
+        if self.cookie_samesite not in get_args(CookieSameSite):
             raise ValueError(
                 "cookie_samesite must be 'strict' or 'lax'; a cross-site cookie "
                 "is not what this library issues",

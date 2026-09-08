@@ -41,6 +41,8 @@ V0_2_0_CSRF_SET_COOKIE = (
     "csrf_token=c2c5cecdd7ae3886e360411f973c9aa43a9e31840585dad8625d47ce82059851; "
     "Max-Age=3600; Path=/; SameSite=strict; Secure"
 )
+CLEARED_SESSION_SET_COOKIE = 'session_id=""; Max-Age=0; Path=/; SameSite=strict'
+CLEARED_CSRF_SET_COOKIE = 'csrf_token=""; Max-Age=0; Path=/; SameSite=strict'
 
 A_CORRECT_PASSWORD = "the-correct-password"
 A_WRONG_PASSWORD = "something-else-entirely"
@@ -64,6 +66,13 @@ class CookieApp:
             value
             for header, value in response.headers.multi_items()
             if header == "set-cookie" and value.startswith(f"{name}=")
+        )
+
+    def set_cookie_header_without_expires(self, response: ClientResponse, name: str) -> str:
+        return "; ".join(
+            part
+            for part in self.set_cookie_header(response, name).split("; ")
+            if not part.lower().startswith("expires=")
         )
 
 
@@ -137,8 +146,14 @@ def test_a_host_that_configures_lax_gets_lax_on_both_cookies_and_their_clearing(
 def test_clearing_carries_the_configured_samesite(cookie_app: CookieApp) -> None:
     cleared = cookie_app.clear()
 
-    for name in (cookie_app.config.session_cookie_name, cookie_app.config.csrf_cookie_name):
-        assert "SameSite=strict" in cookie_app.set_cookie_header(cleared, name)
+    assert (
+        cookie_app.set_cookie_header_without_expires(cleared, "session_id")
+        == CLEARED_SESSION_SET_COOKIE
+    )
+    assert (
+        cookie_app.set_cookie_header_without_expires(cleared, "csrf_token")
+        == CLEARED_CSRF_SET_COOKIE
+    )
 
 
 def test_the_csrf_token_is_readable_by_the_client_and_bound_to_the_session(

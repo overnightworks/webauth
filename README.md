@@ -41,6 +41,10 @@ The host builds one `WebAuthConfig` and installs it. Cookie flags a host may nam
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 
+v0.3.0 clears the session cookies with the configured SameSite (`"strict"` by
+default), where v0.2.0 cleared them with `lax`. A cookie is deleted by name,
+domain and path, so the attribute does not affect the clearing.
+
 ## Install
 
 The wheel is published as an asset on each tag's release:
