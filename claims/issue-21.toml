@@ -1,8 +1,0 @@
-claim_id = "bdff4ac57bdc4312a3da630a7f94e788"
-agent = "Claude head (coordinator)"
-role = "coordinator"
-base = "8e00e61579e08352e917647ffb67909003a354cd"
-branch = "claude/issue-21-csrf-exempt-public-refusal"
-scope = ["src/webauth/middleware/csrf.py", "src/webauth/dependencies.py", "README.md"]
-opened_commit = "193355c3dd4a607589c72be151c98fdacf68419f"
-whole_reason = "two library additions, their tests and the README"
