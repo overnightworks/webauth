@@ -1,0 +1,7 @@
+claim_id = "f51553c54dca43bea08f840880ab7825"
+agent = "Claude head (coordinator)"
+role = "coordinator"
+base = "1a970b2b217f7286be9e4bde2e426d8dd91bf308"
+branch = "claude/issue-16-redirecting-dependency"
+scope = ["src/webauth/dependencies.py", "README.md", "tests/test_dependencies.py"]
+opened_commit = "25ad75f38a0defa99cf53b901b77b630eb1f02fa"
