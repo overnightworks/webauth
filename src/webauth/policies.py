@@ -117,9 +117,9 @@ class CsrfPolicy:
     every state-changing request is checked, and ``exempt`` carves out the
     prefixes that carry no session and no token — a sessionless webhook, say.
     Naming an explicit ``PathRules`` in ``protected`` switches to the older
-    fail-open shape, matched only against the paths it lists; ``exempt`` is
-    not consulted there, so a deployment that already lists every mutating
-    route keeps its exact behaviour.
+    fail-open shape, matched only against the paths it lists. That shape
+    cannot carry an ``exempt`` rule: a non-empty exemption is refused at
+    construction, rather than silently failing to change the listed paths.
 
     A path may be exempt from the token check and still owe a same-origin
     check: a login carries no session yet, so it has no token to submit, but
@@ -129,6 +129,17 @@ class CsrfPolicy:
     protected: PathRules | None = None
     exempt: PathRules = PathRules()
     token_exempt: PathRules = PathRules()
+
+    def __post_init__(self) -> None:
+        if self.protected is not None and any((
+            self.exempt.exact,
+            self.exempt.prefixes,
+            self.exempt.shapes,
+            self.exempt.patterns,
+        )):
+            raise ValueError(
+                "CsrfPolicy cannot combine explicit protected rules with exempt rules.",
+            )
 
     def _is_protected(self, path: str) -> bool:
         if self.protected is None:

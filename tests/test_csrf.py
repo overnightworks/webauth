@@ -18,7 +18,9 @@ CROSS_ORIGIN_DETAIL = {"detail": "Cross-origin request rejected"}
 MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header on form submission"}
 
 
-WEBHOOK_PATH = "/webhook/provider"
+WEBHOOK_PREFIX = "/webhook/provider/"
+WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
+WEBHOOK_SIBLING_PATH = "/webhook/providerx"
 
 
 def an_origin_guarded_client() -> TestClient:
@@ -41,7 +43,7 @@ def a_protect_everything_client() -> TestClient:
     install_web_auth_config(app, a_web_auth_config())
     app.add_middleware(
         CsrfOriginMiddleware,
-        policy=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PATH,))),
+        policy=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PREFIX,))),
     )
 
     @app.api_route(API_PATH, methods=["POST"])
@@ -200,3 +202,22 @@ def test_protect_everything_exempts_a_named_prefix() -> None:
 
     assert response.status_code == 200
     assert response.json() == OK
+
+
+def test_protect_everything_keeps_a_sibling_of_an_exempt_prefix_protected() -> None:
+    client = a_protect_everything_client()
+
+    response = client.post(
+        WEBHOOK_SIBLING_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
+
+
+def test_explicit_protected_rules_refuse_an_exempt_rule() -> None:
+    with pytest.raises(ValueError, match="exempt"):
+        CsrfPolicy(
+            protected=PathRules(prefixes=("/api/",)),
+            exempt=PathRules(prefixes=(WEBHOOK_PREFIX,)),
+        )

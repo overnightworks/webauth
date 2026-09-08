@@ -192,8 +192,9 @@ header still passes.
 state-changing request is checked, and `exempt` names the path prefixes that
 carry no session and therefore no token — a sessionless payment-provider
 webhook, say. A deployment that already lists every mutating route in
-`protected` keeps that exact fail-open shape unchanged; `exempt` is not
-consulted there.
+`protected` keeps that exact fail-open shape unchanged. It must leave
+`exempt` empty: combining an explicit `protected` list with any exemption is
+refused at startup, because the exemption cannot change that list.
 
 `webauth.dependencies.unauthenticated_response(request, login_redirect)`
 answers exactly what `current_user_dependency` would for the same request —
