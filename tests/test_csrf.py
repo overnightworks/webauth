@@ -18,6 +18,9 @@ CROSS_ORIGIN_DETAIL = {"detail": "Cross-origin request rejected"}
 MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header on form submission"}
 
 
+WEBHOOK_PATH = "/webhook/provider"
+
+
 def an_origin_guarded_client() -> TestClient:
     app = FastAPI()
     install_web_auth_config(app, a_web_auth_config())
@@ -28,6 +31,25 @@ def an_origin_guarded_client() -> TestClient:
 
     @app.api_route(API_PATH, methods=["GET", "POST"])
     def ok() -> dict[str, str]:
+        return OK
+
+    return TestClient(app, base_url=ALLOWED_ORIGIN)
+
+
+def a_protect_everything_client() -> TestClient:
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config())
+    app.add_middleware(
+        CsrfOriginMiddleware,
+        policy=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PATH,))),
+    )
+
+    @app.api_route(API_PATH, methods=["POST"])
+    def ok() -> dict[str, str]:
+        return OK
+
+    @app.api_route(WEBHOOK_PATH, methods=["POST"])
+    def webhook() -> dict[str, str]:
         return OK
 
     return TestClient(app, base_url=ALLOWED_ORIGIN)
@@ -155,6 +177,26 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
 def test_songmakers_json_post_without_either_header_is_unchanged() -> None:
     """Songmaker's TestClient path: JSON, no Sec-Fetch-Site, no Origin."""
     response = _call("POST", {})
+
+    assert response.status_code == 200
+    assert response.json() == OK
+
+
+def test_protect_everything_refuses_a_route_nobody_listed() -> None:
+    """A route added later, with no path rule naming it, is checked by default."""
+    client = a_protect_everything_client()
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN})
+
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
+
+
+def test_protect_everything_exempts_a_named_prefix() -> None:
+    """A sessionless webhook under the exempt prefix passes a foreign Origin."""
+    client = a_protect_everything_client()
+
+    response = client.post(WEBHOOK_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN})
 
     assert response.status_code == 200
     assert response.json() == OK

@@ -12,6 +12,7 @@ from webauth_arrangement import (
     IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
     SESSION_ID,
+    UNAUTHENTICATED_RESPONSE_PATH,
     AuthApp,
     FakeSessionRecord,
     FakeUser,
@@ -397,3 +398,42 @@ def test_a_deactivated_account_still_answers_403_not_a_redirect() -> None:
     assert response.status_code == 403
     assert response.json()["detail"] == ACCOUNT_DISABLED_DETAIL
     assert "location" not in response.headers
+
+
+@pytest.mark.parametrize(
+    ("login_redirect", "accept", "expected_status"),
+    [
+        pytest.param(None, None, 401, id="no login redirect configured"),
+        pytest.param(A_LOGIN_REDIRECT, None, 401, id="login redirect but no accept header"),
+        pytest.param(
+            A_LOGIN_REDIRECT, "application/json", 401, id="login redirect but json preferred",
+        ),
+        pytest.param(A_LOGIN_REDIRECT, "text/html", 302, id="login redirect and html preferred"),
+    ],
+)
+def test_the_public_function_answers_like_the_dependency_for_no_session(
+    login_redirect: LoginRedirect | None, accept: str | None, expected_status: int,
+) -> None:
+    """``unauthenticated_response`` and the dependency-guarded route agree.
+
+    Both are driven over the same client, so an identical request answers
+    identically whether the answer comes from raising inside the dependency
+    or from calling the public function directly. The redirect's ``next``
+    value differs because the two routes live at different paths; the login
+    page and query key it carries do not.
+    """
+    app = an_auth_app(None, login_redirect=login_redirect)
+
+    via_dependency = app.get("/me", accept=accept)
+    via_function = app.get(UNAUTHENTICATED_RESPONSE_PATH, accept=accept)
+
+    assert via_dependency.status_code == expected_status
+    assert via_function.status_code == expected_status
+    assert via_function.json() == via_dependency.json()
+    if expected_status == 302:
+        assert login_redirect is not None
+        assert via_function.headers["location"].split("?")[0] == login_redirect.path
+        assert via_dependency.headers["location"].split("?")[0] == login_redirect.path
+    else:
+        assert "location" not in via_function.headers
+        assert "location" not in via_dependency.headers

@@ -113,19 +113,33 @@ class RateLimitPolicy:
 class CsrfPolicy:
     """Which requests must prove they were made from this site.
 
+    Leaving ``protected`` at its default (``None``) is the fail-closed shape:
+    every state-changing request is checked, and ``exempt`` carves out the
+    prefixes that carry no session and no token — a sessionless webhook, say.
+    Naming an explicit ``PathRules`` in ``protected`` switches to the older
+    fail-open shape, matched only against the paths it lists; ``exempt`` is
+    not consulted there, so a deployment that already lists every mutating
+    route keeps its exact behaviour.
+
     A path may be exempt from the token check and still owe a same-origin
     check: a login carries no session yet, so it has no token to submit, but
     a foreign page must not be able to submit it either.
     """
 
-    protected: PathRules = PathRules()
+    protected: PathRules | None = None
+    exempt: PathRules = PathRules()
     token_exempt: PathRules = PathRules()
 
-    def requires_same_origin(self, path: str) -> bool:
+    def _is_protected(self, path: str) -> bool:
+        if self.protected is None:
+            return not self.exempt.matches(path)
         return self.protected.matches(path)
 
+    def requires_same_origin(self, path: str) -> bool:
+        return self._is_protected(path)
+
     def requires_token(self, path: str) -> bool:
-        return self.protected.matches(path) and not self.token_exempt.matches(path)
+        return self._is_protected(path) and not self.token_exempt.matches(path)
 
 
 @dataclass(frozen=True)

@@ -188,6 +188,20 @@ allowlist; when the header is absent the allowlist is applied as before.
 When both are absent, a form POST is refused — a JSON POST with neither
 header still passes.
 
+`CsrfPolicy` defaults to fail-closed: with `protected` left unset, every
+state-changing request is checked, and `exempt` names the path prefixes that
+carry no session and therefore no token — a sessionless payment-provider
+webhook, say. A deployment that already lists every mutating route in
+`protected` keeps that exact fail-open shape unchanged; `exempt` is not
+consulted there.
+
+`webauth.dependencies.unauthenticated_response(request, login_redirect)`
+answers exactly what `current_user_dependency` would for the same request —
+the same login redirect or the same 401 — as a real `Response` rather than a
+raised exception, for a host whose own middleware is the session authority
+and cannot rely on FastAPI's dependency-injection or exception-handling
+machinery to reach it.
+
 ## Development
 
 ```bash
