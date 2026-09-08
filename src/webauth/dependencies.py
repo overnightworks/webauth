@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
 
 from fastapi import Depends, HTTPException, Request
+from starlette.responses import JSONResponse, Response
 
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import verify_session_cookie
@@ -153,6 +154,23 @@ def current_user_dependency(
         admin_user=admin_user,
         verified_session_id=verified_session_id,
     )
+
+
+def unauthenticated_response(
+    request: Request, login_redirect: LoginRedirect | None,
+) -> Response:
+    """The refusal ``current_user_dependency`` answers with for no live session.
+
+    A host whose own middleware is the session authority calls this directly
+    to answer exactly as the dependency would for the same request: the same
+    login redirect (``Location``, ``next`` carrying path and query) a browser
+    navigation gets, the same 401 every other request gets. This is the one
+    place that decision is made; ``current_user_dependency`` raises the
+    identical status, headers and body as an ``HTTPException`` so FastAPI's
+    own handler reaches it byte-for-byte.
+    """
+    exc = _unauthenticated(request, AUTHENTICATION_REQUIRED_DETAIL, login_redirect)
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
 
 
 def _unauthenticated(

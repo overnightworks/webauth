@@ -18,6 +18,11 @@ CROSS_ORIGIN_DETAIL = {"detail": "Cross-origin request rejected"}
 MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header on form submission"}
 
 
+WEBHOOK_PREFIX = "/webhook/provider/"
+WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
+WEBHOOK_SIBLING_PATH = "/webhook/providerx"
+
+
 def an_origin_guarded_client() -> TestClient:
     app = FastAPI()
     install_web_auth_config(app, a_web_auth_config())
@@ -28,6 +33,25 @@ def an_origin_guarded_client() -> TestClient:
 
     @app.api_route(API_PATH, methods=["GET", "POST"])
     def ok() -> dict[str, str]:
+        return OK
+
+    return TestClient(app, base_url=ALLOWED_ORIGIN)
+
+
+def a_protect_everything_client() -> TestClient:
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config())
+    app.add_middleware(
+        CsrfOriginMiddleware,
+        policy=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PREFIX,))),
+    )
+
+    @app.api_route(API_PATH, methods=["POST"])
+    def ok() -> dict[str, str]:
+        return OK
+
+    @app.api_route(WEBHOOK_PATH, methods=["POST"])
+    def webhook() -> dict[str, str]:
         return OK
 
     return TestClient(app, base_url=ALLOWED_ORIGIN)
@@ -158,3 +182,42 @@ def test_songmakers_json_post_without_either_header_is_unchanged() -> None:
 
     assert response.status_code == 200
     assert response.json() == OK
+
+
+def test_protect_everything_refuses_a_route_nobody_listed() -> None:
+    """A route added later, with no path rule naming it, is checked by default."""
+    client = a_protect_everything_client()
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN})
+
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
+
+
+def test_protect_everything_exempts_a_named_prefix() -> None:
+    """A sessionless webhook under the exempt prefix passes a foreign Origin."""
+    client = a_protect_everything_client()
+
+    response = client.post(WEBHOOK_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN})
+
+    assert response.status_code == 200
+    assert response.json() == OK
+
+
+def test_protect_everything_keeps_a_sibling_of_an_exempt_prefix_protected() -> None:
+    client = a_protect_everything_client()
+
+    response = client.post(
+        WEBHOOK_SIBLING_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
+
+
+def test_explicit_protected_rules_refuse_an_exempt_rule() -> None:
+    with pytest.raises(ValueError, match="exempt"):
+        CsrfPolicy(
+            protected=PathRules(prefixes=("/api/",)),
+            exempt=PathRules(prefixes=(WEBHOOK_PREFIX,)),
+        )

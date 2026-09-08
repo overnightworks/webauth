@@ -12,10 +12,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import fakeredis
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx import Response as HttpxResponse
 from pydantic import SecretStr
+from starlette.responses import Response
 
 from webauth.config import (
     MIN_SESSION_SECRET_CHARS,
@@ -23,7 +24,12 @@ from webauth.config import (
     install_web_auth_config,
 )
 from webauth.cookies import sign_session_id
-from webauth.dependencies import AuthenticatedUser, LoginRedirect, current_user_dependency
+from webauth.dependencies import (
+    AuthenticatedUser,
+    LoginRedirect,
+    current_user_dependency,
+    unauthenticated_response,
+)
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
 from webauth.passwords import BcryptPasswordHasher
@@ -287,7 +293,9 @@ class AuthApp:
     authenticated: list[AuthenticatedUser]
     signing_key: bytes
 
-    def get(self, path: str, *, cookie: str | None = None, accept: str | None = None) -> Response:
+    def get(
+        self, path: str, *, cookie: str | None = None, accept: str | None = None,
+    ) -> HttpxResponse:
         headers = {} if cookie is None else {"cookie": f"session_id={cookie}"}
         if accept is not None:
             headers["accept"] = accept
@@ -316,13 +324,21 @@ def a_session(
     )
 
 
+UNAUTHENTICATED_RESPONSE_PATH = "/unauthenticated-response"
+
+
 def an_auth_app(
     record: FakeSessionRecord | None,
     cache: RedisSessionCache | None = None,
     *,
     login_redirect: LoginRedirect | None = None,
 ) -> AuthApp:
-    """An application serving one protected, one admin, one session-id route."""
+    """An application serving one protected, one admin, one session-id route.
+
+    ``UNAUTHENTICATED_RESPONSE_PATH`` answers with ``unauthenticated_response``
+    called directly, over the same ``login_redirect``, so a test can compare
+    it against a dependency-guarded route for the same request.
+    """
     config = a_web_auth_config(admin_role=ADMIN_ROLE, session_cache=cache)
     sessions = SessionRecordsInMemory(record)
     audit = RecordingAuditSink()
@@ -351,6 +367,10 @@ def an_auth_app(
         verified: str = Depends(dependencies.verified_session_id),
     ) -> dict[str, str]:
         return {"session_id": verified}
+
+    @app.get(UNAUTHENTICATED_RESPONSE_PATH)
+    def unauthenticated(request: Request) -> Response:
+        return unauthenticated_response(request, login_redirect)
 
     return AuthApp(
         client=TestClient(app, cookies={}, headers={"user-agent": CLIENT_USER_AGENT}),
