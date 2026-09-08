@@ -19,17 +19,11 @@ if TYPE_CHECKING:
 
 _MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-_FORM_CONTENT_TYPES: Final = frozenset({
-    "application/x-www-form-urlencoded",
-    "multipart/form-data",
-    "text/plain",
-})
-
 _LOCALHOST_PATTERN: Final = re.compile(r"^(localhost|127\.0\.0\.1)(:\d+)?$")
 
 _SEC_FETCH_SITE: Final = "sec-fetch-site"
 _SAME_ORIGIN: Final = "same-origin"
-_NONE: Final = "none"
+_SAME_SITE: Final = "same-site"
 
 
 class CsrfTokenMiddleware(BaseHTTPMiddleware):
@@ -73,22 +67,22 @@ def _is_allowed_host(
     return bool(_LOCALHOST_PATTERN.match(netloc))
 
 
-def _sec_fetch_site_allows(fetch_site: str, method: str) -> bool:
+def _sec_fetch_site_allows(fetch_site: str) -> bool | None:
     if fetch_site == _SAME_ORIGIN:
         return True
-    if fetch_site == _NONE:
-        return method not in _MUTATING_METHODS
+    if fetch_site == _SAME_SITE:
+        return None
     return False
 
 
 class CsrfOriginMiddleware(BaseHTTPMiddleware):
     """Reject a state-changing request that a foreign page originated.
 
-    Sec-Fetch-Site is read first: same-origin passes; cross-site and
-    same-site are refused; none (a typed address or a bookmark) passes
-    for a safe method only. When that header is absent, the Origin
-    allowlist is applied as before. When both are absent, a form POST
-    is refused — the named rule for a client that sends neither.
+    Sec-Fetch-Site is read first: the header overrides the Origin
+    allowlist for same-origin (passes) and cross-site (refused), while
+    same-site is decided by the allowlist; when the header is absent
+    the allowlist is applied, and when both are absent the request is
+    refused.
     """
 
     def __init__(self, app, policy: CsrfPolicy, **kwargs):  # type: ignore[no-untyped-def]
@@ -102,12 +96,14 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
         ):
             fetch_site = request.headers.get(_SEC_FETCH_SITE)
             if fetch_site is not None:
-                if _sec_fetch_site_allows(fetch_site, request.method):
+                allowed = _sec_fetch_site_allows(fetch_site)
+                if allowed is True:
                     return await call_next(request)
-                return JSONResponse(
-                    {"detail": "Cross-origin request rejected"},
-                    status_code=403,
-                )
+                if allowed is False:
+                    return JSONResponse(
+                        {"detail": "Cross-origin request rejected"},
+                        status_code=403,
+                    )
             origin = request.headers.get("origin") or request.headers.get("referer")
             if origin:
                 config = web_auth_config(request)
@@ -123,10 +119,8 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                     )
             else:
-                content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
-                if content_type in _FORM_CONTENT_TYPES:
-                    return JSONResponse(
-                        {"detail": "Missing Origin header on form submission"},
-                        status_code=403,
-                    )
+                return JSONResponse(
+                    {"detail": "Cross-origin request rejected"},
+                    status_code=403,
+                )
         return await call_next(request)

@@ -159,11 +159,10 @@ protocol.
 ## CSRF origin
 
 `CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
-request: `same-origin` passes; `cross-site` and `same-site` are refused;
-`none` (a typed address or a bookmark) passes for a safe method only. When
-that header is absent, the Origin allowlist is applied as before. When both
-are absent, a form POST is refused — the named rule for a client that sends
-neither.
+request: the header overrides the Origin allowlist for `same-origin`
+(passes) and `cross-site` (refused), while `same-site` is decided by the
+allowlist; when the header is absent the allowlist is applied, and when
+both are absent the request is refused.
 
 ## Development
 
