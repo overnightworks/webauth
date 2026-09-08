@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
 _MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
+_FORM_CONTENT_TYPES: Final = frozenset({
+    "application/x-www-form-urlencoded",
+    "multipart/form-data",
+    "text/plain",
+})
+
 _LOCALHOST_PATTERN: Final = re.compile(r"^(localhost|127\.0\.0\.1)(:\d+)?$")
 
 _SEC_FETCH_SITE: Final = "sec-fetch-site"
@@ -81,8 +87,8 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
     Sec-Fetch-Site is read first: the header overrides the Origin
     allowlist for same-origin (passes) and cross-site (refused), while
     same-site is decided by the allowlist; when the header is absent
-    the allowlist is applied, and when both are absent the request is
-    refused.
+    the allowlist is applied as before. When both are absent, a form
+    POST is refused.
     """
 
     def __init__(self, app, policy: CsrfPolicy, **kwargs):  # type: ignore[no-untyped-def]
@@ -119,8 +125,10 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                     )
             else:
-                return JSONResponse(
-                    {"detail": "Cross-origin request rejected"},
-                    status_code=403,
-                )
+                content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
+                if content_type in _FORM_CONTENT_TYPES:
+                    return JSONResponse(
+                        {"detail": "Missing Origin header on form submission"},
+                        status_code=403,
+                    )
         return await call_next(request)

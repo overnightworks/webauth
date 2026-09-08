@@ -161,8 +161,9 @@ protocol.
 `CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
 request: the header overrides the Origin allowlist for `same-origin`
 (passes) and `cross-site` (refused), while `same-site` is decided by the
-allowlist; when the header is absent the allowlist is applied, and when
-both are absent the request is refused.
+allowlist; when the header is absent the allowlist is applied as before.
+When both are absent, a form POST is refused — a JSON POST with neither
+header still passes.
 
 ## Development
 

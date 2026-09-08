@@ -6,16 +6,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
-from webauth_arrangement import API_PATH, a_web_auth_config
+from webauth_arrangement import ALLOWED_ORIGIN, API_PATH, a_web_auth_config
 
 from webauth.config import install_web_auth_config
 from webauth.middleware import CsrfOriginMiddleware
 from webauth.policies import CsrfPolicy, PathRules
 
-ALLOWED_ORIGIN = f"https://{next(iter(a_web_auth_config().allowed_hosts_exact))}"
 FOREIGN_ORIGIN = "https://evil.test"
 OK = {"status": "ok"}
 CROSS_ORIGIN_DETAIL = {"detail": "Cross-origin request rejected"}
+MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header on form submission"}
 
 
 def an_origin_guarded_client() -> TestClient:
@@ -33,19 +33,26 @@ def an_origin_guarded_client() -> TestClient:
     return TestClient(app, base_url=ALLOWED_ORIGIN)
 
 
-def _call(method: str, headers: dict[str, str]) -> Response:
+def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Response:
     client = an_origin_guarded_client()
     if method == "GET":
         return client.get(API_PATH, headers=headers)
+    if as_form:
+        return client.post(
+            API_PATH,
+            content=b"n=1",
+            headers={**headers, "content-type": "application/x-www-form-urlencoded"},
+        )
     return client.post(API_PATH, json={"n": 1}, headers=headers)
 
 
 @pytest.mark.parametrize(
-    ("method", "headers", "status", "body"),
+    ("method", "headers", "as_form", "status", "body"),
     [
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-origin"},
+            False,
             200,
             OK,
             id="same-origin-without-origin-passes",
@@ -53,6 +60,7 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-origin", "origin": FOREIGN_ORIGIN},
+            False,
             200,
             OK,
             id="same-origin-with-foreign-origin-passes",
@@ -60,6 +68,7 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "POST",
             {"sec-fetch-site": "cross-site", "origin": ALLOWED_ORIGIN},
+            False,
             403,
             CROSS_ORIGIN_DETAIL,
             id="cross-site-wins-over-allowlisted-origin",
@@ -67,6 +76,7 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-site", "origin": ALLOWED_ORIGIN},
+            False,
             200,
             OK,
             id="same-site-with-allowlisted-origin-passes",
@@ -74,6 +84,7 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-site", "origin": FOREIGN_ORIGIN},
+            False,
             403,
             CROSS_ORIGIN_DETAIL,
             id="same-site-with-foreign-origin-refused",
@@ -81,6 +92,7 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "POST",
             {"origin": ALLOWED_ORIGIN},
+            False,
             200,
             OK,
             id="absent-header-allowlisted-origin-passes",
@@ -88,6 +100,7 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "POST",
             {"origin": FOREIGN_ORIGIN},
+            False,
             403,
             CROSS_ORIGIN_DETAIL,
             id="absent-header-foreign-origin-refused",
@@ -95,13 +108,23 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "POST",
             {},
+            False,
+            200,
+            OK,
+            id="absent-both-json-passes",
+        ),
+        pytest.param(
+            "POST",
+            {},
+            True,
             403,
-            CROSS_ORIGIN_DETAIL,
-            id="absent-both-refused",
+            MISSING_ORIGIN_DETAIL,
+            id="absent-both-form-refused",
         ),
         pytest.param(
             "POST",
             {"sec-fetch-site": "none"},
+            False,
             403,
             CROSS_ORIGIN_DETAIL,
             id="none-with-post-refused",
@@ -109,6 +132,7 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         pytest.param(
             "GET",
             {"sec-fetch-site": "cross-site"},
+            False,
             200,
             OK,
             id="safe-method-cross-site-passes",
@@ -118,10 +142,19 @@ def _call(method: str, headers: dict[str, str]) -> Response:
 def test_a_request_is_judged_by_sec_fetch_site_then_origin(
     method: str,
     headers: dict[str, str],
+    as_form: bool,
     status: int,
     body: dict[str, str],
 ) -> None:
-    response = _call(method, headers)
+    response = _call(method, headers, as_form=as_form)
 
     assert response.status_code == status
     assert response.json() == body
+
+
+def test_songmakers_json_post_without_either_header_is_unchanged() -> None:
+    """Songmaker's TestClient path: JSON, no Sec-Fetch-Site, no Origin."""
+    response = _call("POST", {})
+
+    assert response.status_code == 200
+    assert response.json() == OK
