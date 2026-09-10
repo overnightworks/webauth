@@ -383,6 +383,7 @@ class SessionRecordsInMemory:
 
 
     def delete(self, session_id: str) -> None:
+        _require_held_lock(self._lock)
         self._records.pop(session_id, None)
 
     def delete_for_user(self, user_id: str) -> int:
