@@ -394,6 +394,15 @@ class SessionRecordsInMemory:
             self.delete(session_id)
         return len(session_ids)
 
+    def list_active(
+        self, *, offset: int = 0, limit: int | None = None,
+    ) -> list[FakeSessionRecord]:
+        records = list(self._records.values())
+        return records[offset:None if limit is None else offset + limit]
+
+    def count_active(self) -> int:
+        return len(self._records)
+
     def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
         records = sorted(
             (record for record in self._records.values() if record.user_id == user_id),
