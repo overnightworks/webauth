@@ -1,8 +1,0 @@
-claim_id = "ccd97b7fb96c4839a10c1ec193af9330"
-agent = "codex-webauth-25"
-role = "coordinator"
-base = "874b210f1152ca2e5033f3f442999fcccd751cee"
-branch = "codex/issue-25-users-passwords"
-scope = ["src/webauth/ports.py", "src/webauth/users.py", "src/webauth/__init__.py", "README.md", "pyproject.toml", "tests/webauth_arrangement.py", "tests/test_users.py", "uv.lock"]
-opened_commit = "d5ab31362a477f37e9753f01ac6e76f48a6c1684"
-whole_reason = "Der Versionssprung 0.4.0 friert Ports, Helfer, README, Tests und das Lockfile in einem PR ein, weil das Tag danach unveraenderlich ist."
