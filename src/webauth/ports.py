@@ -8,6 +8,7 @@ fails leaves nothing behind that the auth machinery wrote.
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
@@ -53,6 +54,59 @@ class UserStore(Protocol):
     def create(self, username: str, password_hash: str, role: str) -> UserRecord:
         """Add an account, including whatever else the application ties to one."""
         ...
+
+
+class UserManagementError(Exception):
+    """A refused user-management operation, translated by the host."""
+
+
+class UsernameTakenError(UserManagementError):
+    """The store could not create an account because its username is taken."""
+
+
+class UnknownUserError(UserManagementError):
+    """The requested account does not exist."""
+
+
+@runtime_checkable
+class UserAdministrationStore(UserStore, Protocol):
+    """Account administration over the host's model and transaction.
+
+    ``create`` raises ``UsernameTakenError`` for a duplicate username. Store
+    errors carry no passwords, hashes, or raw session identifiers.
+    """
+
+    def list(self) -> list[UserRecord]:
+        """All accounts, in the order the store chooses."""
+        ...
+
+    def update(
+        self,
+        user_id: str,
+        *,
+        role: str | None = None,
+        is_active: bool | None = None,
+        password_hash: str | None = None,
+    ) -> UserRecord:
+        """Change the supplied fields, or raise ``UnknownUserError``."""
+        ...
+
+    def count_active_admins(self, role: str) -> int:
+        """Count active accounts with ``role``; the caller holds any lock."""
+        ...
+
+
+@runtime_checkable
+class WriteLock(Protocol):
+    """Serialize check-then-write operations in the host's transaction.
+
+    All stores used inside ``hold`` share that transaction. The host owns
+    commit and rollback, including rollback after ``SetupRacedError``. A
+    transaction-scoped database lock may remain held after context exit until
+    the host finishes its transaction; exiting never commits implicitly.
+    """
+
+    def hold(self) -> AbstractContextManager[None]: ...
 
 
 @runtime_checkable
@@ -248,8 +302,32 @@ class SessionIdentityChanged:
     current: str
 
 
+class UserManagementEventKind(Enum):
+    USER_CREATED = "user_created"
+    ROLE_CHANGED = "role_changed"
+    USER_DEACTIVATED = "user_deactivated"
+    SESSIONS_REVOKED = "sessions_revoked"
+    FIRST_ADMIN_CREATED = "first_admin_created"
+
+
+@dataclass(frozen=True)
+class UserManagementEvent:
+    """An account operation without credentials, usernames, or session tokens."""
+
+    kind: UserManagementEventKind
+    actor_id: str | None
+    subject_id: str
+    role: str | None = None
+    session_count: int | None = None
+    session_ref: str | None = None
+
+
 @runtime_checkable
 class AuditSink(Protocol):
     def session_identity_changed(self, event: SessionIdentityChanged) -> None:
         """Record that a live session began arriving from somewhere else."""
+        ...
+
+    def user_management_event(self, event: UserManagementEvent) -> None:
+        """Map an account operation to the host's audit, optionally doing nothing."""
         ...

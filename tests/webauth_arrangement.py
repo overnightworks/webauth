@@ -8,8 +8,12 @@ one that the rest of the suite imports `TEST_SECRET` and its factories from.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from itertools import count
+from threading import RLock
 
 import fakeredis
 from fastapi import Depends, FastAPI, Request
@@ -39,10 +43,17 @@ from webauth.policies import (
     RateLimitClass,
     RateLimitPolicy,
 )
-from webauth.ports import RateLimitBackend, SessionIdentityChanged
+from webauth.ports import (
+    RateLimitBackend,
+    SessionIdentityChanged,
+    UnknownUserError,
+    UserManagementEvent,
+    UsernameTakenError,
+)
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
+from webauth.users import UserManagement
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 ALLOWED_HOST = "songmaker.example"
@@ -174,6 +185,104 @@ class FakeUser:
     password_hash: str = "unused"
 
 
+class LockNotHeldError(RuntimeError):
+    """A store operation requires the host's write lock."""
+
+
+def _require_held_lock(lock: WriteLockInMemory | None) -> None:
+    if lock is not None and not lock.held:
+        raise LockNotHeldError("Store operation requires a held write lock")
+
+
+class UsersInMemory:
+    """Accounts sharing the same mutable records as the host's session store."""
+
+    def __init__(self, *users: FakeUser, lock: WriteLockInMemory | None = None) -> None:
+        self._lock = lock
+        self._users = {user.id: user for user in users}
+        self._usernames = {user.username: user for user in users}
+        self._ids = count(1)
+
+    def get(self, user_id: str) -> FakeUser | None:
+        return self._users.get(user_id)
+
+    def get_by_username(self, username: str) -> FakeUser | None:
+        return self._usernames.get(username)
+
+    def count(self) -> int:
+        _require_held_lock(self._lock)
+        return len(self._users)
+
+    def create(self, username: str, password_hash: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
+        if username in self._usernames:
+            raise UsernameTakenError("Username is already taken")
+        user_id = f"user-{next(self._ids)}"
+        while user_id in self._users:
+            user_id = f"user-{next(self._ids)}"
+        user = FakeUser(
+            id=user_id, username=username, password_hash=password_hash, role=role,
+        )
+        self._users[user.id] = user
+        self._usernames[user.username] = user
+        return user
+
+    def list(self) -> list[FakeUser]:
+        return list(self._users.values())
+
+    def update(
+        self,
+        user_id: str,
+        *,
+        role: str | None = None,
+        is_active: bool | None = None,
+        password_hash: str | None = None,
+    ) -> FakeUser:
+        _require_held_lock(self._lock)
+        user = self.get(user_id)
+        if user is None:
+            raise UnknownUserError("Account does not exist")
+        if role is not None:
+            user.role = role
+        if is_active is not None:
+            user.is_active = is_active
+        if password_hash is not None:
+            user.password_hash = password_hash
+        return user
+
+    def count_active_admins(self, role: str) -> int:
+        _require_held_lock(self._lock)
+        return sum(user.is_active and user.role == role for user in self._users.values())
+
+
+class UsersWithSetupRace(UsersInMemory):
+    """A store exposing a second creator that escaped the host's setup lock."""
+
+    def create(self, username: str, password_hash: str, role: str) -> FakeUser:
+        user = super().create(username, password_hash, role)
+        super().create("concurrent-account", "unused", role)
+        return user
+
+
+@dataclass
+class WriteLockInMemory:
+    _lock: RLock = field(default_factory=RLock)
+    _hold_depth: int = field(default=0, init=False)
+
+    @property
+    def held(self) -> bool:
+        return self._hold_depth > 0
+
+    @contextmanager
+    def hold(self) -> Iterator[None]:
+        with self._lock:
+            self._hold_depth += 1
+            try:
+                yield
+            finally:
+                self._hold_depth -= 1
+
+
 @dataclass
 class Argon2idStyleHasher:
     """A non-bcrypt ``PasswordHasher`` double whose hashes are legible.
@@ -205,21 +314,60 @@ class FakeSessionRecord:
         return self.user.id
 
 
-@dataclass
 class SessionRecordsInMemory:
-    """The one stored session, renewed in place and never committed.
+    """Stored sessions, renewed in place and never committed.
 
     The expiry-column store owns its max age and computes the new expiry from
     the ``now`` the caller passes, so no clock is read outside ``dependencies``.
     """
 
-    record: FakeSessionRecord | None
-    max_age_seconds: int = SESSION_MAX_AGE_SECONDS
+    def __init__(
+        self,
+        record: FakeSessionRecord | None = None,
+        max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
+        *,
+        users: UsersInMemory | None = None,
+        lock: WriteLockInMemory | None = None,
+    ) -> None:
+        self._lock = lock
+        self._records = {} if record is None else {record.id: record}
+        self._users = users if users is not None else UsersInMemory(
+            *(() if record is None else (record.user,)),
+        )
+        self._ids = count(1)
+        self.max_age_seconds = max_age_seconds
+
+    @property
+    def record(self) -> FakeSessionRecord | None:
+        return next(iter(self._records.values()), None)
+
+    def create(
+        self,
+        user_id: str,
+        expires_at: datetime,
+        *,
+        ip_address: str,
+        user_agent: str,
+    ) -> FakeSessionRecord:
+        user = self._users.get(user_id)
+        if user is None:
+            raise UnknownUserError("Account does not exist")
+        session_id = f"session-{next(self._ids)}"
+        while session_id in self._records:
+            session_id = f"session-{next(self._ids)}"
+        record = FakeSessionRecord(
+            id=session_id,
+            user=user,
+            created_at=expires_at - timedelta(seconds=self.max_age_seconds),
+            expires_at=expires_at,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        self._records[record.id] = record
+        return record
 
     def load(self, session_id: str) -> FakeSessionRecord | None:
-        if self.record is None or self.record.id != session_id:
-            return None
-        return self.record
+        return self._records.get(session_id)
 
     def touch(
         self,
@@ -232,6 +380,30 @@ class SessionRecordsInMemory:
         record.ip_address = ip_address
         record.user_agent = user_agent
         record.expires_at = now + timedelta(seconds=self.max_age_seconds)
+
+
+    def delete(self, session_id: str) -> None:
+        self._records.pop(session_id, None)
+
+    def delete_for_user(self, user_id: str) -> int:
+        _require_held_lock(self._lock)
+        session_ids = [
+            record.id for record in self._records.values() if record.user_id == user_id
+        ]
+        for session_id in session_ids:
+            self.delete(session_id)
+        return len(session_ids)
+
+    def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
+        records = sorted(
+            (record for record in self._records.values() if record.user_id == user_id),
+            key=lambda record: record.created_at,
+            reverse=True,
+        )
+        removed = [record.id for record in records[max_sessions:]]
+        for session_id in removed:
+            self.delete(session_id)
+        return removed
 
 
 @dataclass
@@ -278,9 +450,25 @@ class IdleSessionsInMemory:
 @dataclass
 class RecordingAuditSink:
     events: list[SessionIdentityChanged] = field(default_factory=list)
+    user_management_events: list[UserManagementEvent] = field(default_factory=list)
 
     def session_identity_changed(self, event: SessionIdentityChanged) -> None:
         self.events.append(event)
+
+    def user_management_event(self, event: UserManagementEvent) -> None:
+        self.user_management_events.append(event)
+
+
+def a_user_management(*users: FakeUser, config: WebAuthConfig) -> UserManagement:
+    lock = WriteLockInMemory()
+    user_store = UsersInMemory(*users, lock=lock)
+    return UserManagement(
+        users=user_store,
+        sessions=SessionRecordsInMemory(users=user_store, lock=lock),
+        audit=RecordingAuditSink(),
+        lock=lock,
+        config=config,
+    )
 
 
 @dataclass
