@@ -629,15 +629,13 @@ def test_the_session_arrangement_prunes_only_the_subjects_oldest_sessions(
         ip_address=CLIENT_ADDRESS, user_agent=CLIENT_USER_AGENT,
     )
 
-    with cached_management.lock.hold():
-        assert set(sessions.prune_overflow("subject", 1)) == {
-            record.id for record in stored_sessions if record.user_id == "subject"
-        }
+    assert set(sessions.prune_overflow("subject", 1)) == {
+        record.id for record in stored_sessions if record.user_id == "subject"
+    }
     assert sessions.load(newest.id) == newest
     assert sessions.load(stored_sessions[1].id) == stored_sessions[1]
-    with cached_management.lock.hold():
-        assert sessions.prune_overflow("subject", 1) == []
-        assert sessions.prune_overflow("subject", 0) == [newest.id]
+    assert sessions.prune_overflow("subject", 1) == []
+    assert sessions.prune_overflow("subject", 0) == [newest.id]
 
 
 @pytest.mark.parametrize("error_type", [
@@ -664,6 +662,9 @@ PASSWORD_CHANGES = [
         ),
         "password_changed", "subject", id="own_password",
     ),
+]
+PASSWORD_OPERATIONS = [
+    pytest.param(change.values[0], id=change.id) for change in PASSWORD_CHANGES
 ]
 
 
@@ -728,7 +729,6 @@ def test_REQ_ADMIN_10_an_admin_changing_their_own_password_ends_the_current_sess
 @pytest.mark.parametrize(("current", "new", "error_type"), [
     ("wrong-current-password", NEW_PASSWORD, WrongPasswordError),
     ("wrong-current-password", "password123", WrongPasswordError),
-    (CHOSEN_PASSWORD, "password123", WeakPasswordError),
 ])
 def test_REQ_ADMIN_10_refused_own_password_changes_preserve_password_and_every_session(
     cached_management: UserManagement, actor: AuthenticatedUser,
@@ -751,11 +751,10 @@ def test_REQ_ADMIN_10_refused_own_password_changes_preserve_password_and_every_s
         assert secret not in evidence
 
 
-@pytest.mark.parametrize(("operation", "kind", "actor_id"), PASSWORD_CHANGES)
+@pytest.mark.parametrize("operation", PASSWORD_OPERATIONS)
 def test_REQ_ADMIN_10_password_changes_reject_weak_passwords_without_writes(
     cached_management: UserManagement, actor: AuthenticatedUser,
     stored_sessions: list[FakeSessionRecord], operation: PasswordOperation,
-    kind: str, actor_id: str,
 ) -> None:
     management = cached_management
     stored_hash = management.users.get("subject").password_hash
@@ -771,11 +770,10 @@ def test_REQ_ADMIN_10_password_changes_reject_weak_passwords_without_writes(
     assert management.audit.user_management_events == []
 
 
-@pytest.mark.parametrize(("operation", "kind", "actor_id"), PASSWORD_CHANGES)
+@pytest.mark.parametrize("operation", PASSWORD_OPERATIONS)
 def test_REQ_ADMIN_10_password_changes_delete_from_the_store_before_a_cache_failure(
     cached_management: UserManagement, actor: AuthenticatedUser,
     stored_sessions: list[FakeSessionRecord], operation: PasswordOperation,
-    kind: str, actor_id: str,
 ) -> None:
     management = replace(cached_management, config=replace(
         cached_management.config, session_cache=a_session_cache_failing_on("smembers"),
@@ -871,9 +869,38 @@ def test_REQ_ADMIN_12_an_admin_revokes_one_listed_session_without_its_raw_token(
         summary.username, *(record.id for record in stored_sessions),
     ):
         assert secret not in evidence
+
+
+def test_REQ_ADMIN_12_revoking_a_consumed_reference_is_refused_without_another_event(
+    cached_management: UserManagement, actor: AuthenticatedUser,
+    stored_sessions: list[FakeSessionRecord],
+) -> None:
+    management = cached_management
+    summary = management.list_sessions(limit=1)[0]
+    management.revoke_session(actor, summary.session_ref)
+
     with pytest.raises(UnknownSessionError):
         management.revoke_session(actor, summary.session_ref)
+
+    assert management.sessions.list_active() == stored_sessions[1:]
     assert len(management.audit.user_management_events) == 1
+
+
+def test_REQ_ADMIN_12_revoking_a_session_deletes_from_the_store_before_a_cache_failure(
+    cached_management: UserManagement, actor: AuthenticatedUser,
+    stored_sessions: list[FakeSessionRecord],
+) -> None:
+    management = replace(cached_management, config=replace(
+        cached_management.config, session_cache=a_session_cache_failing_on("pipeline"),
+    ))
+    record = stored_sessions[0]
+    summary = management.list_sessions(limit=1)[0]
+
+    with pytest.raises(ConnectionError):
+        management.revoke_session(actor, summary.session_ref)
+
+    assert management.sessions.load(record.id) is None
+    assert management.audit.user_management_events == []
 
 
 @pytest.mark.parametrize("reference", ["unknown", "", "é", "session-1", "0" * 64])
