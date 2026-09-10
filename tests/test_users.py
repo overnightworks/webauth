@@ -300,18 +300,39 @@ def test_REQ_ADMIN_07_an_admin_cannot_deactivate_their_own_account(
     assert management.audit.user_management_events == []
 
 
+@pytest.mark.parametrize(("operation", "initial_role_field", "final_role_field", "kind"), [
+    pytest.param(
+        deactivate_subject, "user_role", "user_role", "user_deactivated", id="deactivate",
+    ),
+    pytest.param(promote_subject, "user_role", "admin_role", "role_changed", id="promote"),
+    pytest.param(demote_subject, "admin_role", "user_role", "role_changed", id="demote"),
+])
 @pytest.mark.parametrize("with_cache", [True, False])
-def test_REQ_ADMIN_10_deactivation_ends_every_subject_session_and_keeps_other_users_sessions(
+def test_REQ_ADMIN_06_REQ_ADMIN_10_role_change_and_deactivation_end_every_subject_session(
     cached_management: UserManagement, actor: AuthenticatedUser,
     stored_sessions: list[FakeSessionRecord], with_cache: bool,
+    operation: AdminOperation, initial_role_field: str, final_role_field: str, kind: str,
 ) -> None:
     management = cached_management
     if not with_cache:
         management = replace(management, config=replace(management.config, session_cache=None))
 
-    management.deactivate_user(actor, "subject")
+    with management.lock.hold():
+        management.users.update("subject", role=getattr(management.config, initial_role_field))
 
-    assert not management.users.get("subject").is_active
+    operation(management, actor)
+
+    subject = management.users.get("subject")
+    assert subject.is_active == (kind == "role_changed")
+    assert subject.role == getattr(management.config, final_role_field)
+    assert [asdict(event) for event in management.audit.user_management_events] == [{
+        "kind": UserManagementEventKind(kind),
+        "actor_id": actor.id,
+        "subject_id": "subject",
+        "role": subject.role if kind == "role_changed" else None,
+        "session_count": 2,
+        "session_ref": None,
+    }]
     for record in stored_sessions:
         remains = record.user_id != "subject"
         assert (management.sessions.load(record.id) is not None) == remains
@@ -319,6 +340,25 @@ def test_REQ_ADMIN_10_deactivation_ends_every_subject_session_and_keeps_other_us
             assert (management.config.session_cache.get(record.id) is not None) == remains
     if with_cache:
         assert management.config.session_cache.get("cache-only-session") is None
+
+
+@pytest.mark.parametrize("role_field", ["admin_role", "user_role"])
+def test_repeating_the_stored_role_keeps_sessions_and_reports_no_event(
+    cached_management: UserManagement, actor: AuthenticatedUser,
+    stored_sessions: list[FakeSessionRecord], role_field: str,
+) -> None:
+    management = cached_management
+    role = getattr(management.config, role_field)
+    with management.lock.hold():
+        subject = management.users.update("subject", role=role)
+
+    assert management.change_role(actor, "subject", role) == subject
+
+    for record in stored_sessions:
+        assert management.sessions.load(record.id) == record
+        assert management.config.session_cache.get(record.id) is not None
+    assert management.config.session_cache.get("cache-only-session") is not None
+    assert management.audit.user_management_events == []
 
 
 def test_revocation_returns_the_store_count_and_removes_cached_sessions_too(
@@ -387,10 +427,14 @@ def test_promoting_a_user_changes_the_stored_role(
         lambda m, a, password: complete_first_run_setup(m, "first-admin", password), id="setup",
     ),
 ])
-@pytest.mark.parametrize("password", ["password123", "aaaaaaaabbbbbbbb", "abc"])
+@pytest.mark.parametrize(("password", "reason"), [
+    ("password123", "Password is too common — choose something less predictable"),
+    ("aaaaaaaabbbbbbbb", "Password must contain at least 4 unique characters"),
+    ("abc", "Password must contain at least 4 unique characters"),
+])
 def test_both_password_accepting_flows_reject_weak_passwords_without_writing(
     empty_management: UserManagement, actor: AuthenticatedUser, operation: PasswordOperation,
-    password: str,
+    password: str, reason: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     management = empty_management
@@ -400,6 +444,9 @@ def test_both_password_accepting_flows_reject_weak_passwords_without_writing(
     with management.lock.hold():
         assert management.users.count() == 0
     assert management.audit.user_management_events == []
+    assert str(error.value) == reason
+    assert isinstance(error.value.__cause__, ValueError)
+    assert str(error.value.__cause__) == reason
     assert password not in str(error.value)
     assert password not in caplog.text
 
@@ -462,7 +509,7 @@ def test_a_non_admin_is_refused_before_weak_password_or_unknown_role_errors(
             create_member, "user_created", "user_role", None, id="user_created",
         ),
         pytest.param(
-            promote_subject, "role_changed", "admin_role", None, id="role_changed",
+            promote_subject, "role_changed", "admin_role", 2, id="role_changed",
         ),
         pytest.param(
             deactivate_subject, "user_deactivated", None, 2, id="user_deactivated",

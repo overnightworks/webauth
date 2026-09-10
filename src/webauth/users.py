@@ -99,14 +99,19 @@ class UserManagement:
         self._require_admin(actor)
         self._require_role(role)
         with self.lock.hold():
+            user = self._user(user_id)
+            if user.role == role:
+                return user
             if role != self.config.admin_role:
                 self.ensure_not_last_admin(user_id)
             user = self.users.update(user_id, role=role)
+            session_count = self._delete_user_sessions(user_id)
             self.audit.user_management_event(UserManagementEvent(
                 kind=UserManagementEventKind.ROLE_CHANGED,
                 actor_id=actor.id,
                 subject_id=user.id,
                 role=user.role,
+                session_count=session_count,
             ))
             return user
 
@@ -188,6 +193,6 @@ def complete_first_run_setup(
 def _hash_password(password: str, config: WebAuthConfig) -> str:
     try:
         check_password_strength(password)
-    except ValueError:
-        raise WeakPasswordError("Password does not meet strength requirements") from None
+    except ValueError as error:
+        raise WeakPasswordError(str(error)) from error
     return config.password_hasher.hash(password)
