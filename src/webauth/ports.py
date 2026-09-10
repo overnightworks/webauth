@@ -149,6 +149,21 @@ class SessionRecordStore(Protocol):
         ...
 
 
+@runtime_checkable
+class SessionAdministrationStore(SessionRecordStore, Protocol):
+    """Active sessions selected by the host's liveness and persistence rules."""
+
+    def list_active(
+        self, *, offset: int = 0, limit: int | None = None,
+    ) -> list[SessionRecord]:
+        """Read active sessions in store order without requiring a write lock."""
+        ...
+
+    def count_active(self) -> int:
+        """Count active sessions without requiring a write lock."""
+        ...
+
+
 StoredSessionT = TypeVar("StoredSessionT", contravariant=True)
 
 
@@ -308,6 +323,9 @@ class UserManagementEventKind(Enum):
     USER_DEACTIVATED = "user_deactivated"
     SESSIONS_REVOKED = "sessions_revoked"
     FIRST_ADMIN_CREATED = "first_admin_created"
+    PASSWORD_SET_BY_ADMIN = "password_set_by_admin"
+    PASSWORD_CHANGED = "password_changed"
+    SESSION_REVOKED = "session_revoked"
 
 
 @dataclass(frozen=True)

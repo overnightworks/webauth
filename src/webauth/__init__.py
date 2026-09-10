@@ -11,4 +11,4 @@ The library persists nothing itself: it holds no schema and no ORM, and the
 `.importlinter` contract keeps it that way.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

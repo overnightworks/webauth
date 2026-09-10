@@ -383,16 +383,28 @@ class SessionRecordsInMemory:
 
 
     def delete(self, session_id: str) -> None:
+        _require_held_lock(self._lock)
+        self._remove_record(session_id)
+
+    def _remove_record(self, session_id: str) -> None:
         self._records.pop(session_id, None)
 
     def delete_for_user(self, user_id: str) -> int:
-        _require_held_lock(self._lock)
         session_ids = [
             record.id for record in self._records.values() if record.user_id == user_id
         ]
         for session_id in session_ids:
-            self.delete(session_id)
+            self._remove_record(session_id)
         return len(session_ids)
+
+    def list_active(
+        self, *, offset: int = 0, limit: int | None = None,
+    ) -> list[FakeSessionRecord]:
+        records = list(self._records.values())
+        return records[offset:None if limit is None else offset + limit]
+
+    def count_active(self) -> int:
+        return len(self._records)
 
     def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
         records = sorted(
@@ -402,7 +414,7 @@ class SessionRecordsInMemory:
         )
         removed = [record.id for record in records[max_sessions:]]
         for session_id in removed:
-            self.delete(session_id)
+            self._remove_record(session_id)
         return removed
 
 
