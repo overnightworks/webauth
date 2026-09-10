@@ -1,6 +1,6 @@
 [project]
 name = "overnightworks-webauth"
-version = "0.3.1"
+version = "0.4.0"
 description = "Web authentication for FastAPI applications: sessions, cookies, CSRF, rate limits, audit ports"
 authors = [{ name = "Flex0r (Felix Hummert)", email = "felix.hummert@gmail.com" }]
 readme = "README.md"

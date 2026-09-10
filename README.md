@@ -23,10 +23,11 @@ It owns the machinery an application should not rebuild:
 | `webauth.session_store` | `RedisSessionCache`, the one `SessionCache` implementation a host may put on its config |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
+| `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
 
 It leaves the application everything that touches the application's own truth:
-the user model, roles, first-run setup, and the login route with its
-transaction boundary. The library persists nothing itself — it holds no schema
+the user model, configured roles, setup and login routes, and their
+transaction boundaries. The library persists nothing itself — it holds no schema
 and no ORM, and an import-linter contract keeps it that way. What it needs
 reaches it through the Protocols in `webauth.ports`: `UserStore`,
 `SessionRecordStore`, `LoginAttemptStore`, `AuditSink`, and `PasswordHasher`.
@@ -118,6 +119,76 @@ path, with the asked-for address and query string under the query key it
 named, while every other request still gets 401. A dependency can only raise
 an `HTTPException`, so the 302 still carries FastAPI's default JSON body
 (`{"detail":"Found"}`) alongside its `Location` header.
+
+## users
+
+Host developers use [`webauth.users`](src/webauth/users.py) to administer
+accounts without moving their model, persistence, or HTTP API into the library.
+Construct `UserManagement(users, sessions, audit, lock, config)` with the host's
+stores and `WebAuthConfig`. The additional [ports](src/webauth/ports.py) are:
+
+- `UserAdministrationStore`: extends `UserStore` with `list`, `update`, and
+  `count_active_admins`. Duplicate usernames raise `UsernameTakenError`;
+  updates to missing accounts raise `UnknownUserError`.
+- `SessionAdministrationStore`: extends `SessionRecordStore` with
+  `list_active(*, offset=0, limit=None)` and `count_active()`. The host selects
+  active records using its liveness rules and owns their order. These reads
+  need no write lock; `limit=None` returns all remaining records.
+- `WriteLock.hold()`: serializes checks and writes across the supplied stores
+  in one host-owned transaction. Helpers acquire it for mutations and never
+  commit. The host commits on success and rolls back on failure, including
+  `SetupRacedError`. A transaction-scoped lock can remain held until then.
+
+`UserManagement` provides these helpers:
+
+| Helper | Behavior |
+|---|---|
+| `create_user(actor, username, password, role)` | Creates an active account with either configured role |
+| `list_users()` | Returns all accounts in store order |
+| `change_role(actor, user_id, role)` | Changes the role and ends all sessions; an unchanged role does neither |
+| `deactivate_user(actor, user_id)` | Deactivates the account and ends all sessions; refuses self-deactivation |
+| `revoke_user_sessions(actor, user_id)` | Ends all account sessions and returns the store's deletion count |
+| `set_password(actor, user_id, password)` | Sets a strength-checked password using the configured hasher and ends all sessions |
+| `change_own_password(actor, current, new)` | Verifies the current password, replaces it, and ends all sessions |
+| `list_sessions(offset=0, limit=None)` | Returns frozen `SessionSummary` records with `session_ref`, `user_id`, `username`, `ip_address`, and `user_agent` |
+| `revoke_session(actor, session_ref)` | Ends the active session identified by a listed reference; raises `UnknownSessionError` if absent |
+| `ensure_not_last_admin(user_id)` | Guards a host write against removing the last active admin; the caller holds the lock around both |
+
+Every helper taking `actor` first requires `config.admin_role`, except
+`change_own_password`, which lets any authenticated user change their own
+password. The host authenticates the actor and guards the two list methods
+with its admin dependency. A wrong current password raises `WrongPasswordError`;
+the host owns the failed-attempt budget. Refusals derive from
+`UserManagementError`, which the host translates into its own responses.
+
+Both password paths delete every account session from the store, then from
+`config.session_cache` when configured, including the current session. The
+host opens a new session and issues new cookies afterwards. Single-session
+revocation also deletes from the store before the cache. Public references
+come only from `session_reference(session_id)`: SHA-256 hex of the UTF-8 raw
+identifier. Lists and management events expose no raw token; the host reads
+any timestamps from its own records.
+
+`complete_first_run_setup(management, username, password)` creates the first
+administrator only while no account exists. Both a setup route and a bootstrap
+command can call it; the host supplies bootstrap credentials through its own
+configuration and owns the setup surface.
+
+Map `AuditSink.user_management_event(event)` to the host's audit system, or
+explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
+`subject_id`; setup has `actor_id=None`. Optional fields default to `None`:
+
+| Event kind | Additional fields |
+|---|---|
+| `user_created`, `first_admin_created` | `role` |
+| `role_changed` | `role`, `session_count` |
+| `user_deactivated`, `sessions_revoked` | `session_count` |
+| `password_set_by_admin`, `password_changed` | `session_count` |
+| `session_revoked` | `session_ref` |
+
+Management events contain no passwords, hashes, raw session identifiers, or
+usernames. [The users tests](tests/test_users.py) verify the helpers, including
+REQ-ADMIN-10 for password invalidation and REQ-ADMIN-12 for listed references.
 
 ## PasswordHasher
 
