@@ -32,8 +32,10 @@ than the owner needs.
   and bcrypt at runtime, and on nothing else. Redis is optional — install
   `webauth[redis]` for the Redis rate-limit and session backends; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
-- Application concerns — the user model, roles, first-run setup, and the login
-  route's transaction boundary — belong to the host, not here.
+- The user model, schema, configured role names, transaction boundaries, and
+  HTTP routes and responses belong to the host. User administration and
+  first-run setup are library helpers in `webauth.users` over host-supplied
+  ports and a write lock; the host commits or rolls back their work.
 
 ## Checks
 
