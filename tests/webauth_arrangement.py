@@ -53,6 +53,7 @@ from webauth.ports import (
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
+from webauth.users import UserManagement
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 ALLOWED_HOST = "songmaker.example"
@@ -184,10 +185,20 @@ class FakeUser:
     password_hash: str = "unused"
 
 
+class LockNotHeldError(RuntimeError):
+    """A store operation requires the host's write lock."""
+
+
+def _require_held_lock(lock: WriteLockInMemory | None) -> None:
+    if lock is not None and not lock.held:
+        raise LockNotHeldError("Store operation requires a held write lock")
+
+
 class UsersInMemory:
     """Accounts sharing the same mutable records as the host's session store."""
 
-    def __init__(self, *users: FakeUser) -> None:
+    def __init__(self, *users: FakeUser, lock: WriteLockInMemory | None = None) -> None:
+        self._lock = lock
         self._users = {user.id: user for user in users}
         self._usernames = {user.username: user for user in users}
         self._ids = count(1)
@@ -199,9 +210,11 @@ class UsersInMemory:
         return self._usernames.get(username)
 
     def count(self) -> int:
+        _require_held_lock(self._lock)
         return len(self._users)
 
     def create(self, username: str, password_hash: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
         if username in self._usernames:
             raise UsernameTakenError("Username is already taken")
         user_id = f"user-{next(self._ids)}"
@@ -225,6 +238,7 @@ class UsersInMemory:
         is_active: bool | None = None,
         password_hash: str | None = None,
     ) -> FakeUser:
+        _require_held_lock(self._lock)
         user = self.get(user_id)
         if user is None:
             raise UnknownUserError("Account does not exist")
@@ -237,6 +251,7 @@ class UsersInMemory:
         return user
 
     def count_active_admins(self, role: str) -> int:
+        _require_held_lock(self._lock)
         return sum(user.is_active and user.role == role for user in self._users.values())
 
 
@@ -252,11 +267,20 @@ class UsersWithSetupRace(UsersInMemory):
 @dataclass
 class WriteLockInMemory:
     _lock: RLock = field(default_factory=RLock)
+    _hold_depth: int = field(default=0, init=False)
+
+    @property
+    def held(self) -> bool:
+        return self._hold_depth > 0
 
     @contextmanager
     def hold(self) -> Iterator[None]:
         with self._lock:
-            yield
+            self._hold_depth += 1
+            try:
+                yield
+            finally:
+                self._hold_depth -= 1
 
 
 @dataclass
@@ -303,7 +327,9 @@ class SessionRecordsInMemory:
         max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
         *,
         users: UsersInMemory | None = None,
+        lock: WriteLockInMemory | None = None,
     ) -> None:
+        self._lock = lock
         self._records = {} if record is None else {record.id: record}
         self._users = users if users is not None else UsersInMemory(
             *(() if record is None else (record.user,)),
@@ -360,6 +386,7 @@ class SessionRecordsInMemory:
         self._records.pop(session_id, None)
 
     def delete_for_user(self, user_id: str) -> int:
+        _require_held_lock(self._lock)
         session_ids = [
             record.id for record in self._records.values() if record.user_id == user_id
         ]
@@ -430,6 +457,18 @@ class RecordingAuditSink:
 
     def user_management_event(self, event: UserManagementEvent) -> None:
         self.user_management_events.append(event)
+
+
+def a_user_management(*users: FakeUser, config: WebAuthConfig) -> UserManagement:
+    lock = WriteLockInMemory()
+    user_store = UsersInMemory(*users, lock=lock)
+    return UserManagement(
+        users=user_store,
+        sessions=SessionRecordsInMemory(users=user_store, lock=lock),
+        audit=RecordingAuditSink(),
+        lock=lock,
+        config=config,
+    )
 
 
 @dataclass

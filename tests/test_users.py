@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
-from threading import Barrier
 
 import pytest
 from webauth_arrangement import (
@@ -15,12 +14,10 @@ from webauth_arrangement import (
     Argon2idStyleHasher,
     FakeSessionRecord,
     FakeUser,
-    RecordingAuditSink,
-    SessionRecordsInMemory,
-    UsersInMemory,
+    LockNotHeldError,
     UsersWithSetupRace,
-    WriteLockInMemory,
     a_session_cache,
+    a_user_management,
     a_web_auth_config,
 )
 
@@ -50,6 +47,8 @@ from webauth.users import (
 
 CHOSEN_PASSWORD = "River!Lantern92"
 AdminOperation = Callable[[UserManagement, AuthenticatedUser], object]
+RoleOperation = Callable[[UserManagement, AuthenticatedUser, str], object]
+PasswordOperation = Callable[[UserManagement, AuthenticatedUser, str], object]
 
 
 def create_member(management: UserManagement, actor: AuthenticatedUser) -> UserRecord:
@@ -60,6 +59,10 @@ def create_member(management: UserManagement, actor: AuthenticatedUser) -> UserR
 
 def promote_subject(management: UserManagement, actor: AuthenticatedUser) -> UserRecord:
     return management.change_role(actor, "subject", management.config.admin_role)
+
+
+def demote_subject(management: UserManagement, actor: AuthenticatedUser) -> UserRecord:
+    return management.change_role(actor, "subject", management.config.user_role)
 
 
 def deactivate_subject(management: UserManagement, actor: AuthenticatedUser) -> None:
@@ -82,15 +85,9 @@ def management() -> UserManagement:
     config = a_web_auth_config(
         admin_role="operator", user_role="member", password_hasher=Argon2idStyleHasher(),
     )
-    users = UsersInMemory(
+    return a_user_management(
         FakeUser(id="actor", username="administrator", role=config.admin_role),
         FakeUser(id="subject", username="member", role=config.user_role),
-    )
-    return UserManagement(
-        users=users,
-        sessions=SessionRecordsInMemory(users=users),
-        audit=RecordingAuditSink(),
-        lock=WriteLockInMemory(),
         config=config,
     )
 
@@ -104,8 +101,7 @@ def actor(management: UserManagement) -> AuthenticatedUser:
 
 @pytest.fixture
 def empty_management(management: UserManagement) -> UserManagement:
-    users = UsersInMemory()
-    return replace(management, users=users, sessions=SessionRecordsInMemory(users=users))
+    return a_user_management(config=management.config)
 
 
 @pytest.fixture
@@ -168,12 +164,13 @@ def test_REQ_ADMIN_02_repeating_setup_keeps_the_first_account(
 def test_REQ_ADMIN_02_a_setup_race_requires_host_rollback_without_reporting_success(
     empty_management: UserManagement,
 ) -> None:
-    management = replace(empty_management, users=UsersWithSetupRace())
+    management = replace(empty_management, users=UsersWithSetupRace(lock=empty_management.lock))
 
     with pytest.raises(SetupRacedError):
         complete_first_run_setup(management, "first-admin", CHOSEN_PASSWORD)
 
-    assert management.users.count() == 2
+    with management.lock.hold():
+        assert management.users.count() == 2
     assert management.audit.user_management_events == []
 
 
@@ -182,7 +179,7 @@ def test_REQ_ADMIN_03_any_existing_account_closes_setup(
     empty_management: UserManagement, is_active: bool,
 ) -> None:
     existing = FakeUser(role=empty_management.config.user_role, is_active=is_active)
-    management = replace(empty_management, users=UsersInMemory(existing))
+    management = a_user_management(existing, config=empty_management.config)
 
     with pytest.raises(SetupAlreadyDoneError):
         complete_first_run_setup(management, "first-admin", CHOSEN_PASSWORD)
@@ -205,18 +202,22 @@ def test_REQ_ADMIN_04_an_admin_creates_an_account_with_either_configured_role(
     assert user.password_hash == management.config.password_hasher.hash(CHOSEN_PASSWORD)
 
 
-@pytest.mark.parametrize("operation", ["create_user", "change_role"])
+@pytest.mark.parametrize("operation", [
+    pytest.param(
+        lambda m, a, role: m.create_user(a, "new-account", CHOSEN_PASSWORD, role),
+        id="create_user",
+    ),
+    pytest.param(lambda m, a, role: m.change_role(a, "subject", role), id="change_role"),
+])
 @pytest.mark.parametrize("role", ["admin", "user", "unknown"])
 def test_REQ_ADMIN_04_roles_outside_the_configuration_are_refused(
-    management: UserManagement, actor: AuthenticatedUser, operation: str, role: str,
+    management: UserManagement, actor: AuthenticatedUser, operation: RoleOperation, role: str,
 ) -> None:
     with pytest.raises(UnknownRoleError):
-        if operation == "create_user":
-            management.create_user(actor, "new-account", CHOSEN_PASSWORD, role)
-        else:
-            management.change_role(actor, "subject", role)
+        operation(management, actor, role)
 
-    assert management.users.count() == 2
+    with management.lock.hold():
+        assert management.users.count() == 2
     assert management.users.get("subject").role == management.config.user_role
     assert management.audit.user_management_events == []
 
@@ -229,45 +230,51 @@ def test_REQ_ADMIN_05_only_the_configured_admin_can_run_an_actor_flow(
     with pytest.raises(NotAnAdminError):
         operation(management, replace(actor, role=role))
 
-    assert management.users.count() == 2
+    with management.lock.hold():
+        assert management.users.count() == 2
     assert management.users.get("subject").role == management.config.user_role
     assert management.users.get("subject").is_active
     assert management.audit.user_management_events == []
 
 
-@pytest.mark.parametrize("operation", ["change_role", "deactivate_user"])
+@pytest.mark.parametrize("operation", [
+    pytest.param(demote_subject, id="change_role"),
+    pytest.param(deactivate_subject, id="deactivate_user"),
+])
 def test_REQ_ADMIN_06_the_last_active_admin_cannot_be_removed(
-    management: UserManagement, actor: AuthenticatedUser, operation: str,
+    management: UserManagement, actor: AuthenticatedUser, operation: AdminOperation,
 ) -> None:
-    management.users.update("actor", is_active=False)
-    management.users.update("subject", role=management.config.admin_role)
+    with management.lock.hold():
+        management.users.update("actor", is_active=False)
+        management.users.update("subject", role=management.config.admin_role)
 
     with pytest.raises(LastAdminError):
-        if operation == "change_role":
-            management.change_role(actor, "subject", management.config.user_role)
-        else:
-            management.deactivate_user(actor, "subject")
+        operation(management, actor)
 
     assert management.users.get("subject").role == management.config.admin_role
     assert management.users.get("subject").is_active
     assert management.audit.user_management_events == []
 
 
-@pytest.mark.parametrize("operation", ["change_role", "deactivate_user"])
+@pytest.mark.parametrize(("operation", "role_field", "stays_active"), [
+    pytest.param(demote_subject, "user_role", True, id="change_role"),
+    pytest.param(deactivate_subject, "admin_role", False, id="deactivate_user"),
+])
 @pytest.mark.parametrize("is_active", [True, False])
 def test_an_admin_can_be_removed_when_another_active_admin_remains(
-    management: UserManagement, actor: AuthenticatedUser, operation: str, is_active: bool,
+    management: UserManagement, actor: AuthenticatedUser, operation: AdminOperation,
+    role_field: str, stays_active: bool, is_active: bool,
 ) -> None:
-    management.users.update("subject", role=management.config.admin_role, is_active=is_active)
+    with management.lock.hold():
+        management.users.update("subject", role=management.config.admin_role, is_active=is_active)
 
-    if operation == "change_role":
-        user = management.change_role(actor, "subject", management.config.user_role)
-        assert user.role == management.config.user_role
-        assert user.is_active == is_active
-    else:
-        assert management.deactivate_user(actor, "subject") is None
-        assert not management.users.get("subject").is_active
-    assert management.users.count_active_admins(management.config.admin_role) == 1
+    operation(management, actor)
+
+    user = management.users.get("subject")
+    assert user.role == getattr(management.config, role_field)
+    assert user.is_active == (is_active and stays_active)
+    with management.lock.hold():
+        assert management.users.count_active_admins(management.config.admin_role) == 1
 
 
 def test_leaving_the_last_admin_in_the_admin_role_is_allowed(
@@ -276,13 +283,15 @@ def test_leaving_the_last_admin_in_the_admin_role_is_allowed(
     user = management.change_role(actor, actor.id, management.config.admin_role)
 
     assert user.role == management.config.admin_role
-    assert management.users.count_active_admins(management.config.admin_role) == 1
+    with management.lock.hold():
+        assert management.users.count_active_admins(management.config.admin_role) == 1
 
 
 def test_REQ_ADMIN_07_an_admin_cannot_deactivate_their_own_account(
     management: UserManagement, actor: AuthenticatedUser,
 ) -> None:
-    management.users.update("subject", role=management.config.admin_role)
+    with management.lock.hold():
+        management.users.update("subject", role=management.config.admin_role)
 
     with pytest.raises(SelfDeactivationError):
         management.deactivate_user(actor, actor.id)
@@ -346,7 +355,8 @@ def test_revocation_without_a_cache_can_end_the_admins_own_sessions(
 def test_listing_keeps_the_stores_order_and_includes_inactive_accounts(
     management: UserManagement,
 ) -> None:
-    management.users.update("subject", is_active=False)
+    with management.lock.hold():
+        management.users.update("subject", is_active=False)
 
     assert management.list_users() == management.users.list()
     assert [user.id for user in management.list_users()] == ["actor", "subject"]
@@ -364,23 +374,31 @@ def test_promoting_a_user_changes_the_stored_role(
 
     assert user == management.users.get("subject")
     assert user.role == management.config.admin_role
-    assert management.users.count_active_admins(management.config.admin_role) == 2
+    with management.lock.hold():
+        assert management.users.count_active_admins(management.config.admin_role) == 2
 
 
-@pytest.mark.parametrize("operation", ["create_user", "setup"])
+@pytest.mark.parametrize("operation", [
+    pytest.param(
+        lambda m, a, password: m.create_user(a, "new-account", password, m.config.user_role),
+        id="create_user",
+    ),
+    pytest.param(
+        lambda m, a, password: complete_first_run_setup(m, "first-admin", password), id="setup",
+    ),
+])
 @pytest.mark.parametrize("password", ["password123", "aaaaaaaabbbbbbbb", "abc"])
 def test_both_password_accepting_flows_reject_weak_passwords_without_writing(
-    empty_management: UserManagement, actor: AuthenticatedUser, operation: str, password: str,
+    empty_management: UserManagement, actor: AuthenticatedUser, operation: PasswordOperation,
+    password: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     management = empty_management
     with pytest.raises(WeakPasswordError) as error:
-        if operation == "create_user":
-            management.create_user(actor, "new-account", password, management.config.user_role)
-        else:
-            complete_first_run_setup(management, "first-admin", password)
+        operation(management, actor, password)
 
-    assert management.users.count() == 0
+    with management.lock.hold():
+        assert management.users.count() == 0
     assert management.audit.user_management_events == []
     assert password not in str(error.value)
     assert password not in caplog.text
@@ -392,27 +410,25 @@ def test_duplicate_usernames_raise_the_store_error_without_an_event(
     with pytest.raises(UsernameTakenError):
         management.create_user(actor, "member", CHOSEN_PASSWORD, management.config.user_role)
 
-    assert management.users.count() == 2
+    with management.lock.hold():
+        assert management.users.count() == 2
     assert management.audit.user_management_events == []
 
 
 @pytest.mark.parametrize("operation", [
-    "promote", "demote", "deactivate_user", "revoke_user_sessions",
+    pytest.param(lambda m, a: m.change_role(a, "missing", m.config.admin_role), id="promote"),
+    pytest.param(lambda m, a: m.change_role(a, "missing", m.config.user_role), id="demote"),
+    pytest.param(lambda m, a: m.deactivate_user(a, "missing"), id="deactivate_user"),
+    pytest.param(lambda m, a: m.revoke_user_sessions(a, "missing"), id="revoke_user_sessions"),
 ])
 def test_an_unknown_subject_is_refused_without_an_event(
-    management: UserManagement, actor: AuthenticatedUser, operation: str,
+    management: UserManagement, actor: AuthenticatedUser, operation: AdminOperation,
 ) -> None:
     with pytest.raises(UnknownUserError):
-        if operation in {"promote", "demote"}:
-            role = (
-                management.config.admin_role if operation == "promote"
-                else management.config.user_role
-            )
-            management.change_role(actor, "missing", role)
-        else:
-            getattr(management, operation)(actor, "missing")
+        operation(management, actor)
 
-    assert management.users.count() == 2
+    with management.lock.hold():
+        assert management.users.count() == 2
     assert management.audit.user_management_events == []
 
 
@@ -427,7 +443,8 @@ def test_authorization_precedes_subject_role_and_password_validation(
     with pytest.raises(NotAnAdminError):
         operation(management, actor)
 
-    assert management.users.count() == 0
+    with management.lock.hold():
+        assert management.users.count() == 0
     assert management.audit.user_management_events == []
 
 
@@ -511,7 +528,8 @@ def test_the_public_last_admin_guard_can_protect_a_host_write(
         assert management.ensure_not_last_admin("actor") is None
         management.users.update("actor", role=management.config.user_role)
 
-    assert management.users.count_active_admins(management.config.admin_role) == 1
+    with management.lock.hold():
+        assert management.users.count_active_admins(management.config.admin_role) == 1
     assert management.audit.user_management_events == []
 
 
@@ -520,52 +538,16 @@ def test_the_public_last_admin_guard_refuses_an_unknown_account(management: User
         management.ensure_not_last_admin("missing")
 
 
-def test_REQ_ADMIN_02_concurrent_setup_calls_create_only_one_admin(
-    empty_management: UserManagement,
+def test_a_helper_without_the_write_lock_is_refused_by_the_store(
+    empty_management: UserManagement, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    start = Barrier(2)
+    monkeypatch.setattr(empty_management.lock, "hold", nullcontext)
 
-    def setup(username: str) -> UserRecord | SetupAlreadyDoneError:
-        start.wait(timeout=5)
-        try:
-            return complete_first_run_setup(empty_management, username, CHOSEN_PASSWORD)
-        except SetupAlreadyDoneError as error:
-            return error
+    with pytest.raises(LockNotHeldError):
+        complete_first_run_setup(empty_management, "first-admin", CHOSEN_PASSWORD)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(setup, ["first-contender", "second-contender"]))
-
-    assert sum(isinstance(result, SetupAlreadyDoneError) for result in results) == 1
-    assert empty_management.users.count_active_admins(empty_management.config.admin_role) == 1
-    assert len(empty_management.audit.user_management_events) == 1
-
-
-@pytest.mark.parametrize("operation", ["change_role", "deactivate_user"])
-def test_REQ_ADMIN_06_concurrent_removals_leave_one_active_admin(
-    management: UserManagement, actor: AuthenticatedUser, operation: str,
-) -> None:
-    management.users.update("subject", role=management.config.admin_role)
-    second_actor = replace(actor, id="subject", username="member")
-    start = Barrier(2)
-
-    def remove(request_actor: AuthenticatedUser) -> UserRecord | LastAdminError | None:
-        start.wait(timeout=5)
-        try:
-            if operation == "change_role":
-                return management.change_role(
-                    request_actor, request_actor.id, management.config.user_role,
-                )
-            target = "subject" if request_actor.id == "actor" else "actor"
-            return management.deactivate_user(request_actor, target)
-        except LastAdminError as error:
-            return error
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(remove, [actor, second_actor]))
-
-    assert sum(isinstance(result, LastAdminError) for result in results) == 1
-    assert management.users.count_active_admins(management.config.admin_role) == 1
-    assert len(management.audit.user_management_events) == 1
+    assert empty_management.users.list() == []
+    assert empty_management.audit.user_management_events == []
 
 
 def test_shared_arrangements_supply_the_administration_protocols(
