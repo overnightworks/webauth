@@ -1,0 +1,8 @@
+claim_id = "426edd6bd4d848b9b42edbbf73f9da13"
+agent = "codex-webauth-23"
+role = "coordinator"
+base = "6d26d2c024d7a03ef1a5b8d34c0d19bd0236d7fb"
+branch = "codex/issue-23-users"
+scope = ["src/webauth/ports.py", "src/webauth/users.py", "src/webauth/__init__.py", "AGENTS.md", "README.md", "pyproject.toml", "tests/webauth_arrangement.py", "tests/test_users.py"]
+opened_commit = "759fbc058b9546d61e1ccb4d871ed4a4d26f584d"
+whole_reason = "Ein neuer oeffentlicher Bibliotheksvertrag (Ports, Helfer, Arrangement, Doku, Version) muss in einem PR konsistent landen, weil ein Tag ihn einfriert."
