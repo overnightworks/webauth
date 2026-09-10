@@ -171,10 +171,11 @@ class UserManagement:
     def set_password(self, actor: AuthenticatedUser, user_id: str, password: str) -> None:
         """Set an account's password and end all its sessions, including this one."""
         self._require_admin(actor)
+        password_hash = _hash_password(password, self.config)
         with self.lock.hold():
             self._user(user_id)
             self._replace_password(
-                actor, user_id, password, UserManagementEventKind.PASSWORD_SET_BY_ADMIN,
+                actor, user_id, password_hash, UserManagementEventKind.PASSWORD_SET_BY_ADMIN,
             )
 
     def change_own_password(self, actor: AuthenticatedUser, current: str, new: str) -> None:
@@ -186,7 +187,10 @@ class UserManagement:
             user = self._user(actor.id)
             if not self.config.password_hasher.verify(current, user.password_hash):
                 raise WrongPasswordError("Current password is incorrect")
-            self._replace_password(actor, actor.id, new, UserManagementEventKind.PASSWORD_CHANGED)
+            password_hash = _hash_password(new, self.config)
+            self._replace_password(
+                actor, actor.id, password_hash, UserManagementEventKind.PASSWORD_CHANGED,
+            )
 
     def list_sessions(self, offset: int = 0, limit: int | None = None) -> list[SessionSummary]:
         """List public references; the host's admin dependency protects access."""
@@ -221,10 +225,10 @@ class UserManagement:
             raise UnknownSessionError("Active session does not exist")
 
     def _replace_password(
-        self, actor: AuthenticatedUser, user_id: str, password: str,
+        self, actor: AuthenticatedUser, user_id: str, password_hash: str,
         kind: UserManagementEventKind,
     ) -> None:
-        self.users.update(user_id, password_hash=_hash_password(password, self.config))
+        self.users.update(user_id, password_hash=password_hash)
         session_count = self._delete_user_sessions(user_id)
         self.audit.user_management_event(UserManagementEvent(
             kind=kind,
