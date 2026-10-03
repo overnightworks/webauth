@@ -1,8 +1,0 @@
-claim_id = "74c59f32838145e9bff6606735c921d6"
-agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
-role = "builder"
-base = "9ade603cb0ced9b997284d18e817884f28255ce5"
-branch = "claude/issue-29-s1-password-min-length"
-scope = ["pyproject.toml", "src/webauth/__init__.py", "src/webauth/passwords.py", "tests/test_login.py", "tests/test_passwords.py", "tests/test_users.py", "uv.lock"]
-opened_commit = "406641a7c9021ed0e8787c73f8a034796c8ac5b9"
-whole_reason = "Eine Längenprüfung in passwords.py, ihre Tests (passwords, users, login für Satz 2) und der gekoppelte Versions-Exklusivwert (pyproject, __version__, uv.lock) — eine Release."
