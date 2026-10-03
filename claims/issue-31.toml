@@ -1,0 +1,8 @@
+claim_id = "afb361b9f2e64ab3af58851846295696"
+agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
+role = "builder"
+base = "199baeb5d3802adf152f6f82760b197901aa096d"
+branch = "claude/issue-31-s2-argon2id"
+scope = ["AGENTS.md", "README.md", "pyproject.toml", "src/webauth/__init__.py", "src/webauth/passwords.py", "tests/test_login.py", "tests/test_passwords.py", "tests/webauth_arrangement.py", "uv.lock"]
+opened_commit = "0ba5e8dfd5112785610e0d9f8e7c87dfd70630ba"
+whole_reason = "Ein Hasher-Wechsel: passwords.py, seine Tests und Test-Arrangement, die Abhängigkeit (pyproject/uv.lock), Doku (README/AGENTS) und der Versions-Exklusivwert – eine Release."
