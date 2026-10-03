@@ -330,6 +330,10 @@ AN_ACCOUNT = StoredAccount(password_hash=hash_password(A_CORRECT_PASSWORD))
 A_DEACTIVATED_ACCOUNT = StoredAccount(
     password_hash=AN_ACCOUNT.password_hash, is_active=False,
 )
+A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE = "abc1234"
+AN_ACCOUNT_WITH_A_SHORT_PASSWORD = StoredAccount(
+    password_hash=hash_password(A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE),
+)
 
 
 @dataclass
@@ -365,6 +369,11 @@ class VerificationSpy:
         pytest.param(
             A_CORRECT_PASSWORD, A_DEACTIVATED_ACCOUNT, LoginOutcome.DEACTIVATED,
             id="a deactivated account and its right password",
+        ),
+        pytest.param(
+            A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE, AN_ACCOUNT_WITH_A_SHORT_PASSWORD,
+            LoginOutcome.ADMITTED,
+            id="a stored password shorter than today's minimum",
         ),
     ],
 )
