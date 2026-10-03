@@ -16,6 +16,7 @@ from itertools import count
 from threading import RLock
 
 import fakeredis
+from argon2.profiles import CHEAPEST
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
@@ -36,7 +37,7 @@ from webauth.dependencies import (
 )
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
-from webauth.passwords import BcryptPasswordHasher
+from webauth.passwords import Argon2idPasswordHasher
 from webauth.policies import (
     PathRules,
     RateLimitBudget,
@@ -71,12 +72,17 @@ SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
 IDLE_WINDOW_SECONDS = 1800
 
 
+def a_cheap_argon2id_hasher() -> Argon2idPasswordHasher:
+    """The real Argon2id hasher at argon2-cffi's cheapest costs, so tests stay fast."""
+    return Argon2idPasswordHasher(CHEAPEST)
+
+
 def a_web_auth_config(**overrides: object) -> WebAuthConfig:
     """A complete configuration; a keyword replaces the field it names."""
     defaults = {
         "session_secret": SecretStr("s" * MIN_SESSION_SECRET_CHARS),
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
-        "password_hasher": BcryptPasswordHasher(),
+        "password_hasher": a_cheap_argon2id_hasher(),
         "rate_limits": SingleProcessRateLimitBackend(),
         "session_cache": None,
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
@@ -285,7 +291,7 @@ class WriteLockInMemory:
 
 @dataclass
 class Argon2idStyleHasher:
-    """A non-bcrypt ``PasswordHasher`` double whose hashes are legible.
+    """A host-supplied ``PasswordHasher`` double whose hashes are legible.
 
     It stands in for a host that plugs in its own algorithm: a test can inject
     it and read straight off the stored hash which password produced it.

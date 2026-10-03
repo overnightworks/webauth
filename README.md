@@ -83,13 +83,11 @@ from webauth.login import (
     issue_session_cookies,
     judge_credentials,
 )
-from webauth.passwords import hash_password
-
 config = a_web_auth_config()
 app = FastAPI()
 install_web_auth_config(app, config)
 
-alice = FakeUser(password_hash=hash_password("the-correct-password"))
+alice = FakeUser(password_hash=config.password_hasher.hash("the-correct-password"))
 
 @app.post("/login")
 def login(request: Request, response: Response, password: str) -> dict[str, str]:
@@ -198,9 +196,16 @@ The library hardcodes no hashing algorithm: `WebAuthConfig` requires a
 must check even a `None` `stored_hash` against a fixed dummy at full cost, so a
 username nobody holds cannot be told from a wrong password by timing.
 
-`webauth.passwords.BcryptPasswordHasher` is provided and honours that contract.
-A host that prefers Argon2id supplies its own class implementing the same
-protocol.
+`webauth.passwords.Argon2idPasswordHasher` is provided and honours that
+contract. It normalises every password to Unicode NFC before hashing, as
+`check_password_strength` does before measuring it. New hashes use OWASP's
+Argon2id costs (m=19 MiB, t=2, p=1), held in `OWASP_ARGON2ID`; a host passes its
+own `argon2.Parameters` to the constructor to change them. A stored Argon2id
+hash is verified with the costs written inside it. Any other stored format —
+bcrypt, Argon2i, Argon2d, an empty or garbled string — raises
+`webauth.passwords.UnknownHashFormatError` instead of reading as a wrong
+password. A host with another algorithm supplies its own class implementing
+the same protocol.
 
 ## Rate limiting, and the optional Redis extra
 
