@@ -444,7 +444,7 @@ def test_promoting_a_user_changes_the_stored_role(
 @pytest.mark.parametrize(("password", "reason"), [
     ("password123", "Password is too common — choose something less predictable"),
     ("aaaaaaaabbbbbbbb", "Password must contain at least 4 unique characters"),
-    ("abc", "Password must contain at least 4 unique characters"),
+    ("abc", "Password must be at least 8 characters long"),
 ])
 def test_both_password_accepting_flows_reject_weak_passwords_without_writing(
     empty_management: UserManagement, actor: AuthenticatedUser, operation: PasswordOperation,

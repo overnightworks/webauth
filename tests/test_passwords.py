@@ -46,6 +46,19 @@ def test_cost_and_length_floor() -> None:
     assert MIN_PASSWORD_LENGTH == 8
 
 
+@pytest.mark.parametrize(("password", "accepted"), [
+    pytest.param("a1b2", False, id="four_chars"),
+    pytest.param("Sonne-4", False, id="seven_chars"),
+    pytest.param("Sonne-42", True, id="eight_chars"),
+])
+def test_a_password_needs_at_least_eight_characters(password: str, accepted: bool) -> None:
+    if accepted:
+        assert check_password_strength(password) == password
+    else:
+        with pytest.raises(ValueError, match="at least 8 characters"):
+            check_password_strength(password)
+
+
 def test_common_password_rejected() -> None:
     with pytest.raises(ValueError, match="too common"):
         check_password_strength("password")

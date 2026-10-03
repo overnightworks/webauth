@@ -89,7 +89,7 @@ class BcryptPasswordHasher:
 
 
 def check_password_strength(cls_or_value: str, *_args: object) -> str:
-    """Pydantic-compatible validator: reject common and low-entropy passwords.
+    """Pydantic-compatible validator: reject short, common and low-entropy passwords.
 
     Works both as a standalone function and as a Pydantic field_validator
     (which passes `cls` as first arg in classmethod mode, but we accept
@@ -98,6 +98,10 @@ def check_password_strength(cls_or_value: str, *_args: object) -> str:
     password = cls_or_value
     if password is None:
         return password
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(
+            f"Password must be at least {MIN_PASSWORD_LENGTH} characters long"
+        )
     if password.lower() in _COMMON_PASSWORDS:
         raise ValueError("Password is too common — choose something less predictable")
     if len(set(password)) < MIN_UNIQUE_CHARS:
