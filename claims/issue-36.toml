@@ -1,8 +1,0 @@
-claim_id = "814d97efe74240039380c789ddca5a0a"
-agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
-role = "builder"
-base = "17a3a683712c9b4f6cf697f5b8f0bd42928ac71e"
-branch = "claude/issue-36-s5-session-ref"
-scope = ["README.md", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/ports.py", "src/webauth/session_ending.py", "src/webauth/users.py", "tests/test_cookies.py", "tests/test_dependencies.py", "tests/test_users.py", "tests/webauth_arrangement.py"]
-opened_commit = "009562f1942cb71578b948023077b8caaa5d2346"
-whole_reason = "Ein Ereignis-Feld wird umbenannt (ports/dependencies), session_reference zieht wegen Importzyklus nach cookies.py (users.py folgt), dazu Port-Doku zu load/touch – eine Release."
