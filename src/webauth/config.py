@@ -47,6 +47,18 @@ DEFAULT_USER_ROLE: Final = "user"
 WEB_AUTH_STATE_ATTRIBUTE: Final = "webauth"
 
 
+class _DefaultCookieName(str):
+    """A cookie name the library chose because the host named none.
+
+    Every reader sees a plain ``str``. The type alone remembers that the host
+    left the name open: ``dataclasses.replace`` rebuilds a configuration from
+    its stored values, and a name it forwards must be resolved again against
+    the new ``cookie_secure`` instead of passing for the host's own choice.
+    """
+
+    __slots__ = ()
+
+
 @dataclass(frozen=True)
 class WebAuthConfig:
     session_secret: SecretStr
@@ -99,11 +111,10 @@ class WebAuthConfig:
 
     def _resolve_cookie_name(self, field: str, plain_name: str) -> None:
         name = getattr(self, field)
-        if name is None:
+        if name is None or isinstance(name, _DefaultCookieName):
             # The dataclass is frozen; resolving a default is part of construction.
-            object.__setattr__(
-                self, field, default_cookie_name(plain_name, secure=self.cookie_secure),
-            )
+            resolved = default_cookie_name(plain_name, secure=self.cookie_secure)
+            object.__setattr__(self, field, _DefaultCookieName(resolved))
         elif is_host_only_cookie_name(name) and not self.cookie_secure:
             raise ValueError(
                 f"{field} {name!r} needs cookie_secure=True; browsers drop a __Host- "

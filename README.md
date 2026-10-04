@@ -65,10 +65,14 @@ The release after v0.8 renames the default cookies to `__Host-session_id` and
 `__Host-csrf_token`. Browsers still send the old `session_id` cookie, which
 no longer authenticates, so every user of a host on the defaults is signed
 out once and signs in again; the old cookies and their sessions run out at
-their own expiry. A host that names its cookies itself is unaffected (it may
-switch to a `__Host-` name when it serves over https), and a development
-setup with `cookie_secure=False` keeps the plain names. A client that reads
-the CSRF cookie by name reads `config.csrf_cookie_name` instead.
+their own expiry. A host that names both cookies itself is unaffected (it
+may switch to `__Host-` names when it serves over https); a host naming only
+one gets the new default for the other. A development setup with
+`cookie_secure=False` keeps the plain names. `DEFAULT_SESSION_COOKIE_NAME` and
+`DEFAULT_CSRF_COOKIE_NAME` in `webauth.cookies` now hold the `__Host-` names;
+the plain ones are `PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME`. A
+client that reads the CSRF cookie by name reads `config.csrf_cookie_name`
+instead.
 
 v0.8.0 refuses a request that carries the session cookie more than once:
 `current_user_dependency` answers 401 and `CsrfTokenMiddleware` 403 where

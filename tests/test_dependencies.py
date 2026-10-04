@@ -30,7 +30,7 @@ from webauth_arrangement import (
     session_cookie_header,
 )
 
-from webauth.cookies import session_reference, sign_session_id
+from webauth.cookies import PLAIN_SESSION_COOKIE_NAME, session_reference, sign_session_id
 from webauth.dependencies import (
     ACCOUNT_DISABLED_DETAIL,
     ADMIN_REQUIRED_DETAIL,
@@ -228,6 +228,16 @@ def test_one_session_cookie_among_others_still_authenticates(
 
     assert response.status_code == 200
     assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
+
+
+def test_a_signed_cookie_under_the_pre_upgrade_name_signs_nobody_in(auth_app: AuthApp) -> None:
+    """Upgrading past v0.8 signs every user of a host on the default names out once."""
+    old_cookie = f"{PLAIN_SESSION_COOKIE_NAME}={auth_app.signed_cookie()}"
+
+    response = auth_app.client.get("/me", headers={"cookie": old_cookie})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL
 
 
 @pytest.mark.parametrize(
