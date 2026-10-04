@@ -15,6 +15,7 @@ from webauth.proxies import (
     MAX_ADDRESS_CHARS,
     MAX_FORWARDED_FOR_HOPS,
     TrustedProxies,
+    budget_address,
     get_client_ip,
 )
 
@@ -273,6 +274,18 @@ def test_the_client_identity_of_a_configured_application() -> None:
     assert response.json() == {"ip": _CLIENT}
 
 
+def test_the_client_identity_keeps_the_full_ipv6_address() -> None:
+    """Only the rate-limit budget pools a network; audit and sessions record
+    the address the client actually used."""
+    app = _client_ip_app()
+    install_web_auth_config(app, a_web_auth_config(ipv6_budget_prefix=48))
+
+    with TestClient(app, client=("2001:db8:1:2::1", 55000)) as client:
+        response = client.get("/client-ip")
+
+    assert response.json() == {"ip": "2001:db8:1:2::1"}
+
+
 def test_an_application_without_a_configuration_names_nobody() -> None:
     """Guessing here would hand a forged header the identity that binds a
     session and buys a rate-limit budget, so a missing configuration has to
@@ -284,6 +297,26 @@ def test_an_application_without_a_configuration_names_nobody() -> None:
         pytest.raises(RuntimeError, match="install_web_auth_config"),
     ):
         client.get("/client-ip", headers={"x-forwarded-for": _CLIENT})
+
+
+# -- Budget address ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(("address", "prefix", "budget"), [
+    ("203.0.113.7", 64, "203.0.113.7"),
+    ("::ffff:203.0.113.7", 64, "203.0.113.7"),
+    ("2001:db8:1:2::1", 64, "2001:db8:1:2::/64"),
+    ("2001:db8:1:2:ffff:ffff:ffff:ffff", 64, "2001:db8:1:2::/64"),
+    ("2001:db8:1:3::1", 64, "2001:db8:1:3::/64"),
+    ("2001:db8:1:ff::1", 48, "2001:db8:1::/48"),
+    ("2001:db8:1:2::1", 128, "2001:db8:1:2::1/128"),
+    ("2001:0DB8:0001:0002:0000:0000:0000:0001", 64, "2001:db8:1:2::/64"),
+    ("testclient", 64, "testclient"),
+])
+def test_the_budget_of_an_address_pools_its_ipv6_network(
+    address: str, prefix: int, budget: str,
+) -> None:
+    assert budget_address(address, prefix) == budget
 
 
 # -- Forwarded protocol ------------------------------------------------------

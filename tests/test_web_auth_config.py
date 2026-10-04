@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -85,6 +86,25 @@ def test_a_cookie_secure_that_is_not_a_bool_is_refused_at_configuration_time(
 ) -> None:
     with pytest.raises(ValueError, match="cookie_secure must be True or False"):
         a_web_auth_config(cookie_secure=value)
+
+
+def test_the_ipv6_budget_prefix_defaults_to_one_subscriber_network() -> None:
+    assert a_web_auth_config().ipv6_budget_prefix == 64
+
+
+@pytest.mark.parametrize("prefix", [32, 128])
+def test_an_ipv6_budget_prefix_at_either_bound_is_accepted(prefix: int) -> None:
+    assert a_web_auth_config(ipv6_budget_prefix=prefix).ipv6_budget_prefix == prefix
+
+
+@pytest.mark.parametrize("prefix", [31, 129, 64.0, Decimal(64), True])
+def test_an_ipv6_budget_prefix_other_than_an_integer_within_its_bounds_is_refused(
+    prefix: object,
+) -> None:
+    with pytest.raises(
+        ValueError, match="ipv6_budget_prefix must be an integer between 32 and 128",
+    ):
+        a_web_auth_config(ipv6_budget_prefix=prefix)
 
 
 def test_a_deployment_may_name_the_cookies_itself() -> None:
