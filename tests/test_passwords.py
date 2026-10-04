@@ -10,7 +10,7 @@ from argon2 import Parameters, Type, extract_parameters
 from argon2 import PasswordHasher as Argon2PasswordHasher
 from argon2.exceptions import VerificationError
 from argon2.profiles import CHEAPEST
-from webauth_arrangement import Argon2idStyleHasher, FakeUser, a_cheap_argon2id_hasher
+from webauth_arrangement import FakeUser, LegibleHasher, a_cheap_argon2id_hasher
 
 from webauth.login import LoginOutcome, judge_credentials
 from webauth.passwords import (
@@ -253,7 +253,7 @@ def test_an_unset_password_passes_the_strength_check() -> None:
 
 
 def test_an_injected_hasher_admits_the_account_it_signed() -> None:
-    hasher = Argon2idStyleHasher()
+    hasher = LegibleHasher()
     user = FakeUser(password_hash=hasher.hash("open-sesame-42"))
     assert (
         judge_credentials("open-sesame-42", user, hasher=hasher)

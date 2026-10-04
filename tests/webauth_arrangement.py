@@ -293,7 +293,7 @@ class WriteLockInMemory:
 
 
 @dataclass
-class Argon2idStyleHasher:
+class LegibleHasher:
     """A host-supplied ``PasswordHasher`` double whose hashes are legible.
 
     It stands in for a host that plugs in its own algorithm: a test can inject
@@ -530,6 +530,19 @@ def a_session(
         expires_at=now + remaining,
         ip_address=ip_address,
         user_agent=user_agent,
+    )
+
+
+def cache_session(
+    cache: RedisSessionCache,
+    record: FakeSessionRecord,
+    max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
+) -> None:
+    """Put a stored session into the cache, as a login with a cache does."""
+    cache.store(
+        record.id, record.user_id, record.user.username, record.user.role,
+        record.user.is_active, record.ip_address, record.user_agent,
+        record.expires_at, record.created_at, max_age_seconds,
     )
 
 
