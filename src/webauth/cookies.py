@@ -14,6 +14,11 @@ CookieSameSite = Literal["strict", "lax"]
 DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
 
 
+def session_reference(session_id: str) -> str:
+    """Return the public SHA-256 hex reference for a raw session identifier."""
+    return hashlib.sha256(session_id.encode()).hexdigest()
+
+
 def sign_session_id(session_id: str, secret: bytes) -> str:
     """Return ``session_id.hmac_hex`` for use as a cookie value."""
     sig = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
