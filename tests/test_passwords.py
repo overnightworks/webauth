@@ -2,78 +2,253 @@
 
 from __future__ import annotations
 
+import unicodedata
+from dataclasses import replace
+
 import pytest
-from webauth_arrangement import Argon2idStyleHasher, FakeUser
+from argon2 import Parameters, Type, extract_parameters
+from argon2 import PasswordHasher as Argon2PasswordHasher
+from argon2.exceptions import VerificationError
+from argon2.profiles import CHEAPEST
+from webauth_arrangement import Argon2idStyleHasher, FakeUser, a_cheap_argon2id_hasher
 
 from webauth.login import LoginOutcome, judge_credentials
 from webauth.passwords import (
-    _DUMMY_HASH,
-    BCRYPT_ROUNDS,
-    MIN_PASSWORD_LENGTH,
-    BcryptPasswordHasher,
+    Argon2idPasswordHasher,
+    UnknownHashFormatError,
     check_password_strength,
-    hash_password,
-    verify_password,
-    verify_password_constant_time,
+)
+
+A_PASSWORD = "s3cur3P@ss!"
+COMPOSED_GROESSE = unicodedata.normalize("NFC", "Größe1")
+DECOMPOSED_GROESSE = unicodedata.normalize("NFD", "Größe1")
+COMPOSED_LONG_GROESSE = unicodedata.normalize("NFC", "Größe-42-Meter")
+DECOMPOSED_LONG_GROESSE = unicodedata.normalize("NFD", "Größe-42-Meter")
+# Longer than bcrypt's 72-byte limit, which made bcrypt 5 raise (#28, finding 2).
+AN_80_BYTE_PASSWORD = "a-long-passphrase-" + "x" * 62
+A_200_BYTE_PASSWORD = "ä" * 100
+PRESENTATOR_64_MIB_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$fm5te1qOTc8XSDynEXXiCw"
+    "$Jx711Mq9d9fFUAQYVoa5R8YsLdZP6Z4pClBwlpvB50Y"
 )
 
 
-def test_hash_and_verify_password() -> None:
-    hashed = hash_password("testpassword123")
-    assert hashed != "testpassword123"
-    assert verify_password("testpassword123", hashed)
+def _cheap_hash_with(**changed_parameters: object) -> str:
+    return Argon2PasswordHasher.from_parameters(replace(CHEAPEST, **changed_parameters)).hash(
+        A_PASSWORD,
+    )
 
 
-def test_verify_wrong_password() -> None:
-    hashed = hash_password("correct-password")
-    assert not verify_password("wrong-password", hashed)
+def _differing_after_byte_72(password: str) -> str:
+    return password[:-1] + ("y" if password[-1] != "y" else "z")
 
 
-def test_hash_produces_different_hashes() -> None:
-    h1 = hash_password("same-password")
-    h2 = hash_password("same-password")
-    assert h1 != h2
+def _with_salt_and_digest(stored_hash: str, salt: str, digest: str) -> str:
+    """The hash with its salt and digest replaced, every other field kept."""
+    head = stored_hash.split("$")[:4]
+    return "$".join([*head, salt, digest])
 
 
-def test_a_missing_hash_is_still_compared() -> None:
-    """An unknown username must cost the same as a known one, or the timing
-    difference tells an attacker which accounts exist."""
-    assert verify_password_constant_time("any-password", None) is False
+def _with_stray_trailing_bits(field: str) -> str:
+    """The field with the unused low bit of its last character set: same length,
+    but no longer the canonical base64 Argon2 decodes."""
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    return field[:-1] + alphabet[alphabet.index(field[-1]) ^ 1]
 
 
-def test_cost_and_length_floor() -> None:
-    assert BCRYPT_ROUNDS == 12
-    assert MIN_PASSWORD_LENGTH == 8
+A_CHEAP_HASH = a_cheap_argon2id_hasher().hash(A_PASSWORD)
+A_CHEAP_SALT, A_CHEAP_DIGEST = A_CHEAP_HASH.split("$")[4:]
+CHEAP_COSTS = "m=8,t=1,p=1"
 
 
-@pytest.mark.parametrize(("password", "accepted"), [
-    pytest.param("a1b2", False, id="four_chars"),
-    pytest.param("Sonne-4", False, id="seven_chars"),
-    pytest.param("Sonne-42", True, id="eight_chars"),
+def test_a_new_hash_is_argon2id_at_owasp_costs_by_default() -> None:
+    stored = Argon2idPasswordHasher().hash(A_PASSWORD)
+
+    assert stored.startswith("$argon2id$")
+    assert extract_parameters(stored) == Parameters(
+        type=Type.ID, version=19, salt_len=16, hash_len=32,
+        time_cost=2, memory_cost=19 * 1024, parallelism=1,
+    )
+
+
+def test_a_host_sets_its_own_argon2id_costs_through_the_constructor() -> None:
+    host_costs = Parameters(
+        type=Type.ID, version=19, salt_len=16, hash_len=32,
+        time_cost=1, memory_cost=64, parallelism=2,
+    )
+
+    stored = Argon2idPasswordHasher(host_costs).hash(A_PASSWORD)
+
+    assert extract_parameters(stored) == host_costs
+
+
+@pytest.mark.parametrize(("parameters", "reason"), [
+    pytest.param(replace(CHEAPEST, type=Type.I), "Type.ID", id="argon2i"),
+    pytest.param(replace(CHEAPEST, version=16), "version 19", id="argon2_version_1_0"),
 ])
-def test_a_password_needs_at_least_eight_characters(password: str, accepted: bool) -> None:
-    if accepted:
-        assert check_password_strength(password) == password
-    else:
-        with pytest.raises(ValueError, match="at least 8 characters"):
-            check_password_strength(password)
+def test_a_hasher_refuses_parameters_it_cannot_hash_with(
+    parameters: Parameters, reason: str,
+) -> None:
+    with pytest.raises(ValueError, match=reason):
+        Argon2idPasswordHasher(parameters)
 
 
-def test_common_password_rejected() -> None:
-    with pytest.raises(ValueError, match="too common"):
-        check_password_strength("password")
+@pytest.mark.parametrize(("hashed", "attempt", "matches"), [
+    pytest.param(A_PASSWORD, A_PASSWORD, True, id="the_password_it_hashed"),
+    pytest.param(A_PASSWORD, "wrong-password", False, id="any_other_password"),
+    pytest.param(AN_80_BYTE_PASSWORD, AN_80_BYTE_PASSWORD, True, id="80_bytes"),
+    pytest.param(
+        AN_80_BYTE_PASSWORD, _differing_after_byte_72(AN_80_BYTE_PASSWORD), False,
+        id="80_bytes_differing_after_byte_72",
+    ),
+    pytest.param(A_200_BYTE_PASSWORD, A_200_BYTE_PASSWORD, True, id="200_multibyte_bytes"),
+    pytest.param(
+        A_200_BYTE_PASSWORD, _differing_after_byte_72(A_200_BYTE_PASSWORD), False,
+        id="200_multibyte_bytes_differing_after_byte_72",
+    ),
+])
+def test_a_hash_matches_only_the_password_it_was_made_from(
+    hashed: str, attempt: str, matches: bool,
+) -> None:
+    hasher = a_cheap_argon2id_hasher()
+
+    assert hasher.verify(attempt, hasher.hash(hashed)) is matches
 
 
-def test_low_entropy_rejected() -> None:
-    with pytest.raises(ValueError, match="unique characters"):
-        check_password_strength("aaaaaaaa")
+def test_hashing_the_same_password_twice_gives_different_hashes() -> None:
+    hasher = a_cheap_argon2id_hasher()
+
+    first_hash = hasher.hash(A_PASSWORD)
+    second_hash = hasher.hash(A_PASSWORD)
+
+    assert first_hash != second_hash
 
 
-def test_strong_password_accepted() -> None:
-    assert check_password_strength("s3cur3P@ss!") == "s3cur3P@ss!"
+@pytest.mark.parametrize(("hashed", "typed"), [
+    pytest.param(COMPOSED_LONG_GROESSE, DECOMPOSED_LONG_GROESSE, id="stored_composed"),
+    pytest.param(DECOMPOSED_LONG_GROESSE, COMPOSED_LONG_GROESSE, id="stored_decomposed"),
+])
+def test_composed_and_decomposed_spellings_match_the_same_hash(hashed: str, typed: str) -> None:
+    hasher = a_cheap_argon2id_hasher()
+
+    assert hasher.verify(typed, hasher.hash(hashed)) is True
 
 
-def test_none_password_passes() -> None:
+@pytest.mark.parametrize("stored_hash", [
+    pytest.param("$2b$12$abcdefghijklmnopqrstuuJ1Y5mA6OZ3qG0tJ1cB/6H2p0q7tq1a", id="bcrypt"),
+    pytest.param(_cheap_hash_with(type=Type.I), id="argon2i"),
+    pytest.param(_cheap_hash_with(type=Type.D), id="argon2d"),
+    pytest.param("", id="empty"),
+    pytest.param("not a hash at all", id="garbage"),
+    pytest.param(PRESENTATOR_64_MIB_HASH, id="argon2id_at_64_mib"),
+    pytest.param(_cheap_hash_with(memory_cost=16), id="argon2id_at_more_memory"),
+    pytest.param(_cheap_hash_with(time_cost=2), id="argon2id_at_more_passes"),
+    pytest.param(_cheap_hash_with(parallelism=2, memory_cost=16), id="argon2id_at_more_lanes"),
+    pytest.param(_cheap_hash_with(salt_len=16), id="argon2id_with_longer_salt"),
+    pytest.param(_cheap_hash_with(hash_len=32), id="argon2id_with_longer_digest"),
+    pytest.param(A_CHEAP_HASH.replace("$v=19$", "$v=16$"), id="argon2id_version_1_0"),
+    pytest.param(
+        _with_salt_and_digest(A_CHEAP_HASH, "!" * len(A_CHEAP_SALT), A_CHEAP_DIGEST),
+        id="argon2id_salt_not_base64",
+    ),
+    pytest.param(
+        _with_salt_and_digest(A_CHEAP_HASH, "ä" * len(A_CHEAP_SALT), A_CHEAP_DIGEST),
+        id="argon2id_salt_not_ascii",
+    ),
+    pytest.param(
+        _with_salt_and_digest(A_CHEAP_HASH, A_CHEAP_SALT, "\x00" * len(A_CHEAP_DIGEST)),
+        id="argon2id_digest_of_nul_bytes",
+    ),
+    pytest.param(
+        _with_salt_and_digest(
+            A_CHEAP_HASH, _with_stray_trailing_bits(A_CHEAP_SALT), A_CHEAP_DIGEST,
+        ),
+        id="argon2id_salt_with_stray_trailing_bits",
+    ),
+    pytest.param(A_CHEAP_HASH.replace(CHEAP_COSTS, "m=8,p=1,t=1"), id="argon2id_costs_reordered"),
+    pytest.param(
+        A_CHEAP_HASH.replace(CHEAP_COSTS, f"{CHEAP_COSTS},p=1"), id="argon2id_lanes_repeated",
+    ),
+    pytest.param(A_CHEAP_HASH.replace("m=8,", "m=08,"), id="argon2id_memory_zero_padded"),
+    pytest.param(A_CHEAP_HASH.replace("m=8,", "m=+8,"), id="argon2id_memory_signed"),
+    pytest.param(A_CHEAP_HASH.replace("m=8,", "m= 8,"), id="argon2id_memory_space_padded"),
+    pytest.param(A_CHEAP_HASH.replace("$v=19$", "$v=019$"), id="argon2id_version_zero_padded"),
+    pytest.param(A_CHEAP_HASH.rsplit("$", 1)[0], id="argon2id_without_digest"),
+])
+def test_a_hash_outside_the_hosts_argon2id_profile_fails_loudly(stored_hash: str) -> None:
+    hasher = a_cheap_argon2id_hasher()
+
+    with pytest.raises(UnknownHashFormatError):
+        hasher.verify(A_PASSWORD, stored_hash)
+
+
+def test_a_hash_cheaper_than_the_hosts_profile_fails_loudly() -> None:
+    """A downgraded hash would let a host check passwords below its own costs."""
+    host = Argon2idPasswordHasher(replace(CHEAPEST, memory_cost=16, time_cost=2))
+
+    with pytest.raises(UnknownHashFormatError):
+        host.verify(A_PASSWORD, A_CHEAP_HASH)
+
+
+def test_an_argon2_failure_on_a_well_formed_hash_is_not_reported_as_a_bad_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Memory or thread exhaustion says nothing about the stored hash, so it
+    surfaces as Argon2's own error rather than as an unknown hash format."""
+    def exhausted_verify(self: Argon2PasswordHasher, stored: str, password: str) -> bool:
+        raise VerificationError("Memory allocation error")
+
+    monkeypatch.setattr(Argon2PasswordHasher, "verify", exhausted_verify)
+    hasher = a_cheap_argon2id_hasher()
+
+    with pytest.raises(VerificationError, match="Memory allocation error"):
+        hasher.verify(A_PASSWORD, A_CHEAP_HASH)
+
+
+def test_an_unknown_user_is_verified_at_the_cost_of_a_wrong_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing hash is checked against an Argon2id dummy with the hasher's own
+    costs, or the timing gap tells an attacker which accounts exist."""
+    hasher = a_cheap_argon2id_hasher()
+    known_hash = hasher.hash(A_PASSWORD)
+    costs_paid: list[Parameters] = []
+    real_verify = Argon2PasswordHasher.verify
+
+    def recording_verify(self: Argon2PasswordHasher, stored: str, password: str) -> bool:
+        costs_paid.append(extract_parameters(stored))
+        return real_verify(self, stored, password)
+
+    monkeypatch.setattr(Argon2PasswordHasher, "verify", recording_verify)
+
+    assert hasher.verify("wrong-password", known_hash) is False
+    assert hasher.verify("wrong-password", None) is False
+    assert costs_paid == [extract_parameters(known_hash)] * 2
+
+
+@pytest.mark.parametrize(("password", "message"), [
+    pytest.param("a1b2", "at least 8 characters", id="four_chars"),
+    pytest.param("Sonne-4", "at least 8 characters", id="seven_chars"),
+    pytest.param(COMPOSED_GROESSE, "at least 8 characters", id="six_chars_composed"),
+    pytest.param(DECOMPOSED_GROESSE, "at least 8 characters", id="six_chars_decomposed"),
+    pytest.param("password", "too common", id="common"),
+    pytest.param("aaaaaaaa", "unique characters", id="low_entropy"),
+])
+def test_a_weak_password_is_rejected_with_its_reason(password: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        check_password_strength(password)
+
+
+@pytest.mark.parametrize(("password", "returned"), [
+    pytest.param("Sonne-42", "Sonne-42", id="eight_chars"),
+    pytest.param(A_PASSWORD, A_PASSWORD, id="mixed_symbols"),
+    pytest.param(DECOMPOSED_LONG_GROESSE, COMPOSED_LONG_GROESSE, id="decomposed_returns_nfc"),
+])
+def test_a_strong_password_is_accepted_in_its_nfc_form(password: str, returned: str) -> None:
+    assert check_password_strength(password) == returned
+
+
+def test_an_unset_password_passes_the_strength_check() -> None:
     assert check_password_strength(None) is None
 
 
@@ -88,27 +263,3 @@ def test_an_injected_hasher_admits_the_account_it_signed() -> None:
         judge_credentials("not-the-password", user, hasher=hasher)
         is LoginOutcome.WRONG_PASSWORD
     )
-
-
-def test_bcrypt_hasher_round_trips_a_password() -> None:
-    hasher = BcryptPasswordHasher()
-    stored = hasher.hash("s3cur3P@ss!")
-    assert hasher.verify("s3cur3P@ss!", stored) is True
-    assert hasher.verify("wrong-password", stored) is False
-
-
-def test_bcrypt_verify_with_no_hash_still_pays_the_full_cost(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A missing hash must be checked against the dummy, or the timing gap
-    tells an attacker the account does not exist."""
-    verified_against: list[str] = []
-
-    def spy(password: str, password_hash: str) -> bool:
-        verified_against.append(password_hash)
-        return False
-
-    monkeypatch.setattr("webauth.passwords.verify_password", spy)
-
-    assert BcryptPasswordHasher().verify("any-password", None) is False
-    assert verified_against == [_DUMMY_HASH]

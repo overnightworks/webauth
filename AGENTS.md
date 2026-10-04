@@ -29,7 +29,7 @@ than the owner needs.
   application implements over the persistence it already owns. `.importlinter`
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
 - No host application is a dependency. `webauth` depends on FastAPI, Pydantic
-  and bcrypt at runtime, and on nothing else. Redis is optional — install
+  and argon2-cffi at runtime, and on nothing else. Redis is optional — install
   `webauth[redis]` for the Redis rate-limit and session backends; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
 - The user model, schema, configured role names, transaction boundaries, and

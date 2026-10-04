@@ -8,7 +8,7 @@ import pytest
 from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from httpx import Response as ClientResponse
-from webauth_arrangement import a_web_auth_config
+from webauth_arrangement import a_cheap_argon2id_hasher, a_web_auth_config
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import verify_csrf_token, verify_session_cookie
@@ -25,7 +25,6 @@ from webauth.login import (
     judge_credentials,
     login_attempt_budget,
 )
-from webauth.passwords import BcryptPasswordHasher, hash_password
 from webauth.ports import PasswordHasher
 
 SESSION_ID = "session-1"
@@ -326,13 +325,14 @@ class StoredAccount:
     role: str = "user"
 
 
-AN_ACCOUNT = StoredAccount(password_hash=hash_password(A_CORRECT_PASSWORD))
+A_HASHER = a_cheap_argon2id_hasher()
+AN_ACCOUNT = StoredAccount(password_hash=A_HASHER.hash(A_CORRECT_PASSWORD))
 A_DEACTIVATED_ACCOUNT = StoredAccount(
     password_hash=AN_ACCOUNT.password_hash, is_active=False,
 )
 A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE = "abc1234"
 AN_ACCOUNT_WITH_A_SHORT_PASSWORD = StoredAccount(
-    password_hash=hash_password(A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE),
+    password_hash=A_HASHER.hash(A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE),
 )
 
 
@@ -380,7 +380,7 @@ class VerificationSpy:
 def test_judge_credentials_names_the_outcome_of_each_attempt(
     password: str, user: StoredAccount | None, outcome: LoginOutcome,
 ) -> None:
-    assert judge_credentials(password, user, hasher=BcryptPasswordHasher()) is outcome
+    assert judge_credentials(password, user, hasher=A_HASHER) is outcome
 
 
 @pytest.mark.parametrize(
@@ -393,7 +393,7 @@ def test_judge_credentials_names_the_outcome_of_each_attempt(
 def test_a_refused_credential_runs_exactly_one_full_verification(
     password: str, user: StoredAccount | None,
 ) -> None:
-    spy = VerificationSpy(BcryptPasswordHasher())
+    spy = VerificationSpy(A_HASHER)
 
     judge_credentials(password, user, hasher=spy)
 

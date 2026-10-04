@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import unicodedata
 from typing import Final
 
-import bcrypt
+from argon2 import Parameters
+from argon2 import PasswordHasher as Argon2PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+from argon2.low_level import ARGON2_VERSION, Type
 
-BCRYPT_ROUNDS: Final = 12
+OWASP_ARGON2ID: Final = Parameters(
+    type=Type.ID,
+    version=ARGON2_VERSION,
+    salt_len=16,
+    hash_len=32,
+    time_cost=2,
+    memory_cost=19 * 1024,
+    parallelism=1,
+)
 MIN_PASSWORD_LENGTH: Final = 8
 MIN_UNIQUE_CHARS: Final = 4
 
@@ -56,48 +70,120 @@ _COMMON_PASSWORDS = frozenset({
 })
 
 
-_DUMMY_HASH: Final = bcrypt.hashpw(b"dummy", bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
+class UnknownHashFormatError(ValueError):
+    """A stored hash that is not this host's Argon2id, so no password is checked against it."""
 
 
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=BCRYPT_ROUNDS)).decode()
+def _normalized_password(password: str) -> str:
+    """The NFC form of a password: one spelling for what looks like one text.
+
+    "Größe" typed with a composed "ö" and with "o" plus a combining diaeresis
+    must count, hash and match as the same password.
+    """
+    return unicodedata.normalize("NFC", password)
 
 
-def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+class Argon2idPasswordHasher:
+    """The Argon2id ``PasswordHasher`` this library provides out of the box.
 
-
-def verify_password_constant_time(password: str, password_hash: str | None) -> bool:
-    """Verify password, using a dummy hash if None to prevent timing oracle."""
-    return bcrypt.checkpw(password.encode(), (password_hash or _DUMMY_HASH).encode())
-
-
-class BcryptPasswordHasher:
-    """The bcrypt ``PasswordHasher`` this library provides out of the box.
-
-    A host that wants a different algorithm supplies its own implementation of
-    the ``webauth.ports.PasswordHasher`` protocol instead.
+    A host has one cost profile: ``parameters`` (OWASP's m=19 MiB, t=2, p=1 by
+    default). New hashes use it, and ``verify`` accepts only an Argon2id hash
+    encoding exactly these parameters — version, memory, time, parallelism,
+    salt and hash length. Every other stored value raises
+    ``UnknownHashFormatError`` rather than reading as a wrong password: bcrypt,
+    Argon2i, Argon2d, an empty or garbled string, an Argon2id hash at other
+    costs (dearer or cheaper), and one whose salt or digest is not the
+    canonical unpadded base64 of the profile's salt and hash length. A
+    well-formed hash that Argon2 still fails to check — memory or thread
+    exhaustion — raises Argon2's own ``VerificationError`` unchanged.
     """
 
+    def __init__(self, parameters: Parameters = OWASP_ARGON2ID) -> None:
+        if parameters.type is not Type.ID:
+            raise ValueError(f"Argon2idPasswordHasher needs Type.ID, got {parameters.type!r}")
+        if parameters.version != ARGON2_VERSION:
+            raise ValueError(
+                f"Argon2idPasswordHasher hashes with version {ARGON2_VERSION}, "
+                f"got {parameters.version}"
+            )
+        self._parameters = parameters
+        self._header = _phc_header(parameters)
+        self._argon2 = Argon2PasswordHasher.from_parameters(parameters)
+        # Hashed once with the host's only parameters, so verifying a username
+        # nobody holds costs what verifying any accepted hash costs.
+        self._dummy_hash = self._argon2.hash("no account has this password")
+        if not self._dummy_hash.startswith(self._header):
+            raise RuntimeError(
+                f"Argon2 encodes this profile as {self._dummy_hash!r}, "
+                f"not under the expected header {self._header!r}"
+            )
+
     def hash(self, password: str) -> str:
-        return hash_password(password)
+        return self._argon2.hash(_normalized_password(password))
 
     def verify(self, password: str, stored_hash: str | None) -> bool:
         if stored_hash is None:
-            return verify_password(password, _DUMMY_HASH)
-        return verify_password(password, stored_hash)
+            self._matches(password, self._dummy_hash)
+            return False
+        self._require_host_profile(stored_hash)
+        return self._matches(password, stored_hash)
+
+    def _require_host_profile(self, stored_hash: str) -> None:
+        """Admit only the exact encoding Argon2 itself writes for this profile.
+
+        libargon2 rejects a reordered, repeated, zero-padded or signed header
+        field with a bare ``VerificationError``, so anything but the canonical
+        header must be turned away here, before Argon2 reads it.
+        """
+        if not (stored_hash.isascii() and stored_hash.startswith(self._header)):
+            raise UnknownHashFormatError(
+                "stored password hash is not Argon2id at this host's parameters"
+            )
+        salt, separator, digest = stored_hash.removeprefix(self._header).partition("$")
+        if not (
+            separator
+            and _is_phc_base64_of_length(salt, self._parameters.salt_len)
+            and _is_phc_base64_of_length(digest, self._parameters.hash_len)
+        ):
+            raise UnknownHashFormatError("stored password hash has a malformed salt or digest")
+
+    def _matches(self, password: str, stored_hash: str) -> bool:
+        try:
+            return self._argon2.verify(stored_hash, _normalized_password(password))
+        except VerifyMismatchError:
+            return False
 
 
-def check_password_strength(cls_or_value: str, *_args: object) -> str:
-    """Pydantic-compatible validator: reject short, common and low-entropy passwords.
+def _phc_header(parameters: Parameters) -> str:
+    """The PHC prefix Argon2 writes before the salt for ``parameters``."""
+    return (
+        f"$argon2id$v={parameters.version}"
+        f"$m={parameters.memory_cost},t={parameters.time_cost},p={parameters.parallelism}$"
+    )
 
-    Works both as a standalone function and as a Pydantic field_validator
-    (which passes `cls` as first arg in classmethod mode, but we accept
-    the value in either position via the *_args fallback).
+
+def _is_phc_base64_of_length(field: str, length: int) -> bool:
+    """Whether ``field`` is the canonical unpadded base64 of ``length`` bytes.
+
+    Argon2's decoder rejects padding and stray trailing bits, so only a field
+    that re-encodes to itself is one Argon2 will read.
     """
-    password = cls_or_value
-    if password is None:
-        return password
+    try:
+        decoded = base64.b64decode(field + "=" * (-len(field) % 4), validate=True)
+    except binascii.Error:
+        return False
+    return len(decoded) == length and base64.b64encode(decoded).decode().rstrip("=") == field
+
+
+def check_password_strength(value: str | None) -> str | None:
+    """Reject a short, common or low-entropy password; return its NFC form.
+
+    Usable directly and as a Pydantic ``field_validator``. ``None`` passes
+    through untouched, so an optional password field may stay unset.
+    """
+    if value is None:
+        return None
+    password = _normalized_password(value)
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ValueError(
             f"Password must be at least {MIN_PASSWORD_LENGTH} characters long"
