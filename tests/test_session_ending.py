@@ -107,8 +107,9 @@ def test_a_cache_that_fails_to_delete_raises_after_the_store_has_ended_the_sessi
 ) -> None:
     sessions, records = a_store_of(SUBJECT, SUBJECT)
 
+    cache = a_session_cache_failing_on(failing_command)
     with pytest.raises(ConnectionError):
-        ending(sessions, a_session_cache_failing_on(failing_command), records)
+        ending(sessions, cache, records)
 
     for index in ended:
         assert sessions.load(records[index].id) is None
