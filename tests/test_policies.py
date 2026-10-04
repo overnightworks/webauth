@@ -12,7 +12,6 @@ from webauth_arrangement import a_web_auth_config
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import (
-    DEFAULT_PERMISSIONS_POLICY,
     BodySizePolicy,
     BodySizeRule,
     CacheControlRule,
@@ -176,20 +175,20 @@ class TestSecurityHeadersPolicy:
     @pytest.mark.parametrize(("policy", "expected"), [
         pytest.param(
             SecurityHeadersPolicy(content_security_policy="default-src 'none'"),
-            DEFAULT_PERMISSIONS_POLICY,
+            "camera=(), microphone=(), geolocation=()",
             id="without-the-field",
         ),
         pytest.param(
             SecurityHeadersPolicy(
                 content_security_policy="default-src 'none'",
-                permissions_policy="microphone=(self)",
+                permissions_policy="camera=(), microphone=(self), geolocation=()",
             ),
-            "microphone=(self)",
+            "camera=(), microphone=(self), geolocation=()",
             id="with-microphone-for-this-origin",
         ),
         pytest.param(
             SecurityHeadersPolicy("default-src 'none'", ()),
-            DEFAULT_PERMISSIONS_POLICY,
+            "camera=(), microphone=(), geolocation=()",
             id="two-positional-arguments",
         ),
     ])
@@ -204,6 +203,14 @@ class TestSecurityHeadersPolicy:
         response = TestClient(app).get("/")
 
         assert response.headers["Permissions-Policy"] == expected
+
+    @pytest.mark.parametrize("line_break", ["\r", "\n", "\r\n"])
+    def test_refuses_a_permissions_policy_with_a_line_break(self, line_break: str) -> None:
+        with pytest.raises(ValueError, match="CR or LF"):
+            SecurityHeadersPolicy(
+                content_security_policy="default-src 'none'",
+                permissions_policy=f"camera=(){line_break}X-Injected: 1",
+            )
 
 
 class TestDefaultContentSecurityPolicy:

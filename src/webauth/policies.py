@@ -202,6 +202,13 @@ class SecurityHeadersPolicy:
     cache_control_rules: tuple[CacheControlRule, ...] = ()
     permissions_policy: str = DEFAULT_PERMISSIONS_POLICY
 
+    def __post_init__(self) -> None:
+        if "\r" in self.permissions_policy or "\n" in self.permissions_policy:
+            raise ValueError(
+                "permissions_policy cannot contain CR or LF: a header value with "
+                "a line break breaks every response it is sent on.",
+            )
+
     def cache_control(self, path: str) -> str | None:
         """What this path may be cached as; the first matching rule wins."""
         for rule in self.cache_control_rules:
