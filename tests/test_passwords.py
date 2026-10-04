@@ -58,6 +58,7 @@ def _with_stray_trailing_bits(field: str) -> str:
 
 A_CHEAP_HASH = a_cheap_argon2id_hasher().hash(A_PASSWORD)
 A_CHEAP_SALT, A_CHEAP_DIGEST = A_CHEAP_HASH.split("$")[4:]
+CHEAP_COSTS = "m=8,t=1,p=1"
 
 
 def test_a_new_hash_is_argon2id_at_owasp_costs_by_default() -> None:
@@ -161,6 +162,15 @@ def test_composed_and_decomposed_spellings_match_the_same_hash(hashed: str, type
         ),
         id="argon2id_salt_with_stray_trailing_bits",
     ),
+    pytest.param(A_CHEAP_HASH.replace(CHEAP_COSTS, "m=8,p=1,t=1"), id="argon2id_costs_reordered"),
+    pytest.param(
+        A_CHEAP_HASH.replace(CHEAP_COSTS, f"{CHEAP_COSTS},p=1"), id="argon2id_lanes_repeated",
+    ),
+    pytest.param(A_CHEAP_HASH.replace("m=8,", "m=08,"), id="argon2id_memory_zero_padded"),
+    pytest.param(A_CHEAP_HASH.replace("m=8,", "m=+8,"), id="argon2id_memory_signed"),
+    pytest.param(A_CHEAP_HASH.replace("m=8,", "m= 8,"), id="argon2id_memory_space_padded"),
+    pytest.param(A_CHEAP_HASH.replace("$v=19$", "$v=019$"), id="argon2id_version_zero_padded"),
+    pytest.param(A_CHEAP_HASH.rsplit("$", 1)[0], id="argon2id_without_digest"),
 ])
 def test_a_hash_outside_the_hosts_argon2id_profile_fails_loudly(stored_hash: str) -> None:
     with pytest.raises(UnknownHashFormatError):

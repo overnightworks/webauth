@@ -7,9 +7,9 @@ import binascii
 import unicodedata
 from typing import Final
 
-from argon2 import Parameters, Type, extract_parameters
+from argon2 import Parameters, Type
 from argon2 import PasswordHasher as Argon2PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
+from argon2.exceptions import VerifyMismatchError
 from argon2.low_level import ARGON2_VERSION
 
 OWASP_ARGON2ID: Final = Parameters(
@@ -107,10 +107,16 @@ class Argon2idPasswordHasher:
                 f"got {parameters.version}"
             )
         self._parameters = parameters
+        self._header = _phc_header(parameters)
         self._argon2 = Argon2PasswordHasher.from_parameters(parameters)
         # Hashed once with the host's only parameters, so verifying a username
         # nobody holds costs what verifying any accepted hash costs.
         self._dummy_hash = self._argon2.hash("no account has this password")
+        if not self._dummy_hash.startswith(self._header):
+            raise RuntimeError(
+                f"Argon2 encodes this profile as {self._dummy_hash!r}, "
+                f"not under the expected header {self._header!r}"
+            )
 
     def hash(self, password: str) -> str:
         return self._argon2.hash(_normalized_password(password))
@@ -123,18 +129,21 @@ class Argon2idPasswordHasher:
         return self._matches(password, stored_hash)
 
     def _require_host_profile(self, stored_hash: str) -> None:
-        try:
-            parameters = extract_parameters(stored_hash)
-        except InvalidHashError:
-            raise UnknownHashFormatError("stored password hash is not an Argon2 encoding") from None
-        if parameters != self._parameters or not stored_hash.isascii():
+        """Admit only the exact encoding Argon2 itself writes for this profile.
+
+        libargon2 rejects a reordered, repeated, zero-padded or signed header
+        field with a bare ``VerificationError``, so anything but the canonical
+        header must be turned away here, before Argon2 reads it.
+        """
+        if not (stored_hash.isascii() and stored_hash.startswith(self._header)):
             raise UnknownHashFormatError(
                 "stored password hash is not Argon2id at this host's parameters"
             )
-        salt, digest = stored_hash.split("$")[4:]
+        salt, separator, digest = stored_hash.removeprefix(self._header).partition("$")
         if not (
-            _is_phc_base64_of_length(salt, parameters.salt_len)
-            and _is_phc_base64_of_length(digest, parameters.hash_len)
+            separator
+            and _is_phc_base64_of_length(salt, self._parameters.salt_len)
+            and _is_phc_base64_of_length(digest, self._parameters.hash_len)
         ):
             raise UnknownHashFormatError("stored password hash has a malformed salt or digest")
 
@@ -143,6 +152,14 @@ class Argon2idPasswordHasher:
             return self._argon2.verify(stored_hash, _normalized_password(password))
         except VerifyMismatchError:
             return False
+
+
+def _phc_header(parameters: Parameters) -> str:
+    """The PHC prefix Argon2 writes before the salt for ``parameters``."""
+    return (
+        f"$argon2id$v={parameters.version}"
+        f"$m={parameters.memory_cost},t={parameters.time_cost},p={parameters.parallelism}$"
+    )
 
 
 def _is_phc_base64_of_length(field: str, length: int) -> bool:
