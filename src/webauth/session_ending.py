@@ -1,8 +1,11 @@
 """The one place a session ends in both the host's store and the cache.
 
-The store goes first because it is the record of truth. A cache that then
-fails to delete raises to the host, which answers with an error rather than
-report a logout the cache would still honour.
+Two orderings keep the cache from outliving the store. Ending deletes from
+the store before the cache, because the store is the record of truth; a cache
+that then fails to delete raises to the host, which answers with an error
+rather than report a logout the cache would still honour. Filling the cache
+happens only after ``SessionRecordStore.load`` has found the session, so a
+session the store already dropped is never cached again.
 """
 
 from __future__ import annotations

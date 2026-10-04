@@ -121,7 +121,11 @@ class SessionRecordStore(Protocol):
     ) -> SessionRecord: ...
 
     def load(self, session_id: str) -> SessionRecord | None:
-        """The session held against concurrent writers until the caller commits."""
+        """The session held against concurrent writers until the caller commits.
+
+        A concurrent ``delete`` of the same session waits until the caller of
+        ``load`` commits, so a revocation never interleaves with a renewal.
+        """
         ...
 
     def touch(
@@ -133,6 +137,9 @@ class SessionRecordStore(Protocol):
         now: datetime,
     ) -> None:
         """Renew ``record`` in place: its origin, and an expiry the store owns.
+
+        ``touch`` only updates an existing row and never creates one, so a
+        session deleted meanwhile stays deleted.
 
         The store computes its own new expiry from the max age it was built
         with; the caller passes only ``now``, so no code outside
@@ -310,9 +317,15 @@ class SessionIdentityChange(Enum):
 
 @dataclass(frozen=True)
 class SessionIdentityChanged:
+    """A session's origin changed; ``session_ref`` is the SHA-256 hex of its id.
+
+    The raw session identifier never reaches an audit event: it is a bearer
+    secret, and ``session_ref`` matches the reference of ``revoke_session``.
+    """
+
     change: SessionIdentityChange
     user_id: str
-    session_id: str
+    session_ref: str
     previous: str
     current: str
 

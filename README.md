@@ -163,9 +163,15 @@ Both password paths delete every account session from the store, then from
 `config.session_cache` when configured, including the current session. The
 host opens a new session and issues new cookies afterwards. Single-session
 revocation also deletes from the store before the cache. Public references
-come only from `session_reference(session_id)`: SHA-256 hex of the UTF-8 raw
-identifier. Lists and management events expose no raw token; the host reads
-any timestamps from its own records.
+come only from `webauth.cookies.session_reference(session_id)`: SHA-256 hex of
+the UTF-8 raw identifier. Lists, management events, and `SessionIdentityChanged`
+(its `session_ref`) expose no raw token; the host reads any timestamps from its
+own records.
+
+v0.6.0 renames `SessionIdentityChanged.session_id` to `session_ref`, which
+carries the reference rather than the raw identifier, and moves
+`session_reference` from `webauth.users` to `webauth.cookies`; v0.5.1 hosts
+update both the import and the field name.
 
 `complete_first_run_setup(management, username, password)` creates the first
 administrator only while no account exists. Both a setup route and a bootstrap
