@@ -52,7 +52,7 @@ over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
-v0.6.0 changes three public behaviours a host upgrading from v0.5 must act
+v0.7.0 changes three public behaviours a host upgrading from v0.6 must act
 on: `issue_session_cookies(response, session_id, config)` no longer takes the
 `request`; a host reached over plain http now gets `Secure` cookies and HSTS
 unless its configuration sets `cookie_secure=False`; and
