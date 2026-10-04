@@ -1,0 +1,8 @@
+claim_id = "4ceae8d4d9504a1c92e4b9152423ab0b"
+agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
+role = "builder"
+base = "2cb0e176d473aacf4e9f06693dc80fb144b6102d"
+branch = "claude/issue-47-w1-permissions-policy"
+scope = ["README.md", "pyproject.toml", "src/webauth/__init__.py", "src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "tests/test_policies.py", "uv.lock"]
+opened_commit = "661f6bc2243edf5c36adb06e42ebedf4ad8d878f"
+whole_reason = "Ein neues Policy-Feld, seine Middleware-Nutzung, Tests, Doku und der Versions-Exklusivwert – eine Release."
