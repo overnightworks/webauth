@@ -1,0 +1,8 @@
+claim_id = "9825aa69e0264e00bca0176a6ee5827e"
+agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
+role = "builder"
+base = "303c18759b530be720520910a7b62a0c2ccad61b"
+branch = "claude/issue-41-s9-ipv6-budget"
+scope = ["README.md", "src/webauth/config.py", "src/webauth/middleware/rate_limit.py", "src/webauth/proxies.py", "tests/test_proxies.py", "tests/test_redis_rate_limiter.py", "tests/test_single_process_rate_limiter.py", "tests/test_web_auth_config.py"]
+opened_commit = "8f540ac8438452bea303a997d835db8a770be193"
+whole_reason = "Ein Budget-Schlüssel (proxies) mit Config-Feld und Middleware-Nutzung samt Tests – eine Release."
