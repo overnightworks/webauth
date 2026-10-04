@@ -52,6 +52,12 @@ over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
+v0.8.0 refuses a request that carries the session cookie more than once:
+`current_user_dependency` answers 401 and `CsrfTokenMiddleware` 403 where
+v0.7 picked one of the values. It adds
+`webauth.dependencies.session_id_from_request(request, config)`; a host that
+reads the session cookie from `request.cookies` itself switches to it.
+
 v0.7.0 changes three public behaviours a host upgrading from v0.6 must act
 on: `issue_session_cookies(response, session_id, config)` no longer takes the
 `request`; a host reached over plain http now gets `Secure` cookies and HSTS
