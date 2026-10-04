@@ -42,6 +42,8 @@ The host builds one `WebAuthConfig` and installs it. Fields a host may name:
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
+| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
+| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
 | `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
@@ -52,6 +54,26 @@ does not send a `Secure` cookie back over plain http, so local development
 over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
+
+A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only
+this exact host can set it: a sibling subdomain cannot plant one with
+`Domain=parent`. Browsers drop a `__Host-` cookie without `Secure`, so an
+unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
+`__Host-` name a host sets itself with `cookie_secure=False` is refused when
+the configuration is built rather than ending in a silent login loop.
+
+v0.10.0 renames the default cookies to `__Host-session_id` and
+`__Host-csrf_token`. Browsers still send the old `session_id` cookie, which
+no longer authenticates, so every user of a host on the defaults is signed
+out once and signs in again; the old cookies and their sessions run out at
+their own expiry. A host that names both cookies itself is unaffected (it
+may switch to `__Host-` names when it serves over https); a host naming only
+one gets the new default for the other. A development setup with
+`cookie_secure=False` keeps the plain names. `DEFAULT_SESSION_COOKIE_NAME` and
+`DEFAULT_CSRF_COOKIE_NAME` in `webauth.cookies` now hold the `__Host-` names;
+the plain ones are `PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME`. A
+client that reads the CSRF cookie by name reads `config.csrf_cookie_name`
+instead.
 
 v0.9.0 counts rate-limit budgets per IPv6 network: every IPv6 client in one
 `/64` shares one budget by default, and `ipv6_budget_prefix` (32 to 128)

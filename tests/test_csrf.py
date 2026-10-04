@@ -9,7 +9,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
-from webauth_arrangement import ALLOWED_ORIGIN, API_PATH, SESSION_ID, a_web_auth_config
+from webauth_arrangement import (
+    ALLOWED_ORIGIN,
+    API_PATH,
+    SESSION_COOKIE_NAME,
+    SESSION_ID,
+    a_web_auth_config,
+    session_cookie_header,
+)
 
 from webauth.config import install_web_auth_config
 from webauth.cookies import generate_csrf_token, sign_session_id
@@ -262,29 +269,32 @@ def _post_with_token(cookie_header: str, token_for: str) -> Response:
 @pytest.mark.parametrize(
     ("cookie_header", "token_for", "status", "body"),
     [
-        pytest.param(f"session_id={SESSION_COOKIE}", SESSION_ID, 200, OK, id="one session"),
         pytest.param(
-            f"session_id_old={ANOTHER_SESSION_COOKIE}; session_id={SESSION_COOKIE}",
+            session_cookie_header(SESSION_COOKIE), SESSION_ID, 200, OK, id="one session",
+        ),
+        pytest.param(
+            f"{SESSION_COOKIE_NAME}_old={ANOTHER_SESSION_COOKIE}; "
+            f"{session_cookie_header(SESSION_COOKIE)}",
             SESSION_ID, 200, OK,
             id="a cookie whose name starts like the session cookie",
         ),
         pytest.param(
-            f"session_id={SESSION_COOKIE}; session_id={SESSION_COOKIE}",
+            session_cookie_header(SESSION_COOKIE, SESSION_COOKIE),
             SESSION_ID, 403, INVALID_TOKEN_DETAIL,
             id="the same session cookie twice",
         ),
         pytest.param(
-            f"session_id={SESSION_COOKIE}; session_id={ANOTHER_SESSION_COOKIE}",
+            session_cookie_header(SESSION_COOKIE, ANOTHER_SESSION_COOKIE),
             SESSION_ID, 403, INVALID_TOKEN_DETAIL,
             id="a token for the first of two sessions",
         ),
         pytest.param(
-            f"session_id={SESSION_COOKIE}; session_id={ANOTHER_SESSION_COOKIE}",
+            session_cookie_header(SESSION_COOKIE, ANOTHER_SESSION_COOKIE),
             ANOTHER_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
             id="a token for the second of two sessions",
         ),
         pytest.param(
-            f"session_id={OVERLONG_SESSION_COOKIE}",
+            session_cookie_header(OVERLONG_SESSION_COOKIE),
             OVERLONG_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
             id="a correctly signed cookie longer than the reader accepts",
         ),

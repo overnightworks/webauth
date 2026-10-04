@@ -22,6 +22,12 @@ from webauth.config import (
     install_web_auth_config,
     web_auth_config,
 )
+from webauth.cookies import (
+    DEFAULT_CSRF_COOKIE_NAME,
+    DEFAULT_SESSION_COOKIE_NAME,
+    PLAIN_CSRF_COOKIE_NAME,
+    PLAIN_SESSION_COOKIE_NAME,
+)
 from webauth.liveness import IdleWindowLiveness
 
 
@@ -62,8 +68,8 @@ def test_the_secret_never_shows_up_in_the_configuration_it_belongs_to() -> None:
 def test_names_and_roles_default_to_the_conventional_ones() -> None:
     config = a_web_auth_config()
 
-    assert config.session_cookie_name == "session_id"
-    assert config.csrf_cookie_name == "csrf_token"
+    assert config.session_cookie_name == DEFAULT_SESSION_COOKIE_NAME == "__Host-session_id"
+    assert config.csrf_cookie_name == DEFAULT_CSRF_COOKIE_NAME == "__Host-csrf_token"
     assert config.csrf_header_name == "x-csrf-token"
     assert config.cookie_samesite == "strict"
     assert config.cookie_secure is True
@@ -107,11 +113,77 @@ def test_an_ipv6_budget_prefix_other_than_an_integer_within_its_bounds_is_refuse
         a_web_auth_config(ipv6_budget_prefix=prefix)
 
 
-def test_a_deployment_may_name_the_cookies_itself() -> None:
-    config = a_web_auth_config(session_cookie_name="sid", csrf_cookie_name="xsrf")
+@pytest.mark.parametrize("cookie_secure", [True, False])
+def test_a_deployment_may_name_the_cookies_itself(cookie_secure: bool) -> None:
+    config = a_web_auth_config(
+        session_cookie_name="sid", csrf_cookie_name="xsrf", cookie_secure=cookie_secure,
+    )
 
     assert config.session_cookie_name == "sid"
     assert config.csrf_cookie_name == "xsrf"
+
+
+def test_unnamed_cookies_fall_back_to_plain_names_when_cookie_secure_is_off() -> None:
+    """Browsers drop a ``__Host-`` cookie without ``Secure``; the plain name still works."""
+    config = a_web_auth_config(cookie_secure=False)
+
+    assert config.session_cookie_name == "session_id"
+    assert config.csrf_cookie_name == "csrf_token"
+
+
+@pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])
+@pytest.mark.parametrize("name", ["__Host-session_id", "__host-own"])
+def test_a_host_only_cookie_name_without_cookie_secure_is_refused_at_configuration_time(
+    field: str, name: str,
+) -> None:
+    """A browser would drop the cookie silently and the login would loop."""
+    with pytest.raises(ValueError, match="needs cookie_secure=True"):
+        a_web_auth_config(cookie_secure=False, **{field: name})
+
+
+@pytest.mark.parametrize(
+    ("built_with", "replaced_with", "session_cookie_name", "csrf_cookie_name"),
+    [
+        pytest.param(
+            {}, {"cookie_secure": False},
+            PLAIN_SESSION_COOKIE_NAME, PLAIN_CSRF_COOKIE_NAME,
+            id="unnamed cookies lose __Host- when Secure is switched off",
+        ),
+        pytest.param(
+            {"cookie_secure": False}, {"cookie_secure": True},
+            DEFAULT_SESSION_COOKIE_NAME, DEFAULT_CSRF_COOKIE_NAME,
+            id="unnamed cookies gain __Host- when Secure is switched on",
+        ),
+        pytest.param(
+            {"session_cookie_name": "sid"}, {"cookie_secure": False},
+            "sid", PLAIN_CSRF_COOKIE_NAME,
+            id="a named cookie keeps its name while the unnamed one follows Secure",
+        ),
+        pytest.param(
+            {}, {"session_cookie_name": "sid"},
+            "sid", DEFAULT_CSRF_COOKIE_NAME,
+            id="a name given while replacing becomes the host's own",
+        ),
+    ],
+)
+def test_a_replaced_configuration_resolves_unnamed_cookies_again(
+    built_with: dict[str, object],
+    replaced_with: dict[str, object],
+    session_cookie_name: str,
+    csrf_cookie_name: str,
+) -> None:
+    """``dataclasses.replace`` must not mistake a resolved default for the host's choice."""
+    config = replace(a_web_auth_config(**built_with), **replaced_with)
+
+    assert config.session_cookie_name == session_cookie_name
+    assert config.csrf_cookie_name == csrf_cookie_name
+
+
+@pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])
+def test_a_host_only_cookie_name_with_cookie_secure_stays_as_named(field: str) -> None:
+    config = a_web_auth_config(**{field: "__Host-own"})
+
+    assert getattr(config, field) == "__Host-own"
 
 
 def test_a_request_reads_the_configuration_installed_on_its_application() -> None:

@@ -14,6 +14,7 @@ from webauth_arrangement import (
     CLIENT_USER_AGENT,
     IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
+    SESSION_COOKIE_NAME,
     SESSION_ID,
     UNAUTHENTICATED_RESPONSE_PATH,
     AuthApp,
@@ -26,9 +27,10 @@ from webauth_arrangement import (
     an_idle_auth_app,
     an_idle_session,
     cache_session,
+    session_cookie_header,
 )
 
-from webauth.cookies import session_reference, sign_session_id
+from webauth.cookies import PLAIN_SESSION_COOKIE_NAME, session_reference, sign_session_id
 from webauth.dependencies import (
     ACCOUNT_DISABLED_DETAIL,
     ADMIN_REQUIRED_DETAIL,
@@ -117,31 +119,34 @@ FORGED_COOKIE = sign_session_id(SESSION_ID, b"a different signing key entirely")
     "cookie_headers",
     [
         pytest.param(
-            [f"session_id={STORED_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            [session_cookie_header(STORED_SESSION_COOKIE, STORED_SESSION_COOKIE)],
             id="the same valid cookie twice",
         ),
         pytest.param(
-            [f"session_id={STORED_SESSION_COOKIE}; session_id={ANOTHER_SESSION_COOKIE}"],
+            [session_cookie_header(STORED_SESSION_COOKIE, ANOTHER_SESSION_COOKIE)],
             id="the stored session before another signed one",
         ),
         pytest.param(
-            [f"session_id={ANOTHER_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            [session_cookie_header(ANOTHER_SESSION_COOKIE, STORED_SESSION_COOKIE)],
             id="another signed session before the stored one",
         ),
         pytest.param(
-            [f"session_id={STORED_SESSION_COOKIE}; session_id={FORGED_COOKIE}"],
+            [session_cookie_header(STORED_SESSION_COOKIE, FORGED_COOKIE)],
             id="a valid cookie before a forged one",
         ),
         pytest.param(
-            [f"session_id={FORGED_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            [session_cookie_header(FORGED_COOKIE, STORED_SESSION_COOKIE)],
             id="a forged cookie before a valid one",
         ),
         pytest.param(
-            [f"session_id={FORGED_COOKIE}; session_id=unsigned"],
+            [session_cookie_header(FORGED_COOKIE, "unsigned")],
             id="two invalid cookies",
         ),
         pytest.param(
-            [f"session_id={STORED_SESSION_COOKIE}", f"session_id={ANOTHER_SESSION_COOKIE}"],
+            [
+                session_cookie_header(STORED_SESSION_COOKIE),
+                session_cookie_header(ANOTHER_SESSION_COOKIE),
+            ],
             id="one cookie in each of two Cookie headers",
         ),
     ],
@@ -172,19 +177,21 @@ def a_bare_request(*cookie_headers: str) -> Request:
 @pytest.mark.parametrize(
     ("cookie_headers", "session_id"),
     [
-        pytest.param([f"session_id={STORED_SESSION_COOKIE}"], SESSION_ID, id="one cookie"),
+        pytest.param(
+            [session_cookie_header(STORED_SESSION_COOKIE)], SESSION_ID, id="one cookie",
+        ),
         pytest.param([], None, id="no cookie"),
         pytest.param(
-            [f"session_id={STORED_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            [session_cookie_header(STORED_SESSION_COOKIE, STORED_SESSION_COOKIE)],
             None,
             id="the same cookie twice",
         ),
         pytest.param(
-            [f"session_id={OVERLONG_SIGNED_COOKIE}"],
+            [session_cookie_header(OVERLONG_SIGNED_COOKIE)],
             None,
             id="a correctly signed cookie longer than the reader accepts",
         ),
-        pytest.param(["session_id=unsigned"], None, id="an unsigned cookie"),
+        pytest.param([session_cookie_header("unsigned")], None, id="an unsigned cookie"),
     ],
 )
 def test_the_session_cookie_reader_names_only_the_one_signed_session(
@@ -199,15 +206,18 @@ def test_the_session_cookie_reader_names_only_the_one_signed_session(
     "cookie_header",
     [
         pytest.param(
-            f"xsession_id={ANOTHER_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}",
+            f"x{SESSION_COOKIE_NAME}={ANOTHER_SESSION_COOKIE}; "
+            f"{session_cookie_header(STORED_SESSION_COOKIE)}",
             id="a cookie whose name ends like the session cookie",
         ),
         pytest.param(
-            f"session_id={STORED_SESSION_COOKIE}; session_id_old={ANOTHER_SESSION_COOKIE}",
+            f"{session_cookie_header(STORED_SESSION_COOKIE)}; "
+            f"{SESSION_COOKIE_NAME}_old={ANOTHER_SESSION_COOKIE}",
             id="a cookie whose name starts like the session cookie",
         ),
         pytest.param(
-            f'theme=dark; session_id="{STORED_SESSION_COOKIE}"', id="a quoted session cookie",
+            "theme=dark; " + session_cookie_header(f'"{STORED_SESSION_COOKIE}"'),
+            id="a quoted session cookie",
         ),
     ],
 )
@@ -218,6 +228,16 @@ def test_one_session_cookie_among_others_still_authenticates(
 
     assert response.status_code == 200
     assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
+
+
+def test_a_signed_cookie_under_the_pre_upgrade_name_signs_nobody_in(auth_app: AuthApp) -> None:
+    """Upgrading past v0.8 signs every user of a host on the default names out once."""
+    old_cookie = f"{PLAIN_SESSION_COOKIE_NAME}={auth_app.signed_cookie()}"
+
+    response = auth_app.client.get("/me", headers={"cookie": old_cookie})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL
 
 
 @pytest.mark.parametrize(
