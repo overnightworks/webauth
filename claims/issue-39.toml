@@ -1,0 +1,8 @@
+claim_id = "a8400a31c6ba41aab2e2f404cc59030e"
+agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
+role = "builder"
+base = "bb62e8766fd897b5240129b20cc87e74c565fc89"
+branch = "claude/issue-39-s7-one-cookie-reader"
+scope = ["README.md", "src/webauth/dependencies.py", "src/webauth/middleware/csrf.py", "tests/test_csrf.py", "tests/test_dependencies.py", "tests/webauth_arrangement.py"]
+opened_commit = "9f0f4b4b6cec772dacb922c44d7afee8c9289fa5"
+whole_reason = "Ein Leser ersetzt zwei Lese-Stellen (dependencies, csrf) samt Tests, Test-Folgepunkt 30 und Doku – eine Release."
