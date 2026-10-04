@@ -7,7 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import fakeredis
 import pytest
-from webauth_arrangement import RATE_LIMITED_PATH, a_rate_limited_client
+from fastapi.testclient import TestClient
+from webauth_arrangement import HTTPS_TEST_SERVER, RATE_LIMITED_PATH, a_rate_limited_client
 
 from webauth.rate_limit import RedisRateLimitBackend
 
@@ -84,6 +85,18 @@ class TestMiddlewareOverRedisBackend:
         blocked = client.get(RATE_LIMITED_PATH)
         assert blocked.status_code == 429
         assert blocked.headers["Retry-After"] == "60"
+
+    def test_two_addresses_in_one_ipv6_network_share_a_budget(self) -> None:
+        client = a_rate_limited_client(
+            RedisRateLimitBackend(fakeredis.FakeRedis(decode_responses=True), HOST_PREFIX),
+            max_requests=1,
+        )
+        first, neighbour = (
+            TestClient(client.app, base_url=HTTPS_TEST_SERVER, client=(address, 50000))
+            for address in ("2001:db8:1:2::1", "2001:db8:1:2::2")
+        )
+        assert first.get(RATE_LIMITED_PATH).status_code == 200
+        assert neighbour.get(RATE_LIMITED_PATH).status_code == 429
 
     def test_rejects_closed_when_the_backend_cannot_answer(self) -> None:
         client = a_rate_limited_client(_AlwaysFailingBackend(), max_requests=5)

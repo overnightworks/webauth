@@ -36,7 +36,7 @@ fails leaves nothing behind that the auth machinery wrote.
 
 ## Configuration
 
-The host builds one `WebAuthConfig` and installs it. Cookie flags a host may name:
+The host builds one `WebAuthConfig` and installs it. Fields a host may name:
 
 | Field | Default | Values |
 |---|---|---|
@@ -44,6 +44,7 @@ The host builds one `WebAuthConfig` and installs it. Cookie flags a host may nam
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
 | `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
 | `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
+| `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
 are set and when they are cleared — and whether `SecurityHeadersMiddleware`
@@ -61,7 +62,7 @@ unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
 `__Host-` name a host sets itself with `cookie_secure=False` is refused when
 the configuration is built rather than ending in a silent login loop.
 
-The release after v0.8 renames the default cookies to `__Host-session_id` and
+v0.10.0 renames the default cookies to `__Host-session_id` and
 `__Host-csrf_token`. Browsers still send the old `session_id` cookie, which
 no longer authenticates, so every user of a host on the defaults is signed
 out once and signs in again; the old cookies and their sessions run out at
@@ -73,6 +74,11 @@ one gets the new default for the other. A development setup with
 the plain ones are `PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME`. A
 client that reads the CSRF cookie by name reads `config.csrf_cookie_name`
 instead.
+
+v0.9.0 counts rate-limit budgets per IPv6 network: every IPv6 client in one
+`/64` shares one budget by default, and `ipv6_budget_prefix` (32 to 128)
+chooses the network size. The IPv6 budget keys change, so existing Redis
+counters for IPv6 clients start from zero once after the upgrade.
 
 v0.8.0 refuses a request that carries the session cookie more than once:
 `current_user_dependency` answers 401 and `CsrfTokenMiddleware` 403 where

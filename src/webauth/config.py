@@ -41,6 +41,10 @@ if TYPE_CHECKING:
 MIN_SESSION_SECRET_CHARS: Final = 32
 DEFAULT_LOGIN_RATE_WINDOW_SECONDS: Final = 300
 DEFAULT_MAX_USER_AGENT_CHARS: Final = 500
+DEFAULT_IPV6_BUDGET_PREFIX: Final = 64
+# Shorter than /32 would pool whole providers into one budget; longer than /128
+# is not an IPv6 prefix at all.
+IPV6_BUDGET_PREFIX_RANGE: Final = range(32, 129)
 DEFAULT_ADMIN_ROLE: Final = "admin"
 DEFAULT_USER_ROLE: Final = "user"
 
@@ -79,6 +83,7 @@ class WebAuthConfig:
     cookie_samesite: CookieSameSite = DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
     max_user_agent_chars: int = DEFAULT_MAX_USER_AGENT_CHARS
+    ipv6_budget_prefix: int = DEFAULT_IPV6_BUDGET_PREFIX
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
     session_cache: SessionCache | None = None
@@ -101,6 +106,16 @@ class WebAuthConfig:
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
+        if (
+            type(self.ipv6_budget_prefix) is not int
+            or self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE
+        ):
+            raise ValueError(
+                "ipv6_budget_prefix must be an integer between "
+                f"{IPV6_BUDGET_PREFIX_RANGE.start} "
+                f"and {IPV6_BUDGET_PREFIX_RANGE.stop - 1}; it is the network size "
+                "whose addresses share one rate-limit budget",
+            )
         if self.session_cache is not None and not isinstance(
             self.session_liveness, ExpiryColumnLiveness,
         ):
