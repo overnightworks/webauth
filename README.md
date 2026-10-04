@@ -121,7 +121,10 @@ an `HTTPException`, so the 302 still carries FastAPI's default JSON body
 `webauth.dependencies.session_id_from_request(request, config)` is the one
 reader of the session cookie: it parses the raw `Cookie` headers and returns
 the verified session identifier, or `None` when the cookie is missing, longer
-than any this library signs, forged, or present more than once. A sibling
+than `MAX_SESSION_COOKIE_CHARS` (200 characters), forged, or present more than
+once. The limit holds even for a correctly signed cookie: `issue_session_cookies`
+does not cap the session identifier it signs, and an identifier over 135
+characters yields a cookie every reader refuses. A sibling
 subdomain can set a second cookie of the same name, so a request carrying two
 is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the

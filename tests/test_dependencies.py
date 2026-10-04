@@ -7,6 +7,7 @@ from dataclasses import fields, is_dataclass
 from datetime import timedelta
 
 import pytest
+from fastapi import Request
 from webauth_arrangement import (
     ADMIN_ROLE,
     CLIENT_ADDRESS,
@@ -37,6 +38,7 @@ from webauth.dependencies import (
     SESSION_EXPIRED_DETAIL,
     AuthenticatedUser,
     LoginRedirect,
+    session_id_from_request,
 )
 from webauth.ports import SessionIdentityChange, SessionIdentityChanged
 
@@ -86,7 +88,7 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
         pytest.param(
             "x" * (MAX_SESSION_COOKIE_CHARS + 1),
             AUTHENTICATION_REQUIRED_DETAIL,
-            id="a cookie longer than any this signs",
+            id="a cookie longer than the reader accepts",
         ),
         pytest.param("unsigned", INVALID_SESSION_DETAIL, id="a cookie without a signature"),
         pytest.param(
@@ -144,18 +146,53 @@ FORGED_COOKIE = sign_session_id(SESSION_ID, b"a different signing key entirely")
         ),
     ],
 )
+@pytest.mark.parametrize("path", ["/me", "/admin", "/session-id"])
 def test_a_request_carrying_more_than_one_session_cookie_authenticates_nobody(
-    cookie_headers: list[str],
+    cookie_headers: list[str], path: str,
 ) -> None:
     """Whichever cookie a dict kept, the request could run in a tossed account."""
     app = an_auth_app(a_session(user=FakeUser(id="user-2", username="mallory")))
 
     response = app.client.get(
-        "/me", headers=[("cookie", header) for header in cookie_headers],
+        path, headers=[("cookie", header) for header in cookie_headers],
     )
 
     assert response.status_code == 401
     assert response.json()["detail"] == INVALID_SESSION_DETAIL
+
+
+OVERLONG_SIGNED_COOKIE = sign_session_id("s" * MAX_SESSION_COOKIE_CHARS, SIGNING_KEY)
+
+
+def a_bare_request(*cookie_headers: str) -> Request:
+    headers = [(b"cookie", header.encode()) for header in cookie_headers]
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
+
+
+@pytest.mark.parametrize(
+    ("cookie_headers", "session_id"),
+    [
+        pytest.param([f"session_id={STORED_SESSION_COOKIE}"], SESSION_ID, id="one cookie"),
+        pytest.param([], None, id="no cookie"),
+        pytest.param(
+            [f"session_id={STORED_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            None,
+            id="the same cookie twice",
+        ),
+        pytest.param(
+            [f"session_id={OVERLONG_SIGNED_COOKIE}"],
+            None,
+            id="a correctly signed cookie longer than the reader accepts",
+        ),
+        pytest.param(["session_id=unsigned"], None, id="an unsigned cookie"),
+    ],
+)
+def test_the_session_cookie_reader_names_only_the_one_signed_session(
+    cookie_headers: list[str], session_id: str | None,
+) -> None:
+    request = a_bare_request(*cookie_headers)
+
+    assert session_id_from_request(request, a_web_auth_config()) == session_id
 
 
 @pytest.mark.parametrize(

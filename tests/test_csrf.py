@@ -13,6 +13,7 @@ from webauth_arrangement import ALLOWED_ORIGIN, API_PATH, SESSION_ID, a_web_auth
 
 from webauth.config import install_web_auth_config
 from webauth.cookies import generate_csrf_token, sign_session_id
+from webauth.dependencies import MAX_SESSION_COOKIE_CHARS
 from webauth.middleware import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.policies import CsrfPolicy, PathRules
 
@@ -232,6 +233,8 @@ CONFIG = a_web_auth_config()
 SESSION_COOKIE = sign_session_id(SESSION_ID, CONFIG.signing_key)
 ANOTHER_SESSION_ID = "another-session"
 ANOTHER_SESSION_COOKIE = sign_session_id(ANOTHER_SESSION_ID, CONFIG.signing_key)
+OVERLONG_SESSION_ID = "s" * MAX_SESSION_COOKIE_CHARS
+OVERLONG_SESSION_COOKIE = sign_session_id(OVERLONG_SESSION_ID, CONFIG.signing_key)
 
 
 def a_token_guarded_client() -> TestClient:
@@ -279,6 +282,11 @@ def _post_with_token(cookie_header: str, token_for: str) -> Response:
             f"session_id={SESSION_COOKIE}; session_id={ANOTHER_SESSION_COOKIE}",
             ANOTHER_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
             id="a token for the second of two sessions",
+        ),
+        pytest.param(
+            f"session_id={OVERLONG_SESSION_COOKIE}",
+            OVERLONG_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
+            id="a correctly signed cookie longer than the reader accepts",
         ),
     ],
 )
