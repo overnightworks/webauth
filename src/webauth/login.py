@@ -17,10 +17,8 @@ from typing import TYPE_CHECKING, Final
 from fastapi import HTTPException
 
 from webauth.cookies import generate_csrf_token, sign_session_id
-from webauth.proxies import request_is_https
 
 if TYPE_CHECKING:
-    from starlette.requests import Request
     from starlette.responses import Response
 
     from webauth.config import WebAuthConfig
@@ -64,18 +62,17 @@ class LoginRefusal:
 
 
 def issue_session_cookies(
-    response: Response,
-    request: Request,
-    session_id: str,
-    config: WebAuthConfig,
+    response: Response, session_id: str, config: WebAuthConfig,
 ) -> None:
     """Hand the browser its signed session and the CSRF token bound to it.
 
     Only the session cookie is kept from scripts: the CSRF token has to be
     readable, because the double-submit check compares it against a header the
-    client sends back itself.
+    client sends back itself. Both carry ``Secure`` unless the host switched
+    ``cookie_secure`` off: a request's scheme is not trusted to decide it,
+    because behind an unlisted TLS proxy every request looks like plain http.
     """
-    secure = request_is_https(request)
+    secure = config.cookie_secure
     max_age = config.session_max_age_seconds
     samesite = config.cookie_samesite
     response.set_cookie(
@@ -99,13 +96,22 @@ def issue_session_cookies(
 
 
 def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
-    """Take both cookies back, so the browser stops carrying a dead session."""
+    """Take both cookies back, so the browser stops carrying a dead session.
+
+    Each deletion repeats the attributes its cookie was set with, so a browser
+    that only lets a secure context overwrite a ``Secure`` cookie accepts it.
+    """
     samesite = config.cookie_samesite
+    secure = config.cookie_secure
     response.delete_cookie(
-        config.session_cookie_name, path=COOKIE_PATH, samesite=samesite,
+        config.session_cookie_name,
+        path=COOKIE_PATH,
+        samesite=samesite,
+        secure=secure,
+        httponly=True,
     )
     response.delete_cookie(
-        config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite,
+        config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite, secure=secure,
     )
 
 

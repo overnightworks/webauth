@@ -41,6 +41,24 @@ The host builds one `WebAuthConfig` and installs it. Cookie flags a host may nam
 | Field | Default | Values |
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
+| `cookie_secure` | `True` | `True` or `False`; any other value is refused |
+
+`cookie_secure` alone decides whether both cookies carry `Secure` — when they
+are set and when they are cleared — and whether `SecurityHeadersMiddleware`
+sends HSTS. The request's scheme no longer decides it, so a deployment behind
+a TLS proxy it has not listed in `trusted_proxies` still gets both. A browser
+does not send a `Secure` cookie back over plain http, so local development
+over http works only with `cookie_secure=False` in that environment's
+configuration, which drops `Secure` and HSTS together. With it off,
+`SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
+
+v0.7.0 changes three public behaviours a host upgrading from v0.6 must act
+on: `issue_session_cookies(response, session_id, config)` no longer takes the
+`request`; a host reached over plain http now gets `Secure` cookies and HSTS
+unless its configuration sets `cookie_secure=False`; and
+`SecurityHeadersMiddleware` reads the installed configuration, so an
+application without `install_web_auth_config` gets a `RuntimeError` before
+its route runs.
 
 v0.3.0 clears the session cookies with the configured SameSite (`"strict"` by
 default), where v0.2.0 cleared them with `lax`. A cookie is deleted by name,
@@ -71,7 +89,7 @@ the fake stores, so the shape of a login is visible without a database. Run
 this from `tests/`:
 
 ```python
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 from webauth_arrangement import FakeUser, a_web_auth_config
 
@@ -90,11 +108,11 @@ install_web_auth_config(app, config)
 alice = FakeUser(password_hash=config.password_hasher.hash("the-correct-password"))
 
 @app.post("/login")
-def login(request: Request, response: Response, password: str) -> dict[str, str]:
+def login(response: Response, password: str) -> dict[str, str]:
     outcome = judge_credentials(password, alice, hasher=config.password_hasher)
     if outcome is not LoginOutcome.ADMITTED:
         raise http_refusal(LoginRefusal(outcome))
-    issue_session_cookies(response, request, "session-1", config)
+    issue_session_cookies(response, "session-1", config)
     return {"status": "ok"}
 
 client = TestClient(app, base_url="https://songmaker.example")
