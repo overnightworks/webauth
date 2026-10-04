@@ -262,6 +262,20 @@ here; it needs the client library, so a host that uses it installs
 `webauth[redis]`. A host that supplies its own cache implements the same
 protocol.
 
+## Ending a session
+
+`webauth.session_ending` is the one place a session ends in both the host's
+store and `config.session_cache`. A logout route calls
+`end_session(sessions, config.session_cache, session_id=..., user_id=...)`
+rather than deleting from either itself; `end_user_sessions(sessions, cache,
+user_id)` ends every session of an account and returns the store's count, and
+`prune_sessions(sessions, cache, user_id, max_sessions)` ends the oldest
+sessions above a cap after a login and returns their identifiers. Each deletes
+from the store first, then from the cache when one is configured. A cache that
+fails to delete raises: the host answers with an error instead of reporting a
+logout the cache would still honour. The `users` helpers end sessions through
+the same functions.
+
 ## CSRF origin
 
 `CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing

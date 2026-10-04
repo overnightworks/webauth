@@ -20,6 +20,7 @@ from webauth_arrangement import (
     a_session_cache_failing_on,
     a_user_management,
     a_web_auth_config,
+    cache_session,
 )
 
 from webauth.dependencies import AuthenticatedUser
@@ -135,11 +136,7 @@ def stored_sessions(cached_management: UserManagement) -> list[FakeSessionRecord
             ip_address=CLIENT_ADDRESS,
             user_agent=CLIENT_USER_AGENT,
         )
-        cache.store(
-            record.id, record.user_id, record.user.username, record.user.role,
-            record.user.is_active, record.ip_address, record.user_agent,
-            record.expires_at, record.created_at, management.config.session_max_age_seconds,
-        )
+        cache_session(cache, record, management.config.session_max_age_seconds)
         records.append(record)
     subject = management.users.get("subject")
     cache.store(
@@ -771,16 +768,38 @@ def test_REQ_ADMIN_10_password_changes_reject_weak_passwords_without_writes(
 
 
 @pytest.mark.parametrize("operation", PASSWORD_OPERATIONS)
-def test_REQ_ADMIN_10_password_changes_delete_from_the_store_before_a_cache_failure(
+def test_REQ_ADMIN_10_password_changes_store_the_composed_spelling_of_the_password(
+    management: UserManagement, actor: AuthenticatedUser, operation: PasswordOperation,
+) -> None:
+    decomposed = "Cafe\u0301!Lantern92"
+
+    operation(management, actor, decomposed)
+
+    stored_hash = management.users.get("subject").password_hash
+    assert stored_hash == management.config.password_hasher.hash("Caf\u00e9!Lantern92")
+
+
+@pytest.mark.parametrize("operation", [
+    *(
+        pytest.param(
+            lambda m, a, change=change.values[0]: change(m, a, NEW_PASSWORD), id=change.id,
+        )
+        for change in PASSWORD_OPERATIONS
+    ),
+    pytest.param(promote_subject, id="change_role"),
+    pytest.param(deactivate_subject, id="deactivate_user"),
+    pytest.param(revoke_subject_sessions, id="revoke_user_sessions"),
+])
+def test_REQ_ADMIN_10_ending_every_account_session_deletes_from_the_store_before_a_cache_failure(
     cached_management: UserManagement, actor: AuthenticatedUser,
-    stored_sessions: list[FakeSessionRecord], operation: PasswordOperation,
+    stored_sessions: list[FakeSessionRecord], operation: AdminOperation,
 ) -> None:
     management = replace(cached_management, config=replace(
         cached_management.config, session_cache=a_session_cache_failing_on("smembers"),
     ))
 
     with pytest.raises(ConnectionError):
-        operation(management, actor, NEW_PASSWORD)
+        operation(management, actor)
 
     assert management.sessions.list_active() == [stored_sessions[1]]
     assert management.audit.user_management_events == []

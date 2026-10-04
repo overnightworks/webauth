@@ -530,6 +530,19 @@ def a_session(
     )
 
 
+def cache_session(
+    cache: RedisSessionCache,
+    record: FakeSessionRecord,
+    max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
+) -> None:
+    """Put a stored session into the cache, as a login with a cache does."""
+    cache.store(
+        record.id, record.user_id, record.user.username, record.user.role,
+        record.user.is_active, record.ip_address, record.user_agent,
+        record.expires_at, record.created_at, max_age_seconds,
+    )
+
+
 UNAUTHENTICATED_RESPONSE_PATH = "/unauthenticated-response"
 
 
