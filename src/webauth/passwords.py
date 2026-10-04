@@ -7,14 +7,14 @@ import binascii
 import unicodedata
 from typing import Final
 
-from argon2 import Parameters, Type
+from argon2 import Parameters
 from argon2 import PasswordHasher as Argon2PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from argon2.low_level import ARGON2_VERSION
+from argon2.low_level import ARGON2_VERSION, Type
 
 OWASP_ARGON2ID: Final = Parameters(
     type=Type.ID,
-    version=19,
+    version=ARGON2_VERSION,
     salt_len=16,
     hash_len=32,
     time_cost=2,

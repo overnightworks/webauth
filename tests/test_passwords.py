@@ -118,7 +118,10 @@ def test_a_hash_matches_only_the_password_it_was_made_from(
 def test_hashing_the_same_password_twice_gives_different_hashes() -> None:
     hasher = a_cheap_argon2id_hasher()
 
-    assert hasher.hash(A_PASSWORD) != hasher.hash(A_PASSWORD)
+    first_hash = hasher.hash(A_PASSWORD)
+    second_hash = hasher.hash(A_PASSWORD)
+
+    assert first_hash != second_hash
 
 
 @pytest.mark.parametrize(("hashed", "typed"), [
@@ -173,8 +176,10 @@ def test_composed_and_decomposed_spellings_match_the_same_hash(hashed: str, type
     pytest.param(A_CHEAP_HASH.rsplit("$", 1)[0], id="argon2id_without_digest"),
 ])
 def test_a_hash_outside_the_hosts_argon2id_profile_fails_loudly(stored_hash: str) -> None:
+    hasher = a_cheap_argon2id_hasher()
+
     with pytest.raises(UnknownHashFormatError):
-        a_cheap_argon2id_hasher().verify(A_PASSWORD, stored_hash)
+        hasher.verify(A_PASSWORD, stored_hash)
 
 
 def test_a_hash_cheaper_than_the_hosts_profile_fails_loudly() -> None:
@@ -194,9 +199,10 @@ def test_an_argon2_failure_on_a_well_formed_hash_is_not_reported_as_a_bad_hash(
         raise VerificationError("Memory allocation error")
 
     monkeypatch.setattr(Argon2PasswordHasher, "verify", exhausted_verify)
+    hasher = a_cheap_argon2id_hasher()
 
     with pytest.raises(VerificationError, match="Memory allocation error"):
-        a_cheap_argon2id_hasher().verify(A_PASSWORD, A_CHEAP_HASH)
+        hasher.verify(A_PASSWORD, A_CHEAP_HASH)
 
 
 def test_an_unknown_user_is_verified_at_the_cost_of_a_wrong_password(
