@@ -10,7 +10,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
-from webauth.cookies import verify_csrf_token, verify_session_cookie
+from webauth.cookies import verify_csrf_token
+from webauth.dependencies import session_id_from_request
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -50,10 +51,10 @@ class CsrfTokenMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     {"detail": "CSRF token missing or invalid"}, status_code=403,
                 )
-            raw_cookie = request.cookies.get(config.session_cookie_name)
-            secret = config.signing_key
-            session_id = verify_session_cookie(raw_cookie, secret) if raw_cookie else None
-            if not session_id or not verify_csrf_token(header_token, session_id, secret):
+            session_id = session_id_from_request(request, config)
+            if session_id is None or not verify_csrf_token(
+                header_token, session_id, config.signing_key,
+            ):
                 return JSONResponse(
                     {"detail": "CSRF token missing or invalid"}, status_code=403,
                 )

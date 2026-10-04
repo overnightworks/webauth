@@ -12,10 +12,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
 
 from fastapi import Depends, HTTPException, Request
+from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse, Response
 
 from webauth.config import WebAuthConfig, web_auth_config
@@ -238,16 +240,58 @@ def _accepted_quality(accept_header: str, media_type: str) -> float:
     return wildcard_quality if matched_wildcard else 0.0
 
 
+class _NoSessionCookie(Enum):
+    """Why a request carries no usable session cookie, as the refusal names it."""
+
+    ABSENT = AUTHENTICATION_REQUIRED_DETAIL
+    INVALID = INVALID_SESSION_DETAIL
+
+
+def session_id_from_request(request: Request, config: WebAuthConfig) -> str | None:
+    """The session identifier the request's one signed session cookie names.
+
+    ``None`` when the cookie is missing, longer than any this library signs,
+    forged, or present more than once: a sibling subdomain can set a second
+    cookie of the same name, and choosing either would let it decide whose
+    account the request runs in.
+    """
+    reading = _read_session_cookie(request, config)
+    return None if isinstance(reading, _NoSessionCookie) else reading
+
+
 def _session_id_from_cookie(
     request: Request, config: WebAuthConfig, login_redirect: LoginRedirect | None,
 ) -> str:
-    raw_cookie = request.cookies.get(config.session_cookie_name)
-    if not raw_cookie or len(raw_cookie) > MAX_SESSION_COOKIE_CHARS:
-        raise _unauthenticated(request, AUTHENTICATION_REQUIRED_DETAIL, login_redirect)
-    session_id = verify_session_cookie(raw_cookie, config.signing_key)
-    if session_id is None:
-        raise _unauthenticated(request, INVALID_SESSION_DETAIL, login_redirect)
-    return session_id
+    reading = _read_session_cookie(request, config)
+    if isinstance(reading, _NoSessionCookie):
+        raise _unauthenticated(request, reading.value, login_redirect)
+    return reading
+
+
+def _read_session_cookie(request: Request, config: WebAuthConfig) -> str | _NoSessionCookie:
+    values = _cookie_values(request, config.session_cookie_name)
+    if len(values) > 1:
+        return _NoSessionCookie.INVALID
+    if not values or not values[0] or len(values[0]) > MAX_SESSION_COOKIE_CHARS:
+        return _NoSessionCookie.ABSENT
+    session_id = verify_session_cookie(values[0], config.signing_key)
+    return _NoSessionCookie.INVALID if session_id is None else session_id
+
+
+def _cookie_values(request: Request, name: str) -> list[str]:
+    """Every value the raw ``Cookie`` headers carry under ``name``, in order.
+
+    Starlette's cookie dict silently keeps one of several same-named
+    cookies, so each pair is parsed on its own with Starlette's parser to keep
+    its browser-compatible trimming and unquoting.
+    """
+    pairs = "; ".join(request.headers.getlist("cookie")).split(";")
+    return [
+        value
+        for pair in pairs
+        for key, value in cookie_parser(pair).items()
+        if key == name
+    ]
 
 
 def _record_identity_changes(

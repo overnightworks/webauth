@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import fields
+from collections.abc import Callable, Iterator
+from dataclasses import fields, is_dataclass
 from datetime import timedelta
 
 import pytest
@@ -14,16 +14,17 @@ from webauth_arrangement import (
     IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
     SESSION_ID,
-    SESSION_MAX_AGE_SECONDS,
     UNAUTHENTICATED_RESPONSE_PATH,
     AuthApp,
     FakeSessionRecord,
     FakeUser,
     a_session,
     a_session_cache,
+    a_web_auth_config,
     an_auth_app,
     an_idle_auth_app,
     an_idle_session,
+    cache_session,
 )
 
 from webauth.cookies import session_reference, sign_session_id
@@ -104,6 +105,84 @@ def test_a_cookie_that_was_not_issued_here_authenticates_nobody(
     assert response.json()["detail"] == detail
 
 
+SIGNING_KEY = a_web_auth_config().signing_key
+STORED_SESSION_COOKIE = sign_session_id(SESSION_ID, SIGNING_KEY)
+ANOTHER_SESSION_COOKIE = sign_session_id("another-session", SIGNING_KEY)
+FORGED_COOKIE = sign_session_id(SESSION_ID, b"a different signing key entirely")
+
+
+@pytest.mark.parametrize(
+    "cookie_headers",
+    [
+        pytest.param(
+            [f"session_id={STORED_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            id="the same valid cookie twice",
+        ),
+        pytest.param(
+            [f"session_id={STORED_SESSION_COOKIE}; session_id={ANOTHER_SESSION_COOKIE}"],
+            id="the stored session before another signed one",
+        ),
+        pytest.param(
+            [f"session_id={ANOTHER_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            id="another signed session before the stored one",
+        ),
+        pytest.param(
+            [f"session_id={STORED_SESSION_COOKIE}; session_id={FORGED_COOKIE}"],
+            id="a valid cookie before a forged one",
+        ),
+        pytest.param(
+            [f"session_id={FORGED_COOKIE}; session_id={STORED_SESSION_COOKIE}"],
+            id="a forged cookie before a valid one",
+        ),
+        pytest.param(
+            [f"session_id={FORGED_COOKIE}; session_id=unsigned"],
+            id="two invalid cookies",
+        ),
+        pytest.param(
+            [f"session_id={STORED_SESSION_COOKIE}", f"session_id={ANOTHER_SESSION_COOKIE}"],
+            id="one cookie in each of two Cookie headers",
+        ),
+    ],
+)
+def test_a_request_carrying_more_than_one_session_cookie_authenticates_nobody(
+    cookie_headers: list[str],
+) -> None:
+    """Whichever cookie a dict kept, the request could run in a tossed account."""
+    app = an_auth_app(a_session(user=FakeUser(id="user-2", username="mallory")))
+
+    response = app.client.get(
+        "/me", headers=[("cookie", header) for header in cookie_headers],
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == INVALID_SESSION_DETAIL
+
+
+@pytest.mark.parametrize(
+    "cookie_header",
+    [
+        pytest.param(
+            f"xsession_id={ANOTHER_SESSION_COOKIE}; session_id={STORED_SESSION_COOKIE}",
+            id="a cookie whose name ends like the session cookie",
+        ),
+        pytest.param(
+            f"session_id={STORED_SESSION_COOKIE}; session_id_old={ANOTHER_SESSION_COOKIE}",
+            id="a cookie whose name starts like the session cookie",
+        ),
+        pytest.param(
+            f'theme=dark; session_id="{STORED_SESSION_COOKIE}"', id="a quoted session cookie",
+        ),
+    ],
+)
+def test_one_session_cookie_among_others_still_authenticates(
+    auth_app: AuthApp, cookie_header: str,
+) -> None:
+    response = auth_app.client.get("/me", headers={"cookie": cookie_header})
+
+    assert response.status_code == 200
+    assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
+
+
 @pytest.mark.parametrize(
     "record",
     [
@@ -138,6 +217,19 @@ def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None
     assert auth_app.sessions.record.expires_at > before
 
 
+def an_app_authenticating_from_the_cache(record: FakeSessionRecord) -> AuthApp:
+    cache = a_session_cache()
+    cache_session(cache, record)
+    return an_auth_app(None, cache)
+
+
+AUTHENTICATION_PATHS = [
+    pytest.param(an_auth_app, id="from the store"),
+    pytest.param(an_app_authenticating_from_the_cache, id="from the cache"),
+]
+
+
+@pytest.mark.parametrize("an_app", AUTHENTICATION_PATHS)
 @pytest.mark.parametrize(
     ("stored_origin", "change", "previous", "current"),
     [
@@ -152,9 +244,13 @@ def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None
     ],
 )
 def test_a_session_arriving_from_a_new_origin_is_reported_once_by_reference(
-    stored_origin: dict[str, str], change: SessionIdentityChange, previous: str, current: str,
+    an_app: Callable[[FakeSessionRecord], AuthApp],
+    stored_origin: dict[str, str],
+    change: SessionIdentityChange,
+    previous: str,
+    current: str,
 ) -> None:
-    app = an_auth_app(a_session(**stored_origin))
+    app = an_app(a_session(**stored_origin))
 
     app.get("/me", cookie=app.signed_cookie())
 
@@ -169,27 +265,19 @@ def test_a_session_arriving_from_a_new_origin_is_reported_once_by_reference(
     ]
 
 
-def an_app_authenticating_from_the_store(record: FakeSessionRecord) -> AuthApp:
-    return an_auth_app(record)
+def every_recorded_value(recorded: object) -> Iterator[str]:
+    """Each leaf value of an audit event, however deeply it is nested."""
+    if is_dataclass(recorded):
+        for field in fields(recorded):
+            yield from every_recorded_value(getattr(recorded, field.name))
+    elif isinstance(recorded, (list, tuple)):
+        for item in recorded:
+            yield from every_recorded_value(item)
+    else:
+        yield str(recorded)
 
 
-def an_app_authenticating_from_the_cache(record: FakeSessionRecord) -> AuthApp:
-    cache = a_session_cache()
-    cache.store(
-        record.id, record.user.id, record.user.username, record.user.role, record.user.is_active,
-        record.ip_address, record.user_agent, record.expires_at, record.created_at,
-        SESSION_MAX_AGE_SECONDS,
-    )
-    return an_auth_app(None, cache)
-
-
-@pytest.mark.parametrize(
-    "an_app",
-    [
-        pytest.param(an_app_authenticating_from_the_store, id="from the store"),
-        pytest.param(an_app_authenticating_from_the_cache, id="from the cache"),
-    ],
-)
+@pytest.mark.parametrize("an_app", AUTHENTICATION_PATHS)
 def test_no_identity_event_carries_the_raw_session_id_or_cookie(
     an_app: Callable[[FakeSessionRecord], AuthApp],
 ) -> None:
@@ -198,11 +286,12 @@ def test_no_identity_event_carries_the_raw_session_id_or_cookie(
 
     app.get("/me", cookie=cookie)
 
-    recorded_values = [
-        str(getattr(event, field.name)) for event in app.audit.events for field in fields(event)
-    ]
     assert {event.change for event in app.audit.events} == set(SessionIdentityChange)
-    assert not [value for value in recorded_values if SESSION_ID in value or cookie in value]
+    assert not [
+        value
+        for value in every_recorded_value(app.audit.events)
+        if SESSION_ID in value or cookie in value
+    ]
 
 
 def test_a_session_stored_without_an_origin_reports_no_change() -> None:
