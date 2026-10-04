@@ -1,4 +1,7 @@
-"""CsrfOriginMiddleware: Sec-Fetch-Site first, Origin allowlist as fallback."""
+"""CsrfOriginMiddleware: Sec-Fetch-Site first, Origin allowlist as fallback.
+
+CsrfTokenMiddleware: the header token must match the request's one session.
+"""
 
 from __future__ import annotations
 
@@ -6,16 +9,19 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
-from webauth_arrangement import ALLOWED_ORIGIN, API_PATH, a_web_auth_config
+from webauth_arrangement import ALLOWED_ORIGIN, API_PATH, SESSION_ID, a_web_auth_config
 
 from webauth.config import install_web_auth_config
-from webauth.middleware import CsrfOriginMiddleware
+from webauth.cookies import generate_csrf_token, sign_session_id
+from webauth.dependencies import MAX_SESSION_COOKIE_CHARS
+from webauth.middleware import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.policies import CsrfPolicy, PathRules
 
 FOREIGN_ORIGIN = "https://evil.test"
 OK = {"status": "ok"}
 CROSS_ORIGIN_DETAIL = {"detail": "Cross-origin request rejected"}
 MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header on form submission"}
+INVALID_TOKEN_DETAIL = {"detail": "CSRF token missing or invalid"}
 
 
 WEBHOOK_PREFIX = "/webhook/provider/"
@@ -221,3 +227,73 @@ def test_explicit_protected_rules_refuse_an_exempt_rule() -> None:
             protected=PathRules(prefixes=("/api/",)),
             exempt=PathRules(prefixes=(WEBHOOK_PREFIX,)),
         )
+
+
+CONFIG = a_web_auth_config()
+SESSION_COOKIE = sign_session_id(SESSION_ID, CONFIG.signing_key)
+ANOTHER_SESSION_ID = "another-session"
+ANOTHER_SESSION_COOKIE = sign_session_id(ANOTHER_SESSION_ID, CONFIG.signing_key)
+OVERLONG_SESSION_ID = "s" * MAX_SESSION_COOKIE_CHARS
+OVERLONG_SESSION_COOKIE = sign_session_id(OVERLONG_SESSION_ID, CONFIG.signing_key)
+
+
+def a_token_guarded_client() -> TestClient:
+    app = FastAPI()
+    install_web_auth_config(app, CONFIG)
+    app.add_middleware(CsrfTokenMiddleware, policy=CsrfPolicy())
+
+    @app.post(API_PATH)
+    def ok() -> dict[str, str]:
+        return OK
+
+    return TestClient(app, base_url=ALLOWED_ORIGIN, cookies={})
+
+
+def _post_with_token(cookie_header: str, token_for: str) -> Response:
+    return a_token_guarded_client().post(
+        API_PATH,
+        headers={
+            "cookie": cookie_header,
+            CONFIG.csrf_header_name: generate_csrf_token(token_for, CONFIG.signing_key),
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("cookie_header", "token_for", "status", "body"),
+    [
+        pytest.param(f"session_id={SESSION_COOKIE}", SESSION_ID, 200, OK, id="one session"),
+        pytest.param(
+            f"session_id_old={ANOTHER_SESSION_COOKIE}; session_id={SESSION_COOKIE}",
+            SESSION_ID, 200, OK,
+            id="a cookie whose name starts like the session cookie",
+        ),
+        pytest.param(
+            f"session_id={SESSION_COOKIE}; session_id={SESSION_COOKIE}",
+            SESSION_ID, 403, INVALID_TOKEN_DETAIL,
+            id="the same session cookie twice",
+        ),
+        pytest.param(
+            f"session_id={SESSION_COOKIE}; session_id={ANOTHER_SESSION_COOKIE}",
+            SESSION_ID, 403, INVALID_TOKEN_DETAIL,
+            id="a token for the first of two sessions",
+        ),
+        pytest.param(
+            f"session_id={SESSION_COOKIE}; session_id={ANOTHER_SESSION_COOKIE}",
+            ANOTHER_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
+            id="a token for the second of two sessions",
+        ),
+        pytest.param(
+            f"session_id={OVERLONG_SESSION_COOKIE}",
+            OVERLONG_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
+            id="a correctly signed cookie longer than the reader accepts",
+        ),
+    ],
+)
+def test_a_csrf_token_is_honoured_only_for_the_one_session_cookie(
+    cookie_header: str, token_for: str, status: int, body: dict[str, str],
+) -> None:
+    response = _post_with_token(cookie_header, token_for)
+
+    assert response.status_code == status
+    assert response.json() == body

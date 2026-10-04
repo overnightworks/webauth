@@ -53,6 +53,12 @@ over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
+v0.8.0 refuses a request that carries the session cookie more than once:
+`current_user_dependency` answers 401 and `CsrfTokenMiddleware` 403 where
+v0.7 picked one of the values. It adds
+`webauth.dependencies.session_id_from_request(request, config)`; a host that
+reads the session cookie from `request.cookies` itself switches to it.
+
 v0.7.0 changes three public behaviours a host upgrading from v0.6 must act
 on: `issue_session_cookies(response, session_id, config)` no longer takes the
 `request`; a host reached over plain http now gets `Secure` cookies and HSTS
@@ -136,6 +142,18 @@ path, with the asked-for address and query string under the query key it
 named, while every other request still gets 401. A dependency can only raise
 an `HTTPException`, so the 302 still carries FastAPI's default JSON body
 (`{"detail":"Found"}`) alongside its `Location` header.
+
+`webauth.dependencies.session_id_from_request(request, config)` is the one
+reader of the session cookie: it parses the raw `Cookie` headers and returns
+the verified session identifier, or `None` when the cookie is missing, longer
+than `MAX_SESSION_COOKIE_CHARS` (200 characters), forged, or present more than
+once. The limit holds even for a correctly signed cookie: `issue_session_cookies`
+does not cap the session identifier it signs, and an identifier over 135
+characters yields a cookie every reader refuses. A sibling
+subdomain can set a second cookie of the same name, so a request carrying two
+is refused rather than resolved to either: `current_user_dependency` answers
+401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
+session cookie itself calls this function instead of `request.cookies`.
 
 ## users
 
