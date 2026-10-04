@@ -106,10 +106,15 @@ DEFAULT_RATE_WINDOW_SECONDS = 60
 
 
 def _rate_limited_client(
-    rate_limits: RateLimitBackend, policy: RateLimitPolicy, paths: tuple[str, ...],
+    rate_limits: RateLimitBackend,
+    policy: RateLimitPolicy,
+    paths: tuple[str, ...],
+    config_overrides: dict[str, object],
 ) -> TestClient:
     app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config(rate_limits=rate_limits))
+    install_web_auth_config(
+        app, a_web_auth_config(rate_limits=rate_limits, **config_overrides),
+    )
     app.add_middleware(IpRateLimitMiddleware, policy=policy)
     for path in paths:
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET"])
@@ -121,17 +126,19 @@ def a_rate_limited_client(
     *,
     max_requests: int,
     window_seconds: int = DEFAULT_RATE_WINDOW_SECONDS,
+    **config_overrides: object,
 ) -> TestClient:
     """A client whose every request spends one budget of ``rate_limits``.
 
     Every class shares one budget so the test drives the limiter through the
-    real middleware regardless of how a path classifies.
+    real middleware regardless of how a path classifies; a keyword replaces the
+    configuration field it names.
     """
     budget = RateLimitBudget(max_requests, window_seconds)
     policy = RateLimitPolicy(
         budgets={rate_limit_class: budget for rate_limit_class in RateLimitClass},
     )
-    return _rate_limited_client(rate_limits, policy, (API_PATH,))
+    return _rate_limited_client(rate_limits, policy, (API_PATH,), config_overrides)
 
 
 def a_class_split_rate_limited_client(
@@ -154,7 +161,7 @@ def a_class_split_rate_limited_client(
         },
         media=PathRules(prefixes=(MEDIA_PATH,)),
     )
-    return _rate_limited_client(rate_limits, policy, (API_PATH, MEDIA_PATH))
+    return _rate_limited_client(rate_limits, policy, (API_PATH, MEDIA_PATH), {})
 
 
 def a_session_cache(redis: object | None = None) -> RedisSessionCache:

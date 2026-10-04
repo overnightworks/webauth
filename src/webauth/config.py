@@ -90,9 +90,13 @@ class WebAuthConfig:
                 "cookie_secure must be True or False; it alone decides whether the "
                 "cookies carry Secure and responses carry HSTS",
             )
-        if self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE:
+        if (
+            type(self.ipv6_budget_prefix) is not int
+            or self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE
+        ):
             raise ValueError(
-                f"ipv6_budget_prefix must lie between {IPV6_BUDGET_PREFIX_RANGE.start} "
+                "ipv6_budget_prefix must be an integer between "
+                f"{IPV6_BUDGET_PREFIX_RANGE.start} "
                 f"and {IPV6_BUDGET_PREFIX_RANGE.stop - 1}; it is the network size "
                 "whose addresses share one rate-limit budget",
             )

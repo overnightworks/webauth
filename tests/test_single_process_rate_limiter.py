@@ -123,6 +123,13 @@ class TestMiddlewareOverSingleProcessBackend:
         assert _from_peer(client, "2001:db8:1:2::3").get(RATE_LIMITED_PATH).status_code == 429
         assert _from_peer(client, "2001:db8:1:3::1").get(RATE_LIMITED_PATH).status_code == 200
 
+    def test_a_configured_ipv6_budget_prefix_pools_a_wider_network(self) -> None:
+        client = a_rate_limited_client(
+            SingleProcessRateLimitBackend(), max_requests=1, ipv6_budget_prefix=48,
+        )
+        assert _from_peer(client, "2001:db8:1:2::1").get(RATE_LIMITED_PATH).status_code == 200
+        assert _from_peer(client, "2001:db8:1:ff::1").get(RATE_LIMITED_PATH).status_code == 429
+
     def test_two_ipv4_addresses_keep_budgets_of_their_own(self) -> None:
         client = a_rate_limited_client(SingleProcessRateLimitBackend(), max_requests=1)
         assert _from_peer(client, "203.0.113.7").get(RATE_LIMITED_PATH).status_code == 200
