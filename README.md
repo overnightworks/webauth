@@ -197,8 +197,11 @@ must check even a `None` `stored_hash` against a fixed dummy at full cost, so a
 username nobody holds cannot be told from a wrong password by timing.
 
 `webauth.passwords.Argon2idPasswordHasher` is provided and honours that
-contract. It normalises every password to Unicode NFC before hashing, as
-`check_password_strength` does before measuring it. New hashes use OWASP's
+contract. It normalises every password to Unicode NFC in both `hash` and
+`verify`, as `check_password_strength` does before measuring it.
+Normalisation is the hasher's job: the library passes the password as typed,
+so a host hasher that wants spelling-independence normalises in both `hash`
+and `verify`. New hashes use OWASP's
 Argon2id costs (m=19 MiB, t=2, p=1), held in `OWASP_ARGON2ID`; a host passes its
 own `argon2.Parameters` to the constructor to change them. Those parameters
 are the host's one cost profile: `verify` accepts only an Argon2id hash that

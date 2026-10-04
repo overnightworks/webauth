@@ -16,6 +16,7 @@ from webauth_arrangement import (
     LegibleHasher,
     LockNotHeldError,
     UsersWithSetupRace,
+    a_cheap_argon2id_hasher,
     a_session_cache,
     a_session_cache_failing_on,
     a_user_management,
@@ -24,8 +25,10 @@ from webauth_arrangement import (
 )
 
 from webauth.dependencies import AuthenticatedUser
+from webauth.login import LoginOutcome, judge_credentials
 from webauth.ports import (
     AuditSink,
+    PasswordHasher,
     SessionAdministrationStore,
     UnknownUserError,
     UserAdministrationStore,
@@ -53,6 +56,8 @@ from webauth.users import (
 
 CHOSEN_PASSWORD = "River!Lantern92"
 NEW_PASSWORD = "Mountain!Beacon83"
+COMPOSED_PASSWORD = "Caf\u00e9!Lantern92"
+DECOMPOSED_PASSWORD = "Cafe\u0301!Lantern92"
 AdminOperation = Callable[[UserManagement, AuthenticatedUser], object]
 RoleOperation = Callable[[UserManagement, AuthenticatedUser, str], object]
 PasswordOperation = Callable[[UserManagement, AuthenticatedUser, str], object]
@@ -80,6 +85,32 @@ def revoke_subject_sessions(management: UserManagement, actor: AuthenticatedUser
     return management.revoke_user_sessions(actor, "subject")
 
 
+def the_subject_signed_in(
+    management: UserManagement, actor: AuthenticatedUser,
+) -> AuthenticatedUser:
+    return replace(actor, id="subject", username="member", role=management.config.user_role)
+
+
+def reset_subject_password(
+    management: UserManagement, actor: AuthenticatedUser, password: str,
+) -> None:
+    management.set_password(actor, "subject", password)
+
+
+def change_subject_own_password(
+    management: UserManagement, actor: AuthenticatedUser, password: str,
+) -> None:
+    management.change_own_password(
+        the_subject_signed_in(management, actor), CHOSEN_PASSWORD, password,
+    )
+
+
+def to_new_password(change: PasswordOperation) -> AdminOperation:
+    def change_to_new_password(management: UserManagement, actor: AuthenticatedUser) -> object:
+        return change(management, actor, NEW_PASSWORD)
+    return change_to_new_password
+
+
 ADMIN_OPERATIONS = [
     pytest.param(create_member, id="create_user"),
     pytest.param(promote_subject, id="change_role"),
@@ -89,10 +120,9 @@ ADMIN_OPERATIONS = [
     pytest.param(lambda m, a: m.revoke_session(a, "unknown"), id="revoke_session"),
 ]
 
-@pytest.fixture
-def management() -> UserManagement:
+def a_management_hashing_with(hasher: PasswordHasher) -> UserManagement:
     config = a_web_auth_config(
-        admin_role="operator", user_role="member", password_hasher=LegibleHasher(),
+        admin_role="operator", user_role="member", password_hasher=hasher,
     )
     return a_user_management(
         FakeUser(
@@ -105,6 +135,11 @@ def management() -> UserManagement:
         ),
         config=config,
     )
+
+
+@pytest.fixture
+def management() -> UserManagement:
+    return a_management_hashing_with(LegibleHasher())
 
 
 @pytest.fixture
@@ -648,20 +683,12 @@ def test_hosts_can_catch_every_management_refusal_through_its_common_base(
 
 
 PASSWORD_CHANGES = [
-    pytest.param(
-        lambda m, a, password: m.set_password(a, "subject", password),
-        "password_set_by_admin", "actor", id="admin_reset",
-    ),
-    pytest.param(
-        lambda m, a, password: m.change_own_password(
-            replace(a, id="subject", username="member", role=m.config.user_role),
-            CHOSEN_PASSWORD, password,
-        ),
-        "password_changed", "subject", id="own_password",
-    ),
+    pytest.param(reset_subject_password, "password_set_by_admin", "actor", id="admin_reset"),
+    pytest.param(change_subject_own_password, "password_changed", "subject", id="own_password"),
 ]
 PASSWORD_OPERATIONS = [
-    pytest.param(change.values[0], id=change.id) for change in PASSWORD_CHANGES
+    pytest.param(reset_subject_password, id="admin_reset"),
+    pytest.param(change_subject_own_password, id="own_password"),
 ]
 
 
@@ -767,25 +794,48 @@ def test_REQ_ADMIN_10_password_changes_reject_weak_passwords_without_writes(
     assert management.audit.user_management_events == []
 
 
+@pytest.mark.parametrize(("hasher", "typed", "admitted", "refused"), [
+    pytest.param(
+        LegibleHasher(), DECOMPOSED_PASSWORD, [DECOMPOSED_PASSWORD], [COMPOSED_PASSWORD],
+        id="injected_hasher_decomposed",
+    ),
+    pytest.param(
+        LegibleHasher(), COMPOSED_PASSWORD, [COMPOSED_PASSWORD], [DECOMPOSED_PASSWORD],
+        id="injected_hasher_composed",
+    ),
+    pytest.param(
+        a_cheap_argon2id_hasher(), DECOMPOSED_PASSWORD,
+        [DECOMPOSED_PASSWORD, COMPOSED_PASSWORD], [], id="argon2id_decomposed",
+    ),
+    pytest.param(
+        a_cheap_argon2id_hasher(), COMPOSED_PASSWORD,
+        [COMPOSED_PASSWORD, DECOMPOSED_PASSWORD], [], id="argon2id_composed",
+    ),
+])
 @pytest.mark.parametrize("operation", PASSWORD_OPERATIONS)
-def test_REQ_ADMIN_10_password_changes_store_the_composed_spelling_of_the_password(
-    management: UserManagement, actor: AuthenticatedUser, operation: PasswordOperation,
+def test_REQ_ADMIN_10_a_changed_password_logs_in_as_its_hasher_matches_the_typed_spelling(
+    actor: AuthenticatedUser, operation: PasswordOperation, hasher: PasswordHasher,
+    typed: str, admitted: list[str], refused: list[str],
 ) -> None:
-    decomposed = "Cafe\u0301!Lantern92"
+    management = a_management_hashing_with(hasher)
 
-    operation(management, actor, decomposed)
+    operation(management, actor, typed)
 
-    stored_hash = management.users.get("subject").password_hash
-    assert stored_hash == management.config.password_hasher.hash("Caf\u00e9!Lantern92")
+    subject = management.users.get("subject")
+    for spelling in admitted:
+        assert judge_credentials(spelling, subject, hasher=hasher) is LoginOutcome.ADMITTED
+    for spelling in refused:
+        assert judge_credentials(spelling, subject, hasher=hasher) is LoginOutcome.WRONG_PASSWORD
+    management.change_own_password(
+        the_subject_signed_in(management, actor), typed, NEW_PASSWORD,
+    )
+    changed = management.users.get("subject")
+    assert judge_credentials(NEW_PASSWORD, changed, hasher=hasher) is LoginOutcome.ADMITTED
 
 
 @pytest.mark.parametrize("operation", [
-    *(
-        pytest.param(
-            lambda m, a, change=change.values[0]: change(m, a, NEW_PASSWORD), id=change.id,
-        )
-        for change in PASSWORD_OPERATIONS
-    ),
+    pytest.param(to_new_password(reset_subject_password), id="admin_reset"),
+    pytest.param(to_new_password(change_subject_own_password), id="own_password"),
     pytest.param(promote_subject, id="change_role"),
     pytest.param(deactivate_subject, id="deactivate_user"),
     pytest.param(revoke_subject_sessions, id="revoke_user_sessions"),

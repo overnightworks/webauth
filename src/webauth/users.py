@@ -284,7 +284,7 @@ def complete_first_run_setup(
 
 def _hash_password(password: str, config: WebAuthConfig) -> str:
     try:
-        password = check_password_strength(password)
+        check_password_strength(password)
     except ValueError as error:
         raise WeakPasswordError(str(error)) from error
     return config.password_hasher.hash(password)
