@@ -284,3 +284,43 @@ def test_an_application_without_a_configuration_names_nobody() -> None:
         pytest.raises(RuntimeError, match="install_web_auth_config"),
     ):
         client.get("/client-ip", headers={"x-forwarded-for": _CLIENT})
+
+
+# -- Forwarded protocol ------------------------------------------------------
+
+
+def _scheme_app() -> FastAPI:
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config())
+
+    @app.get("/is-https")
+    def is_https(request: Request) -> dict:
+        return {"https": proxies.request_is_https(request)}
+
+    return app
+
+
+@pytest.mark.parametrize(("base_url", "peer", "forwarded_proto", "https"), [
+    pytest.param("https://testserver", "testclient", None, True, id="own-https-connection"),
+    pytest.param("http://testserver", _TRUSTED_PEER, "https", True, id="trusted-proxy-says-https"),
+    pytest.param(
+        "http://testserver", _TRUSTED_PEER, "http, https", True,
+        id="trusted-proxy-appended-https-last",
+    ),
+    pytest.param(
+        "http://testserver", _TRUSTED_PEER, "https, http", False,
+        id="client-prepended-https-before-trusted-http",
+    ),
+    pytest.param("http://testserver", _TRUSTED_PEER, None, False, id="trusted-proxy-says-nothing"),
+    pytest.param("http://testserver", _CLIENT, "https", False, id="untrusted-peer-says-https"),
+    pytest.param("http://testserver", _CLIENT, None, False, id="untrusted-plain-http"),
+])
+def test_https_counts_only_from_the_connection_or_a_trusted_proxy(
+    base_url: str, peer: str, forwarded_proto: str | None, https: bool,
+) -> None:
+    headers = {} if forwarded_proto is None else {"x-forwarded-proto": forwarded_proto}
+
+    with TestClient(_scheme_app(), base_url=base_url, client=(peer, 55000)) as client:
+        response = client.get("/is-https", headers=headers)
+
+    assert response.json() == {"https": https}

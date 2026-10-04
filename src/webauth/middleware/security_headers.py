@@ -26,6 +26,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     HSTS follows the configured ``cookie_secure``, never the request's scheme:
     behind a TLS proxy the host has not listed, every request looks like plain
     http, and a deployment that serves Secure cookies must still pin https.
+    With ``cookie_secure`` off no HSTS leaves, not even one a route set: a
+    browser that pinned https could no longer reach the plain-http host.
     """
 
     def __init__(self, app, policy: SecurityHeadersPolicy, **kwargs):  # type: ignore[no-untyped-def]
@@ -33,6 +35,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self._policy = policy
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        cookie_secure = web_auth_config(request).cookie_secure
         response = await call_next(request)
         cache_control = self._policy.cache_control(request.url.path)
         if cache_control is not None:
@@ -42,6 +45,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = self._policy.content_security_policy
         response.headers["Referrer-Policy"] = REFERRER_POLICY
         response.headers["Permissions-Policy"] = PERMISSIONS_POLICY
-        if web_auth_config(request).cookie_secure:
+        if cookie_secure:
             response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
+        elif "Strict-Transport-Security" in response.headers:
+            del response.headers["Strict-Transport-Security"]
         return response

@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
 from httpx import Response as ClientResponse
 from webauth_arrangement import a_cheap_argon2id_hasher, a_web_auth_config
@@ -47,7 +48,11 @@ CLEARED_CSRF_WITHOUT_SECURE = 'csrf_token=""; Max-Age=0; Path=/; SameSite=strict
 CLEARED_SESSION_SET_COOKIE = f"{CLEARED_SESSION_WITHOUT_SECURE}; Secure"
 CLEARED_CSRF_SET_COOKIE = f"{CLEARED_CSRF_WITHOUT_SECURE}; Secure"
 UNTRUSTED_PROXY_SAYS_HTTPS = {"x-forwarded-proto": "https"}
-STRICT_TRANSPORT_SECURITY = "strict-transport-security"
+TRUSTED_PROXY_SAYS_HTTP = {"x-forwarded-proto": "http"}
+UNTRUSTED_PEER = "testclient"
+TRUSTED_PEER = "172.18.0.1"  # inside the arrangement's trusted proxy network
+HSTS_HEADER = "strict-transport-security"
+HSTS_PINNING_HTTPS_FOR_A_YEAR = "max-age=31536000; includeSubDomains"
 
 A_CORRECT_PASSWORD = "the-correct-password"
 A_WRONG_PASSWORD = "something-else-entirely"
@@ -62,6 +67,9 @@ class CookieApp:
 
     def issue(self, headers: dict[str, str] | None = None) -> ClientResponse:
         return self.client.post("/issue", headers=headers)
+
+    def visit(self, path: str) -> ClientResponse:
+        return self.client.get(path, follow_redirects=False)
 
     def signed_in_session(self) -> ClientResponse:
         return self.client.get("/session")
@@ -84,19 +92,25 @@ class CookieApp:
         )
 
 
-def a_cookie_app(*, base_url: str = OVER_HTTPS, **config_overrides: object) -> CookieApp:
-    """The cookie routes behind the security headers a deployment installs.
-
-    The test client's peer address is outside the configured trusted proxies,
-    so a forwarded scheme it sends is the untrusted-proxy case.
-    """
-    config = a_web_auth_config(**config_overrides)
-    app = FastAPI()
-    install_web_auth_config(app, config)
+def with_security_headers(app: FastAPI) -> None:
     app.add_middleware(
         SecurityHeadersMiddleware,
         policy=SecurityHeadersPolicy(default_content_security_policy([])),
     )
+
+
+def a_cookie_app(
+    *, base_url: str = OVER_HTTPS, peer: str = UNTRUSTED_PEER, **config_overrides: object,
+) -> CookieApp:
+    """The cookie routes behind the security headers a deployment installs.
+
+    By default the test client's peer address is outside the configured
+    trusted proxies, so a forwarded scheme it sends is the untrusted-proxy case.
+    """
+    config = a_web_auth_config(**config_overrides)
+    app = FastAPI()
+    install_web_auth_config(app, config)
+    with_security_headers(app)
 
     @app.post("/issue")
     def issue(response: Response) -> dict[str, str]:
@@ -113,7 +127,19 @@ def a_cookie_app(*, base_url: str = OVER_HTTPS, **config_overrides: object) -> C
         clear_session_cookies(response, config)
         return {"status": "ok"}
 
-    return CookieApp(client=TestClient(app, base_url=base_url), config=config)
+    @app.get("/moved")
+    def moved() -> RedirectResponse:
+        return RedirectResponse("/session")
+
+    @app.get("/forbidden")
+    def forbidden() -> None:
+        raise HTTPException(status_code=403)
+
+    @app.get("/route-pins-https")
+    def route_pins_https() -> Response:
+        return Response(headers={"Strict-Transport-Security": "max-age=60"})
+
+    return CookieApp(client=TestClient(app, base_url=base_url, client=(peer, 50000)), config=config)
 
 
 @pytest.fixture
@@ -197,21 +223,62 @@ def test_the_csrf_token_is_readable_by_the_client_and_bound_to_the_session(
     assert verify_csrf_token(token, SESSION_ID, cookie_app.config.signing_key)
 
 
-@pytest.mark.parametrize(("base_url", "headers"), [
-    pytest.param(OVER_HTTPS, None, id="over-https"),
-    pytest.param(PLAIN_HTTP, UNTRUSTED_PROXY_SAYS_HTTPS, id="behind-an-untrusted-tls-proxy"),
-    pytest.param(PLAIN_HTTP, None, id="over-plain-http"),
+@pytest.mark.parametrize(("base_url", "peer", "headers"), [
+    pytest.param(OVER_HTTPS, UNTRUSTED_PEER, None, id="over-https"),
+    pytest.param(
+        PLAIN_HTTP, UNTRUSTED_PEER, UNTRUSTED_PROXY_SAYS_HTTPS,
+        id="behind-an-untrusted-tls-proxy",
+    ),
+    pytest.param(PLAIN_HTTP, TRUSTED_PEER, TRUSTED_PROXY_SAYS_HTTP, id="trusted-proxy-says-http"),
+    pytest.param(PLAIN_HTTP, UNTRUSTED_PEER, None, id="over-plain-http"),
 ])
 def test_a_host_that_configures_nothing_gets_secure_cookies_and_hsts_however_reached(
-    base_url: str, headers: dict[str, str] | None,
+    base_url: str, peer: str, headers: dict[str, str] | None,
 ) -> None:
-    app = a_cookie_app(base_url=base_url)
+    app = a_cookie_app(base_url=base_url, peer=peer)
 
     response = app.issue(headers)
 
     for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
         assert "Secure" in app.set_cookie_header(response, name).split("; ")
-    assert STRICT_TRANSPORT_SECURITY in response.headers
+    assert response.headers[HSTS_HEADER] == HSTS_PINNING_HTTPS_FOR_A_YEAR
+
+
+@pytest.mark.parametrize(("path", "status"), [
+    pytest.param("/moved", 307, id="redirect"),
+    pytest.param("/forbidden", 403, id="handled-error"),
+    pytest.param("/route-pins-https", 200, id="route-sets-its-own-hsts"),
+])
+@pytest.mark.parametrize(("cookie_secure", "hsts"), [
+    pytest.param(True, HSTS_PINNING_HTTPS_FOR_A_YEAR, id="secure"),
+    pytest.param(False, None, id="secure-off"),
+])
+def test_every_answer_carries_exactly_the_hsts_cookie_secure_decides(
+    path: str, status: int, cookie_secure: bool, hsts: str | None,
+) -> None:
+    app = a_cookie_app(cookie_secure=cookie_secure)
+
+    response = app.visit(path)
+
+    assert response.status_code == status
+    assert response.headers.get(HSTS_HEADER) == hsts
+
+
+def test_security_headers_without_a_configuration_stop_before_the_route_runs() -> None:
+    route_ran: list[bool] = []
+    app = FastAPI()
+    with_security_headers(app)
+
+    @app.post("/side-effect")
+    def side_effect() -> None:
+        route_ran.append(True)
+
+    with (
+        TestClient(app, base_url=OVER_HTTPS) as client,
+        pytest.raises(RuntimeError, match="install_web_auth_config"),
+    ):
+        client.post("/side-effect")
+    assert route_ran == []
 
 
 def test_a_host_that_switches_cookie_secure_off_gets_neither_secure_nor_hsts() -> None:
@@ -221,7 +288,7 @@ def test_a_host_that_switches_cookie_secure_off_gets_neither_secure_nor_hsts() -
 
     for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
         assert "Secure" not in app.set_cookie_header(response, name).split("; ")
-    assert STRICT_TRANSPORT_SECURITY not in response.headers
+    assert HSTS_HEADER not in response.headers
 
 
 def test_with_cookie_secure_off_a_plain_http_browser_signs_in_and_out() -> None:

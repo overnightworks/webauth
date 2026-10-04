@@ -49,7 +49,16 @@ sends HSTS. The request's scheme no longer decides it, so a deployment behind
 a TLS proxy it has not listed in `trusted_proxies` still gets both. A browser
 does not send a `Secure` cookie back over plain http, so local development
 over http works only with `cookie_secure=False` in that environment's
-configuration, which drops `Secure` and HSTS together.
+configuration, which drops `Secure` and HSTS together. With it off,
+`SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
+
+v0.6.0 changes three public behaviours a host upgrading from v0.5 must act
+on: `issue_session_cookies(response, session_id, config)` no longer takes the
+`request`; a host reached over plain http now gets `Secure` cookies and HSTS
+unless its configuration sets `cookie_secure=False`; and
+`SecurityHeadersMiddleware` reads the installed configuration, so an
+application without `install_web_auth_config` gets a `RuntimeError` before
+its route runs.
 
 v0.3.0 clears the session cookies with the configured SameSite (`"strict"` by
 default), where v0.2.0 cleared them with `lax`. A cookie is deleted by name,
