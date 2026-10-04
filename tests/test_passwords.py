@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 from argon2 import Parameters, Type, extract_parameters
 from argon2 import PasswordHasher as Argon2PasswordHasher
+from argon2.exceptions import VerificationError
 from argon2.profiles import CHEAPEST
 from webauth_arrangement import Argon2idStyleHasher, FakeUser, a_cheap_argon2id_hasher
 
@@ -46,6 +47,13 @@ def _with_salt_and_digest(stored_hash: str, salt: str, digest: str) -> str:
     """The hash with its salt and digest replaced, every other field kept."""
     head = stored_hash.split("$")[:4]
     return "$".join([*head, salt, digest])
+
+
+def _with_stray_trailing_bits(field: str) -> str:
+    """The field with the unused low bit of its last character set: same length,
+    but no longer the canonical base64 Argon2 decodes."""
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    return field[:-1] + alphabet[alphabet.index(field[-1]) ^ 1]
 
 
 A_CHEAP_HASH = a_cheap_argon2id_hasher().hash(A_PASSWORD)
@@ -147,6 +155,12 @@ def test_composed_and_decomposed_spellings_match_the_same_hash(hashed: str, type
         _with_salt_and_digest(A_CHEAP_HASH, A_CHEAP_SALT, "\x00" * len(A_CHEAP_DIGEST)),
         id="argon2id_digest_of_nul_bytes",
     ),
+    pytest.param(
+        _with_salt_and_digest(
+            A_CHEAP_HASH, _with_stray_trailing_bits(A_CHEAP_SALT), A_CHEAP_DIGEST,
+        ),
+        id="argon2id_salt_with_stray_trailing_bits",
+    ),
 ])
 def test_a_hash_outside_the_hosts_argon2id_profile_fails_loudly(stored_hash: str) -> None:
     with pytest.raises(UnknownHashFormatError):
@@ -159,6 +173,20 @@ def test_a_hash_cheaper_than_the_hosts_profile_fails_loudly() -> None:
 
     with pytest.raises(UnknownHashFormatError):
         host.verify(A_PASSWORD, A_CHEAP_HASH)
+
+
+def test_an_argon2_failure_on_a_well_formed_hash_is_not_reported_as_a_bad_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Memory or thread exhaustion says nothing about the stored hash, so it
+    surfaces as Argon2's own error rather than as an unknown hash format."""
+    def exhausted_verify(self: Argon2PasswordHasher, stored: str, password: str) -> bool:
+        raise VerificationError("Memory allocation error")
+
+    monkeypatch.setattr(Argon2PasswordHasher, "verify", exhausted_verify)
+
+    with pytest.raises(VerificationError, match="Memory allocation error"):
+        a_cheap_argon2id_hasher().verify(A_PASSWORD, A_CHEAP_HASH)
 
 
 def test_an_unknown_user_is_verified_at_the_cost_of_a_wrong_password(

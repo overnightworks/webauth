@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import unicodedata
 from typing import Final
 
 from argon2 import Parameters, Type, extract_parameters
 from argon2 import PasswordHasher as Argon2PasswordHasher
-from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from argon2.low_level import ARGON2_VERSION
 
 OWASP_ARGON2ID: Final = Parameters(
@@ -90,8 +92,10 @@ class Argon2idPasswordHasher:
     salt and hash length. Every other stored value raises
     ``UnknownHashFormatError`` rather than reading as a wrong password: bcrypt,
     Argon2i, Argon2d, an empty or garbled string, an Argon2id hash at other
-    costs (dearer or cheaper), and one whose salt or digest Argon2 cannot
-    decode, with Argon2's own error attached as the cause.
+    costs (dearer or cheaper), and one whose salt or digest is not the
+    canonical unpadded base64 of the profile's salt and hash length. A
+    well-formed hash that Argon2 still fails to check — memory or thread
+    exhaustion — raises Argon2's own ``VerificationError`` unchanged.
     """
 
     def __init__(self, parameters: Parameters = OWASP_ARGON2ID) -> None:
@@ -127,18 +131,31 @@ class Argon2idPasswordHasher:
             raise UnknownHashFormatError(
                 "stored password hash is not Argon2id at this host's parameters"
             )
+        salt, digest = stored_hash.split("$")[4:]
+        if not (
+            _is_phc_base64_of_length(salt, parameters.salt_len)
+            and _is_phc_base64_of_length(digest, parameters.hash_len)
+        ):
+            raise UnknownHashFormatError("stored password hash has a malformed salt or digest")
 
     def _matches(self, password: str, stored_hash: str) -> bool:
         try:
             return self._argon2.verify(stored_hash, _normalized_password(password))
         except VerifyMismatchError:
             return False
-        except VerificationError as error:
-            # The parameters equal those the dummy was hashed with at
-            # construction, so what Argon2 still refuses is the stored
-            # encoding itself; argon2-cffi names no public code to tell that
-            # apart from a resource fault, hence the chained cause.
-            raise UnknownHashFormatError("stored password hash cannot be decoded") from error
+
+
+def _is_phc_base64_of_length(field: str, length: int) -> bool:
+    """Whether ``field`` is the canonical unpadded base64 of ``length`` bytes.
+
+    Argon2's decoder rejects padding and stray trailing bits, so only a field
+    that re-encodes to itself is one Argon2 will read.
+    """
+    try:
+        decoded = base64.b64decode(field + "=" * (-len(field) % 4), validate=True)
+    except binascii.Error:
+        return False
+    return len(decoded) == length and base64.b64encode(decoded).decode().rstrip("=") == field
 
 
 def check_password_strength(value: str | None) -> str | None:

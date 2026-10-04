@@ -207,8 +207,10 @@ length), so an unknown username costs the same as any accepted hash. Every
 other stored value raises `webauth.passwords.UnknownHashFormatError` instead
 of reading as a wrong password — bcrypt, Argon2i, Argon2d, an empty or garbled
 string, an Argon2id hash at other costs (a 64 MiB one as much as a cheaper
-one), and an Argon2id hash whose salt or digest Argon2 cannot decode, with
-Argon2's error chained as the cause. After changing the parameters, set each
+one), and an Argon2id hash whose salt or digest is not canonical unpadded
+base64 of the profile's salt and hash length. A well-formed hash that Argon2
+still fails to check, for example under memory or thread exhaustion, raises
+Argon2's own `argon2.exceptions.VerificationError` unchanged. After changing the parameters, set each
 password anew, for example with `set_password`. A host with another algorithm
 supplies its own class implementing the same protocol.
 
