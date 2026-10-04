@@ -24,6 +24,7 @@ from webauth_arrangement import (
     cache_session,
 )
 
+from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.login import LoginOutcome, judge_credentials
 from webauth.ports import (
@@ -51,7 +52,6 @@ from webauth.users import (
     WeakPasswordError,
     WrongPasswordError,
     complete_first_run_setup,
-    session_reference,
 )
 
 CHOSEN_PASSWORD = "River!Lantern92"

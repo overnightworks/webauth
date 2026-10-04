@@ -19,7 +19,7 @@ from fastapi import Depends, HTTPException, Request
 from starlette.responses import JSONResponse, Response
 
 from webauth.config import WebAuthConfig, web_auth_config
-from webauth.cookies import verify_session_cookie
+from webauth.cookies import session_reference, verify_session_cookie
 from webauth.ports import (
     AuditSink,
     SessionIdentityChange,
@@ -271,7 +271,7 @@ def _record_identity_changes(
             SessionIdentityChanged(
                 change=SessionIdentityChange.IP_ADDRESS,
                 user_id=user_id,
-                session_id=session_id,
+                session_ref=session_reference(session_id),
                 previous=stored_ip,
                 current=current_ip,
             ),
@@ -281,7 +281,7 @@ def _record_identity_changes(
             SessionIdentityChanged(
                 change=SessionIdentityChange.USER_AGENT,
                 user_id=user_id,
-                session_id=session_id,
+                session_ref=session_reference(session_id),
                 previous=stored_user_agent,
                 current=current_user_agent,
             ),

@@ -7,11 +7,11 @@ operation must be rolled back by the host, including a raced first setup.
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 from dataclasses import dataclass
 
 from webauth.config import WebAuthConfig
+from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.passwords import check_password_strength
 from webauth.ports import (
@@ -71,11 +71,6 @@ class SessionSummary:
     username: str
     ip_address: str
     user_agent: str
-
-
-def session_reference(session_id: str) -> str:
-    """Return the public SHA-256 reference for a raw session identifier."""
-    return hashlib.sha256(session_id.encode()).hexdigest()
 
 
 @dataclass(frozen=True)

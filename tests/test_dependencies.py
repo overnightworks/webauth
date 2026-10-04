@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import fields
 from datetime import timedelta
 
 import pytest
@@ -12,17 +14,19 @@ from webauth_arrangement import (
     IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
     SESSION_ID,
+    SESSION_MAX_AGE_SECONDS,
     UNAUTHENTICATED_RESPONSE_PATH,
     AuthApp,
     FakeSessionRecord,
     FakeUser,
     a_session,
+    a_session_cache,
     an_auth_app,
     an_idle_auth_app,
     an_idle_session,
 )
 
-from webauth.cookies import sign_session_id
+from webauth.cookies import session_reference, sign_session_id
 from webauth.dependencies import (
     ACCOUNT_DISABLED_DETAIL,
     ADMIN_REQUIRED_DETAIL,
@@ -134,36 +138,71 @@ def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None
     assert auth_app.sessions.record.expires_at > before
 
 
-def test_a_session_arriving_from_a_new_address_is_reported_once(auth_app: AuthApp) -> None:
-    auth_app.sessions.record.ip_address = "203.0.113.9"
+@pytest.mark.parametrize(
+    ("stored_origin", "change", "previous", "current"),
+    [
+        pytest.param(
+            {"ip_address": "203.0.113.9"}, SessionIdentityChange.IP_ADDRESS,
+            "203.0.113.9", CLIENT_ADDRESS, id="a new address",
+        ),
+        pytest.param(
+            {"user_agent": "OldBrowser/1.0"}, SessionIdentityChange.USER_AGENT,
+            "OldBrowser/1.0", CLIENT_USER_AGENT, id="a new agent",
+        ),
+    ],
+)
+def test_a_session_arriving_from_a_new_origin_is_reported_once_by_reference(
+    stored_origin: dict[str, str], change: SessionIdentityChange, previous: str, current: str,
+) -> None:
+    app = an_auth_app(a_session(**stored_origin))
 
-    auth_app.get("/me", cookie=auth_app.signed_cookie())
+    app.get("/me", cookie=app.signed_cookie())
 
-    assert auth_app.audit.events == [
+    assert app.audit.events == [
         SessionIdentityChanged(
-            change=SessionIdentityChange.IP_ADDRESS,
+            change=change,
             user_id="user-1",
-            session_id=SESSION_ID,
-            previous="203.0.113.9",
-            current=CLIENT_ADDRESS,
+            session_ref=session_reference(SESSION_ID),
+            previous=previous,
+            current=current,
         ),
     ]
 
 
-def test_a_session_arriving_from_a_new_agent_is_reported_once(auth_app: AuthApp) -> None:
-    auth_app.sessions.record.user_agent = "OldBrowser/1.0"
+def an_app_authenticating_from_the_store(record: FakeSessionRecord) -> AuthApp:
+    return an_auth_app(record)
 
-    auth_app.get("/me", cookie=auth_app.signed_cookie())
 
-    assert auth_app.audit.events == [
-        SessionIdentityChanged(
-            change=SessionIdentityChange.USER_AGENT,
-            user_id="user-1",
-            session_id=SESSION_ID,
-            previous="OldBrowser/1.0",
-            current=CLIENT_USER_AGENT,
-        ),
+def an_app_authenticating_from_the_cache(record: FakeSessionRecord) -> AuthApp:
+    cache = a_session_cache()
+    cache.store(
+        record.id, record.user.id, record.user.username, record.user.role, record.user.is_active,
+        record.ip_address, record.user_agent, record.expires_at, record.created_at,
+        SESSION_MAX_AGE_SECONDS,
+    )
+    return an_auth_app(None, cache)
+
+
+@pytest.mark.parametrize(
+    "an_app",
+    [
+        pytest.param(an_app_authenticating_from_the_store, id="from the store"),
+        pytest.param(an_app_authenticating_from_the_cache, id="from the cache"),
+    ],
+)
+def test_no_identity_event_carries_the_raw_session_id_or_cookie(
+    an_app: Callable[[FakeSessionRecord], AuthApp],
+) -> None:
+    app = an_app(a_session(ip_address="203.0.113.9", user_agent="OldBrowser/1.0"))
+    cookie = app.signed_cookie()
+
+    app.get("/me", cookie=cookie)
+
+    recorded_values = [
+        str(getattr(event, field.name)) for event in app.audit.events for field in fields(event)
     ]
+    assert {event.change for event in app.audit.events} == set(SessionIdentityChange)
+    assert not [value for value in recorded_values if SESSION_ID in value or cookie in value]
 
 
 def test_a_session_stored_without_an_origin_reports_no_change() -> None:
