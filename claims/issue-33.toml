@@ -1,8 +1,0 @@
-claim_id = "cce348c20ffe4f4f8035ed8dd559975e"
-agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
-role = "builder"
-base = "8c6cc6d9864a51f192214263df665287efefc156"
-branch = "claude/issue-33-s4-session-ending"
-scope = ["README.md", "pyproject.toml", "src/webauth/__init__.py", "src/webauth/session_ending.py", "src/webauth/users.py", "tests/test_passwords.py", "tests/test_session_ending.py", "tests/test_users.py", "tests/webauth_arrangement.py", "uv.lock"]
-opened_commit = "ef6091eb854fa578f0ba83df926f2ad34d3773a0"
-whole_reason = "Neuer Deletion-Owner plus seine zwei bisherigen Kopien in users.py, Tests, Test-Double-Umbenennung, Doku und Versions-Exklusivwert – eine Release."
