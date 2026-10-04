@@ -6,8 +6,10 @@ import threading
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 from webauth_arrangement import (
     API_PATH,
+    HTTPS_TEST_SERVER,
     MEDIA_PATH,
     RATE_LIMITED_PATH,
     a_class_split_rate_limited_client,
@@ -114,6 +116,19 @@ class TestMiddlewareOverSingleProcessBackend:
         assert blocked.status_code == 429
         assert blocked.headers["Retry-After"] == "60"
 
+    def test_two_addresses_in_one_ipv6_network_share_a_budget(self) -> None:
+        client = a_rate_limited_client(SingleProcessRateLimitBackend(), max_requests=2)
+        assert _from_peer(client, "2001:db8:1:2::1").get(RATE_LIMITED_PATH).status_code == 200
+        assert _from_peer(client, "2001:db8:1:2::2").get(RATE_LIMITED_PATH).status_code == 200
+        assert _from_peer(client, "2001:db8:1:2::3").get(RATE_LIMITED_PATH).status_code == 429
+        assert _from_peer(client, "2001:db8:1:3::1").get(RATE_LIMITED_PATH).status_code == 200
+
+    def test_two_ipv4_addresses_keep_budgets_of_their_own(self) -> None:
+        client = a_rate_limited_client(SingleProcessRateLimitBackend(), max_requests=1)
+        assert _from_peer(client, "203.0.113.7").get(RATE_LIMITED_PATH).status_code == 200
+        assert _from_peer(client, "203.0.113.8").get(RATE_LIMITED_PATH).status_code == 200
+        assert _from_peer(client, "203.0.113.7").get(RATE_LIMITED_PATH).status_code == 429
+
     def test_exhausting_the_api_budget_leaves_the_media_path_answering(self) -> None:
         client = a_class_split_rate_limited_client(
             SingleProcessRateLimitBackend(),
@@ -123,3 +138,8 @@ class TestMiddlewareOverSingleProcessBackend:
         assert client.get(API_PATH).status_code == 200
         assert client.get(API_PATH).status_code == 429
         assert client.get(MEDIA_PATH).status_code == 200
+
+
+def _from_peer(client: TestClient, address: str) -> TestClient:
+    """A client of the same application connecting from ``address``."""
+    return TestClient(client.app, base_url=HTTPS_TEST_SERVER, client=(address, 50000))

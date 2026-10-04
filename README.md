@@ -36,12 +36,13 @@ fails leaves nothing behind that the auth machinery wrote.
 
 ## Configuration
 
-The host builds one `WebAuthConfig` and installs it. Cookie flags a host may name:
+The host builds one `WebAuthConfig` and installs it. Fields a host may name:
 
 | Field | Default | Values |
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
+| `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
 are set and when they are cleared — and whether `SecurityHeadersMiddleware`
