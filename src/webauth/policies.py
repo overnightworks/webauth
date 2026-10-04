@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     import re
@@ -191,12 +191,16 @@ class CacheControlRule:
     value: str
 
 
+DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
+
+
 @dataclass(frozen=True)
 class SecurityHeadersPolicy:
     """The policy headers every response carries out of this deployment."""
 
     content_security_policy: str
     cache_control_rules: tuple[CacheControlRule, ...] = ()
+    permissions_policy: str = DEFAULT_PERMISSIONS_POLICY
 
     def cache_control(self, path: str) -> str | None:
         """What this path may be cached as; the first matching rule wins."""

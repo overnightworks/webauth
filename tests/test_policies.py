@@ -5,8 +5,14 @@ from __future__ import annotations
 import re
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from webauth_arrangement import a_web_auth_config
 
+from webauth.config import install_web_auth_config
+from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import (
+    DEFAULT_PERMISSIONS_POLICY,
     BodySizePolicy,
     BodySizeRule,
     CacheControlRule,
@@ -166,6 +172,38 @@ class TestSecurityHeadersPolicy:
         assert policy.cache_control("/api/events") == "no-cache, no-store"
         assert policy.cache_control("/api/songs") == "no-store"
         assert policy.cache_control("/about") is None
+
+    @pytest.mark.parametrize(("policy", "expected"), [
+        pytest.param(
+            SecurityHeadersPolicy(content_security_policy="default-src 'none'"),
+            DEFAULT_PERMISSIONS_POLICY,
+            id="without-the-field",
+        ),
+        pytest.param(
+            SecurityHeadersPolicy(
+                content_security_policy="default-src 'none'",
+                permissions_policy="microphone=(self)",
+            ),
+            "microphone=(self)",
+            id="with-microphone-for-this-origin",
+        ),
+        pytest.param(
+            SecurityHeadersPolicy("default-src 'none'", ()),
+            DEFAULT_PERMISSIONS_POLICY,
+            id="two-positional-arguments",
+        ),
+    ])
+    def test_every_response_answers_the_policy_permissions(
+        self, policy: SecurityHeadersPolicy, expected: str,
+    ) -> None:
+        app = FastAPI()
+        install_web_auth_config(app, a_web_auth_config())
+        app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+        app.get("/")(lambda: {})
+
+        response = TestClient(app).get("/")
+
+        assert response.headers["Permissions-Policy"] == expected
 
 
 class TestDefaultContentSecurityPolicy:
