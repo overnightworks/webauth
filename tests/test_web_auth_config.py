@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from webauth_arrangement import (
+    HTTPS_TEST_SERVER,
     IDLE_WINDOW_SECONDS,
     a_session_cache,
     a_web_auth_config,
@@ -64,6 +65,7 @@ def test_names_and_roles_default_to_the_conventional_ones() -> None:
     assert config.csrf_cookie_name == "csrf_token"
     assert config.csrf_header_name == "x-csrf-token"
     assert config.cookie_samesite == "strict"
+    assert config.cookie_secure is True
     assert config.admin_role == "admin"
     assert config.user_role == "user"
     assert config.login_rate_window_seconds == 300
@@ -75,6 +77,14 @@ def test_a_cross_site_cookie_samesite_is_refused_at_configuration_time(
 ) -> None:
     with pytest.raises(ValueError, match="cross-site cookie"):
         a_web_auth_config(cookie_samesite=value)
+
+
+@pytest.mark.parametrize("value", ["false", 0, None])
+def test_a_cookie_secure_that_is_not_a_bool_is_refused_at_configuration_time(
+    value: object,
+) -> None:
+    with pytest.raises(ValueError, match="cookie_secure must be True or False"):
+        a_web_auth_config(cookie_secure=value)
 
 
 def test_a_deployment_may_name_the_cookies_itself() -> None:
@@ -93,7 +103,7 @@ def test_a_request_reads_the_configuration_installed_on_its_application() -> Non
     def config_secret_length(installed: WebAuthConfig = Depends(web_auth_config)) -> dict:
         return {"length": len(installed.signing_key)}
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url=HTTPS_TEST_SERVER) as client:
         assert client.get("/config-secret-length").json() == {
             "length": MIN_SESSION_SECRET_CHARS,
         }
@@ -109,7 +119,10 @@ def test_an_application_without_a_configuration_refuses_the_request() -> None:
     def config_secret_length(installed: WebAuthConfig = Depends(web_auth_config)) -> dict:
         return {"length": len(installed.signing_key)}
 
-    with TestClient(app) as client, pytest.raises(RuntimeError, match="install_web_auth_config"):
+    with (
+        TestClient(app, base_url=HTTPS_TEST_SERVER) as client,
+        pytest.raises(RuntimeError, match="install_web_auth_config"),
+    ):
         client.get("/config-secret-length")
 
 

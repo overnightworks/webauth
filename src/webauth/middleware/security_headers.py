@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Final
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from webauth.proxies import request_is_https
+from webauth.config import web_auth_config
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -21,7 +21,12 @@ STRICT_TRANSPORT_SECURITY: Final = "max-age=31536000; includeSubDomains"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Answer every request with this deployment's policy headers."""
+    """Answer every request with this deployment's policy headers.
+
+    HSTS follows the configured ``cookie_secure``, never the request's scheme:
+    behind a TLS proxy the host has not listed, every request looks like plain
+    http, and a deployment that serves Secure cookies must still pin https.
+    """
 
     def __init__(self, app, policy: SecurityHeadersPolicy, **kwargs):  # type: ignore[no-untyped-def]
         super().__init__(app, **kwargs)
@@ -37,6 +42,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = self._policy.content_security_policy
         response.headers["Referrer-Policy"] = REFERRER_POLICY
         response.headers["Permissions-Policy"] = PERMISSIONS_POLICY
-        if request_is_https(request):
+        if web_auth_config(request).cookie_secure:
             response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
         return response
