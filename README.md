@@ -197,8 +197,11 @@ must check even a `None` `stored_hash` against a fixed dummy at full cost, so a
 username nobody holds cannot be told from a wrong password by timing.
 
 `webauth.passwords.Argon2idPasswordHasher` is provided and honours that
-contract. It normalises every password to Unicode NFC before hashing, as
-`check_password_strength` does before measuring it. New hashes use OWASP's
+contract. It normalises every password to Unicode NFC in both `hash` and
+`verify`, as `check_password_strength` does before measuring it.
+Normalisation is the hasher's job: the library passes the password as typed,
+so a host hasher that wants spelling-independence normalises in both `hash`
+and `verify`. New hashes use OWASP's
 Argon2id costs (m=19 MiB, t=2, p=1), held in `OWASP_ARGON2ID`; a host passes its
 own `argon2.Parameters` to the constructor to change them. Those parameters
 are the host's one cost profile: `verify` accepts only an Argon2id hash that
@@ -261,6 +264,20 @@ request from its store — so `WebAuthConfig` refuses a `session_cache` alongsid
 here; it needs the client library, so a host that uses it installs
 `webauth[redis]`. A host that supplies its own cache implements the same
 protocol.
+
+## Ending a session
+
+`webauth.session_ending` is the one place a session ends in both the host's
+store and `config.session_cache`. A logout route calls
+`end_session(sessions, config.session_cache, session_id=..., user_id=...)`
+rather than deleting from either itself; `end_user_sessions(sessions, cache,
+user_id)` ends every session of an account and returns the store's count, and
+`prune_sessions(sessions, cache, user_id, max_sessions)` ends the oldest
+sessions above a cap after a login and returns their identifiers. Each deletes
+from the store first, then from the cache when one is configured. A cache that
+fails to delete raises: the host answers with an error instead of reporting a
+logout the cache would still honour. The `users` helpers end sessions through
+the same functions.
 
 ## CSRF origin
 

@@ -25,6 +25,7 @@ from webauth.ports import (
     UserRecord,
     WriteLock,
 )
+from webauth.session_ending import end_session, end_user_sessions
 
 
 class NotAnAdminError(UserManagementError):
@@ -212,9 +213,10 @@ class UserManagement:
         with self.lock.hold():
             for record in self.sessions.list_active(limit=None):
                 if hmac.compare_digest(session_reference(record.id).encode(), reference):
-                    self.sessions.delete(record.id)
-                    if self.config.session_cache is not None:
-                        self.config.session_cache.delete(record.id, record.user_id)
+                    end_session(
+                        self.sessions, self.config.session_cache,
+                        session_id=record.id, user_id=record.user_id,
+                    )
                     self.audit.user_management_event(UserManagementEvent(
                         kind=UserManagementEventKind.SESSION_REVOKED,
                         actor_id=actor.id,
@@ -252,10 +254,7 @@ class UserManagement:
         return user
 
     def _delete_user_sessions(self, user_id: str) -> int:
-        count = self.sessions.delete_for_user(user_id)
-        if self.config.session_cache is not None:
-            self.config.session_cache.delete_user_sessions(user_id)
-        return count
+        return end_user_sessions(self.sessions, self.config.session_cache, user_id)
 
 
 def complete_first_run_setup(
