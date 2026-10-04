@@ -1,0 +1,8 @@
+claim_id = "e0d83bd4794147589b1eb858b48f444e"
+agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
+role = "builder"
+base = "5b789d2c9af645b4142c897afc7c6c895caaf1e3"
+branch = "claude/issue-43-s8-host-cookies"
+scope = ["README.md", "src/webauth/config.py", "src/webauth/cookies.py", "tests"]
+opened_commit = "85f69344ac181dda48c1dab7bd1a4b5271f1d239"
+whole_reason = "Standardnamen ändern sich zentral (config/cookies); viele Tests pinnen die alten Namen – tests als Verzeichnis, damit die Pin-Stellen in einer Release nachziehen."
