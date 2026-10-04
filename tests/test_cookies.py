@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from webauth.cookies import (
     DEFAULT_CSRF_HEADER_NAME,
+    default_cookie_name,
     generate_csrf_token,
     sign_session_id,
     verify_csrf_token,
@@ -15,6 +18,25 @@ _TEST_SECRET = b"a" * 64
 
 def test_the_csrf_header_name_is_the_one_clients_already_send() -> None:
     assert DEFAULT_CSRF_HEADER_NAME == "x-csrf-token"
+
+
+@pytest.mark.parametrize(
+    ("plain_name", "secure", "expected"),
+    [
+        ("session_id", True, "__Host-session_id"),
+        ("csrf_token", True, "__Host-csrf_token"),
+        ("custom", True, "__Host-custom"),
+        ("session_id", False, "session_id"),
+        ("custom", False, "custom"),
+    ],
+)
+def test_default_cookie_name_prefixes_any_name_only_when_secure(
+    plain_name: str,
+    *,
+    secure: bool,
+    expected: str,
+) -> None:
+    assert default_cookie_name(plain_name, secure=secure) == expected
 
 
 def test_sign_and_verify_session() -> None:

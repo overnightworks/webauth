@@ -9,18 +9,10 @@ from typing import Final, Literal
 HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
-DEFAULT_SESSION_COOKIE_NAME: Final = f"{HOST_ONLY_COOKIE_PREFIX}{PLAIN_SESSION_COOKIE_NAME}"
-DEFAULT_CSRF_COOKIE_NAME: Final = f"{HOST_ONLY_COOKIE_PREFIX}{PLAIN_CSRF_COOKIE_NAME}"
 DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
 
 CookieSameSite = Literal["strict", "lax"]
 DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
-
-
-_SECURE_DEFAULT_COOKIE_NAMES: Final = {
-    PLAIN_SESSION_COOKIE_NAME: DEFAULT_SESSION_COOKIE_NAME,
-    PLAIN_CSRF_COOKIE_NAME: DEFAULT_CSRF_COOKIE_NAME,
-}
 
 
 def default_cookie_name(plain_name: str, *, secure: bool) -> str:
@@ -31,7 +23,11 @@ def default_cookie_name(plain_name: str, *, secure: bool) -> str:
     prefix only on a ``Secure`` cookie, so without ``Secure`` the plain name
     is the one that still works.
     """
-    return _SECURE_DEFAULT_COOKIE_NAMES[plain_name] if secure else plain_name
+    return f"{HOST_ONLY_COOKIE_PREFIX}{plain_name}" if secure else plain_name
+
+
+DEFAULT_SESSION_COOKIE_NAME: Final = default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=True)
+DEFAULT_CSRF_COOKIE_NAME: Final = default_cookie_name(PLAIN_CSRF_COOKIE_NAME, secure=True)
 
 
 def is_host_only_cookie_name(name: str) -> bool:
