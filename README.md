@@ -42,6 +42,8 @@ The host builds one `WebAuthConfig` and installs it. Cookie flags a host may nam
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
+| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
+| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
 are set and when they are cleared — and whether `SecurityHeadersMiddleware`
@@ -51,6 +53,22 @@ does not send a `Secure` cookie back over plain http, so local development
 over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
+
+A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only
+this exact host can set it: a sibling subdomain cannot plant one with
+`Domain=parent`. Browsers drop a `__Host-` cookie without `Secure`, so an
+unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
+`__Host-` name a host sets itself with `cookie_secure=False` is refused when
+the configuration is built rather than ending in a silent login loop.
+
+The release after v0.8 renames the default cookies to `__Host-session_id` and
+`__Host-csrf_token`. Browsers still send the old `session_id` cookie, which
+no longer authenticates, so every user of a host on the defaults is signed
+out once and signs in again; the old cookies and their sessions run out at
+their own expiry. A host that names its cookies itself is unaffected (it may
+switch to a `__Host-` name when it serves over https), and a development
+setup with `cookie_secure=False` keeps the plain names. A client that reads
+the CSRF cookie by name reads `config.csrf_cookie_name` instead.
 
 v0.8.0 refuses a request that carries the session cookie more than once:
 `current_user_dependency` answers 401 and `CsrfTokenMiddleware` 403 where

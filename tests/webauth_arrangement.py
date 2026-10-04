@@ -99,6 +99,14 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
     return WebAuthConfig(**{**defaults, **overrides})
 
 
+SESSION_COOKIE_NAME = a_web_auth_config().session_cookie_name
+
+
+def session_cookie_header(*cookie_values: str) -> str:
+    """A Cookie header carrying the default session cookie once per value, in order."""
+    return "; ".join(f"{SESSION_COOKIE_NAME}={value}" for value in cookie_values)
+
+
 API_PATH = "/api/thing"
 RATE_LIMITED_PATH = API_PATH
 MEDIA_PATH = "/media/thing"
@@ -505,7 +513,7 @@ class AuthApp:
     def get(
         self, path: str, *, cookie: str | None = None, accept: str | None = None,
     ) -> HttpxResponse:
-        headers = {} if cookie is None else {"cookie": f"session_id={cookie}"}
+        headers = {} if cookie is None else {"cookie": f"{SESSION_COOKIE_NAME}={cookie}"}
         if accept is not None:
             headers["accept"] = accept
         return self.client.get(path, headers=headers, follow_redirects=False)

@@ -6,12 +6,29 @@ import hashlib
 import hmac
 from typing import Final, Literal
 
-DEFAULT_SESSION_COOKIE_NAME: Final = "session_id"
-DEFAULT_CSRF_COOKIE_NAME: Final = "csrf_token"
+HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
+PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
+PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
 
 CookieSameSite = Literal["strict", "lax"]
 DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
+
+
+def default_cookie_name(plain_name: str, *, secure: bool) -> str:
+    """Return the name a cookie gets when the host names none.
+
+    A ``__Host-`` cookie can be set only by this exact host, so a sibling
+    subdomain cannot toss one in with ``Domain=parent``. Browsers accept the
+    prefix only on a ``Secure`` cookie, so without ``Secure`` the plain name
+    is the one that still works.
+    """
+    return f"{HOST_ONLY_COOKIE_PREFIX}{plain_name}" if secure else plain_name
+
+
+def is_host_only_cookie_name(name: str) -> bool:
+    """Whether a browser treats ``name`` as a ``__Host-`` cookie (case-insensitively)."""
+    return name.lower().startswith(HOST_ONLY_COOKIE_PREFIX.lower())
 
 
 def session_reference(session_id: str) -> str:

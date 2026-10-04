@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from webauth.cookies import (
-    DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_CSRF_HEADER_NAME,
-    DEFAULT_SESSION_COOKIE_NAME,
     generate_csrf_token,
     sign_session_id,
     verify_csrf_token,
@@ -15,11 +13,7 @@ from webauth.cookies import (
 _TEST_SECRET = b"a" * 64
 
 
-def test_default_names_are_what_the_browser_already_carries() -> None:
-    """A deployment that upgrades must not log everybody out, so the names
-    the library defaults to are the ones already in people's browsers."""
-    assert DEFAULT_SESSION_COOKIE_NAME == "session_id"
-    assert DEFAULT_CSRF_COOKIE_NAME == "csrf_token"
+def test_the_csrf_header_name_is_the_one_clients_already_send() -> None:
     assert DEFAULT_CSRF_HEADER_NAME == "x-csrf-token"
 
 

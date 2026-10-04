@@ -15,10 +15,12 @@ from starlette.requests import Request
 
 from webauth.cookies import (
     DEFAULT_COOKIE_SAMESITE,
-    DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_CSRF_HEADER_NAME,
-    DEFAULT_SESSION_COOKIE_NAME,
+    PLAIN_CSRF_COOKIE_NAME,
+    PLAIN_SESSION_COOKIE_NAME,
     CookieSameSite,
+    default_cookie_name,
+    is_host_only_cookie_name,
 )
 from webauth.liveness import ExpiryColumnLiveness
 
@@ -59,8 +61,8 @@ class WebAuthConfig:
     login_lockout_threshold: int
     login_lockout_window_seconds: int
     login_rate_window_seconds: int = DEFAULT_LOGIN_RATE_WINDOW_SECONDS
-    session_cookie_name: str = DEFAULT_SESSION_COOKIE_NAME
-    csrf_cookie_name: str = DEFAULT_CSRF_COOKIE_NAME
+    session_cookie_name: str | None = None
+    csrf_cookie_name: str | None = None
     csrf_header_name: str = DEFAULT_CSRF_HEADER_NAME
     cookie_samesite: CookieSameSite = DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
@@ -85,12 +87,27 @@ class WebAuthConfig:
                 "cookie_secure must be True or False; it alone decides whether the "
                 "cookies carry Secure and responses carry HSTS",
             )
+        self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
+        self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
         if self.session_cache is not None and not isinstance(
             self.session_liveness, ExpiryColumnLiveness,
         ):
             raise ValueError(
                 "a session cache requires expiry-column liveness; the idle-window "
                 "model reads sessions straight from the store",
+            )
+
+    def _resolve_cookie_name(self, field: str, plain_name: str) -> None:
+        name = getattr(self, field)
+        if name is None:
+            # The dataclass is frozen; resolving a default is part of construction.
+            object.__setattr__(
+                self, field, default_cookie_name(plain_name, secure=self.cookie_secure),
+            )
+        elif is_host_only_cookie_name(name) and not self.cookie_secure:
+            raise ValueError(
+                f"{field} {name!r} needs cookie_secure=True; browsers drop a __Host- "
+                "cookie without Secure, so nobody could stay signed in",
             )
 
     @property

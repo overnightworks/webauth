@@ -35,18 +35,21 @@ CLIENT_ADDRESS = "203.0.113.7"
 USERNAME = "alice"
 PLAIN_HTTP = "http://songmaker.example"
 OVER_HTTPS = "https://songmaker.example"
-V0_2_0_SESSION_SET_COOKIE = (
-    "session_id=session-1.69aa4d225bc23dcce050c2be44156a8b099336a14cc6eb8fcebb4b350bc4f2ee; "
+DEFAULT_SESSION_SET_COOKIE = (
+    "__Host-session_id="
+    "session-1.69aa4d225bc23dcce050c2be44156a8b099336a14cc6eb8fcebb4b350bc4f2ee; "
     "HttpOnly; Max-Age=3600; Path=/; SameSite=strict; Secure"
 )
-V0_2_0_CSRF_SET_COOKIE = (
-    "csrf_token=c2c5cecdd7ae3886e360411f973c9aa43a9e31840585dad8625d47ce82059851; "
+DEFAULT_CSRF_SET_COOKIE = (
+    "__Host-csrf_token=c2c5cecdd7ae3886e360411f973c9aa43a9e31840585dad8625d47ce82059851; "
     "Max-Age=3600; Path=/; SameSite=strict; Secure"
 )
+CLEARED_SESSION_SET_COOKIE = (
+    '__Host-session_id=""; HttpOnly; Max-Age=0; Path=/; SameSite=strict; Secure'
+)
+CLEARED_CSRF_SET_COOKIE = '__Host-csrf_token=""; Max-Age=0; Path=/; SameSite=strict; Secure'
 CLEARED_SESSION_WITHOUT_SECURE = 'session_id=""; HttpOnly; Max-Age=0; Path=/; SameSite=strict'
 CLEARED_CSRF_WITHOUT_SECURE = 'csrf_token=""; Max-Age=0; Path=/; SameSite=strict'
-CLEARED_SESSION_SET_COOKIE = f"{CLEARED_SESSION_WITHOUT_SECURE}; Secure"
-CLEARED_CSRF_SET_COOKIE = f"{CLEARED_CSRF_WITHOUT_SECURE}; Secure"
 UNTRUSTED_PROXY_SAYS_HTTPS = {"x-forwarded-proto": "https"}
 TRUSTED_PROXY_SAYS_HTTP = {"x-forwarded-proto": "http"}
 UNTRUSTED_PEER = "testclient"
@@ -169,12 +172,49 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
     assert "Path=/" in header
 
 
-def test_a_host_that_configures_nothing_gets_the_v0_2_0_set_cookie_bytes() -> None:
+def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> None:
+    """Exactly these bytes: ``__Host-``, ``Secure``, ``Path=/`` and no ``Domain``,
+    so a sibling subdomain cannot set a cookie of the same name."""
     app = a_cookie_app()
     response = app.issue()
 
-    assert app.set_cookie_header(response, "session_id") == V0_2_0_SESSION_SET_COOKIE
-    assert app.set_cookie_header(response, "csrf_token") == V0_2_0_CSRF_SET_COOKIE
+    session_header = app.set_cookie_header(response, app.config.session_cookie_name)
+    csrf_header = app.set_cookie_header(response, app.config.csrf_cookie_name)
+    assert session_header == DEFAULT_SESSION_SET_COOKIE
+    assert csrf_header == DEFAULT_CSRF_SET_COOKIE
+
+
+@pytest.mark.parametrize(("base_url", "config_overrides", "session_name", "csrf_name"), [
+    pytest.param(
+        OVER_HTTPS, {}, "__Host-session_id", "__Host-csrf_token", id="secure-default",
+    ),
+    pytest.param(
+        PLAIN_HTTP, {"cookie_secure": False}, "session_id", "csrf_token",
+        id="secure-off-falls-back-to-plain-names",
+    ),
+    pytest.param(
+        OVER_HTTPS, {"session_cookie_name": "sid", "csrf_cookie_name": "xsrf"}, "sid", "xsrf",
+        id="own-names-stay-when-secure",
+    ),
+    pytest.param(
+        PLAIN_HTTP,
+        {"cookie_secure": False, "session_cookie_name": "sid", "csrf_cookie_name": "xsrf"},
+        "sid", "xsrf",
+        id="own-names-stay-when-secure-off",
+    ),
+])
+def test_both_cookies_are_issued_and_cleared_under_the_resolved_names(
+    base_url: str, config_overrides: dict[str, object], session_name: str, csrf_name: str,
+) -> None:
+    app = a_cookie_app(base_url=base_url, **config_overrides)
+
+    for response in (app.issue(), app.clear()):
+        issued_names = {
+            value.split("=", 1)[0]
+            for header, value in response.headers.multi_items()
+            if header == "set-cookie"
+        }
+        assert issued_names == {session_name, csrf_name}
 
 
 def test_a_host_that_configures_lax_gets_lax_on_both_cookies_and_their_clearing() -> None:
@@ -208,8 +248,10 @@ def test_clearing_repeats_the_attributes_each_cookie_was_set_with(
 
     cleared = app.clear()
 
-    assert app.set_cookie_header_without_expires(cleared, "session_id") == session_clearing
-    assert app.set_cookie_header_without_expires(cleared, "csrf_token") == csrf_clearing
+    session_header = app.set_cookie_header_without_expires(cleared, app.config.session_cookie_name)
+    csrf_header = app.set_cookie_header_without_expires(cleared, app.config.csrf_cookie_name)
+    assert session_header == session_clearing
+    assert csrf_header == csrf_clearing
 
 
 def test_the_csrf_token_is_readable_by_the_client_and_bound_to_the_session(
