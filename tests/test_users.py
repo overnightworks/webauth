@@ -11,9 +11,9 @@ import pytest
 from webauth_arrangement import (
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
-    Argon2idStyleHasher,
     FakeSessionRecord,
     FakeUser,
+    LegibleHasher,
     LockNotHeldError,
     UsersWithSetupRace,
     a_session_cache,
@@ -92,7 +92,7 @@ ADMIN_OPERATIONS = [
 @pytest.fixture
 def management() -> UserManagement:
     config = a_web_auth_config(
-        admin_role="operator", user_role="member", password_hasher=Argon2idStyleHasher(),
+        admin_role="operator", user_role="member", password_hasher=LegibleHasher(),
     )
     return a_user_management(
         FakeUser(

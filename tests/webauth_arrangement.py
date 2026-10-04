@@ -290,7 +290,7 @@ class WriteLockInMemory:
 
 
 @dataclass
-class Argon2idStyleHasher:
+class LegibleHasher:
     """A host-supplied ``PasswordHasher`` double whose hashes are legible.
 
     It stands in for a host that plugs in its own algorithm: a test can inject
