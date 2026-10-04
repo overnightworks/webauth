@@ -5,9 +5,10 @@ from __future__ import annotations
 import unicodedata
 from typing import Final
 
-from argon2 import Parameters, Type
+from argon2 import Parameters, Type, extract_parameters
 from argon2 import PasswordHasher as Argon2PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+from argon2.low_level import ARGON2_VERSION
 
 OWASP_ARGON2ID: Final = Parameters(
     type=Type.ID,
@@ -18,7 +19,6 @@ OWASP_ARGON2ID: Final = Parameters(
     memory_cost=19 * 1024,
     parallelism=1,
 )
-_ARGON2ID_HASH_PREFIX: Final = "$argon2id$"
 MIN_PASSWORD_LENGTH: Final = 8
 MIN_UNIQUE_CHARS: Final = 4
 
@@ -69,7 +69,7 @@ _COMMON_PASSWORDS = frozenset({
 
 
 class UnknownHashFormatError(ValueError):
-    """A stored hash that is not Argon2id, so no password can be checked against it."""
+    """A stored hash that is not this host's Argon2id, so no password is checked against it."""
 
 
 def _normalized_password(password: str) -> str:
@@ -84,21 +84,28 @@ def _normalized_password(password: str) -> str:
 class Argon2idPasswordHasher:
     """The Argon2id ``PasswordHasher`` this library provides out of the box.
 
-    New hashes use ``parameters`` (OWASP's m=19 MiB, t=2, p=1 by default); a
-    stored Argon2id hash is verified with the parameters written inside it, so
-    hashes made with other costs stay checkable. Every other format — bcrypt,
-    Argon2i, Argon2d, an empty or garbled string — raises
-    ``UnknownHashFormatError`` rather than reading as a wrong password. A
-    stored hash that starts like Argon2id but cannot be decoded raises
-    ``argon2.exceptions.VerificationError``.
+    A host has one cost profile: ``parameters`` (OWASP's m=19 MiB, t=2, p=1 by
+    default). New hashes use it, and ``verify`` accepts only an Argon2id hash
+    encoding exactly these parameters — version, memory, time, parallelism,
+    salt and hash length. Every other stored value raises
+    ``UnknownHashFormatError`` rather than reading as a wrong password: bcrypt,
+    Argon2i, Argon2d, an empty or garbled string, an Argon2id hash at other
+    costs (dearer or cheaper), and one whose salt or digest Argon2 cannot
+    decode, with Argon2's own error attached as the cause.
     """
 
     def __init__(self, parameters: Parameters = OWASP_ARGON2ID) -> None:
         if parameters.type is not Type.ID:
             raise ValueError(f"Argon2idPasswordHasher needs Type.ID, got {parameters.type!r}")
+        if parameters.version != ARGON2_VERSION:
+            raise ValueError(
+                f"Argon2idPasswordHasher hashes with version {ARGON2_VERSION}, "
+                f"got {parameters.version}"
+            )
+        self._parameters = parameters
         self._argon2 = Argon2PasswordHasher.from_parameters(parameters)
-        # Hashed once with the same parameters, so verifying a username nobody
-        # holds costs what verifying a wrong password costs.
+        # Hashed once with the host's only parameters, so verifying a username
+        # nobody holds costs what verifying any accepted hash costs.
         self._dummy_hash = self._argon2.hash("no account has this password")
 
     def hash(self, password: str) -> str:
@@ -108,15 +115,30 @@ class Argon2idPasswordHasher:
         if stored_hash is None:
             self._matches(password, self._dummy_hash)
             return False
-        if not stored_hash.startswith(_ARGON2ID_HASH_PREFIX):
-            raise UnknownHashFormatError("stored password hash is not Argon2id")
+        self._require_host_profile(stored_hash)
         return self._matches(password, stored_hash)
+
+    def _require_host_profile(self, stored_hash: str) -> None:
+        try:
+            parameters = extract_parameters(stored_hash)
+        except InvalidHashError:
+            raise UnknownHashFormatError("stored password hash is not an Argon2 encoding") from None
+        if parameters != self._parameters or not stored_hash.isascii():
+            raise UnknownHashFormatError(
+                "stored password hash is not Argon2id at this host's parameters"
+            )
 
     def _matches(self, password: str, stored_hash: str) -> bool:
         try:
             return self._argon2.verify(stored_hash, _normalized_password(password))
         except VerifyMismatchError:
             return False
+        except VerificationError as error:
+            # The parameters equal those the dummy was hashed with at
+            # construction, so what Argon2 still refuses is the stored
+            # encoding itself; argon2-cffi names no public code to tell that
+            # apart from a resource fault, hence the chained cause.
+            raise UnknownHashFormatError("stored password hash cannot be decoded") from error
 
 
 def check_password_strength(value: str | None) -> str | None:

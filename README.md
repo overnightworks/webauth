@@ -200,12 +200,17 @@ username nobody holds cannot be told from a wrong password by timing.
 contract. It normalises every password to Unicode NFC before hashing, as
 `check_password_strength` does before measuring it. New hashes use OWASP's
 Argon2id costs (m=19 MiB, t=2, p=1), held in `OWASP_ARGON2ID`; a host passes its
-own `argon2.Parameters` to the constructor to change them. A stored Argon2id
-hash is verified with the costs written inside it. Any other stored format —
-bcrypt, Argon2i, Argon2d, an empty or garbled string — raises
-`webauth.passwords.UnknownHashFormatError` instead of reading as a wrong
-password. A host with another algorithm supplies its own class implementing
-the same protocol.
+own `argon2.Parameters` to the constructor to change them. Those parameters
+are the host's one cost profile: `verify` accepts only an Argon2id hash that
+encodes exactly them (version, memory, time, parallelism, salt and hash
+length), so an unknown username costs the same as any accepted hash. Every
+other stored value raises `webauth.passwords.UnknownHashFormatError` instead
+of reading as a wrong password — bcrypt, Argon2i, Argon2d, an empty or garbled
+string, an Argon2id hash at other costs (a 64 MiB one as much as a cheaper
+one), and an Argon2id hash whose salt or digest Argon2 cannot decode, with
+Argon2's error chained as the cause. After changing the parameters, set each
+password anew, for example with `set_password`. A host with another algorithm
+supplies its own class implementing the same protocol.
 
 ## Rate limiting, and the optional Redis extra
 
