@@ -168,6 +168,11 @@ the UTF-8 raw identifier. Lists, management events, and `SessionIdentityChanged`
 (its `session_ref`) expose no raw token; the host reads any timestamps from its
 own records.
 
+v0.6.0 renames `SessionIdentityChanged.session_id` to `session_ref`, which
+carries the reference rather than the raw identifier, and moves
+`session_reference` from `webauth.users` to `webauth.cookies`; v0.5.1 hosts
+update both the import and the field name.
+
 `complete_first_run_setup(management, username, password)` creates the first
 administrator only while no account exists. Both a setup route and a bootstrap
 command can call it; the host supplies bootstrap credentials through its own
