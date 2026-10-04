@@ -53,6 +53,11 @@ over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
+v0.9.0 counts rate-limit budgets per IPv6 network: every IPv6 client in one
+`/64` shares one budget by default, and `ipv6_budget_prefix` (32 to 128)
+chooses the network size. The IPv6 budget keys change, so existing Redis
+counters for IPv6 clients start from zero once after the upgrade.
+
 v0.8.0 refuses a request that carries the session cookie more than once:
 `current_user_dependency` answers 401 and `CsrfTokenMiddleware` 403 where
 v0.7 picked one of the values. It adds
