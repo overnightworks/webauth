@@ -1,0 +1,8 @@
+claim_id = "c7b3a52e9fd94421abd67360bc89f91a"
+agent = "Claude 255c9087-94fa-477f-af88-8eb64e5acd39"
+role = "builder"
+base = "8c6cc6d9864a51f192214263df665287efefc156"
+branch = "claude/issue-35-s6-cookie-secure"
+scope = ["README.md", "pyproject.toml", "src/webauth/__init__.py", "src/webauth/config.py", "src/webauth/login.py", "src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "tests/test_csrf.py", "tests/test_login.py", "tests/test_policies.py", "tests/test_web_auth_config.py", "tests/webauth_arrangement.py", "uv.lock"]
+opened_commit = "e4c788aaad107132f3468ed9873ed656bc28084d"
+whole_reason = "Eine Konfig-Tatsache (cookie_secure) ersetzt request_is_https an zwei Stellen (Cookies, HSTS) samt Testclient-Umstellung auf https und Versions-Exklusivwert – eine Release."
