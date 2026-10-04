@@ -63,6 +63,7 @@ class WebAuthConfig:
     csrf_cookie_name: str = DEFAULT_CSRF_COOKIE_NAME
     csrf_header_name: str = DEFAULT_CSRF_HEADER_NAME
     cookie_samesite: CookieSameSite = DEFAULT_COOKIE_SAMESITE
+    cookie_secure: bool = True
     max_user_agent_chars: int = DEFAULT_MAX_USER_AGENT_CHARS
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
@@ -78,6 +79,11 @@ class WebAuthConfig:
             raise ValueError(
                 "cookie_samesite must be 'strict' or 'lax'; a cross-site cookie "
                 "is not what this library issues",
+            )
+        if not isinstance(self.cookie_secure, bool):
+            raise ValueError(
+                "cookie_secure must be True or False; it alone decides whether the "
+                "cookies carry Secure and responses carry HSTS",
             )
         if self.session_cache is not None and not isinstance(
             self.session_liveness, ExpiryColumnLiveness,

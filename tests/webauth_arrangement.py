@@ -59,6 +59,9 @@ from webauth.users import UserManagement
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 ALLOWED_HOST = "songmaker.example"
 ALLOWED_ORIGIN = f"https://{ALLOWED_HOST}"
+# The suite reaches its applications over https, as production does, so the
+# cookie and header flags under test are the ones a deployment really sends.
+HTTPS_TEST_SERVER = "https://testserver"
 SESSION_KEY_PREFIXES = SessionKeyPrefixes(
     session="app:session", user_sessions="app:user_sessions",
 )
@@ -110,7 +113,7 @@ def _rate_limited_client(
     app.add_middleware(IpRateLimitMiddleware, policy=policy)
     for path in paths:
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET"])
-    return TestClient(app)
+    return TestClient(app, base_url=HTTPS_TEST_SERVER)
 
 
 def a_rate_limited_client(
@@ -592,7 +595,12 @@ def an_auth_app(
         return unauthenticated_response(request, login_redirect)
 
     return AuthApp(
-        client=TestClient(app, cookies={}, headers={"user-agent": CLIENT_USER_AGENT}),
+        client=TestClient(
+            app,
+            base_url=HTTPS_TEST_SERVER,
+            cookies={},
+            headers={"user-agent": CLIENT_USER_AGENT},
+        ),
         sessions=sessions,
         audit=audit,
         authenticated=authenticated,
@@ -631,7 +639,12 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
         return {"username": user.username, "role": user.role}
 
     return AuthApp(
-        client=TestClient(app, cookies={}, headers={"user-agent": CLIENT_USER_AGENT}),
+        client=TestClient(
+            app,
+            base_url=HTTPS_TEST_SERVER,
+            cookies={},
+            headers={"user-agent": CLIENT_USER_AGENT},
+        ),
         sessions=sessions,
         audit=audit,
         authenticated=authenticated,
