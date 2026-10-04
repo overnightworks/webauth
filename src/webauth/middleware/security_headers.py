@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 CONTENT_TYPE_OPTIONS: Final = "nosniff"
 FRAME_OPTIONS: Final = "DENY"
 REFERRER_POLICY: Final = "strict-origin-when-cross-origin"
-PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
 STRICT_TRANSPORT_SECURITY: Final = "max-age=31536000; includeSubDomains"
 
 
@@ -44,7 +43,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = FRAME_OPTIONS
         response.headers["Content-Security-Policy"] = self._policy.content_security_policy
         response.headers["Referrer-Policy"] = REFERRER_POLICY
-        response.headers["Permissions-Policy"] = PERMISSIONS_POLICY
+        response.headers["Permissions-Policy"] = self._policy.permissions_policy
         if cookie_secure:
             response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
         elif "Strict-Transport-Security" in response.headers:

@@ -5,7 +5,12 @@ from __future__ import annotations
 import re
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from webauth_arrangement import a_web_auth_config
 
+from webauth.config import install_web_auth_config
+from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
@@ -166,6 +171,46 @@ class TestSecurityHeadersPolicy:
         assert policy.cache_control("/api/events") == "no-cache, no-store"
         assert policy.cache_control("/api/songs") == "no-store"
         assert policy.cache_control("/about") is None
+
+    @pytest.mark.parametrize(("policy", "expected"), [
+        pytest.param(
+            SecurityHeadersPolicy(content_security_policy="default-src 'none'"),
+            "camera=(), microphone=(), geolocation=()",
+            id="without-the-field",
+        ),
+        pytest.param(
+            SecurityHeadersPolicy(
+                content_security_policy="default-src 'none'",
+                permissions_policy="camera=(), microphone=(self), geolocation=()",
+            ),
+            "camera=(), microphone=(self), geolocation=()",
+            id="with-microphone-for-this-origin",
+        ),
+        pytest.param(
+            SecurityHeadersPolicy("default-src 'none'", ()),
+            "camera=(), microphone=(), geolocation=()",
+            id="two-positional-arguments",
+        ),
+    ])
+    def test_every_response_answers_the_policy_permissions(
+        self, policy: SecurityHeadersPolicy, expected: str,
+    ) -> None:
+        app = FastAPI()
+        install_web_auth_config(app, a_web_auth_config())
+        app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+        app.get("/")(lambda: {})
+
+        response = TestClient(app).get("/")
+
+        assert response.headers["Permissions-Policy"] == expected
+
+    @pytest.mark.parametrize("line_break", ["\r", "\n", "\r\n"])
+    def test_refuses_a_permissions_policy_with_a_line_break(self, line_break: str) -> None:
+        with pytest.raises(ValueError, match="CR or LF"):
+            SecurityHeadersPolicy(
+                content_security_policy="default-src 'none'",
+                permissions_policy=f"camera=(){line_break}X-Injected: 1",
+            )
 
 
 class TestDefaultContentSecurityPolicy:

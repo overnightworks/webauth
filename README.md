@@ -55,6 +55,15 @@ over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
+`SecurityHeadersMiddleware` sends the `Permissions-Policy` its
+`SecurityHeadersPolicy` names in `permissions_policy`. The field defaults to
+`DEFAULT_PERMISSIONS_POLICY` (`"camera=(), microphone=(), geolocation=()"`),
+so a host that leaves it out keeps every one of those features off. The value
+replaces the whole header, so a host that records audio names every feature it
+still wants off, for example
+`permissions_policy="camera=(), microphone=(self), geolocation=()"`. A value
+containing CR or LF is refused when the policy is built.
+
 A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only
 this exact host can set it: a sibling subdomain cannot plant one with
 `Domain=parent`. Browsers drop a `__Host-` cookie without `Secure`, so an
