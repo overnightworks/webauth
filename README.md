@@ -309,7 +309,7 @@ Two backends implement it:
 
 - `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
   process that reaches the same Redis. It needs the client library, so a host
-  that uses it installs `webauth[redis]`.
+  that uses it installs `overnightworks-webauth[redis]`.
 - `webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
   process's memory and needs no Redis — for a single-node host that runs one
   worker. Two processes or two hosts count independently, so a multi-worker
@@ -344,7 +344,7 @@ construction rather than failing per request.
 
 `webauth.session_store.RedisSessionCache` is the one implementation shipped
 here; it needs the client library, so a host that uses it installs
-`webauth[redis]`. A host that supplies its own cache implements the same
+`overnightworks-webauth[redis]`. A host that supplies its own cache implements the same
 protocol.
 
 ## Session lifetime

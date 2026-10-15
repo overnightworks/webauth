@@ -773,6 +773,16 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
         pytest.param({"jwks_url": "https:///certs"}, "https", id="key-set-without-host"),
         pytest.param({"jwks_url": "https://["}, "https", id="unparseable-key-set-url"),
         pytest.param(
+            {"jwks_url": "https://login.example.org:99999/certs"},
+            "https",
+            id="key-set-url-with-bad-port",
+        ),
+        pytest.param(
+            {"jwks_url": "https://login.example.org:abc/certs"},
+            "https",
+            id="key-set-url-with-non-numeric-port",
+        ),
+        pytest.param(
             {"jwks_url": "https://operator:password@login.example.org/certs"},
             "https",
             id="key-set-url-with-credentials",

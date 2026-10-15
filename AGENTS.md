@@ -30,7 +30,7 @@ than the owner needs.
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
 - No host application is a dependency. `webauth` depends on FastAPI, Pydantic
   and argon2-cffi at runtime, and on nothing else. Redis is optional — install
-  `webauth[redis]` for the Redis rate-limit and session backends; a single-node
+  `overnightworks-webauth[redis]` for the Redis rate-limit and session backends; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
   JWT verification is optional too — `overnightworks-webauth[jwt]` adds PyJWT,
   cryptography and urllib3 for `webauth.jwt_verification`; no other module

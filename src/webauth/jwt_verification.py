@@ -169,7 +169,8 @@ class JwtVerifier:
             raise ValueError("the accepted audiences must be one or more non-empty strings")
         if not _is_https_url(jwks_url):
             raise ValueError(
-                "the key set URL must be an https URL naming a host and no credentials"
+                "the key set URL must be an https URL naming a host, a valid port if any,"
+                " and no credentials"
             )
         if isinstance(leeway_seconds, bool) or not isinstance(leeway_seconds, int):
             raise ValueError("the leeway must be a whole number of seconds")
@@ -311,7 +312,8 @@ def fetch_key_set_over_https(
     its credentials, path or query."""
     if not _is_https_url(url):
         raise KeySetFetchError(
-            "refusing to fetch the key set: not an https URL naming a host and no credentials"
+            "refusing to fetch the key set: not an https URL naming a host,"
+            " a valid port if any, and no credentials"
         )
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:
@@ -334,9 +336,10 @@ def fetch_key_set_over_https(
 
 
 def _is_https_url(url: str) -> bool:
-    """An https URL naming a host and carrying no credentials."""
+    """An https URL naming a host, a valid port if any, and no credentials."""
     try:
         origin = urllib.parse.urlsplit(url)
+        _ = origin.port
     except ValueError:
         return False
     return origin.scheme == "https" and bool(origin.hostname) and "@" not in origin.netloc
