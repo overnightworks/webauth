@@ -196,7 +196,7 @@ class ReceivedRequest:
 
 @dataclass
 class LoopbackHttpsServer:
-    """Answers by path, whatever the method: `/token` a token answer,
+    """Answers by path, whatever the method or query: `/token` a token answer,
     `/token-refused` a 400 `invalid_grant`, `/token-reflecting` a token
     answer whose header block carries the request body as a malformed line,
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
@@ -241,25 +241,26 @@ def loopback_https_server(
         def _receive(self, body: bytes) -> None:
             headers = {name.lower(): value for name, value in self.headers.items()}
             received.append(ReceivedRequest(self.command, self.path, headers, body))
-            if self.path == "/silent":
+            route = urllib.parse.urlsplit(self.path).path
+            if route == "/silent":
                 silent_request_arrived.set()
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
-            elif self.path == "/moved":
+            elif route == "/moved":
                 self._send_head(302, {"Location": "/certs", "Content-Length": "0"})
-            elif self.path == "/moved-stalling":
+            elif route == "/moved-stalling":
                 self._send_head(302, {"Location": "/certs", "Content-Length": "1"})
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
-            elif self.path == "/missing":
+            elif route == "/missing":
                 self._send_head(404, {"Content-Length": "0"})
-            elif self.path == "/oversized":
+            elif route == "/oversized":
                 self._answer(200, b" " * _OVERSIZED_ANSWER_BYTES)
-            elif self.path == "/compressed":
+            elif route == "/compressed":
                 self._answer(200, gzip.compress(served_key_set()), content_encoding="gzip")
-            elif self.path == "/token":
+            elif route == "/token":
                 self._answer(200, SERVED_TOKEN_ANSWER)
-            elif self.path == "/token-refused":
+            elif route == "/token-refused":
                 self._answer(400, REFUSED_TOKEN_ANSWER)
-            elif self.path == "/token-reflecting":
+            elif route == "/token-reflecting":
                 self._answer_reflecting_in_a_malformed_header(body)
             else:
                 self._answer(200, served_key_set())

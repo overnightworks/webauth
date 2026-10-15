@@ -38,6 +38,7 @@ _CLIENT_ID = "songmaker"
 _CLIENT_SECRET = "canary-client-secret"
 _CODE = "canary-authorization-code"
 _CODE_VERIFIER = "canary-code-verifier"
+_URL_QUERY = "session=canary-url-query"
 _FORM = {
     "grant_type": "authorization_code",
     "code": _CODE,
@@ -47,7 +48,7 @@ _FORM = {
 _BASIC_CREDENTIALS = base64.b64encode(f"{_CLIENT_ID}:{_CLIENT_SECRET}".encode()).decode()
 _BASIC_AUTHORIZATION = f"Basic {_BASIC_CREDENTIALS}"
 # The client secret travels only inside the Basic credentials.
-_CANARIES = (_CLIENT_SECRET, _BASIC_CREDENTIALS, _CODE, _CODE_VERIFIER)
+_CANARIES = (_CLIENT_SECRET, _BASIC_CREDENTIALS, _CODE, _CODE_VERIFIER, _URL_QUERY)
 
 
 @pytest.fixture
@@ -82,7 +83,9 @@ def _assert_no_canary_in(text: str) -> None:
 def test_a_token_answer_comes_back_with_its_status_and_body(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
-    answer = post_token_request_over_https(_token_request(f"{token_server.base_url}/token"))
+    answer = post_token_request_over_https(
+        _token_request(f"{token_server.base_url}/token?{_URL_QUERY}")
+    )
 
     assert (answer.status, answer.body) == (200, SERVED_TOKEN_ANSWER)
     _assert_no_canary_in(repr(answer) + caplog.text)
@@ -198,7 +201,8 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
     started = time.monotonic()
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(
-            _token_request(target(token_server, monkeypatch)), timeout_seconds=0.2
+            _token_request(f"{target(token_server, monkeypatch)}?{_URL_QUERY}"),
+            timeout_seconds=0.2,
         )
 
     assert str(refused.value).startswith(refusal)
@@ -243,7 +247,9 @@ def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
     with pytest.raises(
         TokenEndpointError, match="^the token request failed: the origin could not be reached$"
     ) as refused:
-        post_token_request_over_https(_token_request(f"https://127.0.0.1:{closed_port}/token"))
+        post_token_request_over_https(
+            _token_request(f"https://127.0.0.1:{closed_port}/token?{_URL_QUERY}")
+        )
 
     _assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
     assert refused.value.__context__ is None
