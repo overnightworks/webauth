@@ -44,6 +44,7 @@ The host builds one `WebAuthConfig` and installs it. Fields a host may name:
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
 | `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
 | `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
+| `cookie_max_age_seconds` | `session_max_age_seconds`, re-derived when `dataclasses.replace` changes it | seconds; the browser cookie's `Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime) |
 | `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
@@ -327,11 +328,11 @@ there is no sync loop. Either way `WebAuthConfig.session_liveness` — a
 `webauth.dependencies` alone reads the wall clock and passes the instant in.
 `webauth.liveness` ships two: `ExpiryColumnLiveness`, for a store with
 `created_at`/`expires_at` columns, and `IdleWindowLiveness`, for one that keeps
-`last_seen` (and `created_at` when it is given an absolute cap). On the cache path a policy never trusts the cached
-`expires_at`, which can lag the real TTL after a refresh — Redis TTL owns idle
-there, and only a policy's own caps remain. There is no app-state install: the
-config carries the cache, so any code that holds the config — not only a
-request handler — can reach it.
+`last_seen` (and `created_at` when it is given an absolute cap). On the cache
+path a policy never trusts the cached `expires_at`, which can lag the real TTL
+after a refresh — Redis TTL owns idle there, and only a policy's own caps
+remain. There is no app-state install: the config carries the cache, so any
+code that holds the config — not only a request handler — can reach it.
 
 The Redis `SessionCache` is an expiry-column feature: a cached session carries
 `created_at`/`expires_at`, so it pairs only with `ExpiryColumnLiveness`. The

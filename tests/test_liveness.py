@@ -11,6 +11,8 @@ from webauth_arrangement import (
     CLIENT_USER_AGENT,
     IDLE_WINDOW_SECONDS,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
+    SEVEN_DAYS_SECONDS,
+    THIRTY_DAYS_SECONDS,
     FakeUser,
     IdleSessionRecord,
     IdleSessionsInMemory,
@@ -24,10 +26,8 @@ EXPIRY_POLICY = ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS)
 IDLE_POLICY = IdleWindowLiveness(IDLE_WINDOW_SECONDS)
 
 
-SEVEN_DAYS = timedelta(days=7)
-THIRTY_DAYS = timedelta(days=30)
 RECOMMENDED_IDLE_POLICY = IdleWindowLiveness(
-    int(SEVEN_DAYS.total_seconds()), absolute_max_age_seconds=int(THIRTY_DAYS.total_seconds()),
+    SEVEN_DAYS_SECONDS, absolute_max_age_seconds=THIRTY_DAYS_SECONDS,
 )
 
 
@@ -159,8 +159,8 @@ def test_the_idle_window_policy_admits_a_session_seen_within_the_window(
     ("age", "admitted"),
     [
         pytest.param(timedelta(days=29), True, id="within the cap"),
-        pytest.param(THIRTY_DAYS, True, id="at the cap"),
-        pytest.param(THIRTY_DAYS + timedelta(seconds=1), False, id="past the cap"),
+        pytest.param(timedelta(seconds=THIRTY_DAYS_SECONDS), True, id="at the cap"),
+        pytest.param(timedelta(seconds=THIRTY_DAYS_SECONDS + 1), False, id="past the cap"),
     ],
 )
 def test_a_capped_idle_window_policy_refuses_a_session_older_than_the_cap_however_recently_seen(
