@@ -45,7 +45,9 @@ class ExpiryColumnLiveness:
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
         if record.expires_at.replace(tzinfo=timezone.utc) < now:
             return False
-        return self._within_absolute_cap(record.created_at.replace(tzinfo=timezone.utc), now)
+        return _within_absolute_cap(
+            record.created_at.replace(tzinfo=timezone.utc), now, self._absolute_max_age_seconds,
+        )
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
         # The cache's own TTL owns idle expiry, and a cached ``expires_at`` can
@@ -54,10 +56,7 @@ class ExpiryColumnLiveness:
         created_at = cached.created_at
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
-        return self._within_absolute_cap(created_at, now)
-
-    def _within_absolute_cap(self, created_at: datetime, now: datetime) -> bool:
-        return (now - created_at).total_seconds() <= self._absolute_max_age_seconds
+        return _within_absolute_cap(created_at, now, self._absolute_max_age_seconds)
 
 
 class IdleWindowLiveness:
@@ -82,17 +81,18 @@ class IdleWindowLiveness:
     ) -> bool:
         if (now - record.last_seen).total_seconds() > self._idle_window_seconds:
             return False
-        return self._within_absolute_cap(record, now)
-
-    def _within_absolute_cap(
-        self, record: _IdleWindowRecord | _CappedIdleWindowRecord, now: datetime,
-    ) -> bool:
         if self._absolute_max_age_seconds is None:
             return True
-        return (now - record.created_at).total_seconds() <= self._absolute_max_age_seconds
+        return _within_absolute_cap(record.created_at, now, self._absolute_max_age_seconds)
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
         raise NotImplementedError(
             "the idle-window model does not use the Redis session cache; a host "
             "that wants a cache uses expiry-column liveness",
         )
+
+
+def _within_absolute_cap(
+    created_at: datetime, now: datetime, absolute_max_age_seconds: int,
+) -> bool:
+    return (now - created_at).total_seconds() <= absolute_max_age_seconds
