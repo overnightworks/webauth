@@ -450,6 +450,29 @@ def test_a_callback_refused_on_its_own_sends_no_token_request(
     assert login.token_endpoint.requests == []
 
 
+@pytest.mark.parametrize(
+    "pending",
+    [
+        pytest.param(
+            PendingLogin(state="", nonce="a-real-nonce", code_verifier="a-real-verifier"),
+            id="empty-state",
+        ),
+        pytest.param(
+            PendingLogin(state="", nonce="", code_verifier=""), id="empty-state-and-nonce"
+        ),
+    ],
+)
+def test_an_empty_pending_state_never_matches_and_sends_no_token_request(
+    login: LoginScenario, pending: PendingLogin
+) -> None:
+    login.token_endpoint.answer = _issued(login.id_token(pending, {}))
+
+    outcome = login.relying_party.complete_login(pending, login.callback(pending, {}))
+
+    assert outcome == OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
+    assert login.token_endpoint.requests == []
+
+
 def _s256(code_verifier: str) -> str:
     digest = hashlib.sha256(code_verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
