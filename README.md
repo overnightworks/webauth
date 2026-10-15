@@ -500,7 +500,8 @@ def callback(request: Request, response: Response) -> dict[str, str]:
         bound_issuer=client_config.issuer, accounts=accounts, lock=lock, audit=audit,
     )
     if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
-        raise_the_hosts_refusal(outcome)
+        response.status_code = 403
+        return describe_the_hosts_refusal(outcome)
     session = open_the_hosts_session(outcome)
     issue_session_cookies(response, session.id, config)
     ...
@@ -510,7 +511,12 @@ def callback(request: Request, response: Response) -> dict[str, str]:
 its pending-login cookie on `response` and returns the authorization URL.
 `finish_login(...)` answers the `UserRecord` to open a session for, as after
 a password login, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
-the host commits on an account and opens the session itself.
+the host commits on an account and opens the session itself. `finish_login`
+sets the header that clears the pending-login cookie on `response`, so the
+host answers with that response on every outcome, refusals included: FastAPI
+copies an injected `response`'s headers only when the route returns a value,
+and a raised `HTTPException` gets a new response without them, which would
+leave the pending cookie in the browser.
 
 The pending login travels in a cookie of its own, one per login, so two tabs
 never overwrite each other:

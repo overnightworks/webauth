@@ -106,8 +106,9 @@ def finish_login(
     """Complete the login the callback ``request`` returns from.
 
     The callback's state selects exactly one pending-login cookie, which is
-    cleared on ``response`` whatever the outcome; every other tab's cookie
-    stays. A callback naming no state or naming it twice, or whose state
+    cleared on ``response`` whatever the outcome, so the host answers with
+    ``response`` on every outcome, refusals included; every other tab's
+    cookie stays. A callback naming no state or naming it twice, or whose state
     names no single genuine cookie, is refused before any token request. On
     an account, the host opens its session and calls ``issue_session_cookies``
     as after a password login.
