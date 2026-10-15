@@ -24,7 +24,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
-| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. Needs `overnightworks-webauth[jwt]` |
+| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. Needs `overnightworks-webauth[jwt]` |
 
 It leaves the application everything that touches the application's own truth:
 the user model, configured roles, setup and login routes, and their
@@ -45,7 +45,7 @@ The host builds one `WebAuthConfig` and installs it. Fields a host may name:
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
 | `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
 | `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
-| `cookie_max_age_seconds` | `session_max_age_seconds`, re-derived when `dataclasses.replace` changes it | seconds; the browser cookie's `Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime) |
+| `cookie_max_age_seconds` | `session_max_age_seconds`, re-derived when `dataclasses.replace` changes it | a positive whole number of seconds; the browser cookie's `Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime) |
 | `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
@@ -72,6 +72,18 @@ this exact host can set it: a sibling subdomain cannot plant one with
 unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
 `__Host-` name a host sets itself with `cookie_secure=False` is refused when
 the configuration is built rather than ending in a silent login loop.
+
+v0.12.0 adds the RS256 verifier `webauth.jwt_verification` (install the
+`jwt` extra), a cookie lifetime separate from the idle window
+(`cookie_max_age_seconds`), and an absolute cap for `IdleWindowLiveness`
+(`absolute_max_age_seconds`) — see [Session lifetime](#session-lifetime). It
+also refuses at construction what used to fail later: every lifetime —
+`session_max_age_seconds`, `cookie_max_age_seconds`, and the windows and caps
+of both liveness policies — must be a positive whole number of seconds, so a
+`0`, a negative value, a `float`, a string or a `bool` stops the host from
+starting instead of ending in a silent login loop. A capped
+`IdleWindowLiveness` names a naive `created_at` instead of failing with a bare
+`TypeError`.
 
 v0.10.0 renames the default cookies to `__Host-session_id` and
 `__Host-csrf_token`. Browsers still send the old `session_id` cookie, which

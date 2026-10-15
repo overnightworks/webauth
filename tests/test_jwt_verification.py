@@ -18,6 +18,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import socket
 import ssl
 import string
 import threading
@@ -533,6 +534,16 @@ def _defective_key_sets() -> list[Any]:
             id="too-many-keys",
         ),
         pytest.param(
+            _key_set_document(
+                valid_jwk,
+                *(
+                    _public_jwk(current, f"encryption-{index}", use="enc")
+                    for index in range(MAX_KEY_SET_KEYS)
+                ),
+            ),
+            id="too-many-keys-counting-passed-over-ones",
+        ),
+        pytest.param(
             _key_set_document(valid_jwk, _public_jwk(_rsa_key("other"), "current-key")),
             id="duplicate-kid",
         ),
@@ -818,6 +829,10 @@ def test_a_verifier_refuses_a_configuration_it_cannot_verify_against(
 
 _SILENT_HOLD_SECONDS = 10
 """How long `/silent` keeps a request unanswered unless the test releases it."""
+_TRANSPORT_FAILURE = (
+    "fetching the key set failed: the origin could not be reached,"
+    " or the TLS handshake or HTTP exchange failed"
+)
 
 
 @dataclass
@@ -955,7 +970,7 @@ def test_https_fetch_gives_up_on_an_origin_silent_past_the_read_timeout(
     https_key_set_server: HttpsKeySetServer,
 ) -> None:
     started = time.monotonic()
-    with pytest.raises(KeySetFetchError):
+    with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
         fetch_key_set_over_https(f"{https_key_set_server.base_url}/silent", timeout_seconds=0.2)
 
     assert time.monotonic() - started < _SILENT_HOLD_SECONDS / 2
@@ -1000,8 +1015,17 @@ def test_https_fetch_refuses_a_certificate_the_system_does_not_trust(
 ) -> None:
     monkeypatch.delenv("SSL_CERT_FILE")
 
-    with pytest.raises(KeySetFetchError):
+    with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
         fetch_key_set_over_https(f"{https_key_set_server.base_url}/certs")
+
+
+def test_https_fetch_names_an_origin_nobody_listens_on_as_unreachable() -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed_port = probe.getsockname()[1]
+
+        with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
+            fetch_key_set_over_https(f"https://127.0.0.1:{closed_port}/certs")
 
 
 def test_https_fetch_refuses_an_answer_other_than_200(
