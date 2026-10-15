@@ -22,7 +22,7 @@ from webauth.cookies import (
     default_cookie_name,
     is_host_only_cookie_name,
 )
-from webauth.liveness import ExpiryColumnLiveness
+from webauth.liveness import ExpiryColumnLiveness, require_positive_seconds
 
 if TYPE_CHECKING:
     import re
@@ -118,7 +118,9 @@ class WebAuthConfig:
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
+        require_positive_seconds("session_max_age_seconds", self.session_max_age_seconds)
         self._resolve_cookie_max_age()
+        require_positive_seconds("cookie_max_age_seconds", self.cookie_max_age_seconds)
         if (
             type(self.ipv6_budget_prefix) is not int
             or self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE

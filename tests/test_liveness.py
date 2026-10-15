@@ -194,6 +194,14 @@ def test_a_capped_idle_window_policy_refuses_to_judge_a_record_without_created_a
         RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now)
 
 
+def test_a_capped_idle_window_policy_refuses_to_judge_a_naive_created_at() -> None:
+    now = datetime.now(timezone.utc)
+    record = _CappedIdleRecord(created_at=now.replace(tzinfo=None), last_seen=now)
+
+    with pytest.raises(TypeError, match="timezone-aware created_at"):
+        RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now)
+
+
 @pytest.mark.parametrize(
     "age",
     [
