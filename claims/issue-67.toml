@@ -1,0 +1,7 @@
+claim_id = "edd1e9f6b6a64b22bfbfe3a2e5e62788"
+agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
+role = "builder"
+base = "480624aa347f0dd93f672b33d950081a1585e0ca"
+branch = "claude/issue-67-w1b-unbekannte-schl-ssel-id-w-hrend-eine"
+scope = ["README.md", "src/webauth/jwt_verification.py", "tests/test_jwt_verification.py"]
+opened_commit = "1edc33c9d50c3856524d5030c48b2a5edc9c28c0"
