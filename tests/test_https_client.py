@@ -485,6 +485,16 @@ def test_a_deadline_of_zero_or_less_is_refused_naming_the_parameter(
         exchange("https://127.0.0.1:1/token", deadline_seconds=deadline_seconds)
 
 
+@pytest.mark.parametrize("deadline_seconds", [0, -1])
+def test_a_token_request_with_a_non_positive_deadline_is_refused_naming_the_deadline(
+    deadline_seconds: float,
+) -> None:
+    with pytest.raises(ValueError, match="deadline_seconds must be positive"):
+        post_token_request_over_https(
+            _token_request("https://127.0.0.1:1/token"), deadline_seconds=deadline_seconds
+        )
+
+
 def test_a_token_request_that_timed_out_names_the_timeout_as_its_failure(
     token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
