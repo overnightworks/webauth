@@ -534,6 +534,16 @@ def _defective_key_sets() -> list[Any]:
             id="too-many-keys",
         ),
         pytest.param(
+            _key_set_document(
+                valid_jwk,
+                *(
+                    _public_jwk(current, f"encryption-{index}", use="enc")
+                    for index in range(MAX_KEY_SET_KEYS)
+                ),
+            ),
+            id="too-many-keys-counting-passed-over-ones",
+        ),
+        pytest.param(
             _key_set_document(valid_jwk, _public_jwk(_rsa_key("other"), "current-key")),
             id="duplicate-kid",
         ),
