@@ -171,9 +171,9 @@ class UserManagement:
     def set_password(self, actor: AuthenticatedUser, user_id: str, password: str) -> None:
         """Set an account's password and end all its sessions, including this one."""
         self._require_admin(actor)
-        password_hash = _hash_password(password, self.config)
         with self.lock.hold():
             self._password_account(user_id)
+            password_hash = _hash_password(password, self.config)
             self._replace_password(
                 actor, user_id, password_hash, UserManagementEventKind.PASSWORD_SET_BY_ADMIN,
             )

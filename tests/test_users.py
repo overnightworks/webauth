@@ -777,9 +777,14 @@ def test_REQ_ADMIN_10_refused_own_password_changes_preserve_password_and_every_s
         assert secret not in evidence
 
 
+@pytest.mark.parametrize("proposed", [
+    pytest.param(NEW_PASSWORD, id="a strong password"),
+    pytest.param("password123", id="a weak password"),
+])
 @pytest.mark.parametrize("operation", PASSWORD_OPERATIONS)
 def test_a_passwordless_account_refuses_every_password_change_without_writes(
     management: UserManagement, actor: AuthenticatedUser, operation: PasswordOperation,
+    proposed: str,
 ) -> None:
     subject = PasswordlessUser(id="subject", username="member", role=management.config.user_role)
     management = a_user_management(management.users.get("actor"), subject, config=management.config)
@@ -789,7 +794,7 @@ def test_a_passwordless_account_refuses_every_password_change_without_writes(
     )
 
     with pytest.raises(PasswordlessAccountError):
-        operation(management, actor, NEW_PASSWORD)
+        operation(management, actor, proposed)
 
     assert management.users.get("subject").password_hash is None
     assert management.sessions.list_active() == [session]
