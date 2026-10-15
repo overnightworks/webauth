@@ -17,7 +17,10 @@ client ID; its nonce and authorized party are checked here, as OpenID Connect
 Core asks of the relying party.
 
 The state, nonce and verifier are each 32 random bytes, and the received state
-and nonce are compared in constant time. The client secret enters only through
+and nonce are compared in constant time. A pending login is stamped with the
+wall clock when it begins and stands for `PENDING_LOGIN_MAX_AGE_SECONDS`; one
+older than that, or dated in the future, is refused before its code is
+exchanged. The client secret enters only through
 `OidcClientConfig`; it, the code and the verifier stay out of every repr and
 message this module writes.
 
@@ -53,6 +56,8 @@ from webauth.jwt_verification import (
 )
 
 MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
+MAX_AUTHORIZATION_CODE_CHARS = 2048
+PENDING_LOGIN_MAX_AGE_SECONDS = 600
 
 _OPENID_SCOPE = "openid"
 _RANDOM_BYTES = 32
@@ -109,6 +114,7 @@ class PendingLogin:
     state: str = field(repr=False)
     nonce: str = field(repr=False)
     code_verifier: str = field(repr=False)
+    issued_at: int
 
 
 @dataclass(frozen=True)
@@ -144,6 +150,7 @@ TokenRequestPost = Callable[[TokenRequest], TokenEndpointAnswer]
 class OidcRefusalReason(StrEnum):
     MALFORMED_CALLBACK = "malformed-callback"
     STATE_MISMATCH = "state-mismatch"
+    PENDING_LOGIN_EXPIRED = "pending-login-expired"
     ISSUER_MISMATCH = "issuer-mismatch"
     AUTHORIZATION_DENIED = "authorization-denied"
     TOKEN_REQUEST_REFUSED = "token-request-refused"
@@ -197,6 +204,7 @@ class OidcRelyingParty:
     ) -> None:
         self._config = config
         self._post_token_request = post_token_request
+        self._wall_clock = wall_clock
         self._client_authorization = _basic_authorization(config.client_id, config.client_secret)
         self._id_token_verifier = JwtVerifier(
             issuer=config.issuer,
@@ -213,6 +221,7 @@ class OidcRelyingParty:
             state=secrets.token_urlsafe(_RANDOM_BYTES),
             nonce=secrets.token_urlsafe(_RANDOM_BYTES),
             code_verifier=secrets.token_urlsafe(_RANDOM_BYTES),
+            issued_at=int(self._wall_clock()),
         )
         query = urllib.parse.urlencode(
             {
@@ -250,6 +259,8 @@ class OidcRelyingParty:
     def _authorization_code(self, pending: PendingLogin, callback: Mapping[str, str]) -> str:
         if not _is_same_secret(callback.get("state"), pending.state):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.STATE_MISMATCH))
+        if not self._is_unexpired(pending):
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.PENDING_LOGIN_EXPIRED))
         if callback.get("iss", self._config.issuer) != self._config.issuer:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH))
         if "error" in callback:
@@ -260,9 +271,13 @@ class OidcRelyingParty:
                 )
             )
         code = callback.get("code")
-        if not code:
+        if not code or len(code) > MAX_AUTHORIZATION_CODE_CHARS:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK))
         return code
+
+    def _is_unexpired(self, pending: PendingLogin) -> bool:
+        age_seconds = self._wall_clock() - pending.issued_at
+        return 0 <= age_seconds <= PENDING_LOGIN_MAX_AGE_SECONDS
 
     def _exchanged_id_token(self, pending: PendingLogin, code: str) -> str:
         request = TokenRequest(
@@ -371,16 +386,25 @@ def _idp_error_code(error: str) -> str | None:
 
 def _token_answer_document(body: bytes) -> Mapping[str, object]:
     """The answer's JSON object, or an empty one for an answer too large,
-    not JSON, or not an object."""
+    not JSON, not an object, or naming a member twice in any object."""
     if len(body) > MAX_TOKEN_RESPONSE_BYTES:
         return {}
     try:
-        document = json.loads(body)
+        document = json.loads(body, object_pairs_hook=_object_without_duplicates)
     # The stdlib parser recurses per nesting level, and the size bound alone
     # leaves room for nesting deep enough to exhaust the recursion limit.
     except (ValueError, RecursionError):
         return {}
     return document if isinstance(document, dict) else {}
+
+
+def _object_without_duplicates(members: list[tuple[str, object]]) -> dict[str, object]:
+    """Refuses a repeated member rather than letting the last one win, so no
+    reader of the answer can be shown another value than this one judged."""
+    document = dict(members)
+    if len(document) != len(members):
+        raise ValueError("a member is named twice")
+    return document
 
 
 def _identity_of(id_token: VerifiedClaims) -> OidcIdentity:
