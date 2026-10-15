@@ -1,8 +1,0 @@
-claim_id = "8739f7f994274133a57287e125ffa214"
-agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
-role = "builder"
-base = "9527dcbbb9ee30a2d556e43cc0ba9aecae0242ba"
-branch = "claude/issue-63-w2b-https-transport"
-scope = [".importlinter", "AGENTS.md", "README.md", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "src/webauth/oidc_login.py", "tests/oidc_arrangement.py", "tests/test_https_client.py", "tests/test_jwt_verification.py"]
-opened_commit = "a218a3fbbe79cdee214c899daa94858af686fcc2"
-whole_reason = "One urllib3 owner for both outbound calls, its contracts and its docs land together."
