@@ -60,9 +60,11 @@ if TYPE_CHECKING:
     from webauth.ports import AuditSink, SubjectUserStore, UserRecord, WriteLock
 
 MAX_PENDING_LOGINS: Final = 5
-TOKEN_REQUEST_TIMEOUT_SECONDS: Final = 5
 """Pending-login cookies a browser keeps at once. A start beyond them
 evicts the oldest, so repeated starts never crowd out the session cookies."""
+TOKEN_REQUEST_TIMEOUT_SECONDS: Final = 5
+"""Seconds ``post_token_request_over_https`` waits to connect, and for each
+read, by default."""
 
 # The callback is a top-level navigation from the issuer's site, which a
 # Strict cookie would not accompany.
