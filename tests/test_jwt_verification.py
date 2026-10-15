@@ -9,16 +9,12 @@ boundary, is driven against a loopback TLS server.
 
 from __future__ import annotations
 
-import contextlib
-import datetime
 import gzip
 import hashlib
 import hmac
-import ipaddress
 import json
 import logging
 import socket
-import ssl
 import string
 import threading
 import time
@@ -26,45 +22,43 @@ import traceback
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, NoReturn
 
 import jwt
 import pytest
 import urllib3
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 from oidc_arrangement import (
     ABSENT,
+    SILENT_HOLD_SECONDS,
     FakeClock,
     FakeKeySetEndpoint,
+    LoopbackHttpsServer,
     changed,
     jws,
     key_set_document,
+    loopback_https_server,
     public_jwk,
     rs256,
     rsa_key,
     segment,
 )
 
+from webauth.https_client import MAX_KEY_SET_BYTES, KeySetFetchError, fetch_key_set_over_https
 from webauth.jwt_verification import (
     KEY_SET_REFRESH_COOLDOWN_SECONDS,
     KEY_SET_TTL_SECONDS,
     MAX_JSON_NESTING_DEPTH,
     MAX_KEY_ID_CHARACTERS,
-    MAX_KEY_SET_BYTES,
     MAX_KEY_SET_KEYS,
     MAX_TOKEN_CHARACTERS,
     JwtVerifier,
-    KeySetFetchError,
     Rejected,
     RejectionReason,
     VerifiedClaims,
-    fetch_key_set_over_https,
 )
 
 
@@ -777,137 +771,28 @@ def test_a_verifier_refuses_a_configuration_it_cannot_verify_against(
 # The real HTTPS boundary, served from loopback under a self-signed certificate.
 
 
-_SILENT_HOLD_SECONDS = 10
-"""How long `/silent` keeps a request unanswered unless the test releases it."""
 _TRANSPORT_FAILURE = (
     "fetching the key set failed: the origin could not be reached,"
     " or the TLS handshake or HTTP exchange failed"
 )
 
 
-@dataclass
-class HttpsKeySetServer:
-    base_url: str
-    requested_paths: list[str]
-    silent_request_arrived: threading.Event
-    release_silent_request: threading.Event
-
-
-def _served_key_set() -> bytes:
-    return key_set_document(public_jwk(rsa_key("current"), "current-key"))
-
-
-def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:
-    key = rsa_key("loopback-tls")
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
-    now = datetime.datetime.now(datetime.UTC)
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(name)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - datetime.timedelta(hours=1))
-        .not_valid_after(now + datetime.timedelta(hours=1))
-        .add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-            critical=False,
-        )
-        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), critical=False
-        )
-        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-        .sign(key, hashes.SHA256())
-    )
-    certificate_path, key_path = directory / "cert.pem", directory / "key.pem"
-    certificate_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
-    key_path.write_bytes(
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-    )
-    return certificate_path, key_path
-
-
 @pytest.fixture
 def https_key_set_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[HttpsKeySetServer]:
-    certificate_path, key_path = _self_signed_loopback_certificate(tmp_path)
-    monkeypatch.setenv("SSL_CERT_FILE", str(certificate_path))
-    requested_paths: list[str] = []
-    silent_request_arrived, release_silent_request = threading.Event(), threading.Event()
-
-    class KeySetHandler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            requested_paths.append(self.path)
-            if self.path == "/silent":
-                silent_request_arrived.set()
-                release_silent_request.wait(timeout=_SILENT_HOLD_SECONDS)
-            elif self.path == "/moved":
-                self._send_head(302, {"Location": "/certs", "Content-Length": "0"})
-            elif self.path == "/missing":
-                self._send_head(404, {"Content-Length": "0"})
-            elif self.path == "/oversized":
-                self._answer(b" " * (2 * MAX_KEY_SET_BYTES))
-            elif self.path == "/compressed":
-                self._answer(gzip.compress(_served_key_set()), content_encoding="gzip")
-            else:
-                self._answer(_served_key_set())
-
-        def _answer(self, body: bytes, content_encoding: str | None = None) -> None:
-            headers = {"Content-Length": str(len(body))}
-            if content_encoding is not None:
-                headers["Content-Encoding"] = content_encoding
-            self._send_head(200, headers)
-            # The fetch may hang up once it read its limit.
-            with contextlib.suppress(OSError):
-                self.wfile.write(body)
-
-        def _send_head(self, status: int, headers: dict[str, str]) -> None:
-            # The fetch may already have hung up, refusing the certificate or
-            # the answer.
-            with contextlib.suppress(OSError):
-                self.send_response(status)
-                for name, value in headers.items():
-                    self.send_header(name, value)
-                self.end_headers()
-
-        def log_message(self, format: str, *args: Any) -> None:
-            del format, args
-
-    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    tls.load_cert_chain(certificate_path, key_path)
-    server = HTTPServer(("127.0.0.1", 0), KeySetHandler)
-    server.socket = tls.wrap_socket(server.socket, server_side=True)
-    serving = threading.Thread(target=server.serve_forever, daemon=True)
-    serving.start()
-    try:
-        yield HttpsKeySetServer(
-            f"https://127.0.0.1:{server.server_port}",
-            requested_paths,
-            silent_request_arrived,
-            release_silent_request,
-        )
-    finally:
-        release_silent_request.set()
-        server.shutdown()
-        server.server_close()
-        serving.join(timeout=10)
+) -> Iterator[LoopbackHttpsServer]:
+    with loopback_https_server(tmp_path, monkeypatch) as server:
+        yield server
 
 
-def test_https_fetch_returns_the_served_key_set(https_key_set_server: HttpsKeySetServer) -> None:
+def test_https_fetch_returns_the_served_key_set(https_key_set_server: LoopbackHttpsServer) -> None:
     document = fetch_key_set_over_https(f"{https_key_set_server.base_url}/certs")
 
     assert json.loads(document)["keys"][0]["kid"] == "current-key"
 
 
 def test_a_verifier_on_the_https_fetch_verifies_a_token_of_the_served_key_set(
-    https_key_set_server: HttpsKeySetServer, issuer: IssuerScenario
+    https_key_set_server: LoopbackHttpsServer, issuer: IssuerScenario
 ) -> None:
     verifier = issuer.verifier_with(
         jwks_url=f"{https_key_set_server.base_url}/certs", fetch_key_set=fetch_key_set_over_https
@@ -917,17 +802,17 @@ def test_a_verifier_on_the_https_fetch_verifies_a_token_of_the_served_key_set(
 
 
 def test_https_fetch_gives_up_on_an_origin_silent_past_the_read_timeout(
-    https_key_set_server: HttpsKeySetServer,
+    https_key_set_server: LoopbackHttpsServer,
 ) -> None:
     started = time.monotonic()
     with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
         fetch_key_set_over_https(f"{https_key_set_server.base_url}/silent", timeout_seconds=0.2)
 
-    assert time.monotonic() - started < _SILENT_HOLD_SECONDS / 2
+    assert time.monotonic() - started < SILENT_HOLD_SECONDS / 2
 
 
 def test_a_request_during_a_stalled_key_set_fetch_is_refused_without_waiting(
-    https_key_set_server: HttpsKeySetServer, issuer: IssuerScenario
+    https_key_set_server: LoopbackHttpsServer, issuer: IssuerScenario
 ) -> None:
     verifier = issuer.verifier_with(
         jwks_url=f"{https_key_set_server.base_url}/silent", fetch_key_set=fetch_key_set_over_https
@@ -945,7 +830,7 @@ def test_a_request_during_a_stalled_key_set_fetch_is_refused_without_waiting(
 
 
 def test_https_fetch_reads_at_most_one_byte_past_the_key_set_limit(
-    https_key_set_server: HttpsKeySetServer,
+    https_key_set_server: LoopbackHttpsServer,
 ) -> None:
     document = fetch_key_set_over_https(f"{https_key_set_server.base_url}/oversized")
 
@@ -953,7 +838,7 @@ def test_https_fetch_reads_at_most_one_byte_past_the_key_set_limit(
 
 
 def test_https_fetch_hands_back_a_compressed_answer_still_compressed(
-    https_key_set_server: HttpsKeySetServer,
+    https_key_set_server: LoopbackHttpsServer,
 ) -> None:
     document = fetch_key_set_over_https(f"{https_key_set_server.base_url}/compressed")
 
@@ -961,7 +846,7 @@ def test_https_fetch_hands_back_a_compressed_answer_still_compressed(
 
 
 def test_https_fetch_refuses_a_certificate_the_system_does_not_trust(
-    https_key_set_server: HttpsKeySetServer, monkeypatch: pytest.MonkeyPatch
+    https_key_set_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("SSL_CERT_FILE")
 
@@ -979,13 +864,13 @@ def test_https_fetch_names_an_origin_nobody_listens_on_as_unreachable() -> None:
 
 
 def test_https_fetch_refuses_an_answer_other_than_200(
-    https_key_set_server: HttpsKeySetServer,
+    https_key_set_server: LoopbackHttpsServer,
 ) -> None:
     with pytest.raises(KeySetFetchError):
         fetch_key_set_over_https(f"{https_key_set_server.base_url}/missing")
 
 
-def test_https_fetch_never_follows_a_redirect(https_key_set_server: HttpsKeySetServer) -> None:
+def test_https_fetch_never_follows_a_redirect(https_key_set_server: LoopbackHttpsServer) -> None:
     with pytest.raises(KeySetFetchError):
         fetch_key_set_over_https(f"{https_key_set_server.base_url}/moved")
 
@@ -1008,7 +893,7 @@ def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: object) -> Non
 
 
 def test_fetch_refuses_a_c1_control_character_before_any_request(
-    https_key_set_server: HttpsKeySetServer,
+    https_key_set_server: LoopbackHttpsServer,
 ) -> None:
     with pytest.raises(KeySetFetchError):
         fetch_key_set_over_https(f"{https_key_set_server.base_url}/ce\x85rts")
@@ -1036,7 +921,7 @@ def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
     ],
 )
 def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
-    https_key_set_server: HttpsKeySetServer, monkeypatch: pytest.MonkeyPatch, url_template: str
+    https_key_set_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, url_template: str
 ) -> None:
     monkeypatch.delenv("SSL_CERT_FILE")
     authority = https_key_set_server.base_url.removeprefix("https://")
@@ -1059,7 +944,7 @@ def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
     ],
 )
 def test_a_failed_fetch_speaks_none_of_urllib3s_error_vocabulary(
-    https_key_set_server: HttpsKeySetServer, monkeypatch: pytest.MonkeyPatch, url_template: str
+    https_key_set_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, url_template: str
 ) -> None:
     monkeypatch.delenv("SSL_CERT_FILE")
     authority = https_key_set_server.base_url.removeprefix("https://")

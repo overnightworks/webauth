@@ -3,26 +3,39 @@
 The keys, signed tokens and key-set documents here are what an issuer
 publishes; the fakes stand in for the injected clock, key-set fetch and token
 POST, so the verifier and the relying party run offline and deterministically.
+`loopback_https_server` is the real counterpart of both endpoints, a TLS
+server on loopback for the production HTTPS transport.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
+import datetime
+import gzip
 import hashlib
+import ipaddress
 import json
 import secrets
+import ssl
 import threading
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from functools import cache
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
 
-from cryptography.hazmat.primitives import hashes
+import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import RSAAlgorithm
 
-from webauth.oidc import TokenEndpointAnswer, TokenRequest
+from webauth.https_client import MAX_KEY_SET_BYTES
+from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointAnswer, TokenRequest
 
 ABSENT = object()
 """A claim or header change that removes the member instead of setting it."""
@@ -157,3 +170,187 @@ class FakeIssuer:
 def s256_code_challenge(code_verifier: str) -> str:
     digest = hashlib.sha256(code_verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
+# The real HTTPS endpoints, served from loopback under a self-signed certificate.
+
+
+SILENT_HOLD_SECONDS = 10
+"""How long `/silent` keeps a request unanswered unless the test releases it."""
+SERVED_TOKEN_ANSWER = json.dumps(
+    {"access_token": "served-access-token", "id_token": "served.id.token", "token_type": "Bearer"}
+).encode()
+REFUSED_TOKEN_ANSWER = json.dumps({"error": "invalid_grant"}).encode()
+_OVERSIZED_ANSWER_BYTES = 2 * max(MAX_KEY_SET_BYTES, MAX_TOKEN_RESPONSE_BYTES)
+
+
+@dataclass(frozen=True)
+class ReceivedRequest:
+    """One request as the server read it; `headers` are keyed in lower case."""
+
+    method: str
+    path: str
+    headers: Mapping[str, str]
+    body: bytes
+
+
+@dataclass
+class LoopbackHttpsServer:
+    """Answers by path, whatever the method or query: `/token` a token answer,
+    `/token-refused` a 400 `invalid_grant`, `/token-at-limit` and
+    `/token-past-limit` a body of `MAX_TOKEN_RESPONSE_BYTES` and one byte
+    more, `/token-reflecting` a token
+    answer whose header block carries the request body as a malformed line,
+    `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
+    released, `/missing` a 404,
+    `/oversized` a body past every size limit, `/compressed` the key set
+    gzipped, `/silent` nothing until released, and any other path the key set.
+    """
+
+    base_url: str
+    received: list[ReceivedRequest]
+    silent_request_arrived: threading.Event
+    release_silent_request: threading.Event
+
+    @property
+    def requested_paths(self) -> list[str]:
+        return [request.path for request in self.received]
+
+
+def served_key_set() -> bytes:
+    return key_set_document(public_jwk(rsa_key("current"), "current-key"))
+
+
+@contextlib.contextmanager
+def loopback_https_server(
+    directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[LoopbackHttpsServer]:
+    """Serves until the block ends, under a certificate written to `directory`
+    that `SSL_CERT_FILE` makes the system trust; a test unsets it to see the
+    certificate refused."""
+    certificate_path, key_path = _self_signed_loopback_certificate(directory)
+    monkeypatch.setenv("SSL_CERT_FILE", str(certificate_path))
+    received: list[ReceivedRequest] = []
+    silent_request_arrived, release_silent_request = threading.Event(), threading.Event()
+
+    class LoopbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self._receive(b"")
+
+        def do_POST(self) -> None:
+            self._receive(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+
+        def _receive(self, body: bytes) -> None:
+            headers = {name.lower(): value for name, value in self.headers.items()}
+            received.append(ReceivedRequest(self.command, self.path, headers, body))
+            route = urllib.parse.urlsplit(self.path).path
+            if route == "/silent":
+                silent_request_arrived.set()
+                release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
+            elif route == "/moved":
+                self._send_head(302, {"Location": "/certs", "Content-Length": "0"})
+            elif route == "/moved-stalling":
+                self._send_head(302, {"Location": "/certs", "Content-Length": "1"})
+                release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
+            elif route == "/missing":
+                self._send_head(404, {"Content-Length": "0"})
+            elif route == "/oversized":
+                self._answer(200, b" " * _OVERSIZED_ANSWER_BYTES)
+            elif route == "/compressed":
+                self._answer(200, gzip.compress(served_key_set()), content_encoding="gzip")
+            elif route == "/token":
+                self._answer(200, SERVED_TOKEN_ANSWER)
+            elif route == "/token-refused":
+                self._answer(400, REFUSED_TOKEN_ANSWER)
+            elif route == "/token-at-limit":
+                self._answer(200, b" " * MAX_TOKEN_RESPONSE_BYTES)
+            elif route == "/token-past-limit":
+                self._answer(200, b" " * (MAX_TOKEN_RESPONSE_BYTES + 1))
+            elif route == "/token-reflecting":
+                self._answer_reflecting_in_a_malformed_header(body)
+            else:
+                self._answer(200, served_key_set())
+
+        def _answer(self, status: int, body: bytes, content_encoding: str | None = None) -> None:
+            headers = {"Content-Length": str(len(body))}
+            if content_encoding is not None:
+                headers["Content-Encoding"] = content_encoding
+            self._send_head(status, headers)
+            # The client may hang up once it read its limit.
+            with contextlib.suppress(OSError):
+                self.wfile.write(body)
+
+        def _answer_reflecting_in_a_malformed_header(self, reflected: bytes) -> None:
+            self.wfile.write(
+                b"HTTP/1.0 200 OK\r\n"
+                + reflected
+                + f"\r\nContent-Length: {len(SERVED_TOKEN_ANSWER)}\r\n\r\n".encode()
+                + SERVED_TOKEN_ANSWER
+            )
+
+        def _send_head(self, status: int, headers: dict[str, str]) -> None:
+            # The client may already have hung up, refusing the certificate or
+            # the answer.
+            with contextlib.suppress(OSError):
+                self.send_response(status)
+                for name, value in headers.items():
+                    self.send_header(name, value)
+                self.end_headers()
+
+        def log_message(self, format: str, *args: Any) -> None:
+            del format, args
+
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(certificate_path, key_path)
+    server = HTTPServer(("127.0.0.1", 0), LoopbackHandler)
+    server.socket = tls.wrap_socket(server.socket, server_side=True)
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    try:
+        yield LoopbackHttpsServer(
+            f"https://127.0.0.1:{server.server_port}",
+            received,
+            silent_request_arrived,
+            release_silent_request,
+        )
+    finally:
+        release_silent_request.set()
+        server.shutdown()
+        server.server_close()
+        serving.join(timeout=10)
+
+
+def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:
+    key = rsa_key("loopback-tls")
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])
+    now = datetime.datetime.now(datetime.UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(hours=1))
+        .not_valid_after(now + datetime.timedelta(hours=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
+            critical=False,
+        )
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), critical=False
+        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .sign(key, hashes.SHA256())
+    )
+    certificate_path, key_path = directory / "cert.pem", directory / "key.pem"
+    certificate_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return certificate_path, key_path

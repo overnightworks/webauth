@@ -33,10 +33,13 @@ than the owner needs.
   `overnightworks-webauth[redis]` for the Redis rate-limit and session backends; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
   JWT verification and OpenID Connect login are optional too —
-  `overnightworks-webauth[jwt]` adds PyJWT, cryptography and urllib3 for
-  `webauth.jwt_verification`; no other module imports them, and only
-  `webauth.oidc` imports `webauth.jwt_verification`. Two `protected`
-  import-linter contracts enforce both.
+  `overnightworks-webauth[jwt]` adds PyJWT and cryptography, which only
+  `webauth.jwt_verification` imports, and urllib3, which only
+  `webauth.https_client` imports — the one owner of outbound HTTPS. Only
+  `webauth.oidc` imports `webauth.jwt_verification`; only
+  `webauth.jwt_verification` and `webauth.oidc_login` import
+  `webauth.https_client`. Four `protected` import-linter contracts enforce
+  this.
 - The user model, schema, configured role names, transaction boundaries, and
   HTTP routes and responses belong to the host. User administration and
   first-run setup are library helpers in `webauth.users` over host-supplied

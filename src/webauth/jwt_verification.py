@@ -34,18 +34,24 @@ import logging
 import math
 import re
 import threading
-import urllib.parse
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from http import HTTPStatus
 from types import MappingProxyType
 from typing import NoReturn, TypeGuard, cast
 
 import jwt
-import urllib3
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
+
+# The aliased names are re-exported: hosts imported the key-set fetch, its
+# limits and its error from this module before they moved to webauth.https_client,
+# and webauth.oidc imports is_https_url from here.
+from webauth.https_client import KEY_SET_FETCH_TIMEOUT_SECONDS as KEY_SET_FETCH_TIMEOUT_SECONDS
+from webauth.https_client import MAX_KEY_SET_BYTES as MAX_KEY_SET_BYTES
+from webauth.https_client import KeySetFetchError as KeySetFetchError
+from webauth.https_client import fetch_key_set_over_https as fetch_key_set_over_https
+from webauth.https_client import is_https_url as is_https_url
 
 log = logging.getLogger(__name__)
 
@@ -54,15 +60,12 @@ MAX_JSON_NESTING_DEPTH = 8
 MAX_KEY_ID_CHARACTERS = 128
 KEY_SET_TTL_SECONDS = 60 * 60
 KEY_SET_REFRESH_COOLDOWN_SECONDS = 30
-KEY_SET_FETCH_TIMEOUT_SECONDS = 5
-MAX_KEY_SET_BYTES = 64 * 1024
 MAX_KEY_SET_KEYS = 10
 MIN_RSA_KEY_BITS = 2048
 
 _ALGORITHM = "RS256"
 _JWS_COMPACT_SEGMENTS = 3
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]*")
-_URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 # Members through which a token could name, embed or constrain its own key,
 # and `b64`, which would change how PyJWT reads the payload segment.
 _FORBIDDEN_HEADER_MEMBERS = frozenset({"crit", "jwk", "jku", "x5u", "x5c", "b64"})
@@ -116,10 +119,6 @@ class VerifiedClaims:
 @dataclass(frozen=True)
 class Rejected:
     reason: RejectionReason
-
-
-class KeySetFetchError(Exception):
-    """The key set could not be fetched: refused, timed out, redirected, or broken off."""
 
 
 class _RefusalError(Exception):
@@ -314,69 +313,6 @@ class JwtVerifier:
             log.warning("Refreshing the key set failed: %s", failure)
         finally:
             self._refresh_lock.release()
-
-
-def fetch_key_set_over_https(
-    url: str, *, timeout_seconds: float = KEY_SET_FETCH_TIMEOUT_SECONDS
-) -> bytes:
-    """The production `KeySetFetch`: HTTPS under the system's trusted
-    certificates, no retry, no redirect followed, no content decoding, and at
-    most one byte past the key-set limit read, so the verifier refuses an
-    oversized answer without buffering it. A compressed answer reaches the
-    verifier still compressed and fails as invalid JSON.
-
-    `timeout_seconds` bounds connecting and each read on its own, not the
-    fetch in total: a stalled DNS lookup, or an origin that trickles bytes
-    within each read timeout, holds this refresh for as long as it lasts.
-    Every failure fails closed, and every other request is refused at once
-    rather than waiting for this refresh.
-
-    No error carries any part of the URL or names urllib3's error, and none
-    chains it, since its message may quote the whole URL: a key-set URL may
-    hold a secret in its credentials, path or query."""
-    if not is_https_url(url):
-        raise KeySetFetchError(
-            "refusing to fetch the key set: not an https URL naming a host,"
-            " a valid port if any, and no control character, space or credentials"
-        )
-    timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
-    try:
-        with urllib3.PoolManager(timeout=timeout, retries=False) as pool:
-            response = pool.request(
-                "GET", url, redirect=False, preload_content=False, decode_content=False
-            )
-            try:
-                if response.status != HTTPStatus.OK:
-                    raise KeySetFetchError(
-                        f"the key set origin answered {response.status}, not 200"
-                    )
-                return response.read(MAX_KEY_SET_BYTES + 1)
-            finally:
-                response.close()
-    except (urllib3.exceptions.HTTPError, OSError):
-        failed = KeySetFetchError(
-            "fetching the key set failed: the origin could not be reached,"
-            " or the TLS handshake or HTTP exchange failed"
-        )
-    # Raised outside the handler so urllib3's error is not even its context.
-    raise failed
-
-
-def is_https_url(url: object) -> TypeGuard[str]:
-    """A string that is an https URL naming a host, a valid port if any, and
-    no control character, space or credentials.
-
-    A control character or space is refused outright: the URL parser strips
-    some of them before judging, so the parse would pass a URL that is not
-    the one stored and later sent."""
-    if not isinstance(url, str) or _URL_CONTROL_OR_SPACE.search(url):
-        return False
-    try:
-        origin = urllib.parse.urlsplit(url)
-        _ = origin.port
-    except ValueError:
-        return False
-    return origin.scheme == "https" and bool(origin.hostname) and "@" not in origin.netloc
 
 
 def _library_checks() -> Options:

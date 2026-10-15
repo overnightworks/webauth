@@ -25,8 +25,9 @@ It owns the machinery an application should not rebuild:
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. Needs `overnightworks-webauth[jwt]` |
+| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
 It leaves the application everything that touches the application's own truth:
 the user model, configured roles, setup and login routes, and their
@@ -455,6 +456,38 @@ injects, authenticated with HTTP Basic, and the ID token is verified by a
 `JwtVerifier` whose one accepted audience is the client ID, then checked for
 the pending nonce and an authorized party: a token for several audiences must
 name the client as its `azp`, and any `azp` a token names must be the client.
+
+In production both outbound calls go through `webauth.https_client`, the one
+module that imports urllib3:
+
+```python
+import time
+
+from webauth.https_client import fetch_key_set_over_https
+from webauth.oidc import OidcRelyingParty
+from webauth.oidc_login import post_token_request_over_https
+
+relying_party = OidcRelyingParty(
+    client_config,
+    post_token_request=post_token_request_over_https,
+    fetch_key_set=fetch_key_set_over_https,
+    wall_clock=time.time,
+    monotonic_clock=time.monotonic,
+)
+```
+
+Each request is HTTPS only, under the system's trusted certificates
+(`SSL_CERT_FILE` included), with a connect and a read timeout of five seconds
+each, no retry, no redirect followed and no content decoding. The key-set
+fetch reads at most one byte past `MAX_KEY_SET_BYTES` and refuses any answer
+but 200. The token POST is a form POST with the client's Basic authorization
+and `Accept: application/json`; it hands back any answer but a redirect —
+an issuer's `400 invalid_grant` included — and raises `TokenEndpointError`
+for a redirect, an answer past `MAX_TOKEN_RESPONSE_BYTES`, a TLS failure, a
+timeout or an unreachable origin. Its message is the library's own and never
+quotes the URL, the client secret, the code or the verifier. urllib3 logs
+nothing during either call, since its records quote the URL and whatever
+malformed header text the origin sends back.
 
 `webauth.oidc_login.admit_identity(identity, *, bound_issuer, accounts, lock,
 audit, config)` turns that identity into the account it signs in as. The host
