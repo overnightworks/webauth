@@ -532,7 +532,9 @@ never overwrite each other:
 - **Cap:** a browser holds at most five pending-login cookies. A start beyond
   them clears the oldest by `issued_at` — a cookie that does not verify, or
   whose name appears twice, counts as oldest — so repeated starts never crowd
-  out the session and CSRF cookies.
+  out the session and CSRF cookies. Only names of the exact pending-login
+  shape, the prefix and 16 lowercase hex characters, count; any other cookie
+  whose name merely starts with the prefix is neither counted nor cleared.
 
 `finish_login` reads the state from the callback, selects exactly the cookie
 that state names and clears it on every outcome — admitted or refused —

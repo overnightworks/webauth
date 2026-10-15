@@ -29,6 +29,7 @@ MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 256
 _PENDING_LOGIN_VERSION: Final = "v1"
 _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
 _STATE_DIGEST_HEX_CHARS: Final = 16
+_STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 # The state, nonce and verifier are `secrets.token_urlsafe(32)`, which is
 # always 43 base64url characters; a field of any other shape was not minted
 # by `webauth.oidc`.
@@ -70,6 +71,16 @@ def pending_login_cookie_name(state: str, *, secure: bool) -> str:
     """The name of the cookie that carries the pending login of ``state``."""
     state_digest = hashlib.sha256(state.encode()).hexdigest()[:_STATE_DIGEST_HEX_CHARS]
     return f"{pending_login_cookie_prefix(secure=secure)}{state_digest}"
+
+
+def is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
+    """Whether ``name`` has the shape ``pending_login_cookie_name`` gives every
+    pending-login cookie, so webauth may clear it; a name of any other shape
+    was not set by webauth, and may not even be a legal cookie name."""
+    prefix = pending_login_cookie_prefix(secure=secure)
+    if not name.startswith(prefix):
+        return False
+    return _STATE_DIGEST.fullmatch(name.removeprefix(prefix)) is not None
 
 
 def is_host_only_cookie_name(name: str) -> bool:

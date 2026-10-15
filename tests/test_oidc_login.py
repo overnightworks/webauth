@@ -696,3 +696,17 @@ def test_a_start_at_the_cap_evicts_a_forged_pending_cookie_before_any_genuine_on
     newest = host.pending_cookie_name(host.sign_in_at_issuer())
 
     assert host.pending_cookie_names() == genuine | {newest}
+
+
+def test_a_start_at_the_cap_leaves_a_prefixed_cookie_of_another_shape_alone() -> None:
+    host = an_oidc_host()
+    genuine = {host.pending_cookie_name(host.sign_in_at_issuer()) for _ in range(4)}
+    stranger = f"{pending_login_cookie_prefix(secure=True)}a@b"
+    host.client.cookies.set(stranger, "x", domain="testserver.local", path="/")
+
+    response = host.client.get("/login/oidc")
+
+    newest = host.pending_cookie_name(
+        urllib.parse.urlsplit(response.json()["authorization_url"]).query
+    )
+    assert host.pending_cookie_names() == genuine | {stranger, newest}

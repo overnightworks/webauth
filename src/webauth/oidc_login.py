@@ -28,8 +28,8 @@ from typing import TYPE_CHECKING, Final
 from webauth.cookies import (
     cookie_pairs,
     cookie_values,
+    is_pending_login_cookie_name,
     pending_login_cookie_name,
-    pending_login_cookie_prefix,
     sign_pending_login,
     verify_pending_login,
 )
@@ -146,10 +146,9 @@ def _sole_pending_login(
 def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> list[str]:
     """The names to clear so the new pending login is one of at most
     ``MAX_PENDING_LOGINS``, oldest first."""
-    prefix = pending_login_cookie_prefix(secure=config.cookie_secure)
     issued_at_by_name: dict[str, int] = {}
     for name, value in cookie_pairs(request):
-        if name.startswith(prefix):
+        if is_pending_login_cookie_name(name, secure=config.cookie_secure):
             issued_at_by_name[name] = (
                 _UNRANKED if name in issued_at_by_name else _issued_at(value, config)
             )
