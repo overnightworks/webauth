@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import inspect
 import logging
 import socket
 import time
@@ -434,6 +435,21 @@ def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
         <= held
         < _DEFAULT_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS * _FAST_CLOCK_SPEED
     )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
+        pytest.param(post_form_over_https, id="token-post"),
+    ],
+)
+def test_each_calls_default_deadline_is_exactly_ten_seconds(call: Callable[..., object]) -> None:
+    # The fast-clock test above proves the default is wired; its band cannot
+    # tell ten seconds from fifteen, so the public default itself is pinned.
+    deadline = inspect.signature(call).parameters["deadline_seconds"].default
+
+    assert deadline == _DEFAULT_DEADLINE_SECONDS
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
