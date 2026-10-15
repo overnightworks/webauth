@@ -18,6 +18,10 @@ host's accounts, never a configuration change. This module builds on
 
 Admission holds the host's write lock and never commits: the host commits or
 rolls back, and a refusal writes nothing.
+
+``post_token_request_over_https`` is the production ``TokenRequestPost`` the
+host gives its ``OidcRelyingParty``, beside ``fetch_key_set_over_https``; both
+send their request through ``webauth.https_client``.
 """
 
 from __future__ import annotations
@@ -33,11 +37,15 @@ from webauth.cookies import (
     sign_pending_login,
     verify_pending_login,
 )
+from webauth.https_client import HttpsExchangeError, post_form_over_https
 from webauth.login import COOKIE_PATH
 from webauth.oidc import (
+    MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcRefusal,
     OidcRefusalReason,
+    TokenEndpointAnswer,
+    TokenEndpointError,
     callback_state,
 )
 from webauth.ports import UserManagementEvent, UserManagementEventKind, UsernameTakenError
@@ -48,10 +56,11 @@ if TYPE_CHECKING:
 
     from webauth.config import WebAuthConfig
     from webauth.cookies import PendingLogin
-    from webauth.oidc import OidcIdentity, OidcRelyingParty
+    from webauth.oidc import OidcIdentity, OidcRelyingParty, TokenRequest
     from webauth.ports import AuditSink, SubjectUserStore, UserRecord, WriteLock
 
 MAX_PENDING_LOGINS: Final = 5
+TOKEN_REQUEST_TIMEOUT_SECONDS: Final = 5
 """Pending-login cookies a browser keeps at once. A start beyond them
 evicts the oldest, so repeated starts never crowd out the session cookies."""
 
@@ -227,3 +236,34 @@ def _username_for(identity: OidcIdentity) -> str:
     """The issuer's suggested username, or the subject when it suggests a blank one."""
     suggested = identity.preferred_username
     return suggested if suggested and not suggested.isspace() else identity.subject
+
+
+def post_token_request_over_https(
+    request: TokenRequest, *, timeout_seconds: float = TOKEN_REQUEST_TIMEOUT_SECONDS
+) -> TokenEndpointAnswer:
+    """The production ``TokenRequestPost``: the request POSTed under the
+    bounded posture of ``webauth.https_client``, reading at most one byte past
+    ``MAX_TOKEN_RESPONSE_BYTES`` of the answer.
+
+    Any answer but a redirect comes back whatever its status, so the relying
+    party reads an issuer's refusal such as ``invalid_grant``. A redirect, an
+    oversized answer, a refused URL, an unreachable origin, a failed TLS
+    handshake, a timeout or a broken exchange raises ``TokenEndpointError`` in
+    this library's words, never quoting the request.
+
+    ``timeout_seconds`` bounds connecting and each read on its own, not the
+    exchange in total."""
+    try:
+        answer = post_form_over_https(
+            request.url,
+            request.form,
+            authorization=request.authorization,
+            max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
+            timeout_seconds=timeout_seconds,
+        )
+    except HttpsExchangeError as refusal:
+        failure = refusal.failure
+    else:
+        return TokenEndpointAnswer(answer.status, answer.body)
+    # Raised outside the handler so not even the exchange error is its context.
+    raise TokenEndpointError(f"the token request failed: {failure}")
