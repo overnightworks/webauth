@@ -1,0 +1,8 @@
+claim_id = "d3e1341b92f342ee954f567daf3cde5f"
+agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
+role = "builder"
+base = "d8a15466bdd21adf7bf9e7092364d2c4de4a166e"
+branch = "claude/issue-61-w3b-pending-login"
+scope = ["README.md", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "tests/oidc_arrangement.py", "tests/test_cookies.py", "tests/test_oidc.py", "tests/test_oidc_login.py", "tests/webauth_arrangement.py"]
+opened_commit = "c11c8fceb44a74c7a2032d8df9944743ce94be7b"
+whole_reason = "The pending-login cookie, the start/finish flow that consumes it, and the four hardenings in the same modules land together."
