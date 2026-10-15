@@ -28,8 +28,8 @@ from oidc_arrangement import (
 )
 from pydantic import SecretStr
 
+import webauth.https_client
 import webauth.jwt_verification
-from webauth.https_client import fetch_key_set_over_https
 from webauth.oidc import TokenEndpointError, TokenRequest
 from webauth.oidc_login import post_token_request_over_https
 
@@ -201,5 +201,16 @@ def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
     assert refused.value.__context__ is None
 
 
-def test_the_key_set_fetch_is_still_wired_from_jwt_verification() -> None:
-    assert webauth.jwt_verification.fetch_key_set_over_https is fetch_key_set_over_https
+@pytest.mark.parametrize(
+    "moved_name",
+    [
+        "KEY_SET_FETCH_TIMEOUT_SECONDS",
+        "MAX_KEY_SET_BYTES",
+        "KeySetFetchError",
+        "fetch_key_set_over_https",
+    ],
+)
+def test_the_key_set_fetch_is_still_wired_from_jwt_verification(moved_name: str) -> None:
+    assert getattr(webauth.jwt_verification, moved_name) is getattr(
+        webauth.https_client, moved_name
+    )

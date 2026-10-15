@@ -44,11 +44,13 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
 
-from webauth.https_client import MAX_KEY_SET_BYTES, KeySetFetchError, is_https_url
-
-# Re-exported: hosts wired the production key-set fetch from this module
-# before it moved to webauth.https_client.
+# The aliased names are re-exported: hosts imported the key-set fetch, its
+# limits and its error from this module before they moved to webauth.https_client.
+from webauth.https_client import KEY_SET_FETCH_TIMEOUT_SECONDS as KEY_SET_FETCH_TIMEOUT_SECONDS
+from webauth.https_client import MAX_KEY_SET_BYTES as MAX_KEY_SET_BYTES
+from webauth.https_client import KeySetFetchError as KeySetFetchError
 from webauth.https_client import fetch_key_set_over_https as fetch_key_set_over_https
+from webauth.https_client import is_https_url
 
 log = logging.getLogger(__name__)
 
