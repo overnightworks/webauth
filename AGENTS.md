@@ -32,9 +32,10 @@ than the owner needs.
   and argon2-cffi at runtime, and on nothing else. Redis is optional — install
   `overnightworks-webauth[redis]` for the Redis rate-limit and session backends; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
-  JWT verification is optional too — `overnightworks-webauth[jwt]` adds PyJWT,
-  cryptography and urllib3 for `webauth.jwt_verification`; no other module
-  imports them.
+  JWT verification and OpenID Connect login are optional too —
+  `overnightworks-webauth[jwt]` adds PyJWT, cryptography and urllib3 for
+  `webauth.jwt_verification`; no other module imports them, and only
+  `webauth.oidc` imports `webauth.jwt_verification`.
 - The user model, schema, configured role names, transaction boundaries, and
   HTTP routes and responses belong to the host. User administration and
   first-run setup are library helpers in `webauth.users` over host-supplied
