@@ -828,11 +828,11 @@ def test_a_verifier_refuses_a_configuration_it_cannot_verify_against(
 
 
 _SILENT_HOLD_SECONDS = 10
+"""How long `/silent` keeps a request unanswered unless the test releases it."""
 _TRANSPORT_FAILURE = (
     "fetching the key set failed: the origin could not be reached,"
     " or the TLS handshake or HTTP exchange failed"
 )
-"""How long `/silent` keeps a request unanswered unless the test releases it."""
 
 
 @dataclass
@@ -1024,8 +1024,8 @@ def test_https_fetch_names_an_origin_nobody_listens_on_as_unreachable() -> None:
         probe.bind(("127.0.0.1", 0))
         closed_port = probe.getsockname()[1]
 
-    with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
-        fetch_key_set_over_https(f"https://127.0.0.1:{closed_port}/certs")
+        with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
+            fetch_key_set_over_https(f"https://127.0.0.1:{closed_port}/certs")
 
 
 def test_https_fetch_refuses_an_answer_other_than_200(
