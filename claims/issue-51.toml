@@ -1,8 +1,0 @@
-claim_id = "b069cce296b24960aea8af05ce88eb8e"
-agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
-role = "builder"
-base = "8b2701b5bed4347a955536cf784e8db268d5f7b9"
-branch = "claude/issue-51-w1-jwt-verifier"
-scope = ["README.md", "pyproject.toml", "src/webauth/jwt_verification.py", "tests/test_jwt_verification.py", "uv.lock"]
-opened_commit = "02907f54d2cf198abe33055123e20775115c5255"
-whole_reason = "A verifier module, its tests, its dependencies and its owner-table row belong together."
