@@ -25,6 +25,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. Needs `overnightworks-webauth[jwt]` |
+| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
 
 It leaves the application everything that touches the application's own truth:
 the user model, configured roles, setup and login routes, and their
@@ -426,6 +427,24 @@ the same login redirect or the same 401 — as a real `Response` rather than a
 raised exception, for a host whose own middleware is the session authority
 and cannot rely on FastAPI's dependency-injection or exception-handling
 machinery to reach it.
+
+## OpenID Connect login
+
+`webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE
+for one client at one issuer, described by an `OidcClientConfig` whose URLs
+are all https and whose `client_secret` is a `SecretStr`. `begin_login()`
+answers the URL to send the browser to and a `PendingLogin` — its state,
+nonce and PKCE verifier — that the host keeps until the browser returns.
+`complete_login(pending, callback_query)` takes that pending login and the
+callback's raw query string and answers an `OidcIdentity` (subject, issuer,
+full group paths, `sid`, `preferred_username`) or an `OidcRefusal` naming its
+reason. The state is checked before anything else the callback says; an
+error the issuer reports is carried as its short error code only, never its
+description. The code is exchanged through the `post_token_request` the host
+injects, authenticated with HTTP Basic, and the ID token is verified by a
+`JwtVerifier` whose one accepted audience is the client ID, then checked for
+the pending nonce and an authorized party: a token for several audiences must
+name the client as its `azp`, and any `azp` a token names must be the client.
 
 ## Development
 
