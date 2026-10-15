@@ -130,7 +130,7 @@ class TokenRequest:
 @dataclass(frozen=True)
 class TokenEndpointAnswer:
     status: int
-    body: bytes
+    body: bytes = field(repr=False)
 
 
 class TokenEndpointError(Exception):

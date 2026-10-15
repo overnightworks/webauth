@@ -443,7 +443,8 @@ error the issuer reports is carried as its short error code only, never its
 description. The code is exchanged through the `post_token_request` the host
 injects, authenticated with HTTP Basic, and the ID token is verified by a
 `JwtVerifier` whose one accepted audience is the client ID, then checked for
-the pending nonce and, with several audiences, an `azp` naming the client.
+the pending nonce and an authorized party: a token for several audiences must
+name the client as its `azp`, and any `azp` a token names must be the client.
 
 ## Development
 

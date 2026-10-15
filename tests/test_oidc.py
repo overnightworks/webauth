@@ -512,18 +512,20 @@ def test_two_logins_never_share_a_state_nonce_or_verifier(login: LoginScenario) 
     assert len(set(values)) == len(values)
 
 
-def test_no_repr_shows_the_client_secret_the_code_or_the_pending_login(
+def test_no_repr_shows_the_client_secret_the_code_the_tokens_or_the_pending_login(
     login: LoginScenario,
 ) -> None:
     pending, _outcome = login.attempt(Attempt())
     [request] = login.token_endpoint.requests
+    answer = login.token_endpoint.answer
 
-    shown = " ".join(repr(each) for each in (_config(), request, pending))
+    shown = " ".join(repr(each) for each in (_config(), request, answer, pending))
 
     for secret in (
         _CLIENT_SECRET,
         _BASIC_AUTHORIZATION,
         _CODE,
+        "an-access-token",
         pending.state,
         pending.nonce,
         pending.code_verifier,
