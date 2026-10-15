@@ -9,7 +9,9 @@ secrets in the client secret, the code and the PKCE verifier.
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
+import socket
 import time
 import traceback
 import urllib.parse
@@ -26,6 +28,7 @@ from oidc_arrangement import (
     LoopbackHttpsServer,
     closed_loopback_port,
     loopback_https_server,
+    unconnectable_loopback_port,
 )
 from pydantic import SecretStr
 
@@ -330,18 +333,45 @@ _EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
 )
 
 
-@pytest.mark.parametrize("route", ["/dripping-head", "/dripping-body"])
+_StalledTarget = Callable[[LoopbackHttpsServer, pytest.MonkeyPatch, contextlib.ExitStack], str]
+
+
+def _route(path: str) -> _StalledTarget:
+    return lambda server, monkeypatch, stack: f"{server.base_url}{path}"
+
+
+def _unconnectable_on_every_address(
+    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
+) -> str:
+    port = stack.enter_context(unconnectable_loopback_port())
+    [address] = socket.getaddrinfo("127.0.0.1", port, type=socket.SOCK_STREAM)
+    # A host name resolving to three addresses, none of which answers.
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [address] * 3)
+    return f"https://issuer.example:{port}/certs"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param(_unconnectable_on_every_address, id="connect-on-every-address"),
+        pytest.param(_route("/dripping-head"), id="dripping-head"),
+        pytest.param(_route("/dripping-body"), id="dripping-body"),
+    ],
+)
 @_EXCHANGES_UNDER_A_DEADLINE
-def test_an_origin_dripping_its_answer_is_cut_off_at_the_total_deadline(
+def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
     exchange: Callable[..., object],
     error: type[KeySetFetchError | HttpsExchangeError],
-    route: str,
+    target: _StalledTarget,
 ) -> None:
-    started = time.monotonic()
-    with pytest.raises(error) as refused:
-        exchange(f"{token_server.base_url}{route}", deadline_seconds=_TEST_DEADLINE_SECONDS)
-    held = time.monotonic() - started
+    with contextlib.ExitStack() as stack:
+        url = target(token_server, monkeypatch, stack)
+        started = time.monotonic()
+        with pytest.raises(error) as refused:
+            exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
+        held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS

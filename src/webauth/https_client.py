@@ -29,10 +29,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
+import socket
 import ssl
 import time
 import urllib.parse
-from collections.abc import Buffer, Callable, Iterator, Mapping
+from collections.abc import Buffer, Callable, Iterable, Iterator, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -42,7 +43,10 @@ from typing import TypeGuard
 
 import urllib3
 from pydantic import SecretStr
+from urllib3.connection import HTTPSConnection
+from urllib3.exceptions import ConnectTimeoutError, NameResolutionError, NewConnectionError
 from urllib3.util import create_urllib3_context
+from urllib3.util.connection import allowed_gai_family
 
 KEY_SET_FETCH_TIMEOUT_SECONDS = 5
 KEY_SET_FETCH_DEADLINE_SECONDS = 10
@@ -229,13 +233,11 @@ def _exchange(
     `accepts_status`; any other status comes back as `_RefusedStatus`, so an
     answer the caller refuses by its status alone never waits for its body.
 
-    Once `deadline_seconds` have passed, the next read, write or handshake
-    step on the connection raises a timeout, and the exchange fails as
+    Once `deadline_seconds` have passed, the next connect attempt, read,
+    write or handshake step raises a timeout, and the exchange fails as
     `TIMED_OUT` whatever error urllib3 made of it."""
     deadline = _Deadline.after(deadline_seconds)
-    timeout = urllib3.Timeout(
-        connect=timeout_seconds, read=timeout_seconds, total=deadline_seconds
-    )
+    timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:
         with (
             _urllib3_unlogged(),
@@ -243,6 +245,7 @@ def _exchange(
                 timeout=timeout, retries=False, ssl_context=_tls_context_under(deadline)
             ) as pool,
         ):
+            pool.pool_classes_by_scheme = {"https": _https_pool_class_under(deadline)}
             response = pool.request(
                 method,
                 url,
@@ -323,6 +326,62 @@ def _tls_context_under(deadline: _Deadline) -> ssl.SSLContext:
     context.load_default_certs()
     context.sslsocket_class = SocketUnderDeadline
     return context
+
+
+def _https_pool_class_under(deadline: _Deadline) -> type[urllib3.HTTPSConnectionPool]:
+    """urllib3's HTTPS pool, whose connections connect within `deadline`.
+
+    urllib3 gives each address the host name resolves to a connect timeout of
+    its own, so a host whose every address drops the connection would hold
+    the call for that timeout once per address. Here each attempt gets at
+    most what is left of the deadline, and none starts once it has passed;
+    urllib3's own error classes keep the failure's category."""
+
+    class ConnectionUnderDeadline(HTTPSConnection):
+        def _new_conn(self) -> socket.socket:
+            try:
+                return _connect_within(
+                    deadline, self._dns_host, self.port, self.timeout, self.socket_options
+                )
+            except socket.gaierror as error:
+                raise NameResolutionError(self.host, self, error) from error
+            except TimeoutError as error:
+                raise ConnectTimeoutError(self, "connecting timed out") from error
+            except OSError as error:
+                raise NewConnectionError(self, "connecting failed") from error
+
+    class PoolUnderDeadline(urllib3.HTTPSConnectionPool):
+        ConnectionCls = ConnectionUnderDeadline
+
+    return PoolUnderDeadline
+
+
+def _connect_within(
+    deadline: _Deadline,
+    host: str,
+    port: int,
+    timeout: float | None,
+    socket_options: Iterable[tuple[int, int, int | bytes]] | None,
+) -> socket.socket:
+    """A socket connected to the first address of `host` that answers, every
+    attempt bounded by `timeout` and by what is left of `deadline`."""
+    failure = OSError("the host name resolves to no address")
+    for family, kind, protocol, _, address in socket.getaddrinfo(
+        host.strip("[]"), port, allowed_gai_family(), socket.SOCK_STREAM
+    ):
+        attempt_timeout = deadline.bound(timeout)
+        connection = socket.socket(family, kind, protocol)
+        try:
+            for option in socket_options or ():
+                connection.setsockopt(*option)
+            connection.settimeout(attempt_timeout)
+            connection.connect(address)
+        except OSError as error:
+            connection.close()
+            failure = error
+        else:
+            return connection
+    raise failure
 
 
 @contextlib.contextmanager
