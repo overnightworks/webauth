@@ -54,7 +54,14 @@ _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=F
 
 
 class KeySetFetchError(Exception):
-    """The key set could not be fetched: refused, timed out, redirected, or broken off."""
+    """The key set could not be fetched: refused, timed out, redirected, or broken off.
+
+    `failure` names why when the exchange itself failed; it is `None` when the
+    origin answered with a status other than 200."""
+
+    def __init__(self, message: str, failure: ExchangeFailure | None = None) -> None:
+        super().__init__(message)
+        self.failure = failure
 
 
 class ExchangeFailure(StrEnum):
@@ -114,7 +121,8 @@ def fetch_key_set_over_https(
     if not is_https_url(url):
         raise KeySetFetchError(
             "refusing to fetch the key set: not an https URL naming a host,"
-            " a valid port if any, and no control character, space or credentials"
+            " a valid port if any, and no control character, space or credentials",
+            ExchangeFailure.NOT_AN_HTTPS_URL,
         )
     try:
         answer = _exchange(
@@ -125,10 +133,11 @@ def fetch_key_set_over_https(
             deadline_seconds=deadline_seconds,
             max_body_bytes=MAX_KEY_SET_BYTES,
         )
-    except HttpsExchangeError:
+    except HttpsExchangeError as refusal:
         failed = KeySetFetchError(
             "fetching the key set failed: the origin could not be reached,"
-            " or the TLS handshake or HTTP exchange failed"
+            " or the TLS handshake or HTTP exchange failed",
+            refusal.failure,
         )
     else:
         if isinstance(answer, _RefusedStatus):

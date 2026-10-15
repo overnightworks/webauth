@@ -304,52 +304,44 @@ def test_an_answer_whose_body_is_never_read_is_judged_by_its_status_alone(
 _TEST_DEADLINE_SECONDS = 1.0
 
 
-def _fetch_key_set_under_the_test_deadline(url: str) -> object:
-    return fetch_key_set_over_https(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
+def _fetch_key_set(url: str, **deadline: float) -> object:
+    return fetch_key_set_over_https(url, **deadline)
 
 
-def _post_token_form_under_the_test_deadline(url: str) -> object:
+def _post_token_form(url: str, **deadline: float) -> object:
     return post_form_over_https(
         url,
         _FORM,
         authorization=SecretStr(_BASIC_AUTHORIZATION),
         max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
         timeout_seconds=5,
-        deadline_seconds=_TEST_DEADLINE_SECONDS,
+        **deadline,
     )
 
 
-@pytest.mark.parametrize("route", ["/dripping-head", "/dripping-body"])
-@pytest.mark.parametrize(
-    ("exchange", "error", "refusal"),
+_EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
+    ("exchange", "error"),
     [
-        pytest.param(
-            _fetch_key_set_under_the_test_deadline,
-            KeySetFetchError,
-            # The key-set fetch names every transport failure alike.
-            "^fetching the key set failed: ",
-            id="key-set-fetch",
-        ),
-        pytest.param(
-            _post_token_form_under_the_test_deadline,
-            HttpsExchangeError,
-            f"^{ExchangeFailure.TIMED_OUT}$",
-            id="token-post",
-        ),
+        pytest.param(_fetch_key_set, KeySetFetchError, id="key-set-fetch"),
+        pytest.param(_post_token_form, HttpsExchangeError, id="token-post"),
     ],
 )
+
+
+@pytest.mark.parametrize("route", ["/dripping-head", "/dripping-body"])
+@_EXCHANGES_UNDER_A_DEADLINE
 def test_an_origin_dripping_its_answer_is_cut_off_at_the_total_deadline(
     token_server: LoopbackHttpsServer,
-    exchange: Callable[[str], object],
-    error: type[Exception],
-    refusal: str,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | HttpsExchangeError],
     route: str,
 ) -> None:
     started = time.monotonic()
-    with pytest.raises(error, match=refusal):
-        exchange(f"{token_server.base_url}{route}")
+    with pytest.raises(error) as refused:
+        exchange(f"{token_server.base_url}{route}", deadline_seconds=_TEST_DEADLINE_SECONDS)
     held = time.monotonic() - started
 
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + DRIP_INTERVAL_SECONDS
 
 
