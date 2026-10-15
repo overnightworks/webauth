@@ -1,0 +1,8 @@
+claim_id = "2ad2da940e7745378f6014e316c3021e"
+agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
+role = "builder"
+base = "89b8de7e003176dbc3cfc9dcec3bf57e3088c8d8"
+branch = "claude/issue-65-w2c-total-deadline"
+scope = ["README.md", "src/webauth/https_client.py", "tests/oidc_arrangement.py", "tests/test_https_client.py", "tests/test_jwt_verification.py"]
+opened_commit = "59e9bbad220fd7f60a4de55dd6193eb71e41c122"
+whole_reason = "The deadline and the three small https_client cards in the same module land together."
