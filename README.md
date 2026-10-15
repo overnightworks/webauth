@@ -327,7 +327,7 @@ there is no sync loop. Either way `WebAuthConfig.session_liveness` — a
 `webauth.dependencies` alone reads the wall clock and passes the instant in.
 `webauth.liveness` ships two: `ExpiryColumnLiveness`, for a store with
 `created_at`/`expires_at` columns, and `IdleWindowLiveness`, for one that keeps
-only `last_seen`. On the cache path a policy never trusts the cached
+`last_seen` (and `created_at` when it is given an absolute cap). On the cache path a policy never trusts the cached
 `expires_at`, which can lag the real TTL after a refresh — Redis TTL owns idle
 there, and only a policy's own caps remain. There is no app-state install: the
 config carries the cache, so any code that holds the config — not only a
@@ -343,6 +343,36 @@ request from its store — so `WebAuthConfig` refuses a `session_cache` alongsid
 here; it needs the client library, so a host that uses it installs
 `webauth[redis]`. A host that supplies its own cache implements the same
 protocol.
+
+## Session lifetime
+
+Three numbers decide how long someone stays signed in, and each has one owner:
+
+- `WebAuthConfig.cookie_max_age_seconds` is the browser cookie's `Max-Age`. The
+  cookie is issued once at login and never reissued, so it bounds the whole
+  sign-in. It defaults to `session_max_age_seconds`.
+- The idle window — `session_max_age_seconds` for the cache TTL, the idle
+  argument of `IdleWindowLiveness`, or the host's `expires_at` refresh for
+  `ExpiryColumnLiveness` — refuses a session left unused for longer.
+- The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
+  `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
+  older than the cap, however recently it was used.
+
+The recommended policy is a 30-day cookie, a 7-day idle window and a 30-day
+absolute cap: someone who comes back at least weekly stays signed in for up to
+30 days, and anyone away for more than 7 days signs in again.
+
+```python
+SEVEN_DAYS = 7 * 24 * 3600
+THIRTY_DAYS = 30 * 24 * 3600
+
+WebAuthConfig(
+    ...,
+    session_max_age_seconds=SEVEN_DAYS,
+    cookie_max_age_seconds=THIRTY_DAYS,
+    session_liveness=IdleWindowLiveness(SEVEN_DAYS, absolute_max_age_seconds=THIRTY_DAYS),
+)
+```
 
 ## Ending a session
 
