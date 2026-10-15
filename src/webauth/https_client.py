@@ -80,6 +80,13 @@ class HttpsAnswer:
     body: bytes = field(repr=False)
 
 
+@dataclass(frozen=True)
+class _RefusedStatus:
+    """An answer refused by its status alone, whose body was never read."""
+
+    status: int
+
+
 def fetch_key_set_over_https(
     url: str, *, timeout_seconds: float = KEY_SET_FETCH_TIMEOUT_SECONDS
 ) -> bytes:
@@ -102,7 +109,7 @@ def fetch_key_set_over_https(
         answer = _exchange(
             "GET",
             url,
-            reads_body=lambda status: status == HTTPStatus.OK,
+            accepts_status=_is_key_set_status,
             timeout_seconds=timeout_seconds,
             max_body_bytes=MAX_KEY_SET_BYTES,
         )
@@ -112,7 +119,7 @@ def fetch_key_set_over_https(
             " or the TLS handshake or HTTP exchange failed"
         )
     else:
-        if answer.status != HTTPStatus.OK:
+        if isinstance(answer, _RefusedStatus):
             raise KeySetFetchError(f"the key set origin answered {answer.status}, not 200")
         return answer.body
     # Raised outside the handler so not even the exchange error is its context.
@@ -139,7 +146,7 @@ def post_form_over_https(
     answer = _exchange(
         "POST",
         url,
-        reads_body=lambda status: not _is_redirect(status),
+        accepts_status=_is_form_answer_status,
         timeout_seconds=timeout_seconds,
         max_body_bytes=max_body_bytes,
         headers={
@@ -149,7 +156,7 @@ def post_form_over_https(
         },
         body=urllib.parse.urlencode(form),
     )
-    if _is_redirect(answer.status):
+    if isinstance(answer, _RefusedStatus):
         raise HttpsExchangeError(ExchangeFailure.REDIRECTED)
     if len(answer.body) > max_body_bytes:
         raise HttpsExchangeError(ExchangeFailure.TOO_LARGE)
@@ -173,23 +180,28 @@ def is_https_url(url: object) -> TypeGuard[str]:
     return origin.scheme == "https" and bool(origin.hostname) and "@" not in origin.netloc
 
 
-def _is_redirect(status: int) -> bool:
-    return HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST
+def _is_key_set_status(status: int) -> bool:
+    return status == HTTPStatus.OK
+
+
+def _is_form_answer_status(status: int) -> bool:
+    """Any status but a redirect, which is never followed."""
+    return not HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST
 
 
 def _exchange(
     method: str,
     url: str,
     *,
-    reads_body: Callable[[int], bool],
+    accepts_status: Callable[[int], bool],
     timeout_seconds: float,
     max_body_bytes: int,
     headers: Mapping[str, str] | None = None,
     body: str | None = None,
-) -> HttpsAnswer:
+) -> HttpsAnswer | _RefusedStatus:
     """One request under the bounded posture. The answer's body is read, at
     most one byte past `max_body_bytes` of it, only for a status the caller
-    `reads_body` for; any other status comes back with an empty body, so an
+    `accepts_status`; any other status comes back as `_RefusedStatus`, so an
     answer the caller refuses by its status alone never waits for its body."""
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:
@@ -204,8 +216,9 @@ def _exchange(
                 decode_content=False,
             )
             try:
-                answered = response.read(max_body_bytes + 1) if reads_body(response.status) else b""
-                return HttpsAnswer(response.status, answered)
+                if not accepts_status(response.status):
+                    return _RefusedStatus(response.status)
+                return HttpsAnswer(response.status, response.read(max_body_bytes + 1))
             finally:
                 response.close()
     except urllib3.exceptions.SSLError:
