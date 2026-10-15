@@ -96,13 +96,14 @@ def test_a_token_answer_comes_back_with_its_status_and_body(
     _assert_no_canary_in(repr(answer) + caplog.text)
 
 
-def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_canary_in_a_log_record(
+def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_urllib3_record_and_no_canary(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
     post_token_request_over_https(_token_request(f"{token_server.base_url}/token-reflecting"))
 
     [received] = token_server.received
     assert _CODE.encode() in received.body
+    assert _urllib3_records(caplog) == []
     _assert_no_canary_in(caplog.text)
 
 
