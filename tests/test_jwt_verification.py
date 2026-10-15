@@ -593,14 +593,34 @@ def test_a_failed_refresh_keeps_the_last_valid_key_set_until_its_ttl(
     issuer.after_cooldown()
 
     refreshing = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
+    cooling_down = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
     still_cached = issuer.verifier.verify(issuer.token())
     issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS
     expired = issuer.verifier.verify(issuer.token())
 
-    assert refreshing == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert refreshing == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert cooling_down == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert still_cached == issuer.verified()
     assert expired == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert len(issuer.endpoint.fetched_urls) == 3
+
+
+def test_an_unknown_kid_is_forged_again_once_a_refresh_succeeds_after_a_failed_one(
+    issuer: IssuerScenario,
+) -> None:
+    assert issuer.verifier.verify(issuer.token()) == issuer.verified()
+    issuer.serve(KeySetFetchError("GET answered 503"))
+    issuer.after_cooldown()
+    during_outage = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
+    issuer.serve(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    issuer.after_cooldown()
+
+    after_recovery = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
+    cooling_down = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
+
+    assert during_outage == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert after_recovery == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert cooling_down == Rejected(RejectionReason.UNKNOWN_KEY_ID)
 
 
 _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signature={_URL_SECRET}"

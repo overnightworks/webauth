@@ -208,6 +208,7 @@ class JwtVerifier:
         self._monotonic_clock = monotonic_clock
         self._key_set: _KeySet | None = None
         self._last_refresh_at: float | None = None
+        self._last_refresh_failed = False
         self._refresh_lock = threading.Lock()
 
     def verify(self, token: str) -> VerifiedClaims | Rejected:
@@ -276,6 +277,10 @@ class JwtVerifier:
             raise _RefusalError(RejectionReason.KEY_SET_UNAVAILABLE)
         key = key_set.keys.get(key_id)
         if key is None:
+            # An unknown `kid` is only a forged one when the key set could be
+            # fetched; after a failed refresh it may be a rotated key.
+            if self._last_refresh_failed:
+                raise _RefusalError(RejectionReason.KEY_SET_UNAVAILABLE)
             raise _RefusalError(RejectionReason.UNKNOWN_KEY_ID)
         return key
 
@@ -309,7 +314,9 @@ class JwtVerifier:
                 failure = refusal.failure
             else:
                 self._key_set = _KeySet(keys=keys, fetched_at=now)
+                self._last_refresh_failed = False
                 return
+            self._last_refresh_failed = True
             log.warning("Refreshing the key set failed: %s", failure)
         finally:
             self._refresh_lock.release()
