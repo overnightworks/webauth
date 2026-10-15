@@ -386,6 +386,26 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        pytest.param("issuer..example", id="empty-label"),
+        pytest.param("a" * 64 + ".example", id="label-over-63-characters"),
+    ],
+)
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | HttpsExchangeError],
+    host: str,
+) -> None:
+    with pytest.raises(error) as refused:
+        exchange(f"https://{host}/certs?{_URL_QUERY}")
+
+    assert refused.value.failure is ExchangeFailure.BROKEN_OFF
+    _assert_no_canary_in("".join(traceback.format_exception(refused.value)))
+
+
 _DEFAULT_DEADLINE_SECONDS = 10
 _FAST_CLOCK_SPEED = 10
 

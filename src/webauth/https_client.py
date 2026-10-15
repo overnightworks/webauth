@@ -44,7 +44,12 @@ from typing import TypeGuard
 import urllib3
 from pydantic import SecretStr
 from urllib3.connection import HTTPSConnection
-from urllib3.exceptions import ConnectTimeoutError, NameResolutionError, NewConnectionError
+from urllib3.exceptions import (
+    ConnectTimeoutError,
+    LocationParseError,
+    NameResolutionError,
+    NewConnectionError,
+)
 from urllib3.util import create_urllib3_context
 from urllib3.util.connection import allowed_gai_family
 
@@ -343,6 +348,10 @@ def _https_pool_class_under(deadline: _Deadline) -> type[urllib3.HTTPSConnection
                 return _connect_within(
                     deadline, self._dns_host, self.port, self.timeout, self.socket_options
                 )
+            # The resolver's IDNA codec refuses an empty label or one over 63
+            # characters, which urllib3 reports as a URL it cannot parse.
+            except UnicodeError as error:
+                raise LocationParseError("label empty or too long") from error
             except socket.gaierror as error:
                 raise NameResolutionError(self.host, self, error) from error
             except TimeoutError as error:
