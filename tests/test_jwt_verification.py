@@ -999,9 +999,11 @@ def test_https_fetch_never_follows_a_redirect(https_key_set_server: HttpsKeySetS
         pytest.param("file:///etc/hostname", id="file"),
         pytest.param("https://[", id="unparseable-host"),
         pytest.param("https://127.0.0.1:99999/certs", id="port-out-of-range"),
+        pytest.param(None, id="not-a-string"),
+        pytest.param("https://127.0.0.1:9/ce\x85rts", id="c1-control-character"),
     ],
 )
-def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: str) -> None:
+def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: object) -> None:
     with pytest.raises(KeySetFetchError):
         fetch_key_set_over_https(url)
 
