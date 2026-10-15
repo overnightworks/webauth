@@ -1000,12 +1000,20 @@ def test_https_fetch_never_follows_a_redirect(https_key_set_server: HttpsKeySetS
         pytest.param("https://[", id="unparseable-host"),
         pytest.param("https://127.0.0.1:99999/certs", id="port-out-of-range"),
         pytest.param(None, id="not-a-string"),
-        pytest.param("https://127.0.0.1:9/ce\x85rts", id="c1-control-character"),
     ],
 )
 def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: object) -> None:
     with pytest.raises(KeySetFetchError):
         fetch_key_set_over_https(url)
+
+
+def test_fetch_refuses_a_c1_control_character_before_any_request(
+    https_key_set_server: HttpsKeySetServer,
+) -> None:
+    with pytest.raises(KeySetFetchError):
+        fetch_key_set_over_https(f"{https_key_set_server.base_url}/ce\x85rts")
+
+    assert https_key_set_server.requested_paths == []
 
 
 def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
