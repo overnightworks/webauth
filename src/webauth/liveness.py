@@ -118,7 +118,7 @@ def _created_at_of_capped(record: _IdleWindowRecord) -> datetime:
             "an IdleWindowLiveness with absolute_max_age_seconds needs a stored "
             "session record that carries created_at",
         )
-    if created_at.tzinfo is None:
+    if created_at.utcoffset() is None:
         raise TypeError(
             "an IdleWindowLiveness with absolute_max_age_seconds needs a "
             "timezone-aware created_at; a naive one cannot be measured against now",

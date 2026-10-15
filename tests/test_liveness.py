@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 
 import pytest
 from webauth_arrangement import (
@@ -194,9 +194,25 @@ def test_a_capped_idle_window_policy_refuses_to_judge_a_record_without_created_a
         RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now)
 
 
-def test_a_capped_idle_window_policy_refuses_to_judge_a_naive_created_at() -> None:
+class _OffsetlessZone(tzinfo):
+    """A zone that knows no offset, which makes its datetimes naive."""
+
+    def utcoffset(self, dt: datetime | None) -> None:
+        return None
+
+
+@pytest.mark.parametrize(
+    "zone",
+    [
+        pytest.param(None, id="without tzinfo"),
+        pytest.param(_OffsetlessZone(), id="with a tzinfo that has no offset"),
+    ],
+)
+def test_a_capped_idle_window_policy_refuses_to_judge_a_naive_created_at(
+    zone: tzinfo | None,
+) -> None:
     now = datetime.now(timezone.utc)
-    record = _CappedIdleRecord(created_at=now.replace(tzinfo=None), last_seen=now)
+    record = _CappedIdleRecord(created_at=now.replace(tzinfo=zone), last_seen=now)
 
     with pytest.raises(TypeError, match="timezone-aware created_at"):
         RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now)
