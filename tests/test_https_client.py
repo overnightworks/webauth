@@ -20,6 +20,7 @@ from types import MappingProxyType
 import pytest
 import urllib3
 from oidc_arrangement import (
+    DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
@@ -31,7 +32,13 @@ from pydantic import SecretStr
 
 import webauth.https_client
 import webauth.jwt_verification
-from webauth.https_client import KeySetFetchError, fetch_key_set_over_https
+from webauth.https_client import (
+    ExchangeFailure,
+    HttpsExchangeError,
+    KeySetFetchError,
+    fetch_key_set_over_https,
+    post_form_over_https,
+)
 from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequest
 from webauth.oidc_login import post_token_request_over_https
 
@@ -292,6 +299,58 @@ def test_an_answer_whose_body_is_never_read_is_judged_by_its_status_alone(
 ) -> None:
     with pytest.raises(error, match=refusal):
         exchange(f"{token_server.base_url}/moved-stalling")
+
+
+_TEST_DEADLINE_SECONDS = 1.0
+
+
+def _fetch_key_set_under_the_test_deadline(url: str) -> object:
+    return fetch_key_set_over_https(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
+
+
+def _post_token_form_under_the_test_deadline(url: str) -> object:
+    return post_form_over_https(
+        url,
+        _FORM,
+        authorization=SecretStr(_BASIC_AUTHORIZATION),
+        max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
+        timeout_seconds=5,
+        deadline_seconds=_TEST_DEADLINE_SECONDS,
+    )
+
+
+@pytest.mark.parametrize("route", ["/dripping-head", "/dripping-body"])
+@pytest.mark.parametrize(
+    ("exchange", "error", "refusal"),
+    [
+        pytest.param(
+            _fetch_key_set_under_the_test_deadline,
+            KeySetFetchError,
+            # The key-set fetch names every transport failure alike.
+            "^fetching the key set failed: ",
+            id="key-set-fetch",
+        ),
+        pytest.param(
+            _post_token_form_under_the_test_deadline,
+            HttpsExchangeError,
+            f"^{ExchangeFailure.TIMED_OUT}$",
+            id="token-post",
+        ),
+    ],
+)
+def test_an_origin_dripping_its_answer_is_cut_off_at_the_total_deadline(
+    token_server: LoopbackHttpsServer,
+    exchange: Callable[[str], object],
+    error: type[Exception],
+    refusal: str,
+    route: str,
+) -> None:
+    started = time.monotonic()
+    with pytest.raises(error, match=refusal):
+        exchange(f"{token_server.base_url}{route}")
+    held = time.monotonic() - started
+
+    assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + DRIP_INTERVAL_SECONDS
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(

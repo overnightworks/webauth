@@ -178,6 +178,8 @@ def s256_code_challenge(code_verifier: str) -> str:
 
 SILENT_HOLD_SECONDS = 10
 """How long `/silent` keeps a request unanswered unless the test releases it."""
+DRIP_INTERVAL_SECONDS = 0.2
+"""How long `/dripping-head` and `/dripping-body` wait between two bytes."""
 SERVED_TOKEN_ANSWER = json.dumps(
     {"access_token": "served-access-token", "id_token": "served.id.token", "token_type": "Bearer"}
 ).encode()
@@ -205,7 +207,10 @@ class LoopbackHttpsServer:
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
     released, `/missing` a 404,
     `/oversized` a body past every size limit, `/compressed` the key set
-    gzipped, `/silent` nothing until released, and any other path the key set.
+    gzipped, `/silent` nothing until released, `/dripping-head` and
+    `/dripping-body` a 200 whose header block or body arrives one byte every
+    `DRIP_INTERVAL_SECONDS` until released or hung up on, and any other path
+    the key set.
     """
 
     base_url: str
@@ -253,6 +258,10 @@ def loopback_https_server(
             elif route == "/moved-stalling":
                 self._send_head(302, {"Location": "/certs", "Content-Length": "1"})
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
+            elif route == "/dripping-head":
+                self._drip(b"HTTP/1.1 200 OK\r\nX-Dripping: ")
+            elif route == "/dripping-body":
+                self._drip(b"HTTP/1.1 200 OK\r\nContent-Length: 65536\r\n\r\n")
             elif route == "/missing":
                 self._send_head(404, {"Content-Length": "0"})
             elif route == "/oversized":
@@ -280,6 +289,13 @@ def loopback_https_server(
             # The client may hang up once it read its limit.
             with contextlib.suppress(OSError):
                 self.wfile.write(body)
+
+        def _drip(self, head: bytes) -> None:
+            # Dripping ends with an OSError once the client hangs up.
+            with contextlib.suppress(OSError):
+                self.wfile.write(head)
+                while not release_silent_request.wait(DRIP_INTERVAL_SECONDS):
+                    self.wfile.write(b"x")
 
         def _answer_reflecting_in_a_malformed_header(self, reflected: bytes) -> None:
             self.wfile.write(

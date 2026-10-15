@@ -25,7 +25,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. Needs `overnightworks-webauth[jwt]` |
-| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
+| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
@@ -478,7 +478,11 @@ relying_party = OidcRelyingParty(
 
 Each request is HTTPS only, under the system's trusted certificates
 (`SSL_CERT_FILE` included), with a connect and a read timeout of five seconds
-each, no retry, no redirect followed and no content decoding. The key-set
+each and a total deadline of ten seconds — `KEY_SET_FETCH_DEADLINE_SECONDS`
+and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over connecting, the TLS handshake and
+the whole answer, so an origin that drips its answer is cut off as a timeout;
+only the host name lookup runs outside it. No retry, no redirect followed and
+no content decoding. The key-set
 fetch reads at most one byte past `MAX_KEY_SET_BYTES` and refuses any answer
 but 200. The token POST is a form POST with the client's Basic authorization
 and `Accept: application/json`; it hands back any answer but a redirect —
