@@ -28,6 +28,7 @@ from oidc_arrangement import (
     LoopbackHttpsServer,
     closed_loopback_port,
     loopback_https_server,
+    unanswering_loopback_port,
     unconnectable_loopback_port,
 )
 from pydantic import SecretStr
@@ -350,10 +351,18 @@ def _unconnectable_on_every_address(
     return f"https://issuer.example:{port}/certs"
 
 
+def _unanswering_tls_handshake(
+    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
+) -> str:
+    return f"https://127.0.0.1:{stack.enter_context(unanswering_loopback_port())}/certs"
+
+
 @pytest.mark.parametrize(
     "target",
     [
         pytest.param(_unconnectable_on_every_address, id="connect-on-every-address"),
+        pytest.param(_unanswering_tls_handshake, id="tls-handshake"),
+        pytest.param(_route("/dripping-status"), id="dripping-status-line"),
         pytest.param(_route("/dripping-head"), id="dripping-head"),
         pytest.param(_route("/dripping-body"), id="dripping-body"),
     ],

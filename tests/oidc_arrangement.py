@@ -208,11 +208,11 @@ class LoopbackHttpsServer:
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
     released, `/missing` a 404,
     `/oversized` a body past every size limit, `/compressed` the key set
-    gzipped, `/silent` nothing until released, `/dripping-head` and
-    `/dripping-body` a 200 whose header block or body arrives one byte every
-    `DRIP_INTERVAL_SECONDS` until released, hung up on or `SILENT_HOLD_SECONDS`
-    have passed, and any other path
-    the key set.
+    gzipped, `/silent` nothing until released, `/dripping-status`,
+    `/dripping-head` and `/dripping-body` a 200 whose status line, header
+    block or body arrives one byte every `DRIP_INTERVAL_SECONDS` until
+    released, hung up on or `SILENT_HOLD_SECONDS` have passed, and any other
+    path the key set.
     """
 
     base_url: str
@@ -260,6 +260,8 @@ def loopback_https_server(
             elif route == "/moved-stalling":
                 self._send_head(302, {"Location": "/certs", "Content-Length": "1"})
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
+            elif route == "/dripping-status":
+                self._drip(b"HTTP/1.1 200 ")
             elif route == "/dripping-head":
                 self._drip(b"HTTP/1.1 200 OK\r\nX-Dripping: ")
             elif route == "/dripping-body":
@@ -350,6 +352,16 @@ def closed_loopback_port() -> Iterator[int]:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         yield probe.getsockname()[1]
+
+
+@contextlib.contextmanager
+def unanswering_loopback_port() -> Iterator[int]:
+    """A loopback port whose connections the kernel accepts but nobody ever
+    answers, so a TLS handshake waits on it, for as long as the block lasts."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        yield listener.getsockname()[1]
 
 
 @contextlib.contextmanager
