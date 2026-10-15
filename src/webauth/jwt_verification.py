@@ -188,7 +188,7 @@ class JwtVerifier:
             or not all(isinstance(each, str) and each for each in audiences)
         ):
             raise ValueError("the accepted audiences must be one or more non-empty strings")
-        if not _is_https_url(jwks_url):
+        if not is_https_url(jwks_url):
             raise ValueError(
                 "the key set URL must be an https URL naming a host, a valid port if any,"
                 " and no credentials"
@@ -331,7 +331,7 @@ def fetch_key_set_over_https(
     No error carries any part of the URL or names urllib3's error, and none
     chains it, since its message may quote the whole URL: a key-set URL may
     hold a secret in its credentials, path or query."""
-    if not _is_https_url(url):
+    if not is_https_url(url):
         raise KeySetFetchError(
             "refusing to fetch the key set: not an https URL naming a host,"
             " a valid port if any, and no credentials"
@@ -358,7 +358,7 @@ def fetch_key_set_over_https(
     raise broken_off
 
 
-def _is_https_url(url: str) -> bool:
+def is_https_url(url: str) -> bool:
     """An https URL naming a host, a valid port if any, and no credentials."""
     try:
         origin = urllib.parse.urlsplit(url)
