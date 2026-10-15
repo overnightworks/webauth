@@ -16,11 +16,11 @@ client authenticating with HTTP Basic. The ID token is verified by a
 client ID; its nonce and authorized party are checked here, as OpenID Connect
 Core asks of the relying party.
 
-The state, nonce and verifier are each 32 random bytes, and the received state
-and nonce are compared in constant time. A pending login is stamped with the
-wall clock when it begins and stands for `PENDING_LOGIN_MAX_AGE_SECONDS`; one
-older than that, or dated in the future, is refused before its code is
-exchanged. The client secret enters only through
+The state, nonce and verifier are each `PENDING_SECRET_BYTES` random bytes,
+and the received state and nonce are compared in constant time. A pending
+login is stamped with the wall clock when it begins and stands for
+`PENDING_LOGIN_MAX_AGE_SECONDS`; one older than that, or dated in the future,
+is refused before its code is exchanged. The client secret enters only through
 `OidcClientConfig`; it, the code and the verifier stay out of every repr and
 message this module writes.
 
@@ -44,7 +44,7 @@ from types import MappingProxyType
 
 from pydantic import SecretStr
 
-from webauth.cookies import PendingLogin
+from webauth.cookies import PENDING_SECRET_BYTES, PendingLogin
 from webauth.jwt_verification import (
     JwtVerifier,
     KeySetFetch,
@@ -61,7 +61,6 @@ MAX_AUTHORIZATION_CODE_CHARS = 2048
 PENDING_LOGIN_MAX_AGE_SECONDS = 600
 
 _OPENID_SCOPE = "openid"
-_RANDOM_BYTES = 32
 # RFC 6749 section 3.3: a scope token is one or more printable ASCII
 # characters other than space, `"` and `\`.
 _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
@@ -209,9 +208,9 @@ class OidcRelyingParty:
 
     def begin_login(self) -> AuthorizationRequest:
         pending = PendingLogin(
-            state=secrets.token_urlsafe(_RANDOM_BYTES),
-            nonce=secrets.token_urlsafe(_RANDOM_BYTES),
-            code_verifier=secrets.token_urlsafe(_RANDOM_BYTES),
+            state=secrets.token_urlsafe(PENDING_SECRET_BYTES),
+            nonce=secrets.token_urlsafe(PENDING_SECRET_BYTES),
+            code_verifier=secrets.token_urlsafe(PENDING_SECRET_BYTES),
             issued_at=int(self._wall_clock()),
         )
         query = urllib.parse.urlencode(

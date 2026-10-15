@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
@@ -25,15 +26,17 @@ PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
 DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
 MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 256
+PENDING_SECRET_BYTES: Final = 32
+"""Random bytes in each of a pending login's state, nonce and verifier,
+which are minted with ``secrets.token_urlsafe``."""
 
 _PENDING_LOGIN_VERSION: Final = "v1"
 _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
-# The state, nonce and verifier are `secrets.token_urlsafe(32)`, which is
-# always 43 base64url characters; a field of any other shape was not minted
-# by `webauth.oidc`.
-_PENDING_SECRET: Final = r"[A-Za-z0-9_-]{43}"
+# Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
+# characters, so a field of any other shape was not minted as a pending secret.
+_PENDING_SECRET: Final = rf"[A-Za-z0-9_-]{{{math.ceil(4 * PENDING_SECRET_BYTES / 3)}}}"
 _PENDING_LOGIN_VALUE: Final = re.compile(
     rf"{_PENDING_LOGIN_VERSION}"
     rf"\.(?P<state>{_PENDING_SECRET})"
