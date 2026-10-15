@@ -52,6 +52,10 @@ class WrongPasswordError(UserManagementError):
     """The supplied current password does not match the account's password."""
 
 
+class PasswordlessAccountError(UserManagementError):
+    """The account signs in only through its identity provider and has no password."""
+
+
 class UnknownSessionError(UserManagementError):
     """No active session matches the supplied reference."""
 
@@ -169,7 +173,7 @@ class UserManagement:
         self._require_admin(actor)
         password_hash = _hash_password(password, self.config)
         with self.lock.hold():
-            self._user(user_id)
+            self._password_account(user_id)
             self._replace_password(
                 actor, user_id, password_hash, UserManagementEventKind.PASSWORD_SET_BY_ADMIN,
             )
@@ -180,7 +184,7 @@ class UserManagement:
         The host budgets failed attempts and opens a new session afterwards.
         """
         with self.lock.hold():
-            user = self._user(actor.id)
+            user = self._password_account(actor.id)
             if not self.config.password_hasher.verify(current, user.password_hash):
                 raise WrongPasswordError("Current password is incorrect")
             password_hash = _hash_password(new, self.config)
@@ -246,6 +250,17 @@ class UserManagement:
         user = self.users.get(user_id)
         if user is None:
             raise UnknownUserError("Account does not exist")
+        return user
+
+    def _password_account(self, user_id: str) -> UserRecord:
+        """The account, refused when it has no password a password path could replace.
+
+        Giving such an account a password would open a second way in beside its
+        identity provider; linking the two is the host's migration to decide.
+        """
+        user = self._user(user_id)
+        if user.password_hash is None:
+            raise PasswordlessAccountError("Account signs in through its identity provider")
         return user
 
     def _delete_user_sessions(self, user_id: str) -> int:

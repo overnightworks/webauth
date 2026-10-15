@@ -12,6 +12,7 @@ from httpx import Response as ClientResponse
 from webauth_arrangement import (
     SEVEN_DAYS_SECONDS,
     THIRTY_DAYS_SECONDS,
+    PasswordlessUser,
     a_cheap_argon2id_hasher,
     a_web_auth_config,
 )
@@ -510,6 +511,7 @@ A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE = "abc1234"
 AN_ACCOUNT_WITH_A_SHORT_PASSWORD = StoredAccount(
     password_hash=A_HASHER.hash(A_PASSWORD_SET_BEFORE_THE_LENGTH_RULE),
 )
+A_PASSWORDLESS_ACCOUNT = PasswordlessUser()
 
 
 @dataclass
@@ -551,10 +553,14 @@ class VerificationSpy:
             LoginOutcome.ADMITTED,
             id="a stored password shorter than today's minimum",
         ),
+        pytest.param(
+            A_CORRECT_PASSWORD, A_PASSWORDLESS_ACCOUNT, LoginOutcome.WRONG_PASSWORD,
+            id="an account that signs in only through its identity provider",
+        ),
     ],
 )
 def test_judge_credentials_names_the_outcome_of_each_attempt(
-    password: str, user: StoredAccount | None, outcome: LoginOutcome,
+    password: str, user: StoredAccount | PasswordlessUser | None, outcome: LoginOutcome,
 ) -> None:
     assert judge_credentials(password, user, hasher=A_HASHER) is outcome
 
@@ -564,13 +570,33 @@ def test_judge_credentials_names_the_outcome_of_each_attempt(
     [
         pytest.param(A_CORRECT_PASSWORD, None, id="a username nobody holds"),
         pytest.param(A_WRONG_PASSWORD, AN_ACCOUNT, id="a wrong password"),
+        pytest.param(A_CORRECT_PASSWORD, A_PASSWORDLESS_ACCOUNT, id="no password at all"),
     ],
 )
 def test_a_refused_credential_runs_exactly_one_full_verification(
-    password: str, user: StoredAccount | None,
+    password: str, user: StoredAccount | PasswordlessUser | None,
 ) -> None:
     spy = VerificationSpy(A_HASHER)
 
     judge_credentials(password, user, hasher=spy)
 
     assert spy.verify_calls == 1
+
+
+@dataclass
+class HasherAnsweringYes:
+    """A host hasher that wrongly reports a match for every password and hash."""
+
+    def hash(self, password: str) -> str:
+        return password
+
+    def verify(self, password: str, stored_hash: str | None) -> bool:
+        return True
+
+
+def test_no_password_admits_a_passwordless_account_even_when_the_hasher_says_yes() -> None:
+    outcome = judge_credentials(
+        A_CORRECT_PASSWORD, A_PASSWORDLESS_ACCOUNT, hasher=HasherAnsweringYes(),
+    )
+
+    assert outcome is LoginOutcome.WRONG_PASSWORD

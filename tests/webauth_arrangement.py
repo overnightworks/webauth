@@ -211,6 +211,20 @@ class FakeUser:
     password_hash: str = "unused"
 
 
+@dataclass
+class PasswordlessUser:
+    """An account an identity provider vouches for: its id is the issuer's subject."""
+
+    id: str = "5f0c2a1e-subject"
+    username: str = "lena"
+    role: str = MEMBER_ROLE
+    is_active: bool = True
+    password_hash: None = None
+
+
+StoredUser = FakeUser | PasswordlessUser
+
+
 class LockNotHeldError(RuntimeError):
     """A store operation requires the host's write lock."""
 
@@ -223,16 +237,16 @@ def _require_held_lock(lock: WriteLockInMemory | None) -> None:
 class UsersInMemory:
     """Accounts sharing the same mutable records as the host's session store."""
 
-    def __init__(self, *users: FakeUser, lock: WriteLockInMemory | None = None) -> None:
+    def __init__(self, *users: StoredUser, lock: WriteLockInMemory | None = None) -> None:
         self._lock = lock
         self._users = {user.id: user for user in users}
         self._usernames = {user.username: user for user in users}
         self._ids = count(1)
 
-    def get(self, user_id: str) -> FakeUser | None:
+    def get(self, user_id: str) -> StoredUser | None:
         return self._users.get(user_id)
 
-    def get_by_username(self, username: str) -> FakeUser | None:
+    def get_by_username(self, username: str) -> StoredUser | None:
         return self._usernames.get(username)
 
     def count(self) -> int:
@@ -240,20 +254,25 @@ class UsersInMemory:
         return len(self._users)
 
     def create(self, username: str, password_hash: str, role: str) -> FakeUser:
-        _require_held_lock(self._lock)
-        if username in self._usernames:
-            raise UsernameTakenError("Username is already taken")
         user_id = f"user-{next(self._ids)}"
         while user_id in self._users:
             user_id = f"user-{next(self._ids)}"
-        user = FakeUser(
+        return self._add(FakeUser(
             id=user_id, username=username, password_hash=password_hash, role=role,
-        )
+        ))
+
+    def create_for_subject(self, subject: str, username: str, role: str) -> PasswordlessUser:
+        return self._add(PasswordlessUser(id=subject, username=username, role=role))
+
+    def _add[UserT: StoredUser](self, user: UserT) -> UserT:
+        _require_held_lock(self._lock)
+        if user.username in self._usernames:
+            raise UsernameTakenError("Username is already taken")
         self._users[user.id] = user
         self._usernames[user.username] = user
         return user
 
-    def list(self) -> list[FakeUser]:
+    def list(self) -> list[StoredUser]:
         return list(self._users.values())
 
     def update(
@@ -263,7 +282,7 @@ class UsersInMemory:
         role: str | None = None,
         is_active: bool | None = None,
         password_hash: str | None = None,
-    ) -> FakeUser:
+    ) -> StoredUser:
         _require_held_lock(self._lock)
         user = self.get(user_id)
         if user is None:
@@ -497,7 +516,7 @@ class RecordingAuditSink:
         self.user_management_events.append(event)
 
 
-def a_user_management(*users: FakeUser, config: WebAuthConfig) -> UserManagement:
+def a_user_management(*users: StoredUser, config: WebAuthConfig) -> UserManagement:
     lock = WriteLockInMemory()
     user_store = UsersInMemory(*users, lock=lock)
     return UserManagement(

@@ -163,14 +163,14 @@ def judge_credentials(
     A username nobody holds is verified against a dummy hash and a deactivated
     account is judged only after that verification, so neither answers faster
     than a plain wrong password does: exactly one full verification runs on
-    every path.
+    every path. An account without a password signs in only through its
+    identity provider, so no password admits it, whatever the hasher answers.
     """
-    password_matches = hasher.verify(
-        password, user.password_hash if user else None,
-    )
+    stored_hash = user.password_hash if user else None
+    password_matches = hasher.verify(password, stored_hash)
     if user is None:
         return LoginOutcome.UNKNOWN_USER
-    if not password_matches:
+    if stored_hash is None or not password_matches:
         return LoginOutcome.WRONG_PASSWORD
     if not user.is_active:
         return LoginOutcome.DEACTIVATED
