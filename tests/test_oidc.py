@@ -473,6 +473,17 @@ def test_an_empty_pending_state_never_matches_and_sends_no_token_request(
     assert login.token_endpoint.requests == []
 
 
+def test_an_empty_pending_nonce_never_matches_a_token_minted_with_an_empty_nonce(
+    login: LoginScenario,
+) -> None:
+    pending = dataclasses.replace(login.relying_party.begin_login().pending, nonce="")
+    login.token_endpoint.answer = _issued(login.id_token(pending, {}))
+
+    outcome = login.relying_party.complete_login(pending, login.callback(pending, {}))
+
+    assert outcome == OidcRefusal(OidcRefusalReason.NONCE_MISMATCH)
+
+
 def _s256(code_verifier: str) -> str:
     digest = hashlib.sha256(code_verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
