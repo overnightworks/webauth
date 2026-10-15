@@ -8,7 +8,11 @@ POST, so the verifier and the relying party run offline and deterministically.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import secrets
+import threading
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import cache
@@ -107,3 +111,49 @@ class FakeTokenEndpoint:
 def token_endpoint_answer(status: int, document: dict[str, Any] | bytes) -> TokenEndpointAnswer:
     body = document if isinstance(document, bytes) else json.dumps(document).encode()
     return TokenEndpointAnswer(status, body)
+
+
+@dataclass(frozen=True)
+class _IssuedCode:
+    nonce: str
+    code_challenge: str
+
+
+@dataclass
+class FakeIssuer:
+    """An issuer's authorization and token endpoints that remember what they issued.
+
+    `authorize` plays the person signing in at the issuer: it reads the
+    authorization URL and answers the callback query with a fresh code bound
+    to the login's nonce and PKCE challenge. Called as the token endpoint, it
+    answers each code once, and only to the verifier of that challenge, with
+    the ID token `mint_id_token` makes for the nonce; `before_exchange` runs
+    before a code is looked up, so a test can hold two exchanges together.
+    """
+
+    mint_id_token: Callable[[str], str]
+    requests: list[TokenRequest] = field(default_factory=list)
+    before_exchange: Callable[[], None] = lambda: None
+    _codes: dict[str, _IssuedCode] = field(default_factory=dict)
+    _codes_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def authorize(self, authorization_url: str) -> str:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(authorization_url).query)
+        code = secrets.token_urlsafe(32)
+        self._codes[code] = _IssuedCode(query["nonce"][0], query["code_challenge"][0])
+        return urllib.parse.urlencode({"state": query["state"][0], "code": code})
+
+    def __call__(self, request: TokenRequest) -> TokenEndpointAnswer:
+        self.requests.append(request)
+        self.before_exchange()
+        with self._codes_lock:
+            issued = self._codes.pop(request.form["code"], None)
+        verifier = request.form["code_verifier"]
+        if issued is None or s256_code_challenge(verifier) != issued.code_challenge:
+            return token_endpoint_answer(400, {"error": "invalid_grant"})
+        return token_endpoint_answer(200, {"id_token": self.mint_id_token(issued.nonce)})
+
+
+def s256_code_challenge(code_verifier: str) -> str:
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()

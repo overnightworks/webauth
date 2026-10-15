@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import dataclasses
-import hashlib
 import logging
 import urllib.parse
 from collections.abc import Callable
@@ -29,6 +28,7 @@ from oidc_arrangement import (
     public_jwk,
     rs256,
     rsa_key,
+    s256_code_challenge,
     token_endpoint_answer,
 )
 from pydantic import SecretStr
@@ -537,11 +537,6 @@ def test_an_empty_pending_nonce_never_matches_a_token_minted_with_an_empty_nonce
     assert outcome == OidcRefusal(OidcRefusalReason.NONCE_MISMATCH)
 
 
-def _s256(code_verifier: str) -> str:
-    digest = hashlib.sha256(code_verifier.encode()).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-
-
 def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
     login: LoginScenario,
 ) -> None:
@@ -557,7 +552,7 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
         "scope": ["openid profile"],
         "state": [pending.state],
         "nonce": [pending.nonce],
-        "code_challenge": [_s256(pending.code_verifier)],
+        "code_challenge": [s256_code_challenge(pending.code_verifier)],
         "code_challenge_method": ["S256"],
     }
     assert url.fragment == ""

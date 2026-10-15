@@ -318,6 +318,17 @@ class OidcRelyingParty:
         return len(id_token.audiences) == 1
 
 
+def callback_state(callback_query: str) -> str | OidcRefusal:
+    """The state a callback query names, or the refusal `complete_login`
+    answers for a query that names none or is malformed — which includes one
+    naming its state twice."""
+    try:
+        state = _callback_parameters(callback_query).get("state")
+    except _RefusalError as refusal:
+        return refusal.refusal
+    return state if state else OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
+
+
 def _is_endpoint_url(url: object) -> bool:
     return is_https_url(url) and "?" not in url and "#" not in url
 

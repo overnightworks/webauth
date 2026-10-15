@@ -300,6 +300,15 @@ class UsersInMemory:
         return sum(user.is_active and user.role == role for user in self._users.values())
 
 
+class UsersWithCaseInsensitiveUsernames(UsersInMemory):
+    """A store whose unique index ignores case, while its lookup does not."""
+
+    def create_for_subject(self, subject: str, username: str, role: str) -> PasswordlessUser:
+        if any(user.username.casefold() == username.casefold() for user in self.list()):
+            raise UsernameTakenError("Username is already taken")
+        return super().create_for_subject(subject, username, role)
+
+
 class UsersWithSetupRace(UsersInMemory):
     """A store exposing a second creator that escaped the host's setup lock."""
 
