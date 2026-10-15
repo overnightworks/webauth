@@ -38,7 +38,6 @@ _CLIENT_ID = "songmaker"
 _CLIENT_SECRET = "canary-client-secret"
 _CODE = "canary-authorization-code"
 _CODE_VERIFIER = "canary-code-verifier"
-_CANARIES = (_CLIENT_SECRET, _CODE, _CODE_VERIFIER)
 _FORM = {
     "grant_type": "authorization_code",
     "code": _CODE,
@@ -47,6 +46,8 @@ _FORM = {
 }
 _BASIC_CREDENTIALS = base64.b64encode(f"{_CLIENT_ID}:{_CLIENT_SECRET}".encode()).decode()
 _BASIC_AUTHORIZATION = f"Basic {_BASIC_CREDENTIALS}"
+# The client secret travels only inside the Basic credentials.
+_CANARIES = (_CLIENT_SECRET, _BASIC_CREDENTIALS, _CODE, _CODE_VERIFIER)
 
 
 @pytest.fixture
