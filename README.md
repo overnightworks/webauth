@@ -24,6 +24,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
+| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. Needs `webauth[jwt]` |
 
 It leaves the application everything that touches the application's own truth:
 the user model, configured roles, setup and login routes, and their
