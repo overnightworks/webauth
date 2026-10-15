@@ -31,7 +31,7 @@ from pydantic import SecretStr
 import webauth.https_client
 import webauth.jwt_verification
 from webauth.https_client import KeySetFetchError, fetch_key_set_over_https
-from webauth.oidc import TokenEndpointError, TokenRequest
+from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequest
 from webauth.oidc_login import post_token_request_over_https
 
 _CLIENT_ID = "songmaker"
@@ -119,6 +119,16 @@ def test_an_issuer_refusal_comes_back_as_an_answer_not_an_error(
     assert (answer.status, answer.body) == (400, REFUSED_TOKEN_ANSWER)
 
 
+def test_a_token_answer_of_exactly_the_size_limit_comes_back_whole(
+    token_server: LoopbackHttpsServer,
+) -> None:
+    answer = post_token_request_over_https(
+        _token_request(f"{token_server.base_url}/token-at-limit")
+    )
+
+    assert len(answer.body) == MAX_TOKEN_RESPONSE_BYTES
+
+
 def test_the_token_request_is_one_form_post_authenticated_with_basic(
     token_server: LoopbackHttpsServer,
 ) -> None:
@@ -138,6 +148,10 @@ def _redirecting(server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch) -
 
 def _oversized(server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch) -> str:
     return f"{server.base_url}/oversized"
+
+
+def _one_byte_past_the_limit(server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch) -> str:
+    return f"{server.base_url}/token-past-limit"
 
 
 def _stalled(server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch) -> str:
@@ -168,6 +182,12 @@ def _plain_http(server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch) ->
             "the token request failed: the origin's answer exceeds its size limit",
             1,
             id="oversized-body",
+        ),
+        pytest.param(
+            _one_byte_past_the_limit,
+            "the token request failed: the origin's answer exceeds its size limit",
+            1,
+            id="one-byte-past-the-limit",
         ),
         pytest.param(
             _stalled,

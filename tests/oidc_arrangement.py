@@ -197,7 +197,9 @@ class ReceivedRequest:
 @dataclass
 class LoopbackHttpsServer:
     """Answers by path, whatever the method or query: `/token` a token answer,
-    `/token-refused` a 400 `invalid_grant`, `/token-reflecting` a token
+    `/token-refused` a 400 `invalid_grant`, `/token-at-limit` and
+    `/token-past-limit` a body of `MAX_TOKEN_RESPONSE_BYTES` and one byte
+    more, `/token-reflecting` a token
     answer whose header block carries the request body as a malformed line,
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
     released, `/missing` a 404,
@@ -260,6 +262,10 @@ def loopback_https_server(
                 self._answer(200, SERVED_TOKEN_ANSWER)
             elif route == "/token-refused":
                 self._answer(400, REFUSED_TOKEN_ANSWER)
+            elif route == "/token-at-limit":
+                self._answer(200, b" " * MAX_TOKEN_RESPONSE_BYTES)
+            elif route == "/token-past-limit":
+                self._answer(200, b" " * (MAX_TOKEN_RESPONSE_BYTES + 1))
             elif route == "/token-reflecting":
                 self._answer_reflecting_in_a_malformed_header(body)
             else:
