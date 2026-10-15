@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import ssl
 import string
 import threading
@@ -649,6 +650,19 @@ def test_a_failed_refresh_keeps_the_last_valid_key_set_until_its_ttl(
     assert still_cached == issuer.verified()
     assert expired == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert len(issuer.endpoint.fetched_urls) == 3
+
+
+def test_a_failed_refresh_is_logged_with_its_key_set_url_and_cause(
+    issuer: IssuerScenario, caplog: pytest.LogCaptureFixture
+) -> None:
+    issuer.serve(KeySetFetchError("the key set origin answered 503, not 200"))
+
+    with caplog.at_level(logging.WARNING, logger="webauth.jwt_verification"):
+        issuer.verifier.verify(issuer.token())
+
+    [warning] = caplog.records
+    assert _JWKS_URL in warning.getMessage()
+    assert "answered 503" in warning.getMessage()
 
 
 def test_the_key_set_is_cached_on_the_monotonic_clock_until_its_ttl(

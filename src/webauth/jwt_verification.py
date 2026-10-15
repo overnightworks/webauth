@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import math
 import re
 import threading
@@ -43,6 +44,8 @@ import jwt
 import urllib3
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
+
+log = logging.getLogger(__name__)
 
 MAX_TOKEN_CHARACTERS = 8 * 1024
 MAX_JSON_NESTING_DEPTH = 8
@@ -274,7 +277,12 @@ class JwtVerifier:
             self._last_refresh_at = now
             try:
                 keys = _parse_key_set(self._fetch_key_set(self._jwks_url))
-            except (KeySetFetchError, _InvalidKeySetError):
+            except (KeySetFetchError, _InvalidKeySetError) as error:
+                log.warning(
+                    "Refreshing the key set from %s failed, keeping the cached one: %s",
+                    _without_query(self._jwks_url),
+                    error,
+                )
                 return
             self._key_set = _KeySet(keys=keys, fetched_at=now)
         finally:
