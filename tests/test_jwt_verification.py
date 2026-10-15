@@ -21,6 +21,7 @@ import ssl
 import string
 import threading
 import time
+import traceback
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -737,6 +738,11 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
         pytest.param({"jwks_url": "http://login.example.org/certs"}, "https", id="http-key-set"),
         pytest.param({"jwks_url": "https:///certs"}, "https", id="key-set-without-host"),
         pytest.param({"jwks_url": "https://["}, "https", id="unparseable-key-set-url"),
+        pytest.param(
+            {"jwks_url": "https://operator:password@login.example.org/certs"},
+            "https",
+            id="key-set-url-with-credentials",
+        ),
         pytest.param({"leeway_seconds": -1}, "negative", id="negative-leeway"),
         pytest.param({"leeway_seconds": 1.5}, "whole", id="fractional-leeway"),
         pytest.param({"leeway_seconds": True}, "whole", id="boolean-leeway"),
@@ -966,3 +972,36 @@ def test_https_fetch_never_follows_a_redirect(https_key_set_server: HttpsKeySetS
 def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: str) -> None:
     with pytest.raises(KeySetFetchError):
         fetch_key_set_over_https(url)
+
+
+_URL_SECRET = "s3cr3t-in-the-url"
+
+
+def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
+    issuer: IssuerScenario,
+) -> None:
+    with pytest.raises(ValueError) as refusal:
+        issuer.verifier_with(jwks_url=f"https://operator:{_URL_SECRET}@login.example.org/certs")
+
+    assert _URL_SECRET not in "".join(traceback.format_exception(refusal.value))
+
+
+@pytest.mark.parametrize(
+    "url_template",
+    [
+        pytest.param("https://operator:{secret}@{authority}/certs", id="credentials"),
+        pytest.param("https://{authority}/certs?signature={secret}", id="query-of-a-failed-fetch"),
+        pytest.param("https://key set.example/certs?signature={secret}", id="query-of-a-bad-host"),
+    ],
+)
+def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
+    https_key_set_server: HttpsKeySetServer, monkeypatch: pytest.MonkeyPatch, url_template: str
+) -> None:
+    monkeypatch.delenv("SSL_CERT_FILE")
+    authority = https_key_set_server.base_url.removeprefix("https://")
+    url = url_template.format(secret=_URL_SECRET, authority=authority)
+
+    with pytest.raises(KeySetFetchError) as refusal:
+        fetch_key_set_over_https(url)
+
+    assert _URL_SECRET not in "".join(traceback.format_exception(refusal.value))

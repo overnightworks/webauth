@@ -165,7 +165,9 @@ class JwtVerifier:
         ):
             raise ValueError("the accepted audiences must be one or more non-empty strings")
         if not _is_https_url(jwks_url):
-            raise ValueError(f"the key set URL {jwks_url!r} is not an https URL")
+            raise ValueError(
+                "the key set URL must be an https URL naming a host and no credentials"
+            )
         if isinstance(leeway_seconds, bool) or not isinstance(leeway_seconds, int):
             raise ValueError("the leeway must be a whole number of seconds")
         if leeway_seconds < 0:
@@ -292,9 +294,15 @@ def fetch_key_set_over_https(
     fetch in total: a stalled DNS lookup, or an origin that trickles bytes
     within each read timeout, holds this refresh for as long as it lasts.
     Every failure fails closed, and every other request is refused at once
-    rather than waiting for this refresh."""
+    rather than waiting for this refresh.
+
+    No error carries the URL's credentials or query, and none chains urllib3's
+    error, whose message may quote the whole URL: a key-set URL may hold a
+    secret."""
     if not _is_https_url(url):
-        raise KeySetFetchError(f"refusing to fetch the key set from {url}: not an https URL")
+        raise KeySetFetchError(
+            "refusing to fetch the key set: not an https URL naming a host and no credentials"
+        )
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:
         with urllib3.PoolManager(timeout=timeout, retries=False) as pool:
@@ -310,15 +318,23 @@ def fetch_key_set_over_https(
             finally:
                 response.close()
     except (urllib3.exceptions.HTTPError, OSError) as error:
-        raise KeySetFetchError(f"fetching the key set from {url} failed: {error}") from error
+        raise KeySetFetchError(
+            f"fetching the key set from {_without_query(url)} failed: {type(error).__name__}"
+        ) from None
 
 
 def _is_https_url(url: str) -> bool:
+    """An https URL naming a host and carrying no credentials."""
     try:
         origin = urllib.parse.urlsplit(url)
     except ValueError:
         return False
-    return origin.scheme == "https" and bool(origin.hostname)
+    return origin.scheme == "https" and bool(origin.hostname) and "@" not in origin.netloc
+
+
+def _without_query(url: str) -> str:
+    origin = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((origin.scheme, origin.netloc, origin.path, "", ""))
 
 
 def _library_checks() -> Options:
