@@ -338,13 +338,22 @@ def _s256_code_challenge(code_verifier: str) -> str:
 
 
 def _is_same_secret(received: object, expected: str) -> bool:
-    return isinstance(received, str) and hmac.compare_digest(received.encode(), expected.encode())
+    if not isinstance(received, str):
+        return False
+    try:
+        received_bytes = received.encode()
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(received_bytes, expected.encode())
 
 
 def _callback_parameters(callback_query: str) -> Mapping[str, str]:
     """The callback's parameters, each named once. A repeated name is refused
-    rather than resolved, so no reader of the query can pick another value."""
+    rather than resolved, so no reader of the query can pick another value.
+    A query that does not encode as UTF-8 is refused before parsing, since
+    the parser lets a character through that was never percent-encoded."""
     try:
+        callback_query.encode()
         pairs = urllib.parse.parse_qsl(
             callback_query, keep_blank_values=True, strict_parsing=True, errors="strict"
         )

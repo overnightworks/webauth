@@ -269,6 +269,11 @@ _CALLBACK_REFUSALS = [
         id="not-utf-8",
     ),
     pytest.param(
+        Attempt(appended_to_callback="&note=\ud800"),
+        OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK),
+        id="lone-surrogate-not-percent-encoded",
+    ),
+    pytest.param(
         Attempt(appended_to_callback="&&"),
         OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK),
         id="empty-field",
@@ -354,6 +359,11 @@ _EXCHANGE_REFUSALS = [
         Attempt(claims={"nonce": ABSENT}),
         OidcRefusal(OidcRefusalReason.NONCE_MISMATCH),
         id="token-without-nonce",
+    ),
+    pytest.param(
+        Attempt(claims={"nonce": "\ud800"}),
+        OidcRefusal(OidcRefusalReason.NONCE_MISMATCH),
+        id="nonce-a-lone-surrogate",
     ),
     pytest.param(
         Attempt(claims={"iss": _OTHER_REALM}),
