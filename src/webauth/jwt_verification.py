@@ -19,7 +19,9 @@ A fetched key set replaces the cached one only once every key in it is sound,
 so a failed or poisoned refresh never evicts the last good set; that set
 expires on the injected monotonic clock. Keys published for another purpose —
 encryption, another algorithm or key type — are passed over, not refused,
-because issuers such as Keycloak publish them beside the signing keys.
+because issuers such as Keycloak publish them beside the signing keys. They
+still count toward `MAX_KEY_SET_KEYS`, which bounds every key the set
+publishes: ten covers Keycloak's signing and encryption keys during a rotation.
 
 Install the `jwt` extra to use this module.
 """
@@ -351,11 +353,12 @@ def fetch_key_set_over_https(
             finally:
                 response.close()
     except (urllib3.exceptions.HTTPError, OSError):
-        broken_off = KeySetFetchError(
-            "fetching the key set failed: the connection, TLS handshake or HTTP exchange broke off"
+        failed = KeySetFetchError(
+            "fetching the key set failed: the origin could not be reached,"
+            " or the TLS handshake or HTTP exchange failed"
         )
     # Raised outside the handler so urllib3's error is not even its context.
-    raise broken_off
+    raise failed
 
 
 def is_https_url(url: str) -> bool:

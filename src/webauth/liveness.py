@@ -16,6 +16,16 @@ if TYPE_CHECKING:
     from webauth.ports import CachedSessionData
 
 
+def _require_positive_seconds(field: str, value: object) -> None:
+    """Refuse a lifetime that is not a positive whole number of seconds.
+
+    A zero, negative or fractional lifetime would not fail loudly later: it
+    would expire every session at once and leave its users in a login loop.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{field} must be a positive whole number of seconds, not {value!r}")
+
+
 class _ExpiryColumnRecord(Protocol):
     created_at: datetime
     expires_at: datetime
@@ -36,6 +46,7 @@ class ExpiryColumnLiveness:
     """
 
     def __init__(self, absolute_max_age_seconds: int) -> None:
+        _require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
@@ -62,7 +73,8 @@ class IdleWindowLiveness:
     put with ``last_seen == now``. With ``absolute_max_age_seconds`` it also
     falls once it is older than the cap, however recently it was seen — the
     store then has to keep ``created_at`` beside ``last_seen``, and a record
-    without it raises `TypeError` instead of receiving a verdict. The model is
+    without it, or with a naive one, raises `TypeError` instead of receiving a
+    verdict. The model is
     store-only: it has no ``expires_at``, so it cannot ride the Redis
     `SessionCache`, and `WebAuthConfig` refuses that pairing at construction.
     """
@@ -70,6 +82,9 @@ class IdleWindowLiveness:
     def __init__(
         self, idle_window_seconds: int, absolute_max_age_seconds: int | None = None,
     ) -> None:
+        _require_positive_seconds("idle_window_seconds", idle_window_seconds)
+        if absolute_max_age_seconds is not None:
+            _require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
         self._idle_window_seconds = idle_window_seconds
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
@@ -102,6 +117,11 @@ def _created_at_of_capped(record: _IdleWindowRecord) -> datetime:
         raise TypeError(
             "an IdleWindowLiveness with absolute_max_age_seconds needs a stored "
             "session record that carries created_at",
+        )
+    if created_at.utcoffset() is None:
+        raise TypeError(
+            "an IdleWindowLiveness with absolute_max_age_seconds needs a "
+            "timezone-aware created_at; a naive one cannot be measured against now",
         )
     return created_at
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from decimal import Decimal
 
@@ -29,7 +30,7 @@ from webauth.cookies import (
     PLAIN_CSRF_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
 )
-from webauth.liveness import IdleWindowLiveness
+from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 
 
 def test_a_secret_shorter_than_the_floor_is_refused() -> None:
@@ -97,6 +98,32 @@ def test_a_cookie_secure_that_is_not_a_bool_is_refused_at_configuration_time(
 
 def test_the_ipv6_budget_prefix_defaults_to_one_subscriber_network() -> None:
     assert a_web_auth_config().ipv6_budget_prefix == 64
+
+
+LIFETIMES: dict[str, Callable[[object], object]] = {
+    "cookie_max_age_seconds": lambda seconds: a_web_auth_config(cookie_max_age_seconds=seconds),
+    "session_max_age_seconds": lambda seconds: a_web_auth_config(session_max_age_seconds=seconds),
+    "absolute_max_age_seconds": ExpiryColumnLiveness,
+    "idle_window_seconds": IdleWindowLiveness,
+    "idle-window absolute_max_age_seconds": lambda seconds: IdleWindowLiveness(
+        IDLE_WINDOW_SECONDS, absolute_max_age_seconds=seconds,
+    ),
+}
+
+
+@pytest.mark.parametrize("lifetime", LIFETIMES)
+@pytest.mark.parametrize("seconds", [True, 60.0, 1.5, "60", 0, -1])
+def test_a_lifetime_other_than_a_positive_whole_number_of_seconds_is_refused_at_construction(
+    lifetime: str, seconds: object,
+) -> None:
+    field = lifetime.split()[-1]
+    with pytest.raises(ValueError, match=f"{field} must be a positive whole number of seconds"):
+        LIFETIMES[lifetime](seconds)
+
+
+@pytest.mark.parametrize("lifetime", LIFETIMES)
+def test_a_lifetime_of_one_second_is_accepted(lifetime: str) -> None:
+    LIFETIMES[lifetime](1)
 
 
 @pytest.mark.parametrize("prefix", [32, 128])
