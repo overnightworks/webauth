@@ -439,13 +439,18 @@ machinery to reach it.
 for one client at one issuer, described by an `OidcClientConfig` whose URLs
 are all https and whose `client_secret` is a `SecretStr`. `begin_login()`
 answers the URL to send the browser to and a `PendingLogin` — its state,
-nonce and PKCE verifier — that the host keeps until the browser returns.
+nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
 `complete_login(pending, callback_query)` takes that pending login and the
 callback's raw query string and answers an `OidcIdentity` (subject, issuer,
 full group paths, `sid`, `preferred_username`) or an `OidcRefusal` naming its
-reason. The state is checked before anything else the callback says; an
-error the issuer reports is carried as its short error code only, never its
-description. The code is exchanged through the `post_token_request` the host
+reason. The state is checked before anything else the callback says; then
+the pending login's age: one older than `PENDING_LOGIN_MAX_AGE_SECONDS`
+(600) or dated in the future is `PENDING_LOGIN_EXPIRED`, and no token
+request is sent. An error the issuer reports is carried as its short error
+code only, never its description, and a `code` longer than
+`MAX_AUTHORIZATION_CODE_CHARS` (2048) is `MALFORMED_CALLBACK`. A token answer
+that names any member twice, at any depth, is `TOKEN_ENDPOINT_FAILED` rather
+than letting the last one win. The code is exchanged through the `post_token_request` the host
 injects, authenticated with HTTP Basic, and the ID token is verified by a
 `JwtVerifier` whose one accepted audience is the client ID, then checked for
 the pending nonce and an authorized party: a token for several audiences must
@@ -462,15 +467,85 @@ a back-channel logout names the account directly). Admission holds
 `lock.hold()` and never commits:
 
 - A new subject gets an account with the issuer's `preferred_username` (or the
-  subject when it suggests none) and `config.user_role`, and the audit sink
-  hears `user_created` with `actor_id=None`.
+  subject when it suggests none, or only whitespace) and `config.user_role`,
+  and the audit sink hears `user_created` with `actor_id=None`.
 - A known subject reuses its account unchanged, even when its suggested
   username changed.
 - Otherwise it answers an `AdmissionRefusal` and writes nothing:
   `FOREIGN_ISSUER` for an identity from another issuer, `ACCOUNT_DEACTIVATED`,
   `SUBJECT_HELD_BY_PASSWORD_ACCOUNT` when the subject names an existing
   password account (linking the two is the host's migration to decide), and
-  `USERNAME_TAKEN` when a new subject's username belongs to another account.
+  `USERNAME_TAKEN` when a new subject's username belongs to another account
+  — including when the store's own uniqueness is stricter than its lookup
+  and `create_for_subject` raises `UsernameTakenError`.
+
+### The host's start and callback routes
+
+`webauth.oidc_login` carries the pending login for the host, so the host
+keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
+Connect. The host serves two routes over its one `OidcRelyingParty`:
+
+```python
+@app.get("/login/oidc")
+def start(request: Request) -> Response:
+    response = Response(status_code=303)
+    response.headers["location"] = start_login(relying_party, request, response, config)
+    return response
+
+
+@app.get("/auth/callback")
+def callback(request: Request, response: Response) -> dict[str, str]:
+    outcome = finish_login(
+        relying_party, request, response, config,
+        bound_issuer=client_config.issuer, accounts=accounts, lock=lock, audit=audit,
+    )
+    if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
+        raise_the_hosts_refusal(outcome)
+    session = open_the_hosts_session(outcome)
+    issue_session_cookies(response, session.id, config)
+    ...
+```
+
+`start_login(relying_party, request, response, config)` begins a login, sets
+its pending-login cookie on `response` and returns the authorization URL.
+`finish_login(...)` answers the `UserRecord` to open a session for, as after
+a password login, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
+the host commits on an account and opens the session itself.
+
+The pending login travels in a cookie of its own, one per login, so two tabs
+never overwrite each other:
+
+- **Name:** the pending-login prefix `__Host-oidc_pending_` followed by the
+  first 16 hex characters of the SHA-256 of the login's state. With
+  `cookie_secure=False` the name is the plain `oidc_pending_…` form and the
+  cookie is not `Secure`; that is for local development over http only, where
+  a sibling host or a network observer can set or read it.
+- **Flags:** `HttpOnly`, `Path=/`, `Max-Age=600`, and `Secure` following
+  `cookie_secure`. It is always `SameSite=Lax`, whatever `cookie_samesite`
+  says: the callback is a top-level navigation from the issuer's site, which a
+  `Strict` cookie would not accompany.
+- **Value:** `v1.` followed by the state, nonce, verifier and `issued_at`,
+  each bounded to the exact shape `begin_login` mints, and an HMAC-SHA256
+  signature under the session signing key with an `oidc-pending:` prefix no
+  other cookie uses; the whole value is at most 256 characters, and the
+  signature is compared in constant time.
+- **Cap:** a browser holds at most five pending-login cookies. A start beyond
+  them clears the oldest by `issued_at` — a cookie that does not verify, or
+  whose name appears twice, counts as oldest — so repeated starts never crowd
+  out the session and CSRF cookies.
+
+`finish_login` reads the state from the callback, selects exactly the cookie
+that state names and clears it on every outcome — admitted or refused —
+while every other tab's cookie stays. A callback with no state or with its
+state twice, a missing, forged, oversized, unknown-version or duplicated
+cookie, or a genuine cookie of another login is refused before any token
+request: `STATE_MISMATCH`, or `MALFORMED_CALLBACK` for a repeated state.
+
+**Single use, stated honestly.** A pending login is single-use because its
+cookie is cleared on every outcome and the issuer accepts its authorization
+code once. webauth keeps no server-side replay store: a copy of the cookie
+taken before the callback is stopped by the issuer refusing the spent code
+(`TOKEN_REQUEST_REFUSED`), not by webauth remembering it.
 
 `UserRecord.password_hash` is a read-only `str | None` property, so a
 password-only host whose model types the field `str` keeps satisfying it, and
