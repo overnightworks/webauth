@@ -99,9 +99,10 @@ def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed(
 
 @pytest.mark.parametrize(("identity", "stored", "refusal"), [
     pytest.param(
-        replace(LENA, issuer="https://other.example/realms/lab"), [],
+        replace(LENA, issuer="https://other.example/realms/lab"),
+        [PasswordlessUser(id=SUBJECT)],
         AdmissionRefusal.FOREIGN_ISSUER,
-        id="an identity from another issuer",
+        id="another issuer's identity whose subject names a known account",
     ),
     pytest.param(
         LENA, [PasswordlessUser(id=SUBJECT, is_active=False)],
