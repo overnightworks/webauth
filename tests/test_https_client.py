@@ -20,7 +20,6 @@ from types import MappingProxyType
 import pytest
 import urllib3
 from oidc_arrangement import (
-    DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
@@ -302,6 +301,9 @@ def test_an_answer_whose_body_is_never_read_is_judged_by_its_status_alone(
 
 
 _TEST_DEADLINE_SECONDS = 1.0
+# Room for closing the connection and for a loaded runner, still far below the
+# per-step timeout of five seconds and the drip that would run on for longer.
+_TEST_DEADLINE_SLACK_SECONDS = 1.0
 
 
 def _fetch_key_set(url: str, **deadline: float) -> object:
@@ -342,7 +344,7 @@ def test_an_origin_dripping_its_answer_is_cut_off_at_the_total_deadline(
     held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
-    assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + DRIP_INTERVAL_SECONDS
+    assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
