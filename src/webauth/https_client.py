@@ -351,7 +351,9 @@ def _https_pool_class_under(deadline: _Deadline) -> type[urllib3.HTTPSConnection
                 raise NewConnectionError(self, "connecting failed") from error
 
     class PoolUnderDeadline(urllib3.HTTPSConnectionPool):
-        ConnectionCls = ConnectionUnderDeadline
+        # Under pyright, urllib3's own HTTPSConnection does not satisfy the
+        # BaseHTTPSConnection protocol this attribute is declared as.
+        ConnectionCls = ConnectionUnderDeadline  # pyright: ignore[reportAssignmentType]
 
     return PoolUnderDeadline
 
