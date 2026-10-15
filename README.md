@@ -536,10 +536,14 @@ never overwrite each other:
 
 `finish_login` reads the state from the callback, selects exactly the cookie
 that state names and clears it on every outcome — admitted or refused —
-while every other tab's cookie stays. A callback with no state or with its
-state twice, a missing, forged, oversized, unknown-version or duplicated
-cookie, or a genuine cookie of another login is refused before any token
-request: `STATE_MISMATCH`, or `MALFORMED_CALLBACK` for a repeated state.
+while every other tab's cookie stays. The state is read on its own, so a
+callback naming one state beside a malformed rest — another parameter named
+twice, or one that does not decode — still clears that state's cookie and is
+refused as `MALFORMED_CALLBACK`. A callback with no state, an empty one, its
+state twice or an undecodable one selects no cookie. Every one of these, and
+a missing, forged, oversized, unknown-version or duplicated cookie, or a
+genuine cookie of another login, is refused before any token request:
+`STATE_MISMATCH`, or `MALFORMED_CALLBACK` for a malformed query.
 
 **Single use, stated honestly.** A pending login is single-use because its
 cookie is cleared on every outcome and the issuer accepts its authorization

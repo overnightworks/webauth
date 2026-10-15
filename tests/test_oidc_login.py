@@ -444,6 +444,14 @@ def _after_the_pending_lifetime(host: OidcHost, query: str) -> str:
     return query
 
 
+def _with_the_code_twice(_host: OidcHost, query: str) -> str:
+    return f"{query}&code=another"
+
+
+def _with_an_undecodable_parameter(_host: OidcHost, query: str) -> str:
+    return f"{query}&note=%ff"
+
+
 _REFUSED_CALLBACKS = [
     pytest.param(
         RefusedCallback("token-request-refused", returned_query=_with_another_code),
@@ -452,6 +460,14 @@ _REFUSED_CALLBACKS = [
     pytest.param(
         RefusedCallback("pending-login-expired", returned_query=_after_the_pending_lifetime),
         id="a pending login past its lifetime",
+    ),
+    pytest.param(
+        RefusedCallback("malformed-callback", returned_query=_with_the_code_twice),
+        id="its one state beside a code named twice",
+    ),
+    pytest.param(
+        RefusedCallback("malformed-callback", returned_query=_with_an_undecodable_parameter),
+        id="its one state beside an undecodable parameter",
     ),
     pytest.param(
         RefusedCallback(
@@ -592,6 +608,10 @@ def test_an_invalid_pending_cookie_is_refused_before_any_token_request_and_clear
                  id="without a state"),
     pytest.param(lambda query: f"{query}&{query.partition('&')[0]}", "malformed-callback",
                  id="naming its state twice"),
+    pytest.param(lambda query: query.replace("state=", "state=&other=", 1), "state-mismatch",
+                 id="naming an empty state"),
+    pytest.param(lambda query: query.replace("state=", "state=%ff", 1), "malformed-callback",
+                 id="naming an undecodable state"),
 ])
 def test_a_callback_without_one_state_is_refused_and_selects_no_cookie(
     returned_query: Callable[[str], str], refusal: str,

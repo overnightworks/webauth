@@ -319,14 +319,34 @@ class OidcRelyingParty:
 
 
 def callback_state(callback_query: str) -> str | OidcRefusal:
-    """The state a callback query names, or the refusal `complete_login`
-    answers for a query that names none or is malformed — which includes one
-    naming its state twice."""
+    """The state a callback query names once, non-empty and decodable, or the
+    refusal `complete_login` answers for a query that names no such state.
+
+    The state is read on its own, so a callback whose rest is malformed still
+    names the pending login it ends; `complete_login` then refuses it."""
+    states = [
+        value
+        for name, value in urllib.parse.parse_qsl(
+            callback_query, keep_blank_values=True, errors="surrogateescape"
+        )
+        if name == "state"
+    ]
+    if len(states) == 1 and states[0] and _is_utf8(states[0]):
+        return states[0]
     try:
-        state = _callback_parameters(callback_query).get("state")
+        _callback_parameters(callback_query)
     except _RefusalError as refusal:
         return refusal.refusal
-    return state if state else OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
+    return OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
+
+
+def _is_utf8(text: str) -> bool:
+    """Whether ``text`` holds no byte that failed to decode as UTF-8."""
+    try:
+        text.encode()
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _is_endpoint_url(url: object) -> bool:
