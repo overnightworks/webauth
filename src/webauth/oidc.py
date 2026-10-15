@@ -47,6 +47,7 @@ from pydantic import SecretStr
 
 from webauth.cookies import PENDING_SECRET_BYTES, PendingLogin
 from webauth.jwt_verification import (
+    ExchangeFailure,
     JwtVerifier,
     KeySetFetch,
     MonotonicClock,
@@ -131,7 +132,15 @@ class TokenEndpointAnswer:
 
 
 class TokenEndpointError(Exception):
-    """The token request did not reach an answer: refused, timed out, or broken off."""
+    """The token request did not reach an answer: refused, timed out, or broken off.
+
+    `failure` names why, so a caller can tell a timeout from another transport
+    failure without reading the message; it is `None` for an error raised
+    without one."""
+
+    def __init__(self, message: str, failure: ExchangeFailure | None = None) -> None:
+        super().__init__(message)
+        self.failure = failure
 
 
 TokenRequestPost = Callable[[TokenRequest], TokenEndpointAnswer]

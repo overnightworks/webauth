@@ -37,7 +37,11 @@ from webauth.cookies import (
     sign_pending_login,
     verify_pending_login,
 )
-from webauth.https_client import HttpsExchangeError, post_form_over_https
+from webauth.https_client import (
+    TOKEN_EXCHANGE_DEADLINE_SECONDS,
+    HttpsExchangeError,
+    post_form_over_https,
+)
 from webauth.login import COOKIE_PATH
 from webauth.oidc import (
     MAX_TOKEN_RESPONSE_BYTES,
@@ -241,7 +245,10 @@ def _username_for(identity: OidcIdentity) -> str:
 
 
 def post_token_request_over_https(
-    request: TokenRequest, *, timeout_seconds: float = TOKEN_REQUEST_TIMEOUT_SECONDS
+    request: TokenRequest,
+    *,
+    timeout_seconds: float = TOKEN_REQUEST_TIMEOUT_SECONDS,
+    deadline_seconds: float = TOKEN_EXCHANGE_DEADLINE_SECONDS,
 ) -> TokenEndpointAnswer:
     """The production ``TokenRequestPost``: the request POSTed under the
     bounded posture of ``webauth.https_client``, reading at most one byte past
@@ -253,8 +260,17 @@ def post_token_request_over_https(
     handshake, a timeout or a broken exchange raises ``TokenEndpointError`` in
     this library's words, never quoting the request.
 
-    ``timeout_seconds`` bounds connecting and each read on its own, not the
-    exchange in total."""
+    ``timeout_seconds`` bounds connecting and each read on its own;
+    ``deadline_seconds`` bounds the exchange in total and is owned by
+    ``webauth.https_client``. A ``timeout_seconds`` above ``deadline_seconds``
+    raises ``ValueError`` rather than being silently capped, as does a
+    ``deadline_seconds`` of zero or less. ``TokenEndpointError.failure`` names
+    why the request failed."""
+    if timeout_seconds > deadline_seconds > 0:
+        raise ValueError(
+            f"timeout_seconds ({timeout_seconds}) must not exceed"
+            f" deadline_seconds ({deadline_seconds})"
+        )
     try:
         answer = post_form_over_https(
             request.url,
@@ -262,10 +278,11 @@ def post_token_request_over_https(
             authorization=request.authorization,
             max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
             timeout_seconds=timeout_seconds,
+            deadline_seconds=deadline_seconds,
         )
     except HttpsExchangeError as refusal:
         failure = refusal.failure
     else:
         return TokenEndpointAnswer(answer.status, answer.body)
     # Raised outside the handler so not even the exchange error is its context.
-    raise TokenEndpointError(f"the token request failed: {failure}")
+    raise TokenEndpointError(f"the token request failed: {failure}", failure)

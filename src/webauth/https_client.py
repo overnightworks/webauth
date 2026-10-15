@@ -127,7 +127,8 @@ def fetch_key_set_over_https(
     `deadline_seconds` bounds the fetch in total, so an origin that trickles
     bytes within each read timeout is cut off. Only a stalled DNS lookup holds
     this refresh past the deadline. Every failure fails closed, and every other
-    request is refused at once rather than waiting for this refresh."""
+    request is refused at once rather than waiting for this refresh. A
+    `deadline_seconds` of zero or less raises `ValueError`."""
     if not is_https_url(url):
         raise KeySetFetchError(
             "refusing to fetch the key set: not an https URL naming a host,"
@@ -173,7 +174,8 @@ def post_form_over_https(
     Raises `HttpsExchangeError` for a URL that is not well-formed https, an
     origin that cannot be reached, a failed TLS handshake, a timeout or the
     total `deadline_seconds` passing, a broken exchange, a redirect, and a
-    body past `max_body_bytes`."""
+    body past `max_body_bytes`. A `deadline_seconds` of zero or less raises
+    `ValueError`."""
     if not is_https_url(url):
         raise HttpsExchangeError(ExchangeFailure.NOT_AN_HTTPS_URL)
     answer = _exchange(
@@ -239,9 +241,14 @@ def _exchange(
     `accepts_status`; any other status comes back as `_RefusedStatus`, so an
     answer the caller refuses by its status alone never waits for its body.
 
+    A `deadline_seconds` of zero or less raises `ValueError`, since every
+    exchange would then time out at once.
+
     Once `deadline_seconds` have passed, the next connect attempt, read,
     write or handshake step raises a timeout, and the exchange fails as
     `TIMED_OUT` whatever error urllib3 made of it."""
+    if deadline_seconds <= 0:
+        raise ValueError(f"deadline_seconds must be positive, not {deadline_seconds}")
     deadline = _Deadline.after(deadline_seconds)
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:

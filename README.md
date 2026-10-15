@@ -77,6 +77,20 @@ unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
 `__Host-` name a host sets itself with `cookie_secure=False` is refused when
 the configuration is built rather than ending in a silent login loop.
 
+v0.13.0 adds the OpenID Connect relying party (`webauth.oidc` and
+`webauth.oidc_login`) with PKCE and the signed pending-login cookie, and the one
+HTTPS client `webauth.https_client` that every outbound request goes through,
+with a total deadline of ten seconds on top of the per-step timeout. The
+verifier rejects a token naming an unknown `kid` as `KEY_SET_UNAVAILABLE` when
+the key-set refresh failed, not as `UNKNOWN_KEY_ID`. It also changes
+three public contracts: a `deadline_seconds` of zero or less raises
+`ValueError` in `fetch_key_set_over_https`, `post_form_over_https` and
+`post_token_request_over_https`;
+`TokenEndpointError.failure` is the `ExchangeFailure` that ended the token
+request, so a caller can tell `TIMED_OUT` from other transport failures; and
+`post_token_request_over_https` takes `deadline_seconds`, raising `ValueError`
+when `timeout_seconds` exceeds it instead of capping it silently.
+
 v0.12.0 adds the RS256 verifier `webauth.jwt_verification` (install the
 `jwt` extra), a cookie lifetime separate from the idle window
 (`cookie_max_age_seconds`), and an absolute cap for `IdleWindowLiveness`
