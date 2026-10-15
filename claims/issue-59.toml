@@ -1,0 +1,8 @@
+claim_id = "07e966c8a507476297834905b623be0c"
+agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
+role = "builder"
+base = "d806f48f0868c125a042ce0deb600eecac090694"
+branch = "claude/issue-59-w3a-oidc-account"
+scope = [".github/workflows/ci.yml", ".importlinter", "AGENTS.md", "README.md", "src/webauth/login.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/users.py", "tests/test_login.py", "tests/test_oidc_login.py", "tests/test_users.py", "tests/typing", "tests/webauth_arrangement.py"]
+opened_commit = "e653da250b7f57f7156324230db3626fe5a013de"
+whole_reason = "The account port, the admission rule, the password-path refusals and the import gates that keep them honest land together."
