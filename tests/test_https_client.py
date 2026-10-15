@@ -17,7 +17,7 @@ import traceback
 import urllib.parse
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 import urllib3
@@ -384,6 +384,36 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
+
+
+_DEFAULT_DEADLINE_SECONDS = 10
+_FAST_CLOCK_SPEED = 10
+
+
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
+    token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | HttpsExchangeError],
+) -> None:
+    started = time.monotonic()
+
+    def fast_monotonic() -> float:
+        return started + (time.monotonic() - started) * _FAST_CLOCK_SPEED
+
+    # The deadline's clock runs fast, so its ten seconds pass in one.
+    monkeypatch.setattr(webauth.https_client, "time", SimpleNamespace(monotonic=fast_monotonic))
+    with pytest.raises(error) as refused:
+        exchange(f"{token_server.base_url}/dripping-body")
+    held = fast_monotonic() - started
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+    assert (
+        _DEFAULT_DEADLINE_SECONDS
+        <= held
+        < _DEFAULT_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS * _FAST_CLOCK_SPEED
+    )
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
