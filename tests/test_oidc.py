@@ -115,11 +115,12 @@ class Attempt:
 @dataclass
 class LoginScenario:
     token_endpoint: FakeTokenEndpoint
+    config: OidcClientConfig = field(default_factory=_config)
     relying_party: OidcRelyingParty = field(init=False)
 
     def __post_init__(self) -> None:
         self.relying_party = OidcRelyingParty(
-            _config(),
+            self.config,
             post_token_request=self.token_endpoint,
             fetch_key_set=FakeKeySetEndpoint(
                 key_set_document(public_jwk(rsa_key("current"), "current-key"))
@@ -282,6 +283,11 @@ _CALLBACK_REFUSALS = [
         Attempt(callback={"iss": _OTHER_REALM}),
         OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH),
         id="callback-iss-of-another-realm",
+    ),
+    pytest.param(
+        Attempt(callback={"iss": _OTHER_REALM, "code": ABSENT, "error": "access_denied"}),
+        OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH),
+        id="callback-iss-of-another-realm-reporting-an-idp-error",
     ),
     pytest.param(
         Attempt(callback={"code": ABSENT, "error": "access_denied", "error_description": _MARKUP}),
@@ -470,9 +476,21 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
     assert url.fragment == ""
 
 
+@pytest.mark.parametrize(
+    ("client_secret", "authorization"),
+    [
+        pytest.param(_CLIENT_SECRET, _BASIC_AUTHORIZATION, id="plain-secret"),
+        pytest.param(
+            "se:cr+et %",
+            "Basic c29uZ21ha2VyOnNlJTNBY3IlMkJldCslMjU=",
+            id="secret-form-encoded-before-basic-encoding",
+        ),
+    ],
+)
 def test_the_token_endpoint_receives_the_code_and_verifier_with_basic_client_authentication(
-    login: LoginScenario,
+    client_secret: str, authorization: str
 ) -> None:
+    login = LoginScenario(FakeTokenEndpoint(), _config(client_secret=SecretStr(client_secret)))
     pending, _outcome = login.attempt(Attempt())
 
     [request] = login.token_endpoint.requests
@@ -483,7 +501,7 @@ def test_the_token_endpoint_receives_the_code_and_verifier_with_basic_client_aut
         "redirect_uri": _REDIRECT_URI,
         "code_verifier": pending.code_verifier,
     }
-    assert request.authorization.get_secret_value() == _BASIC_AUTHORIZATION
+    assert request.authorization.get_secret_value() == authorization
 
 
 def test_two_logins_never_share_a_state_nonce_or_verifier(login: LoginScenario) -> None:
