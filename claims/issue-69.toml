@@ -1,8 +1,0 @@
-claim_id = "a7b4e2b9bd314bf686304ab63ffd8da1"
-agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
-role = "builder"
-base = "15ef69b6a015a7c0753b530ba0d4b50b5ce71ec6"
-branch = "claude/issue-69-r2-release-0-13-0-mit-dem-oidc-relying-p"
-scope = ["README.md", "pyproject.toml", "src/webauth/__init__.py", "src/webauth/https_client.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "tests/test_https_client.py", "tests/test_oidc.py", "uv.lock"]
-opened_commit = "ea584019122dc16f9cc3054c673513406a431a1a"
-whole_reason = "A release carries its version, its README note and the three small public-contract cards together."
