@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import secrets
+
 import pytest
 
 from webauth.cookies import (
     DEFAULT_CSRF_HEADER_NAME,
+    PendingLogin,
     default_cookie_name,
     generate_csrf_token,
+    pending_login_cookie_name,
+    sign_pending_login,
     sign_session_id,
     verify_csrf_token,
+    verify_pending_login,
     verify_session_cookie,
 )
 
 _TEST_SECRET = b"a" * 64
+_PENDING = PendingLogin(
+    state=secrets.token_urlsafe(32),
+    nonce=secrets.token_urlsafe(32),
+    code_verifier=secrets.token_urlsafe(32),
+    issued_at=1_800_000_000,
+)
 
 
 def test_the_csrf_header_name_is_the_one_clients_already_send() -> None:
@@ -89,3 +103,49 @@ def test_verify_csrf_token_wrong_session() -> None:
 
 def test_verify_csrf_token_forged() -> None:
     assert verify_csrf_token("forged-token", "session-a", _TEST_SECRET) is False
+
+
+@pytest.mark.parametrize(
+    ("secure", "prefix"), [(True, "__Host-oidc_pending_"), (False, "oidc_pending_")]
+)
+def test_a_pending_login_cookie_is_named_after_a_digest_of_its_state(
+    *, secure: bool, prefix: str
+) -> None:
+    digest = hashlib.sha256(_PENDING.state.encode()).hexdigest()[:16]
+
+    assert pending_login_cookie_name(_PENDING.state, secure=secure) == f"{prefix}{digest}"
+
+
+def test_a_signed_pending_login_verifies_to_the_same_pending_login() -> None:
+    signed = sign_pending_login(_PENDING, _TEST_SECRET)
+
+    assert signed.startswith("v1.")
+    assert verify_pending_login(signed, _TEST_SECRET) == _PENDING
+
+
+_MINTED_SECRET = _PENDING.state
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        pytest.param({"state": "short"}, id="state-not-minted"),
+        pytest.param({"state": _MINTED_SECRET + "A"}, id="state-overlong"),
+        pytest.param({"state": "+" + _MINTED_SECRET[1:]}, id="state-outside-base64url"),
+        pytest.param({"nonce": ""}, id="nonce-empty"),
+        pytest.param({"nonce": _MINTED_SECRET + "A"}, id="nonce-overlong"),
+        pytest.param({"nonce": "=" + _MINTED_SECRET[1:]}, id="nonce-outside-base64url"),
+        pytest.param({"code_verifier": _MINTED_SECRET[1:]}, id="verifier-short"),
+        pytest.param({"code_verifier": _MINTED_SECRET + "A"}, id="verifier-overlong"),
+        pytest.param({"code_verifier": "/" + _MINTED_SECRET[1:]}, id="verifier-outside-base64url"),
+        pytest.param({"issued_at": -1}, id="issued-before-the-epoch"),
+        pytest.param({"issued_at": 10**12}, id="issued-at-beyond-twelve-digits"),
+    ],
+)
+def test_a_pending_login_oidc_cannot_have_begun_is_refused_a_cookie(
+    changes: dict[str, object],
+) -> None:
+    pending = dataclasses.replace(_PENDING, **changes)
+
+    with pytest.raises(ValueError, match="does not fit"):
+        sign_pending_login(pending, _TEST_SECRET)

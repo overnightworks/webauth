@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import dataclasses
-import hashlib
 import logging
 import urllib.parse
 from collections.abc import Callable
@@ -29,19 +28,22 @@ from oidc_arrangement import (
     public_jwk,
     rs256,
     rsa_key,
+    s256_code_challenge,
     token_endpoint_answer,
 )
 from pydantic import SecretStr
 
+from webauth.cookies import PendingLogin
 from webauth.jwt_verification import RejectionReason
 from webauth.oidc import (
+    MAX_AUTHORIZATION_CODE_CHARS,
     MAX_TOKEN_RESPONSE_BYTES,
+    PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcClientConfig,
     OidcIdentity,
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
-    PendingLogin,
     TokenEndpointAnswer,
     TokenEndpointError,
 )
@@ -103,19 +105,22 @@ def _issued(id_token: str) -> TokenEndpointAnswer:
 @dataclass(frozen=True)
 class Attempt:
     """One login: changes to the callback the browser brings back, raw text
-    appended to its query, changes to the ID token's claims, and the token
-    endpoint's answer given the ID token minted for this login."""
+    appended to its query, changes to the ID token's claims, the token
+    endpoint's answer given the ID token minted for this login, and the
+    seconds the wall clock moves between the login's begin and its callback."""
 
     callback: dict[str, Any] = field(default_factory=dict)
     appended_to_callback: str = ""
     claims: dict[str, Any] = field(default_factory=dict)
     token_answer: Callable[[str], TokenEndpointAnswer | Exception] = _issued
+    elapsed_seconds: float = 0
 
 
 @dataclass
 class LoginScenario:
     token_endpoint: FakeTokenEndpoint
     config: OidcClientConfig = field(default_factory=_config)
+    wall_clock: FakeClock = field(default_factory=lambda: FakeClock(float(_NOW)))
     relying_party: OidcRelyingParty = field(init=False)
 
     def __post_init__(self) -> None:
@@ -125,17 +130,18 @@ class LoginScenario:
             fetch_key_set=FakeKeySetEndpoint(
                 key_set_document(public_jwk(rsa_key("current"), "current-key"))
             ),
-            wall_clock=FakeClock(float(_NOW)),
+            wall_clock=self.wall_clock,
             monotonic_clock=FakeClock(5_000.0),
         )
 
     def id_token(self, pending: PendingLogin, changes: dict[str, Any]) -> str:
+        now = int(self.wall_clock.now)
         claims = {
             "iss": _ISSUER,
             "aud": _CLIENT_ID,
             "sub": _SUBJECT,
-            "exp": _NOW + 300,
-            "iat": _NOW - 10,
+            "exp": now + 300,
+            "iat": now - 10,
             "nonce": pending.nonce,
             "sid": _SESSION_ID,
             "preferred_username": "operator",
@@ -158,6 +164,7 @@ class LoginScenario:
 
     def attempt(self, attempt: Attempt) -> tuple[PendingLogin, OidcIdentity | OidcRefusal]:
         pending = self.relying_party.begin_login().pending
+        self.wall_clock.now += attempt.elapsed_seconds
         self.token_endpoint.answer = attempt.token_answer(self.id_token(pending, attempt.claims))
         callback_query = self.callback(pending, attempt.callback) + attempt.appended_to_callback
         return pending, self.relying_party.complete_login(pending, callback_query)
@@ -206,6 +213,16 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
             id="without-sid-and-preferred-username",
         ),
         pytest.param(Attempt(callback={"iss": ABSENT}), _IDENTITY, id="callback-without-iss"),
+        pytest.param(
+            Attempt(callback={"code": "c" * MAX_AUTHORIZATION_CODE_CHARS}),
+            _IDENTITY,
+            id="code-at-the-length-limit",
+        ),
+        pytest.param(
+            Attempt(elapsed_seconds=PENDING_LOGIN_MAX_AGE_SECONDS),
+            _IDENTITY,
+            id="callback-at-the-end-of-the-pending-lifetime",
+        ),
     ],
 )
 def test_a_login_the_issuer_vouched_for_yields_its_identity(
@@ -220,6 +237,10 @@ def _answered(
     status: int, document: dict[str, Any] | bytes
 ) -> Callable[[str], TokenEndpointAnswer]:
     return lambda _id_token: token_endpoint_answer(status, document)
+
+
+def _answered_raw(status: int, json_text: str) -> TokenEndpointAnswer:
+    return TokenEndpointAnswer(status, json_text.encode())
 
 
 def _padded_past_the_limit(id_token: str) -> TokenEndpointAnswer:
@@ -263,6 +284,21 @@ _CALLBACK_REFUSALS = [
         Attempt(callback={"code": ""}),
         OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK),
         id="code-empty",
+    ),
+    pytest.param(
+        Attempt(callback={"code": "c" * (MAX_AUTHORIZATION_CODE_CHARS + 1)}),
+        OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK),
+        id="code-past-the-length-limit",
+    ),
+    pytest.param(
+        Attempt(elapsed_seconds=PENDING_LOGIN_MAX_AGE_SECONDS + 1),
+        OidcRefusal(OidcRefusalReason.PENDING_LOGIN_EXPIRED),
+        id="pending-login-past-its-lifetime",
+    ),
+    pytest.param(
+        Attempt(elapsed_seconds=-1),
+        OidcRefusal(OidcRefusalReason.PENDING_LOGIN_EXPIRED),
+        id="pending-login-dated-in-the-future",
     ),
     pytest.param(
         Attempt(appended_to_callback="&note=%ff"),
@@ -340,6 +376,20 @@ _EXCHANGE_REFUSALS = [
         Attempt(token_answer=_answered(200, b"[" * (MAX_TOKEN_RESPONSE_BYTES // 2))),
         OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
         id="nested-past-the-parsers-recursion-limit",
+    ),
+    pytest.param(
+        Attempt(token_answer=lambda id_token: _answered_raw(
+            200, f'{{"id_token": "{id_token}", "id_token": "{id_token}"}}'
+        )),
+        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
+        id="answer-naming-id-token-twice",
+    ),
+    pytest.param(
+        Attempt(token_answer=lambda id_token: _answered_raw(
+            200, f'{{"id_token": "{id_token}", "profile": {{"name": "a", "name": "b"}}}}'
+        )),
+        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
+        id="answer-naming-a-nested-member-twice",
     ),
     pytest.param(
         Attempt(token_answer=_answered(200, {"access_token": "an-access-token"})),
@@ -454,11 +504,14 @@ def test_a_callback_refused_on_its_own_sends_no_token_request(
     "pending",
     [
         pytest.param(
-            PendingLogin(state="", nonce="a-real-nonce", code_verifier="a-real-verifier"),
+            PendingLogin(
+                state="", nonce="a-real-nonce", code_verifier="a-real-verifier", issued_at=_NOW
+            ),
             id="empty-state",
         ),
         pytest.param(
-            PendingLogin(state="", nonce="", code_verifier=""), id="empty-state-and-nonce"
+            PendingLogin(state="", nonce="", code_verifier="", issued_at=_NOW),
+            id="empty-state-and-nonce",
         ),
     ],
 )
@@ -484,11 +537,6 @@ def test_an_empty_pending_nonce_never_matches_a_token_minted_with_an_empty_nonce
     assert outcome == OidcRefusal(OidcRefusalReason.NONCE_MISMATCH)
 
 
-def _s256(code_verifier: str) -> str:
-    digest = hashlib.sha256(code_verifier.encode()).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-
-
 def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
     login: LoginScenario,
 ) -> None:
@@ -504,7 +552,7 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
         "scope": ["openid profile"],
         "state": [pending.state],
         "nonce": [pending.nonce],
-        "code_challenge": [_s256(pending.code_verifier)],
+        "code_challenge": [s256_code_challenge(pending.code_verifier)],
         "code_challenge_method": ["S256"],
     }
     assert url.fragment == ""
@@ -546,6 +594,14 @@ def test_the_token_endpoint_receives_the_code_and_verifier_with_basic_client_aut
         "code_verifier": pending.code_verifier,
     }
     assert request.authorization.get_secret_value() == authorization
+
+
+def test_a_pending_login_is_stamped_with_the_wall_clock_second_it_began(
+    login: LoginScenario,
+) -> None:
+    login.wall_clock.now = _NOW + 0.75
+
+    assert login.relying_party.begin_login().pending.issued_at == _NOW
 
 
 def test_two_logins_never_share_a_state_nonce_or_verifier(login: LoginScenario) -> None:

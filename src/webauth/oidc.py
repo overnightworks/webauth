@@ -1,23 +1,27 @@
 """OpenID Connect login against one issuer: the authorization-code flow with PKCE.
 
 `OidcRelyingParty.begin_login` answers the URL a browser is sent to and the
-`PendingLogin` the host keeps until the browser returns. `complete_login` takes
-that pending login and the raw query of the callback and answers a verified
-`OidcIdentity`, or an `OidcRefusal` naming why the login does not stand.
+`PendingLogin` that must come back with it, which `webauth.oidc_login` carries
+in the browser's pending-login cookie. `complete_login` takes that pending
+login and the raw query of the callback and answers a verified `OidcIdentity`,
+or an `OidcRefusal` naming why the login does not stand.
 
 The callback is judged in a fixed order. Its state comes first, so a forged
 callback is refused as such even when it also reports an error; then the
-RFC 9207 `iss` parameter, when the issuer sends one; only then the IdP's own
-`error`, of which nothing but a short error code is carried — never its
-`error_description`, which is text the IdP's caller controls. The code is
-exchanged with the PKCE verifier over the injected `TokenRequestPost`, the
-client authenticating with HTTP Basic. The ID token is verified by a
-`JwtVerifier` of `webauth.jwt_verification` whose one accepted audience is the
-client ID; its nonce and authorized party are checked here, as OpenID Connect
-Core asks of the relying party.
+pending login's age; then the RFC 9207 `iss` parameter, when the issuer sends
+one; only then the IdP's own `error`, of which nothing but a short error code
+is carried — never its `error_description`, which is text the IdP's caller
+controls. The code is exchanged with the PKCE verifier over the injected
+`TokenRequestPost`, the client authenticating with HTTP Basic. The ID token
+is verified by a `JwtVerifier` of `webauth.jwt_verification` whose one
+accepted audience is the client ID; its nonce and authorized party are
+checked here, as OpenID Connect Core asks of the relying party.
 
-The state, nonce and verifier are each 32 random bytes, and the received state
-and nonce are compared in constant time. The client secret enters only through
+The state, nonce and verifier are each `PENDING_SECRET_BYTES` random bytes,
+and the received state and nonce are compared in constant time. A pending
+login is stamped with the wall clock when it begins and stands for
+`PENDING_LOGIN_MAX_AGE_SECONDS`; one older than that, or dated in the future,
+is refused before its code is exchanged. The client secret enters only through
 `OidcClientConfig`; it, the code and the verifier stay out of every repr and
 message this module writes.
 
@@ -41,6 +45,7 @@ from types import MappingProxyType
 
 from pydantic import SecretStr
 
+from webauth.cookies import PENDING_SECRET_BYTES, PendingLogin
 from webauth.jwt_verification import (
     JwtVerifier,
     KeySetFetch,
@@ -53,9 +58,10 @@ from webauth.jwt_verification import (
 )
 
 MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
+MAX_AUTHORIZATION_CODE_CHARS = 2048
+PENDING_LOGIN_MAX_AGE_SECONDS = 600
 
 _OPENID_SCOPE = "openid"
-_RANDOM_BYTES = 32
 # RFC 6749 section 3.3: a scope token is one or more printable ASCII
 # characters other than space, `"` and `\`.
 _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
@@ -103,15 +109,6 @@ class OidcClientConfig:
 
 
 @dataclass(frozen=True)
-class PendingLogin:
-    """What the host keeps between sending the browser away and its return."""
-
-    state: str = field(repr=False)
-    nonce: str = field(repr=False)
-    code_verifier: str = field(repr=False)
-
-
-@dataclass(frozen=True)
 class AuthorizationRequest:
     url: str
     pending: PendingLogin
@@ -144,6 +141,7 @@ TokenRequestPost = Callable[[TokenRequest], TokenEndpointAnswer]
 class OidcRefusalReason(StrEnum):
     MALFORMED_CALLBACK = "malformed-callback"
     STATE_MISMATCH = "state-mismatch"
+    PENDING_LOGIN_EXPIRED = "pending-login-expired"
     ISSUER_MISMATCH = "issuer-mismatch"
     AUTHORIZATION_DENIED = "authorization-denied"
     TOKEN_REQUEST_REFUSED = "token-request-refused"
@@ -197,6 +195,7 @@ class OidcRelyingParty:
     ) -> None:
         self._config = config
         self._post_token_request = post_token_request
+        self._wall_clock = wall_clock
         self._client_authorization = _basic_authorization(config.client_id, config.client_secret)
         self._id_token_verifier = JwtVerifier(
             issuer=config.issuer,
@@ -210,9 +209,10 @@ class OidcRelyingParty:
 
     def begin_login(self) -> AuthorizationRequest:
         pending = PendingLogin(
-            state=secrets.token_urlsafe(_RANDOM_BYTES),
-            nonce=secrets.token_urlsafe(_RANDOM_BYTES),
-            code_verifier=secrets.token_urlsafe(_RANDOM_BYTES),
+            state=secrets.token_urlsafe(PENDING_SECRET_BYTES),
+            nonce=secrets.token_urlsafe(PENDING_SECRET_BYTES),
+            code_verifier=secrets.token_urlsafe(PENDING_SECRET_BYTES),
+            issued_at=int(self._wall_clock()),
         )
         query = urllib.parse.urlencode(
             {
@@ -250,6 +250,8 @@ class OidcRelyingParty:
     def _authorization_code(self, pending: PendingLogin, callback: Mapping[str, str]) -> str:
         if not _is_same_secret(callback.get("state"), pending.state):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.STATE_MISMATCH))
+        if not self._is_unexpired(pending):
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.PENDING_LOGIN_EXPIRED))
         if callback.get("iss", self._config.issuer) != self._config.issuer:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH))
         if "error" in callback:
@@ -260,9 +262,13 @@ class OidcRelyingParty:
                 )
             )
         code = callback.get("code")
-        if not code:
+        if not code or len(code) > MAX_AUTHORIZATION_CODE_CHARS:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK))
         return code
+
+    def _is_unexpired(self, pending: PendingLogin) -> bool:
+        age_seconds = self._wall_clock() - pending.issued_at
+        return 0 <= age_seconds <= PENDING_LOGIN_MAX_AGE_SECONDS
 
     def _exchanged_id_token(self, pending: PendingLogin, code: str) -> str:
         request = TokenRequest(
@@ -312,6 +318,37 @@ class OidcRelyingParty:
         return len(id_token.audiences) == 1
 
 
+def callback_state(callback_query: str) -> str | OidcRefusal:
+    """The state a callback query names once, non-empty and decodable, or the
+    refusal `complete_login` answers for a query that names no such state.
+
+    The state is read on its own, so a callback whose rest is malformed still
+    names the pending login it ends; `complete_login` then refuses it."""
+    states = [
+        value
+        for name, value in urllib.parse.parse_qsl(
+            callback_query, keep_blank_values=True, errors="surrogateescape"
+        )
+        if name == "state"
+    ]
+    if len(states) == 1 and states[0] and _is_utf8(states[0]):
+        return states[0]
+    try:
+        _callback_parameters(callback_query)
+    except _RefusalError as refusal:
+        return refusal.refusal
+    return OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
+
+
+def _is_utf8(text: str) -> bool:
+    """Whether ``text`` holds no byte that failed to decode as UTF-8."""
+    try:
+        text.encode()
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _is_endpoint_url(url: object) -> bool:
     return is_https_url(url) and "?" not in url and "#" not in url
 
@@ -338,13 +375,9 @@ def _s256_code_challenge(code_verifier: str) -> str:
 
 
 def _is_same_secret(received: object, expected: str) -> bool:
-    if not expected or not isinstance(received, str):
+    if not expected or not isinstance(received, str) or not _is_utf8(received):
         return False
-    try:
-        received_bytes = received.encode()
-    except UnicodeEncodeError:
-        return False
-    return hmac.compare_digest(received_bytes, expected.encode())
+    return hmac.compare_digest(received.encode(), expected.encode())
 
 
 def _callback_parameters(callback_query: str) -> Mapping[str, str]:
@@ -371,16 +404,25 @@ def _idp_error_code(error: str) -> str | None:
 
 def _token_answer_document(body: bytes) -> Mapping[str, object]:
     """The answer's JSON object, or an empty one for an answer too large,
-    not JSON, or not an object."""
+    not JSON, not an object, or naming a member twice in any object."""
     if len(body) > MAX_TOKEN_RESPONSE_BYTES:
         return {}
     try:
-        document = json.loads(body)
+        document = json.loads(body, object_pairs_hook=_object_without_duplicates)
     # The stdlib parser recurses per nesting level, and the size bound alone
     # leaves room for nesting deep enough to exhaust the recursion limit.
     except (ValueError, RecursionError):
         return {}
     return document if isinstance(document, dict) else {}
+
+
+def _object_without_duplicates(members: list[tuple[str, object]]) -> dict[str, object]:
+    """Refuses a repeated member rather than letting the last one win, so no
+    reader of the answer can be shown another value than this one judged."""
+    document = dict(members)
+    if len(document) != len(members):
+        raise ValueError("a member is named twice")
+    return document
 
 
 def _identity_of(id_token: VerifiedClaims) -> OidcIdentity:
