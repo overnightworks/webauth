@@ -20,6 +20,7 @@ import secrets
 import socket
 import ssl
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -209,7 +210,8 @@ class LoopbackHttpsServer:
     `/oversized` a body past every size limit, `/compressed` the key set
     gzipped, `/silent` nothing until released, `/dripping-head` and
     `/dripping-body` a 200 whose header block or body arrives one byte every
-    `DRIP_INTERVAL_SECONDS` until released or hung up on, and any other path
+    `DRIP_INTERVAL_SECONDS` until released, hung up on or `SILENT_HOLD_SECONDS`
+    have passed, and any other path
     the key set.
     """
 
@@ -291,10 +293,15 @@ def loopback_https_server(
                 self.wfile.write(body)
 
         def _drip(self, head: bytes) -> None:
-            # Dripping ends with an OSError once the client hangs up.
+            # Dripping ends with an OSError once the client hangs up, and after
+            # SILENT_HOLD_SECONDS at the latest, so a client that never hangs
+            # up fails its test instead of holding it for hours.
+            dripping_ends = time.monotonic() + SILENT_HOLD_SECONDS
             with contextlib.suppress(OSError):
                 self.wfile.write(head)
-                while not release_silent_request.wait(DRIP_INTERVAL_SECONDS):
+                while time.monotonic() < dripping_ends and not release_silent_request.wait(
+                    DRIP_INTERVAL_SECONDS
+                ):
                     self.wfile.write(b"x")
 
         def _answer_reflecting_in_a_malformed_header(self, reflected: bytes) -> None:
