@@ -17,11 +17,10 @@ from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
 
 from fastapi import Depends, HTTPException, Request
-from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse, Response
 
 from webauth.config import WebAuthConfig, web_auth_config
-from webauth.cookies import session_reference, verify_session_cookie
+from webauth.cookies import cookie_values, session_reference, verify_session_cookie
 from webauth.ports import (
     AuditSink,
     SessionIdentityChange,
@@ -270,29 +269,13 @@ def _session_id_from_cookie(
 
 
 def _read_session_cookie(request: Request, config: WebAuthConfig) -> str | _NoSessionCookie:
-    values = _cookie_values(request, config.session_cookie_name)
+    values = cookie_values(request, config.session_cookie_name)
     if len(values) > 1:
         return _NoSessionCookie.INVALID
     if not values or not values[0] or len(values[0]) > MAX_SESSION_COOKIE_CHARS:
         return _NoSessionCookie.ABSENT
     session_id = verify_session_cookie(values[0], config.signing_key)
     return _NoSessionCookie.INVALID if session_id is None else session_id
-
-
-def _cookie_values(request: Request, name: str) -> list[str]:
-    """Every value the raw ``Cookie`` headers carry under ``name``, in order.
-
-    Starlette's cookie dict silently keeps one of several same-named
-    cookies, so each pair is parsed on its own with Starlette's parser to keep
-    its browser-compatible trimming and unquoting.
-    """
-    pairs = "; ".join(request.headers.getlist("cookie")).split(";")
-    return [
-        value
-        for pair in pairs
-        for key, value in cookie_parser(pair).items()
-        if key == name
-    ]
 
 
 def _record_identity_changes(

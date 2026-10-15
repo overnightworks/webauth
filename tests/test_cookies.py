@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import secrets
+
 import pytest
 
 from webauth.cookies import (
     DEFAULT_CSRF_HEADER_NAME,
+    PendingLogin,
     default_cookie_name,
     generate_csrf_token,
+    pending_login_cookie_name,
+    sign_pending_login,
     sign_session_id,
     verify_csrf_token,
+    verify_pending_login,
     verify_session_cookie,
 )
 
 _TEST_SECRET = b"a" * 64
+_PENDING = PendingLogin(
+    state=secrets.token_urlsafe(32),
+    nonce=secrets.token_urlsafe(32),
+    code_verifier=secrets.token_urlsafe(32),
+    issued_at=1_800_000_000,
+)
 
 
 def test_the_csrf_header_name_is_the_one_clients_already_send() -> None:
@@ -89,3 +103,36 @@ def test_verify_csrf_token_wrong_session() -> None:
 
 def test_verify_csrf_token_forged() -> None:
     assert verify_csrf_token("forged-token", "session-a", _TEST_SECRET) is False
+
+
+@pytest.mark.parametrize(
+    ("secure", "prefix"), [(True, "__Host-oidc_pending_"), (False, "oidc_pending_")]
+)
+def test_a_pending_login_cookie_is_named_after_a_digest_of_its_state(
+    *, secure: bool, prefix: str
+) -> None:
+    digest = hashlib.sha256(_PENDING.state.encode()).hexdigest()[:16]
+
+    assert pending_login_cookie_name(_PENDING.state, secure=secure) == f"{prefix}{digest}"
+
+
+def test_a_signed_pending_login_verifies_to_the_same_pending_login() -> None:
+    signed = sign_pending_login(_PENDING, _TEST_SECRET)
+
+    assert signed.startswith("v1.")
+    assert verify_pending_login(signed, _TEST_SECRET) == _PENDING
+
+
+@pytest.mark.parametrize(
+    "pending",
+    [
+        pytest.param(dataclasses.replace(_PENDING, state="short"), id="state-not-minted"),
+        pytest.param(dataclasses.replace(_PENDING, nonce=""), id="nonce-empty"),
+        pytest.param(dataclasses.replace(_PENDING, issued_at=-1), id="issued-before-the-epoch"),
+    ],
+)
+def test_a_pending_login_oidc_cannot_have_begun_is_refused_a_cookie(
+    pending: PendingLogin,
+) -> None:
+    with pytest.raises(ValueError, match="does not fit"):
+        sign_pending_login(pending, _TEST_SECRET)

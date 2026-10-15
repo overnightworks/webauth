@@ -33,6 +33,7 @@ from oidc_arrangement import (
 )
 from pydantic import SecretStr
 
+from webauth.cookies import PendingLogin
 from webauth.jwt_verification import RejectionReason
 from webauth.oidc import (
     MAX_AUTHORIZATION_CODE_CHARS,
@@ -43,7 +44,6 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
-    PendingLogin,
     TokenEndpointAnswer,
     TokenEndpointError,
 )

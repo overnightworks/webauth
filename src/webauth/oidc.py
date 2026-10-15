@@ -44,6 +44,7 @@ from types import MappingProxyType
 
 from pydantic import SecretStr
 
+from webauth.cookies import PendingLogin
 from webauth.jwt_verification import (
     JwtVerifier,
     KeySetFetch,
@@ -105,16 +106,6 @@ class OidcClientConfig:
             raise ValueError("client_secret must be a non-empty SecretStr")
         if not _is_scope_list_with_openid(self.scopes):
             raise ValueError("scopes must be a tuple of scope tokens that includes openid")
-
-
-@dataclass(frozen=True)
-class PendingLogin:
-    """What the host keeps between sending the browser away and its return."""
-
-    state: str = field(repr=False)
-    nonce: str = field(repr=False)
-    code_verifier: str = field(repr=False)
-    issued_at: int
 
 
 @dataclass(frozen=True)
