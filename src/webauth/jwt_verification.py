@@ -362,14 +362,14 @@ def fetch_key_set_over_https(
     raise failed
 
 
-def is_https_url(url: str) -> bool:
-    """An https URL naming a host, a valid port if any, and no control
-    character, space or credentials.
+def is_https_url(url: object) -> TypeGuard[str]:
+    """A string that is an https URL naming a host, a valid port if any, and
+    no control character, space or credentials.
 
     A control character or space is refused outright: the URL parser strips
     some of them before judging, so the parse would pass a URL that is not
     the one stored and later sent."""
-    if _URL_CONTROL_OR_SPACE.search(url):
+    if not isinstance(url, str) or _URL_CONTROL_OR_SPACE.search(url):
         return False
     try:
         origin = urllib.parse.urlsplit(url)

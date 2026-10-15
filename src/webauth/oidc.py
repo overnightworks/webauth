@@ -313,7 +313,7 @@ class OidcRelyingParty:
 
 
 def _is_endpoint_url(url: object) -> bool:
-    return isinstance(url, str) and is_https_url(url) and "?" not in url and "#" not in url
+    return is_https_url(url) and "?" not in url and "#" not in url
 
 
 def _is_scope_list_with_openid(scopes: object) -> bool:

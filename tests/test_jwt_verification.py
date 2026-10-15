@@ -739,6 +739,7 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
         pytest.param({"audiences": [""]}, "audiences", id="empty-audience"),
         pytest.param({"audiences": "songmaker"}, "audiences", id="audience-as-one-string"),
         pytest.param({"jwks_url": "http://login.example.org/certs"}, "https", id="http-key-set"),
+        pytest.param({"jwks_url": None}, "https", id="key-set-url-not-a-string"),
         pytest.param({"jwks_url": "https:///certs"}, "https", id="key-set-without-host"),
         pytest.param({"jwks_url": "https://["}, "https", id="unparseable-key-set-url"),
         pytest.param(
