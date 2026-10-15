@@ -351,11 +351,12 @@ def fetch_key_set_over_https(
             finally:
                 response.close()
     except (urllib3.exceptions.HTTPError, OSError):
-        broken_off = KeySetFetchError(
-            "fetching the key set failed: the connection, TLS handshake or HTTP exchange broke off"
+        failed = KeySetFetchError(
+            "fetching the key set failed: the origin could not be reached,"
+            " or the TLS handshake or HTTP exchange failed"
         )
     # Raised outside the handler so urllib3's error is not even its context.
-    raise broken_off
+    raise failed
 
 
 def _is_https_url(url: str) -> bool:
