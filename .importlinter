@@ -16,8 +16,10 @@ forbidden_modules =
     sqlalchemy
 
 # The JWT verifier is reached only through the OpenID Connect relying party,
-# and the cryptographic stack only through the verifier, so the `jwt` extra
-# stays one narrow edge a password-only host never imports.
+# the cryptographic stack only through the verifier, and urllib3 only through
+# the one HTTPS client, so the `jwt` extra stays one narrow edge a
+# password-only host never imports, and every outbound request holds one
+# bounded posture.
 [importlinter:contract:only-oidc-imports-jwt-verification]
 name = only webauth.oidc imports webauth.jwt_verification
 type = protected
@@ -27,11 +29,27 @@ allowed_importers =
     webauth.oidc
 
 [importlinter:contract:only-jwt-verification-imports-the-crypto-stack]
-name = only webauth.jwt_verification imports jwt, cryptography and urllib3
+name = only webauth.jwt_verification imports jwt and cryptography
 type = protected
 protected_modules =
     jwt
     cryptography
-    urllib3
 allowed_importers =
     webauth.jwt_verification
+
+[importlinter:contract:only-the-https-client-imports-urllib3]
+name = only webauth.https_client imports urllib3
+type = protected
+protected_modules =
+    urllib3
+allowed_importers =
+    webauth.https_client
+
+[importlinter:contract:only-key-set-and-token-transport-import-the-https-client]
+name = webauth.https_client is imported only by jwt_verification and oidc_login
+type = protected
+protected_modules =
+    webauth.https_client
+allowed_importers =
+    webauth.jwt_verification
+    webauth.oidc_login
