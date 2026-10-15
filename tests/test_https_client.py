@@ -305,6 +305,29 @@ def test_an_answer_whose_body_is_never_read_is_judged_by_its_status_alone(
         exchange(f"{token_server.base_url}/moved-stalling")
 
 
+@pytest.mark.parametrize(
+    ("target", "failure"),
+    [
+        pytest.param(
+            lambda server, monkeypatch: f"{server.base_url}/moved-stalling",
+            None,
+            id="answered-another-status",
+        ),
+        pytest.param(_plain_http, ExchangeFailure.NOT_AN_HTTPS_URL, id="plain-http"),
+    ],
+)
+def test_a_key_set_fetch_refusal_names_why_only_when_the_exchange_itself_failed(
+    token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
+    target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch], str],
+    failure: ExchangeFailure | None,
+) -> None:
+    with pytest.raises(KeySetFetchError) as refused:
+        fetch_key_set_over_https(target(token_server, monkeypatch), timeout_seconds=0.2)
+
+    assert refused.value.failure is failure
+
+
 _TEST_DEADLINE_SECONDS = 1.0
 # Room for closing the connection and for a loaded runner, still far below the
 # per-step timeout of five seconds and the drip that would run on for longer.
