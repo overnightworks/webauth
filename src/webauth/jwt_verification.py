@@ -307,9 +307,9 @@ def fetch_key_set_over_https(
     Every failure fails closed, and every other request is refused at once
     rather than waiting for this refresh.
 
-    No error carries any part of the URL, and none chains urllib3's error,
-    whose message may quote the whole URL: a key-set URL may hold a secret in
-    its credentials, path or query."""
+    No error carries any part of the URL or names urllib3's error, and none
+    chains it, since its message may quote the whole URL: a key-set URL may
+    hold a secret in its credentials, path or query."""
     if not _is_https_url(url):
         raise KeySetFetchError(
             "refusing to fetch the key set: not an https URL naming a host,"
@@ -329,10 +329,12 @@ def fetch_key_set_over_https(
                 return response.read(MAX_KEY_SET_BYTES + 1)
             finally:
                 response.close()
-    except (urllib3.exceptions.HTTPError, OSError) as error:
-        failure = type(error).__name__
+    except (urllib3.exceptions.HTTPError, OSError):
+        broken_off = KeySetFetchError(
+            "fetching the key set failed: the connection, TLS handshake or HTTP exchange broke off"
+        )
     # Raised outside the handler so urllib3's error is not even its context.
-    raise KeySetFetchError(f"fetching the key set failed: {failure}")
+    raise broken_off
 
 
 def _is_https_url(url: str) -> bool:

@@ -33,6 +33,7 @@ from typing import Any, NoReturn
 
 import jwt
 import pytest
+import urllib3
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
@@ -1051,3 +1052,25 @@ def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
     # urllib3's own error may hold the URL in an attribute no repr shows.
     assert refusal.value.__cause__ is None
     assert refusal.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "url_template",
+    [
+        pytest.param("https://{authority}/certs", id="untrusted-certificate"),
+        pytest.param("https://key set.example/certs", id="unparseable-host"),
+    ],
+)
+def test_a_failed_fetch_speaks_none_of_urllib3s_error_vocabulary(
+    https_key_set_server: HttpsKeySetServer, monkeypatch: pytest.MonkeyPatch, url_template: str
+) -> None:
+    monkeypatch.delenv("SSL_CERT_FILE")
+    authority = https_key_set_server.base_url.removeprefix("https://")
+
+    with pytest.raises(KeySetFetchError) as refusal:
+        fetch_key_set_over_https(url_template.format(authority=authority))
+
+    urllib3_error_names = {
+        name for name, value in vars(urllib3.exceptions).items() if isinstance(value, type)
+    }
+    assert not any(name in str(refusal.value) for name in urllib3_error_names)
