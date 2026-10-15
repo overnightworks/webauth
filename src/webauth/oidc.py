@@ -1,20 +1,21 @@
 """OpenID Connect login against one issuer: the authorization-code flow with PKCE.
 
 `OidcRelyingParty.begin_login` answers the URL a browser is sent to and the
-`PendingLogin` the host keeps until the browser returns. `complete_login` takes
-that pending login and the raw query of the callback and answers a verified
-`OidcIdentity`, or an `OidcRefusal` naming why the login does not stand.
+`PendingLogin` that must come back with it, which `webauth.oidc_login` carries
+in the browser's pending-login cookie. `complete_login` takes that pending
+login and the raw query of the callback and answers a verified `OidcIdentity`,
+or an `OidcRefusal` naming why the login does not stand.
 
 The callback is judged in a fixed order. Its state comes first, so a forged
 callback is refused as such even when it also reports an error; then the
-RFC 9207 `iss` parameter, when the issuer sends one; only then the IdP's own
-`error`, of which nothing but a short error code is carried — never its
-`error_description`, which is text the IdP's caller controls. The code is
-exchanged with the PKCE verifier over the injected `TokenRequestPost`, the
-client authenticating with HTTP Basic. The ID token is verified by a
-`JwtVerifier` of `webauth.jwt_verification` whose one accepted audience is the
-client ID; its nonce and authorized party are checked here, as OpenID Connect
-Core asks of the relying party.
+pending login's age; then the RFC 9207 `iss` parameter, when the issuer sends
+one; only then the IdP's own `error`, of which nothing but a short error code
+is carried — never its `error_description`, which is text the IdP's caller
+controls. The code is exchanged with the PKCE verifier over the injected
+`TokenRequestPost`, the client authenticating with HTTP Basic. The ID token
+is verified by a `JwtVerifier` of `webauth.jwt_verification` whose one
+accepted audience is the client ID; its nonce and authorized party are
+checked here, as OpenID Connect Core asks of the relying party.
 
 The state, nonce and verifier are each `PENDING_SECRET_BYTES` random bytes,
 and the received state and nonce are compared in constant time. A pending
