@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from webauth.ports import CachedSessionData
 
 
-def require_positive_seconds(field: str, value: object) -> None:
+def _require_positive_seconds(field: str, value: object) -> None:
     """Refuse a lifetime that is not a positive whole number of seconds.
 
     A zero, negative or fractional lifetime would not fail loudly later: it
@@ -46,7 +46,7 @@ class ExpiryColumnLiveness:
     """
 
     def __init__(self, absolute_max_age_seconds: int) -> None:
-        require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
+        _require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
@@ -82,9 +82,9 @@ class IdleWindowLiveness:
     def __init__(
         self, idle_window_seconds: int, absolute_max_age_seconds: int | None = None,
     ) -> None:
-        require_positive_seconds("idle_window_seconds", idle_window_seconds)
+        _require_positive_seconds("idle_window_seconds", idle_window_seconds)
         if absolute_max_age_seconds is not None:
-            require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
+            _require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
         self._idle_window_seconds = idle_window_seconds
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
