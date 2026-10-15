@@ -1,0 +1,8 @@
+claim_id = "7f5b8dc1875d480084ed095f9210028d"
+agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
+role = "builder"
+base = "3e96eb52117559aa3d56a5df5e3c1e6cca9691c9"
+branch = "claude/issue-55-r1-release-0-12"
+scope = ["README.md", "pyproject.toml", "src/webauth/__init__.py", "src/webauth/config.py", "src/webauth/jwt_verification.py", "src/webauth/liveness.py", "tests/test_jwt_verification.py", "tests/test_liveness.py", "tests/test_login.py", "tests/test_validation.py", "tests/test_web_auth_config.py", "uv.lock"]
+opened_commit = "044d0510ace20d572f238ea48904b82d7c67aef7"
+whole_reason = "Four small review fixes and the version bump that ships them land as one release."
