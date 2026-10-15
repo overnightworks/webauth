@@ -335,9 +335,10 @@ request handler — can reach it.
 
 The Redis `SessionCache` is an expiry-column feature: a cached session carries
 `created_at`/`expires_at`, so it pairs only with `ExpiryColumnLiveness`. The
-idle-window model is store-only — it keeps just `last_seen` and reads every
-request from its store — so `WebAuthConfig` refuses a `session_cache` alongside
-`IdleWindowLiveness` at construction rather than failing per request.
+idle-window model is store-only — it keeps `last_seen` (and `created_at` when
+it is given an absolute cap) and reads every request from its store — so
+`WebAuthConfig` refuses a `session_cache` alongside `IdleWindowLiveness` at
+construction rather than failing per request.
 
 `webauth.session_store.RedisSessionCache` is the one implementation shipped
 here; it needs the client library, so a host that uses it installs
