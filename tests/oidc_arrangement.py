@@ -17,8 +17,10 @@ import hashlib
 import ipaddress
 import json
 import secrets
+import socket
 import ssl
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -177,6 +179,8 @@ def s256_code_challenge(code_verifier: str) -> str:
 
 SILENT_HOLD_SECONDS = 10
 """How long `/silent` keeps a request unanswered unless the test releases it."""
+DRIP_INTERVAL_SECONDS = 0.2
+"""How long `/dripping-head` and `/dripping-body` wait between two bytes."""
 SERVED_TOKEN_ANSWER = json.dumps(
     {"access_token": "served-access-token", "id_token": "served.id.token", "token_type": "Bearer"}
 ).encode()
@@ -204,7 +208,11 @@ class LoopbackHttpsServer:
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
     released, `/missing` a 404,
     `/oversized` a body past every size limit, `/compressed` the key set
-    gzipped, `/silent` nothing until released, and any other path the key set.
+    gzipped, `/silent` nothing until released, `/dripping-status`,
+    `/dripping-head` and `/dripping-body` a 200 whose status line, header
+    block or body arrives one byte every `DRIP_INTERVAL_SECONDS` until
+    released, hung up on or `SILENT_HOLD_SECONDS` have passed, and any other
+    path the key set.
     """
 
     base_url: str
@@ -252,6 +260,12 @@ def loopback_https_server(
             elif route == "/moved-stalling":
                 self._send_head(302, {"Location": "/certs", "Content-Length": "1"})
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
+            elif route == "/dripping-status":
+                self._drip(b"HTTP/1.1 200 ")
+            elif route == "/dripping-head":
+                self._drip(b"HTTP/1.1 200 OK\r\nX-Dripping: ")
+            elif route == "/dripping-body":
+                self._drip(b"HTTP/1.1 200 OK\r\nContent-Length: 65536\r\n\r\n")
             elif route == "/missing":
                 self._send_head(404, {"Content-Length": "0"})
             elif route == "/oversized":
@@ -279,6 +293,18 @@ def loopback_https_server(
             # The client may hang up once it read its limit.
             with contextlib.suppress(OSError):
                 self.wfile.write(body)
+
+        def _drip(self, head: bytes) -> None:
+            # Dripping ends with an OSError once the client hangs up, and after
+            # SILENT_HOLD_SECONDS at the latest, so a client that never hangs
+            # up fails its test instead of holding it for hours.
+            dripping_ends = time.monotonic() + SILENT_HOLD_SECONDS
+            with contextlib.suppress(OSError):
+                self.wfile.write(head)
+                while time.monotonic() < dripping_ends and not release_silent_request.wait(
+                    DRIP_INTERVAL_SECONDS
+                ):
+                    self.wfile.write(b"x")
 
         def _answer_reflecting_in_a_malformed_header(self, reflected: bytes) -> None:
             self.wfile.write(
@@ -318,6 +344,36 @@ def loopback_https_server(
         server.shutdown()
         server.server_close()
         serving.join(timeout=10)
+
+
+@contextlib.contextmanager
+def closed_loopback_port() -> Iterator[int]:
+    """A loopback port bound by nobody listening on it, for as long as the block lasts."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        yield probe.getsockname()[1]
+
+
+@contextlib.contextmanager
+def unanswering_loopback_port() -> Iterator[int]:
+    """A loopback port whose connections the kernel accepts but nobody ever
+    answers, so a TLS handshake waits on it, for as long as the block lasts."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        yield listener.getsockname()[1]
+
+
+@contextlib.contextmanager
+def unconnectable_loopback_port() -> Iterator[int]:
+    """A loopback port whose accept queue is full, so the kernel drops every
+    further connection attempt and connecting waits, for as long as the block
+    lasts."""
+    with socket.socket() as listener, socket.socket() as queued:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(0)
+        queued.connect(listener.getsockname())
+        yield listener.getsockname()[1]
 
 
 def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:

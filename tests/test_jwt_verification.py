@@ -14,7 +14,6 @@ import hashlib
 import hmac
 import json
 import logging
-import socket
 import string
 import threading
 import time
@@ -38,6 +37,7 @@ from oidc_arrangement import (
     FakeKeySetEndpoint,
     LoopbackHttpsServer,
     changed,
+    closed_loopback_port,
     jws,
     key_set_document,
     loopback_https_server,
@@ -855,10 +855,7 @@ def test_https_fetch_refuses_a_certificate_the_system_does_not_trust(
 
 
 def test_https_fetch_names_an_origin_nobody_listens_on_as_unreachable() -> None:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        closed_port = probe.getsockname()[1]
-
+    with closed_loopback_port() as closed_port:
         with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
             fetch_key_set_over_https(f"https://127.0.0.1:{closed_port}/certs")
 

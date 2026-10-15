@@ -9,6 +9,8 @@ secrets in the client secret, the code and the PKCE verifier.
 from __future__ import annotations
 
 import base64
+import contextlib
+import inspect
 import logging
 import socket
 import time
@@ -16,7 +18,7 @@ import traceback
 import urllib.parse
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 import urllib3
@@ -25,13 +27,22 @@ from oidc_arrangement import (
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
     LoopbackHttpsServer,
+    closed_loopback_port,
     loopback_https_server,
+    unanswering_loopback_port,
+    unconnectable_loopback_port,
 )
 from pydantic import SecretStr
 
 import webauth.https_client
 import webauth.jwt_verification
-from webauth.https_client import KeySetFetchError, fetch_key_set_over_https
+from webauth.https_client import (
+    ExchangeFailure,
+    HttpsExchangeError,
+    KeySetFetchError,
+    fetch_key_set_over_https,
+    post_form_over_https,
+)
 from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequest
 from webauth.oidc_login import post_token_request_over_https
 
@@ -60,10 +71,8 @@ def token_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Lo
 
 @pytest.fixture
 def closed_port() -> Iterator[int]:
-    """A loopback port bound by nobody listening on it."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        yield probe.getsockname()[1]
+    with closed_loopback_port() as port:
+        yield port
 
 
 @pytest.fixture(autouse=True)
@@ -107,8 +116,8 @@ def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_urllib3_recor
     _assert_no_canary_in(caplog.text)
 
 
-# Modules `import urllib3` does not load, so their loggers come into being
-# only after webauth.https_client is imported.
+# Modules `import urllib3` does not load: webauth.https_client creates their
+# loggers when it is imported, before urllib3 ever loads the modules.
 @pytest.mark.parametrize(
     "module_name",
     [
@@ -294,6 +303,176 @@ def test_an_answer_whose_body_is_never_read_is_judged_by_its_status_alone(
 ) -> None:
     with pytest.raises(error, match=refusal):
         exchange(f"{token_server.base_url}/moved-stalling")
+
+
+@pytest.mark.parametrize(
+    ("target", "failure"),
+    [
+        pytest.param(
+            lambda server, monkeypatch: f"{server.base_url}/moved-stalling",
+            None,
+            id="answered-another-status",
+        ),
+        pytest.param(_plain_http, ExchangeFailure.NOT_AN_HTTPS_URL, id="plain-http"),
+    ],
+)
+def test_a_key_set_fetch_refusal_names_why_only_when_the_exchange_itself_failed(
+    token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
+    target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch], str],
+    failure: ExchangeFailure | None,
+) -> None:
+    with pytest.raises(KeySetFetchError) as refused:
+        fetch_key_set_over_https(target(token_server, monkeypatch), timeout_seconds=0.2)
+
+    assert refused.value.failure is failure
+
+
+_TEST_DEADLINE_SECONDS = 1.0
+# Room for closing the connection and for a loaded runner, still far below the
+# per-step timeout of five seconds and the drip that would run on for longer.
+_TEST_DEADLINE_SLACK_SECONDS = 1.0
+
+
+def _fetch_key_set(url: str, **deadline: float) -> object:
+    return fetch_key_set_over_https(url, **deadline)
+
+
+def _post_token_form(url: str, **deadline: float) -> object:
+    return post_form_over_https(
+        url,
+        _FORM,
+        authorization=SecretStr(_BASIC_AUTHORIZATION),
+        max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
+        timeout_seconds=5,
+        **deadline,
+    )
+
+
+_EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
+    ("exchange", "error"),
+    [
+        pytest.param(_fetch_key_set, KeySetFetchError, id="key-set-fetch"),
+        pytest.param(_post_token_form, HttpsExchangeError, id="token-post"),
+    ],
+)
+
+
+_StalledTarget = Callable[[LoopbackHttpsServer, pytest.MonkeyPatch, contextlib.ExitStack], str]
+
+
+def _route(path: str) -> _StalledTarget:
+    return lambda server, monkeypatch, stack: f"{server.base_url}{path}"
+
+
+def _unconnectable_on_every_address(
+    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
+) -> str:
+    port = stack.enter_context(unconnectable_loopback_port())
+    [address] = socket.getaddrinfo("127.0.0.1", port, type=socket.SOCK_STREAM)
+    # A host name resolving to three addresses, none of which answers.
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [address] * 3)
+    return f"https://issuer.example:{port}/certs"
+
+
+def _unanswering_tls_handshake(
+    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
+) -> str:
+    return f"https://127.0.0.1:{stack.enter_context(unanswering_loopback_port())}/certs"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param(_unconnectable_on_every_address, id="connect-on-every-address"),
+        pytest.param(_unanswering_tls_handshake, id="tls-handshake"),
+        pytest.param(_route("/dripping-status"), id="dripping-status-line"),
+        pytest.param(_route("/dripping-head"), id="dripping-head"),
+        pytest.param(_route("/dripping-body"), id="dripping-body"),
+    ],
+)
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
+    token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | HttpsExchangeError],
+    target: _StalledTarget,
+) -> None:
+    with contextlib.ExitStack() as stack:
+        url = target(token_server, monkeypatch, stack)
+        started = time.monotonic()
+        with pytest.raises(error) as refused:
+            exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
+        held = time.monotonic() - started
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+    assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        pytest.param("issuer..example", id="empty-label"),
+        pytest.param("a" * 64 + ".example", id="label-over-63-characters"),
+    ],
+)
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | HttpsExchangeError],
+    host: str,
+) -> None:
+    with pytest.raises(error) as refused:
+        exchange(f"https://{host}/certs?{_URL_QUERY}")
+
+    assert refused.value.failure is ExchangeFailure.BROKEN_OFF
+    _assert_no_canary_in("".join(traceback.format_exception(refused.value)))
+
+
+_DEFAULT_DEADLINE_SECONDS = 10
+_FAST_CLOCK_SPEED = 10
+
+
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
+    token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | HttpsExchangeError],
+) -> None:
+    started = time.monotonic()
+
+    def fast_monotonic() -> float:
+        return started + (time.monotonic() - started) * _FAST_CLOCK_SPEED
+
+    # The deadline's clock runs fast, so its ten seconds pass in one.
+    monkeypatch.setattr(webauth.https_client, "time", SimpleNamespace(monotonic=fast_monotonic))
+    with pytest.raises(error) as refused:
+        exchange(f"{token_server.base_url}/dripping-body")
+    held = fast_monotonic() - started
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+    assert (
+        _DEFAULT_DEADLINE_SECONDS
+        <= held
+        < _DEFAULT_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS * _FAST_CLOCK_SPEED
+    )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
+        pytest.param(post_form_over_https, id="token-post"),
+    ],
+)
+def test_each_calls_default_deadline_is_exactly_ten_seconds(call: Callable[..., object]) -> None:
+    # The fast-clock test above proves the default is wired; its band cannot
+    # tell ten seconds from fifteen, so the public default itself is pinned.
+    deadline = inspect.signature(call).parameters["deadline_seconds"].default
+
+    assert deadline == _DEFAULT_DEADLINE_SECONDS
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
