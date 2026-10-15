@@ -1047,12 +1047,7 @@ def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
     with pytest.raises(KeySetFetchError) as refusal:
         fetch_key_set_over_https(url)
 
-    assert not any(_URL_SECRET in repr(error) for error in _exception_chain(refusal.value))
-
-
-def _exception_chain(error: BaseException | None) -> Iterator[BaseException]:
-    """The error and every error reachable from it, whether or not a
-    traceback would print it."""
-    while error is not None:
-        yield error
-        error = error.__cause__ or error.__context__
+    assert _URL_SECRET not in repr(refusal.value)
+    # urllib3's own error may hold the URL in an attribute no repr shows.
+    assert refusal.value.__cause__ is None
+    assert refusal.value.__context__ is None
