@@ -477,20 +477,30 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
 
 
 @pytest.mark.parametrize(
-    ("client_secret", "authorization"),
+    ("client_id", "client_secret", "authorization"),
     [
-        pytest.param(_CLIENT_SECRET, _BASIC_AUTHORIZATION, id="plain-secret"),
+        pytest.param(_CLIENT_ID, _CLIENT_SECRET, _BASIC_AUTHORIZATION, id="plain-credentials"),
         pytest.param(
+            _CLIENT_ID,
             "se:cr+et %",
             "Basic c29uZ21ha2VyOnNlJTNBY3IlMkJldCslMjU=",
             id="secret-form-encoded-before-basic-encoding",
         ),
+        pytest.param(
+            "web app:1",
+            _CLIENT_SECRET,
+            "Basic d2ViK2FwcCUzQTE6Y2xpZW50LXMzY3IzdC12YWx1ZQ==",
+            id="client-id-form-encoded-before-basic-encoding",
+        ),
     ],
 )
 def test_the_token_endpoint_receives_the_code_and_verifier_with_basic_client_authentication(
-    client_secret: str, authorization: str
+    client_id: str, client_secret: str, authorization: str
 ) -> None:
-    login = LoginScenario(FakeTokenEndpoint(), _config(client_secret=SecretStr(client_secret)))
+    login = LoginScenario(
+        FakeTokenEndpoint(),
+        _config(client_id=client_id, client_secret=SecretStr(client_secret)),
+    )
     pending, _outcome = login.attempt(Attempt())
 
     [request] = login.token_endpoint.requests
