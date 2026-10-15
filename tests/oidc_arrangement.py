@@ -17,6 +17,7 @@ import hashlib
 import ipaddress
 import json
 import secrets
+import socket
 import ssl
 import threading
 import urllib.parse
@@ -318,6 +319,14 @@ def loopback_https_server(
         server.shutdown()
         server.server_close()
         serving.join(timeout=10)
+
+
+@contextlib.contextmanager
+def closed_loopback_port() -> Iterator[int]:
+    """A loopback port bound by nobody listening on it, for as long as the block lasts."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        yield probe.getsockname()[1]
 
 
 def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:

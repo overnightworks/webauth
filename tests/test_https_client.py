@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import socket
 import time
 import traceback
 import urllib.parse
@@ -25,6 +24,7 @@ from oidc_arrangement import (
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
     LoopbackHttpsServer,
+    closed_loopback_port,
     loopback_https_server,
 )
 from pydantic import SecretStr
@@ -60,10 +60,8 @@ def token_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Lo
 
 @pytest.fixture
 def closed_port() -> Iterator[int]:
-    """A loopback port bound by nobody listening on it."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        yield probe.getsockname()[1]
+    with closed_loopback_port() as port:
+        yield port
 
 
 @pytest.fixture(autouse=True)
@@ -107,8 +105,8 @@ def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_urllib3_recor
     _assert_no_canary_in(caplog.text)
 
 
-# Modules `import urllib3` does not load, so their loggers come into being
-# only after webauth.https_client is imported.
+# Modules `import urllib3` does not load: webauth.https_client creates their
+# loggers when it is imported, before urllib3 ever loads the modules.
 @pytest.mark.parametrize(
     "module_name",
     [
