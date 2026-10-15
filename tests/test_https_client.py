@@ -475,6 +475,52 @@ def test_each_calls_default_deadline_is_exactly_ten_seconds(call: Callable[..., 
     assert deadline == _DEFAULT_DEADLINE_SECONDS
 
 
+@_EXCHANGES_UNDER_A_DEADLINE
+@pytest.mark.parametrize("deadline_seconds", [0, -1])
+def test_a_deadline_of_zero_or_less_is_refused_naming_the_parameter(
+    exchange: Callable[..., object], error: type[Exception], deadline_seconds: float
+) -> None:
+    with pytest.raises(ValueError, match="deadline_seconds"):
+        exchange("https://127.0.0.1:1/token", deadline_seconds=deadline_seconds)
+
+
+def test_a_token_request_that_timed_out_names_the_timeout_as_its_failure(
+    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(TokenEndpointError) as refused:
+        post_token_request_over_https(
+            _token_request(_stalled(token_server, monkeypatch)), timeout_seconds=0.2
+        )
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+
+
+def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
+    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(TokenEndpointError) as refused:
+        post_token_request_over_https(
+            _token_request(_stalled(token_server, monkeypatch)),
+            timeout_seconds=0.2,
+            deadline_seconds=0.4,
+        )
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+
+
+def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> None:
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        post_token_request_over_https(
+            _token_request("https://127.0.0.1:1/token"), timeout_seconds=3, deadline_seconds=2
+        )
+
+
+def test_the_token_posts_default_deadline_is_the_https_clients_token_exchange_deadline() -> None:
+    deadline = inspect.signature(post_token_request_over_https).parameters["deadline_seconds"]
+
+    assert deadline.default == webauth.https_client.TOKEN_EXCHANGE_DEADLINE_SECONDS
+
+
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
     closed_port: int, caplog: pytest.LogCaptureFixture
 ) -> None:

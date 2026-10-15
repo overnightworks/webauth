@@ -46,9 +46,11 @@ from jwt.types import Options
 
 # The aliased names are re-exported: hosts imported the key-set fetch, its
 # limits and its error from this module before they moved to webauth.https_client,
-# and webauth.oidc imports is_https_url from here.
+# and webauth.oidc imports is_https_url and ExchangeFailure from here.
 from webauth.https_client import KEY_SET_FETCH_TIMEOUT_SECONDS as KEY_SET_FETCH_TIMEOUT_SECONDS
 from webauth.https_client import MAX_KEY_SET_BYTES as MAX_KEY_SET_BYTES
+
+from webauth.https_client import ExchangeFailure as ExchangeFailure
 from webauth.https_client import KeySetFetchError as KeySetFetchError
 from webauth.https_client import fetch_key_set_over_https as fetch_key_set_over_https
 from webauth.https_client import is_https_url as is_https_url
