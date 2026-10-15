@@ -25,10 +25,6 @@ class _IdleWindowRecord(Protocol):
     last_seen: datetime
 
 
-class _CappedIdleWindowRecord(_IdleWindowRecord, Protocol):
-    created_at: datetime
-
-
 class ExpiryColumnLiveness:
     """Songmaker's model: a stored row carrying ``created_at`` and ``expires_at``.
 
@@ -65,7 +61,8 @@ class IdleWindowLiveness:
     A session stands while it was seen within the idle window; a ``touch`` is a
     put with ``last_seen == now``. With ``absolute_max_age_seconds`` it also
     falls once it is older than the cap, however recently it was seen — the
-    store then has to keep ``created_at`` beside ``last_seen``. The model is
+    store then has to keep ``created_at`` beside ``last_seen``, and a record
+    without it raises `TypeError` instead of receiving a verdict. The model is
     store-only: it has no ``expires_at``, so it cannot ride the Redis
     `SessionCache`, and `WebAuthConfig` refuses that pairing at construction.
     """
@@ -76,20 +73,33 @@ class IdleWindowLiveness:
         self._idle_window_seconds = idle_window_seconds
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
-    def admits_stored_session(
-        self, record: _IdleWindowRecord | _CappedIdleWindowRecord, now: datetime,
-    ) -> bool:
+    def admits_stored_session(self, record: _IdleWindowRecord, now: datetime) -> bool:
         if (now - record.last_seen).total_seconds() > self._idle_window_seconds:
             return False
         if self._absolute_max_age_seconds is None:
             return True
-        return _within_absolute_cap(record.created_at, now, self._absolute_max_age_seconds)
+        return _within_absolute_cap(
+            _created_at_of_capped(record), now, self._absolute_max_age_seconds,
+        )
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
         raise NotImplementedError(
             "the idle-window model does not use the Redis session cache; a host "
             "that wants a cache uses expiry-column liveness",
         )
+
+
+def _created_at_of_capped(record: _IdleWindowRecord) -> datetime:
+    # The host's store record crosses into the library here. A capped policy
+    # over a store that keeps no ``created_at`` is a host misconfiguration, so
+    # it is named as such rather than surfacing as an AttributeError.
+    created_at = getattr(record, "created_at", None)
+    if created_at is None:
+        raise TypeError(
+            "an IdleWindowLiveness with absolute_max_age_seconds needs a stored "
+            "session record that carries created_at",
+        )
+    return created_at
 
 
 def _within_absolute_cap(

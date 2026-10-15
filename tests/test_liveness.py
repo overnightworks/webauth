@@ -172,6 +172,14 @@ def test_a_capped_idle_window_policy_refuses_a_session_older_than_the_cap_howeve
     assert RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now) is admitted
 
 
+def test_a_capped_idle_window_policy_refuses_to_judge_a_record_without_created_at() -> None:
+    now = datetime.now(timezone.utc)
+    record = IdleSessionRecord(id="session-1", user=FakeUser(), last_seen=now)
+
+    with pytest.raises(TypeError, match="created_at"):
+        RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now)
+
+
 def test_a_session_used_every_six_days_stands_after_twenty_days_under_a_seven_day_window() -> None:
     created_at = A_TIME_FAR_FROM_REAL_NOW
     record = _CappedIdleRecord(created_at=created_at, last_seen=created_at)
