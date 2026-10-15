@@ -62,7 +62,7 @@ MIN_RSA_KEY_BITS = 2048
 _ALGORITHM = "RS256"
 _JWS_COMPACT_SEGMENTS = 3
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]*")
-_URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f]")
+_URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 # Members through which a token could name, embed or constrain its own key,
 # and `b64`, which would change how PyJWT reads the payload segment.
 _FORBIDDEN_HEADER_MEMBERS = frozenset({"crit", "jwk", "jku", "x5u", "x5c", "b64"})

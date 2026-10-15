@@ -571,6 +571,11 @@ def _text_of(value: object) -> str:
             "https://songmaker.example.org/auth/call\rback",
             id="redirect-uri-with-a-carriage-return-in-its-path",
         ),
+        pytest.param(
+            "redirect_uri",
+            "https://songmaker.example.org/auth/call\x85back",
+            id="redirect-uri-with-a-c1-control-character",
+        ),
         pytest.param("issuer", f"\n{_ISSUER}", id="issuer-led-by-a-newline"),
         pytest.param("jwks_url", f"{_JWKS_URL}\x00", id="jwks-url-with-a-nul"),
         pytest.param("token_endpoint", f"{_TOKEN_ENDPOINT} ", id="token-endpoint-with-a-space"),
