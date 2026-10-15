@@ -58,6 +58,8 @@ HSTS_HEADER = "strict-transport-security"
 HSTS_PINNING_HTTPS_FOR_A_YEAR = "max-age=31536000; includeSubDomains"
 
 A_CORRECT_PASSWORD = "the-correct-password"
+SEVEN_DAYS = 7 * 24 * 3600
+THIRTY_DAYS = 30 * 24 * 3600
 A_WRONG_PASSWORD = "something-else-entirely"
 
 
@@ -170,6 +172,16 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
     assert "SameSite=strict" in header
     assert f"Max-Age={cookie_app.config.session_max_age_seconds}" in header
     assert "Path=/" in header
+
+
+def test_a_cookie_lifetime_longer_than_the_idle_window_is_what_the_browser_keeps() -> None:
+    """A 30-day cookie over a 7-day idle window: the cookie is issued once, so it
+    must outlive the window for a session used every few days to stay signed in."""
+    app = a_cookie_app(session_max_age_seconds=SEVEN_DAYS, cookie_max_age_seconds=THIRTY_DAYS)
+    response = app.issue()
+
+    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
+        assert f"Max-Age={THIRTY_DAYS};" in app.set_cookie_header(response, name)
 
 
 def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> None:

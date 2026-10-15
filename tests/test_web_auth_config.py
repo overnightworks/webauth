@@ -12,6 +12,7 @@ from pydantic import SecretStr
 from webauth_arrangement import (
     HTTPS_TEST_SERVER,
     IDLE_WINDOW_SECONDS,
+    SESSION_MAX_AGE_SECONDS,
     a_session_cache,
     a_web_auth_config,
 )
@@ -177,6 +178,32 @@ def test_a_replaced_configuration_resolves_unnamed_cookies_again(
 
     assert config.session_cookie_name == session_cookie_name
     assert config.csrf_cookie_name == csrf_cookie_name
+
+
+@pytest.mark.parametrize(
+    ("built_with", "replaced_with", "cookie_max_age_seconds"),
+    [
+        pytest.param({}, {}, SESSION_MAX_AGE_SECONDS, id="defaults-to-the-session-max-age"),
+        pytest.param(
+            {"cookie_max_age_seconds": 2_592_000}, {}, 2_592_000, id="own-lifetime-stays",
+        ),
+        pytest.param(
+            {}, {"session_max_age_seconds": 60}, 60, id="replace-derives-the-default-again",
+        ),
+        pytest.param(
+            {"cookie_max_age_seconds": 2_592_000},
+            {"session_max_age_seconds": 60},
+            2_592_000,
+            id="replace-keeps-the-own-lifetime",
+        ),
+    ],
+)
+def test_the_cookie_lifetime_follows_the_session_max_age_unless_the_host_sets_its_own(
+    built_with: dict[str, int], replaced_with: dict[str, int], cookie_max_age_seconds: int,
+) -> None:
+    config = replace(a_web_auth_config(**built_with), **replaced_with)
+
+    assert config.cookie_max_age_seconds == cookie_max_age_seconds
 
 
 @pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])

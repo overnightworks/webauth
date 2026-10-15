@@ -63,6 +63,17 @@ class _DefaultCookieName(str):
     __slots__ = ()
 
 
+class _DefaultCookieMaxAge(int):
+    """A cookie lifetime the library took from ``session_max_age_seconds``.
+
+    Like `_DefaultCookieName`, the type remembers that the host left the value
+    open, so ``dataclasses.replace`` with a new ``session_max_age_seconds``
+    derives the cookie lifetime again instead of keeping the old one.
+    """
+
+    __slots__ = ()
+
+
 @dataclass(frozen=True)
 class WebAuthConfig:
     session_secret: SecretStr
@@ -87,6 +98,7 @@ class WebAuthConfig:
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
     session_cache: SessionCache | None = None
+    cookie_max_age_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if len(self.session_secret.get_secret_value()) < MIN_SESSION_SECRET_CHARS:
@@ -106,6 +118,7 @@ class WebAuthConfig:
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
+        self._resolve_cookie_max_age()
         if (
             type(self.ipv6_budget_prefix) is not int
             or self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE
@@ -134,6 +147,18 @@ class WebAuthConfig:
             raise ValueError(
                 f"{field} {name!r} needs cookie_secure=True; browsers drop a __Host- "
                 "cookie without Secure, so nobody could stay signed in",
+            )
+
+    def _resolve_cookie_max_age(self) -> None:
+        # The browser cookie may outlive the server's idle window: a 30-day
+        # cookie with a 7-day window keeps a regularly used session signed in,
+        # because the cookie is issued once at login and never reissued.
+        if self.cookie_max_age_seconds is None or isinstance(
+            self.cookie_max_age_seconds, _DefaultCookieMaxAge,
+        ):
+            # The dataclass is frozen; resolving a default is part of construction.
+            object.__setattr__(
+                self, "cookie_max_age_seconds", _DefaultCookieMaxAge(self.session_max_age_seconds),
             )
 
     @property
