@@ -31,6 +31,7 @@ import logging
 import re
 import socket
 import ssl
+import sys
 import time
 import urllib.parse
 from collections.abc import Buffer, Callable, Iterable, Iterator, Mapping
@@ -345,7 +346,7 @@ def _https_pool_class_under(deadline: _Deadline) -> type[urllib3.HTTPSConnection
     class ConnectionUnderDeadline(HTTPSConnection):
         def _new_conn(self) -> socket.socket:
             try:
-                return _connect_within(
+                connection = _connect_within(
                     deadline, self._dns_host, self.port, self.timeout, self.socket_options
                 )
             # The resolver's IDNA codec refuses an empty label or one over 63
@@ -358,6 +359,8 @@ def _https_pool_class_under(deadline: _Deadline) -> type[urllib3.HTTPSConnection
                 raise ConnectTimeoutError(self, "connecting timed out") from error
             except OSError as error:
                 raise NewConnectionError(self, "connecting failed") from error
+            sys.audit("http.client.connect", self, self.host, self.port)
+            return connection
 
     class PoolUnderDeadline(urllib3.HTTPSConnectionPool):
         # Under pyright, urllib3's own HTTPSConnection does not satisfy the
