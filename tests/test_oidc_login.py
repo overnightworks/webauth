@@ -687,15 +687,35 @@ def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_sess
     assert host.callback(queries[0]).json() == {"refusal": "state-mismatch"}
 
 
-def test_a_start_at_the_cap_evicts_a_forged_pending_cookie_before_any_genuine_one() -> None:
+def _a_forged_pending_cookie(host: OidcHost) -> str:
+    name = f"{pending_login_cookie_prefix(secure=True)}{'f' * 16}"
+    host.client.cookies.set(name, "v1.forged", domain="testserver.local", path="/")
+    return name
+
+
+def _the_newest_genuine_pending_cookie_twice(host: OidcHost) -> str:
+    name = host.pending_cookie_name(host.sign_in_at_issuer())
+    value = host.client.cookies[name]
+    host.client.cookies.set(name, value, domain="testserver.local", path="/login")
+    return name
+
+
+@pytest.mark.parametrize("unranked_cookie", [
+    pytest.param(_a_forged_pending_cookie, id="a forged value"),
+    pytest.param(_the_newest_genuine_pending_cookie_twice, id="a name sent twice"),
+])
+def test_a_start_at_the_cap_evicts_an_unranked_pending_cookie_before_any_genuine_one(
+    unranked_cookie: Callable[[OidcHost], str],
+) -> None:
     host = an_oidc_host()
-    genuine = {host.pending_cookie_name(host.sign_in_at_issuer()) for _ in range(4)}
-    forged = f"{pending_login_cookie_prefix(secure=True)}{'f' * 16}"
-    host.client.cookies.set(forged, "v1.forged", domain="testserver.local", path="/")
+    for _ in range(MAX_PENDING_LOGINS - 1):
+        host.sign_in_at_issuer()
+        host.wall_clock.now += 1
+    unranked = unranked_cookie(host)
 
-    newest = host.pending_cookie_name(host.sign_in_at_issuer())
+    response = host.client.get("/login/oidc")
 
-    assert host.pending_cookie_names() == genuine | {newest}
+    assert [name for name in set_cookies(response) if is_cleared(response, name)] == [unranked]
 
 
 def test_a_start_at_the_cap_leaves_a_prefixed_cookie_of_another_shape_alone() -> None:
