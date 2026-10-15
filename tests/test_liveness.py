@@ -24,10 +24,23 @@ EXPIRY_POLICY = ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS)
 IDLE_POLICY = IdleWindowLiveness(IDLE_WINDOW_SECONDS)
 
 
+SEVEN_DAYS = timedelta(days=7)
+THIRTY_DAYS = timedelta(days=30)
+RECOMMENDED_IDLE_POLICY = IdleWindowLiveness(
+    int(SEVEN_DAYS.total_seconds()), absolute_max_age_seconds=int(THIRTY_DAYS.total_seconds()),
+)
+
+
 @dataclass
 class _ExpiryRecord:
     created_at: datetime
     expires_at: datetime
+
+
+@dataclass
+class _CappedIdleRecord:
+    created_at: datetime
+    last_seen: datetime
 
 
 def _cached(created_at: datetime, *, expires_at: datetime | None = None) -> CachedSessionData:
@@ -140,6 +153,47 @@ def test_the_idle_window_policy_admits_a_session_seen_within_the_window(
     record = IdleSessionRecord(id="session-1", user=FakeUser(), last_seen=now - idle_age)
 
     assert IDLE_POLICY.admits_stored_session(record, now) is admitted
+
+
+@pytest.mark.parametrize(
+    ("age", "admitted"),
+    [
+        pytest.param(timedelta(days=29), True, id="within the cap"),
+        pytest.param(THIRTY_DAYS, True, id="at the cap"),
+        pytest.param(THIRTY_DAYS + timedelta(seconds=1), False, id="past the cap"),
+    ],
+)
+def test_a_capped_idle_window_policy_refuses_a_session_older_than_the_cap_however_recently_seen(
+    age: timedelta, admitted: bool,
+) -> None:
+    now = datetime.now(timezone.utc)
+    record = _CappedIdleRecord(created_at=now - age, last_seen=now)
+
+    assert RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now) is admitted
+
+
+def test_a_session_used_every_six_days_stands_after_twenty_days_under_a_seven_day_window() -> None:
+    created_at = A_TIME_FAR_FROM_REAL_NOW
+    record = _CappedIdleRecord(created_at=created_at, last_seen=created_at)
+
+    for day in (6, 12, 18):
+        now = created_at + timedelta(days=day)
+        assert RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now) is True
+        record.last_seen = now
+
+    assert RECOMMENDED_IDLE_POLICY.admits_stored_session(
+        record, created_at + timedelta(days=20),
+    ) is True
+
+
+def test_a_session_left_idle_for_eight_days_is_refused_under_a_seven_day_window() -> None:
+    record = _CappedIdleRecord(
+        created_at=A_TIME_FAR_FROM_REAL_NOW, last_seen=A_TIME_FAR_FROM_REAL_NOW,
+    )
+
+    assert RECOMMENDED_IDLE_POLICY.admits_stored_session(
+        record, A_TIME_FAR_FROM_REAL_NOW + timedelta(days=8),
+    ) is False
 
 
 def test_the_idle_window_policy_never_answers_for_a_cached_session() -> None:

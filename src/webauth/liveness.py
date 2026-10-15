@@ -25,6 +25,10 @@ class _IdleWindowRecord(Protocol):
     last_seen: datetime
 
 
+class _CappedIdleWindowRecord(_IdleWindowRecord, Protocol):
+    created_at: datetime
+
+
 class ExpiryColumnLiveness:
     """Songmaker's model: a stored row carrying ``created_at`` and ``expires_at``.
 
@@ -57,19 +61,35 @@ class ExpiryColumnLiveness:
 
 
 class IdleWindowLiveness:
-    """Agent-presentator's model: a stored row that keeps only ``last_seen``.
+    """Agent-presentator's model: a stored row that keeps ``last_seen``.
 
     A session stands while it was seen within the idle window; a ``touch`` is a
-    put with ``last_seen == now``. The model is store-only: it has no
-    ``created_at``/``expires_at``, so it cannot ride the Redis `SessionCache`,
-    and `WebAuthConfig` refuses that pairing at construction.
+    put with ``last_seen == now``. With ``absolute_max_age_seconds`` it also
+    falls once it is older than the cap, however recently it was seen — the
+    store then has to keep ``created_at`` beside ``last_seen``. The model is
+    store-only: it has no ``expires_at``, so it cannot ride the Redis
+    `SessionCache`, and `WebAuthConfig` refuses that pairing at construction.
     """
 
-    def __init__(self, idle_window_seconds: int) -> None:
+    def __init__(
+        self, idle_window_seconds: int, absolute_max_age_seconds: int | None = None,
+    ) -> None:
         self._idle_window_seconds = idle_window_seconds
+        self._absolute_max_age_seconds = absolute_max_age_seconds
 
-    def admits_stored_session(self, record: _IdleWindowRecord, now: datetime) -> bool:
-        return (now - record.last_seen).total_seconds() <= self._idle_window_seconds
+    def admits_stored_session(
+        self, record: _IdleWindowRecord | _CappedIdleWindowRecord, now: datetime,
+    ) -> bool:
+        if (now - record.last_seen).total_seconds() > self._idle_window_seconds:
+            return False
+        return self._within_absolute_cap(record, now)
+
+    def _within_absolute_cap(
+        self, record: _IdleWindowRecord | _CappedIdleWindowRecord, now: datetime,
+    ) -> bool:
+        if self._absolute_max_age_seconds is None:
+            return True
+        return (now - record.created_at).total_seconds() <= self._absolute_max_age_seconds
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
         raise NotImplementedError(
