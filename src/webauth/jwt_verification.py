@@ -326,9 +326,9 @@ def fetch_key_set_over_https(
             finally:
                 response.close()
     except (urllib3.exceptions.HTTPError, OSError) as error:
-        raise KeySetFetchError(
-            f"fetching the key set from {_without_query(url)} failed: {type(error).__name__}"
-        ) from None
+        failure = type(error).__name__
+    # Raised outside the handler so urllib3's error is not even its context.
+    raise KeySetFetchError(f"fetching the key set from {_without_query(url)} failed: {failure}")
 
 
 def _is_https_url(url: str) -> bool:

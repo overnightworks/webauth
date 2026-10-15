@@ -1006,6 +1006,7 @@ def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
         pytest.param("https://operator:{secret}@{authority}/certs", id="credentials"),
         pytest.param("https://{authority}/certs?signature={secret}", id="query-of-a-failed-fetch"),
         pytest.param("https://key set.example/certs?signature={secret}", id="query-of-a-bad-host"),
+        pytest.param("https://127.0.0.1:99999/certs?signature={secret}", id="query-of-a-bad-port"),
     ],
 )
 def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
@@ -1018,4 +1019,12 @@ def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
     with pytest.raises(KeySetFetchError) as refusal:
         fetch_key_set_over_https(url)
 
-    assert _URL_SECRET not in "".join(traceback.format_exception(refusal.value))
+    assert not any(_URL_SECRET in repr(error) for error in _exception_chain(refusal.value))
+
+
+def _exception_chain(error: BaseException | None) -> Iterator[BaseException]:
+    """The error and every error reachable from it, whether or not a
+    traceback would print it."""
+    while error is not None:
+        yield error
+        error = error.__cause__ or error.__context__
