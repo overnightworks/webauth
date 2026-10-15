@@ -485,7 +485,9 @@ and `Accept: application/json`; it hands back any answer but a redirect —
 an issuer's `400 invalid_grant` included — and raises `TokenEndpointError`
 for a redirect, an answer past `MAX_TOKEN_RESPONSE_BYTES`, a TLS failure, a
 timeout or an unreachable origin. Its message is the library's own and never
-quotes the URL, the client secret, the code or the verifier.
+quotes the URL, the client secret, the code or the verifier. urllib3 logs
+nothing during either call, since its records quote the URL and whatever
+malformed header text the origin sends back.
 
 `webauth.oidc_login.admit_identity(identity, *, bound_issuer, accounts, lock,
 audit, config)` turns that identity into the account it signs in as. The host
