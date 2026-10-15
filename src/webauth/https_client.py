@@ -10,6 +10,9 @@ No error this module raises carries any part of the URL, the request or
 urllib3's error, and none chains urllib3's error, since its message may quote
 the whole URL: a URL may hold a secret in its credentials, path or query, and
 a token request carries the client secret, the code and the PKCE verifier.
+For the same reason urllib3 logs nothing during an exchange: its records
+quote the URL, and a malformed answer's header text, which the origin can
+fill with what it was sent.
 
 `fetch_key_set_over_https` is the production `KeySetFetch` of
 `webauth.jwt_verification`; `post_form_over_https` is the transport under the
@@ -20,9 +23,12 @@ Install the `jwt` extra to use this module.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import re
 import urllib.parse
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
 from http import HTTPStatus
@@ -35,6 +41,7 @@ KEY_SET_FETCH_TIMEOUT_SECONDS = 5
 MAX_KEY_SET_BYTES = 64 * 1024
 
 _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
+_exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 
 
 class KeySetFetchError(Exception):
@@ -185,7 +192,7 @@ def _exchange(
     answer the caller refuses by its status alone never waits for its body."""
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:
-        with urllib3.PoolManager(timeout=timeout, retries=False) as pool:
+        with _urllib3_unlogged(), urllib3.PoolManager(timeout=timeout, retries=False) as pool:
             response = pool.request(
                 method,
                 url,
@@ -211,3 +218,28 @@ def _exchange(
         failure = ExchangeFailure.BROKEN_OFF
     # Raised outside the handler so urllib3's error is not even its context.
     raise HttpsExchangeError(failure)
+
+
+@contextlib.contextmanager
+def _urllib3_unlogged() -> Iterator[None]:
+    exchanging = _exchanging.set(True)
+    try:
+        yield
+    finally:
+        _exchanging.reset(exchanging)
+
+
+def _outside_an_exchange(record: logging.LogRecord) -> bool:
+    del record
+    return not _exchanging.get()
+
+
+def _quiet_urllib3_during_exchanges() -> None:
+    # A logger's filter sees only the records logged on that logger, not on
+    # its children, so every urllib3 module logger gets it.
+    for name in list(logging.Logger.manager.loggerDict):
+        if name.partition(".")[0] == "urllib3":
+            logging.getLogger(name).addFilter(_outside_an_exchange)
+
+
+_quiet_urllib3_during_exchanges()

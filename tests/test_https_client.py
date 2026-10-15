@@ -1,7 +1,7 @@
 """The production token POST, driven against a loopback TLS server.
 
 `post_token_request_over_https` is the `TokenRequestPost` a host hands its
-`OidcRelyingParty`; every scenario sends a real form POST through
+`OidcRelyingParty`; its scenarios send a real form POST through
 `webauth.https_client` to the server of `oidc_arrangement`, carrying canary
 secrets in the client secret, the code and the PKCE verifier.
 """
@@ -86,6 +86,24 @@ def test_a_token_answer_comes_back_with_its_status_and_body(
 
     assert (answer.status, answer.body) == (200, SERVED_TOKEN_ANSWER)
     _assert_no_canary_in(repr(answer) + caplog.text)
+
+
+def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_canary_in_a_log_record(
+    token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
+) -> None:
+    post_token_request_over_https(_token_request(f"{token_server.base_url}/token-reflecting"))
+
+    [received] = token_server.received
+    assert _CODE.encode() in received.body
+    _assert_no_canary_in(caplog.text)
+
+
+def test_urllib3_still_logs_for_the_host_outside_an_exchange(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    logging.getLogger("urllib3.connectionpool").warning("the host's own urllib3 record")
+
+    assert "the host's own urllib3 record" in caplog.text
 
 
 def test_an_issuer_refusal_comes_back_as_an_answer_not_an_error(

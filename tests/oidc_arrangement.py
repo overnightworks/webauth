@@ -197,8 +197,10 @@ class ReceivedRequest:
 @dataclass
 class LoopbackHttpsServer:
     """Answers by path, whatever the method: `/token` a token answer,
-    `/token-refused` a 400 `invalid_grant`, `/moved` a 302, `/moved-stalling`
-    a 302 whose body never arrives until released, `/missing` a 404,
+    `/token-refused` a 400 `invalid_grant`, `/token-reflecting` a token
+    answer whose header block carries the request body as a malformed line,
+    `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
+    released, `/missing` a 404,
     `/oversized` a body past every size limit, `/compressed` the key set
     gzipped, `/silent` nothing until released, and any other path the key set.
     """
@@ -257,6 +259,8 @@ def loopback_https_server(
                 self._answer(200, SERVED_TOKEN_ANSWER)
             elif self.path == "/token-refused":
                 self._answer(400, REFUSED_TOKEN_ANSWER)
+            elif self.path == "/token-reflecting":
+                self._answer_reflecting_in_a_malformed_header(body)
             else:
                 self._answer(200, served_key_set())
 
@@ -268,6 +272,14 @@ def loopback_https_server(
             # The client may hang up once it read its limit.
             with contextlib.suppress(OSError):
                 self.wfile.write(body)
+
+        def _answer_reflecting_in_a_malformed_header(self, reflected: bytes) -> None:
+            self.wfile.write(
+                b"HTTP/1.0 200 OK\r\n"
+                + reflected
+                + f"\r\nContent-Length: {len(SERVED_TOKEN_ANSWER)}\r\n\r\n".encode()
+                + SERVED_TOKEN_ANSWER
+            )
 
         def _send_head(self, status: int, headers: dict[str, str]) -> None:
             # The client may already have hung up, refusing the certificate or
