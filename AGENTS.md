@@ -35,7 +35,8 @@ than the owner needs.
   JWT verification and OpenID Connect login are optional too —
   `overnightworks-webauth[jwt]` adds PyJWT, cryptography and urllib3 for
   `webauth.jwt_verification`; no other module imports them, and only
-  `webauth.oidc` imports `webauth.jwt_verification`.
+  `webauth.oidc` imports `webauth.jwt_verification`. Two `protected`
+  import-linter contracts enforce both.
 - The user model, schema, configured role names, transaction boundaries, and
   HTTP routes and responses belong to the host. User administration and
   first-run setup are library helpers in `webauth.users` over host-supplied
@@ -48,7 +49,11 @@ uv sync --extra dev
 uv run pytest tests -q
 uv run ruff check src tests
 uv run lint-imports
+uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 ```
+
+`tests/typing/` holds a static password-only host that CI type-checks with
+that pinned pyright, so a port change that would break such a host fails here.
 
 The suite is fast and needs no service: Redis is faked in-process. Run it
 whole.

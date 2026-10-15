@@ -26,13 +26,15 @@ It owns the machinery an application should not rebuild:
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
 It leaves the application everything that touches the application's own truth:
 the user model, configured roles, setup and login routes, and their
 transaction boundaries. The library persists nothing itself — it holds no schema
 and no ORM, and an import-linter contract keeps it that way. What it needs
 reaches it through the Protocols in `webauth.ports`: `UserStore`,
-`SessionRecordStore`, `LoginAttemptStore`, `AuditSink`, and `PasswordHasher`.
+`SubjectUserStore`, `SessionRecordStore`, `LoginAttemptStore`, `AuditSink`,
+and `PasswordHasher`.
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote.
 
@@ -244,8 +246,11 @@ Every helper taking `actor` first requires `config.admin_role`, except
 `change_own_password`, which lets any authenticated user change their own
 password. The host authenticates the actor and guards the two list methods
 with its admin dependency. A wrong current password raises `WrongPasswordError`;
-the host owns the failed-attempt budget. Refusals derive from
-`UserManagementError`, which the host translates into its own responses.
+the host owns the failed-attempt budget. An account without a password signs
+in only through its identity provider, so `set_password` and
+`change_own_password` refuse it with `PasswordlessAccountError` and write
+nothing. Refusals derive from `UserManagementError`, which the host translates
+into its own responses.
 
 Both password paths delete every account session from the store, then from
 `config.session_cache` when configured, including the current session. The
@@ -446,6 +451,32 @@ injects, authenticated with HTTP Basic, and the ID token is verified by a
 the pending nonce and an authorized party: a token for several audiences must
 name the client as its `azp`, and any `azp` a token names must be the client.
 
+`webauth.oidc_login.admit_identity(identity, *, bound_issuer, accounts, lock,
+audit, config)` turns that identity into the account it signs in as. The host
+binds its store to one issuer — the `issuer` of its `OidcClientConfig` — and
+passes it as `bound_issuer`; changing the issuer is a migration of the host's
+accounts, never a configuration change. `accounts` is a `SubjectUserStore`
+(`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
+which adds an account whose `id` is the subject and which has no password, so
+a back-channel logout names the account directly). Admission holds
+`lock.hold()` and never commits:
+
+- A new subject gets an account with the issuer's `preferred_username` (or the
+  subject when it suggests none) and `config.user_role`, and the audit sink
+  hears `user_created` with `actor_id=None`.
+- A known subject reuses its account unchanged, even when its suggested
+  username changed.
+- Otherwise it answers an `AdmissionRefusal` and writes nothing:
+  `FOREIGN_ISSUER` for an identity from another issuer, `ACCOUNT_DEACTIVATED`,
+  `SUBJECT_HELD_BY_PASSWORD_ACCOUNT` when the subject names an existing
+  password account (linking the two is the host's migration to decide), and
+  `USERNAME_TAKEN` when a new subject's username belongs to another account.
+
+`UserRecord.password_hash` is a read-only `str | None` property, so a
+password-only host whose model types the field `str` keeps satisfying it, and
+password login answers `WRONG_PASSWORD` for an account without one after the
+same single hash verification a wrong password costs.
+
 ## Development
 
 ```bash
@@ -453,6 +484,7 @@ uv sync --extra dev
 uv run pytest tests -q
 uv run ruff check src tests
 uv run lint-imports
+uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 ```
 
 ## Licence

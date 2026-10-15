@@ -15,6 +15,7 @@ from webauth_arrangement import (
     FakeUser,
     LegibleHasher,
     LockNotHeldError,
+    PasswordlessUser,
     UsersWithSetupRace,
     a_cheap_argon2id_hasher,
     a_session_cache,
@@ -42,6 +43,7 @@ from webauth.ports import (
 from webauth.users import (
     LastAdminError,
     NotAnAdminError,
+    PasswordlessAccountError,
     SelfDeactivationError,
     SessionSummary,
     SetupAlreadyDoneError,
@@ -673,7 +675,7 @@ def test_the_session_arrangement_prunes_only_the_subjects_oldest_sessions(
 @pytest.mark.parametrize("error_type", [
     UsernameTakenError, UnknownUserError, NotAnAdminError, UnknownRoleError, LastAdminError,
     SelfDeactivationError, WeakPasswordError, SetupAlreadyDoneError, SetupRacedError,
-    WrongPasswordError, UnknownSessionError,
+    WrongPasswordError, UnknownSessionError, PasswordlessAccountError,
 ])
 def test_hosts_can_catch_every_management_refusal_through_its_common_base(
     error_type: type[UserManagementError],
@@ -773,6 +775,30 @@ def test_REQ_ADMIN_10_refused_own_password_changes_preserve_password_and_every_s
     evidence = str(error.value) + caplog.text
     for secret in (current, new, stored_hash, *(record.id for record in stored_sessions)):
         assert secret not in evidence
+
+
+@pytest.mark.parametrize("proposed", [
+    pytest.param(NEW_PASSWORD, id="a strong password"),
+    pytest.param("password123", id="a weak password"),
+])
+@pytest.mark.parametrize("operation", PASSWORD_OPERATIONS)
+def test_a_passwordless_account_refuses_every_password_change_without_writes(
+    management: UserManagement, actor: AuthenticatedUser, operation: PasswordOperation,
+    proposed: str,
+) -> None:
+    subject = PasswordlessUser(id="subject", username="member", role=management.config.user_role)
+    management = a_user_management(management.users.get("actor"), subject, config=management.config)
+    session = management.sessions.create(
+        "subject", datetime(2030, 1, 1, tzinfo=timezone.utc),
+        ip_address=CLIENT_ADDRESS, user_agent=CLIENT_USER_AGENT,
+    )
+
+    with pytest.raises(PasswordlessAccountError):
+        operation(management, actor, proposed)
+
+    assert management.users.get("subject").password_hash is None
+    assert management.sessions.list_active() == [session]
+    assert management.audit.user_management_events == []
 
 
 @pytest.mark.parametrize("operation", PASSWORD_OPERATIONS)
