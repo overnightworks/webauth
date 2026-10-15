@@ -62,6 +62,7 @@ MIN_RSA_KEY_BITS = 2048
 _ALGORITHM = "RS256"
 _JWS_COMPACT_SEGMENTS = 3
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]*")
+_URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f]")
 # Members through which a token could name, embed or constrain its own key,
 # and `b64`, which would change how PyJWT reads the payload segment.
 _FORBIDDEN_HEADER_MEMBERS = frozenset({"crit", "jwk", "jku", "x5u", "x5c", "b64"})
@@ -193,7 +194,7 @@ class JwtVerifier:
         if not is_https_url(jwks_url):
             raise ValueError(
                 "the key set URL must be an https URL naming a host, a valid port if any,"
-                " and no credentials"
+                " and no control character, space or credentials"
             )
         if isinstance(leeway_seconds, bool) or not isinstance(leeway_seconds, int):
             raise ValueError("the leeway must be a whole number of seconds")
@@ -336,7 +337,7 @@ def fetch_key_set_over_https(
     if not is_https_url(url):
         raise KeySetFetchError(
             "refusing to fetch the key set: not an https URL naming a host,"
-            " a valid port if any, and no credentials"
+            " a valid port if any, and no control character, space or credentials"
         )
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:
@@ -362,7 +363,14 @@ def fetch_key_set_over_https(
 
 
 def is_https_url(url: str) -> bool:
-    """An https URL naming a host, a valid port if any, and no credentials."""
+    """An https URL naming a host, a valid port if any, and no control
+    character, space or credentials.
+
+    A control character or space is refused outright: the URL parser strips
+    some of them before judging, so the parse would pass a URL that is not
+    the one stored and later sent."""
+    if _URL_CONTROL_OR_SPACE.search(url):
+        return False
     try:
         origin = urllib.parse.urlsplit(url)
         _ = origin.port

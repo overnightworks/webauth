@@ -70,9 +70,9 @@ _URL_FIELDS = ("issuer", "authorization_endpoint", "token_endpoint", "jwks_url",
 class OidcClientConfig:
     """One client registered at one issuer.
 
-    Every URL is https, names a host and carries no credentials, query or
-    fragment; `scopes` includes `openid`. `leeway_seconds` is checked by the
-    `JwtVerifier` the relying party builds from it."""
+    Every URL is https, names a host and carries no control character, space,
+    credentials, query or fragment; `scopes` includes `openid`. `leeway_seconds`
+    is checked by the `JwtVerifier` the relying party builds from it."""
 
     issuer: str
     authorization_endpoint: str
@@ -89,7 +89,7 @@ class OidcClientConfig:
             if not _is_endpoint_url(getattr(self, name)):
                 raise ValueError(
                     f"{name} must be an https URL naming a host, a valid port if any,"
-                    " and no credentials, query or fragment"
+                    " and no control character, space, credentials, query or fragment"
                 )
         if not isinstance(self.client_id, str) or not self.client_id:
             raise ValueError("client_id must be a non-empty string")

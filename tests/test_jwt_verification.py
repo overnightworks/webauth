@@ -756,6 +756,11 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
             "https",
             id="key-set-url-with-credentials",
         ),
+        pytest.param(
+            {"jwks_url": "https://login.exa\nmple.org/certs"},
+            "https",
+            id="key-set-url-with-a-control-character",
+        ),
         pytest.param({"leeway_seconds": -1}, "negative", id="negative-leeway"),
         pytest.param({"leeway_seconds": 1.5}, "whole", id="fractional-leeway"),
         pytest.param({"leeway_seconds": True}, "whole", id="boolean-leeway"),
