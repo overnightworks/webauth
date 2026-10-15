@@ -74,13 +74,17 @@ class IdleWindowLiveness:
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _IdleWindowRecord, now: datetime) -> bool:
-        # The cap check runs first so a capped policy rejects a record without
-        # ``created_at`` whether or not it is already idle.
-        if self._absolute_max_age_seconds is not None and not _within_absolute_cap(
-            _created_at_of_capped(record), now, self._absolute_max_age_seconds,
-        ):
-            return False
-        return (now - record.last_seen).total_seconds() <= self._idle_window_seconds
+        # Both host fields are read before any verdict, so a record missing
+        # either one fails the same way whether it is idle, capped, or neither.
+        if self._absolute_max_age_seconds is None:
+            return self._within_idle_window(record.last_seen, now)
+        created_at = _created_at_of_capped(record)
+        return self._within_idle_window(record.last_seen, now) and _within_absolute_cap(
+            created_at, now, self._absolute_max_age_seconds,
+        )
+
+    def _within_idle_window(self, last_seen: datetime, now: datetime) -> bool:
+        return (now - last_seen).total_seconds() <= self._idle_window_seconds
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
         raise NotImplementedError(

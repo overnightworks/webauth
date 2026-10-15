@@ -43,6 +43,11 @@ class _CappedIdleRecord:
     last_seen: datetime
 
 
+@dataclass
+class _RecordWithoutLastSeen:
+    created_at: datetime
+
+
 def _cached(created_at: datetime, *, expires_at: datetime | None = None) -> CachedSessionData:
     return CachedSessionData(
         user_id="user-1",
@@ -186,6 +191,23 @@ def test_a_capped_idle_window_policy_refuses_to_judge_a_record_without_created_a
     record = IdleSessionRecord(id="session-1", user=FakeUser(), last_seen=now - idle_for)
 
     with pytest.raises(TypeError, match="created_at"):
+        RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now)
+
+
+@pytest.mark.parametrize(
+    "age",
+    [
+        pytest.param(timedelta(days=29), id="within the cap"),
+        pytest.param(timedelta(seconds=THIRTY_DAYS_SECONDS + 1), id="past the cap"),
+    ],
+)
+def test_a_capped_idle_window_policy_refuses_to_judge_a_record_without_last_seen(
+    age: timedelta,
+) -> None:
+    now = datetime.now(timezone.utc)
+    record = _RecordWithoutLastSeen(created_at=now - age)
+
+    with pytest.raises(AttributeError, match="last_seen"):
         RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now)
 
 
