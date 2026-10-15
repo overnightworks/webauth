@@ -123,16 +123,29 @@ def test_a_signed_pending_login_verifies_to_the_same_pending_login() -> None:
     assert verify_pending_login(signed, _TEST_SECRET) == _PENDING
 
 
+_MINTED_SECRET = _PENDING.state
+
+
 @pytest.mark.parametrize(
-    "pending",
+    "changes",
     [
-        pytest.param(dataclasses.replace(_PENDING, state="short"), id="state-not-minted"),
-        pytest.param(dataclasses.replace(_PENDING, nonce=""), id="nonce-empty"),
-        pytest.param(dataclasses.replace(_PENDING, issued_at=-1), id="issued-before-the-epoch"),
+        pytest.param({"state": "short"}, id="state-not-minted"),
+        pytest.param({"state": _MINTED_SECRET + "A"}, id="state-overlong"),
+        pytest.param({"state": "+" + _MINTED_SECRET[1:]}, id="state-outside-base64url"),
+        pytest.param({"nonce": ""}, id="nonce-empty"),
+        pytest.param({"nonce": _MINTED_SECRET + "A"}, id="nonce-overlong"),
+        pytest.param({"nonce": "=" + _MINTED_SECRET[1:]}, id="nonce-outside-base64url"),
+        pytest.param({"code_verifier": _MINTED_SECRET[1:]}, id="verifier-short"),
+        pytest.param({"code_verifier": _MINTED_SECRET + "A"}, id="verifier-overlong"),
+        pytest.param({"code_verifier": "/" + _MINTED_SECRET[1:]}, id="verifier-outside-base64url"),
+        pytest.param({"issued_at": -1}, id="issued-before-the-epoch"),
+        pytest.param({"issued_at": 10**12}, id="issued-at-beyond-twelve-digits"),
     ],
 )
 def test_a_pending_login_oidc_cannot_have_begun_is_refused_a_cookie(
-    pending: PendingLogin,
+    changes: dict[str, object],
 ) -> None:
+    pending = dataclasses.replace(_PENDING, **changes)
+
     with pytest.raises(ValueError, match="does not fit"):
         sign_pending_login(pending, _TEST_SECRET)
