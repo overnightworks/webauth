@@ -375,13 +375,9 @@ def _s256_code_challenge(code_verifier: str) -> str:
 
 
 def _is_same_secret(received: object, expected: str) -> bool:
-    if not expected or not isinstance(received, str):
+    if not expected or not isinstance(received, str) or not _is_utf8(received):
         return False
-    try:
-        received_bytes = received.encode()
-    except UnicodeEncodeError:
-        return False
-    return hmac.compare_digest(received_bytes, expected.encode())
+    return hmac.compare_digest(received.encode(), expected.encode())
 
 
 def _callback_parameters(callback_query: str) -> Mapping[str, str]:

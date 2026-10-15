@@ -514,9 +514,10 @@ a password login, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
 the host commits on an account and opens the session itself. `finish_login`
 sets the header that clears the pending-login cookie on `response`, so the
 host answers with that response on every outcome, refusals included: FastAPI
-copies an injected `response`'s headers only when the route returns a value,
-and a raised `HTTPException` gets a new response without them, which would
-leave the pending cookie in the browser.
+copies an injected `response`'s headers only when the route returns a value
+that is not itself a `Response`; a returned `JSONResponse` is sent as-is and a
+raised `HTTPException` gets a new response, so neither carries them, which
+would leave the pending cookie in the browser.
 
 The pending login travels in a cookie of its own, one per login, so two tabs
 never overwrite each other:
@@ -546,12 +547,14 @@ never overwrite each other:
 that state names and clears it on every outcome — admitted or refused —
 while every other tab's cookie stays. The state is read on its own, so a
 callback naming one state beside a malformed rest — another parameter named
-twice, or one that does not decode — still clears that state's cookie and is
-refused as `MALFORMED_CALLBACK`. A callback with no state, an empty one, its
+twice, or one that does not decode — still clears that state's cookie; it is
+refused as `MALFORMED_CALLBACK` when that state's cookie is genuine and as
+`STATE_MISMATCH` otherwise. A callback with no state, an empty one, its
 state twice or an undecodable one selects no cookie. Every one of these, and
 a missing, forged, oversized, unknown-version or duplicated cookie, or a
 genuine cookie of another login, is refused before any token request:
-`STATE_MISMATCH`, or `MALFORMED_CALLBACK` for a malformed query.
+`MALFORMED_CALLBACK` for a malformed query that names a single state whose
+cookie is genuine, otherwise `STATE_MISMATCH`.
 
 **Single use, stated honestly.** A pending login is single-use because its
 cookie is cleared on every outcome and the issuer accepts its authorization
