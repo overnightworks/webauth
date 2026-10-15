@@ -33,7 +33,7 @@ jobs:
         run: uv run lint-imports
 
       - name: A password-only host still type-checks
-        run: uvx pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
+        run: uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 
       - name: Tests
         run: uv run pytest tests -q

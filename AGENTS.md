@@ -49,7 +49,7 @@ uv sync --extra dev
 uv run pytest tests -q
 uv run ruff check src tests
 uv run lint-imports
-uvx pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
+uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 ```
 
 `tests/typing/` holds a static password-only host that CI type-checks with
