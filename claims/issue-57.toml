@@ -1,0 +1,8 @@
+claim_id = "12d6630473cc4703bb0f1e74321077dd"
+agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
+role = "builder"
+base = "3e96eb52117559aa3d56a5df5e3c1e6cca9691c9"
+branch = "claude/issue-57-w2-oidc-client"
+scope = ["AGENTS.md", "README.md", "src/webauth/jwt_verification.py", "src/webauth/oidc.py", "tests/oidc_arrangement.py", "tests/test_jwt_verification.py", "tests/test_oidc.py"]
+opened_commit = "cd4080ae59a60ad43ccec5ece21f645bd0bccb85"
+whole_reason = "The OIDC client, its shared test builders and the one https predicate owner land together."
