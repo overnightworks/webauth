@@ -73,7 +73,7 @@ def issue_session_cookies(
     because behind an unlisted TLS proxy every request looks like plain http.
     """
     secure = config.cookie_secure
-    max_age = config.session_max_age_seconds
+    max_age = config.cookie_max_age_seconds
     samesite = config.cookie_samesite
     response.set_cookie(
         config.session_cookie_name,

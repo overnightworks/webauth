@@ -41,7 +41,9 @@ class ExpiryColumnLiveness:
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
         if record.expires_at.replace(tzinfo=timezone.utc) < now:
             return False
-        return self._within_absolute_cap(record.created_at.replace(tzinfo=timezone.utc), now)
+        return _within_absolute_cap(
+            record.created_at.replace(tzinfo=timezone.utc), now, self._absolute_max_age_seconds,
+        )
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
         # The cache's own TTL owns idle expiry, and a cached ``expires_at`` can
@@ -50,29 +52,61 @@ class ExpiryColumnLiveness:
         created_at = cached.created_at
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
-        return self._within_absolute_cap(created_at, now)
-
-    def _within_absolute_cap(self, created_at: datetime, now: datetime) -> bool:
-        return (now - created_at).total_seconds() <= self._absolute_max_age_seconds
+        return _within_absolute_cap(created_at, now, self._absolute_max_age_seconds)
 
 
 class IdleWindowLiveness:
-    """Agent-presentator's model: a stored row that keeps only ``last_seen``.
+    """Agent-presentator's model: a stored row that keeps ``last_seen``.
 
     A session stands while it was seen within the idle window; a ``touch`` is a
-    put with ``last_seen == now``. The model is store-only: it has no
-    ``created_at``/``expires_at``, so it cannot ride the Redis `SessionCache`,
-    and `WebAuthConfig` refuses that pairing at construction.
+    put with ``last_seen == now``. With ``absolute_max_age_seconds`` it also
+    falls once it is older than the cap, however recently it was seen — the
+    store then has to keep ``created_at`` beside ``last_seen``, and a record
+    without it raises `TypeError` instead of receiving a verdict. The model is
+    store-only: it has no ``expires_at``, so it cannot ride the Redis
+    `SessionCache`, and `WebAuthConfig` refuses that pairing at construction.
     """
 
-    def __init__(self, idle_window_seconds: int) -> None:
+    def __init__(
+        self, idle_window_seconds: int, absolute_max_age_seconds: int | None = None,
+    ) -> None:
         self._idle_window_seconds = idle_window_seconds
+        self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _IdleWindowRecord, now: datetime) -> bool:
-        return (now - record.last_seen).total_seconds() <= self._idle_window_seconds
+        # Both host fields are read before any verdict, so a record missing
+        # either one fails the same way whether it is idle, capped, or neither.
+        if self._absolute_max_age_seconds is None:
+            return self._within_idle_window(record.last_seen, now)
+        created_at = _created_at_of_capped(record)
+        return self._within_idle_window(record.last_seen, now) and _within_absolute_cap(
+            created_at, now, self._absolute_max_age_seconds,
+        )
+
+    def _within_idle_window(self, last_seen: datetime, now: datetime) -> bool:
+        return (now - last_seen).total_seconds() <= self._idle_window_seconds
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
         raise NotImplementedError(
             "the idle-window model does not use the Redis session cache; a host "
             "that wants a cache uses expiry-column liveness",
         )
+
+
+def _created_at_of_capped(record: _IdleWindowRecord) -> datetime:
+    # The host's store record crosses into the library here. A capped policy
+    # over a store that keeps no ``created_at`` is a host misconfiguration, so
+    # it is named as such rather than surfacing as an AttributeError.
+    created_at = getattr(record, "created_at", None)
+    if created_at is None:
+        raise TypeError(
+            "an IdleWindowLiveness with absolute_max_age_seconds needs a stored "
+            "session record that carries created_at",
+        )
+    return created_at
+
+
+def _within_absolute_cap(
+    created_at: datetime, now: datetime, absolute_max_age_seconds: int,
+) -> bool:
+    return (now - created_at).total_seconds() <= absolute_max_age_seconds

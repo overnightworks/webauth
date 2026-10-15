@@ -45,6 +45,7 @@ The host builds one `WebAuthConfig` and installs it. Fields a host may name:
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
 | `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
 | `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
+| `cookie_max_age_seconds` | `session_max_age_seconds`, re-derived when `dataclasses.replace` changes it | seconds; the browser cookie's `Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime) |
 | `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
@@ -328,22 +329,53 @@ there is no sync loop. Either way `WebAuthConfig.session_liveness` — a
 `webauth.dependencies` alone reads the wall clock and passes the instant in.
 `webauth.liveness` ships two: `ExpiryColumnLiveness`, for a store with
 `created_at`/`expires_at` columns, and `IdleWindowLiveness`, for one that keeps
-only `last_seen`. On the cache path a policy never trusts the cached
-`expires_at`, which can lag the real TTL after a refresh — Redis TTL owns idle
-there, and only a policy's own caps remain. There is no app-state install: the
-config carries the cache, so any code that holds the config — not only a
-request handler — can reach it.
+`last_seen` (and `created_at` when it is given an absolute cap). On the cache
+path a policy never trusts the cached `expires_at`, which can lag the real TTL
+after a refresh — Redis TTL owns idle there, and only a policy's own caps
+remain. There is no app-state install: the config carries the cache, so any
+code that holds the config — not only a request handler — can reach it.
 
 The Redis `SessionCache` is an expiry-column feature: a cached session carries
 `created_at`/`expires_at`, so it pairs only with `ExpiryColumnLiveness`. The
-idle-window model is store-only — it keeps just `last_seen` and reads every
-request from its store — so `WebAuthConfig` refuses a `session_cache` alongside
-`IdleWindowLiveness` at construction rather than failing per request.
+idle-window model is store-only — it keeps `last_seen` (and `created_at` when
+it is given an absolute cap) and reads every request from its store — so
+`WebAuthConfig` refuses a `session_cache` alongside `IdleWindowLiveness` at
+construction rather than failing per request.
 
 `webauth.session_store.RedisSessionCache` is the one implementation shipped
 here; it needs the client library, so a host that uses it installs
 `webauth[redis]`. A host that supplies its own cache implements the same
 protocol.
+
+## Session lifetime
+
+Three numbers decide how long someone stays signed in, and each has one owner:
+
+- `WebAuthConfig.cookie_max_age_seconds` is the browser cookie's `Max-Age`. The
+  cookie is issued once at login and never reissued, so it bounds the whole
+  sign-in. It defaults to `session_max_age_seconds`.
+- The idle window — `session_max_age_seconds` for the cache TTL, the idle
+  argument of `IdleWindowLiveness`, or the host's `expires_at` refresh for
+  `ExpiryColumnLiveness` — refuses a session left unused for longer.
+- The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
+  `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
+  older than the cap, however recently it was used.
+
+The recommended policy is a 30-day cookie, a 7-day idle window and a 30-day
+absolute cap: someone who comes back at least weekly stays signed in for up to
+30 days, and anyone away for more than 7 days signs in again.
+
+```python
+SEVEN_DAYS = 7 * 24 * 3600
+THIRTY_DAYS = 30 * 24 * 3600
+
+WebAuthConfig(
+    ...,
+    session_max_age_seconds=SEVEN_DAYS,
+    cookie_max_age_seconds=THIRTY_DAYS,
+    session_liveness=IdleWindowLiveness(SEVEN_DAYS, absolute_max_age_seconds=THIRTY_DAYS),
+)
+```
 
 ## Ending a session
 
