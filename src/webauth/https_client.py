@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 import urllib.parse
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from http import HTTPStatus
@@ -92,7 +92,11 @@ def fetch_key_set_over_https(
         )
     try:
         answer = _exchange(
-            "GET", url, timeout_seconds=timeout_seconds, max_body_bytes=MAX_KEY_SET_BYTES
+            "GET",
+            url,
+            reads_body=lambda status: status == HTTPStatus.OK,
+            timeout_seconds=timeout_seconds,
+            max_body_bytes=MAX_KEY_SET_BYTES,
         )
     except HttpsExchangeError:
         failed = KeySetFetchError(
@@ -127,6 +131,7 @@ def post_form_over_https(
     answer = _exchange(
         "POST",
         url,
+        reads_body=lambda status: not _is_redirect(status),
         timeout_seconds=timeout_seconds,
         max_body_bytes=max_body_bytes,
         headers={
@@ -136,7 +141,7 @@ def post_form_over_https(
         },
         body=urllib.parse.urlencode(form),
     )
-    if HTTPStatus.MULTIPLE_CHOICES <= answer.status < HTTPStatus.BAD_REQUEST:
+    if _is_redirect(answer.status):
         raise HttpsExchangeError(ExchangeFailure.REDIRECTED)
     if len(answer.body) > max_body_bytes:
         raise HttpsExchangeError(ExchangeFailure.TOO_LARGE)
@@ -160,17 +165,24 @@ def is_https_url(url: object) -> TypeGuard[str]:
     return origin.scheme == "https" and bool(origin.hostname) and "@" not in origin.netloc
 
 
+def _is_redirect(status: int) -> bool:
+    return HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST
+
+
 def _exchange(
     method: str,
     url: str,
     *,
+    reads_body: Callable[[int], bool],
     timeout_seconds: float,
     max_body_bytes: int,
     headers: Mapping[str, str] | None = None,
     body: str | None = None,
 ) -> HttpsAnswer:
-    """One request under the bounded posture, reading at most one byte past
-    `max_body_bytes` of the answer, whatever its status."""
+    """One request under the bounded posture. The answer's body is read, at
+    most one byte past `max_body_bytes` of it, only for a status the caller
+    `reads_body` for; any other status comes back with an empty body, so an
+    answer the caller refuses by its status alone never waits for its body."""
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     try:
         with urllib3.PoolManager(timeout=timeout, retries=False) as pool:
@@ -184,7 +196,8 @@ def _exchange(
                 decode_content=False,
             )
             try:
-                return HttpsAnswer(response.status, response.read(max_body_bytes + 1))
+                answered = response.read(max_body_bytes + 1) if reads_body(response.status) else b""
+                return HttpsAnswer(response.status, answered)
             finally:
                 response.close()
     except urllib3.exceptions.SSLError:

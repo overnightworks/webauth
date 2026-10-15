@@ -197,7 +197,8 @@ class ReceivedRequest:
 @dataclass
 class LoopbackHttpsServer:
     """Answers by path, whatever the method: `/token` a token answer,
-    `/token-refused` a 400 `invalid_grant`, `/moved` a 302, `/missing` a 404,
+    `/token-refused` a 400 `invalid_grant`, `/moved` a 302, `/moved-stalling`
+    a 302 whose body never arrives until released, `/missing` a 404,
     `/oversized` a body past every size limit, `/compressed` the key set
     gzipped, `/silent` nothing until released, and any other path the key set.
     """
@@ -243,6 +244,9 @@ def loopback_https_server(
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
             elif self.path == "/moved":
                 self._send_head(302, {"Location": "/certs", "Content-Length": "0"})
+            elif self.path == "/moved-stalling":
+                self._send_head(302, {"Location": "/certs", "Content-Length": "1"})
+                release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
             elif self.path == "/missing":
                 self._send_head(404, {"Content-Length": "0"})
             elif self.path == "/oversized":

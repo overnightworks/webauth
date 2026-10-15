@@ -30,6 +30,7 @@ from pydantic import SecretStr
 
 import webauth.https_client
 import webauth.jwt_verification
+from webauth.https_client import KeySetFetchError, fetch_key_set_over_https
 from webauth.oidc import TokenEndpointError, TokenRequest
 from webauth.oidc_login import post_token_request_over_https
 
@@ -187,6 +188,34 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
     _assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
     assert refused.value.__cause__ is None
     assert refused.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("exchange", "error", "refusal"),
+    [
+        pytest.param(
+            lambda url: fetch_key_set_over_https(url, timeout_seconds=0.2),
+            KeySetFetchError,
+            "^the key set origin answered 302, not 200$",
+            id="key-set-fetch",
+        ),
+        pytest.param(
+            lambda url: post_token_request_over_https(_token_request(url), timeout_seconds=0.2),
+            TokenEndpointError,
+            "^the token request failed: the origin answered with a redirect,"
+            " which is never followed$",
+            id="token-post",
+        ),
+    ],
+)
+def test_an_answer_whose_body_is_never_read_is_judged_by_its_status_alone(
+    token_server: LoopbackHttpsServer,
+    exchange: Callable[[str], object],
+    error: type[Exception],
+    refusal: str,
+) -> None:
+    with pytest.raises(error, match=refusal):
+        exchange(f"{token_server.base_url}/moved-stalling")
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
