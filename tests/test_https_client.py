@@ -23,6 +23,7 @@ from types import MappingProxyType, SimpleNamespace
 import pytest
 import urllib3
 from oidc_arrangement import (
+    DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
@@ -496,16 +497,21 @@ def test_a_token_request_that_timed_out_names_the_timeout_as_its_failure(
 
 
 def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
-    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
+    token_server: LoopbackHttpsServer,
 ) -> None:
+    # The drip keeps every single step inside timeout_seconds, so only the
+    # supplied total deadline can end the exchange.
+    started = time.monotonic()
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(
-            _token_request(_stalled(token_server, monkeypatch)),
-            timeout_seconds=0.2,
-            deadline_seconds=0.4,
+            _token_request(f"{token_server.base_url}/dripping-body"),
+            timeout_seconds=DRIP_INTERVAL_SECONDS * 2.5,
+            deadline_seconds=_TEST_DEADLINE_SECONDS,
         )
+    held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
+    assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
 
 
 def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> None:
