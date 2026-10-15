@@ -144,6 +144,7 @@ class FakeKeySetEndpoint:
 _ISSUER = "https://login.example.org/realms/workshop"
 _AUDIENCE = "songmaker"
 _JWKS_URL = f"{_ISSUER}/protocol/openid-connect/certs"
+_URL_SECRET = "s3cr3t-in-the-url"
 _LEEWAY_SECONDS = 30
 
 
@@ -652,17 +653,36 @@ def test_a_failed_refresh_keeps_the_last_valid_key_set_until_its_ttl(
     assert len(issuer.endpoint.fetched_urls) == 3
 
 
-def test_a_failed_refresh_is_logged_with_its_key_set_url_and_cause(
-    issuer: IssuerScenario, caplog: pytest.LogCaptureFixture
+_SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signature={_URL_SECRET}"
+
+
+@pytest.mark.parametrize(
+    ("response", "logged_cause"),
+    [
+        pytest.param(
+            KeySetFetchError(f"GET {_SECRET_BEARING_JWKS_URL} answered 503"),
+            "could not be fetched",
+            id="failed-fetch-quoting-its-url",
+        ),
+        pytest.param(b"[]", "not strict JSON", id="invalid-key-set"),
+    ],
+)
+def test_a_failed_refresh_is_logged_with_its_issuer_and_cause_but_never_its_key_set_url(
+    issuer: IssuerScenario,
+    caplog: pytest.LogCaptureFixture,
+    response: bytes | Exception,
+    logged_cause: str,
 ) -> None:
-    issuer.serve(KeySetFetchError("the key set origin answered 503, not 200"))
+    verifier = issuer.verifier_with(jwks_url=_SECRET_BEARING_JWKS_URL)
+    issuer.serve(response)
 
     with caplog.at_level(logging.WARNING, logger="webauth.jwt_verification"):
-        issuer.verifier.verify(issuer.token())
+        verifier.verify(issuer.token())
 
     [warning] = caplog.records
-    assert _JWKS_URL in warning.getMessage()
-    assert "answered 503" in warning.getMessage()
+    assert _ISSUER in warning.getMessage()
+    assert logged_cause in warning.getMessage()
+    assert _URL_SECRET not in warning.getMessage()
 
 
 def test_the_key_set_is_cached_on_the_monotonic_clock_until_its_ttl(
@@ -988,9 +1008,6 @@ def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: str) -> None:
         fetch_key_set_over_https(url)
 
 
-_URL_SECRET = "s3cr3t-in-the-url"
-
-
 def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
     issuer: IssuerScenario,
 ) -> None:
@@ -1004,6 +1021,7 @@ def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
     "url_template",
     [
         pytest.param("https://operator:{secret}@{authority}/certs", id="credentials"),
+        pytest.param("https://{authority}/certs/{secret}", id="path-of-a-failed-fetch"),
         pytest.param("https://{authority}/certs?signature={secret}", id="query-of-a-failed-fetch"),
         pytest.param("https://key set.example/certs?signature={secret}", id="query-of-a-bad-host"),
         pytest.param("https://127.0.0.1:99999/certs?signature={secret}", id="query-of-a-bad-port"),

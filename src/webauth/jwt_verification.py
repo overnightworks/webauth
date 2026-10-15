@@ -277,14 +277,16 @@ class JwtVerifier:
             self._last_refresh_at = now
             try:
                 keys = _parse_key_set(self._fetch_key_set(self._jwks_url))
-            except (KeySetFetchError, _InvalidKeySetError) as error:
-                log.warning(
-                    "Refreshing the key set from %s failed, keeping the cached one: %s",
-                    _without_query(self._jwks_url),
-                    error,
-                )
+            # The injected fetch's message is not this module's to vouch for:
+            # it may quote the key-set URL, and that URL may hold a secret.
+            except KeySetFetchError:
+                failure = "the key set could not be fetched"
+            except _InvalidKeySetError as refusal:
+                failure = str(refusal)
+            else:
+                self._key_set = _KeySet(keys=keys, fetched_at=now)
                 return
-            self._key_set = _KeySet(keys=keys, fetched_at=now)
+            log.warning("Refreshing the key set for issuer %s failed: %s", self._issuer, failure)
         finally:
             self._refresh_lock.release()
 
@@ -304,9 +306,9 @@ def fetch_key_set_over_https(
     Every failure fails closed, and every other request is refused at once
     rather than waiting for this refresh.
 
-    No error carries the URL's credentials or query, and none chains urllib3's
-    error, whose message may quote the whole URL: a key-set URL may hold a
-    secret."""
+    No error carries any part of the URL, and none chains urllib3's error,
+    whose message may quote the whole URL: a key-set URL may hold a secret in
+    its credentials, path or query."""
     if not _is_https_url(url):
         raise KeySetFetchError(
             "refusing to fetch the key set: not an https URL naming a host and no credentials"
@@ -328,7 +330,7 @@ def fetch_key_set_over_https(
     except (urllib3.exceptions.HTTPError, OSError) as error:
         failure = type(error).__name__
     # Raised outside the handler so urllib3's error is not even its context.
-    raise KeySetFetchError(f"fetching the key set from {_without_query(url)} failed: {failure}")
+    raise KeySetFetchError(f"fetching the key set failed: {failure}")
 
 
 def _is_https_url(url: str) -> bool:
@@ -338,11 +340,6 @@ def _is_https_url(url: str) -> bool:
     except ValueError:
         return False
     return origin.scheme == "https" and bool(origin.hostname) and "@" not in origin.netloc
-
-
-def _without_query(url: str) -> str:
-    origin = urllib.parse.urlsplit(url)
-    return urllib.parse.urlunsplit((origin.scheme, origin.netloc, origin.path, "", ""))
 
 
 def _library_checks() -> Options:
