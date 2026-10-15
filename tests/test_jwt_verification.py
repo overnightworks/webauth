@@ -662,13 +662,26 @@ _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signa
     [
         pytest.param(
             KeySetFetchError(f"GET {_SECRET_BEARING_JWKS_URL} answered 503"),
-            "could not be fetched",
+            "fetch-failed",
             id="failed-fetch-quoting-its-url",
         ),
-        pytest.param(b"[]", "not strict JSON", id="invalid-key-set"),
+        pytest.param(b"[]", "not-strict-json", id="invalid-key-set"),
+        pytest.param(
+            _key_set_document(
+                _public_jwk(_rsa_key("current"), _URL_SECRET),
+                _public_jwk(_rsa_key("other"), _URL_SECRET),
+            ),
+            "duplicate-key-id",
+            id="key-set-repeating-a-kid",
+        ),
+        pytest.param(
+            _key_set_document(_public_jwk(_rsa_key("weak", 1024), _URL_SECRET)),
+            "key-too-short",
+            id="key-set-with-a-weak-key",
+        ),
     ],
 )
-def test_a_failed_refresh_is_logged_with_its_issuer_and_cause_but_never_its_key_set_url(
+def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
     issuer: IssuerScenario,
     caplog: pytest.LogCaptureFixture,
     response: bytes | Exception,
@@ -681,8 +694,8 @@ def test_a_failed_refresh_is_logged_with_its_issuer_and_cause_but_never_its_key_
         verifier.verify(issuer.token())
 
     [warning] = caplog.records
-    assert _ISSUER in warning.getMessage()
     assert logged_cause in warning.getMessage()
+    assert _ISSUER not in warning.getMessage()
     assert _URL_SECRET not in warning.getMessage()
 
 

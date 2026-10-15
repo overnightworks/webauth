@@ -125,8 +125,29 @@ class _RefusalError(Exception):
         self.reason = reason
 
 
+class _RefreshFailure(StrEnum):
+    """Why a key-set refresh failed, in codes this module owns: the issuer,
+    the URL and the remote key IDs stay out of the log."""
+
+    FETCH_FAILED = "fetch-failed"
+    TOO_LARGE = "too-large"
+    NOT_STRICT_JSON = "not-strict-json"
+    KEY_COUNT_OUT_OF_RANGE = "key-count-out-of-range"
+    KEY_NOT_AN_OBJECT = "key-not-an-object"
+    SECRET_KEY_PUBLISHED = "secret-key-published"
+    DUPLICATE_KEY_ID = "duplicate-key-id"
+    NO_RS256_SIGNING_KEY = "no-rs256-signing-key"
+    MALFORMED_KEY = "malformed-key"
+    INVALID_RSA_KEY = "invalid-rsa-key"
+    KEY_TOO_SHORT = "key-too-short"
+
+
 class _InvalidKeySetError(Exception):
     """A fetched key set that must not replace the cached one."""
+
+    def __init__(self, failure: _RefreshFailure) -> None:
+        super().__init__(failure)
+        self.failure = failure
 
 
 @dataclass(frozen=True)
@@ -281,13 +302,13 @@ class JwtVerifier:
             # The injected fetch's message is not this module's to vouch for:
             # it may quote the key-set URL, and that URL may hold a secret.
             except KeySetFetchError:
-                failure = "the key set could not be fetched"
+                failure = _RefreshFailure.FETCH_FAILED
             except _InvalidKeySetError as refusal:
-                failure = str(refusal)
+                failure = refusal.failure
             else:
                 self._key_set = _KeySet(keys=keys, fetched_at=now)
                 return
-            log.warning("Refreshing the key set for issuer %s failed: %s", self._issuer, failure)
+            log.warning("Refreshing the key set failed: %s", failure)
         finally:
             self._refresh_lock.release()
 
@@ -494,28 +515,28 @@ def _finite_number(literal: str) -> float:
 
 def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
     if len(document) > MAX_KEY_SET_BYTES:
-        raise _InvalidKeySetError("key set response is too large")
+        raise _InvalidKeySetError(_RefreshFailure.TOO_LARGE)
     try:
         parsed = _strict_json_object(document)
-    except _RefusalError as refusal:
-        raise _InvalidKeySetError(f"key set is not strict JSON: {refusal.reason}") from None
+    except _RefusalError:
+        raise _InvalidKeySetError(_RefreshFailure.NOT_STRICT_JSON) from None
     jwks = parsed.get("keys")
     if not isinstance(jwks, list) or not 0 < len(jwks) <= MAX_KEY_SET_KEYS:
-        raise _InvalidKeySetError("key set must hold between one and the maximum of keys")
+        raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
     keys: dict[str, RSAPublicKey] = {}
     for jwk in jwks:
         if not isinstance(jwk, dict):
-            raise _InvalidKeySetError("key is not an object")
+            raise _InvalidKeySetError(_RefreshFailure.KEY_NOT_AN_OBJECT)
         if _SECRET_KEY_MEMBERS & jwk.keys():
-            raise _InvalidKeySetError("key set publishes a private or symmetric key")
+            raise _InvalidKeySetError(_RefreshFailure.SECRET_KEY_PUBLISHED)
         if not _is_rs256_verification_key(jwk):
             continue
         key_id, key = _public_signing_key(jwk)
         if key_id in keys:
-            raise _InvalidKeySetError(f"key set repeats kid {key_id!r}")
+            raise _InvalidKeySetError(_RefreshFailure.DUPLICATE_KEY_ID)
         keys[key_id] = key
     if not keys:
-        raise _InvalidKeySetError("key set holds no RS256 signing key")
+        raise _InvalidKeySetError(_RefreshFailure.NO_RS256_SIGNING_KEY)
     return MappingProxyType(keys)
 
 
@@ -536,15 +557,15 @@ def _public_signing_key(jwk: Mapping[str, object]) -> tuple[str, RSAPublicKey]:
     key_id = jwk.get("kid")
     modulus, exponent = jwk.get("n"), jwk.get("e")
     if not _is_key_id(key_id) or not isinstance(modulus, str) or not isinstance(exponent, str):
-        raise _InvalidKeySetError("key lacks a valid kid, n or e")
+        raise _InvalidKeySetError(_RefreshFailure.MALFORMED_KEY)
     try:
         key = RSAPublicNumbers(
             e=_base64url_unsigned(exponent), n=_base64url_unsigned(modulus)
         ).public_key()
     except ValueError as error:
-        raise _InvalidKeySetError(f"key {key_id!r} is not a valid RSA key") from error
+        raise _InvalidKeySetError(_RefreshFailure.INVALID_RSA_KEY) from error
     if key.key_size < MIN_RSA_KEY_BITS:
-        raise _InvalidKeySetError(f"key {key_id!r} is shorter than {MIN_RSA_KEY_BITS} bits")
+        raise _InvalidKeySetError(_RefreshFailure.KEY_TOO_SHORT)
     return key_id, key
 
 
