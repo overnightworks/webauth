@@ -728,6 +728,9 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
     ("changes", "refused"),
     [
         pytest.param({"issuer": ""}, "issuer", id="empty-issuer"),
+        pytest.param(
+            {"issuer": [_ISSUER, "https://other.example.org"]}, "issuer", id="issuer-list"
+        ),
         pytest.param({"audiences": []}, "audiences", id="no-audience"),
         pytest.param({"audiences": [""]}, "audiences", id="empty-audience"),
         pytest.param({"audiences": "songmaker"}, "audiences", id="audience-as-one-string"),

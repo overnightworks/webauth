@@ -156,8 +156,8 @@ class JwtVerifier:
         wall_clock: WallClock,
         monotonic_clock: MonotonicClock,
     ) -> None:
-        if not issuer:
-            raise ValueError("the issuer must not be empty")
+        if not isinstance(issuer, str) or not issuer:
+            raise ValueError("the issuer must be one non-empty string")
         if (
             isinstance(audiences, str)
             or not audiences
