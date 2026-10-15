@@ -266,9 +266,7 @@ def post_token_request_over_https(
     raises ``ValueError`` rather than being silently capped, as does a
     ``deadline_seconds`` of zero or less. ``TokenEndpointError.failure`` names
     why the request failed."""
-    if deadline_seconds <= 0:
-        raise ValueError(f"deadline_seconds must be positive, not {deadline_seconds}")
-    if timeout_seconds > deadline_seconds:
+    if timeout_seconds > deadline_seconds > 0:
         raise ValueError(
             f"timeout_seconds ({timeout_seconds}) must not exceed"
             f" deadline_seconds ({deadline_seconds})"
