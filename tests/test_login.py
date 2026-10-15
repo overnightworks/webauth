@@ -9,7 +9,12 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
 from httpx import Response as ClientResponse
-from webauth_arrangement import a_cheap_argon2id_hasher, a_web_auth_config
+from webauth_arrangement import (
+    SEVEN_DAYS_SECONDS,
+    THIRTY_DAYS_SECONDS,
+    a_cheap_argon2id_hasher,
+    a_web_auth_config,
+)
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import verify_csrf_token, verify_session_cookie
@@ -170,6 +175,18 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
     assert "SameSite=strict" in header
     assert f"Max-Age={cookie_app.config.session_max_age_seconds}" in header
     assert "Path=/" in header
+
+
+def test_a_cookie_lifetime_longer_than_the_idle_window_is_what_the_browser_keeps() -> None:
+    """A 30-day cookie over a 7-day idle window: the cookie is issued once, so it
+    must outlive the window for a session used every few days to stay signed in."""
+    app = a_cookie_app(
+        session_max_age_seconds=SEVEN_DAYS_SECONDS, cookie_max_age_seconds=THIRTY_DAYS_SECONDS,
+    )
+    response = app.issue()
+
+    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
+        assert f"Max-Age={THIRTY_DAYS_SECONDS};" in app.set_cookie_header(response, name)
 
 
 def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> None:
