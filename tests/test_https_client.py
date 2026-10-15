@@ -19,6 +19,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+import urllib3
 from oidc_arrangement import (
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
@@ -80,6 +81,10 @@ def _assert_no_canary_in(text: str) -> None:
     assert not [canary for canary in _CANARIES if canary in text]
 
 
+def _urllib3_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.name.partition(".")[0] == "urllib3"]
+
+
 def test_a_token_answer_comes_back_with_its_status_and_body(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -99,6 +104,35 @@ def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_canary_in_a_l
     [received] = token_server.received
     assert _CODE.encode() in received.body
     _assert_no_canary_in(caplog.text)
+
+
+# Modules `import urllib3` does not load, so their loggers come into being
+# only after webauth.https_client is imported.
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "urllib3.contrib.pyopenssl",
+        "urllib3.http2.connection",
+        "urllib3.contrib.emscripten.response",
+    ],
+)
+def test_a_urllib3_module_loaded_later_logs_nothing_during_an_exchange(
+    module_name: str,
+    token_server: LoopbackHttpsServer,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    send = urllib3.PoolManager.request
+
+    def send_logging_the_url(pool: urllib3.PoolManager, method: str, url: str, **kwargs: object):
+        logging.getLogger(module_name).warning("sending to %s", url)
+        return send(pool, method, url, **kwargs)
+
+    monkeypatch.setattr(urllib3.PoolManager, "request", send_logging_the_url)
+
+    post_token_request_over_https(_token_request(f"{token_server.base_url}/token?{_URL_QUERY}"))
+
+    assert _urllib3_records(caplog) == []
 
 
 def test_urllib3_still_logs_for_the_host_outside_an_exchange(

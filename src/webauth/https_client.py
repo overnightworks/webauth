@@ -32,6 +32,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
 from http import HTTPStatus
+from pathlib import Path
 from typing import TypeGuard
 
 import urllib3
@@ -236,10 +237,19 @@ def _outside_an_exchange(record: logging.LogRecord) -> bool:
 
 def _quiet_urllib3_during_exchanges() -> None:
     # A logger's filter sees only the records logged on that logger, not on
-    # its children, so every urllib3 module logger gets it.
-    for name in list(logging.Logger.manager.loggerDict):
-        if name.partition(".")[0] == "urllib3":
-            logging.getLogger(name).addFilter(_outside_an_exchange)
+    # its children, and urllib3 loads some modules only when first used, so
+    # the logger of every urllib3 module, loaded or not, gets it now.
+    for module_name in _urllib3_module_names():
+        logging.getLogger(module_name).addFilter(_outside_an_exchange)
+
+
+def _urllib3_module_names() -> Iterator[str]:
+    """Read from the installed package's files, so no module is imported;
+    each is its logger's name, since urllib3 logs only on `__name__`."""
+    package = Path(urllib3.__file__).parent
+    for source in package.rglob("*.py"):
+        module = source.relative_to(package.parent).with_suffix("")
+        yield ".".join(module.parent.parts if module.name == "__init__" else module.parts)
 
 
 _quiet_urllib3_during_exchanges()
