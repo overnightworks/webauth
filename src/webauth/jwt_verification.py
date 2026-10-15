@@ -314,7 +314,10 @@ def fetch_key_set_over_https(
 
 
 def _is_https_url(url: str) -> bool:
-    origin = urllib.parse.urlsplit(url)
+    try:
+        origin = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
     return origin.scheme == "https" and bool(origin.hostname)
 
 

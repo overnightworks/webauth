@@ -736,6 +736,7 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
         pytest.param({"audiences": "songmaker"}, "audiences", id="audience-as-one-string"),
         pytest.param({"jwks_url": "http://login.example.org/certs"}, "https", id="http-key-set"),
         pytest.param({"jwks_url": "https:///certs"}, "https", id="key-set-without-host"),
+        pytest.param({"jwks_url": "https://["}, "https", id="unparseable-key-set-url"),
         pytest.param({"leeway_seconds": -1}, "negative", id="negative-leeway"),
         pytest.param({"leeway_seconds": 1.5}, "whole", id="fractional-leeway"),
         pytest.param({"leeway_seconds": True}, "whole", id="boolean-leeway"),
@@ -953,7 +954,15 @@ def test_https_fetch_never_follows_a_redirect(https_key_set_server: HttpsKeySetS
     assert https_key_set_server.requested_paths == ["/moved"]
 
 
-@pytest.mark.parametrize("url", ["http://127.0.0.1:9/certs", "file:///etc/hostname"])
-def test_fetch_refuses_every_scheme_but_https(url: str) -> None:
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("http://127.0.0.1:9/certs", id="http"),
+        pytest.param("file:///etc/hostname", id="file"),
+        pytest.param("https://[", id="unparseable-host"),
+        pytest.param("https://127.0.0.1:99999/certs", id="port-out-of-range"),
+    ],
+)
+def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: str) -> None:
     with pytest.raises(KeySetFetchError):
         fetch_key_set_over_https(url)
