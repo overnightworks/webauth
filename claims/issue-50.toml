@@ -1,8 +1,0 @@
-claim_id = "31b892302b194f709323922d17ccf78e"
-agent = "Claude fe12493e-3d52-442e-b01b-4ee4336de2f0"
-role = "builder"
-base = "8b2701b5bed4347a955536cf784e8db268d5f7b9"
-branch = "claude/issue-50-w6-session-policy"
-scope = ["README.md", "src/webauth/config.py", "src/webauth/liveness.py", "src/webauth/login.py", "tests"]
-opened_commit = "64b4401b58474b455975e64a7b78fa64e94d9d49"
-whole_reason = "One session policy across config, issuance, liveness, their tests and docs."
