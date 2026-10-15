@@ -80,9 +80,9 @@ the configuration is built rather than ending in a silent login loop.
 v0.13.0 adds the OpenID Connect relying party (`webauth.oidc` and
 `webauth.oidc_login`) with PKCE and the signed pending-login cookie, and the one
 HTTPS client `webauth.https_client` that every outbound request goes through,
-with a total deadline of ten seconds on top of the per-step timeout. A key set
-fetch that cannot refresh rejects an unknown `kid` as `KEY_SET_UNAVAILABLE`
-during an outage, not as `UNKNOWN_KEY_ID`. It also changes
+with a total deadline of ten seconds on top of the per-step timeout. The
+verifier rejects a token naming an unknown `kid` as `KEY_SET_UNAVAILABLE` when
+the key-set refresh failed, not as `UNKNOWN_KEY_ID`. It also changes
 three public contracts: a `deadline_seconds` of zero or less raises
 `ValueError` in `fetch_key_set_over_https` and `post_form_over_https`;
 `TokenEndpointError.failure` is the `ExchangeFailure` that ended the token
