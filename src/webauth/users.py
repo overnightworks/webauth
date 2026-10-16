@@ -212,10 +212,7 @@ class UserManagement:
         with self.lock.hold():
             for record in self.sessions.list_active(limit=None):
                 if hmac.compare_digest(session_reference(record.id).encode(), reference):
-                    end_session(
-                        self.sessions, self.config.session_cache,
-                        session_id=record.id, user_id=record.user_id,
-                    )
+                    end_session(self.sessions, session_id=record.id)
                     self.audit.user_management_event(UserManagementEvent(
                         kind=UserManagementEventKind.SESSION_REVOKED,
                         actor_id=actor.id,
@@ -264,7 +261,7 @@ class UserManagement:
         return user
 
     def _delete_user_sessions(self, user_id: str) -> int:
-        return end_user_sessions(self.sessions, self.config.session_cache, user_id)
+        return end_user_sessions(self.sessions, user_id)
 
 
 def complete_first_run_setup(

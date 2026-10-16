@@ -9,7 +9,6 @@ commits it.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -37,9 +36,6 @@ from webauth.proxies import client_user_agent, resolve_client_ip
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from webauth.ports import SessionCache, SessionRecord
-
-log = logging.getLogger(__name__)
 
 AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
 INVALID_SESSION_DETAIL: Final = "Invalid session"
@@ -133,11 +129,9 @@ def current_user_dependency(
         config = web_auth_config(request)
         session_id = _session_id_from_cookie(request, config, login_redirect)
 
-        user = _authenticate_from_cache(request, audit, session_id, config, login_redirect)
-        if user is None:
-            user = _authenticate_from_store(
-                request, sessions, audit, session_id, config, login_redirect,
-            )
+        user = _authenticate_from_store(
+            request, sessions, audit, session_id, config, login_redirect,
+        )
         on_authenticated(user)
         return user
 
@@ -301,7 +295,7 @@ def _record_identity_changes(
     stored_user_agent: str,
     current_ip: str,
     current_user_agent: str,
-) -> bool:
+) -> None:
     """Report each part of the session's origin that stopped matching.
 
     A session that was stored without an origin at all is not a change.
@@ -328,63 +322,6 @@ def _record_identity_changes(
                 current=current_user_agent,
             ),
         )
-    return ip_changed or user_agent_changed
-
-
-def _authenticate_from_cache(
-    request: Request,
-    audit: AuditSink,
-    session_id: str,
-    config: WebAuthConfig,
-    login_redirect: LoginRedirect | None,
-) -> AuthenticatedUser | None:
-    """The cached account, or None when the cache cannot answer for it."""
-    session_cache = config.session_cache
-    if session_cache is None:
-        return None
-
-    try:
-        cached = session_cache.get(session_id)
-    except Exception:
-        log.warning("Redis session cache read failed, falling back to DB")
-        return None
-
-    if cached is None:
-        return None
-
-    now = datetime.now(timezone.utc)
-    if not config.session_liveness.admits_cached_session(cached, now):
-        raise _unauthenticated(request, SESSION_EXPIRED_DETAIL, login_redirect)
-
-    if not cached.is_active:
-        raise HTTPException(403, ACCOUNT_DISABLED_DETAIL)
-
-    current_ip = resolve_client_ip(request)
-    current_user_agent = client_user_agent(request)
-
-    identity_changed = _record_identity_changes(
-        audit,
-        session_id=session_id,
-        user_id=cached.user_id,
-        stored_ip=cached.ip_address,
-        stored_user_agent=cached.user_agent,
-        current_ip=current_ip,
-        current_user_agent=current_user_agent,
-    )
-
-    try:
-        session_cache.refresh_ttl(session_id, config.session_max_age_seconds)
-        if identity_changed:
-            session_cache.update_ip_ua(session_id, current_ip, current_user_agent)
-    except Exception:
-        log.warning("Redis session cache write failed")
-
-    return AuthenticatedUser(
-        id=cached.user_id,
-        username=cached.username,
-        role=cached.role,
-        is_active=cached.is_active,
-    )
 
 
 def _authenticate_from_store(
@@ -431,28 +368,9 @@ def _authenticate_from_store(
         current_user_agent=current_user_agent,
     )
 
-    _populate_cache(config.session_cache, record, config)
-
     return AuthenticatedUser(
         id=record.user.id,
         username=record.user.username,
         role=record.user.role,
         is_active=record.user.is_active,
     )
-
-
-def _populate_cache(
-    session_cache: SessionCache | None, record: SessionRecord, config: WebAuthConfig,
-) -> None:
-    if session_cache is None:
-        return
-    try:
-        session_cache.store(
-            record.id, record.user.id, record.user.username,
-            record.user.role, record.user.is_active,
-            record.ip_address, record.user_agent,
-            record.expires_at, record.created_at,
-            config.session_max_age_seconds,
-        )
-    except Exception:
-        log.warning("Redis session cache populate failed")

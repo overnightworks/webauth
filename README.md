@@ -1,7 +1,7 @@
 # webauth
 
-Session authentication for FastAPI applications: sessions with Redis-backed
-expiry, HMAC-signed cookies, CSRF double-submit, admin checks,
+Session authentication for FastAPI applications: sessions the store decides
+on every request, HMAC-signed cookies, CSRF double-submit, admin checks,
 per-address rate limits, and the audit events they raise.
 
 Distribution `overnightworks-webauth`, import package `webauth`.
@@ -20,7 +20,6 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.session_store` | `RedisSessionCache`, the one `SessionCache` implementation a host may put on its config |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
@@ -37,7 +36,8 @@ reaches it through the Protocols in `webauth.ports`: `UserStore`,
 `SubjectUserStore`, `SessionRecordStore`, `LoginAttemptStore`, `AuditSink`,
 and `PasswordHasher`.
 None of the stores commits; the caller owns the transaction, so a request that
-fails leaves nothing behind that the auth machinery wrote.
+fails leaves nothing behind that the auth machinery wrote, except the rate-limit
+budget, which counts attempts whether or not the request succeeds.
 `SessionRecordStore.touch` returns a strict `bool`: `True` when a stored row was
 renewed, `False` when the session is gone, which refuses the request like an
 expired session.
@@ -281,10 +281,9 @@ in only through its identity provider, so `set_password` and
 nothing. Refusals derive from `UserManagementError`, which the host translates
 into its own responses.
 
-Both password paths delete every account session from the store, then from
-`config.session_cache` when configured, including the current session. The
-host opens a new session and issues new cookies afterwards. Single-session
-revocation also deletes from the store before the cache. Public references
+Both password paths delete every account session from the store, including the
+current session. The host opens a new session and issues new cookies
+afterwards. Public references
 come only from `webauth.cookies.session_reference(session_id)`: SHA-256 hex of
 the UTF-8 raw identifier. Lists, management events, and `SessionIdentityChanged`
 (its `session_ref`) expose no raw token; the host reads any timestamps from its
@@ -363,36 +362,19 @@ Two backends implement it:
   deployment uses the Redis backend instead.
 
 Redis is therefore an optional dependency: a deployment that supplies the
-in-process backend and no Redis session cache installs plain `webauth`.
+in-process backend installs plain `webauth`.
 
-## The session cache, or none
+## The store decides every request
 
-`WebAuthConfig.session_cache` is a `webauth.ports.SessionCache` or `None`, and
-that single field decides how a live session's idle expiry is owned. With a
-cache, Redis TTL owns idle expiry and the host reconciles the store; with
-`session_cache=None`, the store's `touch` on every request owns idle expiry and
-there is no sync loop. Either way `WebAuthConfig.session_liveness` — a
-`webauth.ports.SessionLivenessPolicy` — makes the admit-or-refuse decision, and
-`webauth.dependencies` alone reads the wall clock and passes the instant in.
-`webauth.liveness` ships two: `ExpiryColumnLiveness`, for a store with
-`created_at`/`expires_at` columns, and `IdleWindowLiveness`, for one that keeps
-`last_seen` (and `created_at` when it is given an absolute cap). On the cache
-path a policy never trusts the cached `expires_at`, which can lag the real TTL
-after a refresh — Redis TTL owns idle there, and only a policy's own caps
-remain. There is no app-state install: the config carries the cache, so any
-code that holds the config — not only a request handler — can reach it.
-
-The Redis `SessionCache` is an expiry-column feature: a cached session carries
-`created_at`/`expires_at`, so it pairs only with `ExpiryColumnLiveness`. The
-idle-window model is store-only — it keeps `last_seen` (and `created_at` when
-it is given an absolute cap) and reads every request from its store — so
-`WebAuthConfig` refuses a `session_cache` alongside `IdleWindowLiveness` at
-construction rather than failing per request.
-
-`webauth.session_store.RedisSessionCache` is the one implementation shipped
-here; it needs the client library, so a host that uses it installs
-`overnightworks-webauth[redis]`. A host that supplies its own cache implements the same
-protocol.
+The library caches no sessions. Every authenticated request costs one
+`SessionRecordStore.load` and one `touch`, so a session the host ended is
+refused on its next request, with 401 or the login redirect. Whether a loaded
+session still stands is decided by `WebAuthConfig.session_liveness`, a
+`webauth.ports.SessionLivenessPolicy`, and `webauth.dependencies` alone reads
+the wall clock and passes the instant in. `webauth.liveness` ships two:
+`ExpiryColumnLiveness`, for a store with `created_at`/`expires_at` columns, and
+`IdleWindowLiveness`, for one that keeps `last_seen` (and `created_at` when it
+is given an absolute cap).
 
 ## Session lifetime
 
@@ -401,9 +383,8 @@ Three numbers decide how long someone stays signed in, and each has one owner:
 - `WebAuthConfig.cookie_max_age_seconds` is the browser cookie's `Max-Age`. The
   cookie is issued once at login and never reissued, so it bounds the whole
   sign-in. It defaults to `session_max_age_seconds`.
-- The idle window — `session_max_age_seconds` for the cache TTL, the idle
-  argument of `IdleWindowLiveness`, or the host's `expires_at` refresh for
-  `ExpiryColumnLiveness` — refuses a session left unused for longer.
+- The idle window — `IdleWindowLiveness`'s idle argument, or the host's
+  `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
 - The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
   `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
   older than the cap, however recently it was used.
@@ -426,17 +407,14 @@ WebAuthConfig(
 
 ## Ending a session
 
-`webauth.session_ending` is the one place a session ends in both the host's
-store and `config.session_cache`. A logout route calls
-`end_session(sessions, config.session_cache, session_id=..., user_id=...)`
-rather than deleting from either itself; `end_user_sessions(sessions, cache,
-user_id)` ends every session of an account and returns the store's count, and
-`prune_sessions(sessions, cache, user_id, max_sessions)` ends the oldest
-sessions above a cap after a login and returns their identifiers. Each deletes
-from the store first, then from the cache when one is configured. A cache that
-fails to delete raises: the host answers with an error instead of reporting a
-logout the cache would still honour. The `users` helpers end sessions through
-the same functions.
+`webauth.session_ending` is the one place a session ends in the host's store. A
+logout route calls `end_session(sessions, session_id=...)` rather than deleting
+from the store itself; `end_user_sessions(sessions, user_id)` ends every session
+of an account and returns the store's count, and
+`prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
+a cap after a login and returns their identifiers. The next request carrying an
+ended session's cookie is refused. The `users` helpers end sessions through the
+same functions.
 
 ## CSRF origin
 

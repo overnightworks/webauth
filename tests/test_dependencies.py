@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
 from urllib.parse import urlencode
@@ -29,12 +29,10 @@ from webauth_arrangement import (
     SessionsAnsweringTouch,
     SessionsEndedBetweenLoadAndTouch,
     a_session,
-    a_session_cache,
     a_web_auth_config,
     an_auth_app,
     an_idle_auth_app,
     an_idle_session,
-    cache_session,
     session_cookie_header,
     signed_without_bound,
 )
@@ -297,18 +295,6 @@ def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None
     assert auth_app.sessions.record.expires_at > before
 
 
-def an_app_authenticating_from_the_cache(record: FakeSessionRecord) -> AuthApp:
-    cache = a_session_cache()
-    cache_session(cache, record)
-    return an_auth_app(None, cache)
-
-
-AUTHENTICATION_PATHS = [
-    pytest.param(an_auth_app, id="from the store"),
-    pytest.param(an_app_authenticating_from_the_cache, id="from the cache"),
-]
-
-
 def test_a_session_ended_between_load_and_touch_is_refused_without_audit() -> None:
     sessions = SessionsEndedBetweenLoadAndTouch(a_session(ip_address="203.0.113.9"))
     app = an_auth_app(None, sessions=sessions)
@@ -344,20 +330,6 @@ def test_a_touch_reporting_no_row_refuses_the_request_and_writes_nothing() -> No
     assert app.authenticated == []
 
 
-def test_a_touch_reporting_no_row_fills_no_cache_and_refuses_again() -> None:
-    cache = a_session_cache()
-    app = an_auth_app(None, cache, sessions=SessionsAnsweringTouch(a_session(), False))
-    cookie = app.signed_cookie()
-
-    first = app.get("/me", cookie=cookie)
-    cached_after_first = cache.get(SESSION_ID)
-    second = app.get("/me", cookie=cookie)
-
-    assert (first.status_code, second.status_code) == (401, 401)
-    assert cached_after_first is None
-
-
-@pytest.mark.parametrize("an_app", AUTHENTICATION_PATHS)
 @pytest.mark.parametrize(
     ("stored_origin", "change", "previous", "current"),
     [
@@ -372,13 +344,12 @@ def test_a_touch_reporting_no_row_fills_no_cache_and_refuses_again() -> None:
     ],
 )
 def test_a_session_arriving_from_a_new_origin_is_reported_once_by_reference(
-    an_app: Callable[[FakeSessionRecord], AuthApp],
     stored_origin: dict[str, str],
     change: SessionIdentityChange,
     previous: str,
     current: str,
 ) -> None:
-    app = an_app(a_session(**stored_origin))
+    app = an_auth_app(a_session(**stored_origin))
 
     app.get("/me", cookie=app.signed_cookie())
 
@@ -405,11 +376,8 @@ def every_recorded_value(recorded: object) -> Iterator[str]:
         yield str(recorded)
 
 
-@pytest.mark.parametrize("an_app", AUTHENTICATION_PATHS)
-def test_no_identity_event_carries_the_raw_session_id_or_cookie(
-    an_app: Callable[[FakeSessionRecord], AuthApp],
-) -> None:
-    app = an_app(a_session(ip_address="203.0.113.9", user_agent="OldBrowser/1.0"))
+def test_no_identity_event_carries_the_raw_session_id_or_cookie() -> None:
+    app = an_auth_app(a_session(ip_address="203.0.113.9", user_agent="OldBrowser/1.0"))
     cookie = app.signed_cookie()
 
     app.get("/me", cookie=cookie)

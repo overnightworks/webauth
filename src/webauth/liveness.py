@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from webauth.ports import CachedSessionData
-
 
 def _require_positive_seconds(field: str, value: object) -> None:
     """Refuse a lifetime that is not a positive whole number of seconds.
@@ -39,9 +37,7 @@ class ExpiryColumnLiveness:
     """A stored row carrying ``created_at`` and ``expires_at``.
 
     Idle expiry is the ``expires_at`` column; the absolute cap is measured from
-    ``created_at``. A stored row is read as UTC
-    unconditionally, while a cached payload keeps whatever offset it carries and
-    only a naive one is assumed UTC.
+    ``created_at``. A stored row is read as UTC unconditionally.
     """
 
     def __init__(self, absolute_max_age_seconds: int) -> None:
@@ -55,15 +51,6 @@ class ExpiryColumnLiveness:
             record.created_at.replace(tzinfo=timezone.utc), now, self._absolute_max_age_seconds,
         )
 
-    def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
-        # The cache's own TTL owns idle expiry, and a cached ``expires_at`` can
-        # lag the real TTL after a refresh — trusting it here would expire a
-        # live session. Only the absolute cap on ``created_at`` remains.
-        created_at = cached.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        return _within_absolute_cap(created_at, now, self._absolute_max_age_seconds)
-
 
 class IdleWindowLiveness:
     """A stored row that keeps ``last_seen``.
@@ -73,9 +60,7 @@ class IdleWindowLiveness:
     falls once it is older than the cap, however recently it was seen — the
     store then has to keep ``created_at`` beside ``last_seen``, and a record
     without it, or with a naive one, raises `TypeError` instead of receiving a
-    verdict; a naive ``last_seen`` raises it too. The model is
-    store-only: it has no ``expires_at``, so it cannot ride the Redis
-    `SessionCache`, and `WebAuthConfig` refuses that pairing at construction.
+    verdict; a naive ``last_seen`` raises it too.
     """
 
     def __init__(
@@ -104,12 +89,6 @@ class IdleWindowLiveness:
                 "a naive one cannot be measured against now",
             )
         return (now - last_seen).total_seconds() <= self._idle_window_seconds
-
-    def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
-        raise NotImplementedError(
-            "the idle-window model does not use the Redis session cache; a host "
-            "that wants a cache uses expiry-column liveness",
-        )
 
 
 def _created_at_of_capped(record: _IdleWindowRecord) -> datetime:
