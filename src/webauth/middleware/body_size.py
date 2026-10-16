@@ -21,6 +21,16 @@ def _too_large() -> JSONResponse:
     return JSONResponse({"detail": "Request body too large"}, status_code=413)
 
 
+def _declares_over(scope: Scope, limit: int) -> bool:
+    for name, value in scope.get("headers", []):
+        if name.decode("latin-1").lower() == "content-length":
+            try:
+                return int(value.decode("latin-1")) > limit
+            except ValueError:
+                return False
+    return False
+
+
 class BodySizeLimitMiddleware:
     """Stop an oversized body at the door, and again while it streams in."""
 
@@ -35,18 +45,9 @@ class BodySizeLimitMiddleware:
 
         limit = self._policy.max_bytes(scope.get("path", ""), scope.get("method", ""))
 
-        headers = {k.lower(): v for k, v in (
-            (k.decode("latin-1"), v.decode("latin-1"))
-            for k, v in scope.get("headers", [])
-        )}
-        cl = headers.get("content-length")
-        if cl:
-            try:
-                if int(cl) > limit:
-                    await _too_large()(scope, receive, send)
-                    return
-            except ValueError:
-                pass
+        if _declares_over(scope, limit):
+            await _too_large()(scope, receive, send)
+            return
 
         received = 0
 
