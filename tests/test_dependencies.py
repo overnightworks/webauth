@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
+from urllib.parse import urlencode
 
 import pytest
-from fastapi import Request
+from fastapi import Depends, FastAPI, Request
+from fastapi.testclient import TestClient
 from webauth_arrangement import (
     ADMIN_ROLE,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
+    HTTPS_TEST_SERVER,
     IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
     SESSION_COOKIE_NAME,
@@ -20,6 +24,8 @@ from webauth_arrangement import (
     AuthApp,
     FakeSessionRecord,
     FakeUser,
+    RecordingAuditSink,
+    SessionRecordsInMemory,
     a_session,
     a_session_cache,
     a_web_auth_config,
@@ -30,6 +36,7 @@ from webauth_arrangement import (
     session_cookie_header,
 )
 
+from webauth.config import install_web_auth_config
 from webauth.cookies import PLAIN_SESSION_COOKIE_NAME, session_reference, sign_session_id
 from webauth.dependencies import (
     ACCOUNT_DISABLED_DETAIL,
@@ -40,6 +47,7 @@ from webauth.dependencies import (
     SESSION_EXPIRED_DETAIL,
     AuthenticatedUser,
     LoginRedirect,
+    current_user_dependency,
     session_id_from_request,
 )
 from webauth.ports import SessionIdentityChange, SessionIdentityChanged
@@ -58,6 +66,11 @@ def auth_app() -> AuthApp:
     [
         pytest.param("login", id="no leading slash"),
         pytest.param("//evil.example/login", id="a scheme-relative address"),
+        pytest.param("/\\evil.example/login", id="a slash then a backslash"),
+        pytest.param("\\/evil.example/login", id="a backslash then a slash"),
+        pytest.param("\\\\evil.example/login", id="two backslashes"),
+        pytest.param("/\t/evil.example/login", id="a tab the browser strips"),
+        pytest.param("/\r\n/evil.example/login", id="a CR and LF the browser strips"),
         pytest.param("https://evil.example/login", id="an absolute URL"),
         pytest.param("javascript:alert(1)", id="a non-http scheme"),
     ],
@@ -529,6 +542,64 @@ def test_the_redirect_keeps_the_asked_for_query_string() -> None:
 
     assert response.status_code == 302
     assert response.headers["location"] == "/login?next=%2Fme%3Ftab%3D1"
+
+
+def a_guarded_catch_all_app() -> FastAPI:
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config())
+    guard = current_user_dependency(
+        session_store=lambda: SessionRecordsInMemory(None),
+        audit_sink=RecordingAuditSink,
+        on_authenticated=lambda user: None,
+        login_redirect=A_LOGIN_REDIRECT,
+    ).current_user
+
+    @app.get("/{anything:path}", dependencies=[Depends(guard)])
+    def any_guarded_path() -> None: ...
+
+    return app
+
+
+@pytest.mark.parametrize(
+    ("asked_for", "carried"),
+    [
+        pytest.param("/%5Cevil.example/x", "/", id="a backslash after the slash"),
+        pytest.param("/%09/evil.example/x", "/", id="a tab the browser strips"),
+        pytest.param("/songs/1?x=2", "/songs/1?x=2", id="an ordinary path keeps its query"),
+    ],
+)
+def test_the_redirect_never_carries_a_path_a_browser_reads_as_another_host(
+    asked_for: str, carried: str,
+) -> None:
+    response = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER).get(
+        asked_for, headers={"accept": "text/html"}, follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == f"/login?{urlencode({'next': carried})}"
+
+
+def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
+    sent: list[dict] = []
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+        "scheme": "https", "server": ("testserver", 443), "client": ("127.0.0.1", 1),
+        "root_path": "", "path": "/\\evil.example/x", "raw_path": b"/\\evil.example/x",
+        "query_string": b"", "headers": [(b"host", b"testserver"), (b"accept", b"text/html")],
+    }
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    asyncio.run(a_guarded_catch_all_app()(scope, receive, send))
+
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    location = dict(start["headers"])[b"location"].decode()
+    assert start["status"] == 302
+    assert location == f"/login?{urlencode({'next': '/'})}"
 
 
 @pytest.mark.parametrize(

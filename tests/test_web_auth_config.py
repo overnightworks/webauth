@@ -160,7 +160,9 @@ def test_unnamed_cookies_fall_back_to_plain_names_when_cookie_secure_is_off() ->
 
 
 @pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])
-@pytest.mark.parametrize("name", ["__Host-session_id", "__host-own"])
+@pytest.mark.parametrize(
+    "name", ["__Host-session_id", "__host-own", "__Secure-sid", "__SECURE-sid"],
+)
 def test_a_host_only_cookie_name_without_cookie_secure_is_refused_at_configuration_time(
     field: str, name: str,
 ) -> None:
@@ -234,10 +236,57 @@ def test_the_cookie_lifetime_follows_the_session_max_age_unless_the_host_sets_it
 
 
 @pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])
-def test_a_host_only_cookie_name_with_cookie_secure_stays_as_named(field: str) -> None:
-    config = a_web_auth_config(**{field: "__Host-own"})
+@pytest.mark.parametrize("name", ["__Host-own", "__Secure-own"])
+def test_a_prefixed_cookie_name_with_cookie_secure_stays_as_named(field: str, name: str) -> None:
+    config = a_web_auth_config(**{field: name})
 
-    assert getattr(config, field) == "__Host-own"
+    assert getattr(config, field) == name
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        pytest.param(
+            {"admin_role": "user", "user_role": "user"}, "admin_role and user_role must differ",
+            id="equal roles",
+        ),
+        pytest.param({"admin_role": " "}, "admin_role must name a role", id="blank admin role"),
+        pytest.param({"user_role": ""}, "user_role must name a role", id="empty user role"),
+        pytest.param({"admin_role": None}, "admin_role must name a role", id="no admin role"),
+        pytest.param({"user_role": 5}, "user_role must name a role", id="a numeric user role"),
+        pytest.param(
+            {"max_user_agent_chars": -1}, "max_user_agent_chars must be a positive int",
+            id="negative user-agent limit",
+        ),
+        pytest.param(
+            {"max_user_agent_chars": 0}, "max_user_agent_chars must be a positive int",
+            id="zero user-agent limit",
+        ),
+        pytest.param(
+            {"max_user_agent_chars": True}, "max_user_agent_chars must be a positive int",
+            id="boolean user-agent limit",
+        ),
+    ],
+)
+def test_a_role_or_user_agent_limit_that_cannot_work_is_refused_at_configuration_time(
+    overrides: dict[str, object], message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        a_web_auth_config(**overrides)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({}, id="the defaults"),
+        pytest.param({"admin_role": "operator", "user_role": "member"}, id="custom roles"),
+        pytest.param({"max_user_agent_chars": 500}, id="a limit of 500"),
+    ],
+)
+def test_distinct_roles_and_a_positive_user_agent_limit_are_accepted(
+    overrides: dict[str, object],
+) -> None:
+    a_web_auth_config(**overrides)
 
 
 def test_a_request_reads_the_configuration_installed_on_its_application() -> None:
