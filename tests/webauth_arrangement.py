@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import count
 from threading import RLock
+from typing import Any
 
 import fakeredis
 from argon2.profiles import CHEAPEST
@@ -55,6 +56,7 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
+from webauth.session_ending import end_session
 from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
 from webauth.users import UserManagement
 
@@ -438,10 +440,13 @@ class SessionRecordsInMemory:
         ip_address: str,
         user_agent: str,
         now: datetime,
-    ) -> None:
+    ) -> bool:
+        if record.id not in self._records:
+            return False
         record.ip_address = ip_address
         record.user_agent = user_agent
         record.expires_at = now + timedelta(seconds=self.max_age_seconds)
+        return True
 
 
     def delete(self, session_id: str) -> None:
@@ -517,8 +522,39 @@ class IdleSessionsInMemory:
         ip_address: str,
         user_agent: str,
         now: datetime,
-    ) -> None:
+    ) -> bool:
+        if self.record is None or self.record.id != record.id:
+            return False
         record.last_seen = now
+        return True
+
+
+class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
+    """A store whose session is ended by another request right after ``load`` reads it."""
+
+    def load(self, session_id: str) -> FakeSessionRecord | None:
+        record = super().load(session_id)
+        if record is not None:
+            end_session(self, None, session_id=session_id, user_id=record.user.id)
+        return record
+
+
+class SessionsAnsweringTouch(SessionRecordsInMemory):
+    """A store whose ``touch`` writes nothing and gives a fixed answer."""
+
+    def __init__(self, record: FakeSessionRecord, touch_answer: Any) -> None:
+        super().__init__(record)
+        self.touch_answer = touch_answer
+
+    def touch(
+        self,
+        record: FakeSessionRecord,
+        *,
+        ip_address: str,
+        user_agent: str,
+        now: datetime,
+    ) -> bool:
+        return self.touch_answer
 
 
 @dataclass
@@ -607,6 +643,7 @@ def an_auth_app(
     cache: RedisSessionCache | None = None,
     *,
     login_redirect: LoginRedirect | None = None,
+    sessions: SessionRecordsInMemory | None = None,
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route.
 
@@ -615,7 +652,7 @@ def an_auth_app(
     it against a dependency-guarded route for the same request.
     """
     config = a_web_auth_config(admin_role=ADMIN_ROLE, session_cache=cache)
-    sessions = SessionRecordsInMemory(record)
+    sessions = sessions or SessionRecordsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
 

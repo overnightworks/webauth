@@ -26,6 +26,8 @@ from webauth_arrangement import (
     FakeUser,
     RecordingAuditSink,
     SessionRecordsInMemory,
+    SessionsAnsweringTouch,
+    SessionsEndedBetweenLoadAndTouch,
     a_session,
     a_session_cache,
     a_web_auth_config,
@@ -305,6 +307,40 @@ AUTHENTICATION_PATHS = [
     pytest.param(an_auth_app, id="from the store"),
     pytest.param(an_app_authenticating_from_the_cache, id="from the cache"),
 ]
+
+
+def test_a_session_ended_between_load_and_touch_is_refused_without_audit() -> None:
+    sessions = SessionsEndedBetweenLoadAndTouch(a_session(ip_address="203.0.113.9"))
+    app = an_auth_app(None, sessions=sessions)
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 401
+    assert sessions.record is None
+    assert app.audit.events == []
+    assert app.authenticated == []
+
+
+@pytest.mark.parametrize("answer", [None, 1], ids=["None", "an int"])
+def test_a_touch_answering_anything_but_a_bool_is_refused(answer: object) -> None:
+    sessions = SessionsAnsweringTouch(a_session(), answer)
+    app = an_auth_app(None, sessions=sessions)
+
+    with pytest.raises(TypeError, match="SessionRecordStore.touch"):
+        app.get("/me", cookie=app.signed_cookie())
+
+
+def test_a_touch_reporting_no_row_refuses_the_request_and_writes_nothing() -> None:
+    record = a_session(ip_address="203.0.113.9")
+    stored_expiry = record.expires_at
+    app = an_auth_app(None, sessions=SessionsAnsweringTouch(record, False))
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 401
+    assert app.audit.events == []
+    assert (record.ip_address, record.expires_at) == ("203.0.113.9", stored_expiry)
+    assert app.authenticated == []
 
 
 @pytest.mark.parametrize("an_app", AUTHENTICATION_PATHS)
