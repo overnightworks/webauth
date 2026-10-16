@@ -21,11 +21,15 @@ if TYPE_CHECKING:
     from starlette.requests import Request
 
 HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
+SECURE_COOKIE_PREFIX: Final = "__Secure-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
 DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
 MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 256
+# A signed session cookie is an identifier plus a hex digest; anything much
+# longer was not issued here, so the reader rejects it before any HMAC is computed.
+MAX_SESSION_COOKIE_CHARS: Final = 200
 PENDING_SECRET_BYTES: Final = 32
 """Random bytes in each of a pending login's state, nonce and verifier,
 which are minted with ``secrets.token_urlsafe``."""
@@ -91,6 +95,11 @@ def is_host_only_cookie_name(name: str) -> bool:
     return name.lower().startswith(HOST_ONLY_COOKIE_PREFIX.lower())
 
 
+def is_secure_prefixed_cookie_name(name: str) -> bool:
+    """Whether a browser treats ``name`` as a ``__Secure-`` cookie (case-insensitively)."""
+    return name.lower().startswith(SECURE_COOKIE_PREFIX.lower())
+
+
 def cookie_pairs(request: Request) -> list[tuple[str, str]]:
     """Every name and value the raw ``Cookie`` headers carry, in order.
 
@@ -113,9 +122,19 @@ def session_reference(session_id: str) -> str:
 
 
 def sign_session_id(session_id: str, secret: bytes) -> str:
-    """Return ``session_id.hmac_hex`` for use as a cookie value."""
+    """Return ``session_id.hmac_hex`` for use as a cookie value.
+
+    Raises ``ValueError`` when the signed value would exceed
+    ``MAX_SESSION_COOKIE_CHARS`` or when ``session_id`` is empty, since the
+    reader would refuse that cookie.
+    """
+    if not session_id:
+        raise ValueError("the session id must not be empty")
     sig = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
-    return f"{session_id}.{sig}"
+    signed = f"{session_id}.{sig}"
+    if len(signed) > MAX_SESSION_COOKIE_CHARS:
+        raise ValueError("the session id does not fit the session cookie")
+    return signed
 
 
 def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
@@ -126,7 +145,7 @@ def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
     if not session_id or not sig:
         return None
     expected = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
-    if hmac.compare_digest(sig, expected):
+    if hmac.compare_digest(sig.encode(), expected.encode()):
         return session_id
     return None
 
@@ -139,7 +158,7 @@ def generate_csrf_token(session_id: str, secret: bytes) -> str:
 def verify_csrf_token(token: str, session_id: str, secret: bytes) -> bool:
     """Verify a CSRF token is valid for the given session."""
     expected = generate_csrf_token(session_id, secret)
-    return hmac.compare_digest(token, expected)
+    return hmac.compare_digest(token.encode(), expected.encode())
 
 
 @dataclass(frozen=True)

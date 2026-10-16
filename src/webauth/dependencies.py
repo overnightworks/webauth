@@ -20,7 +20,12 @@ from fastapi import Depends, HTTPException, Request
 from starlette.responses import JSONResponse, Response
 
 from webauth.config import WebAuthConfig, web_auth_config
-from webauth.cookies import cookie_values, session_reference, verify_session_cookie
+from webauth.cookies import (
+    MAX_SESSION_COOKIE_CHARS,
+    cookie_values,
+    session_reference,
+    verify_session_cookie,
+)
 from webauth.ports import (
     AuditSink,
     SessionIdentityChange,
@@ -42,10 +47,6 @@ SESSION_EXPIRED_DETAIL: Final = "Session expired"
 ACCOUNT_DISABLED_DETAIL: Final = "Account disabled"
 ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
 
-# A signed session cookie is an identifier plus a hex digest; anything much
-# longer was not issued here, so it is rejected before any HMAC is computed.
-MAX_SESSION_COOKIE_CHARS: Final = 200
-
 
 @dataclass(frozen=True)
 class AuthenticatedUser:
@@ -55,6 +56,19 @@ class AuthenticatedUser:
     username: str
     role: str
     is_active: bool
+
+
+_BROWSER_STRIPPED_CHARACTERS = str.maketrans("", "", "\t\r\n")
+_ANOTHER_HOST_PREFIXES = ("//", "/\\", "\\/", "\\\\")
+
+
+def _reads_as_another_host(path: str) -> bool:
+    """Whether a browser reads ``path`` as an address on another host.
+
+    Browsers drop tab, CR and LF and treat a backslash as a slash, so ``/\\x``
+    and ``/<tab>/x`` lead off the site exactly as ``//x`` does.
+    """
+    return path.translate(_BROWSER_STRIPPED_CHARACTERS).startswith(_ANOTHER_HOST_PREFIXES)
 
 
 @dataclass(frozen=True)
@@ -72,10 +86,10 @@ class LoginRedirect:
     redirect_query_param: str
 
     def __post_init__(self) -> None:
-        if not self.path.startswith("/") or self.path.startswith("//"):
+        if not self.path.startswith("/") or _reads_as_another_host(self.path):
             raise ValueError(
                 "login_redirect.path must be a same-origin absolute path: "
-                "one leading '/', never '//', and no scheme",
+                "one leading '/', never '//' or a backslash form of it, and no scheme",
             )
 
 
@@ -193,10 +207,10 @@ def _unauthenticated(
 def _asked_for_address(request: Request) -> str:
     """The path and query the guarded request named, safe to echo back.
 
-    A path starting with ``//`` reads as a scheme-relative address to a
-    browser, so it collapses to ``/`` before it is ever carried in a redirect.
+    A path a browser reads as another host's address collapses to ``/``
+    before it is ever carried in a redirect.
     """
-    path = "/" if request.url.path.startswith("//") else request.url.path
+    path = "/" if _reads_as_another_host(request.url.path) else request.url.path
     return f"{path}?{request.url.query}" if request.url.query else path
 
 
@@ -250,8 +264,8 @@ def session_id_from_request(request: Request, config: WebAuthConfig) -> str | No
     """The session identifier the request's one signed session cookie names.
 
     ``None`` when the cookie is missing, longer than
-    ``MAX_SESSION_COOKIE_CHARS`` even when correctly signed, forged, or present
-    more than once: a sibling subdomain can set a second cookie of the same
+    ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed,
+    forged, or present more than once: a sibling subdomain can set a second cookie of the same
     name, and choosing either would let it decide whose account the request
     runs in.
     """

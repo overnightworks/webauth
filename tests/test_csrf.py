@@ -5,6 +5,8 @@ CsrfTokenMiddleware: the header token must match the request's one session.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -16,11 +18,11 @@ from webauth_arrangement import (
     SESSION_ID,
     a_web_auth_config,
     session_cookie_header,
+    signed_without_bound,
 )
 
-from webauth.config import install_web_auth_config
-from webauth.cookies import generate_csrf_token, sign_session_id
-from webauth.dependencies import MAX_SESSION_COOKIE_CHARS
+from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.cookies import MAX_SESSION_COOKIE_CHARS, generate_csrf_token, sign_session_id
 from webauth.middleware import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.policies import CsrfPolicy, PathRules
 
@@ -36,9 +38,9 @@ WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
 WEBHOOK_SIBLING_PATH = "/webhook/providerx"
 
 
-def an_origin_guarded_client() -> TestClient:
+def an_origin_guarded_client(config: WebAuthConfig | None = None) -> TestClient:
     app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config())
+    install_web_auth_config(app, config or a_web_auth_config())
     app.add_middleware(
         CsrfOriginMiddleware,
         policy=CsrfPolicy(protected=PathRules(prefixes=("/api/",))),
@@ -68,6 +70,13 @@ def a_protect_everything_client() -> TestClient:
         return OK
 
     return TestClient(app, base_url=ALLOWED_ORIGIN)
+
+
+def a_client_allowing_only_pattern(pattern: str) -> TestClient:
+    return an_origin_guarded_client(a_web_auth_config(
+        allowed_hosts_exact=frozenset(),
+        allowed_hosts_patterns=(re.compile(pattern),),
+    ))
 
 
 def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Response:
@@ -189,6 +198,98 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
     assert response.json() == body
 
 
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param({"origin": "null"}, id="a null origin"),
+        pytest.param({"origin": "http://"}, id="an origin without a host"),
+        pytest.param({"origin": "http://[bad"}, id="an origin that cannot be parsed"),
+        pytest.param({"referer": "null"}, id="a null referer"),
+        pytest.param({"referer": "http://[bad"}, id="a referer that cannot be parsed"),
+        pytest.param(
+            {"sec-fetch-site": "same-site", "origin": "null"}, id="a null origin on same-site",
+        ),
+        pytest.param({"origin": ""}, id="an empty origin"),
+        pytest.param({"referer": ""}, id="an empty referer"),
+        pytest.param(
+            {"origin": "", "referer": f"{ALLOWED_ORIGIN}/page"},
+            id="an empty origin beside an allowed referer",
+        ),
+        pytest.param(
+            {"origin": f"{ALLOWED_ORIGIN}:evil"}, id="an origin with a non-numeric port",
+        ),
+        pytest.param({"origin": "https://[::1]:evil"}, id="an IPv6 origin with a non-numeric port"),
+        pytest.param(
+            {"referer": "https://songmaker.example:password@evil.test/"},
+            id="a referer whose userinfo spells the allowed host",
+        ),
+    ],
+)
+def test_an_origin_that_names_no_host_is_refused_like_a_foreign_one(
+    headers: dict[str, str],
+) -> None:
+    response = _call("POST", headers)
+
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
+
+
+@pytest.mark.parametrize(
+    ("referer", "status"),
+    [
+        pytest.param("https://app.example/page", 200, id="the host itself"),
+        pytest.param("https://app.example:8000/page", 200, id="the host with a port"),
+        pytest.param("https://app.example@evil.test/", 403, id="the host as userinfo"),
+        pytest.param("https://app.example.evil.test/", 403, id="the host as a prefix"),
+    ],
+)
+def test_a_host_pattern_must_match_the_whole_host_and_port(referer: str, status: int) -> None:
+    client = a_client_allowing_only_pattern(r"app\.example(:\d+)?")
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"referer": referer})
+
+    assert response.status_code == status
+
+
+@pytest.mark.parametrize(
+    ("allowed_entry", "origin"),
+    [
+        pytest.param("[::1]", "https://[::1]", id="a bracketed IPv6 host"),
+        pytest.param("[::1]:8000", "https://[::1]:8000", id="a bracketed IPv6 host with a port"),
+    ],
+)
+def test_an_exact_entry_matches_a_bracketed_ipv6_origin(allowed_entry: str, origin: str) -> None:
+    client = an_origin_guarded_client(
+        a_web_auth_config(allowed_hosts_exact=frozenset({allowed_entry})),
+    )
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": origin})
+
+    assert response.status_code == 200
+
+
+def test_a_pattern_without_a_port_refuses_the_host_with_a_port() -> None:
+    client = a_client_allowing_only_pattern(r"app\.example")
+
+    response = client.post(
+        API_PATH, json={"n": 1}, headers={"referer": "https://app.example:8000/"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_same_origin_fetch_site_passes_despite_a_null_origin() -> None:
+    response = _call("POST", {"sec-fetch-site": "same-origin", "origin": "null"})
+
+    assert response.status_code == 200
+
+
+def test_the_exact_host_with_a_port_is_allowed() -> None:
+    response = _call("POST", {"origin": f"{ALLOWED_ORIGIN}:8000"})
+
+    assert response.status_code == 200
+
+
 def test_songmakers_json_post_without_either_header_is_unchanged() -> None:
     """Songmaker's TestClient path: JSON, no Sec-Fetch-Site, no Origin."""
     response = _call("POST", {})
@@ -229,11 +330,11 @@ def test_protect_everything_keeps_a_sibling_of_an_exempt_prefix_protected() -> N
 
 
 def test_explicit_protected_rules_refuse_an_exempt_rule() -> None:
+    protected = PathRules(prefixes=("/api/",))
+    exempt = PathRules(prefixes=(WEBHOOK_PREFIX,))
+
     with pytest.raises(ValueError, match="exempt"):
-        CsrfPolicy(
-            protected=PathRules(prefixes=("/api/",)),
-            exempt=PathRules(prefixes=(WEBHOOK_PREFIX,)),
-        )
+        CsrfPolicy(protected=protected, exempt=exempt)
 
 
 CONFIG = a_web_auth_config()
@@ -241,7 +342,7 @@ SESSION_COOKIE = sign_session_id(SESSION_ID, CONFIG.signing_key)
 ANOTHER_SESSION_ID = "another-session"
 ANOTHER_SESSION_COOKIE = sign_session_id(ANOTHER_SESSION_ID, CONFIG.signing_key)
 OVERLONG_SESSION_ID = "s" * MAX_SESSION_COOKIE_CHARS
-OVERLONG_SESSION_COOKIE = sign_session_id(OVERLONG_SESSION_ID, CONFIG.signing_key)
+OVERLONG_SESSION_COOKIE = signed_without_bound(OVERLONG_SESSION_ID, CONFIG.signing_key)
 
 
 def a_token_guarded_client() -> TestClient:
@@ -307,3 +408,16 @@ def test_a_csrf_token_is_honoured_only_for_the_one_session_cookie(
 
     assert response.status_code == status
     assert response.json() == body
+
+
+def test_a_csrf_token_with_non_ascii_characters_is_refused_like_a_forged_one() -> None:
+    response = a_token_guarded_client().post(
+        API_PATH,
+        headers={
+            "cookie": session_cookie_header(SESSION_COOKIE),
+            CONFIG.csrf_header_name: "é".encode("latin-1"),
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == INVALID_TOKEN_DETAIL

@@ -36,13 +36,12 @@ class _IdleWindowRecord(Protocol):
 
 
 class ExpiryColumnLiveness:
-    """Songmaker's model: a stored row carrying ``created_at`` and ``expires_at``.
+    """A stored row carrying ``created_at`` and ``expires_at``.
 
     Idle expiry is the ``expires_at`` column; the absolute cap is measured from
-    ``created_at``. It reproduces v0.1.0's verdicts exactly, including its
-    timezone handling — a stored row is read as UTC unconditionally, while a
-    cached payload keeps whatever offset it carries and only a naive one is
-    assumed UTC.
+    ``created_at``. A stored row is read as UTC
+    unconditionally, while a cached payload keeps whatever offset it carries and
+    only a naive one is assumed UTC.
     """
 
     def __init__(self, absolute_max_age_seconds: int) -> None:
@@ -67,14 +66,14 @@ class ExpiryColumnLiveness:
 
 
 class IdleWindowLiveness:
-    """Agent-presentator's model: a stored row that keeps ``last_seen``.
+    """A stored row that keeps ``last_seen``.
 
     A session stands while it was seen within the idle window; a ``touch`` is a
     put with ``last_seen == now``. With ``absolute_max_age_seconds`` it also
     falls once it is older than the cap, however recently it was seen — the
     store then has to keep ``created_at`` beside ``last_seen``, and a record
     without it, or with a naive one, raises `TypeError` instead of receiving a
-    verdict. The model is
+    verdict; a naive ``last_seen`` raises it too. The model is
     store-only: it has no ``expires_at``, so it cannot ride the Redis
     `SessionCache`, and `WebAuthConfig` refuses that pairing at construction.
     """
@@ -99,6 +98,11 @@ class IdleWindowLiveness:
         )
 
     def _within_idle_window(self, last_seen: datetime, now: datetime) -> bool:
+        if last_seen.utcoffset() is None:
+            raise TypeError(
+                "an IdleWindowLiveness needs a timezone-aware last_seen; "
+                "a naive one cannot be measured against now",
+            )
         return (now - last_seen).total_seconds() <= self._idle_window_seconds
 
     def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
