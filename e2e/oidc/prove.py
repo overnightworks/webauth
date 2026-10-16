@@ -36,6 +36,7 @@ from evidence import (
     NetworkLog,
     SecretRegistry,
     delete_contaminated,
+    recorded_cookie_name,
     scan_evidence,
     without_query_values,
 )
@@ -131,6 +132,9 @@ class Proof:
         masked_line = self.registry.masked(line)
         self.lines.append(masked_line)
         print(masked_line, flush=True)
+        leaked = self.registry.labels_in(line)
+        if leaked:
+            self.fail(f"a recorded line held {', '.join(leaked)}")
 
     def held_or_failed(self, label: str, check: Callable[[], str]) -> bool:
         if self.stop_requested.is_set():
@@ -172,7 +176,7 @@ class Proof:
 
     def capture_cookies(self, context: BrowserContext) -> None:
         for cookie in context.cookies():
-            self.registry.add(f"cookie {cookie['name']}", cookie["value"])
+            self.registry.add(f"cookie {recorded_cookie_name(cookie['name'])}", cookie["value"])
             if is_pending_login_cookie_name(cookie["name"], secure=True):
                 self._register_pending_login(cookie["value"])
 

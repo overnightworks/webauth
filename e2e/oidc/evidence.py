@@ -2,7 +2,8 @@
 credential the run touched, and the scan that keeps the evidence directory clean.
 
 The network log is built from the browser's events field by field, so a field
-this module does not know cannot reach the file. Nothing here redacts."""
+this module does not know cannot reach the file. Masking keeps stdout clean;
+detection stays loud: a line that needed masking is a leak the run reports."""
 
 from __future__ import annotations
 
@@ -57,11 +58,23 @@ class SecretRegistry:
             self.values.setdefault(label, set()).add(value)
 
     def masked(self, text: str) -> str:
-        """The text with every registered value, in any encoding, replaced by its label."""
-        for label, forms in self.forms_by_label().items():
-            for form in sorted(forms, key=len, reverse=True):
-                text = text.replace(form.decode(), f"[registered secret: {label}]")
+        """The text with every registered value, in any encoding, replaced by its label;
+        the longest form first, so one value never hides inside another's label."""
+        for form, label in self._forms_longest_first():
+            text = text.replace(form, f"[registered secret: {label}]")
         return text
+
+    def labels_in(self, text: str) -> list[str]:
+        """The labels of every registered value that appears in the text."""
+        return sorted({label for form, label in self._forms_longest_first() if form in text})
+
+    def _forms_longest_first(self) -> list[tuple[str, str]]:
+        pairs = [
+            (form.decode(), label)
+            for label, forms in self.forms_by_label().items()
+            for form in forms
+        ]
+        return sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)
 
     def forms_by_label(self) -> dict[str, set[bytes]]:
         """Each value as raw, URL-encoded and form-encoded bytes."""
