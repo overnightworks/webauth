@@ -79,6 +79,10 @@ asset URL. A tag is never moved — a broken release gets the next patch tag —
 so the version in `pyproject.toml` and `webauth.__version__` is raised in the
 pull request that precedes the tag.
 
+A pull request that changes behaviour a host can see adds its line to
+`CHANGELOG.md` under the unreleased version, marked **Breaking** when a public
+contract changes.
+
 A tag must sit on a commit of `main` whose CI push run finished green; the
 release workflow's `verify` job checks both and refuses anything else. If
 `verify` failed only because CI was still running, re-run the release workflow
