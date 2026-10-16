@@ -1,0 +1,8 @@
+claim_id = "4392bd52bc1a42a7803fb1be6c5eef53"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "9433a79b1d1e7050808aa73ca029aaba6e83a616"
+branch = "claude/issue-77-s12-redirect-config-guards"
+scope = ["README.md", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/dependencies.py", "tests/test_dependencies.py", "tests/test_web_auth_config.py"]
+opened_commit = "aa6cdd2c00649fccaac17a601fed3f19c6bc62c2"
+whole_reason = "S12 is one security slice: the path predicate and the config guards with their README rows"
