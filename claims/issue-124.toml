@@ -1,0 +1,8 @@
+claim_id = "3e544e19d70045fa8e74d3c3b6c3e2fd"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "1c9920eb58b7cb64994f85b1e1662ce1d6e715d8"
+branch = "claude/issue-124-d2b-die-konformit-tssuite-hinter-dem-tls"
+scope = ["e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/harness.py", "e2e/oidc/prove.py", "e2e/oidc/suite-compose.yaml", "e2e/oidc/suite.py"]
+opened_commit = "acbf6761ee29c2fdfab78cd3cd19ddc274937d06"
+whole_reason = "One suite stack: its compose file, lifecycle owner and driver are useless apart"
