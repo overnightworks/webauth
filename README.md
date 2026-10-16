@@ -383,9 +383,8 @@ Three numbers decide how long someone stays signed in, and each has one owner:
 - `WebAuthConfig.cookie_max_age_seconds` is the browser cookie's `Max-Age`. The
   cookie is issued once at login and never reissued, so it bounds the whole
   sign-in. It defaults to `session_max_age_seconds`.
-- The idle window — the idle
-  argument of `IdleWindowLiveness`, or the host's `expires_at` refresh for
-  `ExpiryColumnLiveness` — refuses a session left unused for longer.
+- The idle window — `IdleWindowLiveness`'s idle argument, or the host's
+  `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
 - The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
   `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
   older than the cap, however recently it was used.

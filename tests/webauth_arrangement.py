@@ -479,8 +479,7 @@ class SessionRecordsInMemory:
 class IdleSessionRecord:
     """A session an idle-window store keeps: identity, origin, and when last seen.
 
-    It has no ``created_at``/``expires_at``, which is why the idle-window model
-    cannot ride the Redis cache — liveness is ``last_seen`` alone.
+    It has no ``created_at``/``expires_at``; liveness is ``last_seen`` alone.
     """
 
     id: str
@@ -684,7 +683,7 @@ def an_idle_session(
 
 
 def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
-    """The supported presentator config: idle-window liveness, no session cache."""
+    """The supported presentator config: idle-window liveness."""
     config = a_web_auth_config(
         admin_role=ADMIN_ROLE, session_liveness=IdleWindowLiveness(IDLE_WINDOW_SECONDS),
     )
