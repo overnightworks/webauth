@@ -253,8 +253,8 @@ def logout(proof: Proof) -> str:
         back_shows = back_button_shows(page)
         replay = replayed_session_status(proof, session)
         assert replay == 401, f"the old session cookie was answered {replay}"
+        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
         silent = second_sign_in_is_silent(page)
-    assert proof.host_state()["sessions"] == 0, "the host still holds a session"
     return (
         f"after the button the cookies are gone, a reload shows Sign in and /me answers 401; "
         f"the back button shows {back_shows!r} but the old session cookie replayed over HTTPS "
