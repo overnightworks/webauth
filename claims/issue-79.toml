@@ -1,0 +1,7 @@
+claim_id = "a4ed64159f7f488584d826fcf29871e1"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "9433a79b1d1e7050808aa73ca029aaba6e83a616"
+branch = "claude/issue-79-f2-https-client-timeouts"
+scope = ["pyproject.toml", "src/webauth/https_client.py", "tests/test_https_client.py"]
+opened_commit = "ba98fbf065a3841c6bb3734514f1cb6c4acf9a2f"
