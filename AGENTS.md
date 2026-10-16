@@ -33,8 +33,9 @@ CI, which only lints it.
   reaches it through the Protocols in `webauth.ports`, which the host
   application implements over the persistence it already owns. `.importlinter`
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
-- No host application is a dependency. `webauth` depends on FastAPI (with Starlette and anyio, which `src` imports),
-  Pydantic and argon2-cffi at runtime, and on nothing else. Redis is optional — install
+- No host application is a dependency. `webauth` depends on FastAPI (with
+  Starlette and anyio, which `src` imports), Pydantic and argon2-cffi at
+  runtime, and on nothing else. Redis is optional — install
   `overnightworks-webauth[redis]` for the Redis rate-limit backend; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
   JWT verification and OpenID Connect login are optional too —
@@ -63,10 +64,11 @@ uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 `tests/typing/` holds a static password-only host that CI type-checks with
 that pinned pyright, so a port change that would break such a host fails here.
 
-CI runs these in the `checks` job, then the shared quality gate
-(`overnightworks/quality`, pinned by SHA in `ci.yml`) as the `quality` job. Its
-required check is `quality / verdict`; allowances for known secret false
-positives live only in `quality/config.toml`.
+CI runs these in the `checks` job, re-runs the suite at the lowest declared
+versions in `lowest-direct`, then runs the shared quality gate
+(`overnightworks/quality`, pinned by SHA in `ci.yml`) as the `quality` job. The
+quality gate's required check is `quality / verdict`; allowances for known
+secret false positives live only in `quality/config.toml`.
 
 The suite is fast and needs no service: Redis is faked in-process. Run it
 whole.

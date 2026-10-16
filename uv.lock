@@ -816,7 +816,7 @@ e2e = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anyio", specifier = ">=4.12" },
+    { name = "anyio", specifier = ">=4.12,<5" },
     { name = "argon2-cffi", specifier = ">=23.1,<26" },
     { name = "cryptography", marker = "extra == 'jwt'", specifier = ">=50.0.2,<51" },
     { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2.20,<3" },
@@ -830,7 +830,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7,<8" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0,<9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4,<1" },
-    { name = "starlette", specifier = ">=0.46" },
+    { name = "starlette", specifier = ">=0.46,<2" },
     { name = "urllib3", marker = "extra == 'jwt'", specifier = ">=2.6.3,<3" },
 ]
 provides-extras = ["redis", "jwt", "dev"]

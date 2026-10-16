@@ -14,8 +14,8 @@ This is the last release with password parts.
 
 - The declared dependency floors are raised to the versions the suite is proven
   on: fastapi 0.123.7, starlette 0.46, pydantic 2.6 and anyio 4.12; starlette and
-  anyio are now declared directly, and `cryptography` is capped below 51. A host
-  on older versions must upgrade.
+  anyio are now declared directly, capped below 2 and below 5, and
+  `cryptography` is capped below 51. A host on older versions must upgrade.
 - `SecurityHeadersMiddleware` is a pure ASGI middleware: its `.dispatch`, the
   `dispatch=` argument and any subclass override of `dispatch` are gone. The 500
   of an unhandled exception now carries the security headers, and the exception

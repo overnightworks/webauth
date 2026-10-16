@@ -67,6 +67,7 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
         with:
           enable-cache: true
+          cache-suffix: lowest-direct
 
       - name: Create the environment
         run: uv venv --python 3.12
