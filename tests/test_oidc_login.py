@@ -666,7 +666,8 @@ def test_two_tabs_both_sign_in_whichever_returns_first(*, second_returns_first: 
 
     first, second = (host.callback(query) for query in tabs)
 
-    assert [first.json(), second.json()] == [{"username": "lena"}] * 2
+    assert first.json() == {"username": "lena"}
+    assert second.json() == {"username": "lena"}
     assert host.sessions.count_active() == 2
     assert host.pending_cookie_names() == set()
 

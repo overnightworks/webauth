@@ -24,6 +24,7 @@ jwt = [
 dev = [
     "overnightworks-webauth[jwt]",
     "pytest>=7,<10",
+    "pytest-cov>=7,<8",
     "fakeredis[lua]>=2,<3",
     "httpx>=0.27,<1",
     "ruff>=0.4,<1",
