@@ -201,13 +201,16 @@ class _OffsetlessZone(tzinfo):
         return None
 
 
-@pytest.mark.parametrize(
+_NAIVE_ZONES = pytest.mark.parametrize(
     "zone",
     [
         pytest.param(None, id="without tzinfo"),
         pytest.param(_OffsetlessZone(), id="with a tzinfo that has no offset"),
     ],
 )
+
+
+@_NAIVE_ZONES
 def test_a_capped_idle_window_policy_refuses_to_judge_a_naive_created_at(
     zone: tzinfo | None,
 ) -> None:
@@ -225,13 +228,7 @@ def test_a_capped_idle_window_policy_refuses_to_judge_a_naive_created_at(
         pytest.param(RECOMMENDED_IDLE_POLICY, id="capped"),
     ],
 )
-@pytest.mark.parametrize(
-    "zone",
-    [
-        pytest.param(None, id="without tzinfo"),
-        pytest.param(_OffsetlessZone(), id="with a tzinfo that has no offset"),
-    ],
-)
+@_NAIVE_ZONES
 def test_an_idle_window_policy_refuses_to_judge_a_naive_last_seen(
     policy: IdleWindowLiveness, zone: tzinfo | None,
 ) -> None:

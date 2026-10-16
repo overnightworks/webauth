@@ -73,7 +73,7 @@ class IdleWindowLiveness:
     falls once it is older than the cap, however recently it was seen — the
     store then has to keep ``created_at`` beside ``last_seen``, and a record
     without it, or with a naive one, raises `TypeError` instead of receiving a
-    verdict. The model is
+    verdict; a naive ``last_seen`` raises it too. The model is
     store-only: it has no ``expires_at``, so it cannot ride the Redis
     `SessionCache`, and `WebAuthConfig` refuses that pairing at construction.
     """

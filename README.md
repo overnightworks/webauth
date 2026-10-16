@@ -86,9 +86,9 @@ HTTPS client `webauth.https_client` that every outbound request goes through,
 with a total deadline of ten seconds on top of the per-step timeout. The
 verifier rejects a token naming an unknown `kid` as `KEY_SET_UNAVAILABLE` when
 the key-set refresh failed, not as `UNKNOWN_KEY_ID`. It also changes
-three public contracts: a `deadline_seconds` of zero or less raises
-`ValueError` in `fetch_key_set_over_https`, `post_form_over_https` and
-`post_token_request_over_https`, which refuses a `timeout_seconds` of zero or less too;
+three public contracts: a `deadline_seconds` or `timeout_seconds` of zero or
+less raises `ValueError` in `fetch_key_set_over_https`, `post_form_over_https`
+and `post_token_request_over_https`;
 `TokenEndpointError.failure` is the `ExchangeFailure` that ended the token
 request, so a caller can tell `TIMED_OUT` from other transport failures; and
 `post_token_request_over_https` takes `deadline_seconds`, raising `ValueError`

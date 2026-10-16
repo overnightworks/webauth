@@ -17,10 +17,6 @@ repository's tagged release.
 **Agent policy:** [AGENTS.md](AGENTS.md) is the provider-neutral entrypoint and
 owns the layout, boundary, check and release rules. Read it first.
 
-## Setup & Checks
-
-The checks are listed in AGENTS.md "Checks"; `uv sync --extra dev` sets up.
-
 ## Code patterns
 
 - **Ports are Protocols, and none of them commits.** A new host obligation is
