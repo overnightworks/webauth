@@ -264,12 +264,10 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
     refusal: str,
     requests_sent: int,
 ) -> None:
+    request = _token_request(f"{target(token_server, monkeypatch)}?{_URL_QUERY}")
     started = time.monotonic()
     with pytest.raises(TokenEndpointError) as refused:
-        post_token_request_over_https(
-            _token_request(f"{target(token_server, monkeypatch)}?{_URL_QUERY}"),
-            timeout_seconds=0.2,
-        )
+        post_token_request_over_https(request, timeout_seconds=0.2)
 
     assert str(refused.value).startswith(refusal)
     assert len(token_server.received) == requests_sent
@@ -324,8 +322,10 @@ def test_a_key_set_fetch_refusal_names_why_only_when_the_exchange_itself_failed(
     target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch], str],
     failure: ExchangeFailure | None,
 ) -> None:
+    url = target(token_server, monkeypatch)
+
     with pytest.raises(KeySetFetchError) as refused:
-        fetch_key_set_over_https(target(token_server, monkeypatch), timeout_seconds=0.2)
+        fetch_key_set_over_https(url, timeout_seconds=0.2)
 
     assert refused.value.failure is failure
 
@@ -544,19 +544,19 @@ def test_one_exchange_raises_exactly_one_connect_audit_event(
 def test_a_token_request_with_a_non_positive_deadline_is_refused_naming_the_deadline(
     deadline_seconds: float,
 ) -> None:
+    request = _token_request("https://127.0.0.1:1/token")
+
     with pytest.raises(ValueError, match="deadline_seconds must be positive"):
-        post_token_request_over_https(
-            _token_request("https://127.0.0.1:1/token"), deadline_seconds=deadline_seconds
-        )
+        post_token_request_over_https(request, deadline_seconds=deadline_seconds)
 
 
 def test_a_token_request_that_timed_out_names_the_timeout_as_its_failure(
     token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    request = _token_request(_stalled(token_server, monkeypatch))
+
     with pytest.raises(TokenEndpointError) as refused:
-        post_token_request_over_https(
-            _token_request(_stalled(token_server, monkeypatch)), timeout_seconds=0.2
-        )
+        post_token_request_over_https(request, timeout_seconds=0.2)
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
 
@@ -566,10 +566,11 @@ def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
 ) -> None:
     # The drip keeps every single step inside timeout_seconds, so only the
     # supplied total deadline can end the exchange.
+    request = _token_request(f"{token_server.base_url}/dripping-body")
     started = time.monotonic()
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(
-            _token_request(f"{token_server.base_url}/dripping-body"),
+            request,
             timeout_seconds=DRIP_INTERVAL_SECONDS * 2.5,
             deadline_seconds=_TEST_DEADLINE_SECONDS,
         )
@@ -580,10 +581,10 @@ def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
 
 
 def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> None:
+    request = _token_request("https://127.0.0.1:1/token")
+
     with pytest.raises(ValueError, match="timeout_seconds"):
-        post_token_request_over_https(
-            _token_request("https://127.0.0.1:1/token"), timeout_seconds=3, deadline_seconds=2
-        )
+        post_token_request_over_https(request, timeout_seconds=3, deadline_seconds=2)
 
 
 def test_the_token_posts_default_deadline_is_the_https_clients_token_exchange_deadline() -> None:
@@ -595,12 +596,12 @@ def test_the_token_posts_default_deadline_is_the_https_clients_token_exchange_de
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
     closed_port: int, caplog: pytest.LogCaptureFixture
 ) -> None:
+    request = _token_request(f"https://127.0.0.1:{closed_port}/token?{_URL_QUERY}")
+
     with pytest.raises(
         TokenEndpointError, match="^the token request failed: the origin could not be reached$"
     ) as refused:
-        post_token_request_over_https(
-            _token_request(f"https://127.0.0.1:{closed_port}/token?{_URL_QUERY}")
-        )
+        post_token_request_over_https(request)
 
     _assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
     assert refused.value.__context__ is None

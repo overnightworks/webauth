@@ -45,6 +45,7 @@ from oidc_arrangement import (
     rs256,
     rsa_key,
     segment,
+    weak_public_jwk,
 )
 
 from webauth.https_client import (
@@ -499,7 +500,7 @@ def _defective_key_sets() -> list[Any]:
             id="private-key",
         ),
         pytest.param(
-            key_set_document(valid_jwk, public_jwk(rsa_key("weak", 1024), "weak-key")),
+            key_set_document(valid_jwk, weak_public_jwk("weak-key")),
             id="rsa-key-under-2048-bits",
         ),
         pytest.param(
@@ -649,7 +650,7 @@ _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signa
             id="key-set-repeating-a-kid",
         ),
         pytest.param(
-            key_set_document(public_jwk(rsa_key("weak", 1024), _URL_SECRET)),
+            key_set_document(weak_public_jwk(_URL_SECRET)),
             "key-too-short",
             id="key-set-with-a-weak-key",
         ),

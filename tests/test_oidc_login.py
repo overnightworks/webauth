@@ -132,7 +132,7 @@ def test_a_new_subject_creates_a_passwordless_member_account_and_reports_it(
         SUBJECT, username, MEMBER_ROLE, True,
     )
     assert account.password_hash is None
-    assert host.accounts.list() == [account]
+    assert [account] == host.accounts.list()
     assert [asdict(event) for event in host.audit.user_management_events] == [{
         "kind": UserManagementEventKind.USER_CREATED,
         "actor_id": None,
