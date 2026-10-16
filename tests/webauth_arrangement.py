@@ -10,12 +10,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import count
 from threading import RLock
+from typing import Any
 
 import fakeredis
 from argon2.profiles import CHEAPEST
@@ -39,12 +40,19 @@ from webauth.dependencies import (
 )
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
+from webauth.middleware.security_headers import (
+    CONTENT_TYPE_OPTIONS,
+    FRAME_OPTIONS,
+    REFERRER_POLICY,
+    STRICT_TRANSPORT_SECURITY,
+)
 from webauth.passwords import Argon2idPasswordHasher
 from webauth.policies import (
     PathRules,
     RateLimitBudget,
     RateLimitClass,
     RateLimitPolicy,
+    SecurityHeadersPolicy,
 )
 from webauth.ports import (
     RateLimitBackend,
@@ -55,6 +63,7 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
+from webauth.session_ending import end_session
 from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
 from webauth.users import UserManagement
 
@@ -104,6 +113,23 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
 
 
 SESSION_COOKIE_NAME = a_web_auth_config().session_cookie_name
+
+
+def assert_carries_policy_headers(
+    headers: Mapping[str, str], policy: SecurityHeadersPolicy, *, hsts: bool,
+) -> None:
+    """Every header ``policy`` puts on a response is there; HSTS only when ``hsts``."""
+    expected = {
+        "x-content-type-options": CONTENT_TYPE_OPTIONS,
+        "x-frame-options": FRAME_OPTIONS,
+        "content-security-policy": policy.content_security_policy,
+        "referrer-policy": REFERRER_POLICY,
+        "permissions-policy": policy.permissions_policy,
+    }
+    if hsts:
+        expected["strict-transport-security"] = STRICT_TRANSPORT_SECURITY
+    carried = {name: headers.get(name) for name in (*expected, "strict-transport-security")}
+    assert carried == {"strict-transport-security": None, **expected}
 
 
 def signed_without_bound(payload: str, secret: bytes) -> str:
@@ -438,10 +464,13 @@ class SessionRecordsInMemory:
         ip_address: str,
         user_agent: str,
         now: datetime,
-    ) -> None:
+    ) -> bool:
+        if record.id not in self._records:
+            return False
         record.ip_address = ip_address
         record.user_agent = user_agent
         record.expires_at = now + timedelta(seconds=self.max_age_seconds)
+        return True
 
 
     def delete(self, session_id: str) -> None:
@@ -517,8 +546,39 @@ class IdleSessionsInMemory:
         ip_address: str,
         user_agent: str,
         now: datetime,
-    ) -> None:
+    ) -> bool:
+        if self.record is None or self.record.id != record.id:
+            return False
         record.last_seen = now
+        return True
+
+
+class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
+    """A store whose session is ended by another request right after ``load`` reads it."""
+
+    def load(self, session_id: str) -> FakeSessionRecord | None:
+        record = super().load(session_id)
+        if record is not None:
+            end_session(self, None, session_id=session_id, user_id=record.user.id)
+        return record
+
+
+class SessionsAnsweringTouch(SessionRecordsInMemory):
+    """A store whose ``touch`` writes nothing and gives a fixed answer."""
+
+    def __init__(self, record: FakeSessionRecord, touch_answer: Any) -> None:
+        super().__init__(record)
+        self.touch_answer = touch_answer
+
+    def touch(
+        self,
+        record: FakeSessionRecord,
+        *,
+        ip_address: str,
+        user_agent: str,
+        now: datetime,
+    ) -> bool:
+        return self.touch_answer
 
 
 @dataclass
@@ -607,6 +667,7 @@ def an_auth_app(
     cache: RedisSessionCache | None = None,
     *,
     login_redirect: LoginRedirect | None = None,
+    sessions: SessionRecordsInMemory | None = None,
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route.
 
@@ -615,7 +676,8 @@ def an_auth_app(
     it against a dependency-guarded route for the same request.
     """
     config = a_web_auth_config(admin_role=ADMIN_ROLE, session_cache=cache)
-    sessions = SessionRecordsInMemory(record)
+    if sessions is None:
+        sessions = SessionRecordsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
 

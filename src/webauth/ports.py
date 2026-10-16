@@ -163,11 +163,14 @@ class SessionRecordStore(Protocol):
         ip_address: str,
         user_agent: str,
         now: datetime,
-    ) -> None:
-        """Renew ``record`` in place: its origin, and an expiry the store owns.
+    ) -> bool:
+        """Renew ``record`` in place, and say whether a stored row was renewed.
 
+        ``True``: the stored row was renewed. ``False``: the row is gone and
+        nothing was written; the request is refused like an expired session.
         ``touch`` only updates an existing row and never creates one, so a
-        session deleted meanwhile stays deleted.
+        session deleted meanwhile stays deleted. Any other answer raises
+        ``TypeError``: answer ``rowcount == 1``, not ``rowcount``.
 
         The store computes its own new expiry from the max age it was built
         with; the caller passes only ``now``, so no code outside

@@ -38,6 +38,9 @@ reaches it through the Protocols in `webauth.ports`: `UserStore`,
 and `PasswordHasher`.
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote.
+`SessionRecordStore.touch` returns a strict `bool`: `True` when a stored row was
+renewed, `False` when the session is gone, which refuses the request like an
+expired session.
 
 ## Configuration
 
@@ -79,6 +82,14 @@ this exact host can set it: a sibling subdomain cannot plant one with
 unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
 `__Host-` or `__Secure-` name a host sets itself with `cookie_secure=False` is refused when
 the configuration is built rather than ending in a silent login loop.
+
+v0.14.0 makes `SecurityHeadersMiddleware` a pure ASGI middleware: its
+`.dispatch`, the `dispatch=` argument and any subclass override of `dispatch`
+are gone. The 500 of an unhandled exception now carries the security headers,
+and the exception still reaches the server. A host's 500 handler still runs,
+but the response it returns is no longer sent. With `debug=True` Starlette's
+traceback page is no longer sent either: the client gets the library 500 with
+the headers, and the traceback still reaches the server log.
 
 v0.13.0 adds the OpenID Connect relying party (`webauth.oidc` and
 `webauth.oidc_login`) with PKCE and the signed pending-login cookie, and the one
