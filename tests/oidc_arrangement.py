@@ -44,11 +44,11 @@ ABSENT = object()
 
 
 @cache
-def rsa_key(name: str, bits: int = 2048) -> rsa.RSAPrivateKey:
+def rsa_key(name: str) -> rsa.RSAPrivateKey:
     """One generated key per name for the whole session: RSA generation is the
     slow part, and a key is immutable scenario data."""
     del name
-    return rsa.generate_private_key(public_exponent=65537, key_size=bits)
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
 def segment(value: dict[str, Any] | str) -> str:
@@ -76,6 +76,21 @@ def changed(base: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
 def public_jwk(key: rsa.RSAPrivateKey, key_id: str, **changes: Any) -> dict[str, Any]:
     jwk = RSAAlgorithm.to_jwk(key.public_key(), as_dict=True)
     return changed({**jwk, "kid": key_id, "alg": "RS256", "use": "sig"}, changes)
+
+
+def weak_public_jwk(key_id: str) -> dict[str, Any]:
+    """A 1024-bit RSA public key, static so that no weak key is ever generated."""
+    return {
+        "kty": "RSA",
+        "n": (
+            "otF29DKe2dz_RcReQ7qYAQuuKBU5DOolwjQ3rIHi6r6tLI0SXGN1SK4ip_n6LyuyIUHI0tm2Zpi_Gq1WjFJ-7"
+            "zFUPaf6HlY8znnZKEkycPyM5fnFZWx6FQmvi8JVHUKaKgtcF3UB4VPm5LRbva8cQPVTlzkf0WQ2UrjK1P9Rb2M"
+        ),
+        "e": "AQAB",
+        "kid": key_id,
+        "alg": "RS256",
+        "use": "sig",
+    }
 
 
 def key_set_document(*jwks: object) -> bytes:
@@ -327,6 +342,7 @@ def loopback_https_server(
             del format, args
 
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
     tls.load_cert_chain(certificate_path, key_path)
     server = HTTPServer(("127.0.0.1", 0), LoopbackHandler)
     server.socket = tls.wrap_socket(server.socket, server_side=True)
