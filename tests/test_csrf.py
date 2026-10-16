@@ -209,6 +209,19 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
         pytest.param(
             {"sec-fetch-site": "same-site", "origin": "null"}, id="a null origin on same-site",
         ),
+        pytest.param({"origin": ""}, id="an empty origin"),
+        pytest.param({"referer": ""}, id="an empty referer"),
+        pytest.param(
+            {"origin": "", "referer": f"{ALLOWED_ORIGIN}/page"},
+            id="an empty origin beside an allowed referer",
+        ),
+        pytest.param(
+            {"origin": f"{ALLOWED_ORIGIN}:evil"}, id="an origin with a non-numeric port",
+        ),
+        pytest.param(
+            {"referer": "https://songmaker.example:password@evil.test/"},
+            id="a referer whose userinfo spells the allowed host",
+        ),
     ],
 )
 def test_an_origin_that_names_no_host_is_refused_like_a_foreign_one(
@@ -235,6 +248,28 @@ def test_a_host_pattern_must_match_the_whole_host_and_port(referer: str, status:
     response = client.post(API_PATH, json={"n": 1}, headers={"referer": referer})
 
     assert response.status_code == status
+
+
+def test_a_pattern_without_a_port_refuses_the_host_with_a_port() -> None:
+    client = a_client_allowing_only_pattern(r"app\.example")
+
+    response = client.post(
+        API_PATH, json={"n": 1}, headers={"referer": "https://app.example:8000/"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_same_origin_fetch_site_passes_despite_a_null_origin() -> None:
+    response = _call("POST", {"sec-fetch-site": "same-origin", "origin": "null"})
+
+    assert response.status_code == 200
+
+
+def test_the_exact_host_with_a_port_is_allowed() -> None:
+    response = _call("POST", {"origin": f"{ALLOWED_ORIGIN}:8000"})
+
+    assert response.status_code == 200
 
 
 def test_songmakers_json_post_without_either_header_is_unchanged() -> None:

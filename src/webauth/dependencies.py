@@ -251,8 +251,8 @@ def session_id_from_request(request: Request, config: WebAuthConfig) -> str | No
     """The session identifier the request's one signed session cookie names.
 
     ``None`` when the cookie is missing, longer than
-    ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed, forged, or present
-    more than once: a sibling subdomain can set a second cookie of the same
+    ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed,
+    forged, or present more than once: a sibling subdomain can set a second cookie of the same
     name, and choosing either would let it decide whose account the request
     runs in.
     """

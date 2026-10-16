@@ -63,16 +63,16 @@ class CsrfTokenMiddleware(BaseHTTPMiddleware):
 
 
 def _is_allowed_host(
-    netloc: str,
+    hostname: str,
+    host_and_port: str,
     exact: frozenset[str],
     patterns: tuple[re.Pattern[str], ...],
 ) -> bool:
-    host_without_port = netloc.rsplit(":", 1)[0] if ":" in netloc else netloc
     if exact or patterns:
-        if netloc in exact or host_without_port in exact:
+        if host_and_port in exact or hostname in exact:
             return True
-        return any(p.fullmatch(netloc) for p in patterns)
-    return bool(_LOCALHOST_PATTERN.match(netloc))
+        return any(p.fullmatch(host_and_port) for p in patterns)
+    return bool(_LOCALHOST_PATTERN.match(host_and_port))
 
 
 def _sec_fetch_site_allows(fetch_site: str) -> bool | None:
@@ -85,11 +85,19 @@ def _sec_fetch_site_allows(fetch_site: str) -> bool | None:
 
 def _origin_is_allowed(origin: str, config: WebAuthConfig) -> bool:
     try:
-        netloc = urlparse(origin).netloc
+        parsed = urlparse(origin)
+        hostname = parsed.hostname
+        port = parsed.port
     except ValueError:
         return False
-    return bool(netloc) and _is_allowed_host(
-        netloc, config.allowed_hosts_exact, config.allowed_hosts_patterns,
+    if not hostname or parsed.username is not None or parsed.password is not None:
+        return False
+    host_and_port = hostname if port is None else f"{hostname}:{port}"
+    return _is_allowed_host(
+        hostname,
+        host_and_port,
+        config.allowed_hosts_exact,
+        config.allowed_hosts_patterns,
     )
 
 
@@ -128,8 +136,10 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
                     return await call_next(request)
                 if allowed is False:
                     return _cross_origin_rejection()
-            origin = request.headers.get("origin") or request.headers.get("referer")
-            if origin:
+            origin = request.headers.get("origin")
+            if origin is None:
+                origin = request.headers.get("referer")
+            if origin is not None:
                 if not _origin_is_allowed(origin, web_auth_config(request)):
                     return _cross_origin_rejection()
             elif _is_form_submission(request):

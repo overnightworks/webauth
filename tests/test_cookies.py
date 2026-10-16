@@ -10,7 +10,11 @@ from http.cookies import SimpleCookie
 import pytest
 from starlette.requests import Request
 from starlette.responses import Response
-from webauth_arrangement import a_web_auth_config, session_cookie_header
+from webauth_arrangement import (
+    a_web_auth_config,
+    session_cookie_header,
+    signed_without_bound,
+)
 
 from webauth.cookies import (
     DEFAULT_CSRF_HEADER_NAME,
@@ -93,6 +97,17 @@ def test_the_longest_session_id_that_fits_is_issued_and_read_back() -> None:
 def test_a_session_id_whose_cookie_the_reader_would_refuse_is_not_issued() -> None:
     with pytest.raises(ValueError, match="session cookie"):
         _session_id_read_back_after_issuing(LONGEST_SESSION_ID_THAT_FITS + "i")
+
+
+def test_an_empty_session_id_is_not_issued() -> None:
+    with pytest.raises(ValueError, match="session id"):
+        _session_id_read_back_after_issuing("")
+
+
+def test_a_cookie_signed_without_the_length_bound_is_accepted_at_normal_length() -> None:
+    cookie = signed_without_bound("my-session-token", _TEST_SECRET)
+
+    assert verify_session_cookie(cookie, _TEST_SECRET) == "my-session-token"
 
 
 def test_verify_rejects_tampered_signature() -> None:

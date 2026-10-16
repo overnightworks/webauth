@@ -119,8 +119,11 @@ def sign_session_id(session_id: str, secret: bytes) -> str:
     """Return ``session_id.hmac_hex`` for use as a cookie value.
 
     Raises ``ValueError`` when the signed value would exceed
-    ``MAX_SESSION_COOKIE_CHARS``, since the reader would refuse that cookie.
+    ``MAX_SESSION_COOKIE_CHARS`` or when ``session_id`` is empty, since the
+    reader would refuse that cookie.
     """
+    if not session_id:
+        raise ValueError("the session id must not be empty")
     sig = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
     signed = f"{session_id}.{sig}"
     if len(signed) > MAX_SESSION_COOKIE_CHARS:
