@@ -210,7 +210,7 @@ middleware in the one order below, outermost first. Starlette inserts at the
 front, so the installer adds them in reverse.
 
 1. `SecurityHeadersMiddleware` (required): outside everything, so the
-   library's own refusals carry the headers: the 413 by Content-Length, the
+   library's own refusals carry the headers: the 413s, the
    429 and 503 with `Retry-After`, the CSRF 403s, and the 500.
 2. `BodySizeLimitMiddleware`: a body whose Content-Length is over the limit
    is refused before it costs a rate-limit budget or a session lookup.
@@ -243,7 +243,10 @@ headers already set. Put a middleware that must see only admitted requests
 (session lookups, audit) before the call; put one that must observe every
 response (access logs, metrics) after it. A response or exception produced by a host
 middleware added after the call (outside the stack) does not carry the
-library headers.
+library headers. A host `BaseHTTPMiddleware` or `@app.middleware("http")` makes a
+response that fails mid-stream look complete wherever it sits, and added before
+the call it also turns the 413 for a streamed body the route reads into the
+library 500; write a middleware that must see admitted requests as pure ASGI.
 
 **Budget semantics.** When the limiter is enabled, the path is not exempt and
 the limiter is reached:
@@ -251,6 +254,7 @@ the limiter is reached:
 | Refusal | Rate budget |
 |---|---|
 | 413 by Content-Length | spends nothing |
+| 413 for a streamed body the route reads | spends one |
 | CSRF 403 | spends one |
 | library 500 | spends one; a missing-config 500 fails before rate admission |
 
@@ -259,7 +263,9 @@ the limiter is reached:
 | Body | Answer | Rate budget |
 |---|---|---|
 | Any Content-Length header over the limit | 413 before the route | spends nothing |
-| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete; with a rate-limit or CSRF middleware between the body-size check and the route, until #119 the response ends complete with what it sent. The error reaches the server either way | spends one |
+| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete. The error reaches the server either way | spends one |
+| Streamed (no Content-Length), read by the route through `request.body()` or `request.stream()` before the response starts | 413 with the headers | spends one |
+| Streamed, parsed by FastAPI (a typed body, `Form()`, `File()`/`UploadFile`) | FastAPI's 400 "There was an error parsing the body" through the host's `HTTPException` handler; the route never runs | spends one |
 | Streamed, never read, and the response is not a `StreamingResponse` under spec < 2.4 | Not size-checked; answers normally | spends one |
 
 The library sends a response's start whole: a cancellation inside the app waits until the start is sent, and so does a host deadline that cancels through an anyio cancel scope outside the stack; asyncio cancellation (`asyncio.timeout`, server shutdown) still interrupts it. The wait is bounded: a start the app hands over that has not been sent after `BodySizePolicy.start_send_seconds` (default 10 seconds) is cut off with an error that reaches the server; no 413 and no second start follow.
@@ -268,7 +274,6 @@ The library sends a response's start whole: a cancellation inside the app waits 
 
 | Cause | Response | Budget |
 |---|---|---|
-| A streamed body over the limit (no Content-Length) that the route reads | The library 500 with the headers, until #28 finding 37, when a rate-limit or CSRF middleware sits between the body-size check and the route; otherwise 413. A streamed body the route never reads: see the table above | spends one |
 | A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
 | No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
 

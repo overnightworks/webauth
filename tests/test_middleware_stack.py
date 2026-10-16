@@ -2,24 +2,35 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, replace
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
+from pydantic import BaseModel
+from starlette.background import BackgroundTask
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import JSONResponse, StreamingResponse
 from webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
     HTTPS_TEST_SERVER,
     AlwaysFailingRateLimitBackend,
+    a_csrf_passing_request_headers,
     a_web_auth_config,
+    an_http_scope,
     assert_carries_policy_headers,
+    completed,
+    drive,
+    starts,
 )
 
 from webauth.config import WEB_AUTH_STATE_ATTRIBUTE, install_web_auth_config
 from webauth.middleware import (
+    CsrfOriginMiddleware,
+    CsrfTokenMiddleware,
     IpRateLimitMiddleware,
     SecurityHeadersMiddleware,
     install_web_auth_middleware,
@@ -49,6 +60,25 @@ FOREIGN = {"origin": FOREIGN_ORIGIN}
 FORM = "application/x-www-form-urlencoded"
 JSON = "application/json"
 OVERSIZED_BODY = b"x" * (BODY_LIMIT_BYTES + 1)
+READING_PATH = "/reads-body"
+STREAM_READING_PATH = "/reads-stream"
+TYPED_PATH = "/typed"
+FAILING_STREAM_PATH = "/fails-mid-stream"
+BACKGROUND_PATH = "/with-background"
+A_CONFIG = a_web_auth_config()
+TWO_CHUNKS_UNDER_THE_LIMIT_EACH = (b"x" * 60, b"x" * 60)
+TOO_LARGE_BODY = {"detail": "Request body too large"}
+
+
+class TypedBody(BaseModel):
+    text: str
+
+
+class RouteFailure(RuntimeError):
+    pass
+
+
+ROUTE_FAILURE = RouteFailure("mid-stream")
 
 
 def a_rate_limit_policy(max_requests: int) -> RateLimitPolicy:
@@ -64,12 +94,38 @@ def a_fresh_app(
     if rate_limits is not None:
         config = replace(config, rate_limits=rate_limits)
     install_web_auth_config(app, config)
+    app.state.background_ran = []
     for path in (API_PATH, PROTECTED_PATH, WEBHOOK_PATH):
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET", "POST"])
 
     @app.get(RAISING_PATH)
     def raising() -> None:
         raise RuntimeError("route failed")
+
+    @app.post(READING_PATH)
+    async def reading(request: Request) -> dict[str, int]:
+        return {"length": len(await request.body())}
+
+    @app.post(STREAM_READING_PATH)
+    async def stream_reading(request: Request) -> dict[str, int]:
+        return {"length": sum([len(chunk) async for chunk in request.stream()])}
+
+    @app.post(TYPED_PATH)
+    async def typed(body: TypedBody) -> dict[str, int]:
+        return {"length": len(body.text)}
+
+    @app.get(FAILING_STREAM_PATH)
+    async def failing_stream() -> StreamingResponse:
+        async def stream() -> AsyncIterator[bytes]:
+            yield b"first"
+            raise ROUTE_FAILURE
+
+        return StreamingResponse(stream())
+
+    @app.get(BACKGROUND_PATH)
+    async def with_background(tasks: BackgroundTasks) -> dict[str, bool]:
+        tasks.add_task(app.state.background_ran.append, BACKGROUND_PATH)
+        return {"ok": True}
 
     return app
 
@@ -351,6 +407,8 @@ class TestRefusedInstallation:
         [
             pytest.param(type("OwnHeaders", (SecurityHeadersMiddleware,), {}), id="headers"),
             pytest.param(type("OwnLimiter", (IpRateLimitMiddleware,), {}), id="rate-limit"),
+            pytest.param(type("OwnOriginCheck", (CsrfOriginMiddleware,), {}), id="csrf-origin"),
+            pytest.param(type("OwnTokenCheck", (CsrfTokenMiddleware,), {}), id="csrf-token"),
         ],
     )
     def test_hand_added_subclass_of_library_middleware_is_refused_and_leaves_the_app_alone(
@@ -408,3 +466,95 @@ class TestCompetingRefusals:
     def test_a_request_failing_origin_and_token_gets_the_origin_refusal(self) -> None:
         response = post_cross_origin(a_full_stack_client())
         assert response.json() == {"detail": "Cross-origin request rejected"}
+
+
+def an_authenticated_full_stack_app(*, max_requests: int = 100) -> FastAPI:
+    app = a_fresh_app()
+    install_full_stack(app, max_requests=max_requests)
+    return app
+
+
+def a_csrf_passing_client(app: FastAPI) -> TestClient:
+    client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
+    client.headers.update(
+        {name.decode(): value.decode() for name, value in a_csrf_passing_request_headers(A_CONFIG)}
+    )
+    client.headers["origin"] = ALLOWED_ORIGIN
+    return client
+
+
+def streamed(*chunks: bytes) -> Iterator[bytes]:
+    yield from chunks
+
+
+class TestAStreamedBodyOverTheLimit:
+    @pytest.mark.parametrize("path", [READING_PATH, STREAM_READING_PATH])
+    def test_a_streamed_body_over_the_limit_that_the_route_reads_answers_413_with_the_headers(
+        self, path: str
+    ) -> None:
+        client = a_csrf_passing_client(an_authenticated_full_stack_app())
+
+        response = client.post(path, content=streamed(*TWO_CHUNKS_UNDER_THE_LIMIT_EACH))
+
+        assert response.status_code == 413
+        assert response.json() == TOO_LARGE_BODY
+        assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
+
+    def test_a_streamed_413_spends_exactly_one_request_of_the_budget(self) -> None:
+        client = a_csrf_passing_client(an_authenticated_full_stack_app(max_requests=2))
+
+        streamed_over_the_limit = streamed(*TWO_CHUNKS_UNDER_THE_LIMIT_EACH)
+        statuses = [
+            client.post(READING_PATH, content=streamed_over_the_limit).status_code,
+            client.get(API_PATH).status_code,
+            client.get(API_PATH).status_code,
+        ]
+
+        assert statuses == [413, 200, 429]
+
+    def test_a_parsed_body_over_the_limit_reaches_the_hosts_http_exception_handler_and_its_background_task(  # noqa: E501
+        self,
+    ) -> None:
+        app = an_authenticated_full_stack_app()
+        handled: list[str] = []
+
+        @app.exception_handler(StarletteHTTPException)
+        async def host_handler(request: Request, error: StarletteHTTPException) -> JSONResponse:
+            handled.append("handler")
+            return JSONResponse(
+                {"host": error.status_code},
+                status_code=error.status_code,
+                background=BackgroundTask(handled.append, "task"),
+            )
+
+        response = a_csrf_passing_client(app).post(
+            TYPED_PATH,
+            content=streamed(b'{"text":"' + b"x" * 54, b"x" * 60 + b'"}'),
+            headers={"content-type": JSON},
+        )
+
+        assert (response.status_code, response.json()) == (400, {"host": 400})
+        assert handled == ["handler", "task"]
+
+
+class TestResponsesBehindThePureAsgiMiddlewares:
+    @pytest.mark.anyio
+    async def test_a_response_that_fails_mid_stream_ends_incomplete_and_its_exception_reaches_the_server(  # noqa: E501
+        self,
+    ) -> None:
+        app = an_authenticated_full_stack_app()
+        scope = an_http_scope(app, FAILING_STREAM_PATH, spec_version="2.4")
+
+        sent, raised = await drive(app, scope, body_chunks=(b"",))
+
+        assert [start["status"] for start in starts(sent)] == [200]
+        assert not completed(sent)
+        assert raised is ROUTE_FAILURE
+
+    def test_an_admitted_routes_background_task_runs(self) -> None:
+        app = an_authenticated_full_stack_app()
+
+        response = a_csrf_passing_client(app).get(BACKGROUND_PATH)
+
+        assert response.status_code == 200
+        assert app.state.background_ran == [BACKGROUND_PATH]

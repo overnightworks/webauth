@@ -12,6 +12,7 @@ from starlette.datastructures import Headers
 from starlette.responses import StreamingResponse
 from webauth_arrangement import (
     StartSend,
+    a_csrf_passing_request_headers,
     a_web_auth_config,
     an_http_scope,
     assert_carries_policy_headers,
@@ -22,7 +23,6 @@ from webauth_arrangement import (
 )
 
 from webauth.config import install_web_auth_config
-from webauth.cookies import generate_csrf_token, sign_session_id
 from webauth.middleware import install_web_auth_middleware
 from webauth.policies import (
     BodySizePolicy,
@@ -39,8 +39,6 @@ if TYPE_CHECKING:
 
     from starlette.types import Message
 
-    from webauth.config import WebAuthConfig
-
 pytestmark = pytest.mark.anyio
 
 LIMIT = 100
@@ -53,7 +51,6 @@ SPEC_WITH_CONCURRENT_READER = "2.3"
 SPEC_WITHOUT_CONCURRENT_READER = "2.4"
 
 
-SESSION_ID = "sid-1"
 START_SEND_BOUND_SECONDS = 0.05
 
 
@@ -106,16 +103,6 @@ def a_body_limited_app(
     else:
         install_web_auth_middleware(app, security_headers=HEADERS_POLICY, body_size=body_size)
     return app
-
-
-def a_csrf_passing_request_headers(config: WebAuthConfig) -> list[tuple[bytes, bytes]]:
-    cookie = f"{config.session_cookie_name}={sign_session_id(SESSION_ID, config.signing_key)}"
-    token = generate_csrf_token(SESSION_ID, config.signing_key)
-    return [
-        (b"sec-fetch-site", b"same-origin"),
-        (b"cookie", cookie.encode()),
-        (config.csrf_header_name.encode(), token.encode()),
-    ]
 
 
 async def drive_post(
@@ -235,7 +222,7 @@ async def test_any_content_length_over_the_limit_is_refused_before_the_route(
     assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
 
 
-async def test_behind_a_base_http_middleware_an_overflowing_started_response_is_cut_to_what_was_read_until_119() -> None:  # noqa: E501
+async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_the_full_stack() -> None:  # noqa: E501
     app = a_body_limited_app(full_stack=True)
 
     sent, raised = await drive_post(
@@ -247,6 +234,5 @@ async def test_behind_a_base_http_middleware_an_overflowing_started_response_is_
     )
 
     assert [start["status"] for start in starts(sent)] == [200]
-    assert completed(sent)
-    assert body_of(sent) == b"first"
+    assert not completed(sent)
     assert raised is not None
