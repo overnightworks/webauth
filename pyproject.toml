@@ -9,7 +9,6 @@ requires-python = ">=3.12"
 keywords = ["fastapi", "authentication", "session", "csrf", "cookies", "rate-limit", "oidc"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "License :: OSI Approved :: MIT License",
     "Framework :: FastAPI",
     "Typing :: Typed",
     "Programming Language :: Python :: 3 :: Only",

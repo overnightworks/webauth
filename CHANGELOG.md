@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `overnightworks-webauth` are recorded here, in the format of
+All notable changes to `overnightworks-webauth` are recorded here, after
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). While the version is
 0.x, a minor release may break a public contract and says so under **Breaking**.
 Versions before 0.3.0 and releases without an entry here are described in the
@@ -12,15 +12,55 @@ This is the last release with password parts.
 
 **Breaking**
 
-v0.14.0 makes `SecurityHeadersMiddleware` a pure ASGI middleware: its
-`.dispatch`, the `dispatch=` argument and any subclass override of `dispatch`
-are gone. The 500 of an unhandled exception now carries the security headers,
-and the exception still reaches the server. A host's 500 handler still runs,
-but the response it returns is no longer sent. With `debug=True` Starlette's
-traceback page is no longer sent either: the client gets the library 500 with
-the headers, and the traceback still reaches the server log. `install_web_auth_middleware`
-(see [Middleware order](README.md#middleware-order)) installs the whole stack in the
-order that makes every library refusal carry the headers.
+- `SecurityHeadersMiddleware` is a pure ASGI middleware: its `.dispatch`, the
+  `dispatch=` argument and any subclass override of `dispatch` are gone. The 500
+  of an unhandled exception now carries the security headers, and the exception
+  still reaches the server. A host's 500 handler still runs, but the response it
+  returns is no longer sent. With `debug=True` Starlette's traceback page is no
+  longer sent either: the client gets the library 500 with the headers, and the
+  traceback still reaches the server log.
+- `SessionRecordStore.touch` returns a `bool`: `True` when a stored row was
+  renewed, `False` when the row is gone, which refuses the request like an
+  expired session. Any other answer raises `TypeError`; answer `rowcount == 1`,
+  not `rowcount`.
+- The Redis session cache is gone: the store decides every request.
+  `SessionCache`, `CachedSessionData`, `SessionLivenessPolicy.admits_cached_session`,
+  the module `webauth.session_store` with `RedisSessionCache`, and
+  `WebAuthConfig.session_cache` are removed.
+- `end_session`, `end_user_sessions` and `prune_sessions` no longer take a cache;
+  `end_session(sessions, *, session_id)` also drops `user_id`.
+- `webauth.ports.StoredSessionT` is dropped; `SessionLivenessPolicy` is generic in
+  its stored-session type by its own parameter.
+- `WebAuthConfig` refuses, at construction, an `admin_role` equal to `user_role`
+  (and a role that is not a non-blank string), a `max_user_agent_chars` that is
+  not a positive `int`, and a `__Secure-` cookie name with `cookie_secure=False`.
+- `sign_session_cookie` raises `ValueError` for an empty session id or one whose
+  signed value exceeds `MAX_SESSION_COOKIE_CHARS`, which now lives in
+  `webauth.cookies`.
+- The CSRF origin check compares the parsed host and port, matches
+  `allowed_hosts_patterns` against the whole `host[:port]`, and refuses an
+  origin without a host or with userinfo. Bracketed IPv6 origins match.
+- `timeout_seconds` of zero or less raises `ValueError` in
+  `fetch_key_set_over_https`, `post_form_over_https` and
+  `post_token_request_over_https`, as `deadline_seconds` already did.
+- `IdleWindowLiveness` raises `TypeError` for a naive `last_seen`.
+- `webauth.jwt_verification` exposes `VerificationRefusal` and
+  `strict_json_object`; the private `_RefusalError` and `_strict_json_object` are
+  gone.
+
+**Added and changed**
+
+- `install_web_auth_middleware` (see [Middleware order](README.md#middleware-order))
+  installs the whole stack in the order that makes every library refusal carry
+  the headers. It refuses, before touching the app, a token policy without an
+  origin policy, a token policy that exempts paths the origin policy does not
+  check (decided by `CsrfPolicy.token_exemptions_outside_origin_check`), and an
+  app that already carries library middleware.
+- A redirect target that a browser reads as another host (`/\x`, `/<tab>/x`)
+  collapses to `/`, as `//x` did.
+- A key-set fetch that timed out says so in its `KeySetFetchError` message.
+- `SECURITY.md` names the supported release and how to report a vulnerability;
+  a release is built only from a commit of `main` whose CI run finished green.
 
 ## 0.13.0
 
@@ -75,9 +115,12 @@ instead.
 
 ## 0.9.0
 
+**Breaking**
+
 v0.9.0 counts rate-limit budgets per IPv6 network: every IPv6 client in one
 `/64` shares one budget by default, and `ipv6_budget_prefix` (32 to 128)
-chooses the network size. The IPv6 budget keys change, so existing Redis
+chooses the network size; `ipv6_budget_prefix=128` keeps the old per-address
+budgets. The IPv6 budget keys change, so existing Redis
 counters for IPv6 clients start from zero once after the upgrade.
 
 ## 0.8.0

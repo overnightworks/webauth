@@ -12,3 +12,4 @@ updates:
       interval: daily
     cooldown:
       default-days: 7
+    versioning-strategy: lockfile-only

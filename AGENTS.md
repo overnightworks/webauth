@@ -17,7 +17,7 @@ to a public contract that a tag has already frozen somewhere else.
 
 The repository root holds only what a tool must find there — the package
 manifest and its lockfile, scanner configuration, the licence — and the entry
-documents `README.md`, `AGENTS.md` and `CLAUDE.md`. Everything else lives in
+documents `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md` and `SECURITY.md`. Everything else lives in
 the directory of its owner: the library under `src/webauth/`, its suite under
 `tests/`. No catch-all directory (`tooling/`, `misc/`) and no deeper hierarchy
 than the owner needs.
@@ -80,7 +80,8 @@ so the version in `pyproject.toml` and `webauth.__version__` is raised in the
 pull request that precedes the tag.
 
 A pull request that changes behaviour a host can see adds its line to
-`CHANGELOG.md` under the unreleased version, marked **Breaking** when a public
+`CHANGELOG.md` under the unreleased version (opening `## X.Y.Z - Unreleased` when
+none is open), marked **Breaking** when a public
 contract changes.
 
 A tag must sit on a commit of `main` whose CI push run finished green; the

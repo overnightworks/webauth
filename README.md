@@ -91,6 +91,13 @@ traceback page is not sent either: the client gets the library 500 with the head
 whole stack in the order that makes every library refusal carry the headers. What changed
 in each release is in the [CHANGELOG](CHANGELOG.md).
 
+The cookies' default names are the public constants `DEFAULT_SESSION_COOKIE_NAME` and
+`DEFAULT_CSRF_COOKIE_NAME` in `webauth.cookies` (the `__Host-` names) and
+`PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME` (the names with `cookie_secure=False`).
+A client that reads the CSRF cookie by name reads `config.csrf_cookie_name`.
+A request that reaches the library in an app without `install_web_auth_config` raises
+`RuntimeError`.
+
 ## Install
 
 The wheel is published as an asset on each tag's release; take the version
@@ -121,11 +128,11 @@ release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 ## What it does not do
 
 - It persists nothing and holds no schema or ORM.
-- It defines no routes and no response bodies.
+- It defines no routes; the only responses it writes are its own refusals: 401, 403, 413, 429, 503 and the 500.
 - It has no user model and no role names beyond the configured ones.
 - It commits no transaction; the caller owns it.
-- It issues no tokens; it verifies the ones an issuer made.
-- It decides no authorisation beyond the admin check.
+- It issues no access or ID tokens: it is no identity provider, and it verifies the ID tokens an issuer made.
+- It decides no authorisation beyond the admin check and the user-administration guards.
 
 ## A login route
 
@@ -419,6 +426,10 @@ Three numbers decide how long someone stays signed in, and each has one owner:
   `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
   older than the cap, however recently it was used.
 
+Every lifetime — `session_max_age_seconds`, `cookie_max_age_seconds` and the windows and
+caps of both liveness policies — must be a positive whole number of seconds; `0`, a negative
+value, a `float`, a string or a `bool` is refused when the object is built.
+
 The recommended policy is a 30-day cookie, a 7-day idle window and a 30-day
 absolute cap: someone who comes back at least weekly stays signed in for up to
 30 days, and anyone away for more than 7 days signs in again.
@@ -532,7 +543,12 @@ for a redirect, an answer past `MAX_TOKEN_RESPONSE_BYTES`, a TLS failure, a
 timeout or an unreachable origin. Its message is the library's own and never
 quotes the URL, the client secret, the code or the verifier. urllib3 logs
 nothing during either call, since its records quote the URL and whatever
-malformed header text the origin sends back.
+malformed header text the origin sends back. A `timeout_seconds` or
+`deadline_seconds` of zero or less raises `ValueError`, and
+`post_token_request_over_https` raises `ValueError` when `timeout_seconds`
+exceeds `deadline_seconds` instead of capping it. `TokenEndpointError.failure`
+names the `ExchangeFailure` that ended the request, so a caller can tell
+`TIMED_OUT` from other transport failures.
 
 `webauth.oidc_login.admit_identity(identity, *, bound_issuer, accounts, lock,
 audit, config)` turns that identity into the account it signs in as. The host
