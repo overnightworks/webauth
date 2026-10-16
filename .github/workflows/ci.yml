@@ -28,22 +28,19 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --extra dev # NOSONAR(S8541) packaged project: uv refuses --no-build (#75)
-
-      - name: Lockfile is current
-        run: uv lock --check
+        run: uv sync --locked --extra dev
 
       - name: Ruff
-        run: uv run --locked ruff check src tests # NOSONAR(S8541) packaged project: uv refuses --no-build (#75)
+        run: uv run --locked ruff check src tests
 
       - name: Import boundaries
-        run: uv run --locked lint-imports # NOSONAR(S8541) packaged project: uv refuses --no-build (#75)
+        run: uv run --locked lint-imports
 
       - name: A password-only host still type-checks
         run: uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 
       - name: Tests
-        run: uv run --locked pytest tests -q # NOSONAR(S8541) packaged project: uv refuses --no-build (#75)
+        run: uv run --locked pytest tests -q
 
       - name: Build the distribution
         run: uv build
