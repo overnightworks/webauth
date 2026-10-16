@@ -21,7 +21,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
-| `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware |
+| `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
@@ -89,7 +89,9 @@ are gone. The 500 of an unhandled exception now carries the security headers,
 and the exception still reaches the server. A host's 500 handler still runs,
 but the response it returns is no longer sent. With `debug=True` Starlette's
 traceback page is no longer sent either: the client gets the library 500 with
-the headers, and the traceback still reaches the server log.
+the headers, and the traceback still reaches the server log. `install_web_auth_middleware`
+(see [Middleware order](#middleware-order)) installs the whole stack in the
+order that makes every library refusal carry the headers.
 
 v0.13.0 adds the OpenID Connect relying party (`webauth.oidc` and
 `webauth.oidc_login`) with PKCE and the signed pending-login cookie, and the one
@@ -178,6 +180,8 @@ the fake stores, so the shape of a login is visible without a database. Run
 this from `tests/`:
 
 ```python
+import secrets
+
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 from webauth_arrangement import FakeUser, a_web_auth_config
@@ -201,7 +205,7 @@ def login(response: Response, password: str) -> dict[str, str]:
     outcome = judge_credentials(password, alice, hasher=config.password_hasher)
     if outcome is not LoginOutcome.ADMITTED:
         raise http_refusal(LoginRefusal(outcome))
-    issue_session_cookies(response, "session-1", config)
+    issue_session_cookies(response, secrets.token_urlsafe(32), config)
     return {"status": "ok"}
 
 client = TestClient(app, base_url="https://songmaker.example")
@@ -236,6 +240,70 @@ subdomain can set a second cookie of the same name, so a request carrying two
 is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
 session cookie itself calls this function instead of `request.cookies`.
+
+## Middleware order
+
+`install_web_auth_middleware(app, *, security_headers, body_size=None,
+rate_limit=None, csrf_origin=None, csrf_token=None)` adds the library's
+middleware in the one order below, outermost first. Starlette inserts at the
+front, so the installer adds them in reverse.
+
+1. `SecurityHeadersMiddleware` (required): outside everything, so the
+   library's own refusals carry the headers: the 413 by Content-Length, the
+   429 and 503 with `Retry-After`, the CSRF 403s, and the 500.
+2. `BodySizeLimitMiddleware`: an oversized body is refused before it costs a
+   rate-limit budget or a session lookup.
+3. `IpRateLimitMiddleware`: outside CSRF, so forged requests spend the
+   address's budget.
+4. `CsrfOriginMiddleware`.
+5. `CsrfTokenMiddleware`.
+
+`csrf_origin` and `csrf_token` take separate `CsrfPolicy` values. The
+installer refuses, before it touches the app, a `csrf_token` without a
+`csrf_origin` (`ValueError`: login routes skip the token on the promise that
+the origin check protects them), and an app that already carries any of the
+five library middleware, whether from an earlier installer call or added by
+hand (`RuntimeError`). Install once, and add no library middleware yourself.
+
+**Placement of host middleware.** Added before the call, a host middleware
+sits inside the library stack: a request the library refuses never reaches it.
+Added after the call, it sits outside: it sees every library refusal with the
+headers already set. Put a middleware that must see only admitted requests
+(session lookups, audit) before the call; put one that must observe every
+response (access logs, metrics) after it.
+
+**Budget semantics.** When the limiter is enabled, the path is not exempt and
+the limiter is reached:
+
+| Refusal | Rate budget |
+|---|---|
+| 413 by Content-Length | spends nothing |
+| CSRF 403 | spends one |
+| library 500 | spends one; a missing-config 500 fails before rate admission |
+
+**The 500 cases.**
+
+| Cause | Response | Budget |
+|---|---|---|
+| A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
+| No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
+
+### The host's duties at login
+
+The library never writes, so these belong to the host's login and OIDC
+callback routes alike:
+
+- **`next`:** validate the final decoded value against the rule
+  `LoginRedirect.path` enforces: one leading `/`; never `//` or a backslash
+  form after browsers strip tab, CR and LF; no scheme. Otherwise fall back to
+  a fixed local path.
+- **Fresh id:** every successful login mints a fresh session id. Never reuse
+  one from an incoming cookie, and never the issuer's `sid`.
+- **Replaced session:** when a verified session cookie is present, load its
+  record and end it with `end_session(sessions, session_id=<old id>)`, then
+  commit that transaction before `issue_session_cookies`.
+- **Entropy:** at least 128 bits from a CSPRNG. `secrets.token_urlsafe(32)`
+  gives 43 characters, under the 135-character bound.
 
 ## users
 
