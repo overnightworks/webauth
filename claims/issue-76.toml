@@ -1,8 +1,0 @@
-claim_id = "6cbdd9401b274059a752b8e0777313c1"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "9433a79b1d1e7050808aa73ca029aaba6e83a616"
-branch = "claude/issue-76-s11-csrf-origin-cookie-bound"
-scope = ["README.md", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/middleware/csrf.py", "tests/test_cookies.py", "tests/test_csrf.py", "tests/test_dependencies.py", "tests/test_oidc_login.py", "tests/webauth_arrangement.py"]
-opened_commit = "edaec4490e4866a11b90148b54d33f02e62a958c"
-whole_reason = "S11 is one security slice: the origin helper, the bounded signer and the test sites that sign overlong cookies move together"
