@@ -1,0 +1,8 @@
+claim_id = "981a7c3b7e4f495592b05715baa5e451"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "9433a79b1d1e7050808aa73ca029aaba6e83a616"
+branch = "claude/issue-78-f1-strict-token-json"
+scope = ["src/webauth/jwt_verification.py", "src/webauth/oidc.py", "tests/test_jwt_verification.py", "tests/test_oidc.py"]
+opened_commit = "bc70b924f837d4ed4cb5dd24343f0cef60b261b7"
+whole_reason = "F1 is one owner change: the strict parser moves to one module and its two test modules follow"
