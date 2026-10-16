@@ -1,0 +1,8 @@
+claim_id = "c281e848ab1d46e8a11b421daad5e840"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "54e5bad2bcd7877790ea1683590008d173b9f96d"
+branch = "claude/issue-105-sonar-s3-drei-src-befunde-csrf-origin-en"
+scope = ["src/webauth/dependencies.py", "src/webauth/middleware/csrf.py", "src/webauth/ports.py", "tests/test_csrf.py", "tests/test_dependencies.py"]
+opened_commit = "056f59f270d45ff56445d0da1be6c876fbecb609"
+whole_reason = "Three private refactors for one Sonar slice plus the two unchanged test modules that prove them"
