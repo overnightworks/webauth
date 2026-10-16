@@ -9,7 +9,14 @@ from fastapi import BackgroundTasks, FastAPI
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
-from webauth_arrangement import a_web_auth_config, assert_carries_policy_headers
+from webauth_arrangement import (
+    a_web_auth_config,
+    an_http_scope,
+    assert_carries_policy_headers,
+    drive,
+    no_receive,
+    starts,
+)
 
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware
@@ -23,7 +30,7 @@ from webauth.policies import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+    from starlette.types import Message, Receive, Scope, Send
 
 POLICY = SecurityHeadersPolicy(default_content_security_policy([]))
 SERVER_ERROR_BODY = "Internal Server Error"
@@ -46,37 +53,6 @@ def with_failing_route(app: FastAPI, failure: Exception) -> None:
     @app.get("/boom")
     def boom() -> None:
         raise failure
-
-
-async def no_receive() -> Message:
-    return {"type": "http.disconnect"}
-
-
-def an_http_scope(app: FastAPI, path: str = "/boom") -> Scope:
-    return {
-        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
-        "scheme": "https", "path": path, "raw_path": path.encode(), "query_string": b"",
-        "headers": [], "client": ("203.0.113.7", 1234), "server": ("testserver", 443),
-        "root_path": "", "app": app,
-    }
-
-
-async def drive(app: ASGIApp, scope: Scope) -> tuple[list[Message], BaseException | None]:
-    sent: list[Message] = []
-
-    async def record(message: Message) -> None:
-        sent.append(message)
-
-    raised: BaseException | None = None
-    try:
-        await app(scope, no_receive, record)
-    except Exception as error:  # noqa: BLE001
-        raised = error
-    return sent, raised
-
-
-def starts(messages: list[Message]) -> list[Message]:
-    return [message for message in messages if message["type"] == "http.response.start"]
 
 
 @pytest.mark.parametrize("cookie_secure", HSTS_SETTINGS)
