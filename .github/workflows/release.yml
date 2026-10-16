@@ -4,13 +4,43 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  release:
-    name: release
+  verify:
+    name: verify
     runs-on: ubuntu-latest
+    permissions:
+      checks: read
+    steps:
+      - name: The tagged commit passed CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_CHECKS: '["checks", "quality / verdict"]'
+        run: |
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" \
+            --jq '.check_runs[]' | jq -s -r --argjson required "$REQUIRED_CHECKS" '
+              . as $runs
+              | $required[]
+              | . as $name
+              | ([$runs[] | select(.name == $name)] | max_by(.id)) as $latest
+              | if $latest == null then "\($name): missing"
+                elif $latest.conclusion != "success" then "\($name): \($latest.status) \($latest.conclusion)"
+                else empty end' > failures.txt
+          if [ -s failures.txt ]; then
+            echo "Commit ${GITHUB_SHA} is not releasable:" >&2
+            cat failures.txt >&2
+            exit 1
+          fi
+
+  build:
+    name: build
+    needs: [verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -32,7 +62,37 @@ jobs:
             exit 1
           fi
 
-      - name: Publish the release with its wheel
+      - name: Record the checksums
+        run: sha256sum dist/* > SHA256SUMS
+
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            SHA256SUMS
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+
+      - name: Publish the release with its files
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.whl --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.whl dist/*.tar.gz SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
