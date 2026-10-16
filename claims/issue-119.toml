@@ -1,0 +1,8 @@
+claim_id = "17063300ee7e46b0b103657075b935a3"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "d634d9296e1f5b6021f35643fabc56d1f9195dbd"
+branch = "claude/issue-119-s38a-rate-limit-und-csrf-middlewares-wer"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/middleware/csrf.py", "src/webauth/middleware/rate_limit.py", "src/webauth/middleware/refusal.py", "tests/test_middleware_stack.py", "tests/webauth_arrangement.py"]
+opened_commit = "46bd7e9500c6cca532333dbe5678d0f27e00ddb8"
+whole_reason = "One conversion of three peer middlewares onto one private base, with their tests and the README/CHANGELOG lines; split, neither finding can be shown closed"
