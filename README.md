@@ -128,7 +128,7 @@ release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 ## What it does not do
 
 - It persists nothing and holds no schema or ORM.
-- It defines no routes; the only responses it writes are its own refusals: 401, 403, 413, 429, 503 and the 500.
+- It defines no routes; the only responses it writes are its own refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login path.
 - It has no user model and no role names beyond the configured ones.
 - It commits no transaction; the caller owns it.
 - It issues no access or ID tokens: it is no identity provider, and it verifies the ID tokens an issuer made.

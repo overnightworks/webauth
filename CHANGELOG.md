@@ -34,19 +34,12 @@ This is the last release with password parts.
 - `WebAuthConfig` refuses, at construction, an `admin_role` equal to `user_role`
   (and a role that is not a non-blank string), a `max_user_agent_chars` that is
   not a positive `int`, and a `__Secure-` cookie name with `cookie_secure=False`.
-- `sign_session_cookie` raises `ValueError` for an empty session id or one whose
-  signed value exceeds `MAX_SESSION_COOKIE_CHARS`, which now lives in
-  `webauth.cookies`.
+- `sign_session_id` raises `ValueError` for an empty session id or one whose
+  signed value exceeds `MAX_SESSION_COOKIE_CHARS`, which moved from
+  `webauth.dependencies` to `webauth.cookies`.
 - The CSRF origin check compares the parsed host and port, matches
   `allowed_hosts_patterns` against the whole `host[:port]`, and refuses an
   origin without a host or with userinfo. Bracketed IPv6 origins match.
-- `timeout_seconds` of zero or less raises `ValueError` in
-  `fetch_key_set_over_https`, `post_form_over_https` and
-  `post_token_request_over_https`, as `deadline_seconds` already did.
-- `IdleWindowLiveness` raises `TypeError` for a naive `last_seen`.
-- `webauth.jwt_verification` exposes `VerificationRefusal` and
-  `strict_json_object`; the private `_RefusalError` and `_strict_json_object` are
-  gone.
 
 **Added and changed**
 
@@ -57,7 +50,15 @@ This is the last release with password parts.
   check (decided by `CsrfPolicy.token_exemptions_outside_origin_check`), and an
   app that already carries library middleware.
 - A redirect target that a browser reads as another host (`/\x`, `/<tab>/x`)
-  collapses to `/`, as `//x` did.
+  collapses to `/`, as `//x` did. `LoginRedirect` refuses a backslash or tab
+  form of its `path` when it is built.
+- Comparing a session cookie or CSRF token that holds a non-ASCII value now
+  works on bytes: it is refused (401 or 403) where v0.13.0 raised `TypeError`
+  and answered 500.
+- The OIDC token answer is read by the verifier's strict parser: bad UTF-8,
+  non-finite numbers and nesting that is too deep are refused.
+  `webauth.jwt_verification` exposes `VerificationRefusal` and
+  `strict_json_object`.
 - A key-set fetch that timed out says so in its `KeySetFetchError` message.
 - `SECURITY.md` names the supported release and how to report a vulnerability;
   a release is built only from a commit of `main` whose CI run finished green.
