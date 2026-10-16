@@ -325,9 +325,10 @@ def test_a_session_ended_between_load_and_touch_is_refused_without_audit() -> No
 def test_a_touch_answering_anything_but_a_bool_is_refused(answer: object) -> None:
     sessions = SessionsAnsweringTouch(a_session(), answer)
     app = an_auth_app(None, sessions=sessions)
+    cookie = app.signed_cookie()
 
     with pytest.raises(TypeError, match="SessionRecordStore.touch"):
-        app.get("/me", cookie=app.signed_cookie())
+        app.get("/me", cookie=cookie)
 
 
 def test_a_touch_reporting_no_row_refuses_the_request_and_writes_nothing() -> None:
@@ -341,6 +342,19 @@ def test_a_touch_reporting_no_row_refuses_the_request_and_writes_nothing() -> No
     assert app.audit.events == []
     assert (record.ip_address, record.expires_at) == ("203.0.113.9", stored_expiry)
     assert app.authenticated == []
+
+
+def test_a_touch_reporting_no_row_fills_no_cache_and_refuses_again() -> None:
+    cache = a_session_cache()
+    app = an_auth_app(None, cache, sessions=SessionsAnsweringTouch(a_session(), False))
+    cookie = app.signed_cookie()
+
+    first = app.get("/me", cookie=cookie)
+    cached_after_first = cache.get(SESSION_ID)
+    second = app.get("/me", cookie=cookie)
+
+    assert (first.status_code, second.status_code) == (401, 401)
+    assert cached_after_first is None
 
 
 @pytest.mark.parametrize("an_app", AUTHENTICATION_PATHS)

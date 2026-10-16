@@ -652,7 +652,8 @@ def an_auth_app(
     it against a dependency-guarded route for the same request.
     """
     config = a_web_auth_config(admin_role=ADMIN_ROLE, session_cache=cache)
-    sessions = sessions or SessionRecordsInMemory(record)
+    if sessions is None:
+        sessions = SessionRecordsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
 
