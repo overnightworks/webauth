@@ -297,7 +297,7 @@ the limiter is reached:
 
 | Cause | Response | Budget |
 |---|---|---|
-| A streamed body over the limit (no Content-Length) | The library 500 with the headers, until #28 finding 37, when a rate-limit or CSRF middleware sits between the body-size check and a route that reads the body; otherwise 413 | spends one |
+| A streamed body over the limit (no Content-Length) that the route reads | The library 500 with the headers, until #28 finding 37, when a rate-limit or CSRF middleware sits between the body-size check and the route; otherwise 413. A streamed body the route never reads is not size-checked and answers normally | spends one |
 | A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
 | No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
 

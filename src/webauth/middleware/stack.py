@@ -48,7 +48,7 @@ def install_web_auth_middleware(
     origin policy; and an app that already carries any library middleware,
     including a subclass of one.
 
-    Containment is decided by ``CsrfPolicy.origin_check_covers``: a token
+    Containment is decided by ``CsrfPolicy.token_exemptions_outside_origin_check``: a token
     exemption must be covered by the origin check on every path it exempts,
     and one that cannot be verified (a shape or pattern, or a prefix an origin
     exemption may reach into) is refused; name such paths exactly or by a
@@ -60,7 +60,7 @@ def install_web_auth_middleware(
             "promise that the origin check protects them.",
         )
     if csrf_token is not None and csrf_origin is not None:
-        uncovered = csrf_origin.origin_check_covers(csrf_token)
+        uncovered = csrf_origin.token_exemptions_outside_origin_check(csrf_token)
         if uncovered:
             raise ValueError(
                 "csrf_token exempts paths the csrf_origin policy does not check: "

@@ -176,7 +176,7 @@ class TestCsrfPolicy:
     ) -> None:
         token_policy = CsrfPolicy(token_exempt=token_exempt)
 
-        assert origin.origin_check_covers(token_policy) != ()
+        assert origin.token_exemptions_outside_origin_check(token_policy) != ()
 
     @pytest.mark.parametrize("origin", [
         pytest.param(CsrfPolicy(protected=PathRules(prefixes=("/api/",))), id="fail-open"),
@@ -190,7 +190,7 @@ class TestCsrfPolicy:
             prefixes=("/api/internal/",),
         ))
 
-        assert origin.origin_check_covers(token_policy) == ()
+        assert origin.token_exemptions_outside_origin_check(token_policy) == ()
 
 
 class TestBodySizePolicy:

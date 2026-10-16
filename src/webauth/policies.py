@@ -152,7 +152,7 @@ class CsrfPolicy:
     def requires_token(self, path: str) -> bool:
         return self._is_protected(path) and not self.token_exempt.matches(path)
 
-    def origin_check_covers(self, token_policy: CsrfPolicy) -> tuple[str, ...]:
+    def token_exemptions_outside_origin_check(self, token_policy: CsrfPolicy) -> tuple[str, ...]:
         """The ``token_policy`` exemptions this policy's origin check does not fully cover.
 
         A token exemption is safe only where the origin check still runs, so
