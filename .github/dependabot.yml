@@ -12,4 +12,8 @@ updates:
       interval: daily
     cooldown:
       default-days: 7
-    versioning-strategy: lockfile-only
+    versioning-strategy: widen
+    # The e2e pins need a probe run CI does not make; #110 owns their freshness.
+    ignore:
+      - dependency-name: playwright
+      - dependency-name: uvicorn

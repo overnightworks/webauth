@@ -18,7 +18,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUIRED_JOBS: '["checks", "quality / verdict"]'
+          REQUIRED_JOBS: '["checks", "lowest-direct", "quality / verdict"]'
         run: |
           fail() { echo "Commit ${GITHUB_SHA} is not releasable: $1" >&2; exit 1; }
 

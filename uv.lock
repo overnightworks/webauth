@@ -780,9 +780,11 @@ wheels = [
 name = "overnightworks-webauth"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "argon2-cffi" },
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "starlette" },
 ]
 
 [package.optional-dependencies]
@@ -814,19 +816,21 @@ e2e = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.12,<5" },
     { name = "argon2-cffi", specifier = ">=23.1,<26" },
-    { name = "cryptography", marker = "extra == 'jwt'", specifier = ">=50.0.2" },
-    { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2,<3" },
-    { name = "fastapi", specifier = ">=0.100,<1" },
+    { name = "cryptography", marker = "extra == 'jwt'", specifier = ">=50.0.2,<51" },
+    { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2.20,<3" },
+    { name = "fastapi", specifier = ">=0.123.7,<1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27,<1" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2,<3" },
     { name = "overnightworks-webauth", extras = ["jwt"], marker = "extra == 'dev'" },
-    { name = "pydantic", specifier = ">=2,<3" },
+    { name = "pydantic", specifier = ">=2.6,<3" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'jwt'", specifier = ">=2.15.1,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7,<10" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7,<8" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0,<9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4,<1" },
+    { name = "starlette", specifier = ">=0.46,<2" },
     { name = "urllib3", marker = "extra == 'jwt'", specifier = ">=2.6.3,<3" },
 ]
 provides-extras = ["redis", "jwt", "dev"]
