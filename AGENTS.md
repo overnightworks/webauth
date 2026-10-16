@@ -83,4 +83,4 @@ updating and deleting tags) and never bump the version for it.
 The release carries the wheel, the sdist, `SHA256SUMS` and build-provenance
 attestations. Check a downloaded file with
 `gh attestation verify <file> -R overnightworks/webauth` and
-`sha256sum -c SHA256SUMS`.
+`sha256sum -c --ignore-missing SHA256SUMS`.
