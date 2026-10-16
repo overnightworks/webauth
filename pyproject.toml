@@ -73,3 +73,6 @@ select = ["E", "F", "W", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/webauth/__init__.py" }]
