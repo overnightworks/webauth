@@ -13,7 +13,12 @@ from webauth_arrangement import a_web_auth_config, assert_carries_policy_headers
 
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware
-from webauth.policies import SecurityHeadersPolicy, default_content_security_policy
+from webauth.policies import (
+    CacheControlRule,
+    PathRules,
+    SecurityHeadersPolicy,
+    default_content_security_policy,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -92,8 +97,10 @@ def test_a_default_test_client_raises_the_exception_the_route_raised() -> None:
     app = an_app()
     with_failing_route(app, failure)
 
+    client = TestClient(app)
+
     with pytest.raises(RouteFailure) as raised:
-        TestClient(app).get("/boom")
+        client.get("/boom")
 
     assert raised.value is failure
 
@@ -133,8 +140,10 @@ def test_a_host_exception_handler_runs_once_but_its_response_is_not_sent() -> No
     assert_carries_policy_headers(response.headers, POLICY, hsts=True)
     assert len(handled) == 1
     assert background_ran == []
+    client = TestClient(app)
+
     with pytest.raises(RouteFailure):
-        TestClient(app).get("/boom")
+        client.get("/boom")
 
 
 def test_debug_mode_answers_the_library_500_without_a_traceback_page() -> None:
@@ -145,8 +154,10 @@ def test_debug_mode_answers_the_library_500_without_a_traceback_page() -> None:
 
     assert (response.status_code, response.text) == (500, SERVER_ERROR_BODY)
     assert_carries_policy_headers(response.headers, POLICY, hsts=True)
+    client = TestClient(app)
+
     with pytest.raises(RouteFailure):
-        TestClient(app).get("/boom")
+        client.get("/boom")
 
 
 def test_a_missing_configuration_answers_a_500_without_hsts_before_the_route_runs() -> None:
@@ -162,8 +173,10 @@ def test_a_missing_configuration_answers_a_500_without_hsts_before_the_route_run
     assert (response.status_code, response.text) == (500, SERVER_ERROR_BODY)
     assert_carries_policy_headers(response.headers, POLICY, hsts=False)
     assert route_ran == []
+    client = TestClient(app)
+
     with pytest.raises(RuntimeError, match="install_web_auth_config"):
-        TestClient(app).get("/side-effect")
+        client.get("/side-effect")
 
 
 @pytest.mark.anyio
@@ -223,13 +236,65 @@ async def test_a_downstream_send_that_fails_on_the_start_is_tried_once_and_propa
         attempts.append(message)
         raise failure
 
+    middleware = SecurityHeadersMiddleware(responding_app, POLICY)
+    scope = an_http_scope(app)
+
     with pytest.raises(ConnectionResetError) as raised:
-        await SecurityHeadersMiddleware(responding_app, POLICY)(
-            an_http_scope(app), no_receive, failing_send,
-        )
+        await middleware(scope, no_receive, failing_send)
 
     assert raised.value is failure
     assert len(attempts) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failing_message_type", ["http.response.start", "http.response.body"])
+async def test_a_500_that_cannot_be_sent_still_raises_the_route_exception_with_a_note(
+    failing_message_type: str,
+) -> None:
+    failure = RouteFailure()
+    send_failure = ConnectionResetError("client gone")
+    app = an_app()
+
+    async def failing_app(_scope: Scope, _receive: Receive, _send: Send) -> None:
+        raise failure
+
+    async def failing_send(message: Message) -> None:
+        if message["type"] == failing_message_type:
+            raise send_failure
+
+    middleware = SecurityHeadersMiddleware(failing_app, POLICY)
+    scope = an_http_scope(app)
+
+    with pytest.raises(RouteFailure) as raised:
+        await middleware(scope, no_receive, failing_send)
+
+    assert raised.value is failure
+    assert any(repr(send_failure) in note for note in failure.__notes__)
+
+
+def test_a_cache_control_rule_applies_to_a_normal_response_and_to_the_library_500() -> None:
+    cacheable = "public, max-age=60"
+    policy = SecurityHeadersPolicy(
+        default_content_security_policy([]),
+        cache_control_rules=(CacheControlRule(PathRules(prefixes=("/boom", "/ok")), cacheable),),
+    )
+    app = FastAPI()
+    app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+    install_web_auth_config(app, a_web_auth_config())
+    with_failing_route(app, RouteFailure())
+
+    @app.get("/ok")
+    def ok() -> dict[str, bool]:
+        return {"ok": True}
+
+    client = TestClient(app, raise_server_exceptions=False)
+
+    normal, failed = client.get("/ok"), client.get("/boom")
+
+    assert (normal.status_code, failed.status_code) == (200, 500)
+    assert (normal.headers["cache-control"], failed.headers["cache-control"]) == (
+        cacheable, cacheable,
+    )
 
 
 @pytest.mark.anyio

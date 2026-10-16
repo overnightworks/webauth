@@ -84,7 +84,9 @@ v0.14.0 makes `SecurityHeadersMiddleware` a pure ASGI middleware: its
 `.dispatch`, the `dispatch=` argument and any subclass override of `dispatch`
 are gone. The 500 of an unhandled exception now carries the security headers,
 and the exception still reaches the server. A host's 500 handler still runs,
-but the response it returns is no longer sent.
+but the response it returns is no longer sent. With `debug=True` Starlette's
+traceback page is no longer sent either: the client gets the library 500 with
+the headers, and the traceback still reaches the server log.
 
 v0.13.0 adds the OpenID Connect relying party (`webauth.oidc` and
 `webauth.oidc_login`) with PKCE and the signed pending-login cookie, and the one

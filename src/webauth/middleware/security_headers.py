@@ -53,11 +53,14 @@ class SecurityHeadersMiddleware:
         try:
             cookie_secure = installed_web_auth_config(scope["app"]).cookie_secure
             await self._app(scope, receive, send_with_policy)
-        except Exception:
+        except Exception as original:
             if not response_started:
-                await PlainTextResponse("Internal Server Error", 500)(
-                    scope, receive, send_with_policy,
-                )
+                try:
+                    await PlainTextResponse("Internal Server Error", 500)(
+                        scope, receive, send_with_policy,
+                    )
+                except Exception as send_failure:  # noqa: BLE001
+                    original.add_note(f"the 500 could not be sent: {send_failure!r}")
             raise
 
     def _apply_policy(self, headers: MutableHeaders, path: str, cookie_secure: bool) -> None:
