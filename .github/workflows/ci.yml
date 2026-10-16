@@ -53,6 +53,30 @@ jobs:
       - name: Build the distribution
         run: uv build
 
+  # The name is a contract with release.yml: its REQUIRED_JOBS refuses a tag without this job green.
+  lowest-direct:
+    name: lowest-direct
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          enable-cache: true
+
+      - name: Create the environment
+        run: uv venv --python 3.12
+
+      - name: Install the lowest declared versions
+        run: uv pip install --resolution lowest-direct -e ".[dev,redis,jwt]"
+
+      - name: Tests
+        run: .venv/bin/pytest tests -q
+
   quality:
     name: quality
     needs: [checks]

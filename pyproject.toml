@@ -16,15 +16,17 @@ classifiers = [
 ]
 
 dependencies = [
-    "fastapi>=0.100,<1",
-    "pydantic>=2,<3",
+    "fastapi>=0.123.7,<1",
+    "starlette>=0.46",
+    "anyio>=4.12",
+    "pydantic>=2.6,<3",
     "argon2-cffi>=23.1,<26",
 ]
 
 [project.optional-dependencies]
 redis = ["redis>=5.0,<9"]
 jwt = [
-    "cryptography>=50.0.2",
+    "cryptography>=50.0.2,<51",
     "pyjwt[crypto]>=2.15.1,<3",
     # https_client overrides HTTPSConnection._new_conn and reads self._dns_host, both private.
     "urllib3>=2.6.3,<3",
@@ -33,7 +35,7 @@ dev = [
     "overnightworks-webauth[jwt]",
     "pytest>=7,<10",
     "pytest-cov>=7,<8",
-    "fakeredis[lua]>=2,<3",
+    "fakeredis[lua]>=2.20,<3",
     "httpx>=0.27,<1",
     "ruff>=0.4,<1",
     "import-linter>=2,<3",
