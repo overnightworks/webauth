@@ -1,8 +1,0 @@
-claim_id = "29d13709b6b743d19d290566e0f1b78c"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "2cfe9ef3a7246910090200fc756cd6e572a5a1c7"
-branch = "claude/issue-95-coverage-to-sonar"
-scope = [".github/workflows/ci.yml", "pyproject.toml", "sonar-project.properties", "uv.lock"]
-opened_commit = "6a0f068d2312a51bf37ce3f827e2f02a60d69a8d"
-whole_reason = "Coverage delivery is one CI wiring: the report, its artifact, the Sonar path and the pytest-cov dependency"
