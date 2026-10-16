@@ -4,13 +4,58 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  release:
-    name: release
+  verify:
+    name: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: The tagged commit is on main and its push CI run passed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_JOBS: '["checks", "quality / verdict"]'
+        run: |
+          fail() { echo "Commit ${GITHUB_SHA} is not releasable: $1" >&2; exit 1; }
+
+          position="$(gh api "repos/${GITHUB_REPOSITORY}/compare/main...${GITHUB_SHA}" --jq .status)"
+          case "$position" in
+            identical | behind) ;;
+            *) fail "it is not on main (compare status: ${position})" ;;
+          esac
+
+          run="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&event=push&branch=main&per_page=100" \
+            --jq '.workflow_runs[]' | jq -s --arg sha "$GITHUB_SHA" \
+            '[.[] | select(.head_sha == $sha)] | max_by(.id)')"
+          [ "$run" != "null" ] || fail "no CI push run on main for it"
+          [ "$(jq -r '.status + " " + .conclusion' <<<"$run")" = "completed success" ] \
+            || fail "CI run $(jq -r .id <<<"$run") is $(jq -r '.status + " " + (.conclusion // "none")' <<<"$run")"
+
+          run_id="$(jq -r .id <<<"$run")"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100" \
+            --jq '.jobs[]' | jq -s -r --argjson required "$REQUIRED_JOBS" '
+              . as $jobs
+              | $required[]
+              | . as $name
+              | ([$jobs[] | select(.name == $name)] | max_by(.id)) as $job
+              | if $job == null then "\($name): missing"
+                elif $job.conclusion != "success" then "\($name): \($job.status) \($job.conclusion)"
+                else empty end' > failures.txt
+          if [ -s failures.txt ]; then
+            fail "$(tr '\n' ';' < failures.txt)"
+          fi
+
+  build:
+    name: build
+    needs: [verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -24,6 +69,7 @@ jobs:
         run: uv build
 
       - name: The tag names the version that was built
+        shell: bash
         run: |
           built="$(basename "$(ls dist/*.whl)")"
           expected="overnightworks_webauth-${GITHUB_REF_NAME#v}-py3-none-any.whl"
@@ -32,7 +78,52 @@ jobs:
             exit 1
           fi
 
-      - name: Publish the release with its wheel
+      - name: Record the checksums of the flat release files
+        shell: bash
+        run: (cd dist && sha256sum -- *.whl *.tar.gz) > dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  attest:
+    name: attest
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: release-files
+
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release-files/*.whl
+            release-files/*.tar.gz
+
+  publish:
+    name: publish
+    needs: [attest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: release-files
+
+      - name: Publish the release with its files
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.whl --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" release-files/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
