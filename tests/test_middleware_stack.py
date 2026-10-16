@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, StreamingResponse
 from webauth_arrangement import (
@@ -579,9 +580,13 @@ class TestResponsesBehindThePureAsgiMiddlewares:
             app, CONTEXT_SETTING_PATH, spec_version=SPEC_WITHOUT_CONCURRENT_READER
         )
 
-        await drive(app, scope, body_chunks=(b"",))
+        sent, _ = await drive(app, scope, body_chunks=(b"",))
 
         assert DOWNSTREAM_MARK.get() == "set-by-the-route"
+        [start] = starts(sent)
+        assert start["status"] == 200
+        assert completed(sent)
+        assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
 
     def test_an_admitted_routes_background_task_runs(self) -> None:
         app = an_authenticated_full_stack_app()
