@@ -1,0 +1,7 @@
+claim_id = "adc5e350f76049e393d8331885fbd44e"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "d3c74e788b5d21004438baadeb0ab9e1b6d7f883"
+branch = "claude/issue-111-d2a-gemeinsame-lauf-infrastruktur-aus-pr"
+scope = ["e2e/oidc/README.md", "e2e/oidc/harness.py", "e2e/oidc/prove.py"]
+opened_commit = "6bf8f294da9e64cb213f86ca362ed1f94fa0875a"
