@@ -1,8 +1,0 @@
-claim_id = "fbecc34af01142bebc6de59f7aa00c24"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "54e5bad2bcd7877790ea1683590008d173b9f96d"
-branch = "claude/issue-103-middleware-installer"
-scope = ["README.md", "src/webauth/middleware/__init__.py", "src/webauth/middleware/stack.py", "src/webauth/policies.py", "tests/test_middleware_stack.py", "tests/test_policies.py", "tests/test_redis_rate_limiter.py", "tests/webauth_arrangement.py"]
-opened_commit = "bdc9a161ecb60db5404371d7d43eed58989f3258"
-whole_reason = "The installer, its export, its tests, the shared failing-backend builder and the README order and duties land together"
