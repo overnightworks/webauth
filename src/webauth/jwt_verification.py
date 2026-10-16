@@ -122,7 +122,7 @@ class Rejected:
     reason: RejectionReason
 
 
-class _RefusalError(Exception):
+class VerificationRefusal(Exception):
     def __init__(self, reason: RejectionReason) -> None:
         super().__init__(reason)
         self.reason = reason
@@ -215,7 +215,7 @@ class JwtVerifier:
     def verify(self, token: str) -> VerifiedClaims | Rejected:
         try:
             return self._verified_claims(token)
-        except _RefusalError as refusal:
+        except VerificationRefusal as refusal:
             return Rejected(refusal.reason)
 
     def _verified_claims(self, token: str) -> VerifiedClaims:
@@ -243,18 +243,18 @@ class JwtVerifier:
                 options=_library_checks(),
             )
         except jwt.InvalidSignatureError as error:
-            raise _RefusalError(RejectionReason.INVALID_SIGNATURE) from error
+            raise VerificationRefusal(RejectionReason.INVALID_SIGNATURE) from error
         # After InvalidSignatureError, which subclasses it. `_parse_token`
         # already refuses what PyJWT cannot decode; this keeps a disagreement
         # between the two parses a rejection rather than an exception.
         except jwt.DecodeError as error:
-            raise _RefusalError(RejectionReason.MALFORMED_TOKEN) from error
+            raise VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
         except jwt.InvalidAudienceError as error:
-            raise _RefusalError(RejectionReason.INVALID_AUDIENCE) from error
+            raise VerificationRefusal(RejectionReason.INVALID_AUDIENCE) from error
         except jwt.InvalidIssuerError as error:
-            raise _RefusalError(RejectionReason.INVALID_ISSUER) from error
+            raise VerificationRefusal(RejectionReason.INVALID_ISSUER) from error
         except jwt.MissingRequiredClaimError as error:
-            raise _RefusalError(RejectionReason.INVALID_CLAIM) from error
+            raise VerificationRefusal(RejectionReason.INVALID_CLAIM) from error
 
     def _checked_time_claims(self, claims: Mapping[str, object]) -> tuple[int, int]:
         expires_at = _integer_claim(claims, "exp")
@@ -262,11 +262,11 @@ class JwtVerifier:
         not_before = _integer_claim(claims, "nbf") if "nbf" in claims else None
         now = self._wall_clock()
         if now >= expires_at + self._leeway_seconds:
-            raise _RefusalError(RejectionReason.EXPIRED)
+            raise VerificationRefusal(RejectionReason.EXPIRED)
         if issued_at > now + self._leeway_seconds:
-            raise _RefusalError(RejectionReason.ISSUED_IN_FUTURE)
+            raise VerificationRefusal(RejectionReason.ISSUED_IN_FUTURE)
         if not_before is not None and not_before > now + self._leeway_seconds:
-            raise _RefusalError(RejectionReason.NOT_YET_VALID)
+            raise VerificationRefusal(RejectionReason.NOT_YET_VALID)
         return expires_at, issued_at
 
     def _signing_key(self, key_id: str) -> RSAPublicKey:
@@ -275,14 +275,14 @@ class JwtVerifier:
             self._refresh_key_set()
             key_set = self._key_set
         if not self._is_current(key_set):
-            raise _RefusalError(RejectionReason.KEY_SET_UNAVAILABLE)
+            raise VerificationRefusal(RejectionReason.KEY_SET_UNAVAILABLE)
         key = key_set.keys.get(key_id)
         if key is None:
             # An unknown `kid` is only a forged one when the key set could be
             # fetched; after a failed refresh it may be a rotated key.
             if self._last_refresh_failed:
-                raise _RefusalError(RejectionReason.KEY_SET_UNAVAILABLE)
-            raise _RefusalError(RejectionReason.UNKNOWN_KEY_ID)
+                raise VerificationRefusal(RejectionReason.KEY_SET_UNAVAILABLE)
+            raise VerificationRefusal(RejectionReason.UNKNOWN_KEY_ID)
         return key
 
     def _is_current(self, key_set: _KeySet | None) -> TypeGuard[_KeySet]:
@@ -341,27 +341,27 @@ def _library_checks() -> Options:
 
 def _parse_token(token: str) -> _ParsedToken:
     if len(token) > MAX_TOKEN_CHARACTERS:
-        raise _RefusalError(RejectionReason.TOKEN_TOO_LONG)
+        raise VerificationRefusal(RejectionReason.TOKEN_TOO_LONG)
     segments = token.split(".")
     if len(segments) != _JWS_COMPACT_SEGMENTS:
-        raise _RefusalError(RejectionReason.MALFORMED_TOKEN)
+        raise VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
     try:
         header_bytes, claims_bytes, _signature = (_base64url_decode(part) for part in segments)
     except ValueError as error:
-        raise _RefusalError(RejectionReason.MALFORMED_TOKEN) from error
-    header = _strict_json_object(header_bytes)
-    claims = _strict_json_object(claims_bytes)
+        raise VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
+    header = strict_json_object(header_bytes)
+    claims = strict_json_object(claims_bytes)
     return _ParsedToken(key_id=_header_key_id(header), claims=MappingProxyType(claims))
 
 
 def _header_key_id(header: Mapping[str, object]) -> str:
     if _FORBIDDEN_HEADER_MEMBERS & header.keys():
-        raise _RefusalError(RejectionReason.FORBIDDEN_HEADER)
+        raise VerificationRefusal(RejectionReason.FORBIDDEN_HEADER)
     if header.get("alg") != _ALGORITHM:
-        raise _RefusalError(RejectionReason.UNSUPPORTED_ALGORITHM)
+        raise VerificationRefusal(RejectionReason.UNSUPPORTED_ALGORITHM)
     key_id = header.get("kid")
     if not _is_key_id(key_id):
-        raise _RefusalError(RejectionReason.INVALID_KEY_ID)
+        raise VerificationRefusal(RejectionReason.INVALID_KEY_ID)
     return key_id
 
 
@@ -372,7 +372,7 @@ def _is_key_id(value: object) -> TypeGuard[str]:
 def _integer_claim(claims: Mapping[str, object], name: str) -> int:
     value = claims.get(name)
     if isinstance(value, bool) or not isinstance(value, int):
-        raise _RefusalError(RejectionReason.INVALID_CLAIM)
+        raise VerificationRefusal(RejectionReason.INVALID_CLAIM)
     return value
 
 
@@ -381,7 +381,7 @@ def _subject(claims: Mapping[str, object]) -> str | None:
         return None
     subject = claims["sub"]
     if not isinstance(subject, str) or not subject:
-        raise _RefusalError(RejectionReason.INVALID_CLAIM)
+        raise VerificationRefusal(RejectionReason.INVALID_CLAIM)
     return subject
 
 
@@ -403,15 +403,18 @@ def _base64url_decode(segment: str) -> bytes:
     return decoded
 
 
-def _strict_json_object(document: bytes) -> dict[str, object]:
+def strict_json_object(document: bytes) -> dict[str, object]:
+    """The JSON object `document` holds, or a `VerificationRefusal` naming why
+    it is not one: bad UTF-8, nesting too deep, a member named twice, a
+    non-finite number, or no object at the top."""
     try:
         text = document.decode("utf-8")
     except UnicodeDecodeError as error:
-        raise _RefusalError(RejectionReason.MALFORMED_TOKEN) from error
+        raise VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
     # Measured before parsing: the stdlib parser recurses per level and would
     # raise RecursionError on hostile nesting rather than a parse error.
     if _nesting_depth(text) > MAX_JSON_NESTING_DEPTH:
-        raise _RefusalError(RejectionReason.NESTING_TOO_DEEP)
+        raise VerificationRefusal(RejectionReason.NESTING_TOO_DEEP)
     try:
         parsed = json.loads(
             text,
@@ -420,9 +423,9 @@ def _strict_json_object(document: bytes) -> dict[str, object]:
             parse_float=_finite_number,
         )
     except ValueError as error:
-        raise _RefusalError(RejectionReason.MALFORMED_TOKEN) from error
+        raise VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
     if not isinstance(parsed, dict):
-        raise _RefusalError(RejectionReason.MALFORMED_TOKEN)
+        raise VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
     return parsed
 
 
@@ -450,7 +453,7 @@ def _nesting_depth(text: str) -> int:
 def _object_without_duplicates(members: list[tuple[str, object]]) -> dict[str, object]:
     parsed = dict(members)
     if len(parsed) != len(members):
-        raise _RefusalError(RejectionReason.DUPLICATE_MEMBER)
+        raise VerificationRefusal(RejectionReason.DUPLICATE_MEMBER)
     return parsed
 
 
@@ -472,8 +475,8 @@ def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
     if len(document) > MAX_KEY_SET_BYTES:
         raise _InvalidKeySetError(_RefreshFailure.TOO_LARGE)
     try:
-        parsed = _strict_json_object(document)
-    except _RefusalError:
+        parsed = strict_json_object(document)
+    except VerificationRefusal:
         raise _InvalidKeySetError(_RefreshFailure.NOT_STRICT_JSON) from None
     jwks = parsed.get("keys")
     if not isinstance(jwks, list) or not 0 < len(jwks) <= MAX_KEY_SET_KEYS:

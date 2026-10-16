@@ -392,6 +392,13 @@ _EXCHANGE_REFUSALS = [
         id="answer-naming-a-nested-member-twice",
     ),
     pytest.param(
+        Attempt(token_answer=lambda id_token: _answered_raw(
+            200, f'{{"id_token": "{id_token}", "expires_in": NaN}}'
+        )),
+        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
+        id="answer-carrying-a-non-json-constant",
+    ),
+    pytest.param(
         Attempt(token_answer=_answered(200, {"access_token": "an-access-token"})),
         OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
         id="answer-without-id-token",
@@ -488,6 +495,10 @@ def test_a_login_that_does_not_stand_is_refused_with_its_reason_and_leaks_nothin
     for secret in (_CLIENT_SECRET, _CODE, pending.code_verifier, _MARKUP):
         assert secret not in repr(outcome)
         assert secret not in caplog.text
+
+
+def test_a_token_endpoint_error_raised_without_a_failure_carries_none() -> None:
+    assert TokenEndpointError("connection refused").failure is None
 
 
 @pytest.mark.parametrize(("attempt", "refusal"), _CALLBACK_REFUSALS)

@@ -33,7 +33,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import re
 import secrets
 import urllib.parse
@@ -53,9 +52,11 @@ from webauth.jwt_verification import (
     MonotonicClock,
     Rejected,
     RejectionReason,
+    VerificationRefusal,
     VerifiedClaims,
     WallClock,
     is_https_url,
+    strict_json_object,
 )
 
 MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
@@ -412,26 +413,18 @@ def _idp_error_code(error: str) -> str | None:
 
 
 def _token_answer_document(body: bytes) -> Mapping[str, object]:
-    """The answer's JSON object, or an empty one for an answer too large,
-    not JSON, not an object, or naming a member twice in any object."""
+    """The answer's JSON object under the verifier's strict parser, or an empty
+    one for an answer too large, not strict JSON, or not an object.
+
+    The production transport refuses an oversize body first (`TOO_LARGE`); the
+    size check here guards an injected `TokenRequestPost`, which may return any
+    body."""
     if len(body) > MAX_TOKEN_RESPONSE_BYTES:
         return {}
     try:
-        document = json.loads(body, object_pairs_hook=_object_without_duplicates)
-    # The stdlib parser recurses per nesting level, and the size bound alone
-    # leaves room for nesting deep enough to exhaust the recursion limit.
-    except (ValueError, RecursionError):
+        return strict_json_object(body)
+    except VerificationRefusal:
         return {}
-    return document if isinstance(document, dict) else {}
-
-
-def _object_without_duplicates(members: list[tuple[str, object]]) -> dict[str, object]:
-    """Refuses a repeated member rather than letting the last one win, so no
-    reader of the answer can be shown another value than this one judged."""
-    document = dict(members)
-    if len(document) != len(members):
-        raise ValueError("a member is named twice")
-    return document
 
 
 def _identity_of(id_token: VerifiedClaims) -> OidcIdentity:
