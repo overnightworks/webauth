@@ -1,0 +1,8 @@
+claim_id = "8f5ebf08c8a347f49df7e1a39560c05d"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "a0654a154a530096ad4f91388c8e0d60861a3233"
+branch = "claude/issue-90-touch-confirms-row"
+scope = ["README.md", "src/webauth/dependencies.py", "src/webauth/ports.py", "tests/test_dependencies.py", "tests/test_liveness.py", "tests/webauth_arrangement.py"]
+opened_commit = "312f2bca4f90a9f769c38a85ac4cb60c44a62788"
+whole_reason = "S1 is one port contract change: the port, its one caller, the fakes and the tests that pin it"
