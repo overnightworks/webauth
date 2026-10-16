@@ -1,8 +1,0 @@
-claim_id = "33a73d4c34ff46f1b9394a593bb3bcb8"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "9870bed4c42bf83920a238edf9c2f46c69c6525f"
-branch = "claude/issue-84-f3-liveness-message-doc-truths"
-scope = ["CLAUDE.md", "README.md", "src/webauth/__init__.py", "src/webauth/liveness.py", "src/webauth/oidc_login.py", "tests/test_liveness.py"]
-opened_commit = "6b975a99b9cf58bbf857b6d3324d029ba8edf083"
-whole_reason = "F3 bundles small doc cards and one message fix that share these files"
