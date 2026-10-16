@@ -38,6 +38,9 @@ reaches it through the Protocols in `webauth.ports`: `UserStore`,
 and `PasswordHasher`.
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote.
+`SessionRecordStore.touch` returns a strict `bool`: `True` when a stored row was
+renewed, `False` when the session is gone, which refuses the request like an
+expired session.
 
 ## Configuration
 

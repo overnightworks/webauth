@@ -406,20 +406,29 @@ def _authenticate_from_store(
     current_ip = resolve_client_ip(request)
     current_user_agent = client_user_agent(request)
 
-    _record_identity_changes(
-        audit,
-        session_id=session_id,
-        user_id=record.user.id,
-        stored_ip=record.ip_address,
-        stored_user_agent=record.user_agent,
-        current_ip=current_ip,
-        current_user_agent=current_user_agent,
-    )
-    sessions.touch(
+    stored_ip = record.ip_address
+    stored_user_agent = record.user_agent
+    renewed = sessions.touch(
         record,
         ip_address=current_ip,
         user_agent=current_user_agent,
         now=now,
+    )
+    if type(renewed) is not bool:
+        raise TypeError(
+            f"SessionRecordStore.touch must return a bool, not {type(renewed).__name__}",
+        )
+    if not renewed:
+        raise _unauthenticated(request, SESSION_EXPIRED_DETAIL, login_redirect)
+
+    _record_identity_changes(
+        audit,
+        session_id=session_id,
+        user_id=record.user.id,
+        stored_ip=stored_ip,
+        stored_user_agent=stored_user_agent,
+        current_ip=current_ip,
+        current_user_agent=current_user_agent,
     )
 
     _populate_cache(config.session_cache, record, config)
