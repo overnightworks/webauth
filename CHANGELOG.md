@@ -12,6 +12,23 @@ This is the last release with password parts.
 
 **Breaking**
 
+- `IpRateLimitMiddleware`, `CsrfOriginMiddleware` and `CsrfTokenMiddleware` are
+  pure ASGI middleware and no longer subclass Starlette's `BaseHTTPMiddleware`:
+  an `isinstance` or `issubclass` check against `BaseHTTPMiddleware` fails, and a
+  variable or parameter typed `BaseHTTPMiddleware` no longer accepts them. Their
+  `.dispatch`, `.dispatch_func` and public `.app` attribute are gone, and so is
+  any subclass override of `dispatch`. The constructor is `(app, policy)`: the
+  `dispatch=` argument that `BaseHTTPMiddleware` accepted now raises `TypeError`;
+  any other unknown keyword argument raised `TypeError` already. They also run
+  the app in the caller's task: a `ContextVar` that the app or an inner
+  middleware sets is now visible to an outer host middleware after the call
+  returns, where `BaseHTTPMiddleware` isolated it in a task of its own; a host
+  that relied on that isolation restores its own context, for example by
+  resetting the token it set.
+- The declared dependency floors are raised to the versions the suite is proven
+  on: fastapi 0.123.7, starlette 0.46, pydantic 2.6 and anyio 4.12; starlette and
+  anyio are now declared directly, capped below 2 and below 5, and
+  `cryptography` is capped below 51. A host on older versions must upgrade.
 - `SecurityHeadersMiddleware` is a pure ASGI middleware: its `.dispatch`, the
   `dispatch=` argument and any subclass override of `dispatch` are gone. The 500
   of an unhandled exception now carries the security headers, and the exception
@@ -43,6 +60,13 @@ This is the last release with password parts.
 
 **Added and changed**
 
+- Under the library stack a streamed body over the limit (no Content-Length)
+  that the route reads through `request.body()` or `request.stream()` answers the
+  413 with the security headers, where it answered the library 500, and spends one
+  request of the rate budget; a body FastAPI parses still answers FastAPI's 400
+  through the host's `HTTPException` handler. A response that fails after it
+  started streaming now ends incomplete, and its exception reaches the server; it
+  used to end as a complete response.
 - `install_web_auth_middleware` (see [Middleware order](README.md#middleware-order))
   installs the whole stack in the order that makes every library refusal carry
   the headers. It refuses, before touching the app, a token policy without an
@@ -60,6 +84,15 @@ This is the last release with password parts.
   `webauth.jwt_verification` exposes `VerificationRefusal` and
   `strict_json_object`.
 - A key-set fetch that timed out says so in its `KeySetFetchError` message.
+- `BodySizeLimitMiddleware` never sends a second response start. Once the app has
+  handed over a response's start, a streamed body over the limit cuts that response
+  off (a response that already finished stays complete) and the error reaches the server,
+  where a 413 used to follow the start. The start is sent whole: a cancellation
+  inside the stack waits until it is sent. Every start the app hands over is bounded
+  by the new `BodySizePolicy.start_send_seconds` (default 10.0, positive and finite);
+  one still pending after it is cut off with an error that reaches the server; no
+  413 and no second start follow. Any `Content-Length` header over the limit
+  now refuses the request with 413, whatever its position among the headers.
 - `SECURITY.md` names the supported release and how to report a vulnerability;
   a release is built only from a commit of `main` whose CI run finished green.
 
