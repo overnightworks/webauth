@@ -1,0 +1,265 @@
+"""The security headers reach every response, including an unhandled exception's 500."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+from fastapi import BackgroundTasks, FastAPI
+from fastapi.testclient import TestClient
+from starlette.datastructures import Headers
+from starlette.responses import JSONResponse, StreamingResponse
+from webauth_arrangement import a_web_auth_config, assert_carries_policy_headers
+
+from webauth.config import install_web_auth_config
+from webauth.middleware import SecurityHeadersMiddleware
+from webauth.policies import SecurityHeadersPolicy, default_content_security_policy
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+POLICY = SecurityHeadersPolicy(default_content_security_policy([]))
+SERVER_ERROR_BODY = "Internal Server Error"
+HSTS_SETTINGS = [pytest.param(True, id="hsts-on"), pytest.param(False, id="hsts-off")]
+
+
+class RouteFailure(RuntimeError):
+    pass
+
+
+def an_app(*, cookie_secure: bool = True, configured: bool = True, debug: bool = False) -> FastAPI:
+    app = FastAPI(debug=debug)
+    app.add_middleware(SecurityHeadersMiddleware, policy=POLICY)
+    if configured:
+        install_web_auth_config(app, a_web_auth_config(cookie_secure=cookie_secure))
+    return app
+
+
+def with_failing_route(app: FastAPI, failure: Exception) -> None:
+    @app.get("/boom")
+    def boom() -> None:
+        raise failure
+
+
+async def no_receive() -> Message:
+    return {"type": "http.disconnect"}
+
+
+def an_http_scope(app: FastAPI, path: str = "/boom") -> Scope:
+    return {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+        "scheme": "https", "path": path, "raw_path": path.encode(), "query_string": b"",
+        "headers": [], "client": ("203.0.113.7", 1234), "server": ("testserver", 443),
+        "root_path": "", "app": app,
+    }
+
+
+async def drive(app: ASGIApp, scope: Scope) -> tuple[list[Message], BaseException | None]:
+    sent: list[Message] = []
+
+    async def record(message: Message) -> None:
+        sent.append(message)
+
+    raised: BaseException | None = None
+    try:
+        await app(scope, no_receive, record)
+    except Exception as error:  # noqa: BLE001
+        raised = error
+    return sent, raised
+
+
+def starts(messages: list[Message]) -> list[Message]:
+    return [message for message in messages if message["type"] == "http.response.start"]
+
+
+@pytest.mark.parametrize("cookie_secure", HSTS_SETTINGS)
+def test_an_unhandled_exception_answers_a_500_carrying_the_security_headers(
+    cookie_secure: bool,
+) -> None:
+    app = an_app(cookie_secure=cookie_secure)
+    with_failing_route(app, RouteFailure())
+
+    response = TestClient(app, raise_server_exceptions=False).get("/boom")
+
+    assert (response.status_code, response.text) == (500, SERVER_ERROR_BODY)
+    assert_carries_policy_headers(response.headers, POLICY, hsts=cookie_secure)
+
+
+def test_a_default_test_client_raises_the_exception_the_route_raised() -> None:
+    failure = RouteFailure()
+    app = an_app()
+    with_failing_route(app, failure)
+
+    with pytest.raises(RouteFailure) as raised:
+        TestClient(app).get("/boom")
+
+    assert raised.value is failure
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("cookie_secure", HSTS_SETTINGS)
+async def test_one_response_start_carries_the_headers_and_the_exception_reaches_the_server(
+    cookie_secure: bool,
+) -> None:
+    failure = RouteFailure()
+    app = an_app(cookie_secure=cookie_secure)
+    with_failing_route(app, failure)
+
+    sent, raised = await drive(app, an_http_scope(app))
+
+    (start,) = starts(sent)
+    assert_carries_policy_headers(Headers(raw=start["headers"]), POLICY, hsts=cookie_secure)
+    assert raised is failure
+
+
+def test_a_host_exception_handler_runs_once_but_its_response_is_not_sent() -> None:
+    app = an_app()
+    with_failing_route(app, RouteFailure())
+    handled: list[Exception] = []
+    background_ran: list[bool] = []
+
+    @app.exception_handler(Exception)
+    async def handle(_request: object, error: Exception) -> JSONResponse:
+        handled.append(error)
+        tasks = BackgroundTasks()
+        tasks.add_task(background_ran.append, True)
+        return JSONResponse({"handled": True}, status_code=500, background=tasks)
+
+    response = TestClient(app, raise_server_exceptions=False).get("/boom")
+
+    assert (response.status_code, response.text) == (500, SERVER_ERROR_BODY)
+    assert_carries_policy_headers(response.headers, POLICY, hsts=True)
+    assert len(handled) == 1
+    assert background_ran == []
+    with pytest.raises(RouteFailure):
+        TestClient(app).get("/boom")
+
+
+def test_debug_mode_answers_the_library_500_without_a_traceback_page() -> None:
+    app = an_app(debug=True)
+    with_failing_route(app, RouteFailure())
+
+    response = TestClient(app, raise_server_exceptions=False).get("/boom")
+
+    assert (response.status_code, response.text) == (500, SERVER_ERROR_BODY)
+    assert_carries_policy_headers(response.headers, POLICY, hsts=True)
+    with pytest.raises(RouteFailure):
+        TestClient(app).get("/boom")
+
+
+def test_a_missing_configuration_answers_a_500_without_hsts_before_the_route_runs() -> None:
+    route_ran: list[bool] = []
+    app = an_app(configured=False)
+
+    @app.get("/side-effect")
+    def side_effect() -> None:
+        route_ran.append(True)
+
+    response = TestClient(app, raise_server_exceptions=False).get("/side-effect")
+
+    assert (response.status_code, response.text) == (500, SERVER_ERROR_BODY)
+    assert_carries_policy_headers(response.headers, POLICY, hsts=False)
+    assert route_ran == []
+    with pytest.raises(RuntimeError, match="install_web_auth_config"):
+        TestClient(app).get("/side-effect")
+
+
+@pytest.mark.anyio
+async def test_an_exception_after_the_first_chunk_truncates_the_started_response() -> None:
+    failure = RouteFailure()
+    app = an_app()
+
+    @app.get("/stream")
+    def stream() -> StreamingResponse:
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"first"
+            raise failure
+
+        return StreamingResponse(chunks())
+
+    sent, raised = await drive(app, an_http_scope(app, "/stream"))
+
+    (start,) = starts(sent)
+    assert start["status"] == 200
+    assert_carries_policy_headers(Headers(raw=start["headers"]), POLICY, hsts=True)
+    assert b"".join(m["body"] for m in sent if m["type"] == "http.response.body") == b"first"
+    assert raised is failure
+
+
+@pytest.mark.anyio
+async def test_a_start_without_headers_gains_them_and_keeps_its_other_fields() -> None:
+    app = an_app()
+
+    async def bare_app(_scope: Scope, _receive: Receive, send: Send) -> None:
+        await send({"type": "http.response.start", "status": 204, "trailers": True,
+                    "extension": "kept"})
+        await send({"type": "http.response.body", "body": b"x", "more_body": True})
+        await send({"type": "http.response.trailers", "headers": [(b"x-trailer", b"1")]})
+
+    sent, raised = await drive(SecurityHeadersMiddleware(bare_app, POLICY), an_http_scope(app))
+
+    start, body, trailers = sent
+    assert raised is None
+    assert_carries_policy_headers(Headers(raw=start["headers"]), POLICY, hsts=True)
+    assert {key: start[key] for key in ("status", "trailers", "extension")} == {
+        "status": 204, "trailers": True, "extension": "kept",
+    }
+    assert body == {"type": "http.response.body", "body": b"x", "more_body": True}
+    assert trailers == {"type": "http.response.trailers", "headers": [(b"x-trailer", b"1")]}
+
+
+@pytest.mark.anyio
+async def test_a_downstream_send_that_fails_on_the_start_is_tried_once_and_propagates() -> None:
+    app = an_app()
+    failure = ConnectionResetError()
+    attempts: list[Message] = []
+
+    async def responding_app(_scope: Scope, _receive: Receive, send: Send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+
+    async def failing_send(message: Message) -> None:
+        attempts.append(message)
+        raise failure
+
+    with pytest.raises(ConnectionResetError) as raised:
+        await SecurityHeadersMiddleware(responding_app, POLICY)(
+            an_http_scope(app), no_receive, failing_send,
+        )
+
+    assert raised.value is failure
+    assert len(attempts) == 1
+
+
+@pytest.mark.anyio
+async def test_a_websocket_passes_through_untouched() -> None:
+    seen: list[Scope] = []
+
+    async def websocket_app(scope: Scope, _receive: Receive, _send: Send) -> None:
+        seen.append(scope)
+
+    async def no_send(_message: Message) -> None:
+        raise AssertionError("the middleware sent on a websocket")
+
+    scope: Scope = {"type": "websocket", "path": "/ws"}
+
+    await SecurityHeadersMiddleware(websocket_app, POLICY)(scope, no_receive, no_send)
+
+    assert seen == [{"type": "websocket", "path": "/ws"}]
+
+
+def test_a_normal_response_keeps_its_background_task() -> None:
+    app = an_app()
+    background_ran: list[bool] = []
+
+    @app.get("/ok")
+    def ok(tasks: BackgroundTasks) -> dict[str, bool]:
+        tasks.add_task(background_ran.append, True)
+        return {"ok": True}
+
+    response = TestClient(app).get("/ok")
+
+    assert response.json() == {"ok": True}
+    assert_carries_policy_headers(response.headers, POLICY, hsts=True)
+    assert background_ran == [True]

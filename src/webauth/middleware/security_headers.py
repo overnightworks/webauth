@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import MutableHeaders
+from starlette.responses import PlainTextResponse
 
-from webauth.config import web_auth_config
+from webauth.config import installed_web_auth_config
 
 if TYPE_CHECKING:
-    from starlette.requests import Request
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
     from webauth.policies import SecurityHeadersPolicy
 
@@ -19,7 +20,7 @@ REFERRER_POLICY: Final = "strict-origin-when-cross-origin"
 STRICT_TRANSPORT_SECURITY: Final = "max-age=31536000; includeSubDomains"
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+class SecurityHeadersMiddleware:
     """Answer every request with this deployment's policy headers.
 
     HSTS follows the configured ``cookie_secure``, never the request's scheme:
@@ -29,23 +30,46 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     browser that pinned https could no longer reach the plain-http host.
     """
 
-    def __init__(self, app, policy: SecurityHeadersPolicy, **kwargs):  # type: ignore[no-untyped-def]
-        super().__init__(app, **kwargs)
+    def __init__(self, app: ASGIApp, policy: SecurityHeadersPolicy) -> None:
+        self._app = app
         self._policy = policy
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
-        cookie_secure = web_auth_config(request).cookie_secure
-        response = await call_next(request)
-        cache_control = self._policy.cache_control(request.url.path)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        cookie_secure = False
+        response_started = False
+
+        async def send_with_policy(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                message.setdefault("headers", [])
+                self._apply_policy(MutableHeaders(scope=message), scope["path"], cookie_secure)
+                response_started = True
+            await send(message)
+
+        try:
+            cookie_secure = installed_web_auth_config(scope["app"]).cookie_secure
+            await self._app(scope, receive, send_with_policy)
+        except Exception:
+            if not response_started:
+                await PlainTextResponse("Internal Server Error", 500)(
+                    scope, receive, send_with_policy,
+                )
+            raise
+
+    def _apply_policy(self, headers: MutableHeaders, path: str, cookie_secure: bool) -> None:
+        cache_control = self._policy.cache_control(path)
         if cache_control is not None:
-            response.headers["Cache-Control"] = cache_control
-        response.headers["X-Content-Type-Options"] = CONTENT_TYPE_OPTIONS
-        response.headers["X-Frame-Options"] = FRAME_OPTIONS
-        response.headers["Content-Security-Policy"] = self._policy.content_security_policy
-        response.headers["Referrer-Policy"] = REFERRER_POLICY
-        response.headers["Permissions-Policy"] = self._policy.permissions_policy
+            headers["Cache-Control"] = cache_control
+        headers["X-Content-Type-Options"] = CONTENT_TYPE_OPTIONS
+        headers["X-Frame-Options"] = FRAME_OPTIONS
+        headers["Content-Security-Policy"] = self._policy.content_security_policy
+        headers["Referrer-Policy"] = REFERRER_POLICY
+        headers["Permissions-Policy"] = self._policy.permissions_policy
         if cookie_secure:
-            response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
-        elif "Strict-Transport-Security" in response.headers:
-            del response.headers["Strict-Transport-Security"]
-        return response
+            headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
+        elif "Strict-Transport-Security" in headers:
+            del headers["Strict-Transport-Security"]

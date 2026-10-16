@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -39,12 +39,19 @@ from webauth.dependencies import (
 )
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
+from webauth.middleware.security_headers import (
+    CONTENT_TYPE_OPTIONS,
+    FRAME_OPTIONS,
+    REFERRER_POLICY,
+    STRICT_TRANSPORT_SECURITY,
+)
 from webauth.passwords import Argon2idPasswordHasher
 from webauth.policies import (
     PathRules,
     RateLimitBudget,
     RateLimitClass,
     RateLimitPolicy,
+    SecurityHeadersPolicy,
 )
 from webauth.ports import (
     RateLimitBackend,
@@ -104,6 +111,23 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
 
 
 SESSION_COOKIE_NAME = a_web_auth_config().session_cookie_name
+
+
+def assert_carries_policy_headers(
+    headers: Mapping[str, str], policy: SecurityHeadersPolicy, *, hsts: bool,
+) -> None:
+    """Every header ``policy`` puts on a response is there; HSTS only when ``hsts``."""
+    expected = {
+        "x-content-type-options": CONTENT_TYPE_OPTIONS,
+        "x-frame-options": FRAME_OPTIONS,
+        "content-security-policy": policy.content_security_policy,
+        "referrer-policy": REFERRER_POLICY,
+        "permissions-policy": policy.permissions_policy,
+    }
+    if hsts:
+        expected["strict-transport-security"] = STRICT_TRANSPORT_SECURITY
+    carried = {name: headers.get(name) for name in (*expected, "strict-transport-security")}
+    assert carried == {"strict-transport-security": None, **expected}
 
 
 def signed_without_bound(payload: str, secret: bytes) -> str:
