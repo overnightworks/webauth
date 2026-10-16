@@ -498,10 +498,10 @@ def test_a_timeout_of_zero_or_less_is_refused_naming_the_parameter(
 
 
 def test_a_token_request_with_a_non_positive_timeout_is_refused_naming_the_timeout() -> None:
+    request = _token_request("https://127.0.0.1:1/token")
+
     with pytest.raises(ValueError, match="timeout_seconds must be positive"):
-        post_token_request_over_https(
-            _token_request("https://127.0.0.1:1/token"), timeout_seconds=0
-        )
+        post_token_request_over_https(request, timeout_seconds=0)
 
 
 def test_a_key_set_fetch_that_timed_out_says_so_in_its_message(
