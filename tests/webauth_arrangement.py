@@ -7,17 +7,19 @@ one that the rest of the suite imports `TEST_SECRET` and its factories from.
 
 from __future__ import annotations
 
+import enum
 import hashlib
 import hmac
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import count
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final
 
+import anyio
 from argon2.profiles import CHEAPEST
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
@@ -81,6 +83,13 @@ SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
 IDLE_WINDOW_SECONDS = 1800
 SEVEN_DAYS_SECONDS = 7 * 24 * 3600
 THIRTY_DAYS_SECONDS = 30 * 24 * 3600
+
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp, Message, Scope
+
+DRIVE_DEADLINE_SECONDS: Final = 5
+
 
 
 def a_cheap_argon2id_hasher() -> Argon2idPasswordHasher:
@@ -722,4 +731,104 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
         audit=audit,
         authenticated=authenticated,
         signing_key=config.signing_key,
+    )
+
+
+class StartSend(enum.Enum):
+    """How the server takes the response start; the suspended modes need a concurrent
+    reader of the body (ASGI spec before 2.4), because the excess arrives while the start
+    is still in its send."""
+
+    PLAIN = enum.auto()
+    SUSPENDED_BEFORE_ACCEPTING = enum.auto()
+    SUSPENDED_AFTER_ACCEPTING = enum.auto()
+
+
+async def no_receive() -> Message:
+    return {"type": "http.disconnect"}
+
+
+def an_http_scope(
+    app: FastAPI,
+    path: str = "/boom",
+    *,
+    method: str = "GET",
+    headers: Iterable[tuple[bytes, bytes]] = (),
+    spec_version: str | None = None,
+) -> Scope:
+    asgi = {"version": "3.0"}
+    if spec_version is not None:
+        asgi["spec_version"] = spec_version
+    return {
+        "type": "http", "asgi": asgi, "http_version": "1.1", "method": method,
+        "scheme": "https", "path": path, "raw_path": path.encode(), "query_string": b"",
+        "headers": list(headers), "client": ("203.0.113.7", 1234), "server": ("testserver", 443),
+        "root_path": "", "app": app,
+    }
+
+
+async def drive(
+    app: ASGIApp,
+    scope: Scope,
+    *,
+    body_chunks: Sequence[bytes] | None = None,
+    start_send: StartSend = StartSend.PLAIN,
+) -> tuple[list[Message], BaseException | None]:
+    sent: list[Message] = []
+    start_entered, excess_handed, response_complete = anyio.Event(), anyio.Event(), anyio.Event()
+    pending = list(body_chunks or ())
+
+    async def receive() -> Message:
+        if body_chunks is None:
+            return await no_receive()
+        if pending:
+            if start_send is not StartSend.PLAIN:
+                await start_entered.wait()
+            chunk = pending.pop(0)
+            if not pending:
+                excess_handed.set()
+            return {"type": "http.request", "body": chunk, "more_body": bool(pending)}
+        await response_complete.wait()
+        return await no_receive()
+
+    async def record(message: Message) -> None:
+        is_start = message["type"] == "http.response.start"
+        if is_start and start_send is not StartSend.PLAIN:
+            start_entered.set()
+            if start_send is StartSend.SUSPENDED_BEFORE_ACCEPTING:
+                await _until_excess_is_handled(excess_handed)
+        sent.append(message)
+        if completed([message]):
+            response_complete.set()
+        if is_start and start_send is StartSend.SUSPENDED_AFTER_ACCEPTING:
+            await _until_excess_is_handled(excess_handed)
+
+    raised: BaseException | None = None
+    try:
+        with anyio.fail_after(DRIVE_DEADLINE_SECONDS):
+            await app(scope, receive, record)
+    except Exception as error:  # noqa: BLE001
+        raised = error
+    return sent, raised
+
+
+async def _until_excess_is_handled(excess_handed: anyio.Event) -> None:
+    await excess_handed.wait()
+    await anyio.wait_all_tasks_blocked()
+
+
+def starts(messages: list[Message]) -> list[Message]:
+    return [message for message in messages if message["type"] == "http.response.start"]
+
+
+def completed(messages: list[Message]) -> bool:
+    return any(
+        message["type"] == "http.response.body" and not message.get("more_body", False)
+        for message in messages
+    )
+
+
+def body_of(messages: list[Message]) -> bytes:
+    return b"".join(
+        message.get("body", b"") for message in messages if message["type"] == "http.response.body"
     )

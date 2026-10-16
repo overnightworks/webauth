@@ -60,6 +60,11 @@ This is the last release with password parts.
   `webauth.jwt_verification` exposes `VerificationRefusal` and
   `strict_json_object`.
 - A key-set fetch that timed out says so in its `KeySetFetchError` message.
+- `BodySizeLimitMiddleware` never sends a second response start. Once the app has
+  handed over a response's start, a streamed body over the limit cuts that response
+  off (a response that already finished stays complete) and the error reaches the
+  server, where a 413 used to follow the start. The start is sent whole: a
+  cancellation inside the stack waits until it is sent.
 - `SECURITY.md` names the supported release and how to report a vulnerability;
   a release is built only from a commit of `main` whose CI run finished green.
 
