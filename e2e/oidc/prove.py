@@ -35,6 +35,7 @@ from certificates import ThrowawayTls, issue_throwaway_tls
 from evidence import (
     NetworkLog,
     SecretRegistry,
+    cookie_names,
     delete_contaminated,
     recorded_cookie_name,
     scan_evidence,
@@ -59,17 +60,60 @@ REALM = "hallucinai"
 ISSUER = f"https://{IDP_HOST}/realms/{REALM}"
 OIDC_PATH = f"{ISSUER}/protocol/openid-connect"
 APP_ORIGIN = f"https://{APP_HOST}"
+CALLBACK_PATH = "/auth/callback"
+SECOND_APP_ORIGIN = f"https://{SECOND_APP_HOST}"
 CLIENT_ID = "d1-host"
 USER_NAME = "d1-user"
 USER_GROUP = "/apps/songmaker"
-DESKTOP_VIEWPORT = {"width": 1280, "height": 800}
-WIDTH_LABEL = "1280x800"
+DISABLED_USER_NAME = "d1-disabled"
+KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
+SAMESITE_VALUES = ("strict", "lax")
 PAGE_TIMEOUT_MILLISECONDS = 30_000
 APP_START_SECONDS = 30
 URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "session_state", "state")
 STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 WORKER_ENDS_SECONDS = 15
 HOST_STOPS_SECONDS = 15
+
+
+@dataclass(frozen=True)
+class Width:
+    """A browser window the scenarios run at; the phone is touch with mobile emulation."""
+
+    pixels_wide: int
+    pixels_high: int
+    touch: bool
+
+    @property
+    def label(self) -> str:
+        return f"{self.pixels_wide}x{self.pixels_high}"
+
+    @property
+    def context_options(self) -> dict[str, Any]:
+        return {
+            "viewport": {"width": self.pixels_wide, "height": self.pixels_high},
+            "is_mobile": self.touch,
+            "has_touch": self.touch,
+        }
+
+
+PHONE = Width(390, 844, touch=True)
+DESKTOP = Width(1280, 800, touch=False)
+WIDTHS = (PHONE, DESKTOP)
+
+
+@dataclass(frozen=True)
+class Host:
+    """One running host process: its cookie configuration and the ports it serves on."""
+
+    process: subprocess.Popen[bytes]
+    cookie_samesite: str
+    app_port: int
+    observe_port: int
+
+
+class Finding(Exception):
+    """A measurement that came out unfavourably: reported as found, not as a failed run."""
 
 
 class Interrupted(BaseException):
@@ -107,7 +151,11 @@ class Proof:
     ca_certificate: Path | None = None
     session_secret: str = ""
     user_password: str = ""
+    disabled_user_password: str = ""
+    disabled_user_id: str = ""
     client_secret: str = ""
+    stack: HeldStack | None = None
+    width: Width = DESKTOP
     browser_tmp: Path | None = None
     failures: int = 0
     stop_requested: threading.Event = field(default_factory=threading.Event)
@@ -141,6 +189,9 @@ class Proof:
             return False
         try:
             observed = check()
+        except Finding as finding:
+            self.record(f"{label} FAILED-as-found: {finding}")
+            return False
         except Exception as error:
             if self.stop_requested.is_set():
                 self.record(f"{label} interrupted")
@@ -153,9 +204,10 @@ class Proof:
         return True
 
     @contextlib.contextmanager
-    def browsing(self) -> Iterator[Page]:
+    def browsing(self, width: Width = DESKTOP) -> Iterator[Page]:
         assert self.browser is not None
-        context = self.browser.new_context(viewport=DESKTOP_VIEWPORT)
+        self.width = width
+        context = self.browser.new_context(**width.context_options)
         context.set_default_timeout(PAGE_TIMEOUT_MILLISECONDS)
         context.on("request", self._remember_url_credentials)
         context.on("request", self.log.watch)
@@ -195,25 +247,61 @@ class Proof:
         return httpx.get(f"http://{LOOPBACK}:{self.observe_port}/state").json()
 
     def reset_host(self) -> None:
-        httpx.post(f"http://{LOOPBACK}:{self.observe_port}/reset").raise_for_status()
+        self._tell_host("reset")
 
-    def start_sign_in(self, page: Page, scenario: str) -> None:
-        page.goto(f"{APP_ORIGIN}/")
+    def deactivate_host_accounts(self) -> None:
+        self._tell_host("deactivate")
+
+    def _tell_host(self, order: str) -> None:
+        httpx.post(f"http://{LOOPBACK}:{self.observe_port}/{order}").raise_for_status()
+
+    def set_user_enabled(self, user_id: str, enabled: bool) -> None:
+        assert self.stack is not None
+        admin = self.stack.admin()
+        self.registry.add("admin token", admin.token)
+        admin.put(f"/{REALM}/users/{user_id}", {"enabled": enabled})
+
+    def press(self, page: Page, selector: str) -> None:
+        if self.width.touch:
+            page.tap(selector)
+        else:
+            page.click(selector)
+
+    def assert_fits(self, page: Page, *selectors: str) -> None:
+        """Every element is fully inside the window and the page does not scroll sideways."""
+        for selector in selectors:
+            box = page.locator(selector).bounding_box()
+            assert box is not None, f"{selector} has no box"
+            assert 0 <= box["x"] and box["x"] + box["width"] <= self.width.pixels_wide, (
+                f"{selector} leaves the {self.width.label} window: {box}"
+            )
+        scroll_width = page.evaluate("document.documentElement.scrollWidth")
+        assert scroll_width <= self.width.pixels_wide, f"the page scrolls sideways: {scroll_width}"
+
+    def start_sign_in(self, page: Page, scenario: str, origin: str = APP_ORIGIN) -> None:
+        page.goto(f"{origin}/")
         self.shot(page, scenario, "start")
-        page.click("#sign-in")
+        self.press(page, "#sign-in")
         page.wait_for_selector("#username")
         self.capture_cookies(page.context)
 
-    def fill_keycloak_form(self, page: Page, scenario: str, password: str) -> None:
-        page.fill("#username", USER_NAME)
+    def fill_keycloak_form(
+        self, page: Page, scenario: str, password: str, username: str = USER_NAME
+    ) -> None:
+        page.fill("#username", username)
         page.fill("#password", password)
         self.shot(page, scenario, "idp-form")
-        page.click("#kc-login")
+        self.press(page, "#kc-login")
 
-    def sign_in(self, page: Page, scenario: str) -> None:
-        self.start_sign_in(page, scenario)
-        self.fill_keycloak_form(page, scenario, self.user_password)
-        page.wait_for_url(re.compile(f"^{re.escape(APP_ORIGIN)}/"))
+    def sign_in(
+        self, page: Page, scenario: str, origin: str = APP_ORIGIN, username: str = USER_NAME,
+        password: str | None = None,
+    ) -> None:
+        self.start_sign_in(page, scenario, origin)
+        self.fill_keycloak_form(
+            page, scenario, self.user_password if password is None else password, username
+        )
+        page.wait_for_url(re.compile(f"^{re.escape(origin)}/"))
 
     def status_of(self, page: Page, path: str) -> int:
         return page.evaluate("path => fetch(path).then((answer) => answer.status)", path)
@@ -242,38 +330,132 @@ def untrusted_certificate_is_refused(proof: Proof) -> str:
     raise AssertionError("the browser accepted a certificate it was not told to trust")
 
 
-def login(proof: Proof) -> str:
+def login(proof: Proof, width: Width) -> str:
     proof.reset_host()
-    with proof.browsing() as page:
-        proof.sign_in(page, "1")
+    with proof.browsing(width) as page:
+        proof.sign_in(page, f"1-{width.label}")
         page.goto(f"{APP_ORIGIN}/")
         headline = proof.headline(page)
         assert headline == f"Signed in as {USER_NAME}", f"the page says {headline!r}"
         me_status = proof.status_of(page, "/me")
         assert me_status == 200, f"/me answered {me_status}"
-        proof.shot(page, "1", "result")
+        proof.shot(page, f"1-{width.label}", "result")
     held = proof.host_state()
     assert held["accounts"] == 1 and held["sessions"] == 1, f"the host holds {held}"
     signed_in = (
         f"{USER_NAME} signed in at Keycloak's form; '/' says 'Signed in as {USER_NAME}' "
         "and GET /me answered 200"
     )
-    return f"{signed_in}; {a_wrong_password_stays_at_keycloak(proof)}"
+    return f"{signed_in}; {a_wrong_password_stays_at_keycloak(proof, width)}"
 
 
-def a_wrong_password_stays_at_keycloak(proof: Proof) -> str:
+def a_wrong_password_stays_at_keycloak(proof: Proof, width: Width) -> str:
+    scenario = f"1b-{width.label}"
     proof.reset_host()
-    with proof.browsing() as page:
+    with proof.browsing(width) as page:
         wrong_password = secrets.token_urlsafe(12)
         proof.registry.add("wrong password", wrong_password)
-        proof.start_sign_in(page, "1b")
-        proof.fill_keycloak_form(page, "1b", wrong_password)
+        proof.start_sign_in(page, scenario)
+        proof.fill_keycloak_form(page, scenario, wrong_password)
         page.get_by_text("Invalid username or password").wait_for()
         assert urllib.parse.urlsplit(page.url).hostname == IDP_HOST, "left Keycloak's form"
-        proof.shot(page, "1b", "refused-result")
+        proof.shot(page, scenario, "refused-result")
     held = proof.host_state()
     assert (held["callbacks_received"], held["accounts"], held["sessions"]) == (0, 0, 0), held
     return "a wrong password stays on Keycloak's form: callbacks 0, accounts 0, sessions 0"
+
+
+def disabled_user_is_refused(proof: Proof, width: Width) -> str:
+    scenario = f"4-{width.label}"
+    proof.reset_host()
+    proof.set_user_enabled(proof.disabled_user_id, False)
+    with proof.browsing(width) as page:
+        proof.start_sign_in(page, scenario)
+        proof.fill_keycloak_form(
+            page, scenario, proof.disabled_user_password, DISABLED_USER_NAME
+        )
+        page.get_by_text(KEYCLOAK_DISABLED_MESSAGE).wait_for()
+        assert urllib.parse.urlsplit(page.url).hostname == IDP_HOST, "left Keycloak's form"
+        proof.assert_fits(
+            page, "#username", "#password", "#kc-login", f"text={KEYCLOAK_DISABLED_MESSAGE}"
+        )
+        proof.shot(page, scenario, "refused-result")
+    held = proof.host_state()
+    assert held["callbacks_received"] == 0 and held["sessions"] == 0, f"the host holds {held}"
+    proof.set_user_enabled(proof.disabled_user_id, True)
+    with proof.browsing(width) as page:
+        proof.sign_in(
+            page, f"{scenario}-enabled", username=DISABLED_USER_NAME,
+            password=proof.disabled_user_password,
+        )
+        assert proof.headline(page) == f"Signed in as {DISABLED_USER_NAME}"
+    proof.deactivate_host_accounts()
+    sessions_before = proof.host_state()["sessions"]
+    with proof.browsing(width) as page:
+        proof.sign_in(
+            page, f"{scenario}-deactivated", username=DISABLED_USER_NAME,
+            password=proof.disabled_user_password,
+        )
+        assert proof.headline(page) == "Sign-in refused", f"the page says {proof.headline(page)!r}"
+        proof.shot(page, f"{scenario}-deactivated", "result")
+        carried = {c["name"] for c in page.context.cookies(APP_ORIGIN)}
+        assert DEFAULT_SESSION_COOKIE_NAME not in carried, "a session cookie was issued"
+    held = proof.host_state()
+    assert held["last_refusal"] == "account-deactivated", f"the host refused {held}"
+    assert held["sessions"] == sessions_before, f"the host holds {held}"
+    return (
+        f"Keycloak answered {KEYCLOAK_DISABLED_MESSAGE!r} and no callback reached the app "
+        f"(callbacks 0, sessions 0); the same credentials signed in once the user was enabled; "
+        f"a host account with is_active false reached the callback and was refused with "
+        f"'account-deactivated', no session"
+    )
+
+
+def pages_fit_the_window(proof: Proof, width: Width) -> str:
+    scenario = f"6-{width.label}"
+    proof.reset_host()
+    with proof.browsing(width) as page:
+        proof.start_sign_in(page, scenario)
+        page.fill("#username", USER_NAME)
+        page.fill("#password", proof.user_password)
+        proof.assert_fits(page, "#username", "#password", "#kc-login")
+        proof.shot(page, scenario, "idp-form")
+        proof.press(page, "#kc-login")
+        page.wait_for_url(f"{APP_ORIGIN}/")
+        proof.assert_fits(page, "h1", "#logout")
+        proof.shot(page, scenario, "result")
+    return (
+        f"at {width.label} the app's start page, Keycloak's username and password fields and "
+        f"sign-in button, and the app's signed-in page lie inside the window, "
+        f"without sideways scroll"
+    )
+
+
+def session_cookie_after_redirect(proof: Proof, origin: str) -> str:
+    proof.reset_host()
+    scenario = f"5-{urllib.parse.urlsplit(origin).hostname}"
+    with proof.browsing() as page:
+        requests: list[Any] = []
+        page.context.on("request", lambda request: requests.append(request))
+        proof.sign_in(page, scenario, origin)
+        page.wait_for_url(f"{origin}/")
+        callback = next(r for r in requests if r.url.startswith(f"{origin}{CALLBACK_PATH}"))
+        landing = next(r for r in requests if r.redirected_from is callback)
+        assert any(
+            is_pending_login_cookie_name(name, secure=True)
+            for name in cookie_names(callback.headers_array())
+        ), "the callback carried no pending-login cookie; request cookies are not measured"
+        names = [recorded_cookie_name(name) for name in cookie_names(landing.headers_array())]
+        site = next(
+            (h["value"] for h in landing.headers_array() if h["name"].lower() == "sec-fetch-site"),
+            "(none)",
+        )
+        headline = proof.headline(page)
+        proof.shot(page, scenario, "first-page")
+    observed = f"first page showed {headline!r}; cookie names sent {names}; Sec-Fetch-Site {site}"
+    if headline != f"Signed in as {USER_NAME}":
+        raise Finding(observed)
+    return observed
 
 
 def logout(proof: Proof) -> str:
@@ -340,6 +522,21 @@ def second_sign_in(proof: Proof, page: Page) -> str:
     )
 
 
+def create_user(admin: Admin, username: str, password: str) -> str:
+    user_id = admin.create(f"/{REALM}/users", {
+        "username": username,
+        "enabled": True,
+        "email": f"{username}@d1.invalid",
+        "emailVerified": True,
+        "firstName": "D1",
+        "lastName": "User",
+        "credentials": [{"type": "password", "value": password, "temporary": False}],
+    })
+    group = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")
+    admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")
+    return user_id
+
+
 def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
     admin.create(f"/{REALM}/clients", {
         "clientId": CLIENT_ID,
@@ -352,21 +549,12 @@ def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
         "serviceAccountsEnabled": False,
         "frontchannelLogout": False,
         "redirectUris": [
-            f"{APP_ORIGIN}/auth/callback", f"https://{SECOND_APP_HOST}/auth/callback",
+            f"{APP_ORIGIN}{CALLBACK_PATH}", f"{SECOND_APP_ORIGIN}{CALLBACK_PATH}",
         ],
         "defaultClientScopes": ["basic", "profile", "groups"],
     })
-    user_id = admin.create(f"/{REALM}/users", {
-        "username": USER_NAME,
-        "enabled": True,
-        "email": f"{USER_NAME}@d1.invalid",
-        "emailVerified": True,
-        "firstName": "D1",
-        "lastName": "User",
-        "credentials": [{"type": "password", "value": proof.user_password, "temporary": False}],
-    })
-    group = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")
-    admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")
+    create_user(admin, USER_NAME, proof.user_password)
+    proof.disabled_user_id = create_user(admin, DISABLED_USER_NAME, proof.disabled_user_password)
 
 
 def register_stack_secrets(stack: HeldStack, admin: Admin, registry: SecretRegistry) -> None:
@@ -379,14 +567,14 @@ def register_stack_secrets(stack: HeldStack, admin: Admin, registry: SecretRegis
 
 
 def start_host(
-    proof: Proof, runtime: Path, tls: ThrowawayTls, shim_port: int,
-) -> subprocess.Popen[bytes]:
-    proof.app_port, proof.observe_port = free_port(), free_port()
+    proof: Proof, runtime: Path, tls: ThrowawayTls, shim_port: int, cookie_samesite: str,
+) -> Host:
+    app_port, observe_port = free_port(), free_port()
     proof.ca_certificate = tls.ca_certificate
     settings = HostSettings(
-        app_origin=APP_ORIGIN,
-        port=proof.app_port,
-        observe_port=proof.observe_port,
+        app_origins=(APP_ORIGIN, SECOND_APP_ORIGIN),
+        port=app_port,
+        observe_port=observe_port,
         tls_certificate=str(tls.leaf_certificate),
         tls_key=str(tls.leaf_key),
         issuer=ISSUER,
@@ -396,10 +584,11 @@ def start_host(
         client_id=CLIENT_ID,
         client_secret=proof.client_secret,
         session_secret=proof.session_secret,
+        cookie_samesite=cookie_samesite,
     )
-    settings_file = runtime / "host-settings.json"
+    settings_file = runtime / f"host-settings-{cookie_samesite}.json"
     settings.write(settings_file)
-    log_file = (runtime / "host.log").open("wb")
+    log_file = (runtime / f"host-{cookie_samesite}.log").open("wb")
     process = subprocess.Popen(
         [sys.executable, str(Path(__file__).with_name("host_app.py")),
          "--settings", str(settings_file), "--parent-pid", str(os.getpid())],
@@ -407,11 +596,11 @@ def start_host(
         stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
     try:
-        wait_until_serving(proof, process, proof.observe_port, proof.app_port)
+        wait_until_serving(proof, process, observe_port, app_port)
     except BaseException:
         stop_host(process)
         raise
-    return process
+    return Host(process, cookie_samesite, app_port, observe_port)
 
 
 def wait_until_serving(proof: Proof, process: subprocess.Popen[bytes], *ports: int) -> None:
@@ -453,14 +642,17 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
     proof.session_secret = secrets.token_urlsafe(48)
     proof.user_password = secrets.token_urlsafe(18)
     proof.client_secret = secrets.token_urlsafe(24)
+    proof.disabled_user_password = secrets.token_urlsafe(18)
     for label, value in (
         ("session secret", proof.session_secret), ("user password", proof.user_password),
+        ("disabled user password", proof.disabled_user_password),
         ("client secret", proof.client_secret),
     ):
         proof.registry.add(label, value)
     tls = issue_throwaway_tls(runtime, "good", [IDP_HOST, APP_HOST, SECOND_APP_HOST, "localhost"])
     untrusted = issue_throwaway_tls(runtime, "untrusted", [UNTRUSTED_HOST])
     with HeldStack(edge, runtime / "stack") as stack:
+        proof.stack = stack
         admin = stack.admin()
         register_stack_secrets(stack, admin, proof.registry)
         prepare_keycloak(admin, proof, proof.client_secret)
@@ -468,12 +660,17 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
         assert edge_port is not None
         with TlsShim(tls, edge_port, IDP_HOST) as shim, \
                 TlsShim(untrusted, edge_port, IDP_HOST) as untrusted_shim:
-            host = start_host(proof, runtime, tls, shim.port)
+            hosts: list[Host] = []
             try:
-                drive_browser_off_the_main_thread(proof, tls, shim.port, untrusted_shim.port)
+                for cookie_samesite in SAMESITE_VALUES:
+                    hosts.append(start_host(proof, runtime, tls, shim.port, cookie_samesite))
+                drive_browser_off_the_main_thread(
+                    proof, tls, shim.port, untrusted_shim.port, hosts
+                )
             finally:
                 proof.winding_down = True
-                stop_host(host)
+                for host in hosts:
+                    stop_host(host.process)
     print("\n".join(line for line in stack.output if line.startswith("teardown")), flush=True)
 
 
@@ -486,7 +683,7 @@ def own_child_pids() -> set[int]:
 
 
 def drive_browser_off_the_main_thread(
-    proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int
+    proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int, hosts: list[Host]
 ) -> None:
     """Playwright's sync API cannot be torn down from a signal handler, so the
     main thread keeps the signals and kills the browser's driver on a stop."""
@@ -498,7 +695,7 @@ def drive_browser_off_the_main_thread(
     def work() -> None:
         worker_entered.set()
         try:
-            drive_browser(proof, tls, shim_port, untrusted_port)
+            drive_browser(proof, tls, shim_port, untrusted_port, hosts)
         except BaseException as error:
             crashes.append(error)
 
@@ -526,34 +723,59 @@ def drive_browser_off_the_main_thread(
         ) from crash
 
 
-def drive_browser(proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int) -> None:
-    rules = ", ".join((
-        f"MAP {IDP_HOST} {LOOPBACK}:{shim_port}",
-        f"MAP {APP_HOST} {LOOPBACK}:{proof.app_port}",
-        f"MAP {SECOND_APP_HOST} {LOOPBACK}:{proof.app_port}",
-        f"MAP {UNTRUSTED_HOST} {LOOPBACK}:{untrusted_port}",
-    ))
+def drive_browser(
+    proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int, hosts: list[Host]
+) -> None:
     assert proof.browser_tmp is not None
     os.environ["TMPDIR"] = str(proof.browser_tmp)
     with sync_playwright() as playwright:
-        proof.browser = playwright.chromium.launch(args=[
-            f"--host-resolver-rules={rules}",
-            f"--ignore-certificate-errors-spki-list={tls.leaf_spki_sha256_base64}",
-        ])
-        try:
-            if not proof.held_or_failed(
-                "CHECK issuer-document", lambda: issuer_document_is_canonical(proof)
-            ):
-                return
-            if not proof.held_or_failed(
-                "CHECK untrusted-certificate", lambda: untrusted_certificate_is_refused(proof)
-            ):
-                return
-            origin = APP_ORIGIN
-            proof.held_or_failed(f"SCENARIO 1 {WIDTH_LABEL} {origin}", lambda: login(proof))
-            proof.held_or_failed(f"SCENARIO 2 {WIDTH_LABEL} {origin}", lambda: logout(proof))
-        finally:
-            proof.browser.close()
+        for host in hosts:
+            proof.app_port, proof.observe_port = host.app_port, host.observe_port
+            rules = ", ".join((
+                f"MAP {IDP_HOST} {LOOPBACK}:{shim_port}",
+                f"MAP {APP_HOST} {LOOPBACK}:{host.app_port}",
+                f"MAP {SECOND_APP_HOST} {LOOPBACK}:{host.app_port}",
+                f"MAP {UNTRUSTED_HOST} {LOOPBACK}:{untrusted_port}",
+            ))
+            proof.browser = playwright.chromium.launch(args=[
+                f"--host-resolver-rules={rules}",
+                f"--ignore-certificate-errors-spki-list={tls.leaf_spki_sha256_base64}",
+            ])
+            try:
+                if host.cookie_samesite == SAMESITE_VALUES[0] and not run_default_scenarios(proof):
+                    return
+                for origin in (APP_ORIGIN, SECOND_APP_ORIGIN):
+                    proof.held_or_failed(
+                        f"SCENARIO 5 {origin} {host.cookie_samesite}",
+                        lambda origin=origin: session_cookie_after_redirect(proof, origin),
+                    )
+            finally:
+                proof.browser.close()
+
+
+SCENARIOS_PER_WIDTH = (
+    (1, login), (4, disabled_user_is_refused), (6, pages_fit_the_window),
+)
+
+
+def run_default_scenarios(proof: Proof) -> bool:
+    """Everything but the cookie grid runs once, on the shipped default; False stops the run."""
+    if not proof.held_or_failed(
+        "CHECK issuer-document", lambda: issuer_document_is_canonical(proof)
+    ):
+        return False
+    if not proof.held_or_failed(
+        "CHECK untrusted-certificate", lambda: untrusted_certificate_is_refused(proof)
+    ):
+        return False
+    for width in WIDTHS:
+        for number, scenario in SCENARIOS_PER_WIDTH:
+            proof.held_or_failed(
+                f"SCENARIO {number} {width.label} {APP_ORIGIN}",
+                lambda scenario=scenario, width=width: scenario(proof, width),
+            )
+    proof.held_or_failed(f"SCENARIO 2 {DESKTOP.label} {APP_ORIGIN}", lambda: logout(proof))
+    return True
 
 
 def stop_on_first_signal(proof: Proof) -> None:
