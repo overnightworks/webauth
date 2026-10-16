@@ -76,8 +76,10 @@ whole.
 A release is a tag. `.github/workflows/release.yml` builds the wheel on a
 `v*` tag and attaches it to the GitHub release; host applications pin that
 asset URL. A tag is never moved — a broken release gets the next patch tag —
-so the version in `pyproject.toml` and `webauth.__version__` is raised in the
-pull request that precedes the tag.
+so `webauth.__version__` alone is raised in the pull request that precedes the
+tag. It stays a plain string literal: setuptools reads it without importing the
+package, and a computed value would make the isolated build import FastAPI and
+fail.
 
 A pull request that changes behaviour a host can see adds its line to
 `CHANGELOG.md` under the unreleased version (opening `## X.Y.Z - Unreleased` when
