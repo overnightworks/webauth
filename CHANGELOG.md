@@ -53,7 +53,7 @@ This is the last release with password parts.
   collapses to `/`, as `//x` did. `LoginRedirect` refuses a backslash or tab
   form of its `path` when it is built.
 - Comparing a session cookie or CSRF token that holds a non-ASCII value now
-  works on bytes: it is refused (401 or 403) where v0.13.0 raised `TypeError`
+  works on bytes: it is refused like a forged one where v0.13.0 raised `TypeError`
   and answered 500.
 - The OIDC token answer is read by the verifier's strict parser: bad UTF-8,
   non-finite numbers and nesting that is too deep are refused.
