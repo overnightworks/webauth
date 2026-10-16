@@ -3,7 +3,7 @@
 ## Project
 
 Session authentication for FastAPI applications: sessions with Redis-backed
-expiry, HMAC-signed cookies, CSRF double-submit, admin and owner checks,
+expiry, HMAC-signed cookies, CSRF double-submit, admin checks,
 per-address rate limits, audit ports. Distribution `overnightworks-webauth`,
 import package `webauth`.
 
@@ -19,13 +19,7 @@ owns the layout, boundary, check and release rules. Read it first.
 
 ## Setup & Checks
 
-```bash
-uv sync --extra dev
-uv run pytest tests -q       # the whole suite; no service needed
-uv run ruff check src tests
-uv run lint-imports
-uv build                     # what the release attaches
-```
+The checks are listed in AGENTS.md "Checks"; `uv sync --extra dev` sets up.
 
 ## Code patterns
 
@@ -37,4 +31,5 @@ uv build                     # what the release attaches
 - **No inline comments.** Names carry the meaning; a comment explains only a
   non-obvious *why*.
 - **Tests name the behaviour they pin** and use the builders in
-  `tests/webauth_arrangement.py` rather than a second set of fakes.
+  `tests/webauth_arrangement.py` and `tests/oidc_arrangement.py` rather than a
+  second set of fakes.

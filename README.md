@@ -1,7 +1,7 @@
 # webauth
 
 Session authentication for FastAPI applications: sessions with Redis-backed
-expiry, HMAC-signed cookies, CSRF double-submit, admin and owner checks,
+expiry, HMAC-signed cookies, CSRF double-submit, admin checks,
 per-address rate limits, and the audit events they raise.
 
 Distribution `overnightworks-webauth`, import package `webauth`.
@@ -88,7 +88,7 @@ verifier rejects a token naming an unknown `kid` as `KEY_SET_UNAVAILABLE` when
 the key-set refresh failed, not as `UNKNOWN_KEY_ID`. It also changes
 three public contracts: a `deadline_seconds` of zero or less raises
 `ValueError` in `fetch_key_set_over_https`, `post_form_over_https` and
-`post_token_request_over_https`;
+`post_token_request_over_https`, which refuses a `timeout_seconds` of zero or less too;
 `TokenEndpointError.failure` is the `ExchangeFailure` that ended the token
 request, so a caller can tell `TIMED_OUT` from other transport failures; and
 `post_token_request_over_https` takes `deadline_seconds`, raising `ValueError`
