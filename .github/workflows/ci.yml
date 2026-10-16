@@ -27,7 +27,7 @@ jobs:
         run: uv lock --check
 
       - name: Ruff
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests e2e
 
       - name: Import boundaries
         run: uv run lint-imports

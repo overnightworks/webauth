@@ -29,6 +29,12 @@ dev = [
     "import-linter>=2,<3",
 ]
 
+[dependency-groups]
+e2e = [
+    "playwright==1.62.0",
+    "uvicorn[standard]==0.41.0",
+]
+
 [project.urls]
 Repository = "https://github.com/overnightworks/webauth"
 

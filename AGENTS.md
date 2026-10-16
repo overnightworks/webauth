@@ -22,6 +22,11 @@ the directory of its owner: the library under `src/webauth/`, its suite under
 `tests/`. No catch-all directory (`tooling/`, `misc/`) and no deeper hierarchy
 than the owner needs.
 
+`e2e/` is the proof harness: real-browser scripts that drive a host application
+built on the library against a real issuer. It owns nothing shipped, the
+library never imports it, and it is run by hand (`e2e/oidc/README.md`), not in
+CI, which only lints it.
+
 ## Boundaries
 
 - The library persists nothing. It holds no schema and no ORM; durable state
@@ -50,7 +55,7 @@ than the owner needs.
 ```bash
 uv sync --extra dev
 uv run pytest tests -q
-uv run ruff check src tests
+uv run ruff check src tests e2e
 uv run lint-imports
 uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 ```
