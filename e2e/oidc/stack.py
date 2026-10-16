@@ -64,8 +64,8 @@ class Admin:
             raise StackError(f"GET {path} answered {answer.status_code}")
         return answer.json()
 
-    def put(self, path: str) -> None:
-        answer = self._call("PUT", path)
+    def put(self, path: str, representation: dict[str, Any] | None = None) -> None:
+        answer = self._call("PUT", path, json=representation)
         if answer.status_code not in (200, 204):
             raise StackError(f"PUT {path} answered {answer.status_code}")
 
