@@ -737,8 +737,8 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
 class StartSend(enum.Enum):
     """How the server takes the response start; the suspended modes need a concurrent
     reader of the body (ASGI spec before 2.4), because the excess arrives while the start
-    is still in its send. HELD_PAST_THE_DEADLINE holds the start in its send for longer than the drive
-    deadline and only then records it, so a send left unbounded shows as a start."""
+    is still in its send. HELD_PAST_THE_DEADLINE holds the start in its send for longer than
+    the drive deadline and only then records it, so a send left unbounded shows as a start."""
 
     PLAIN = enum.auto()
     SUSPENDED_BEFORE_ACCEPTING = enum.auto()
