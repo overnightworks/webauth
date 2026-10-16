@@ -1,8 +1,0 @@
-claim_id = "1625ca5e21cb471d9de26504c3561558"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "2cfe9ef3a7246910090200fc756cd6e572a5a1c7"
-branch = "claude/issue-93-security-headers-asgi-owner"
-scope = ["README.md", "src/webauth/middleware/security_headers.py", "tests/test_security_headers.py", "tests/webauth_arrangement.py"]
-opened_commit = "8d9abd72e53ca6d162f4c8983130b60ced126fb2"
-whole_reason = "S13a is one middleware owner, its shared test helper, its new tests and its README paragraph"
