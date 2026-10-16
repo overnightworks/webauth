@@ -466,11 +466,11 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
 
 
 def own_child_pids() -> set[int]:
-    return {
-        int(pid)
-        for children in Path("/proc/self/task").glob("*/children")
-        for pid in children.read_text().split()
-    }
+    pids: set[int] = set()
+    for children in Path("/proc/self/task").glob("*/children"):
+        with contextlib.suppress(FileNotFoundError):  # the thread ended while we looked
+            pids.update(int(pid) for pid in children.read_text().split())
+    return pids
 
 
 def drive_browser_off_the_main_thread(
