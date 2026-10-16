@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 import fakeredis
 import pytest
 from fastapi.testclient import TestClient
-from webauth_arrangement import HTTPS_TEST_SERVER, RATE_LIMITED_PATH, a_rate_limited_client
+from webauth_arrangement import (
+    HTTPS_TEST_SERVER,
+    RATE_LIMITED_PATH,
+    AlwaysFailingRateLimitBackend,
+    a_rate_limited_client,
+)
 
 from webauth.rate_limit import RedisRateLimitBackend
 
@@ -99,14 +104,8 @@ class TestMiddlewareOverRedisBackend:
         assert neighbour.get(RATE_LIMITED_PATH).status_code == 429
 
     def test_rejects_closed_when_the_backend_cannot_answer(self) -> None:
-        client = a_rate_limited_client(_AlwaysFailingBackend(), max_requests=5)
+        client = a_rate_limited_client(AlwaysFailingRateLimitBackend(), max_requests=5)
         rejected = client.get(RATE_LIMITED_PATH)
         assert rejected.status_code == 503
         assert rejected.headers["Retry-After"] == "5"
 
-
-class _AlwaysFailingBackend:
-    """A backend that can never answer, to prove the middleware fails closed."""
-
-    def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
-        raise ConnectionError("rate limiter down")

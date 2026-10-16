@@ -6,6 +6,7 @@ from webauth.middleware.body_size import BodySizeLimitMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
+from webauth.middleware.stack import install_web_auth_middleware
 
 __all__ = [
     "BodySizeLimitMiddleware",
@@ -13,4 +14,5 @@ __all__ = [
     "CsrfTokenMiddleware",
     "IpRateLimitMiddleware",
     "SecurityHeadersMiddleware",
+    "install_web_auth_middleware",
 ]
