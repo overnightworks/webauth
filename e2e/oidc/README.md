@@ -100,6 +100,43 @@ redirect leads to: the cookie names it carried, its `Sec-Fetch-Site`, and the
 page it rendered. A logged-out first page is `FAILED-as-found`: a finding to
 file, not a failed run.
 
+## Conformance run
+
+`conformance.py` runs the OpenID Foundation's conformance suite (release
+v5.3.3, server and mongo images pinned by digest in `suite-compose.yaml`) as the
+issuer of a relying party. It needs Docker and no edge checkout. The suite's own
+nginx is not used: its certificate has no subject alternative name, which
+webauth's HTTPS client rightly refuses. The driver puts the `TlsShim` with a
+throwaway certificate in front of the server's port, which is published on
+`127.0.0.1` only (the dev-mode API has no login).
+
+The run creates `oidcc-client-basic-certification-test-plan` with a throwaway
+client secret, prints the plan's modules as the suite names them, brings the
+first module to WAITING, checks the issuer the suite exposes
+(`https://conformance.example.test/test/a/webauth-d2/`), cancels it and writes
+the plan export to `SCRATCH/export/`. The export is a full protocol transcript
+with the client secret and the suite's private keys in it: keep it local, never
+attach it to anything.
+
+Pull the images first, outside the lock:
+
+    docker compose -f e2e/oidc/suite-compose.yaml pull
+
+Then, with the 1-minute load average at or below 18:
+
+    flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
+        uv run --extra dev --group e2e python e2e/oidc/conformance.py --scratch EMPTY_DIR
+
+Stopping works as above (SIGTERM to `timeout` or to the python process; exit
+status 1). On every exit path the suite project is taken down with its volumes
+and the run looks for containers, volumes and networks still carrying its
+compose project label. After a SIGKILL nothing can clean up: find the project
+with `docker ps -a --filter name=d2-suite`, then `docker compose -p NAME -f
+e2e/oidc/suite-compose.yaml down -v --remove-orphans` (with `SUITE_HOST` set to
+anything), and `rm -rf SCRATCH/runtime`.
+
+The pins are not watched by Dependabot; their freshness is owned by issue #110.
+
 ## Last run: session cookie after the redirect
 
 | App origin | `cookie_samesite` | First page | Session cookie sent | `Sec-Fetch-Site` |

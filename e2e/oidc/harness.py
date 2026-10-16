@@ -14,11 +14,17 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from evidence import NetworkLog, SecretRegistry, delete_contaminated, scan_evidence
+from evidence import (
+    NetworkLog,
+    SecretRegistry,
+    delete_contaminated,
+    scan_evidence,
+    without_query_values,
+)
 from host_app import HostSettings
 from shim import LOOPBACK
 from stack import StackError
@@ -47,6 +53,36 @@ class Run(Protocol):
     browser_outlived_run: bool
 
     def fail(self, message: str) -> None: ...
+
+
+@dataclass
+class RunRecord:
+    """What every run keeps: its masked lines, its failures and its stop state."""
+
+    evidence_dir: Path
+    registry: SecretRegistry
+    log: NetworkLog
+    lines: list[str] = field(default_factory=list)
+    failures: int = 0
+    stop_requested: threading.Event = field(default_factory=threading.Event)
+    winding_down: bool = False
+    browser_outlived_run: bool = False
+
+    @property
+    def all_held(self) -> bool:
+        return bool(self.lines) and not self.failures
+
+    def fail(self, message: str) -> None:
+        self.failures += 1
+        self.record(f"FAILED: {without_query_values(message)}")
+
+    def record(self, line: str) -> None:
+        masked_line = self.registry.masked(line)
+        self.lines.append(masked_line)
+        print(masked_line, flush=True)
+        leaked = self.registry.labels_in(line.encode())
+        if leaked:
+            self.fail(f"a recorded line held {', '.join(leaked)}")
 
 
 @dataclass(frozen=True)
