@@ -32,14 +32,17 @@ reaches every descendant), hence Ctrl-C in the terminal reaches only `flock`
 and does not stop the run. The first SIGTERM or SIGINT ends the run with
 `FAILED: interrupted` and exit status 1 after an uninterruptible cleanup (host
 app, stack, `runtime/`, evidence scan); further signals are ignored. `--kill-after=240`
-exceeds the cleanup's longest wait (the stack's 180 s plus the host's 15 s).
+exceeds the cleanup's worst case: browser worker 15 s, host SIGTERM 15 s, host
+SIGKILL 15 s, stack 180 s, together 225 s.
 
 If the run is killed with SIGKILL anyway (the `timeout` fallback, `kill -9`, an
 out-of-memory kill), nothing can clean up. By hand: `rm -rf SCRATCH/runtime`
 (it holds credentials and keys); remove the stack with edge's README procedure
 (`docker ps -a --filter name=edge-kc-probe`); `pkill -f e2e/oidc/host_app.py`
 if a listener on a random port remains (the host app dies with its parent,
-so this is rarely needed). Do not trust `evidence/` of such a run.
+so this is rarely needed). Do not trust `evidence/` of such a run, nor of a
+run that prints `the browser worker did not stop`: its screenshots are deleted
+and nothing is scanned, because a live browser could still write.
 
 `--scratch` must be empty. Afterwards it holds `evidence/` only: screenshots,
 `network.har` and `result-table.txt`. `runtime/` (credentials, keys, the stack's

@@ -1,6 +1,6 @@
 """Proves login and logout of a webauth host in a real browser against a real Keycloak.
 
-    flock /tmp/probe-stack.lock timeout --kill-after=240 900 \\
+    flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \\
         uv run --extra dev --group e2e python e2e/oidc/prove.py --edge PATH --scratch EMPTY_DIR
 
 Read ``README.md`` beside this file first. Nothing of the OIDC path is faked:
@@ -111,6 +111,7 @@ class Proof:
     failures: int = 0
     stop_requested: threading.Event = field(default_factory=threading.Event)
     winding_down: bool = False
+    browser_outlived_run: bool = False
 
     @property
     def all_held(self) -> bool:
@@ -130,6 +131,9 @@ class Proof:
         try:
             observed = check()
         except Exception as error:
+            if self.stop_requested.is_set():
+                self.record(f"{label} interrupted")
+                return False
             failure = without_query_values(f"{type(error).__name__}: {error}")
             self.failures += 1
             self.record(f"{label} FAILED: {failure}")
@@ -148,9 +152,10 @@ class Proof:
         try:
             yield page
         finally:
-            self.capture_cookies(context)
-            self.log.collect()
-            context.close()
+            with contextlib.ExitStack() as cleanup:
+                cleanup.callback(context.close)
+                cleanup.callback(self.log.collect)
+                cleanup.callback(self.capture_cookies, context)
 
     def _remember_url_credentials(self, request: Any) -> None:
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.url).query)
@@ -318,7 +323,10 @@ def second_sign_in(proof: Proof, page: Page) -> str:
         return "shows Keycloak's form again"
     held = proof.host_state()
     assert held["sessions"] == 1, f"the host holds {held}"
-    return "signs in again without a form, through the live SSO session"
+    return (
+        f"signs in again without a form, through the live SSO session "
+        f"(host sessions: {held['sessions']})"
+    )
 
 
 def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
@@ -383,11 +391,15 @@ def start_host(
     log_file = (runtime / "host.log").open("wb")
     process = subprocess.Popen(
         [sys.executable, str(Path(__file__).with_name("host_app.py")),
-         "--settings", str(settings_file)],
+         "--settings", str(settings_file), "--parent-pid", str(os.getpid())],
         env={"PATH": os.environ["PATH"], "SSL_CERT_FILE": str(tls.ca_certificate)},
         stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
-    wait_until_serving(process, proof.observe_port, proof.app_port)
+    try:
+        wait_until_serving(process, proof.observe_port, proof.app_port)
+    except BaseException:
+        stop_host(process)
+        raise
     return process
 
 
@@ -467,25 +479,31 @@ def drive_browser_off_the_main_thread(
     """Playwright's sync API cannot be torn down from a signal handler, so the
     main thread keeps the signals and kills the browser's driver on a stop."""
     before = own_child_pids()
-    crashes: list[Exception] = []
+    crashes: list[BaseException] = []
 
     def work() -> None:
         try:
             drive_browser(proof, tls, shim_port, untrusted_port)
-        except Exception as error:
+        except BaseException as error:
             crashes.append(error)
 
     worker = threading.Thread(target=work, name="browser", daemon=True)
-    worker.start()
     try:
+        worker.start()
         while worker.is_alive():
             worker.join(0.5)
     except Interrupted:
         for pid in own_child_pids() - before:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
-        worker.join(WORKER_ENDS_SECONDS)
         raise
+    finally:
+        proof.winding_down = True
+        if worker.ident is not None:
+            worker.join(WORKER_ENDS_SECONDS)
+        if worker.is_alive():
+            proof.browser_outlived_run = True
+            proof.fail("the browser worker did not stop; evidence is not trustworthy")
     if crashes:
         raise crashes[0]
 
@@ -528,7 +546,7 @@ def stop_on_first_signal(proof: Proof) -> None:
         for stop_signal in STOP_SIGNALS:
             signal.signal(stop_signal, signal.SIG_IGN)
         proof.stop_requested.set()
-        if not proof.winding_down:
+        if not proof.winding_down and sys.exception() is None:
             raise Interrupted
 
     for stop_signal in STOP_SIGNALS:
@@ -581,6 +599,11 @@ def prove(edge: Path, scratch: Path) -> int:
 
 
 def keep_clean_evidence(proof: Proof) -> int:
+    if proof.browser_outlived_run:
+        for screenshot in proof.evidence_dir.glob("*.png"):
+            screenshot.unlink()
+        print("FAILED: the browser outlived the run; screenshots deleted, evidence not scanned")
+        return 1
     (proof.evidence_dir / "result-table.txt").write_text("\n".join(proof.lines) + "\n")
     proof.log.write(proof.evidence_dir / "network.har")
     findings = scan_evidence(proof.evidence_dir, proof.registry)

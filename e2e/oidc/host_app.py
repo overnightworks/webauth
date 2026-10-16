@@ -13,6 +13,7 @@ import functools
 import html
 import importlib.util
 import json
+import os
 import signal
 import sys
 import threading
@@ -267,18 +268,22 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     return app
 
 
-def die_with_parent() -> None:
+def die_with_parent(parent_pid: int) -> None:
     """Linux ``PR_SET_PDEATHSIG``: a host nobody can stop must not outlive its run."""
     pr_set_pdeathsig = 1
     if ctypes.CDLL(None, use_errno=True).prctl(pr_set_pdeathsig, signal.SIGKILL) != 0:
         raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) failed")
+    if os.getppid() != parent_pid:
+        raise SystemExit("the parent ended before the host could watch it")
 
 
 def main() -> None:
-    die_with_parent()
     parser = argparse.ArgumentParser()
     parser.add_argument("--settings", type=Path, required=True)
-    settings = HostSettings.read(parser.parse_args().settings)
+    parser.add_argument("--parent-pid", type=int, required=True)
+    arguments = parser.parse_args()
+    die_with_parent(arguments.parent_pid)
+    settings = HostSettings.read(arguments.settings)
     world = {"world": World()}
     _Observation(settings.observe_port, world)
     uvicorn.run(

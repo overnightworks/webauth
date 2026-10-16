@@ -21,7 +21,7 @@ PROBE_FILES = "compose.yaml keycloak probe/keycloak traefik.yml dynamic".split()
 REALM = "hallucinai"
 READY_MARK = "READY "
 HOLD_ENDED = "HOLD ENDED"
-STOP_WAIT_SECONDS = 180  # README: --kill-after must exceed this plus the host's stop
+STOP_WAIT_SECONDS = 180  # README: --kill-after must exceed the worst-case cleanup, 225 s
 ADMIN_TIMEOUT_SECONDS = 30
 
 
