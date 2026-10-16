@@ -258,17 +258,17 @@ the limiter is reached:
 
 | Body | Answer | Rate budget |
 |---|---|---|
-| Content-Length over the limit | 413 before the route | spends nothing |
-| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete. The error reaches the server either way | spends one |
+| Any Content-Length header over the limit | 413 before the route | spends nothing |
+| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete; with a rate-limit or CSRF middleware between the body-size check and the route, until #119 the response ends complete with what it sent. The error reaches the server either way | spends one |
 | Streamed, never read, and the response is not a `StreamingResponse` under spec < 2.4 | Not size-checked; answers normally | spends one |
 
-The library sends a response's start whole: a cancellation inside the app waits until the start is sent, and so does a host deadline that cancels through an anyio cancel scope outside the stack; asyncio cancellation (`asyncio.timeout`, server shutdown) still interrupts it.
+The library sends a response's start whole: a cancellation inside the app waits until the start is sent, and so does a host deadline that cancels through an anyio cancel scope outside the stack; asyncio cancellation (`asyncio.timeout`, server shutdown) still interrupts it. The wait is bounded: a start send that has not returned after `BodySizePolicy.start_send_seconds` (default 10 seconds) fails with `TimeoutError`, which reaches the server; no 413 and no second start follow.
 
 **The 500 cases.**
 
 | Cause | Response | Budget |
 |---|---|---|
-| A streamed body over the limit (no Content-Length) that the route reads | The library 500 with the headers, until #28 finding 37, when a rate-limit or CSRF middleware sits between the body-size check and the route; otherwise 413. A streamed body the route never reads: see [A body over the limit](#a-body-over-the-limit) | spends one |
+| A streamed body over the limit (no Content-Length) that the route reads | The library 500 with the headers, until #28 finding 37, when a rate-limit or CSRF middleware sits between the body-size check and the route; otherwise 413. A streamed body the route never reads: see the table above | spends one |
 | A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
 | No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
 

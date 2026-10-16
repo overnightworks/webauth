@@ -22,13 +22,18 @@ def _too_large() -> JSONResponse:
 
 
 def _declares_over(scope: Scope, limit: int) -> bool:
-    for name, value in scope.get("headers", []):
-        if name.decode("latin-1").lower() == "content-length":
-            try:
-                return int(value.decode("latin-1")) > limit
-            except ValueError:
-                return False
-    return False
+    return any(
+        _declared_length(value) > limit
+        for name, value in scope.get("headers", [])
+        if name.decode("latin-1").lower() == "content-length"
+    )
+
+
+def _declared_length(value: bytes) -> int:
+    try:
+        return int(value.decode("latin-1"))
+    except ValueError:
+        return 0
 
 
 class BodySizeLimitMiddleware:
@@ -70,7 +75,8 @@ class BodySizeLimitMiddleware:
             start_handed_over = True
             # Shielded: a start cancelled mid-send may or may not have reached the
             # server, and only a delivered or failed start tells whether a 413 may follow.
-            with anyio.CancelScope(shield=True):
+            # Bounded: a peer that stops reading must not hold the shield for ever.
+            with anyio.fail_after(self._policy.start_send_seconds, shield=True):
                 await send(message)
 
         try:

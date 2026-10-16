@@ -222,6 +222,11 @@ class TestBodySizePolicy:
     ) -> None:
         assert self._policy().max_bytes(path, method) == expected
 
+    @pytest.mark.parametrize("seconds", [0, -1.5])
+    def test_a_start_send_bound_that_is_not_positive_is_refused(self, seconds: float) -> None:
+        with pytest.raises(ValueError, match="start_send_seconds"):
+            BodySizePolicy(default_max_bytes=1_000, start_send_seconds=seconds)
+
 
 class TestSecurityHeadersPolicy:
     def test_the_first_matching_cache_rule_answers_the_path(self) -> None:

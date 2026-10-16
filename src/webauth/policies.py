@@ -218,6 +218,12 @@ class BodySizePolicy:
 
     default_max_bytes: int
     rules: tuple[BodySizeRule, ...] = ()
+    start_send_seconds: float = 10.0
+    """How long a response start may take to reach the server before the request fails."""
+
+    def __post_init__(self) -> None:
+        if self.start_send_seconds <= 0:
+            raise ValueError("start_send_seconds must be positive.")
 
     def max_bytes(self, path: str, method: str) -> int:
         """The budget for this request; the first matching rule wins."""
