@@ -1,0 +1,8 @@
+claim_id = "861ae02e4a5b40b49ce4cef7e2b3228b"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "e4e76277892117bea342addc7e9f67feca817eac"
+branch = "claude/issue-98-sonar-test-hygiene"
+scope = ["tests/oidc_arrangement.py", "tests/test_https_client.py", "tests/test_jwt_verification.py", "tests/test_oidc_login.py"]
+opened_commit = "283f8c2748cf36f596e9e7edd9d2e6cf3281f8dd"
+whole_reason = "The Sonar and CodeQL test findings are one hygiene pass over four test files"
