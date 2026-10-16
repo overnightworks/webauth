@@ -1,0 +1,7 @@
+claim_id = "bec37b60968741fdaaa8c20674603e5f"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "8e915c479faa87e7082bb3fd287a6ed72f34fdc1"
+branch = "claude/issue-112-release-hygiene-b2-eine-versionsquelle-l"
+scope = ["AGENTS.md", "pyproject.toml", "uv.lock"]
+opened_commit = "435a618c430209fcfabff57f78c2a33255e9f5f5"
