@@ -141,12 +141,6 @@ class Proof:
     def all_held(self) -> bool:
         return bool(self.lines) and not self.failures
 
-    def raise_if_stop_pending(self) -> None:
-        """A signal the handler could not raise (it landed in error handling)
-        still ends the run at the next place that calls this."""
-        if self.stop_requested.is_set() and not self.winding_down:
-            raise Interrupted
-
     def fail(self, message: str) -> None:
         self.failures += 1
         self.record(f"FAILED: {without_query_values(message)}")
@@ -594,9 +588,9 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
         with TlsShim(tls, edge_port, IDP_HOST) as shim, \
                 TlsShim(untrusted, edge_port, IDP_HOST) as untrusted_shim:
             hosts: list[Host] = []
+            proof.ca_certificate = tls.ca_certificate
             try:
                 for cookie_samesite in SAMESITE_VALUES:
-                    proof.ca_certificate = tls.ca_certificate
                     settings = host_settings(proof, tls, shim.port, cookie_samesite)
                     hosts.append(start_host(proof, runtime, settings, tls.ca_certificate))
                 drive_browser_off_the_main_thread(

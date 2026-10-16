@@ -23,6 +23,8 @@ from host_app import HostSettings
 from shim import LOOPBACK
 from stack import StackError
 
+from webauth.cookies import CookieSameSite
+
 APP_START_SECONDS = 30
 STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 WORKER_ENDS_SECONDS = 15
@@ -44,8 +46,6 @@ class Run(Protocol):
     winding_down: bool
     browser_outlived_run: bool
 
-    def raise_if_stop_pending(self) -> None: ...
-
     def fail(self, message: str) -> None: ...
 
 
@@ -54,7 +54,7 @@ class Host:
     """One running host process: its cookie configuration and the ports it serves on."""
 
     process: subprocess.Popen[bytes]
-    cookie_samesite: str
+    cookie_samesite: CookieSameSite
     app_port: int
     observe_port: int
 
@@ -99,7 +99,7 @@ def wait_until_serving(run: Run, process: subprocess.Popen[bytes], *ports: int) 
     deadline = time.monotonic() + APP_START_SECONDS
     pending = list(ports)
     while pending and time.monotonic() < deadline:
-        run.raise_if_stop_pending()
+        raise_if_stop_pending(run)
         if process.poll() is not None:
             raise StackError("the host app ended before it served")
         with contextlib.suppress(OSError), socket.create_connection((LOOPBACK, pending[0]), 1):
@@ -139,7 +139,7 @@ def own_child_pids() -> set[int]:
 def drive_browser_off_the_main_thread(run: Run, drive: Callable[[], None]) -> None:
     """Playwright's sync API cannot be torn down from a signal handler, so the
     main thread keeps the signals and kills the browser's driver on a stop."""
-    run.raise_if_stop_pending()
+    raise_if_stop_pending(run)
     before = own_child_pids()
     crashes: list[BaseException] = []
     worker_entered = threading.Event()
@@ -173,6 +173,13 @@ def drive_browser_off_the_main_thread(run: Run, drive: Callable[[], None]) -> No
         raise RuntimeError(
             f"the browser worker crashed: {type(crash).__name__}: {crash}"
         ) from crash
+
+
+def raise_if_stop_pending(run: Run) -> None:
+    """A signal the handler could not raise (it landed in error handling)
+    still ends the run at the next place that calls this."""
+    if run.stop_requested.is_set() and not run.winding_down:
+        raise Interrupted
 
 
 def stop_on_first_signal(run: Run) -> None:
