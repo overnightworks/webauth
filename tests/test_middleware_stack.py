@@ -18,12 +18,17 @@ from webauth_arrangement import (
     assert_carries_policy_headers,
 )
 
-from webauth.config import install_web_auth_config
-from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
+from webauth.config import WEB_AUTH_STATE_ATTRIBUTE, install_web_auth_config
+from webauth.middleware import (
+    IpRateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    install_web_auth_middleware,
+)
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
     PathRules,
+    PathShape,
     RateLimitBudget,
     RateLimitClass,
     RateLimitPolicy,
@@ -34,6 +39,7 @@ from webauth.ports import RateLimitBackend
 FOREIGN_ORIGIN = "https://evil.test"
 BODY_LIMIT_BYTES = 100
 RAISING_PATH = "/boom"
+LOGIN_PATH = "/login"
 WEBHOOK_PREFIX = "/webhook/"
 WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
 PROTECTED_PATH = "/api/protected"
@@ -230,11 +236,45 @@ class TestAgentPresentatorShape:
 class TestRefusedInstallation:
     def test_token_policy_without_origin_policy_is_refused_before_touching_the_app(self) -> None:
         app = a_fresh_app()
+        token_policy = CsrfPolicy()
         with pytest.raises(ValueError, match="csrf_origin"):
             install_web_auth_middleware(
-                app, security_headers=HEADERS_POLICY, csrf_token=CsrfPolicy(),
+                app, security_headers=HEADERS_POLICY, csrf_token=token_policy,
             )
         assert app.user_middleware == []
+
+    @pytest.mark.parametrize(
+        "token_exempt",
+        [
+            pytest.param(PathRules(exact=frozenset({LOGIN_PATH})), id="exact-path"),
+            pytest.param(PathRules(prefixes=("/login",)), id="prefix"),
+            pytest.param(PathRules(shapes=(PathShape("/log", "in"),)), id="unverifiable-shape"),
+        ],
+    )
+    def test_token_exemption_outside_the_origin_check_is_refused_before_touching_the_app(
+        self, token_exempt: PathRules,
+    ) -> None:
+        app = a_fresh_app()
+        origin_policy = CsrfPolicy(protected=PathRules(prefixes=("/api",)))
+        token_policy = CsrfPolicy(token_exempt=token_exempt)
+        with pytest.raises(ValueError, match="does not check"):
+            install_web_auth_middleware(
+                app,
+                security_headers=HEADERS_POLICY,
+                csrf_origin=origin_policy,
+                csrf_token=token_policy,
+            )
+        assert app.user_middleware == []
+
+    def test_token_exemption_covered_by_the_origin_check_is_installed(self) -> None:
+        app = a_fresh_app()
+        install_web_auth_middleware(
+            app,
+            security_headers=HEADERS_POLICY,
+            csrf_origin=CsrfPolicy(),
+            csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGIN_PATH}))),
+        )
+        assert len(app.user_middleware) == 3
 
     @pytest.mark.parametrize(
         "arrange",
@@ -252,6 +292,23 @@ class TestRefusedInstallation:
         with pytest.raises(RuntimeError, match="already carries"):
             install_full_stack(app)
 
+    @pytest.mark.parametrize(
+        "subclass",
+        [
+            pytest.param(type("OwnHeaders", (SecurityHeadersMiddleware,), {}), id="headers"),
+            pytest.param(type("OwnLimiter", (IpRateLimitMiddleware,), {}), id="rate-limit"),
+        ],
+    )
+    def test_hand_added_subclass_of_library_middleware_is_refused_and_leaves_the_app_alone(
+        self, subclass: type,
+    ) -> None:
+        app = a_fresh_app()
+        app.add_middleware(subclass, policy=HEADERS_POLICY)
+        before = list(app.user_middleware)
+        with pytest.raises(RuntimeError, match="already carries"):
+            install_full_stack(app)
+        assert app.user_middleware == before
+
     def test_refused_repeat_leaves_the_budget_charged_once(self) -> None:
         app = a_fresh_app()
         install_full_stack(app, max_requests=2)
@@ -263,15 +320,37 @@ class TestRefusedInstallation:
 
 class TestBudgetSemantics:
     @pytest.mark.parametrize(
-        ("refused_request", "next_status"),
+        ("refused_request", "refusal_status", "next_status"),
         [
-            pytest.param(post_oversized, 200, id="content-length-413-spends-nothing"),
-            pytest.param(post_without_token, 429, id="csrf-403-spends-one"),
+            pytest.param(post_oversized, 413, 200, id="content-length-413-spends-nothing"),
+            pytest.param(post_without_token, 403, 429, id="csrf-403-spends-one"),
+            pytest.param(
+                lambda client: client.get(RAISING_PATH), 500, 429, id="raising-route-spends-one",
+            ),
         ],
     )
     def test_refusal_spends_the_budget_as_documented(
-        self, refused_request: Callable[[TestClient], Response], next_status: int,
+        self,
+        refused_request: Callable[[TestClient], Response],
+        refusal_status: int,
+        next_status: int,
     ) -> None:
         client = a_full_stack_client(max_requests=1)
-        refused_request(client)
+        assert refused_request(client).status_code == refusal_status
         assert get_api(client).status_code == next_status
+
+    def test_missing_config_500_spends_nothing(self) -> None:
+        app = a_fresh_app()
+        install_full_stack(app, max_requests=1)
+        client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
+        config = getattr(app.state, WEB_AUTH_STATE_ATTRIBUTE)
+        delattr(app.state, WEB_AUTH_STATE_ATTRIBUTE)
+        assert get_api(client).status_code == 500
+        install_web_auth_config(app, config)
+        assert get_api(client).status_code == 200
+
+
+class TestCompetingRefusals:
+    def test_a_request_failing_origin_and_token_gets_the_origin_refusal(self) -> None:
+        response = post_cross_origin(a_full_stack_client())
+        assert response.json() == {"detail": "Cross-origin request rejected"}

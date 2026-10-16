@@ -251,8 +251,8 @@ front, so the installer adds them in reverse.
 1. `SecurityHeadersMiddleware` (required): outside everything, so the
    library's own refusals carry the headers: the 413 by Content-Length, the
    429 and 503 with `Retry-After`, the CSRF 403s, and the 500.
-2. `BodySizeLimitMiddleware`: an oversized body is refused before it costs a
-   rate-limit budget or a session lookup.
+2. `BodySizeLimitMiddleware`: a body whose Content-Length is over the limit
+   is refused before it costs a rate-limit budget or a session lookup.
 3. `IpRateLimitMiddleware`: outside CSRF, so forged requests spend the
    address's budget.
 4. `CsrfOriginMiddleware`.
@@ -260,17 +260,23 @@ front, so the installer adds them in reverse.
 
 `csrf_origin` and `csrf_token` take separate `CsrfPolicy` values. The
 installer refuses, before it touches the app, a `csrf_token` without a
-`csrf_origin` (`ValueError`: login routes skip the token on the promise that
-the origin check protects them), and an app that already carries any of the
-five library middleware, whether from an earlier installer call or added by
-hand (`RuntimeError`). Install once, and add no library middleware yourself.
+`csrf_origin`, and a `csrf_token` whose `token_exempt` paths the
+`csrf_origin` does not check (`ValueError`: login routes skip the token on
+the promise that the origin check protects them; exact paths and prefixes
+are tested against `requires_same_origin`, shapes and patterns are refused as
+unverifiable), and an app that already carries any of the
+five library middleware (or a subclass of one), whether from an earlier
+installer call or added by hand (`RuntimeError`). Install once, and add no library middleware yourself.
 
 **Placement of host middleware.** Added before the call, a host middleware
-sits inside the library stack: a request the library refuses never reaches it.
+sits inside the library stack: a request the library refuses early (413 by
+Content-Length, 429, 503, the CSRF 403s) never reaches it.
 Added after the call, it sits outside: it sees every library refusal with the
 headers already set. Put a middleware that must see only admitted requests
 (session lookups, audit) before the call; put one that must observe every
-response (access logs, metrics) after it.
+response (access logs, metrics) after it. A response or exception produced by a host
+middleware added after the call (outside the stack) does not carry the
+library headers.
 
 **Budget semantics.** When the limiter is enabled, the path is not exempt and
 the limiter is reached:
@@ -285,6 +291,7 @@ the limiter is reached:
 
 | Cause | Response | Budget |
 |---|---|---|
+| A streamed body over the limit (no Content-Length) | The library 500 with the headers, until #28 finding 37 | spends one |
 | A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
 | No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
 
