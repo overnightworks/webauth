@@ -1,9 +1,10 @@
 """The host application of the proof: the README's start and callback routes
 over the library's own in-memory stores, served over TLS.
 
-One process serves one cookie configuration. Beside it a plain-http listener
-on loopback, which no browser is ever pointed at, answers ``GET /state`` with
-counts only and clears everything on ``POST /reset``."""
+One process serves one cookie configuration on every origin it is told. Beside
+it a plain-http listener on loopback, which no browser is ever pointed at, answers
+``GET /state`` with counts only, clears everything on ``POST /reset`` and
+deactivates every known account on ``POST /deactivate``."""
 
 from __future__ import annotations
 
@@ -52,7 +53,9 @@ SCOPES = ("openid", "profile", "groups")
 LEEWAY_SECONDS = 30
 
 PAGE = Template("""<!doctype html>
-<html><head><meta charset="utf-8"><title>webauth demo host</title></head>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webauth demo host</title></head>
 <body>
 <h1>$headline</h1>
 $body
@@ -84,7 +87,7 @@ def _arrangement() -> Any:
 class HostSettings:
     """Everything a host process is told; the file that carries it is deleted with the run."""
 
-    app_origin: str
+    app_origins: tuple[str, ...]
     port: int
     observe_port: int
     tls_certificate: str
@@ -100,7 +103,8 @@ class HostSettings:
 
     @staticmethod
     def read(path: Path) -> HostSettings:
-        return HostSettings(**json.loads(path.read_text()))
+        fields = json.loads(path.read_text())
+        return HostSettings(**{**fields, "app_origins": tuple(fields["app_origins"])})
 
     def write(self, path: Path) -> None:
         path.touch(mode=0o600)
@@ -119,6 +123,11 @@ class World:
         self.callbacks_received = 0
         self.last_refusal: str | None = None
 
+    def deactivate_accounts(self) -> None:
+        with self.lock.hold():
+            for account in self.accounts.list():
+                self.accounts.update(account.id, is_active=False)
+
     def counts(self) -> dict[str, object]:
         return {
             "accounts": len(self.accounts.list()),
@@ -129,7 +138,7 @@ class World:
 
 
 class _Observation:
-    """The counts-only listener the scenarios read and reset."""
+    """The counts-only listener the scenarios read, reset and deactivate accounts through."""
 
     def __init__(self, port: int, world: dict[str, World]) -> None:
         holder = world
@@ -148,7 +157,9 @@ class _Observation:
             def do_POST(self) -> None:
                 if self.path == "/reset":
                     holder["world"] = World()
-                self.send_response(204 if self.path == "/reset" else 404)
+                elif self.path == "/deactivate":
+                    holder["world"].deactivate_accounts()
+                self.send_response(204 if self.path in ("/reset", "/deactivate") else 404)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
@@ -156,15 +167,8 @@ class _Observation:
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
 
-def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
-    arrangement = _arrangement()
-    config: WebAuthConfig = arrangement.a_web_auth_config(
-        session_secret=SecretStr(settings.session_secret),
-        cookie_samesite=settings.cookie_samesite,
-        allowed_hosts_exact=frozenset({settings.app_origin.removeprefix("https://")}),
-        allowed_hosts_patterns=(),
-    )
-    relying_party = OidcRelyingParty(
+def _relying_party(settings: HostSettings, redirect_uri: str) -> OidcRelyingParty:
+    return OidcRelyingParty(
         OidcClientConfig(
             issuer=settings.issuer,
             authorization_endpoint=settings.authorization_endpoint,
@@ -172,7 +176,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             jwks_url=settings.jwks_url,
             client_id=settings.client_id,
             client_secret=SecretStr(settings.client_secret),
-            redirect_uri=f"{settings.app_origin}{CALLBACK_PATH}",
+            redirect_uri=redirect_uri,
             scopes=SCOPES,
             leeway_seconds=LEEWAY_SECONDS,
         ),
@@ -181,6 +185,26 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         wall_clock=time.time,
         monotonic_clock=time.monotonic,
     )
+
+
+def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
+    arrangement = _arrangement()
+    config: WebAuthConfig = arrangement.a_web_auth_config(
+        session_secret=SecretStr(settings.session_secret),
+        cookie_samesite=settings.cookie_samesite,
+        allowed_hosts_exact=frozenset(
+            origin.removeprefix("https://") for origin in settings.app_origins
+        ),
+        allowed_hosts_patterns=(),
+    )
+    relying_parties = {
+        origin: _relying_party(settings, f"{origin}{CALLBACK_PATH}")
+        for origin in settings.app_origins
+    }
+
+    def relying_party_of(request: Request) -> OidcRelyingParty:
+        return relying_parties[f"https://{request.headers['host']}"]
+
     dependencies = current_user_dependency(
         session_store=lambda: world["world"].sessions,
         audit_sink=lambda: world["world"].audit,
@@ -222,14 +246,16 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     @app.get("/login/oidc")
     def start(request: Request) -> Response:
         response = Response(status_code=303)
-        response.headers["location"] = start_login(relying_party, request, response, config)
+        response.headers["location"] = start_login(
+            relying_party_of(request), request, response, config
+        )
         return response
 
     @app.get(CALLBACK_PATH, response_class=HTMLResponse)
     def callback(request: Request, response: Response) -> str:
         current = world["world"]
         outcome = finish_login(
-            relying_party, request, response, config,
+            relying_party_of(request), request, response, config,
             bound_issuer=settings.issuer, accounts=current.accounts, lock=current.lock,
             audit=current.audit,
         )
@@ -254,14 +280,13 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
         return {"username": user.username}
 
-    @app.post("/logout")
+    @app.post("/logout", dependencies=[Depends(dependencies.current_user)])
     def logout(
         response: Response,
-        user: AuthenticatedUser = Depends(dependencies.current_user),
         session_id: str = Depends(dependencies.verified_session_id),
     ) -> dict[str, bool]:
         with world["world"].lock.hold():
-            end_session(world["world"].sessions, None, session_id=session_id, user_id=user.id)
+            end_session(world["world"].sessions, session_id=session_id)
         clear_session_cookies(response, config)
         return {"signed_out": True}
 

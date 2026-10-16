@@ -71,10 +71,11 @@ header and cookie names, a few harmless header values, cookie attributes), never
 redacted from a raw capture. Every credential the run creates or sees is
 registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
-run. Screenshots are taken at four moments only: the start page, Keycloak's
-form with the password filled, the result page, and the page after the second
-sign-in. A pending-login cookie's name carries a digest of the login's state;
-the log keeps `__Host-oidc_pending_*`.
+run. Screenshots are taken only at fixed moments of a scenario: the start page,
+Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
+clears the field), the result page, the second sign-in of scenario 2, and, in
+scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
+digest of the login's state; the log keeps `__Host-oidc_pending_*`.
 
 ## What it proves
 
@@ -82,6 +83,27 @@ the log keeps `__Host-oidc_pending_*`.
 in the app, not Keycloak's SSO session: a second "Sign in" re-logs in silently,
 and the table says so.
 
-## Last run
+`SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
+the app; enabled again, the same credentials sign in; an account the host
+holds as deactivated is refused at the callback with `account-deactivated`.
+`SCENARIO 6` asserts by bounding boxes that the forms and pages lie inside the
+window. Scenarios 1, 4 and 6 run at 390x844 (mobile emulation, touch) and
+1280x800.
 
-See the pull request that last changed this directory for the table.
+`SCENARIO 5` is the session cookie after the callback redirect. One host
+process per `cookie_samesite` serves both app origins; each cell uses a fresh
+browser context and is measured on the `GET /` that the `/auth/callback`
+redirect leads to: the cookie names it carried, its `Sec-Fetch-Site`, and the
+page it rendered. A logged-out first page is `FAILED-as-found`: a finding to
+file, not a failed run.
+
+## Last run: session cookie after the redirect
+
+| App origin | `cookie_samesite` | First page | Session cookie sent | `Sec-Fetch-Site` |
+|---|---|---|---|---|
+| `https://demo.hallucinai.de` (same site as Keycloak) | strict | Signed in | yes | same-site |
+| `https://demo.example.test` (cross site) | strict | Signed out (`FAILED-as-found`) | no | cross-site |
+| `https://demo.hallucinai.de` | lax | Signed in | yes | same-site |
+| `https://demo.example.test` | lax | Signed in | yes | cross-site |
+
+The pull request that last changed this directory carries the full result table.

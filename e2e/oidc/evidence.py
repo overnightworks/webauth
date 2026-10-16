@@ -168,7 +168,7 @@ class NetworkLog:
                 "httpVersion": "",
                 "cookies": [
                     {"name": recorded_cookie_name(name), "value": ""}
-                    for name in _cookie_names(request_headers)
+                    for name in cookie_names(request_headers)
                 ],
                 "headers": _headers(request_headers),
                 "queryString": [{"name": name, "value": ""} for name in query_names],
@@ -209,7 +209,7 @@ def _headers(headers: list[dict[str, str]]) -> list[dict[str, str]]:
     ]
 
 
-def _cookie_names(request_headers: list[dict[str, str]]) -> list[str]:
+def cookie_names(request_headers: list[dict[str, str]]) -> list[str]:
     return [
         pair.split("=", 1)[0].strip()
         for header in request_headers if header["name"].lower() == "cookie"
