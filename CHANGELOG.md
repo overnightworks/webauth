@@ -19,7 +19,12 @@ This is the last release with password parts.
   `.dispatch`, `.dispatch_func` and public `.app` attribute are gone, and so is
   any subclass override of `dispatch`. The constructor is `(app, policy)`: the
   `dispatch=` argument that `BaseHTTPMiddleware` accepted now raises `TypeError`;
-  any other unknown keyword argument raised `TypeError` already.
+  any other unknown keyword argument raised `TypeError` already. They also run
+  the app in the caller's task: a `ContextVar` that the app or an inner
+  middleware sets is now visible to an outer host middleware after the call
+  returns, where `BaseHTTPMiddleware` isolated it in a task of its own; a host
+  that relied on that isolation restores its own context, for example by
+  resetting the token it set.
 - The declared dependency floors are raised to the versions the suite is proven
   on: fastapi 0.123.7, starlette 0.46, pydantic 2.6 and anyio 4.12; starlette and
   anyio are now declared directly, capped below 2 and below 5, and

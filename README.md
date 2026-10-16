@@ -247,6 +247,10 @@ library headers. A host `BaseHTTPMiddleware` or `@app.middleware("http")` makes 
 response that fails mid-stream look complete wherever it sits, and added before
 the call it also turns the 413 for a streamed body the route reads into the
 library 500; write a middleware that must see admitted requests as pure ASGI.
+The library middlewares run the app in the caller's task, so a `ContextVar` that
+the app or an inner middleware sets is visible to an outer host middleware after
+the call returns; a host that relied on `BaseHTTPMiddleware`'s task isolation
+restores its own context, for example by resetting the token it set.
 
 **Budget semantics.** When the limiter is enabled, the path is not exempt and
 the limiter is reached:

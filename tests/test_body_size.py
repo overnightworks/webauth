@@ -11,6 +11,8 @@ from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
 from starlette.responses import StreamingResponse
 from webauth_arrangement import (
+    SPEC_WITH_CONCURRENT_READER,
+    SPEC_WITHOUT_CONCURRENT_READER,
     StartSend,
     a_csrf_passing_request_headers,
     a_web_auth_config,
@@ -47,8 +49,6 @@ TWO_CHUNKS_UNDER_THE_LIMIT_EACH = (b"x" * 60, b"x" * 60)
 ONE_CHUNK_OVER_THE_LIMIT = (b"x" * 120,)
 A_CONFIG = a_web_auth_config()
 TOO_LARGE_BODY = b'{"detail":"Request body too large"}'
-SPEC_WITH_CONCURRENT_READER = "2.3"
-SPEC_WITHOUT_CONCURRENT_READER = "2.4"
 
 
 START_SEND_BOUND_SECONDS = 0.05
@@ -222,12 +222,21 @@ async def test_any_content_length_over_the_limit_is_refused_before_the_route(
     assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
 
 
-async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_the_full_stack() -> None:  # noqa: E501
+@pytest.mark.parametrize(
+    "spec_version",
+    [
+        pytest.param(SPEC_WITH_CONCURRENT_READER, id="spec-2.3"),
+        pytest.param(SPEC_WITHOUT_CONCURRENT_READER, id="spec-2.4"),
+    ],
+)
+async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_the_full_stack(  # noqa: E501
+    spec_version: str,
+) -> None:
     app = a_body_limited_app(full_stack=True)
 
     sent, raised = await drive_post(
         "/reads-after-first-chunk",
-        SPEC_WITH_CONCURRENT_READER,
+        spec_version,
         TWO_CHUNKS_UNDER_THE_LIMIT_EACH,
         app=app,
         headers=tuple(a_csrf_passing_request_headers(A_CONFIG)),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
 import pytest
@@ -17,6 +18,8 @@ from webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
     HTTPS_TEST_SERVER,
+    SPEC_WITH_CONCURRENT_READER,
+    SPEC_WITHOUT_CONCURRENT_READER,
     AlwaysFailingRateLimitBackend,
     a_csrf_passing_request_headers,
     a_web_auth_config,
@@ -65,6 +68,7 @@ STREAM_READING_PATH = "/reads-stream"
 TYPED_PATH = "/typed"
 FAILING_STREAM_PATH = "/fails-mid-stream"
 BACKGROUND_PATH = "/with-background"
+CONTEXT_SETTING_PATH = "/sets-context"
 A_CONFIG = a_web_auth_config()
 TWO_CHUNKS_UNDER_THE_LIMIT_EACH = (b"x" * 60, b"x" * 60)
 TOO_LARGE_BODY = {"detail": "Request body too large"}
@@ -79,6 +83,7 @@ class RouteFailure(RuntimeError):
 
 
 ROUTE_FAILURE = RouteFailure("mid-stream")
+DOWNSTREAM_MARK: ContextVar[str] = ContextVar("downstream_mark", default="unset")
 
 
 def a_rate_limit_policy(max_requests: int) -> RateLimitPolicy:
@@ -121,6 +126,11 @@ def a_fresh_app(
             raise ROUTE_FAILURE
 
         return StreamingResponse(stream())
+
+    @app.get(CONTEXT_SETTING_PATH)
+    async def context_setting() -> dict[str, bool]:
+        DOWNSTREAM_MARK.set("set-by-the-route")
+        return {"ok": True}
 
     @app.get(BACKGROUND_PATH)
     async def with_background(tasks: BackgroundTasks) -> dict[str, bool]:
@@ -539,17 +549,39 @@ class TestAStreamedBodyOverTheLimit:
 
 class TestResponsesBehindThePureAsgiMiddlewares:
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "spec_version",
+        [
+            pytest.param(SPEC_WITH_CONCURRENT_READER, id="spec-2.3"),
+            pytest.param(SPEC_WITHOUT_CONCURRENT_READER, id="spec-2.4"),
+        ],
+    )
     async def test_a_response_that_fails_mid_stream_ends_incomplete_and_its_exception_reaches_the_server(  # noqa: E501
-        self,
+        self, spec_version: str
     ) -> None:
         app = an_authenticated_full_stack_app()
-        scope = an_http_scope(app, FAILING_STREAM_PATH, spec_version="2.4")
+        scope = an_http_scope(app, FAILING_STREAM_PATH, spec_version=spec_version)
 
         sent, raised = await drive(app, scope, body_chunks=(b"",))
 
         assert [start["status"] for start in starts(sent)] == [200]
         assert not completed(sent)
         assert raised is ROUTE_FAILURE
+
+    @pytest.mark.anyio
+    async def test_a_context_variable_set_downstream_is_visible_to_the_caller_after_the_call(
+        self,
+    ) -> None:
+        """Documented change: the middlewares run the app in the caller's task, where
+        BaseHTTPMiddleware gave it a task of its own."""
+        app = an_authenticated_full_stack_app()
+        scope = an_http_scope(
+            app, CONTEXT_SETTING_PATH, spec_version=SPEC_WITHOUT_CONCURRENT_READER
+        )
+
+        await drive(app, scope, body_chunks=(b"",))
+
+        assert DOWNSTREAM_MARK.get() == "set-by-the-route"
 
     def test_an_admitted_routes_background_task_runs(self) -> None:
         app = an_authenticated_full_stack_app()
