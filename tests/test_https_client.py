@@ -340,13 +340,14 @@ def _fetch_key_set(url: str, **limits: float) -> object:
     return fetch_key_set_over_https(url, **limits)
 
 
-def _post_token_form(url: str, **limits: float) -> object:
+def _post_token_form(url: str, timeout_seconds: float = 5, **limits: float) -> object:
     return post_form_over_https(
         url,
         _FORM,
         authorization=SecretStr(_BASIC_AUTHORIZATION),
         max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
-        **{"timeout_seconds": 5, **limits},
+        timeout_seconds=timeout_seconds,
+        **limits,
     )
 
 
@@ -485,10 +486,12 @@ def test_a_deadline_of_zero_or_less_is_refused_naming_the_parameter(
         exchange("https://127.0.0.1:1/token", deadline_seconds=deadline_seconds)
 
 
-@_EXCHANGES_UNDER_A_DEADLINE
+@pytest.mark.parametrize(
+    "exchange", [_fetch_key_set, _post_token_form], ids=["key-set-fetch", "token-post"]
+)
 @pytest.mark.parametrize("timeout_seconds", [0, -1])
 def test_a_timeout_of_zero_or_less_is_refused_naming_the_parameter(
-    exchange: Callable[..., object], error: type[Exception], timeout_seconds: float
+    exchange: Callable[..., object], timeout_seconds: float
 ) -> None:
     with pytest.raises(ValueError, match="timeout_seconds"):
         exchange("https://127.0.0.1:1/token", timeout_seconds=timeout_seconds)
