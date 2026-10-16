@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -13,30 +16,45 @@ jobs:
   checks:
     name: checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
         with:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --locked --extra dev
 
       - name: Lockfile is current
         run: uv lock --check
 
       - name: Ruff
-        run: uv run ruff check src tests
+        run: uv run --locked ruff check src tests
 
       - name: Import boundaries
-        run: uv run lint-imports
+        run: uv run --locked lint-imports
 
       - name: A password-only host still type-checks
         run: uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 
       - name: Tests
-        run: uv run pytest tests -q
+        run: uv run --locked pytest tests -q
 
       - name: Build the distribution
         run: uv build
+
+  quality:
+    name: quality
+    needs: [checks]
+    if: always()
+    permissions:
+      contents: read
+      actions: read
+    uses: overnightworks/quality/.github/workflows/gate.yml@bab8770b89be8114a206c174b6380653d391e2a0 # v0.1.0
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
