@@ -117,6 +117,12 @@ class Proof:
     def all_held(self) -> bool:
         return bool(self.lines) and not self.failures
 
+    def raise_if_stop_pending(self) -> None:
+        """A signal the handler could not raise (it landed in error handling)
+        still ends the run at the next place that calls this."""
+        if self.stop_requested.is_set() and not self.winding_down:
+            raise Interrupted
+
     def fail(self, message: str) -> None:
         self.failures += 1
         self.record(f"FAILED: {without_query_values(message)}")
@@ -396,17 +402,18 @@ def start_host(
         stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
     try:
-        wait_until_serving(process, proof.observe_port, proof.app_port)
+        wait_until_serving(proof, process, proof.observe_port, proof.app_port)
     except BaseException:
         stop_host(process)
         raise
     return process
 
 
-def wait_until_serving(process: subprocess.Popen[bytes], *ports: int) -> None:
+def wait_until_serving(proof: Proof, process: subprocess.Popen[bytes], *ports: int) -> None:
     deadline = time.monotonic() + APP_START_SECONDS
     pending = list(ports)
     while pending and time.monotonic() < deadline:
+        proof.raise_if_stop_pending()
         if process.poll() is not None:
             raise StackError("the host app ended before it served")
         with contextlib.suppress(OSError), socket.create_connection((LOOPBACK, pending[0]), 1):
@@ -478,10 +485,13 @@ def drive_browser_off_the_main_thread(
 ) -> None:
     """Playwright's sync API cannot be torn down from a signal handler, so the
     main thread keeps the signals and kills the browser's driver on a stop."""
+    proof.raise_if_stop_pending()
     before = own_child_pids()
     crashes: list[BaseException] = []
+    worker_entered = threading.Event()
 
     def work() -> None:
+        worker_entered.set()
         try:
             drive_browser(proof, tls, shim_port, untrusted_port)
         except BaseException as error:
@@ -499,13 +509,13 @@ def drive_browser_off_the_main_thread(
         raise
     finally:
         proof.winding_down = True
-        if worker.ident is not None:
+        if worker_entered.is_set():
             worker.join(WORKER_ENDS_SECONDS)
         if worker.is_alive():
             proof.browser_outlived_run = True
             proof.fail("the browser worker did not stop; evidence is not trustworthy")
     if crashes:
-        raise crashes[0]
+        raise RuntimeError("the browser worker crashed") from crashes[0]
 
 
 def drive_browser(proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int) -> None:
