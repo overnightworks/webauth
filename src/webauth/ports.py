@@ -3,7 +3,8 @@
 Each port is a Protocol the application implements over the persistence it
 already owns, so the library needs no schema and no ORM of its own. None of
 them commits: the caller owns the transaction boundary, so a request that
-fails leaves nothing behind that the auth machinery wrote.
+fails leaves nothing behind that the auth machinery wrote — except the
+rate-limit budget, which counts attempts whether or not the request succeeds.
 """
 
 from __future__ import annotations
@@ -13,8 +14,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
 from typing import Protocol, TypeVar, runtime_checkable
-
-from pydantic import BaseModel
 
 
 class UserRecord(Protocol):
@@ -210,19 +209,11 @@ class SessionLivenessPolicy(Protocol[StoredSessionT]):
 
     ``now`` is passed in by ``dependencies`` — the one place that reads the
     clock — so a policy is a pure function of a session and that instant. The
-    two questions differ by who owns idle expiry. A session loaded from the
-    store is judged whole. A session read from a cache has already had idle
-    expiry enforced by the cache's own TTL, so only the caps the cache cannot
-    see remain — never the cached ``expires_at``, which can lag the real TTL
-    after a refresh and would expire a live session if it were trusted here.
+    session loaded from the store is judged whole.
     """
 
     def admits_stored_session(self, record: StoredSessionT, now: datetime) -> bool:
         """Whether a session loaded from the store still stands at ``now``."""
-        ...
-
-    def admits_cached_session(self, cached: CachedSessionData, now: datetime) -> bool:
-        """Whether a cached session still stands, its idle already the cache's."""
         ...
 
 
@@ -271,71 +262,6 @@ class RateLimitBackend(Protocol):
         yes has already spent one of the budget. A backend that cannot answer
         raises rather than guessing, and the caller fails the request closed.
         """
-        ...
-
-
-class CachedSessionData(BaseModel):
-    """The session payload a `SessionCache` stores and returns."""
-
-    user_id: str
-    username: str
-    role: str
-    is_active: bool
-    ip_address: str
-    user_agent: str
-    expires_at: datetime
-    created_at: datetime
-
-
-@runtime_checkable
-class SessionCache(Protocol):
-    """A fast session store the host keeps beside its database, or nothing.
-
-    With a cache installed on ``WebAuthConfig.session_cache``, its own store —
-    Redis in the one implementation shipped here — owns idle expiry and the
-    host reconciles the database from it; a request's account is read straight
-    from the cache and the ``SessionRecordStore`` answers only when the cache
-    cannot. A host that runs without one leaves the field ``None`` and every
-    read goes to the store, whose per-request ``touch`` then owns idle expiry.
-    """
-
-    @property
-    def consecutive_failures(self) -> int:
-        """Reads that have failed in a row, for the host's cache-health checks."""
-        ...
-
-    def store(
-        self,
-        session_id: str,
-        user_id: str,
-        username: str,
-        role: str,
-        is_active: bool,
-        ip_address: str,
-        user_agent: str,
-        expires_at: datetime,
-        created_at: datetime,
-        max_age_seconds: int,
-    ) -> None:
-        """Write the whole session payload under ``session_id`` with a TTL."""
-        ...
-
-    def get(self, session_id: str) -> CachedSessionData | None:
-        """The cached payload, or ``None`` when the cache holds no such session."""
-        ...
-
-    def refresh_ttl(self, session_id: str, max_age_seconds: int) -> None: ...
-
-    def update_ip_ua(self, session_id: str, ip_address: str, user_agent: str) -> None: ...
-
-    def delete(self, session_id: str, user_id: str) -> None: ...
-
-    def delete_user_sessions(self, user_id: str) -> list[str]:
-        """Forget every session of one account; the ids dropped are returned."""
-        ...
-
-    def get_all_sessions(self) -> list[tuple[str, int]]:
-        """Each live session id paired with the seconds of TTL it has left."""
         ...
 
 

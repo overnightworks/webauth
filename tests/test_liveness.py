@@ -19,7 +19,6 @@ from webauth_arrangement import (
 )
 
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
-from webauth.ports import CachedSessionData
 
 A_TIME_FAR_FROM_REAL_NOW = datetime(2000, 1, 1, tzinfo=timezone.utc)
 EXPIRY_POLICY = ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS)
@@ -46,19 +45,6 @@ class _CappedIdleRecord:
 @dataclass
 class _RecordWithoutLastSeen:
     created_at: datetime
-
-
-def _cached(created_at: datetime, *, expires_at: datetime | None = None) -> CachedSessionData:
-    return CachedSessionData(
-        user_id="user-1",
-        username="alice",
-        role="user",
-        is_active=True,
-        ip_address=CLIENT_ADDRESS,
-        user_agent=CLIENT_USER_AGENT,
-        expires_at=created_at + timedelta(minutes=30) if expires_at is None else expires_at,
-        created_at=created_at,
-    )
 
 
 @pytest.mark.parametrize(
@@ -88,50 +74,6 @@ def test_the_expiry_column_policy_admits_a_stored_session_within_both_limits(
     record = _ExpiryRecord(created_at=now - age, expires_at=now + idle_offset)
 
     assert EXPIRY_POLICY.admits_stored_session(record, now) is admitted
-
-
-@pytest.mark.parametrize(
-    ("age", "admitted"),
-    [
-        pytest.param(timedelta(minutes=5), True, id="within the absolute cap"),
-        pytest.param(
-            timedelta(seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS), True, id="at the cap",
-        ),
-        pytest.param(
-            timedelta(seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS + 1), False, id="past the cap",
-        ),
-    ],
-)
-def test_the_expiry_column_policy_caps_a_cached_session_by_its_creation_time(
-    age: timedelta, admitted: bool,
-) -> None:
-    now = datetime.now(timezone.utc)
-
-    assert EXPIRY_POLICY.admits_cached_session(_cached(now - age), now) is admitted
-
-
-@pytest.mark.parametrize(
-    "strip_offset",
-    [
-        pytest.param(False, id="a creation time stored with its offset"),
-        pytest.param(True, id="a creation time stored bare"),
-    ],
-)
-def test_the_expiry_column_policy_reads_a_naive_cached_creation_time_as_utc(
-    strip_offset: bool,
-) -> None:
-    now = datetime.now(timezone.utc)
-    created_at = now - timedelta(days=2)
-    cached = _cached(created_at.replace(tzinfo=None) if strip_offset else created_at)
-
-    assert EXPIRY_POLICY.admits_cached_session(cached, now) is False
-
-
-def test_the_expiry_column_policy_never_trusts_a_stale_cached_expiry() -> None:
-    now = datetime.now(timezone.utc)
-    cached = _cached(now - timedelta(minutes=5), expires_at=now - timedelta(hours=1))
-
-    assert EXPIRY_POLICY.admits_cached_session(cached, now) is True
 
 
 def test_the_expiry_column_policy_follows_the_injected_clock_not_the_real_one() -> None:
@@ -278,14 +220,6 @@ def test_a_session_left_idle_for_eight_days_is_refused_under_a_seven_day_window(
     assert RECOMMENDED_IDLE_POLICY.admits_stored_session(
         record, A_TIME_FAR_FROM_REAL_NOW + timedelta(days=8),
     ) is False
-
-
-def test_the_idle_window_policy_never_answers_for_a_cached_session() -> None:
-    """The idle model is store-only; a cache pairing is refused at config time."""
-    now = datetime.now(timezone.utc)
-
-    with pytest.raises(NotImplementedError, match="does not use the Redis session cache"):
-        IDLE_POLICY.admits_cached_session(_cached(now - timedelta(days=365)), now)
 
 
 def test_the_idle_window_policy_follows_the_injected_clock_not_the_real_one() -> None:
