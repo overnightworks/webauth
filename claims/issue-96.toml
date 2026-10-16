@@ -3,5 +3,5 @@ agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
 role = "builder"
 base = "2cfe9ef3a7246910090200fc756cd6e572a5a1c7"
 branch = "claude/issue-96-release-hygiene-a"
-scope = [".github/workflows/release.yml", "SECURITY.md"]
+scope = [".github/workflows/release.yml", "AGENTS.md", "SECURITY.md"]
 opened_commit = "a2119187e87c10c0b42a12971a44382f2a36904f"
