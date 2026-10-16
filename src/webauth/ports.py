@@ -13,7 +13,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 class UserRecord(Protocol):
@@ -201,10 +201,7 @@ class SessionAdministrationStore(SessionRecordStore, Protocol):
         ...
 
 
-StoredSessionT = TypeVar("StoredSessionT", contravariant=True)
-
-
-class SessionLivenessPolicy(Protocol[StoredSessionT]):
+class SessionLivenessPolicy[StoredSessionT](Protocol):
     """Whether a session still stands, decided without reading the wall clock.
 
     ``now`` is passed in by ``dependencies`` — the one place that reads the
