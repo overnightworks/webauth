@@ -56,6 +56,13 @@ class SecretRegistry:
         if len(value) >= MIN_REGISTERED_VALUE_CHARS:
             self.values.setdefault(label, set()).add(value)
 
+    def masked(self, text: str) -> str:
+        """The text with every registered value, in any encoding, replaced by its label."""
+        for label, forms in self.forms_by_label().items():
+            for form in sorted(forms, key=len, reverse=True):
+                text = text.replace(form.decode(), f"[registered secret: {label}]")
+        return text
+
     def forms_by_label(self) -> dict[str, set[bytes]]:
         """Each value as raw, URL-encoded and form-encoded bytes."""
         return {

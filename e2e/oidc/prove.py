@@ -128,8 +128,9 @@ class Proof:
         self.record(f"FAILED: {without_query_values(message)}")
 
     def record(self, line: str) -> None:
-        self.lines.append(line)
-        print(line, flush=True)
+        masked_line = self.registry.masked(line)
+        self.lines.append(masked_line)
+        print(masked_line, flush=True)
 
     def held_or_failed(self, label: str, check: Callable[[], str]) -> bool:
         if self.stop_requested.is_set():
