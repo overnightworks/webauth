@@ -5,17 +5,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Final
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
-from webauth.policies import RateLimitClass
+from webauth.middleware.refusal import RefusalMiddleware
+from webauth.policies import RateLimitClass, RateLimitPolicy
 from webauth.proxies import budget_address, resolve_client_ip
 
 if TYPE_CHECKING:
     from starlette.requests import Request
-
-    from webauth.policies import RateLimitPolicy
 
 log = logging.getLogger(__name__)
 
@@ -27,21 +25,17 @@ def _rate_limit_key(rate_limit_class: RateLimitClass, budget_identity: str) -> s
     return f"{rate_limit_class.name}:{budget_identity}"
 
 
-class IpRateLimitMiddleware(BaseHTTPMiddleware):
+class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """Spend one request of the client's budget for the class it falls into.
 
     The budget belongs to the client's address, or to its whole IPv6 network
     of the configured prefix -- see ``budget_address``.
     """
 
-    def __init__(self, app, policy: RateLimitPolicy, **kwargs):  # type: ignore[no-untyped-def]
-        super().__init__(app, **kwargs)
-        self._policy = policy
-
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    def _refusal(self, request: Request) -> JSONResponse | None:
         path = request.url.path
         if self._policy.is_exempt(path):
-            return await call_next(request)
+            return None
         config = web_auth_config(request)
         budget_identity = budget_address(resolve_client_ip(request), config.ipv6_budget_prefix)
         rate_limit_class = self._policy.classify(path)
@@ -63,4 +57,4 @@ class IpRateLimitMiddleware(BaseHTTPMiddleware):
                 {"detail": "Too many requests"}, status_code=429,
                 headers={"Retry-After": str(budget.window_seconds)},
             )
-        return await call_next(request)
+        return None

@@ -32,7 +32,7 @@ from webauth.config import (
     WebAuthConfig,
     install_web_auth_config,
 )
-from webauth.cookies import sign_session_id
+from webauth.cookies import generate_csrf_token, sign_session_id
 from webauth.dependencies import (
     AuthenticatedUser,
     LoginRedirect,
@@ -78,6 +78,8 @@ CLIENT_ADDRESS = "testclient"
 CLIENT_USER_AGENT = "TestBrowser/1.0"
 ADMIN_ROLE = "admin"
 MEMBER_ROLE = "user"
+SPEC_WITH_CONCURRENT_READER = "2.3"
+SPEC_WITHOUT_CONCURRENT_READER = "2.4"
 SESSION_MAX_AGE_SECONDS = 3600
 SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
 IDLE_WINDOW_SECONDS = 1800
@@ -819,6 +821,16 @@ async def drive(
 async def _until_excess_is_handled(excess_handed: anyio.Event) -> None:
     await excess_handed.wait()
     await anyio.wait_all_tasks_blocked()
+
+
+def a_csrf_passing_request_headers(config: WebAuthConfig) -> list[tuple[bytes, bytes]]:
+    cookie = f"{config.session_cookie_name}={sign_session_id(SESSION_ID, config.signing_key)}"
+    token = generate_csrf_token(SESSION_ID, config.signing_key)
+    return [
+        (b"sec-fetch-site", b"same-origin"),
+        (b"cookie", cookie.encode()),
+        (config.csrf_header_name.encode(), token.encode()),
+    ]
 
 
 def starts(messages: list[Message]) -> list[Message]:

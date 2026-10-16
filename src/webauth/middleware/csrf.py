@@ -6,18 +6,18 @@ import re
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlparse
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
 from webauth.cookies import verify_csrf_token
 from webauth.dependencies import session_id_from_request
+from webauth.middleware.refusal import RefusalMiddleware
+from webauth.policies import CsrfPolicy
 
 if TYPE_CHECKING:
     from starlette.requests import Request
 
     from webauth.config import WebAuthConfig
-    from webauth.policies import CsrfPolicy
 
 _MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -34,14 +34,10 @@ _SAME_ORIGIN: Final = "same-origin"
 _SAME_SITE: Final = "same-site"
 
 
-class CsrfTokenMiddleware(BaseHTTPMiddleware):
+class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
     """Reject a state-changing request whose CSRF token does not match its session."""
 
-    def __init__(self, app, policy: CsrfPolicy, **kwargs):  # type: ignore[no-untyped-def]
-        super().__init__(app, **kwargs)
-        self._policy = policy
-
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
             and self._policy.requires_token(request.url.path)
@@ -59,7 +55,7 @@ class CsrfTokenMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     {"detail": "CSRF token missing or invalid"}, status_code=403,
                 )
-        return await call_next(request)
+        return None
 
 
 def _is_allowed_host(
@@ -135,7 +131,7 @@ def _origin_check_refusal(request: Request) -> JSONResponse | None:
     return None
 
 
-class CsrfOriginMiddleware(BaseHTTPMiddleware):
+class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
     """Reject a state-changing request that a foreign page originated.
 
     Sec-Fetch-Site is read first: the header overrides the Origin
@@ -145,16 +141,10 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
     POST is refused.
     """
 
-    def __init__(self, app, policy: CsrfPolicy, **kwargs):  # type: ignore[no-untyped-def]
-        super().__init__(app, **kwargs)
-        self._policy = policy
-
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
             and self._policy.requires_same_origin(request.url.path)
         ):
-            refusal = _origin_check_refusal(request)
-            if refusal is not None:
-                return refusal
-        return await call_next(request)
+            return _origin_check_refusal(request)
+        return None
