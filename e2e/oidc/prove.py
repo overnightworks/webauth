@@ -16,14 +16,10 @@ import json
 import os
 import re
 import secrets
-import shutil
 import signal
-import socket
 import ssl
-import subprocess
 import sys
 import threading
-import time
 import urllib.parse
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -36,15 +32,26 @@ from evidence import (
     NetworkLog,
     SecretRegistry,
     cookie_names,
-    delete_contaminated,
     recorded_cookie_name,
-    scan_evidence,
     without_query_values,
+)
+from harness import (
+    STOP_SIGNALS,
+    Host,
+    Interrupted,
+    drive_browser_off_the_main_thread,
+    free_port,
+    keep_clean_evidence,
+    leftovers,
+    runtime_directory,
+    start_host,
+    stop_host,
+    stop_on_first_signal,
 )
 from host_app import HostSettings
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from shim import LOOPBACK, TlsShim
-from stack import Admin, HeldStack, StackError, require_pinned_clean_edge
+from stack import Admin, HeldStack, require_pinned_clean_edge
 
 from webauth.cookies import (
     DEFAULT_COOKIE_SAMESITE,
@@ -59,6 +66,7 @@ APP_HOST = "demo.hallucinai.de"
 SECOND_APP_HOST = "demo.example.test"
 UNTRUSTED_HOST = "untrusted.hallucinai.de"
 REALM = "hallucinai"
+EDGE_CONTAINER_FILTER = "edge-kc-probe"
 ISSUER = f"https://{IDP_HOST}/realms/{REALM}"
 OIDC_PATH = f"{ISSUER}/protocol/openid-connect"
 APP_ORIGIN = f"https://{APP_HOST}"
@@ -71,11 +79,7 @@ DISABLED_USER_NAME = "d1-disabled"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
 PAGE_TIMEOUT_MILLISECONDS = 30_000
-APP_START_SECONDS = 30
 URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "session_state", "state")
-STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
-WORKER_ENDS_SECONDS = 15
-HOST_STOPS_SECONDS = 15
 
 
 @dataclass(frozen=True)
@@ -104,39 +108,8 @@ DESKTOP = Width(1280, 800, touch=False)
 WIDTHS = (PHONE, DESKTOP)
 
 
-@dataclass(frozen=True)
-class Host:
-    """One running host process: its cookie configuration and the ports it serves on."""
-
-    process: subprocess.Popen[bytes]
-    cookie_samesite: CookieSameSite
-    app_port: int
-    observe_port: int
-
-
 class Finding(Exception):
     """A measurement that came out unfavourably: reported as found, not as a failed run."""
-
-
-class Interrupted(BaseException):
-    """The first stop signal, raised wherever the main thread stands."""
-
-
-@contextlib.contextmanager
-def runtime_directory(scratch: Path) -> Iterator[Path]:
-    """The run's private scratch, deleted on every way out."""
-    runtime = scratch / "runtime"
-    runtime.mkdir(mode=0o700)
-    try:
-        yield runtime
-    finally:
-        shutil.rmtree(runtime)
-
-
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind((LOOPBACK, 0))
-        return probe.getsockname()[1]
 
 
 @dataclass
@@ -447,7 +420,7 @@ def session_cookie_after_redirect(
     with proof.browsing() as page:
         requests: list[Any] = []
         page.context.on("request", lambda request: requests.append(request))
-        proof.sign_in(page, None, origin)
+        proof.sign_in(page, scenario=None, origin=origin)
         page.wait_for_url(f"{origin}/")
         callback = next(r for r in requests if r.url.startswith(f"{origin}{CALLBACK_PATH}"))
         landing = next(r for r in requests if r.redirected_from is callback)
@@ -576,15 +549,13 @@ def register_stack_secrets(stack: HeldStack, admin: Admin, registry: SecretRegis
     registry.add("admin token", admin.token)
 
 
-def start_host(
-    proof: Proof, runtime: Path, tls: ThrowawayTls, shim_port: int, cookie_samesite: str,
-) -> Host:
-    app_port, observe_port = free_port(), free_port()
-    proof.ca_certificate = tls.ca_certificate
-    settings = HostSettings(
+def host_settings(
+    proof: Proof, tls: ThrowawayTls, shim_port: int, cookie_samesite: CookieSameSite
+) -> HostSettings:
+    return HostSettings(
         app_origins=(APP_ORIGIN, SECOND_APP_ORIGIN),
-        port=app_port,
-        observe_port=observe_port,
+        port=free_port(),
+        observe_port=free_port(),
         tls_certificate=str(tls.leaf_certificate),
         tls_key=str(tls.leaf_key),
         issuer=ISSUER,
@@ -596,54 +567,6 @@ def start_host(
         session_secret=proof.session_secret,
         cookie_samesite=cookie_samesite,
     )
-    settings_file = runtime / f"host-settings-{cookie_samesite}.json"
-    settings.write(settings_file)
-    log_file = (runtime / f"host-{cookie_samesite}.log").open("wb")
-    process = subprocess.Popen(
-        [sys.executable, str(Path(__file__).with_name("host_app.py")),
-         "--settings", str(settings_file), "--parent-pid", str(os.getpid())],
-        env={"PATH": os.environ["PATH"], "SSL_CERT_FILE": str(tls.ca_certificate)},
-        stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
-    )
-    try:
-        wait_until_serving(proof, process, observe_port, app_port)
-    except BaseException:
-        stop_host(process)
-        raise
-    return Host(process, cookie_samesite, app_port, observe_port)
-
-
-def wait_until_serving(proof: Proof, process: subprocess.Popen[bytes], *ports: int) -> None:
-    deadline = time.monotonic() + APP_START_SECONDS
-    pending = list(ports)
-    while pending and time.monotonic() < deadline:
-        proof.raise_if_stop_pending()
-        if process.poll() is not None:
-            raise StackError("the host app ended before it served")
-        with contextlib.suppress(OSError), socket.create_connection((LOOPBACK, pending[0]), 1):
-            pending.pop(0)
-    if pending:
-        raise StackError("the host app did not serve in time")
-
-
-def stop_host(process: subprocess.Popen[bytes]) -> None:
-    """Ends the host's whole process group, whatever it has spawned."""
-    for stop_signal in (signal.SIGTERM, signal.SIGKILL):
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, stop_signal)
-        try:
-            process.wait(timeout=HOST_STOPS_SECONDS)
-            return
-        except subprocess.TimeoutExpired:
-            continue
-    process.wait()
-
-
-def containers_left() -> list[str]:
-    return subprocess.run(
-        ["docker", "ps", "-a", "--filter", "name=edge-kc-probe", "--format", "{{.Names}}"],
-        check=True, capture_output=True, text=True,
-    ).stdout.split()
 
 
 def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
@@ -673,64 +596,18 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
             hosts: list[Host] = []
             try:
                 for cookie_samesite in SAMESITE_VALUES:
-                    hosts.append(start_host(proof, runtime, tls, shim.port, cookie_samesite))
+                    proof.ca_certificate = tls.ca_certificate
+                    settings = host_settings(proof, tls, shim.port, cookie_samesite)
+                    hosts.append(start_host(proof, runtime, settings, tls.ca_certificate))
                 drive_browser_off_the_main_thread(
-                    proof, tls, shim.port, untrusted_shim.port, hosts
+                    proof,
+                    lambda: drive_browser(proof, tls, shim.port, untrusted_shim.port, hosts),
                 )
             finally:
                 proof.winding_down = True
                 for host in hosts:
                     stop_host(host.process)
     print("\n".join(line for line in stack.output if line.startswith("teardown")), flush=True)
-
-
-def own_child_pids() -> set[int]:
-    pids: set[int] = set()
-    for children in Path("/proc/self/task").glob("*/children"):
-        with contextlib.suppress(FileNotFoundError):  # the thread ended while we looked
-            pids.update(int(pid) for pid in children.read_text().split())
-    return pids
-
-
-def drive_browser_off_the_main_thread(
-    proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int, hosts: list[Host]
-) -> None:
-    """Playwright's sync API cannot be torn down from a signal handler, so the
-    main thread keeps the signals and kills the browser's driver on a stop."""
-    proof.raise_if_stop_pending()
-    before = own_child_pids()
-    crashes: list[BaseException] = []
-    worker_entered = threading.Event()
-
-    def work() -> None:
-        worker_entered.set()
-        try:
-            drive_browser(proof, tls, shim_port, untrusted_port, hosts)
-        except BaseException as error:
-            crashes.append(error)
-
-    worker = threading.Thread(target=work, name="browser", daemon=True)
-    try:
-        worker.start()
-        while worker.is_alive():
-            worker.join(0.5)
-    except Interrupted:
-        for pid in own_child_pids() - before:
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
-        raise
-    finally:
-        proof.winding_down = True
-        if worker_entered.is_set():
-            worker.join(WORKER_ENDS_SECONDS)
-        if worker.is_alive():
-            proof.browser_outlived_run = True
-            proof.fail("the browser worker did not stop; evidence is not trustworthy")
-    if crashes:
-        crash = crashes[0]
-        raise RuntimeError(
-            f"the browser worker crashed: {type(crash).__name__}: {crash}"
-        ) from crash
 
 
 def drive_browser(
@@ -791,38 +668,6 @@ def run_default_scenarios(proof: Proof) -> bool:
     return True
 
 
-def stop_on_first_signal(proof: Proof) -> None:
-    """The first SIGTERM or SIGINT ends the run through ``Interrupted``; the
-    cleanup that follows is not interruptible, so later signals are ignored."""
-
-    def handler(signum: int, frame: object) -> None:
-        for stop_signal in STOP_SIGNALS:
-            signal.signal(stop_signal, signal.SIG_IGN)
-        proof.stop_requested.set()
-        if not proof.winding_down and sys.exception() is None:
-            raise Interrupted
-
-    for stop_signal in STOP_SIGNALS:
-        signal.signal(stop_signal, handler)
-
-
-def leftovers(scratch: Path) -> list[str]:
-    left = []
-    runtime = scratch / "runtime"
-    if runtime.exists():
-        left.append("runtime/ survived the run")
-        try:
-            shutil.rmtree(runtime)
-        except OSError as error:
-            left.append(f"runtime/ could not be removed: {error}")
-    try:
-        if containers := containers_left():
-            left.append(f"containers left behind: {containers}")
-    except (subprocess.SubprocessError, OSError) as error:
-        left.append(f"could not look for left-over containers: {error}")
-    return left
-
-
 def prove(edge: Path, scratch: Path) -> int:
     if scratch.exists() and any(scratch.iterdir()):
         print(f"FAILED: --scratch {scratch} is not empty")
@@ -846,27 +691,9 @@ def prove(edge: Path, scratch: Path) -> int:
             signal.signal(stop_signal, signal.SIG_IGN)
         if proof.stop_requested.is_set():
             proof.fail("interrupted")
-        for left in leftovers(scratch):
+        for left in leftovers(scratch, EDGE_CONTAINER_FILTER):
             proof.fail(left)
     return max(0 if proof.all_held else 1, keep_clean_evidence(proof))
-
-
-def keep_clean_evidence(proof: Proof) -> int:
-    if proof.browser_outlived_run:
-        for screenshot in proof.evidence_dir.glob("*.png"):
-            screenshot.unlink()
-        print("FAILED: the browser outlived the run; screenshots deleted, evidence not scanned")
-        return 1
-    (proof.evidence_dir / "result-table.txt").write_text("\n".join(proof.lines) + "\n")
-    proof.log.write(proof.evidence_dir / "network.har")
-    findings = scan_evidence(proof.evidence_dir, proof.registry)
-    if findings:
-        delete_contaminated(proof.evidence_dir, findings)
-        for finding in findings:
-            print(f"FAILED: evidence {finding.file} held {finding.label}; file deleted")
-        return 1
-    print(f"evidence scan clean: {proof.evidence_dir}", flush=True)
-    return 0
 
 
 def main() -> int:
