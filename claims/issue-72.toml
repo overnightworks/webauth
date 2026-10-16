@@ -1,8 +1,0 @@
-claim_id = "b5e581de8bf04b069b361d0a8c626079"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "f670728a8a62ac3ac162b89dd2899c04fc14b6aa"
-branch = "claude/issue-72-d1c-gesperrter-nutzer-session-cookie-nac"
-scope = ["e2e/oidc"]
-opened_commit = "44c61f099e3ac50f2b2cdc6ef762aa40e862f4cf"
-whole_reason = "D1c extends the one harness directory: prove.py scenarios, host_app.py switches and the README table land together"
