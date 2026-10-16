@@ -73,3 +73,14 @@ A release is a tag. `.github/workflows/release.yml` builds the wheel on a
 asset URL. A tag is never moved — a broken release gets the next patch tag —
 so the version in `pyproject.toml` and `webauth.__version__` is raised in the
 pull request that precedes the tag.
+
+A tag must sit on a commit of `main` whose CI push run finished green; the
+release workflow's `verify` job checks both and refuses anything else. If
+`verify` failed only because CI was still running, re-run the release workflow
+once CI is green. Never move or re-create the tag (the tag ruleset forbids
+updating and deleting tags) and never bump the version for it.
+
+The release carries the wheel, the sdist, `SHA256SUMS` and build-provenance
+attestations. Check a downloaded file with
+`gh attestation verify <file> -R overnightworks/webauth` and
+`sha256sum -c SHA256SUMS`.
