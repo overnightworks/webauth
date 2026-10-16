@@ -643,6 +643,31 @@ def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
             302,
             id="a browser's default Accept header",
         ),
+        pytest.param(
+            "text/html,,application/json;q=0.1",
+            302,
+            id="an empty entry is skipped",
+        ),
+        pytest.param(
+            "text/html;q=abc, application/json;q=0.5",
+            302,
+            id="an unparsable q counts as 1.0",
+        ),
+        pytest.param(
+            "application/json;level=1, text/html",
+            401,
+            id="a parameter other than q leaves the quality at 1.0, a tie",
+        ),
+        pytest.param(
+            "text/*;q=0.2, application/json;q=0.1",
+            302,
+            id="a type wildcard sets the floor for html",
+        ),
+        pytest.param(
+            "text/*;q=0.1, */*;q=0.9, text/*;q=0.2, application/json;q=0.5",
+            302,
+            id="the highest of several wildcards wins, not the first or the last",
+        ),
     ],
 )
 def test_the_redirect_follows_accept_quality_negotiation(accept: str, status: int) -> None:

@@ -112,6 +112,29 @@ def _cross_origin_rejection() -> JSONResponse:
     return JSONResponse({"detail": "Cross-origin request rejected"}, status_code=403)
 
 
+def _cross_origin_refusal(request: Request) -> JSONResponse | None:
+    fetch_site = request.headers.get(_SEC_FETCH_SITE)
+    if fetch_site is not None:
+        allowed = _sec_fetch_site_allows(fetch_site)
+        if allowed is True:
+            return None
+        if allowed is False:
+            return _cross_origin_rejection()
+    origin = request.headers.get("origin")
+    if origin is None:
+        origin = request.headers.get("referer")
+    if origin is not None:
+        if _origin_is_allowed(origin, web_auth_config(request)):
+            return None
+        return _cross_origin_rejection()
+    if _is_form_submission(request):
+        return JSONResponse(
+            {"detail": "Missing Origin header on form submission"},
+            status_code=403,
+        )
+    return None
+
+
 class CsrfOriginMiddleware(BaseHTTPMiddleware):
     """Reject a state-changing request that a foreign page originated.
 
@@ -131,22 +154,7 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
             request.method in _MUTATING_METHODS
             and self._policy.requires_same_origin(request.url.path)
         ):
-            fetch_site = request.headers.get(_SEC_FETCH_SITE)
-            if fetch_site is not None:
-                allowed = _sec_fetch_site_allows(fetch_site)
-                if allowed is True:
-                    return await call_next(request)
-                if allowed is False:
-                    return _cross_origin_rejection()
-            origin = request.headers.get("origin")
-            if origin is None:
-                origin = request.headers.get("referer")
-            if origin is not None:
-                if not _origin_is_allowed(origin, web_auth_config(request)):
-                    return _cross_origin_rejection()
-            elif _is_form_submission(request):
-                return JSONResponse(
-                    {"detail": "Missing Origin header on form submission"},
-                    status_code=403,
-                )
+            refusal = _cross_origin_refusal(request)
+            if refusal is not None:
+                return refusal
         return await call_next(request)
