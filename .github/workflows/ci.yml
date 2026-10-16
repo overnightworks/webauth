@@ -58,6 +58,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: overnightworks/quality/.github/workflows/gate.yml@bab8770b89be8114a206c174b6380653d391e2a0 # v0.1.0
+    uses: overnightworks/quality/.github/workflows/gate.yml@75467b7888ab8158dda370c770d3323dfc1f594e # v0.1.1
+    with:
+      coverage-artifact: coverage
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
