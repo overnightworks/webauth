@@ -1,11 +1,19 @@
 [project]
 name = "overnightworks-webauth"
-version = "0.13.0"
+dynamic = ["version"]
 description = "Web authentication for FastAPI applications: sessions, cookies, CSRF, rate limits, audit ports"
 authors = [{ name = "Flex0r (Felix Hummert)", email = "felix.hummert@gmail.com" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
+keywords = ["fastapi", "authentication", "session", "csrf", "cookies", "rate-limit", "oidc"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Typing :: Typed",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+]
 
 dependencies = [
     "fastapi>=0.100,<1",
@@ -39,10 +47,15 @@ e2e = [
 
 [project.urls]
 Repository = "https://github.com/overnightworks/webauth"
+Issues = "https://github.com/overnightworks/webauth/issues"
+Changelog = "https://github.com/overnightworks/webauth/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "webauth.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -60,3 +73,6 @@ select = ["E", "F", "W", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/webauth/__init__.py" }]
