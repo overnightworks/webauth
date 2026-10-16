@@ -1,0 +1,8 @@
+claim_id = "884243c83629496dbf9632c6797c8f38"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "b36165b43aaf933927cb64c82a8a97a1fadee231"
+branch = "claude/issue-121-release-hygiene-b3-bewiesene-mindestvers"
+scope = [".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/release.yml", "AGENTS.md", "CHANGELOG.md", "pyproject.toml", "uv.lock"]
+opened_commit = "f377d2e84323a595aa792e5cdf8e7f0b21bc2b84"
+whole_reason = "One install contract: the floors, the job that proves them, the release gate that requires the job and the ceiling watcher land together"
