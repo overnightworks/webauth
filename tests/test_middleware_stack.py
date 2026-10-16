@@ -244,18 +244,54 @@ class TestRefusedInstallation:
         assert app.user_middleware == []
 
     @pytest.mark.parametrize(
-        "token_exempt",
+        ("origin_policy", "token_exempt"),
         [
-            pytest.param(PathRules(exact=frozenset({LOGIN_PATH})), id="exact-path"),
-            pytest.param(PathRules(prefixes=("/login",)), id="prefix"),
-            pytest.param(PathRules(shapes=(PathShape("/log", "in"),)), id="unverifiable-shape"),
+            pytest.param(
+                CsrfPolicy(protected=PathRules(prefixes=("/api",))),
+                PathRules(exact=frozenset({LOGIN_PATH})),
+                id="exact-path",
+            ),
+            pytest.param(
+                CsrfPolicy(protected=PathRules(prefixes=("/api",))),
+                PathRules(prefixes=("/login",)),
+                id="prefix",
+            ),
+            pytest.param(
+                CsrfPolicy(protected=PathRules(prefixes=("/api",))),
+                PathRules(shapes=(PathShape("/log", "in"),)),
+                id="unverifiable-shape",
+            ),
+            pytest.param(
+                CsrfPolicy(exempt=PathRules(exact=frozenset({"/api/auth/login"}))),
+                PathRules(prefixes=("/api/auth/",)),
+                id="origin-exempts-an-exact-path-below-the-prefix",
+            ),
+            pytest.param(
+                CsrfPolicy(exempt=PathRules(prefixes=("/api/auth/l",))),
+                PathRules(prefixes=("/api/auth/",)),
+                id="origin-exempts-a-prefix-below-the-prefix",
+            ),
+            pytest.param(
+                CsrfPolicy(protected=PathRules(exact=frozenset({"/api/internal/"}))),
+                PathRules(prefixes=("/api/internal/",)),
+                id="exact-protected-path-does-not-cover-its-prefix",
+            ),
+            pytest.param(
+                CsrfPolicy(protected=PathRules(exact=frozenset({"/login/"}))),
+                PathRules(prefixes=("/login/",)),
+                id="exact-protected-prefix-string-does-not-cover-paths-below",
+            ),
+            pytest.param(
+                CsrfPolicy(exempt=PathRules(exact=frozenset({"/login/reset"}))),
+                PathRules(prefixes=("/login/",)),
+                id="origin-exempts-an-exact-path-under-a-protected-prefix-string",
+            ),
         ],
     )
     def test_token_exemption_outside_the_origin_check_is_refused_before_touching_the_app(
-        self, token_exempt: PathRules,
+        self, origin_policy: CsrfPolicy, token_exempt: PathRules,
     ) -> None:
         app = a_fresh_app()
-        origin_policy = CsrfPolicy(protected=PathRules(prefixes=("/api",)))
         token_policy = CsrfPolicy(token_exempt=token_exempt)
         with pytest.raises(ValueError, match="does not check"):
             install_web_auth_middleware(
@@ -274,7 +310,25 @@ class TestRefusedInstallation:
             csrf_origin=CsrfPolicy(),
             csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGIN_PATH}))),
         )
-        assert len(app.user_middleware) == 3
+        client = TestClient(app)
+        assert client.post(LOGIN_PATH, json={}, headers=FOREIGN).status_code == 403
+
+    def test_songmakers_token_exemptions_are_installed(self) -> None:
+        app = a_fresh_app()
+        install_web_auth_middleware(
+            app,
+            security_headers=HEADERS_POLICY,
+            csrf_origin=CsrfPolicy(protected=PathRules(prefixes=("/api/",))),
+            csrf_token=CsrfPolicy(
+                protected=PathRules(prefixes=("/api/",)),
+                token_exempt=PathRules(
+                    exact=frozenset({"/api/auth/login", "/api/auth/setup"}),
+                    prefixes=("/api/internal/",),
+                ),
+            ),
+        )
+        response = TestClient(app).post("/api/auth/login", json={}, headers=FOREIGN)
+        assert response.status_code == 403
 
     @pytest.mark.parametrize(
         "arrange",

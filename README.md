@@ -259,14 +259,20 @@ front, so the installer adds them in reverse.
 5. `CsrfTokenMiddleware`.
 
 `csrf_origin` and `csrf_token` take separate `CsrfPolicy` values. The
-installer refuses, before it touches the app, a `csrf_token` without a
-`csrf_origin`, and a `csrf_token` whose `token_exempt` paths the
-`csrf_origin` does not check (`ValueError`: login routes skip the token on
-the promise that the origin check protects them; exact paths and prefixes
-are tested against `requires_same_origin`, shapes and patterns are refused as
-unverifiable), and an app that already carries any of the
-five library middleware (or a subclass of one), whether from an earlier
-installer call or added by hand (`RuntimeError`). Install once, and add no library middleware yourself.
+installer refuses, before it touches the app, three things:
+
+- A `csrf_token` without a `csrf_origin` (`ValueError`).
+- A `csrf_token` whose `token_exempt` paths the origin check does not fully
+  cover (`ValueError`): login routes skip the token on the promise that the
+  origin check protects them. An exact path must require the origin check; a
+  prefix must have every path below it checked, so an origin exemption inside
+  it, or an origin policy that protects only the prefix string, is refused;
+  shapes and patterns are refused as unverifiable.
+- An app that already carries any of the five library middleware or a
+  subclass of one, from an earlier installer call or added by hand
+  (`RuntimeError`).
+
+Install once, and add no library middleware yourself.
 
 **Placement of host middleware.** Added before the call, a host middleware
 sits inside the library stack: a request the library refuses early (413 by
@@ -291,7 +297,7 @@ the limiter is reached:
 
 | Cause | Response | Budget |
 |---|---|---|
-| A streamed body over the limit (no Content-Length) | The library 500 with the headers, until #28 finding 37 | spends one |
+| A streamed body over the limit (no Content-Length) | The library 500 with the headers, until #28 finding 37, when a rate-limit or CSRF middleware sits between the body-size check and a route that reads the body; otherwise 413 | spends one |
 | A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
 | No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
 

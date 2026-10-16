@@ -152,6 +152,50 @@ class CsrfPolicy:
     def requires_token(self, path: str) -> bool:
         return self._is_protected(path) and not self.token_exempt.matches(path)
 
+    def origin_check_covers(self, token_policy: CsrfPolicy) -> tuple[str, ...]:
+        """The ``token_policy`` exemptions this policy's origin check does not fully cover.
+
+        A token exemption is safe only where the origin check still runs, so
+        the decision is conservative and errs toward "uncovered":
+
+        - an exact exemption is covered when ``requires_same_origin`` holds for it;
+        - a prefix exemption is covered only when every path below it requires
+          the origin check. With the default ``protected`` that means no
+          ``exempt`` rule can match at or below the prefix: no exact path
+          beginning with it, no prefix overlapping it either way, no shape whose
+          start overlaps it, and no pattern at all (unverifiable). With explicit
+          ``protected`` rules it means some protected prefix begins the
+          exemption prefix; an exact protected path never covers a prefix;
+        - a shape or pattern exemption cannot be enumerated and is always
+          uncovered.
+        """
+        token_exempt = token_policy.token_exempt
+        uncovered = [
+            path for path in sorted(token_exempt.exact)
+            if not self.requires_same_origin(path)
+        ]
+        uncovered += [
+            prefix for prefix in token_exempt.prefixes
+            if not self._covers_every_path_under(prefix)
+        ]
+        uncovered += [f"{rule!r}" for rule in (*token_exempt.shapes, *token_exempt.patterns)]
+        return tuple(uncovered)
+
+    def _covers_every_path_under(self, prefix: str) -> bool:
+        if self.protected is not None:
+            return any(prefix.startswith(q) for q in self.protected.prefixes)
+        exempt = self.exempt
+        return not (
+            exempt.matches(prefix)
+            or exempt.patterns
+            or any(path.startswith(prefix) for path in exempt.exact)
+            or any(q.startswith(prefix) for q in exempt.prefixes)
+            or any(
+                shape.starts_with.startswith(prefix) or prefix.startswith(shape.starts_with)
+                for shape in exempt.shapes
+            )
+        )
+
 
 @dataclass(frozen=True)
 class BodySizeRule:
