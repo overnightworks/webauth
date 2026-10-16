@@ -737,12 +737,13 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
 class StartSend(enum.Enum):
     """How the server takes the response start; the suspended modes need a concurrent
     reader of the body (ASGI spec before 2.4), because the excess arrives while the start
-    is still in its send. NEVER_RETURNS takes the start and never answers."""
+    is still in its send. HELD_PAST_THE_DEADLINE holds the start in its send for longer than the drive
+    deadline and only then records it, so a send left unbounded shows as a start."""
 
     PLAIN = enum.auto()
     SUSPENDED_BEFORE_ACCEPTING = enum.auto()
     SUSPENDED_AFTER_ACCEPTING = enum.auto()
-    NEVER_RETURNS = enum.auto()
+    HELD_PAST_THE_DEADLINE = enum.auto()
 
 
 async def no_receive() -> Message:
@@ -796,8 +797,8 @@ async def drive(
         is_start = message["type"] == "http.response.start"
         if is_start and start_send is not StartSend.PLAIN:
             start_entered.set()
-            if start_send is StartSend.NEVER_RETURNS:
-                await anyio.sleep_forever()
+            if start_send is StartSend.HELD_PAST_THE_DEADLINE:
+                await anyio.sleep(DRIVE_DEADLINE_SECONDS)
             if start_send is StartSend.SUSPENDED_BEFORE_ACCEPTING:
                 await _until_excess_is_handled(excess_handed)
         sent.append(message)

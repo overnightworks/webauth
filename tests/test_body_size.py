@@ -193,7 +193,7 @@ async def test_a_streamed_body_over_the_limit_read_before_the_response_starts_an
 
 
 
-async def test_a_start_send_that_never_returns_fails_after_the_policy_bound_without_a_second_start() -> None:  # noqa: E501
+async def test_a_start_send_held_past_the_deadline_fails_after_the_policy_bound_without_a_second_start() -> None:  # noqa: E501
     app = a_body_limited_app(
         policy=BodySizePolicy(default_max_bytes=LIMIT, start_send_seconds=START_SEND_BOUND_SECONDS)
     )
@@ -202,7 +202,7 @@ async def test_a_start_send_that_never_returns_fails_after_the_policy_bound_with
         "/never-reads",
         SPEC_WITH_CONCURRENT_READER,
         ONE_CHUNK_OVER_THE_LIMIT,
-        StartSend.NEVER_RETURNS,
+        StartSend.HELD_PAST_THE_DEADLINE,
         app=app,
     )
 
@@ -235,18 +235,18 @@ async def test_any_content_length_over_the_limit_is_refused_before_the_route(
     assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
 
 
-async def test_behind_a_base_http_middleware_a_started_response_still_ends_complete_until_119() -> None:  # noqa: E501
+async def test_behind_a_base_http_middleware_an_overflowing_started_response_is_cut_to_what_was_read_until_119() -> None:  # noqa: E501
     app = a_body_limited_app(full_stack=True)
 
     sent, raised = await drive_post(
-        "/never-reads",
+        "/reads-after-first-chunk",
         SPEC_WITH_CONCURRENT_READER,
-        ONE_CHUNK_OVER_THE_LIMIT,
-        StartSend.SUSPENDED_AFTER_ACCEPTING,
+        TWO_CHUNKS_UNDER_THE_LIMIT_EACH,
         app=app,
         headers=tuple(a_csrf_passing_request_headers(A_CONFIG)),
     )
 
     assert [start["status"] for start in starts(sent)] == [200]
     assert completed(sent)
+    assert body_of(sent) == b"first"
     assert raised is not None

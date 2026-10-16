@@ -10,6 +10,7 @@ singleton or an application module of its own.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Final
@@ -222,8 +223,8 @@ class BodySizePolicy:
     """How long a response start may take to reach the server before the request fails."""
 
     def __post_init__(self) -> None:
-        if self.start_send_seconds <= 0:
-            raise ValueError("start_send_seconds must be positive.")
+        if not 0 < self.start_send_seconds < math.inf:
+            raise ValueError("start_send_seconds must be positive and finite.")
 
     def max_bytes(self, path: str, method: str) -> int:
         """The budget for this request; the first matching rule wins."""

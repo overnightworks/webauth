@@ -65,9 +65,10 @@ This is the last release with password parts.
   off (a response that already finished stays complete; behind a rate-limit or
   CSRF middleware it ends complete until #119) and the error reaches the server,
   where a 413 used to follow the start. The start is sent whole: a cancellation
-  inside the stack waits until it is sent, at most the new
-  `BodySizePolicy.start_send_seconds` (default 10.0, positive), after which the
-  request fails with `TimeoutError`. Any `Content-Length` header over the limit
+  inside the stack waits until it is sent. Every start send is bounded by the new
+  `BodySizePolicy.start_send_seconds` (default 10.0, positive and finite); one
+  still pending after it is cut off with `TimeoutError`, which reaches the server
+  (inside a `BaseExceptionGroup` under a `StreamingResponse` before spec 2.4). Any `Content-Length` header over the limit
   now refuses the request with 413, whatever its position among the headers.
 - `SECURITY.md` names the supported release and how to report a vulnerability;
   a release is built only from a commit of `main` whose CI run finished green.
