@@ -14,12 +14,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from webauth.cookies import is_pending_login_cookie_name, pending_login_cookie_prefix
+
 MIN_REGISTERED_VALUE_CHARS = 8
 KEPT_HEADER_VALUES = frozenset({
     "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "content-type", "cache-control",
 })
 KEPT_SET_COOKIE_FLAGS = frozenset({"secure", "httponly"})
-KEPT_SET_COOKIE_VALUES = frozenset({"samesite", "path", "max-age", "expires"})
+KEPT_SET_COOKIE_VALUES = {
+    "samesite": re.compile(r"(?i)strict|lax|none"),
+    "path": re.compile(r"/[\w/.\-]*"),
+    "max-age": re.compile(r"-?\d+"),
+    "expires": re.compile(r"[A-Za-z]{3}, \d\d[ \-][A-Za-z]{3}[ \-]\d{2,4} [\d:]{8} GMT"),
+}
+INVALID_ATTRIBUTE_VALUE = "(not a plain value)"
 EVIDENCE_SUFFIXES = frozenset({".png", ".har", ".txt"})
 CREDENTIAL_NAME_PARTS = ("secret", "credential", "password", "token", "key", "cert", "pem")
 QUERY_IN_TEXT = re.compile(r"\?[^\s\"'<>]*")
@@ -74,10 +82,22 @@ def without_query_values(text: str) -> str:
 
 
 def sanitized_url(url: str) -> tuple[str, list[str]]:
-    """``scheme://host/path`` and the names of the query parameters."""
+    """``scheme://host[:port]/path`` and the names of the query parameters; no
+    userinfo and no path parameters survive."""
     parts = urllib.parse.urlsplit(url)
     names = [name for name, _ in urllib.parse.parse_qsl(parts.query, keep_blank_values=True)]
-    return f"{parts.scheme}://{parts.netloc}{parts.path}", names
+    host = f"[{parts.hostname}]" if ":" in (parts.hostname or "") else parts.hostname or ""
+    port = f":{parts.port}" if parts.port else ""
+    path = "/".join(segment.partition(";")[0] for segment in parts.path.split("/"))
+    return f"{parts.scheme}://{host}{port}{path}", names
+
+
+def recorded_cookie_name(name: str) -> str:
+    """A pending-login cookie's name ends in a digest of the login's state;
+    the log keeps the shape only."""
+    if is_pending_login_cookie_name(name, secure=True):
+        return f"{pending_login_cookie_prefix(secure=True)}*"
+    return name
 
 
 class NetworkLog:
@@ -121,7 +141,10 @@ class NetworkLog:
                 "method": request.method,
                 "url": url,
                 "httpVersion": "",
-                "cookies": [{"name": name, "value": ""} for name in _cookie_names(request_headers)],
+                "cookies": [
+                    {"name": recorded_cookie_name(name), "value": ""}
+                    for name in _cookie_names(request_headers)
+                ],
                 "headers": _headers(request_headers),
                 "queryString": [{"name": name, "value": ""} for name in query_names],
                 "headersSize": -1,
@@ -145,8 +168,9 @@ class NetworkLog:
     def _register_set_cookie_values(self, headers: list[dict[str, str]]) -> None:
         for header in headers:
             if header["name"].lower() == "set-cookie":
-                name, _, rest = header["value"].partition("=")
-                self._registry.add(f"cookie {name}", rest.split(";", 1)[0])
+                for line in header["value"].splitlines():
+                    name, _, rest = line.partition("=")
+                    self._registry.add(f"cookie {name}", rest.split(";", 1)[0])
 
 
 def _headers(headers: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -172,16 +196,19 @@ def _set_cookies(response_headers: list[dict[str, str]]) -> list[dict[str, Any]]
     for header in response_headers:
         if header["name"].lower() != "set-cookie":
             continue
-        name_and_value, *attributes = header["value"].split(";")
-        cookie: dict[str, Any] = {"name": name_and_value.split("=", 1)[0].strip(), "value": ""}
-        for attribute in attributes:
-            key, _, value = attribute.strip().partition("=")
-            key = key.lower()
-            if key in KEPT_SET_COOKIE_FLAGS:
-                cookie[key] = True
-            elif key in KEPT_SET_COOKIE_VALUES:
-                cookie[key] = value
-        cookies.append(cookie)
+        for line in header["value"].splitlines():
+            name_and_value, *attributes = line.split(";")
+            name = name_and_value.split("=", 1)[0].strip()
+            cookie: dict[str, Any] = {"name": recorded_cookie_name(name), "value": ""}
+            for attribute in attributes:
+                key, _, value = attribute.strip().partition("=")
+                key = key.lower()
+                if key in KEPT_SET_COOKIE_FLAGS:
+                    cookie[key] = True
+                elif key in KEPT_SET_COOKIE_VALUES:
+                    plain = KEPT_SET_COOKIE_VALUES[key].fullmatch(value) is not None
+                    cookie[key] = value if plain else INVALID_ATTRIBUTE_VALUE
+            cookies.append(cookie)
     return cookies
 
 
@@ -201,13 +228,14 @@ def scan_evidence(evidence_dir: Path, registry: SecretRegistry) -> list[Contamin
     for path in sorted(evidence_dir.rglob("*")):
         if not path.is_file():
             continue
+        relative = path.relative_to(evidence_dir).as_posix()
         if path.suffix not in EVIDENCE_SUFFIXES or any(
             part in path.name.lower() for part in CREDENTIAL_NAME_PARTS
         ):
-            findings.append(Contamination(path.name, "file kind"))
+            findings.append(Contamination(relative, "file kind"))
         content = path.read_bytes()
         findings.extend(
-            Contamination(path.name, label)
+            Contamination(relative, label)
             for label, forms in forms_by_label.items()
             if any(form in content for form in forms)
         )
@@ -215,5 +243,5 @@ def scan_evidence(evidence_dir: Path, registry: SecretRegistry) -> list[Contamin
 
 
 def delete_contaminated(evidence_dir: Path, findings: list[Contamination]) -> None:
-    for name in {finding.file for finding in findings}:
-        (evidence_dir / name).unlink(missing_ok=True)
+    for relative in {finding.file for finding in findings}:
+        (evidence_dir / relative).unlink(missing_ok=True)

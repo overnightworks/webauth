@@ -8,9 +8,12 @@ counts only and clears everything on ``POST /reset``."""
 from __future__ import annotations
 
 import argparse
+import ctypes
+import functools
 import html
 import importlib.util
 import json
+import signal
 import sys
 import threading
 import time
@@ -64,6 +67,7 @@ document.getElementById("logout").addEventListener("click", async () => {
 </script>""")
 
 
+@functools.cache
 def _arrangement() -> Any:
     """The library suite's in-memory stores, loaded by path from ``tests/``."""
     path = REPOSITORY / "tests" / "webauth_arrangement.py"
@@ -263,7 +267,15 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     return app
 
 
+def die_with_parent() -> None:
+    """Linux ``PR_SET_PDEATHSIG``: a host nobody can stop must not outlive its run."""
+    pr_set_pdeathsig = 1
+    if ctypes.CDLL(None, use_errno=True).prctl(pr_set_pdeathsig, signal.SIGKILL) != 0:
+        raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) failed")
+
+
 def main() -> None:
+    die_with_parent()
     parser = argparse.ArgumentParser()
     parser.add_argument("--settings", type=Path, required=True)
     settings = HostSettings.read(parser.parse_args().settings)

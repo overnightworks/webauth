@@ -1,6 +1,6 @@
 """Proves login and logout of a webauth host in a real browser against a real Keycloak.
 
-    flock /tmp/probe-stack.lock timeout --kill-after=50 900 \\
+    flock /tmp/probe-stack.lock timeout --kill-after=240 900 \\
         uv run --extra dev --group e2e python e2e/oidc/prove.py --edge PATH --scratch EMPTY_DIR
 
 Read ``README.md`` beside this file first. Nothing of the OIDC path is faked:
@@ -22,6 +22,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator
@@ -43,7 +44,11 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 from shim import LOOPBACK, TlsShim
 from stack import Admin, HeldStack, StackError, require_pinned_clean_edge
 
-from webauth.cookies import verify_pending_login
+from webauth.cookies import (
+    DEFAULT_SESSION_COOKIE_NAME,
+    is_pending_login_cookie_name,
+    verify_pending_login,
+)
 
 IDP_HOST = "auth.hallucinai.de"
 APP_HOST = "demo.hallucinai.de"
@@ -61,7 +66,13 @@ WIDTH_LABEL = "1280x800"
 PAGE_TIMEOUT_MILLISECONDS = 30_000
 APP_START_SECONDS = 30
 URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "session_state", "state")
-PENDING_COOKIE_PREFIX = "__Host-oidc_pending_"
+STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+WORKER_ENDS_SECONDS = 15
+HOST_STOPS_SECONDS = 15
+
+
+class Interrupted(BaseException):
+    """The first stop signal, raised wherever the main thread stands."""
 
 
 @contextlib.contextmanager
@@ -72,7 +83,7 @@ def runtime_directory(scratch: Path) -> Iterator[Path]:
     try:
         yield runtime
     finally:
-        shutil.rmtree(runtime, ignore_errors=True)
+        shutil.rmtree(runtime)
 
 
 def free_port() -> int:
@@ -96,16 +107,31 @@ class Proof:
     session_secret: str = ""
     user_password: str = ""
     client_secret: str = ""
+    browser_tmp: Path | None = None
+    failures: int = 0
+    stop_requested: threading.Event = field(default_factory=threading.Event)
+    winding_down: bool = False
+
+    @property
+    def all_held(self) -> bool:
+        return bool(self.lines) and not self.failures
+
+    def fail(self, message: str) -> None:
+        self.failures += 1
+        self.record(f"FAILED: {without_query_values(message)}")
 
     def record(self, line: str) -> None:
         self.lines.append(line)
         print(line, flush=True)
 
     def held_or_failed(self, label: str, check: Callable[[], str]) -> bool:
+        if self.stop_requested.is_set():
+            return False
         try:
             observed = check()
         except Exception as error:
             failure = without_query_values(f"{type(error).__name__}: {error}")
+            self.failures += 1
             self.record(f"{label} FAILED: {failure}")
             return False
         self.record(f"{label} held: {observed}")
@@ -135,15 +161,16 @@ class Proof:
     def capture_cookies(self, context: BrowserContext) -> None:
         for cookie in context.cookies():
             self.registry.add(f"cookie {cookie['name']}", cookie["value"])
-            if cookie["name"].startswith(PENDING_COOKIE_PREFIX):
+            if is_pending_login_cookie_name(cookie["name"], secure=True):
                 self._register_pending_login(cookie["value"])
 
     def _register_pending_login(self, cookie_value: str) -> None:
         pending = verify_pending_login(cookie_value, self.session_secret.encode())
-        if pending is not None:
-            self.registry.add("pending login state", pending.state)
-            self.registry.add("pending login nonce", pending.nonce)
-            self.registry.add("pending login code_verifier", pending.code_verifier)
+        if pending is None:
+            raise AssertionError("a pending-login cookie did not verify; secrets unregistered")
+        self.registry.add("pending login state", pending.state)
+        self.registry.add("pending login nonce", pending.nonce)
+        self.registry.add("pending login code_verifier", pending.code_verifier)
 
     def shot(self, page: Page, scenario: str, moment: str) -> None:
         page.screenshot(path=self.evidence_dir / f"{scenario}-{moment}.png")
@@ -221,8 +248,10 @@ def login(proof: Proof) -> str:
 def a_wrong_password_stays_at_keycloak(proof: Proof) -> str:
     proof.reset_host()
     with proof.browsing() as page:
+        wrong_password = secrets.token_urlsafe(12)
+        proof.registry.add("wrong password", wrong_password)
         proof.start_sign_in(page, "1b")
-        proof.fill_keycloak_form(page, "1b", secrets.token_urlsafe(12))
+        proof.fill_keycloak_form(page, "1b", wrong_password)
         page.get_by_text("Invalid username or password").wait_for()
         assert urllib.parse.urlsplit(page.url).hostname == IDP_HOST, "left Keycloak's form"
         proof.shot(page, "1b", "refused-result")
@@ -239,7 +268,7 @@ def logout(proof: Proof) -> str:
         assert proof.headline(page) == f"Signed in as {USER_NAME}"
         cookies = [c for c in page.context.cookies(APP_ORIGIN)]
         held_names = {c["name"] for c in cookies}
-        session = next(c for c in cookies if c["httpOnly"])
+        session = next(c for c in cookies if c["name"] == DEFAULT_SESSION_COOKIE_NAME)
         proof.registry.add("session cookie", session["value"])
         page.click("#logout")
         page.get_by_role("heading", name="Signed out").wait_for()
@@ -250,11 +279,11 @@ def logout(proof: Proof) -> str:
         assert not left, f"cookies survived: {sorted(left)}"
         me_status = proof.status_of(page, "/me")
         assert me_status == 401, f"/me answered {me_status}"
-        back_shows = back_button_shows(page)
+        back_shows = back_button_shows(proof, page)
         replay = replayed_session_status(proof, session)
         assert replay == 401, f"the old session cookie was answered {replay}"
         assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-        silent = second_sign_in_is_silent(page)
+        silent = second_sign_in(proof, page)
     return (
         f"after the button the cookies are gone, a reload shows Sign in and /me answers 401; "
         f"the back button shows {back_shows!r} but the old session cookie replayed over HTTPS "
@@ -263,9 +292,10 @@ def logout(proof: Proof) -> str:
     )
 
 
-def back_button_shows(page: Page) -> str:
+def back_button_shows(proof: Proof, page: Page) -> str:
     page.go_back()
-    return page.inner_text("h1") if page.query_selector("h1") else "no page"
+    page_text = page.inner_text("h1") if page.query_selector("h1") else "no page"
+    return f"{page_text} (the host's last sign-in refusal: {proof.host_state()['last_refusal']})"
 
 
 def replayed_session_status(proof: Proof, session: dict[str, Any]) -> int:
@@ -277,14 +307,17 @@ def replayed_session_status(proof: Proof, session: dict[str, Any]) -> int:
     ).status_code
 
 
-def second_sign_in_is_silent(page: Page) -> str:
+def second_sign_in(proof: Proof, page: Page) -> str:
     page.goto(f"{APP_ORIGIN}/")
     page.click("#sign-in")
-    try:
-        page.wait_for_url(re.compile(f"^{re.escape(APP_ORIGIN)}/"), timeout=15_000)
-    except Exception:
+    keycloak_form = page.locator("#username")
+    signed_in = page.get_by_role("heading", name=f"Signed in as {USER_NAME}")
+    keycloak_form.or_(signed_in).wait_for()
+    proof.shot(page, "2", "second-sign-in")
+    if keycloak_form.is_visible():
         return "shows Keycloak's form again"
-    page.goto(f"{APP_ORIGIN}/")
+    held = proof.host_state()
+    assert held["sessions"] == 1, f"the host holds {held}"
     return "signs in again without a form, through the live SSO session"
 
 
@@ -352,7 +385,7 @@ def start_host(
         [sys.executable, str(Path(__file__).with_name("host_app.py")),
          "--settings", str(settings_file)],
         env={"PATH": os.environ["PATH"], "SSL_CERT_FILE": str(tls.ca_certificate)},
-        stdout=log_file, stderr=subprocess.STDOUT,
+        stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
     )
     wait_until_serving(process, proof.observe_port, proof.app_port)
     return process
@@ -371,23 +404,28 @@ def wait_until_serving(process: subprocess.Popen[bytes], *ports: int) -> None:
 
 
 def stop_host(process: subprocess.Popen[bytes]) -> None:
-    process.terminate()
-    try:
-        process.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
+    """Ends the host's whole process group, whatever it has spawned."""
+    for stop_signal in (signal.SIGTERM, signal.SIGKILL):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, stop_signal)
+        try:
+            process.wait(timeout=HOST_STOPS_SECONDS)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+    process.wait()
 
 
-def no_probe_container_is_left() -> None:
-    left = subprocess.run(
+def containers_left() -> list[str]:
+    return subprocess.run(
         ["docker", "ps", "-a", "--filter", "name=edge-kc-probe", "--format", "{{.Names}}"],
         check=True, capture_output=True, text=True,
     ).stdout.split()
-    assert not left, f"containers left behind: {left}"
 
 
 def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
+    proof.browser_tmp = runtime / "tmp"
+    proof.browser_tmp.mkdir()
     proof.session_secret = secrets.token_urlsafe(48)
     proof.user_password = secrets.token_urlsafe(18)
     proof.client_secret = secrets.token_urlsafe(24)
@@ -408,10 +446,48 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
                 TlsShim(untrusted, edge_port, IDP_HOST) as untrusted_shim:
             host = start_host(proof, runtime, tls, shim.port)
             try:
-                drive_browser(proof, tls, shim.port, untrusted_shim.port)
+                drive_browser_off_the_main_thread(proof, tls, shim.port, untrusted_shim.port)
             finally:
+                proof.winding_down = True
                 stop_host(host)
     print("\n".join(line for line in stack.output if line.startswith("teardown")), flush=True)
+
+
+def own_child_pids() -> set[int]:
+    return {
+        int(pid)
+        for children in Path("/proc/self/task").glob("*/children")
+        for pid in children.read_text().split()
+    }
+
+
+def drive_browser_off_the_main_thread(
+    proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int
+) -> None:
+    """Playwright's sync API cannot be torn down from a signal handler, so the
+    main thread keeps the signals and kills the browser's driver on a stop."""
+    before = own_child_pids()
+    crashes: list[Exception] = []
+
+    def work() -> None:
+        try:
+            drive_browser(proof, tls, shim_port, untrusted_port)
+        except Exception as error:
+            crashes.append(error)
+
+    worker = threading.Thread(target=work, name="browser", daemon=True)
+    worker.start()
+    try:
+        while worker.is_alive():
+            worker.join(0.5)
+    except Interrupted:
+        for pid in own_child_pids() - before:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        worker.join(WORKER_ENDS_SECONDS)
+        raise
+    if crashes:
+        raise crashes[0]
 
 
 def drive_browser(proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int) -> None:
@@ -421,6 +497,8 @@ def drive_browser(proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_por
         f"MAP {SECOND_APP_HOST} {LOOPBACK}:{proof.app_port}",
         f"MAP {UNTRUSTED_HOST} {LOOPBACK}:{untrusted_port}",
     ))
+    assert proof.browser_tmp is not None
+    os.environ["TMPDIR"] = str(proof.browser_tmp)
     with sync_playwright() as playwright:
         proof.browser = playwright.chromium.launch(args=[
             f"--host-resolver-rules={rules}",
@@ -442,6 +520,38 @@ def drive_browser(proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_por
             proof.browser.close()
 
 
+def stop_on_first_signal(proof: Proof) -> None:
+    """The first SIGTERM or SIGINT ends the run through ``Interrupted``; the
+    cleanup that follows is not interruptible, so later signals are ignored."""
+
+    def handler(signum: int, frame: object) -> None:
+        for stop_signal in STOP_SIGNALS:
+            signal.signal(stop_signal, signal.SIG_IGN)
+        proof.stop_requested.set()
+        if not proof.winding_down:
+            raise Interrupted
+
+    for stop_signal in STOP_SIGNALS:
+        signal.signal(stop_signal, handler)
+
+
+def leftovers(scratch: Path) -> list[str]:
+    left = []
+    runtime = scratch / "runtime"
+    if runtime.exists():
+        left.append("runtime/ survived the run")
+        try:
+            shutil.rmtree(runtime)
+        except OSError as error:
+            left.append(f"runtime/ could not be removed: {error}")
+    try:
+        if containers := containers_left():
+            left.append(f"containers left behind: {containers}")
+    except (subprocess.SubprocessError, OSError) as error:
+        left.append(f"could not look for left-over containers: {error}")
+    return left
+
+
 def prove(edge: Path, scratch: Path) -> int:
     if scratch.exists() and any(scratch.iterdir()):
         print(f"FAILED: --scratch {scratch} is not empty")
@@ -450,20 +560,24 @@ def prove(edge: Path, scratch: Path) -> int:
     evidence_dir.mkdir(parents=True)
     registry = SecretRegistry()
     proof = Proof(evidence_dir, registry, NetworkLog(registry))
-    outcome = 1
+    stop_on_first_signal(proof)
     try:
         require_pinned_clean_edge(edge)
         with runtime_directory(scratch) as runtime:
             run_proof(proof, edge, runtime)
-        assert not (scratch / "runtime").exists(), "runtime/ survived"
-        no_probe_container_is_left()
-        outcome = 0 if all(" held" in line for line in proof.lines) and proof.lines else 1
-    except (StackError, AssertionError, OSError, subprocess.SubprocessError) as error:
-        print(f"FAILED: {without_query_values(str(error))}", flush=True)
+    except Interrupted:
+        pass
+    except Exception as error:
+        proof.fail(f"{type(error).__name__}: {error}")
     finally:
-        shutil.rmtree(scratch / "runtime", ignore_errors=True)
-        outcome = max(outcome, keep_clean_evidence(proof))
-    return outcome
+        proof.winding_down = True
+        for stop_signal in STOP_SIGNALS:
+            signal.signal(stop_signal, signal.SIG_IGN)
+        if proof.stop_requested.is_set():
+            proof.fail("interrupted")
+        for left in leftovers(scratch):
+            proof.fail(left)
+    return max(0 if proof.all_held else 1, keep_clean_evidence(proof))
 
 
 def keep_clean_evidence(proof: Proof) -> int:
@@ -484,7 +598,6 @@ def main() -> int:
     parser.add_argument("--edge", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
     arguments = parser.parse_args()
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     return prove(arguments.edge.resolve(), arguments.scratch.resolve())
 
 
