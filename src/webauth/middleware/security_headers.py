@@ -59,7 +59,7 @@ class SecurityHeadersMiddleware:
                     await PlainTextResponse("Internal Server Error", 500)(
                         scope, receive, send_with_policy,
                     )
-                except Exception as send_failure:  # noqa: BLE001
+                except Exception as send_failure:
                     original.add_note(f"the 500 could not be sent: {send_failure!r}")
             raise
 
