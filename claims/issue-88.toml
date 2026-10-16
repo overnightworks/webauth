@@ -1,8 +1,0 @@
-claim_id = "b62ebc773f13436e9d3927fb6c3c483c"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "a0654a154a530096ad4f91388c8e0d60861a3233"
-branch = "claude/issue-88-quality-gate-adoption"
-scope = [".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/release.yml", ".gitignore", "AGENTS.md", "quality/config.toml", "sonar-project.properties"]
-opened_commit = "809b19861c8ca840d0fa3af705bef51926dd7bd4"
-whole_reason = "The quality adoption is one gate wiring: the job, its config, the Sonar properties and the AGENTS.md check entry land together"
