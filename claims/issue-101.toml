@@ -1,8 +1,0 @@
-claim_id = "fb06f430689b44d09dcb96dffc17f661"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "4a9bccbad6b0a8c3af36b015c1bc9ef40bf4c698"
-branch = "claude/issue-101-remove-session-cache"
-scope = ["AGENTS.md", "CLAUDE.md", "README.md", "src/webauth/__init__.py", "src/webauth/config.py", "src/webauth/dependencies.py", "src/webauth/liveness.py", "src/webauth/ports.py", "src/webauth/session_ending.py", "src/webauth/session_store.py", "src/webauth/users.py", "tests/test_cached_authentication.py", "tests/test_dependencies.py", "tests/test_liveness.py", "tests/test_session_ending.py", "tests/test_session_store.py", "tests/test_users.py", "tests/test_web_auth_config.py", "tests/webauth_arrangement.py"]
-opened_commit = "66f1bc37624c343e129f7d3ec4a7160f3ffdce17"
-whole_reason = "Removing the session cache is one deletion: the module, its port, its config field, its callers and the tests and docs that pin it go together"
