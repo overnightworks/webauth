@@ -47,7 +47,9 @@ from shim import LOOPBACK, TlsShim
 from stack import Admin, HeldStack, StackError, require_pinned_clean_edge
 
 from webauth.cookies import (
+    DEFAULT_COOKIE_SAMESITE,
     DEFAULT_SESSION_COOKIE_NAME,
+    CookieSameSite,
     is_pending_login_cookie_name,
     verify_pending_login,
 )
@@ -67,7 +69,7 @@ USER_NAME = "d1-user"
 USER_GROUP = "/apps/songmaker"
 DISABLED_USER_NAME = "d1-disabled"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
-SAMESITE_VALUES = ("strict", "lax")
+SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
 PAGE_TIMEOUT_MILLISECONDS = 30_000
 APP_START_SECONDS = 30
 URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "session_state", "state")
@@ -107,7 +109,7 @@ class Host:
     """One running host process: its cookie configuration and the ports it serves on."""
 
     process: subprocess.Popen[bytes]
-    cookie_samesite: str
+    cookie_samesite: CookieSameSite
     app_port: int
     observe_port: int
 
@@ -240,7 +242,9 @@ class Proof:
         self.registry.add("pending login nonce", pending.nonce)
         self.registry.add("pending login code_verifier", pending.code_verifier)
 
-    def shot(self, page: Page, scenario: str, moment: str) -> None:
+    def shot(self, page: Page, scenario: str | None, moment: str) -> None:
+        if scenario is None:
+            return
         page.screenshot(path=self.evidence_dir / f"{scenario}-{moment}.png")
 
     def host_state(self) -> dict[str, Any]:
@@ -268,7 +272,7 @@ class Proof:
             page.click(selector)
 
     def assert_fits(self, page: Page, *selectors: str) -> None:
-        """Every element is fully inside the window and the page does not scroll sideways."""
+        """Every element lies inside the window's width and the page does not scroll sideways."""
         for selector in selectors:
             box = page.locator(selector).bounding_box()
             assert box is not None, f"{selector} has no box"
@@ -278,7 +282,7 @@ class Proof:
         scroll_width = page.evaluate("document.documentElement.scrollWidth")
         assert scroll_width <= self.width.pixels_wide, f"the page scrolls sideways: {scroll_width}"
 
-    def start_sign_in(self, page: Page, scenario: str, origin: str = APP_ORIGIN) -> None:
+    def start_sign_in(self, page: Page, scenario: str | None, origin: str = APP_ORIGIN) -> None:
         page.goto(f"{origin}/")
         self.shot(page, scenario, "start")
         self.press(page, "#sign-in")
@@ -286,7 +290,7 @@ class Proof:
         self.capture_cookies(page.context)
 
     def fill_keycloak_form(
-        self, page: Page, scenario: str, password: str, username: str = USER_NAME
+        self, page: Page, scenario: str | None, password: str, username: str = USER_NAME
     ) -> None:
         page.fill("#username", username)
         page.fill("#password", password)
@@ -294,7 +298,7 @@ class Proof:
         self.press(page, "#kc-login")
 
     def sign_in(
-        self, page: Page, scenario: str, origin: str = APP_ORIGIN, username: str = USER_NAME,
+        self, page: Page, scenario: str | None, origin: str = APP_ORIGIN, username: str = USER_NAME,
         password: str | None = None,
     ) -> None:
         self.start_sign_in(page, scenario, origin)
@@ -388,7 +392,11 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
             page, f"{scenario}-enabled", username=DISABLED_USER_NAME,
             password=proof.disabled_user_password,
         )
-        assert proof.headline(page) == f"Signed in as {DISABLED_USER_NAME}"
+        page.goto(f"{APP_ORIGIN}/")
+        assert proof.headline(page) == f"Signed in as {DISABLED_USER_NAME}", (
+            f"the page says {proof.headline(page)!r}"
+        )
+        proof.shot(page, f"{scenario}-enabled", "result")
     proof.deactivate_host_accounts()
     sessions_before = proof.host_state()["sessions"]
     with proof.browsing(width) as page:
@@ -415,13 +423,13 @@ def pages_fit_the_window(proof: Proof, width: Width) -> str:
     scenario = f"6-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
+        page.goto(f"{APP_ORIGIN}/")
+        proof.assert_fits(page, "#sign-in")
         proof.start_sign_in(page, scenario)
-        page.fill("#username", USER_NAME)
-        page.fill("#password", proof.user_password)
         proof.assert_fits(page, "#username", "#password", "#kc-login")
-        proof.shot(page, scenario, "idp-form")
-        proof.press(page, "#kc-login")
+        proof.fill_keycloak_form(page, scenario, proof.user_password)
         page.wait_for_url(f"{APP_ORIGIN}/")
+        page.goto(f"{APP_ORIGIN}/")
         proof.assert_fits(page, "h1", "#logout")
         proof.shot(page, scenario, "result")
     return (
@@ -431,13 +439,15 @@ def pages_fit_the_window(proof: Proof, width: Width) -> str:
     )
 
 
-def session_cookie_after_redirect(proof: Proof, origin: str) -> str:
+def session_cookie_after_redirect(
+    proof: Proof, origin: str, cookie_samesite: CookieSameSite
+) -> str:
     proof.reset_host()
-    scenario = f"5-{urllib.parse.urlsplit(origin).hostname}"
+    scenario = f"5-{urllib.parse.urlsplit(origin).hostname}-{cookie_samesite}"
     with proof.browsing() as page:
         requests: list[Any] = []
         page.context.on("request", lambda request: requests.append(request))
-        proof.sign_in(page, scenario, origin)
+        proof.sign_in(page, None, origin)
         page.wait_for_url(f"{origin}/")
         callback = next(r for r in requests if r.url.startswith(f"{origin}{CALLBACK_PATH}"))
         landing = next(r for r in requests if r.redirected_from is callback)
@@ -742,12 +752,15 @@ def drive_browser(
                 f"--ignore-certificate-errors-spki-list={tls.leaf_spki_sha256_base64}",
             ])
             try:
-                if host.cookie_samesite == SAMESITE_VALUES[0] and not run_default_scenarios(proof):
+                shipped_default = host.cookie_samesite == DEFAULT_COOKIE_SAMESITE
+                if shipped_default and not run_default_scenarios(proof):
                     return
                 for origin in (APP_ORIGIN, SECOND_APP_ORIGIN):
                     proof.held_or_failed(
                         f"SCENARIO 5 {origin} {host.cookie_samesite}",
-                        lambda origin=origin: session_cookie_after_redirect(proof, origin),
+                        lambda origin=origin, samesite=host.cookie_samesite: (
+                            session_cookie_after_redirect(proof, origin, samesite)
+                        ),
                     )
             finally:
                 proof.browser.close()

@@ -138,7 +138,7 @@ class World:
 
 
 class _Observation:
-    """The counts-only listener the scenarios read and reset."""
+    """The counts-only listener the scenarios read, reset and deactivate accounts through."""
 
     def __init__(self, port: int, world: dict[str, World]) -> None:
         holder = world
