@@ -701,7 +701,7 @@ same single hash verification a wrong password costs.
 ```bash
 uv sync --extra dev
 uv run pytest tests -q
-uv run ruff check src tests
+uv run ruff check src tests e2e
 uv run lint-imports
 uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 ```
