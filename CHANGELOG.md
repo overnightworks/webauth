@@ -6,7 +6,7 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
-## 0.14.0 - Unreleased
+## 0.14.0
 
 This is the last release with password parts.
 
@@ -84,6 +84,12 @@ This is the last release with password parts.
   `webauth.jwt_verification` exposes `VerificationRefusal` and
   `strict_json_object`.
 - A key-set fetch that timed out says so in its `KeySetFetchError` message.
+- `fetch_key_set_over_https`, `post_form_over_https` and
+  `post_token_request_over_https` raise `ValueError` for a `timeout_seconds` of
+  zero or less, as v0.13.0 did for `deadline_seconds`.
+- `IdleWindowLiveness` raises `TypeError` for a stored row whose `last_seen` is
+  naive, naming the cause; v0.13.0 failed on the comparison with a bare
+  `TypeError`.
 - `BodySizeLimitMiddleware` never sends a second response start. Once the app has
   handed over a response's start, a streamed body over the limit cuts that response
   off (a response that already finished stays complete) and the error reaches the server,
