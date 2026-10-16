@@ -1,0 +1,7 @@
+claim_id = "3d8b1960110745efa911a539283c6f6f"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "b5c94e224cc9cb5146e91e3ec25ab92788302627"
+branch = "claude/issue-125-r3-release-0-14-0-das-letzte-mit-passwor"
+scope = ["AGENTS.md", "CHANGELOG.md", "src/webauth/__init__.py"]
+opened_commit = "4a81e61c63a715e14b7ed366b09c72f31c4195c0"
