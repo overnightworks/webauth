@@ -1,0 +1,8 @@
+claim_id = "0cbe1576d9b24bcea5fd224f00546e50"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "4e4f0c7edd88c750d3878309bd856ac61c720757"
+branch = "claude/issue-108-release-hygiene-b1-changelog-versionspol"
+scope = [".github/dependabot.yml", ".gitignore", "AGENTS.md", "CHANGELOG.md", "README.md", "pyproject.toml"]
+opened_commit = "0f850ce21eec14aebb3e6d6dff9215d258dcb8cc"
+whole_reason = "Docs and metadata of one release-hygiene lane: the CHANGELOG move needs the README edit, and the Changelog URL needs the file"
