@@ -34,16 +34,21 @@ from webauth_arrangement import (
     an_idle_session,
     cache_session,
     session_cookie_header,
+    signed_without_bound,
 )
 
 from webauth.config import install_web_auth_config
-from webauth.cookies import PLAIN_SESSION_COOKIE_NAME, session_reference, sign_session_id
+from webauth.cookies import (
+    MAX_SESSION_COOKIE_CHARS,
+    PLAIN_SESSION_COOKIE_NAME,
+    session_reference,
+    sign_session_id,
+)
 from webauth.dependencies import (
     ACCOUNT_DISABLED_DETAIL,
     ADMIN_REQUIRED_DETAIL,
     AUTHENTICATION_REQUIRED_DETAIL,
     INVALID_SESSION_DETAIL,
-    MAX_SESSION_COOKIE_CHARS,
     SESSION_EXPIRED_DETAIL,
     AuthenticatedUser,
     LoginRedirect,
@@ -106,6 +111,9 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
             id="a cookie longer than the reader accepts",
         ),
         pytest.param("unsigned", INVALID_SESSION_DETAIL, id="a cookie without a signature"),
+        pytest.param(
+            r'"abc.\351"', INVALID_SESSION_DETAIL, id="a cookie with non-ASCII characters",
+        ),
         pytest.param(
             sign_session_id(SESSION_ID, b"a different signing key entirely"),
             INVALID_SESSION_DETAIL,
@@ -179,7 +187,7 @@ def test_a_request_carrying_more_than_one_session_cookie_authenticates_nobody(
     assert response.json()["detail"] == INVALID_SESSION_DETAIL
 
 
-OVERLONG_SIGNED_COOKIE = sign_session_id("s" * MAX_SESSION_COOKIE_CHARS, SIGNING_KEY)
+OVERLONG_SIGNED_COOKIE = signed_without_bound("s" * MAX_SESSION_COOKIE_CHARS, SIGNING_KEY)
 
 
 def a_bare_request(*cookie_headers: str) -> Request:
