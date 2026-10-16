@@ -132,7 +132,7 @@ def test_a_new_subject_creates_a_passwordless_member_account_and_reports_it(
         SUBJECT, username, MEMBER_ROLE, True,
     )
     assert account.password_hash is None
-    assert [account] == host.accounts.list()
+    assert host.accounts.list() == [account]
     assert [asdict(event) for event in host.audit.user_management_events] == [{
         "kind": UserManagementEventKind.USER_CREATED,
         "actor_id": None,
@@ -666,7 +666,8 @@ def test_two_tabs_both_sign_in_whichever_returns_first(*, second_returns_first: 
 
     first, second = (host.callback(query) for query in tabs)
 
-    assert [first.json(), second.json()] == [{"username": "lena"}] * 2
+    assert first.json() == {"username": "lena"}
+    assert second.json() == {"username": "lena"}
     assert host.sessions.count_active() == 2
     assert host.pending_cookie_names() == set()
 
