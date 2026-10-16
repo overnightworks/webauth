@@ -1,8 +1,0 @@
-claim_id = "7f426bb1bde9457fb612738bccbef3a0"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "9433a79b1d1e7050808aa73ca029aaba6e83a616"
-branch = "claude/issue-71-d1b-browser-harness"
-scope = [".github/workflows/ci.yml", "AGENTS.md", "README.md", "e2e/oidc", "pyproject.toml", "uv.lock"]
-opened_commit = "1e0a922757a04854775c16684f64fd2f40950ca5"
-whole_reason = "D1b is one harness: the e2e group, the CI ruff path and the two check-block lines are the pinning files of e2e/oidc and land with it"
