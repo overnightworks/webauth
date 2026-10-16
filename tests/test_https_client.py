@@ -13,6 +13,7 @@ import contextlib
 import inspect
 import logging
 import socket
+import sys
 import time
 import traceback
 import urllib.parse
@@ -335,18 +336,18 @@ _TEST_DEADLINE_SECONDS = 1.0
 _TEST_DEADLINE_SLACK_SECONDS = 1.0
 
 
-def _fetch_key_set(url: str, **deadline: float) -> object:
-    return fetch_key_set_over_https(url, **deadline)
+def _fetch_key_set(url: str, **limits: float) -> object:
+    return fetch_key_set_over_https(url, **limits)
 
 
-def _post_token_form(url: str, **deadline: float) -> object:
+def _post_token_form(url: str, timeout_seconds: float = 5, **limits: float) -> object:
     return post_form_over_https(
         url,
         _FORM,
         authorization=SecretStr(_BASIC_AUTHORIZATION),
         max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
-        timeout_seconds=5,
-        **deadline,
+        timeout_seconds=timeout_seconds,
+        **limits,
     )
 
 
@@ -483,6 +484,60 @@ def test_a_deadline_of_zero_or_less_is_refused_naming_the_parameter(
 ) -> None:
     with pytest.raises(ValueError, match="deadline_seconds"):
         exchange("https://127.0.0.1:1/token", deadline_seconds=deadline_seconds)
+
+
+@pytest.mark.parametrize(
+    "exchange", [_fetch_key_set, _post_token_form], ids=["key-set-fetch", "token-post"]
+)
+@pytest.mark.parametrize("timeout_seconds", [0, -1])
+def test_a_timeout_of_zero_or_less_is_refused_naming_the_parameter(
+    exchange: Callable[..., object], timeout_seconds: float
+) -> None:
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        exchange("https://127.0.0.1:1/token", timeout_seconds=timeout_seconds)
+
+
+def test_a_token_request_with_a_non_positive_timeout_is_refused_naming_the_timeout() -> None:
+    request = _token_request("https://127.0.0.1:1/token")
+
+    with pytest.raises(ValueError, match="timeout_seconds must be positive"):
+        post_token_request_over_https(request, timeout_seconds=0)
+
+
+def test_a_key_set_fetch_that_timed_out_says_so_in_its_message(
+    token_server: LoopbackHttpsServer,
+) -> None:
+    with pytest.raises(KeySetFetchError, match=str(ExchangeFailure.TIMED_OUT)) as refused:
+        fetch_key_set_over_https(f"{token_server.base_url}/silent", timeout_seconds=0.2)
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+
+
+_connect_events: list[tuple[str, int]] = []
+_recording_connect_events = False
+
+
+def _record_connect_event(event: str, args: tuple) -> None:
+    if _recording_connect_events and event == "http.client.connect":
+        _connect_events.append((args[1], args[2]))
+
+
+sys.addaudithook(_record_connect_event)
+
+
+def test_one_exchange_raises_exactly_one_connect_audit_event(
+    token_server: LoopbackHttpsServer,
+) -> None:
+    global _recording_connect_events
+    origin = urllib.parse.urlsplit(token_server.base_url)
+    _connect_events.clear()
+    _recording_connect_events = True
+    try:
+        _fetch_key_set(f"{token_server.base_url}/jwks")
+    finally:
+        _recording_connect_events = False
+
+    assert _connect_events == [(origin.hostname, origin.port)]
 
 
 @pytest.mark.parametrize("deadline_seconds", [0, -1])

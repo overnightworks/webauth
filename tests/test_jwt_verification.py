@@ -47,7 +47,12 @@ from oidc_arrangement import (
     segment,
 )
 
-from webauth.https_client import MAX_KEY_SET_BYTES, KeySetFetchError, fetch_key_set_over_https
+from webauth.https_client import (
+    MAX_KEY_SET_BYTES,
+    ExchangeFailure,
+    KeySetFetchError,
+    fetch_key_set_over_https,
+)
 from webauth.jwt_verification import (
     KEY_SET_REFRESH_COOLDOWN_SECONDS,
     KEY_SET_TTL_SECONDS,
@@ -795,6 +800,7 @@ _TRANSPORT_FAILURE = (
     "fetching the key set failed: the origin could not be reached,"
     " or the TLS handshake or HTTP exchange failed"
 )
+_TIMED_OUT_FAILURE = f"fetching the key set failed: {ExchangeFailure.TIMED_OUT}"
 
 
 @pytest.fixture
@@ -825,7 +831,7 @@ def test_https_fetch_gives_up_on_an_origin_silent_past_the_read_timeout(
     https_key_set_server: LoopbackHttpsServer,
 ) -> None:
     started = time.monotonic()
-    with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
+    with pytest.raises(KeySetFetchError, match=_TIMED_OUT_FAILURE):
         fetch_key_set_over_https(f"{https_key_set_server.base_url}/silent", timeout_seconds=0.2)
 
     assert time.monotonic() - started < SILENT_HOLD_SECONDS / 2
