@@ -30,6 +30,7 @@ DOWN_TIMEOUT_SECONDS = 120
 API_TIMEOUT_SECONDS = 30
 WAIT_STATE_SLICE_SECONDS = 5
 LOG_LINES_IN_ERRORS = 5
+STDERR_CHARS_IN_ERRORS = 600
 BEHIND_TLS_FRONT = {"X-Forwarded-Proto": "https"}
 DOCKER_OBJECTS = ("container", "volume", "network")
 
@@ -64,7 +65,7 @@ class HeldSuite:
             self.port = self._published_port()
             self._wait_until_ready()
         except BaseException:
-            self._remove()
+            self.remove_everything()
             raise
         return self
 
@@ -72,25 +73,32 @@ class HeldSuite:
         self, kind: type[BaseException] | None, error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
-        self._remove()
+        if left := self.remove_everything():
+            raise StackError(f"the suite project {self.project} left behind: {left}")
 
     @property
     def api(self) -> SuiteApi:
         return SuiteApi(f"http://127.0.0.1:{self.port}")
 
-    def _remove(self) -> None:
+    def remove_everything(self) -> list[str]:
+        """Takes the project down, with its volumes, and returns what still carries its label."""
         self._compose("down", "-v", "--remove-orphans", timeout=DOWN_TIMEOUT_SECONDS, check=False)
-        if left := project_leftovers(self.project):
-            raise StackError(f"the suite project {self.project} left behind: {left}")
+        return project_leftovers(self.project)
 
     def _compose(
         self, *arguments: str, timeout: int, check: bool = True
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        finished = subprocess.run(
             ["docker", "compose", "-p", self.project, "-f", str(COMPOSE_FILE), *arguments],
             env={**os.environ, "SUITE_HOST": self.host},
-            check=check, capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout,
         )
+        if check and finished.returncode:
+            raise StackError(
+                f"docker compose {arguments[0]} exited {finished.returncode}: "
+                f"{finished.stderr[-STDERR_CHARS_IN_ERRORS:]}"
+            )
+        return finished
 
     def _published_port(self) -> int:
         answer = self._compose(
@@ -151,6 +159,7 @@ class SuiteApi:
             answer = self._call(
                 "GET", f"/api/runner/{module_id}/wait-state",
                 params={"states": wanted, "timeoutMs": WAIT_STATE_SLICE_SECONDS * 1000},
+                expected=200,
                 timeout=WAIT_STATE_SLICE_SECONDS + API_TIMEOUT_SECONDS,
             ).json()
             if state := answer.get("state"):

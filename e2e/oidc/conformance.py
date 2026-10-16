@@ -23,9 +23,9 @@ from harness import (
     Interrupted,
     RunRecord,
     keep_clean_evidence,
-    leftovers,
     raise_if_stop_pending,
     runtime_directory,
+    runtime_leftovers,
     stop_on_first_signal,
 )
 from shim import TlsShim
@@ -60,33 +60,41 @@ def drive_suite(run: RunRecord, runtime: Path, suite: HeldSuite, export_dir: Pat
     client_secret = secrets.token_urlsafe(24)
     run.registry.add("client secret", client_secret)
     with suite, TlsShim(tls, suite.port, SUITE_HOST) as shim:
-        api = suite.api
-        plan = api.create_plan(PLAN_NAME, PLAN_VARIANT, plan_configuration(client_secret))
-        modules = [entry["testModule"] for entry in plan["modules"]]
-        for number, module in enumerate(modules, start=1):
-            run.record(f"module {number}: {module}")
-        if len(modules) != EXPECTED_MODULE_COUNT:
-            run.fail(f"the suite lists {len(modules)} modules, expected {EXPECTED_MODULE_COUNT}")
-        module_id = api.create_module(plan["id"], modules[0])
         try:
-            bring_to_waiting(api, module_id)
+            drive_plan(run, suite.api, tls, shim, export_dir, client_secret)
+        finally:
+            run.winding_down = True
+
+
+def drive_plan(
+    run: RunRecord, api: SuiteApi, tls: ThrowawayTls, shim: TlsShim, export_dir: Path,
+    client_secret: str,
+) -> None:
+    plan = api.create_plan(PLAN_NAME, PLAN_VARIANT, plan_configuration(client_secret))
+    modules = [entry["testModule"] for entry in plan["modules"]]
+    for number, module in enumerate(modules, start=1):
+        run.record(f"module {number}: {module}")
+    if len(modules) != EXPECTED_MODULE_COUNT:
+        run.fail(f"the suite lists {len(modules)} modules, expected {EXPECTED_MODULE_COUNT}")
+    module_id = api.create_module(plan["id"], modules[0])
+    try:
+        state = api.wait_for_state(
+            module_id, ["CONFIGURED", "WAITING"], MODULE_REACHES_WAITING_SECONDS
+        )
+        if state == "CONFIGURED":
+            api.start_module(module_id)
+            state = api.wait_for_state(module_id, ["WAITING"], MODULE_REACHES_WAITING_SECONDS)
+        if state != "WAITING":
+            run.fail(f"module 1 reached {state}, expected WAITING")
+        else:
             check_exposed_issuer(run, api.module_status(module_id))
             check_key_set_through_shim(run, tls, shim)
-        finally:
-            api.cancel_module(module_id)
-        raise_if_stop_pending(run)
-        export = export_dir / f"{PLAN_NAME}-{plan['id']}.zip"
-        export.write_bytes(api.export_plan(plan["id"]))
-        run.record(f"export held: {export}")
-
-
-def bring_to_waiting(api: SuiteApi, module_id: str) -> None:
-    configured = api.wait_for_state(
-        module_id, ["CONFIGURED", "WAITING"], MODULE_REACHES_WAITING_SECONDS
-    )
-    if configured == "CONFIGURED":
-        api.start_module(module_id)
-        api.wait_for_state(module_id, ["WAITING"], MODULE_REACHES_WAITING_SECONDS)
+    finally:
+        api.cancel_module(module_id)
+    raise_if_stop_pending(run)
+    export = export_dir / f"{PLAN_NAME}-{plan['id']}.zip"
+    export.write_bytes(api.export_plan(plan["id"]))
+    run.record(f"export held: {export}")
 
 
 def check_exposed_issuer(run: RunRecord, status: dict[str, object]) -> None:
@@ -108,6 +116,15 @@ def check_key_set_through_shim(run: RunRecord, tls: ThrowawayTls, shim: TlsShim)
     run.record(f"key set through the shim held: {len(answer.json()['keys'])} keys")
 
 
+def error_chain(error: BaseException) -> list[BaseException]:
+    chain = []
+    link: BaseException | None = error
+    while link is not None and link not in chain:
+        chain.append(link)
+        link = link.__cause__ or link.__context__
+    return chain
+
+
 def conform(scratch: Path) -> int:
     if scratch.exists() and any(scratch.iterdir()):
         print(f"FAILED: --scratch {scratch} is not empty")
@@ -126,14 +143,15 @@ def conform(scratch: Path) -> int:
     except Interrupted:
         pass
     except Exception as error:
-        run.fail(f"{type(error).__name__}: {error}")
+        for link in error_chain(error):
+            run.fail(f"{type(link).__name__}: {link}")
     finally:
         run.winding_down = True
         for stop_signal in STOP_SIGNALS:
             signal.signal(stop_signal, signal.SIG_IGN)
         if run.stop_requested.is_set():
             run.fail("interrupted")
-        for left in leftovers(scratch, suite.project):
+        for left in [*runtime_leftovers(scratch), *suite.remove_everything()]:
             run.fail(left)
     return max(0 if run.all_held else 1, keep_clean_evidence(run))
 

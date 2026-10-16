@@ -7,7 +7,7 @@ Keycloak's own form, and the library calls the real token and key-set
 endpoints with its production transport.
 
 `harness.py` is the run plumbing every driver here shares (runtime directory,
-host process, first-signal handling, browser worker, evidence scan).
+host process, first-signal handling, browser worker, run record, evidence scan).
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
 Playwright browser, and takes minutes. CI only lints `e2e/`.
@@ -120,7 +120,7 @@ attach it to anything.
 
 Pull the images first, outside the lock:
 
-    docker compose -f e2e/oidc/suite-compose.yaml pull
+    SUITE_HOST=conformance.example.test docker compose -f e2e/oidc/suite-compose.yaml pull
 
 Then, with the 1-minute load average at or below 18:
 

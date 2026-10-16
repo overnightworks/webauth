@@ -233,7 +233,7 @@ def stop_on_first_signal(run: Run) -> None:
         signal.signal(stop_signal, handler)
 
 
-def leftovers(scratch: Path, container_filter: str) -> list[str]:
+def runtime_leftovers(scratch: Path) -> list[str]:
     left = []
     runtime = scratch / "runtime"
     if runtime.exists():
@@ -242,6 +242,11 @@ def leftovers(scratch: Path, container_filter: str) -> list[str]:
             shutil.rmtree(runtime)
         except OSError as error:
             left.append(f"runtime/ could not be removed: {error}")
+    return left
+
+
+def leftovers(scratch: Path, container_filter: str) -> list[str]:
+    left = runtime_leftovers(scratch)
     try:
         if containers := containers_left(container_filter):
             left.append(f"containers left behind: {containers}")

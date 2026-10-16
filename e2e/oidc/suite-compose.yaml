@@ -7,6 +7,7 @@ services:
     command: ["--wiredTigerCacheSizeGB", "0.25"]
     tmpfs:
       - /data/db
+      - /data/configdb
   server:
     image: registry.gitlab.com/openid/conformance-suite@sha256:377ab51f011d821c4b6f7729053e85adf062d691e51a3615f40507fd900a2436
     environment:
