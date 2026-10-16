@@ -366,7 +366,7 @@ in-process backend installs plain `webauth`.
 
 ## The store decides every request
 
-The library keeps no session cache. Every authenticated request costs one
+The library caches no sessions. Every authenticated request costs one
 `SessionRecordStore.load` and one `touch`, so a session the host ended is
 refused on its next request, with 401 or the login redirect. Whether a loaded
 session still stands is decided by `WebAuthConfig.session_liveness`, a
