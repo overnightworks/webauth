@@ -14,7 +14,6 @@ from webauth_arrangement import (
     HTTPS_TEST_SERVER,
     IDLE_WINDOW_SECONDS,
     SESSION_MAX_AGE_SECONDS,
-    a_session_cache,
     a_web_auth_config,
 )
 
@@ -39,17 +38,6 @@ def test_a_secret_shorter_than_the_floor_is_refused() -> None:
 
     with pytest.raises(ValueError, match="at least 32 characters"):
         a_web_auth_config(session_secret=short)
-
-
-def test_a_session_cache_needs_expiry_column_liveness() -> None:
-    """A cached session carries created_at/expires_at; the idle-window model has
-    neither, so pairing it with a cache is a construction-time error, not a
-    per-request silent populate failure."""
-    with pytest.raises(ValueError, match="expiry-column liveness"):
-        a_web_auth_config(
-            session_cache=a_session_cache(),
-            session_liveness=IdleWindowLiveness(IDLE_WINDOW_SECONDS),
-        )
 
 
 def test_a_secret_at_the_floor_is_accepted() -> None:

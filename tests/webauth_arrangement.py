@@ -18,7 +18,6 @@ from itertools import count
 from threading import RLock
 from typing import Any
 
-import fakeredis
 from argon2.profiles import CHEAPEST
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
@@ -64,7 +63,6 @@ from webauth.ports import (
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 from webauth.session_ending import end_session
-from webauth.session_store import RedisSessionCache, SessionKeyPrefixes
 from webauth.users import UserManagement
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
@@ -73,9 +71,6 @@ ALLOWED_ORIGIN = f"https://{ALLOWED_HOST}"
 # The suite reaches its applications over https, as production does, so the
 # cookie and header flags under test are the ones a deployment really sends.
 HTTPS_TEST_SERVER = "https://testserver"
-SESSION_KEY_PREFIXES = SessionKeyPrefixes(
-    session="app:session", user_sessions="app:user_sessions",
-)
 SESSION_ID = "session-1"
 CLIENT_ADDRESS = "testclient"
 CLIENT_USER_AGENT = "TestBrowser/1.0"
@@ -100,7 +95,6 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
         "password_hasher": a_cheap_argon2id_hasher(),
         "rate_limits": SingleProcessRateLimitBackend(),
-        "session_cache": None,
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "session_max_age_seconds": SESSION_MAX_AGE_SECONDS,
@@ -206,34 +200,6 @@ def a_class_split_rate_limited_client(
         media=PathRules(prefixes=(MEDIA_PATH,)),
     )
     return _rate_limited_client(rate_limits, policy, (API_PATH, MEDIA_PATH), {})
-
-
-def a_session_cache(redis: object | None = None) -> RedisSessionCache:
-    """A real cache over a Redis that lives only for this test."""
-    return RedisSessionCache(
-        redis or fakeredis.FakeRedis(decode_responses=True), SESSION_KEY_PREFIXES,
-    )
-
-
-class _RedisFailingOn:
-    """A Redis that answers everything except the one command named here."""
-
-    def __init__(self, redis: object, command: str) -> None:
-        self._redis = redis
-        self._command = command
-
-    def __getattr__(self, name: str) -> object:
-        if name == self._command:
-            raise ConnectionError(f"redis {name} is unavailable")
-        return getattr(self._redis, name)
-
-
-def a_session_cache_failing_on(command: str) -> RedisSessionCache:
-    """A cache whose Redis refuses exactly one command and serves the rest."""
-    return RedisSessionCache(
-        _RedisFailingOn(fakeredis.FakeRedis(decode_responses=True), command),
-        SESSION_KEY_PREFIXES,
-    )
 
 
 @dataclass
@@ -559,7 +525,7 @@ class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
     def load(self, session_id: str) -> FakeSessionRecord | None:
         record = super().load(session_id)
         if record is not None:
-            end_session(self, None, session_id=session_id, user_id=record.user.id)
+            end_session(self, session_id=session_id)
         return record
 
 
@@ -646,25 +612,11 @@ def a_session(
     )
 
 
-def cache_session(
-    cache: RedisSessionCache,
-    record: FakeSessionRecord,
-    max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
-) -> None:
-    """Put a stored session into the cache, as a login with a cache does."""
-    cache.store(
-        record.id, record.user_id, record.user.username, record.user.role,
-        record.user.is_active, record.ip_address, record.user_agent,
-        record.expires_at, record.created_at, max_age_seconds,
-    )
-
-
 UNAUTHENTICATED_RESPONSE_PATH = "/unauthenticated-response"
 
 
 def an_auth_app(
     record: FakeSessionRecord | None,
-    cache: RedisSessionCache | None = None,
     *,
     login_redirect: LoginRedirect | None = None,
     sessions: SessionRecordsInMemory | None = None,
@@ -675,7 +627,7 @@ def an_auth_app(
     called directly, over the same ``login_redirect``, so a test can compare
     it against a dependency-guarded route for the same request.
     """
-    config = a_web_auth_config(admin_role=ADMIN_ROLE, session_cache=cache)
+    config = a_web_auth_config(admin_role=ADMIN_ROLE)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
     audit = RecordingAuditSink()

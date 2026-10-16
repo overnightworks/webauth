@@ -23,7 +23,7 @@ from webauth.cookies import (
     is_host_only_cookie_name,
     is_secure_prefixed_cookie_name,
 )
-from webauth.liveness import ExpiryColumnLiveness, _require_positive_seconds
+from webauth.liveness import _require_positive_seconds
 
 if TYPE_CHECKING:
     import re
@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from webauth.ports import (
         PasswordHasher,
         RateLimitBackend,
-        SessionCache,
         SessionLivenessPolicy,
     )
     from webauth.proxies import TrustedProxies
@@ -103,7 +102,6 @@ class WebAuthConfig:
     ipv6_budget_prefix: int = DEFAULT_IPV6_BUDGET_PREFIX
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
-    session_cache: SessionCache | None = None
     cookie_max_age_seconds: int | None = None
 
     def __post_init__(self) -> None:
@@ -139,13 +137,6 @@ class WebAuthConfig:
             )
         self._require_distinct_roles()
         _require_positive_count("max_user_agent_chars", self.max_user_agent_chars)
-        if self.session_cache is not None and not isinstance(
-            self.session_liveness, ExpiryColumnLiveness,
-        ):
-            raise ValueError(
-                "a session cache requires expiry-column liveness; the idle-window "
-                "model reads sessions straight from the store",
-            )
 
     def _require_distinct_roles(self) -> None:
         for field in ("admin_role", "user_role"):
