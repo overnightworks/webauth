@@ -21,6 +21,7 @@ from webauth.cookies import (
     CookieSameSite,
     default_cookie_name,
     is_host_only_cookie_name,
+    is_secure_prefixed_cookie_name,
 )
 from webauth.liveness import ExpiryColumnLiveness, _require_positive_seconds
 
@@ -131,6 +132,11 @@ class WebAuthConfig:
                 f"and {IPV6_BUDGET_PREFIX_RANGE.stop - 1}; it is the network size "
                 "whose addresses share one rate-limit budget",
             )
+        self._require_distinct_roles()
+        if type(self.max_user_agent_chars) is not int or self.max_user_agent_chars <= 0:
+            raise ValueError(
+                f"max_user_agent_chars must be a positive int, not {self.max_user_agent_chars!r}",
+            )
         if self.session_cache is not None and not isinstance(
             self.session_liveness, ExpiryColumnLiveness,
         ):
@@ -139,16 +145,28 @@ class WebAuthConfig:
                 "model reads sessions straight from the store",
             )
 
+    def _require_distinct_roles(self) -> None:
+        for field in ("admin_role", "user_role"):
+            if not getattr(self, field).strip():
+                raise ValueError(f"{field} must name a role")
+        if self.admin_role == self.user_role:
+            raise ValueError(
+                "admin_role and user_role must differ; equal roles would make "
+                "every new account an admin",
+            )
+
     def _resolve_cookie_name(self, field: str, plain_name: str) -> None:
         name = getattr(self, field)
         if name is None or isinstance(name, _DefaultCookieName):
             # The dataclass is frozen; resolving a default is part of construction.
             resolved = default_cookie_name(plain_name, secure=self.cookie_secure)
             object.__setattr__(self, field, _DefaultCookieName(resolved))
-        elif is_host_only_cookie_name(name) and not self.cookie_secure:
+        elif (
+            is_host_only_cookie_name(name) or is_secure_prefixed_cookie_name(name)
+        ) and not self.cookie_secure:
             raise ValueError(
                 f"{field} {name!r} needs cookie_secure=True; browsers drop a __Host- "
-                "cookie without Secure, so nobody could stay signed in",
+                "or __Secure- cookie without Secure, so nobody could stay signed in",
             )
 
     def _resolve_cookie_max_age(self) -> None:
