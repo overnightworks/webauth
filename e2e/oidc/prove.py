@@ -515,7 +515,10 @@ def drive_browser_off_the_main_thread(
             proof.browser_outlived_run = True
             proof.fail("the browser worker did not stop; evidence is not trustworthy")
     if crashes:
-        raise RuntimeError("the browser worker crashed") from crashes[0]
+        crash = crashes[0]
+        raise RuntimeError(
+            f"the browser worker crashed: {type(crash).__name__}: {crash}"
+        ) from crash
 
 
 def drive_browser(proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int) -> None:
