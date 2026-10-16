@@ -972,9 +972,10 @@ def test_a_failed_fetch_speaks_none_of_urllib3s_error_vocabulary(
 ) -> None:
     monkeypatch.delenv("SSL_CERT_FILE")
     authority = https_key_set_server.base_url.removeprefix("https://")
+    url = url_template.format(authority=authority)
 
     with pytest.raises(KeySetFetchError) as refusal:
-        fetch_key_set_over_https(url_template.format(authority=authority))
+        fetch_key_set_over_https(url)
 
     urllib3_error_names = {
         name for name, value in vars(urllib3.exceptions).items() if isinstance(value, type)
