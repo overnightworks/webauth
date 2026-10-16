@@ -13,7 +13,8 @@ This is the last release with password parts.
 **Breaking**
 
 - `IpRateLimitMiddleware`, `CsrfOriginMiddleware`, `CsrfTokenMiddleware` and
-  `SecurityHeadersMiddleware` are pure ASGI middleware and no longer subclass Starlette's `BaseHTTPMiddleware`:
+  `SecurityHeadersMiddleware` are pure ASGI middleware and no longer subclass
+  Starlette's `BaseHTTPMiddleware`:
   an `isinstance` or `issubclass` check against `BaseHTTPMiddleware` fails, and a
   variable or parameter typed `BaseHTTPMiddleware` no longer accepts them. Their
   `.dispatch`, `.dispatch_func` and public `.app` attribute are gone, and so is
@@ -29,8 +30,8 @@ This is the last release with password parts.
   on: fastapi 0.123.7, starlette 0.46, pydantic 2.6 and anyio 4.12; starlette and
   anyio are now declared directly, capped below 2 and below 5, and
   `cryptography` is capped below 51. A host on older versions must upgrade.
-- `LoginRedirect` refuses, when it is built, a `path` in backslash or tab form
-  (`/\x`, `/<tab>/x`) with `ValueError`; v0.13.0 constructed them.
+- `LoginRedirect` refuses, when it is built, a `path` in backslash, tab, CR or
+  LF form (`/\x`, `/<tab>/x`) with `ValueError`; v0.13.0 constructed them.
 - `SecurityHeadersMiddleware` (also pure ASGI, see the first item): the 500
   of an unhandled exception now carries the security headers, and the exception
   still reaches the server. A host's 500 handler still runs, but the response it
@@ -63,7 +64,8 @@ This is the last release with password parts.
 
 - Under the library stack a streamed body over the limit (no Content-Length)
   that the route reads through `request.body()` or `request.stream()` answers the
-  413 with the security headers, where v0.13.0 answered Starlette's 500 without the security headers, and spends one
+  413 with the security headers, where v0.13.0 answered Starlette's 500 without
+  the security headers, and spends one
   request of the rate budget; a body FastAPI parses still answers FastAPI's 400
   through the host's `HTTPException` handler. A response that fails after it
   started streaming now ends incomplete, and its exception reaches the server; it
@@ -84,10 +86,10 @@ This is the last release with password parts.
   `webauth.jwt_verification` exposes `VerificationRefusal` and
   `strict_json_object`.
 - A key-set fetch that timed out says so in its `KeySetFetchError` message.
-- `fetch_key_set_over_https`, `post_form_over_https` and
-  `post_token_request_over_https` raise `ValueError` for a `timeout_seconds` of
-  zero or less now raises the library's own `ValueError` naming `timeout_seconds`,
-  before urllib3 sees it.
+- A `timeout_seconds` of zero or less in `fetch_key_set_over_https`,
+  `post_form_over_https` and `post_token_request_over_https` now raises the
+  library's own `ValueError` naming `timeout_seconds`, before urllib3 sees it;
+  v0.13.0 raised urllib3's.
 - `IdleWindowLiveness` raises `TypeError` for a stored row whose `last_seen` is
   naive, naming the cause; v0.13.0 failed on the comparison with a bare
   `TypeError`.
