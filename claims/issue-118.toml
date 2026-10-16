@@ -3,6 +3,6 @@ agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
 role = "builder"
 base = "8e915c479faa87e7082bb3fd287a6ed72f34fdc1"
 branch = "claude/issue-118-s38b-bodysizelimitmiddleware-sendet-nie"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/middleware/body_size.py", "src/webauth/policies.py", "tests/test_body_size.py", "tests/test_security_headers.py", "tests/webauth_arrangement.py"]
+scope = ["CHANGELOG.md", "README.md", "src/webauth/middleware/body_size.py", "src/webauth/policies.py", "tests/test_body_size.py", "tests/test_policies.py", "tests/test_security_headers.py", "tests/webauth_arrangement.py"]
 opened_commit = "27f923975aaf2824931311d53795fd4902eab0c2"
 whole_reason = "One middleware rule with its raw-driver lift, its new test module and the README/CHANGELOG lines that state it"
