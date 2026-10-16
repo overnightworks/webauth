@@ -132,7 +132,7 @@ class Proof:
         masked_line = self.registry.masked(line)
         self.lines.append(masked_line)
         print(masked_line, flush=True)
-        leaked = self.registry.labels_in(line)
+        leaked = self.registry.labels_in(line.encode())
         if leaked:
             self.fail(f"a recorded line held {', '.join(leaked)}")
 

@@ -2,8 +2,9 @@
 credential the run touched, and the scan that keeps the evidence directory clean.
 
 The network log is built from the browser's events field by field, so a field
-this module does not know cannot reach the file. Masking keeps stdout clean;
-detection stays loud: a line that needed masking is a leak the run reports."""
+this module does not know cannot reach the file. Masking keeps already-registered
+values out of stdout and the table; a line that needed masking fails the run; the
+final scan catches values registered later and deletes the file."""
 
 from __future__ import annotations
 
@@ -64,9 +65,13 @@ class SecretRegistry:
             text = text.replace(form, f"[registered secret: {label}]")
         return text
 
-    def labels_in(self, text: str) -> list[str]:
-        """The labels of every registered value that appears in the text."""
-        return sorted({label for form, label in self._forms_longest_first() if form in text})
+    def labels_in(self, content: bytes) -> list[str]:
+        """The labels of every registered value that appears in the content."""
+        return sorted(
+            label
+            for label, forms in self.forms_by_label().items()
+            if any(form in content for form in forms)
+        )
 
     def _forms_longest_first(self) -> list[tuple[str, str]]:
         pairs = [
@@ -190,7 +195,8 @@ class NetworkLog:
             if header["name"].lower() == "set-cookie":
                 for line in header["value"].splitlines():
                     name, _, rest = line.partition("=")
-                    self._registry.add(f"cookie {name}", rest.split(";", 1)[0])
+                    label = f"cookie {recorded_cookie_name(name)}"
+                    self._registry.add(label, rest.split(";", 1)[0])
 
 
 def _headers(headers: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -243,7 +249,6 @@ def _redirect_target(response_headers: list[dict[str, str]], request_url: str) -
 def scan_evidence(evidence_dir: Path, registry: SecretRegistry) -> list[Contamination]:
     """Every registered value found in a retained file, and every file that is
     not an allowed kind of evidence; names the file and the label, never the value."""
-    forms_by_label = registry.forms_by_label()
     findings = []
     for path in sorted(evidence_dir.rglob("*")):
         if not path.is_file():
@@ -255,9 +260,7 @@ def scan_evidence(evidence_dir: Path, registry: SecretRegistry) -> list[Contamin
             findings.append(Contamination(relative, "file kind"))
         content = path.read_bytes()
         findings.extend(
-            Contamination(relative, label)
-            for label, forms in forms_by_label.items()
-            if any(form in content for form in forms)
+            Contamination(relative, label) for label in registry.labels_in(content)
         )
     return findings
 
