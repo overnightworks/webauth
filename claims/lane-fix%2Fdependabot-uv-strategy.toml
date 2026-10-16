@@ -1,0 +1,7 @@
+claim_id = "6fe6f4df2ac348d687cce58ecdd18240"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "7830c09dfd0f9f2beb6958aa697ff1aac88253f2"
+branch = "fix/dependabot-uv-strategy"
+scope = [".github/dependabot.yml"]
+opened_commit = "94ca2042f0c217b4ad0af9d10071d08912501a8b"
