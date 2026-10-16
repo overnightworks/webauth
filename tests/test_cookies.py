@@ -5,11 +5,16 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import secrets
+from http.cookies import SimpleCookie
 
 import pytest
+from starlette.requests import Request
+from starlette.responses import Response
+from webauth_arrangement import a_web_auth_config, session_cookie_header
 
 from webauth.cookies import (
     DEFAULT_CSRF_HEADER_NAME,
+    MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
     default_cookie_name,
     generate_csrf_token,
@@ -20,6 +25,8 @@ from webauth.cookies import (
     verify_pending_login,
     verify_session_cookie,
 )
+from webauth.dependencies import session_id_from_request
+from webauth.login import issue_session_cookies
 
 _TEST_SECRET = b"a" * 64
 _PENDING = PendingLogin(
@@ -57,6 +64,35 @@ def test_sign_and_verify_session() -> None:
     signed = sign_session_id("my-session-token", _TEST_SECRET)
     assert "." in signed
     assert verify_session_cookie(signed, _TEST_SECRET) == "my-session-token"
+
+
+LONGEST_SESSION_ID_THAT_FITS = "i" * (MAX_SESSION_COOKIE_CHARS - len(".") - 64)
+
+
+def _session_id_read_back_after_issuing(session_id: str) -> str | None:
+    config = a_web_auth_config()
+    response = Response()
+    issue_session_cookies(response, session_id, config)
+    issued = SimpleCookie(response.headers.getlist("set-cookie")[0])
+    cookie = issued[config.session_cookie_name].value
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(b"cookie", session_cookie_header(cookie).encode())],
+    })
+    return session_id_from_request(request, config)
+
+
+def test_the_longest_session_id_that_fits_is_issued_and_read_back() -> None:
+    assert _session_id_read_back_after_issuing(LONGEST_SESSION_ID_THAT_FITS) == (
+        LONGEST_SESSION_ID_THAT_FITS
+    )
+
+
+def test_a_session_id_whose_cookie_the_reader_would_refuse_is_not_issued() -> None:
+    with pytest.raises(ValueError, match="session cookie"):
+        _session_id_read_back_after_issuing(LONGEST_SESSION_ID_THAT_FITS + "i")
 
 
 def test_verify_rejects_tampered_signature() -> None:

@@ -214,10 +214,10 @@ an `HTTPException`, so the 302 still carries FastAPI's default JSON body
 `webauth.dependencies.session_id_from_request(request, config)` is the one
 reader of the session cookie: it parses the raw `Cookie` headers and returns
 the verified session identifier, or `None` when the cookie is missing, longer
-than `MAX_SESSION_COOKIE_CHARS` (200 characters), forged, or present more than
-once. The limit holds even for a correctly signed cookie: `issue_session_cookies`
-does not cap the session identifier it signs, and an identifier over 135
-characters yields a cookie every reader refuses. A sibling
+than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
+forged, or present more than once. The limit holds even for a correctly signed
+cookie, so `issue_session_cookies` raises `ValueError` for an identifier whose
+signed cookie would exceed it (identifiers up to 135 characters fit). A sibling
 subdomain can set a second cookie of the same name, so a request carrying two
 is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
@@ -431,7 +431,10 @@ request: the header overrides the Origin allowlist for `same-origin`
 (passes) and `cross-site` (refused), while `same-site` is decided by the
 allowlist; when the header is absent the allowlist is applied as before.
 When both are absent, a form POST is refused — a JSON POST with neither
-header still passes.
+header still passes. An `Origin` or `Referer` that is `null`, has no host or
+cannot be parsed is refused like a foreign origin. A configured host pattern
+is matched against the whole host plus port, so anchor it and allow the port,
+e.g. `app\.example(:\d+)?`.
 
 `CsrfPolicy` defaults to fail-closed: with `protected` left unset, every
 state-changing request is checked, and `exempt` names the path prefixes that

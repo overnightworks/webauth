@@ -20,7 +20,12 @@ from fastapi import Depends, HTTPException, Request
 from starlette.responses import JSONResponse, Response
 
 from webauth.config import WebAuthConfig, web_auth_config
-from webauth.cookies import cookie_values, session_reference, verify_session_cookie
+from webauth.cookies import (
+    MAX_SESSION_COOKIE_CHARS,
+    cookie_values,
+    session_reference,
+    verify_session_cookie,
+)
 from webauth.ports import (
     AuditSink,
     SessionIdentityChange,
@@ -41,10 +46,6 @@ INVALID_SESSION_DETAIL: Final = "Invalid session"
 SESSION_EXPIRED_DETAIL: Final = "Session expired"
 ACCOUNT_DISABLED_DETAIL: Final = "Account disabled"
 ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
-
-# A signed session cookie is an identifier plus a hex digest; anything much
-# longer was not issued here, so it is rejected before any HMAC is computed.
-MAX_SESSION_COOKIE_CHARS: Final = 200
 
 
 @dataclass(frozen=True)
@@ -250,7 +251,7 @@ def session_id_from_request(request: Request, config: WebAuthConfig) -> str | No
     """The session identifier the request's one signed session cookie names.
 
     ``None`` when the cookie is missing, longer than
-    ``MAX_SESSION_COOKIE_CHARS`` even when correctly signed, forged, or present
+    ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed, forged, or present
     more than once: a sibling subdomain can set a second cookie of the same
     name, and choosing either would let it decide whose account the request
     runs in.

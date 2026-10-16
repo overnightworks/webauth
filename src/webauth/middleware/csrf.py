@@ -16,6 +16,7 @@ from webauth.dependencies import session_id_from_request
 if TYPE_CHECKING:
     from starlette.requests import Request
 
+    from webauth.config import WebAuthConfig
     from webauth.policies import CsrfPolicy
 
 _MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -70,7 +71,7 @@ def _is_allowed_host(
     if exact or patterns:
         if netloc in exact or host_without_port in exact:
             return True
-        return any(p.match(netloc) for p in patterns)
+        return any(p.fullmatch(netloc) for p in patterns)
     return bool(_LOCALHOST_PATTERN.match(netloc))
 
 
@@ -80,6 +81,25 @@ def _sec_fetch_site_allows(fetch_site: str) -> bool | None:
     if fetch_site == _SAME_SITE:
         return None
     return False
+
+
+def _origin_is_allowed(origin: str, config: WebAuthConfig) -> bool:
+    try:
+        netloc = urlparse(origin).netloc
+    except ValueError:
+        return False
+    return bool(netloc) and _is_allowed_host(
+        netloc, config.allowed_hosts_exact, config.allowed_hosts_patterns,
+    )
+
+
+def _is_form_submission(request: Request) -> bool:
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
+    return content_type in _FORM_CONTENT_TYPES
+
+
+def _cross_origin_rejection() -> JSONResponse:
+    return JSONResponse({"detail": "Cross-origin request rejected"}, status_code=403)
 
 
 class CsrfOriginMiddleware(BaseHTTPMiddleware):
@@ -107,29 +127,14 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
                 if allowed is True:
                     return await call_next(request)
                 if allowed is False:
-                    return JSONResponse(
-                        {"detail": "Cross-origin request rejected"},
-                        status_code=403,
-                    )
+                    return _cross_origin_rejection()
             origin = request.headers.get("origin") or request.headers.get("referer")
             if origin:
-                config = web_auth_config(request)
-                parsed = urlparse(origin)
-                origin_host = parsed.netloc
-                if origin_host and not _is_allowed_host(
-                    origin_host,
-                    config.allowed_hosts_exact,
-                    config.allowed_hosts_patterns,
-                ):
-                    return JSONResponse(
-                        {"detail": "Cross-origin request rejected"},
-                        status_code=403,
-                    )
-            else:
-                content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
-                if content_type in _FORM_CONTENT_TYPES:
-                    return JSONResponse(
-                        {"detail": "Missing Origin header on form submission"},
-                        status_code=403,
-                    )
+                if not _origin_is_allowed(origin, web_auth_config(request)):
+                    return _cross_origin_rejection()
+            elif _is_form_submission(request):
+                return JSONResponse(
+                    {"detail": "Missing Origin header on form submission"},
+                    status_code=403,
+                )
         return await call_next(request)
