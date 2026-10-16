@@ -252,6 +252,8 @@ def test_a_prefixed_cookie_name_with_cookie_secure_stays_as_named(field: str, na
         ),
         pytest.param({"admin_role": " "}, "admin_role must name a role", id="blank admin role"),
         pytest.param({"user_role": ""}, "user_role must name a role", id="empty user role"),
+        pytest.param({"admin_role": None}, "admin_role must name a role", id="no admin role"),
+        pytest.param({"user_role": 5}, "user_role must name a role", id="a numeric user role"),
         pytest.param(
             {"max_user_agent_chars": -1}, "max_user_agent_chars must be a positive int",
             id="negative user-agent limit",

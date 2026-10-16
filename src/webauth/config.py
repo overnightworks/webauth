@@ -75,6 +75,11 @@ class _DefaultCookieMaxAge(int):
     __slots__ = ()
 
 
+def _require_positive_count(name: str, value: object) -> None:
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{name} must be a positive int, not {value!r}")
+
+
 @dataclass(frozen=True)
 class WebAuthConfig:
     session_secret: SecretStr
@@ -133,10 +138,7 @@ class WebAuthConfig:
                 "whose addresses share one rate-limit budget",
             )
         self._require_distinct_roles()
-        if type(self.max_user_agent_chars) is not int or self.max_user_agent_chars <= 0:
-            raise ValueError(
-                f"max_user_agent_chars must be a positive int, not {self.max_user_agent_chars!r}",
-            )
+        _require_positive_count("max_user_agent_chars", self.max_user_agent_chars)
         if self.session_cache is not None and not isinstance(
             self.session_liveness, ExpiryColumnLiveness,
         ):
@@ -147,7 +149,8 @@ class WebAuthConfig:
 
     def _require_distinct_roles(self) -> None:
         for field in ("admin_role", "user_role"):
-            if not getattr(self, field).strip():
+            value = getattr(self, field)
+            if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field} must name a role")
         if self.admin_role == self.user_role:
             raise ValueError(
