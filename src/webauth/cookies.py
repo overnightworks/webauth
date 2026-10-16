@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from starlette.requests import Request
 
 HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
+SECURE_COOKIE_PREFIX: Final = "__Secure-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
@@ -92,6 +93,11 @@ def is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
 def is_host_only_cookie_name(name: str) -> bool:
     """Whether a browser treats ``name`` as a ``__Host-`` cookie (case-insensitively)."""
     return name.lower().startswith(HOST_ONLY_COOKIE_PREFIX.lower())
+
+
+def is_secure_prefixed_cookie_name(name: str) -> bool:
+    """Whether a browser treats ``name`` as a ``__Secure-`` cookie (case-insensitively)."""
+    return name.lower().startswith(SECURE_COOKIE_PREFIX.lower())
 
 
 def cookie_pairs(request: Request) -> list[tuple[str, str]]:

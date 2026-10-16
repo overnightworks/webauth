@@ -92,6 +92,8 @@ def _origin_is_allowed(origin: str, config: WebAuthConfig) -> bool:
         return False
     if not hostname or parsed.username is not None or parsed.password is not None:
         return False
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
     host_and_port = hostname if port is None else f"{hostname}:{port}"
     return _is_allowed_host(
         hostname,

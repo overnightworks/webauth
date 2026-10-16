@@ -218,6 +218,7 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
         pytest.param(
             {"origin": f"{ALLOWED_ORIGIN}:evil"}, id="an origin with a non-numeric port",
         ),
+        pytest.param({"origin": "https://[::1]:evil"}, id="an IPv6 origin with a non-numeric port"),
         pytest.param(
             {"referer": "https://songmaker.example:password@evil.test/"},
             id="a referer whose userinfo spells the allowed host",
@@ -248,6 +249,23 @@ def test_a_host_pattern_must_match_the_whole_host_and_port(referer: str, status:
     response = client.post(API_PATH, json={"n": 1}, headers={"referer": referer})
 
     assert response.status_code == status
+
+
+@pytest.mark.parametrize(
+    ("allowed_entry", "origin"),
+    [
+        pytest.param("[::1]", "https://[::1]", id="a bracketed IPv6 host"),
+        pytest.param("[::1]:8000", "https://[::1]:8000", id="a bracketed IPv6 host with a port"),
+    ],
+)
+def test_an_exact_entry_matches_a_bracketed_ipv6_origin(allowed_entry: str, origin: str) -> None:
+    client = an_origin_guarded_client(
+        a_web_auth_config(allowed_hosts_exact=frozenset({allowed_entry})),
+    )
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": origin})
+
+    assert response.status_code == 200
 
 
 def test_a_pattern_without_a_port_refuses_the_host_with_a_port() -> None:

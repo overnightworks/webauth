@@ -47,9 +47,12 @@ The host builds one `WebAuthConfig` and installs it. Fields a host may name:
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
-| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
-| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` name with `cookie_secure=False` is refused |
+| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused |
+| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused |
 | `cookie_max_age_seconds` | `session_max_age_seconds`, re-derived when `dataclasses.replace` changes it | a positive whole number of seconds; the browser cookie's `Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime) |
+| `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
+| `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
+| `max_user_agent_chars` | `500` | a positive `int`; zero, a negative number, or a `bool` is refused |
 | `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
@@ -74,7 +77,7 @@ A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only
 this exact host can set it: a sibling subdomain cannot plant one with
 `Domain=parent`. Browsers drop a `__Host-` cookie without `Secure`, so an
 unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
-`__Host-` name a host sets itself with `cookie_secure=False` is refused when
+`__Host-` or `__Secure-` name a host sets itself with `cookie_secure=False` is refused when
 the configuration is built rather than ending in a silent login loop.
 
 v0.13.0 adds the OpenID Connect relying party (`webauth.oidc` and
@@ -203,7 +206,7 @@ never writes.
 `webauth.dependencies.current_user_dependency` answers 401 for a missing or
 dead session by default. A server-rendered host instead passes
 `login_redirect=LoginRedirect(path="/login", redirect_query_param="next")` —
-`path` must be a same-origin absolute path, never a scheme or `//` address —
+`path` must be a same-origin absolute path, never a scheme or `//` address, nor a backslash or tab/CR/LF form a browser reads as one —
 and a browser navigation (`Accept` rating `text/html` above
 `application/json` by q-value) with no live session then answers 302 to that
 path, with the asked-for address and query string under the query key it
@@ -257,7 +260,7 @@ stores and `WebAuthConfig`. The additional [ports](src/webauth/ports.py) are:
 | `revoke_session(actor, session_ref)` | Ends the active session identified by a listed reference; raises `UnknownSessionError` if absent |
 | `ensure_not_last_admin(user_id)` | Guards a host write against removing the last active admin; the caller holds the lock around both |
 
-Every helper taking `actor` first requires `config.admin_role`, except
+Every helper taking `actor` first requires `config.admin_role` (which `WebAuthConfig` keeps distinct from `user_role`), except
 `change_own_password`, which lets any authenticated user change their own
 password. The host authenticates the actor and guards the two list methods
 with its admin dependency. A wrong current password raises `WrongPasswordError`;
@@ -523,7 +526,7 @@ a back-channel logout names the account directly). Admission holds
 `lock.hold()` and never commits:
 
 - A new subject gets an account with the issuer's `preferred_username` (or the
-  subject when it suggests none, or only whitespace) and `config.user_role`,
+  subject when it suggests none, or only whitespace) and `config.user_role` (never equal to `admin_role`, so no new account is an admin by accident),
   and the audit sink hears `user_created` with `actor_id=None`.
 - A known subject reuses its account unchanged, even when its suggested
   username changed.
