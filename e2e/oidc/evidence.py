@@ -134,7 +134,7 @@ class NetworkLog:
                 "cookies": _set_cookies(response_headers),
                 "headers": _headers(response_headers),
                 "content": {"size": -1, "mimeType": ""},
-                "redirectURL": _redirect_target(response_headers),
+                "redirectURL": _redirect_target(response_headers, request.url),
                 "headersSize": -1,
                 "bodySize": -1,
             },
@@ -185,10 +185,10 @@ def _set_cookies(response_headers: list[dict[str, str]]) -> list[dict[str, Any]]
     return cookies
 
 
-def _redirect_target(response_headers: list[dict[str, str]]) -> str:
+def _redirect_target(response_headers: list[dict[str, str]], request_url: str) -> str:
     for header in response_headers:
         if header["name"].lower() == "location":
-            url, _ = sanitized_url(header["value"])
+            url, _ = sanitized_url(urllib.parse.urljoin(request_url, header["value"]))
             return url
     return ""
 
