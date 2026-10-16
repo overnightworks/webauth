@@ -264,8 +264,8 @@ def post_token_request_over_https(
     ``deadline_seconds`` bounds the exchange in total and is owned by
     ``webauth.https_client``. A ``timeout_seconds`` above ``deadline_seconds``
     raises ``ValueError`` rather than being silently capped, as does a
-    ``deadline_seconds`` of zero or less. ``TokenEndpointError.failure`` names
-    why the request failed."""
+    ``deadline_seconds`` or ``timeout_seconds`` of zero or less.
+    ``TokenEndpointError.failure`` names why the request failed."""
     if timeout_seconds > deadline_seconds > 0:
         raise ValueError(
             f"timeout_seconds ({timeout_seconds}) must not exceed"
