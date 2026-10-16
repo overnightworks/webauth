@@ -49,6 +49,7 @@ from webauth_arrangement import (
     WriteLockInMemory,
     a_cheap_argon2id_hasher,
     a_web_auth_config,
+    signed_without_bound,
 )
 
 from webauth.config import WebAuthConfig, install_web_auth_config
@@ -58,7 +59,6 @@ from webauth.cookies import (
     pending_login_cookie_name,
     pending_login_cookie_prefix,
     sign_pending_login,
-    sign_session_id,
 )
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
 from webauth.login import LoginOutcome, issue_session_cookies, judge_credentials
@@ -527,7 +527,7 @@ def _signed_under_another_key(host: OidcHost, query: str) -> str:
 def _signed_as_a_session(host: OidcHost, query: str) -> str:
     name, _, value = host.pending_cookie(query).partition("=")
     payload = value.rpartition(".")[0]
-    return f"{name}={sign_session_id(payload, host.config.signing_key)}"
+    return f"{name}={signed_without_bound(payload, host.config.signing_key)}"
 
 
 def _oversized(host: OidcHost, query: str) -> str:

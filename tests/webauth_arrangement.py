@@ -7,6 +7,8 @@ one that the rest of the suite imports `TEST_SECRET` and its factories from.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -102,6 +104,12 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
 
 
 SESSION_COOKIE_NAME = a_web_auth_config().session_cookie_name
+
+
+def signed_without_bound(payload: str, secret: bytes) -> str:
+    """``payload`` signed like a session cookie but never refused for its length."""
+    signature = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
 
 
 def session_cookie_header(*cookie_values: str) -> str:
