@@ -237,7 +237,6 @@ def _accepted_quality(accept_header: str, media_type: str) -> float:
     """
     main_type, _, _ = media_type.partition("/")
     wildcard_quality = 0.0
-    matched_wildcard = False
     for raw_entry in accept_header.split(","):
         entry = raw_entry.strip()
         if not entry:
@@ -246,9 +245,8 @@ def _accepted_quality(accept_header: str, media_type: str) -> float:
         if type_part == media_type:
             return quality
         if type_part in (f"{main_type}/*", "*/*"):
-            matched_wildcard = True
             wildcard_quality = max(wildcard_quality, quality)
-    return wildcard_quality if matched_wildcard else 0.0
+    return wildcard_quality
 
 
 class _NoSessionCookie(Enum):

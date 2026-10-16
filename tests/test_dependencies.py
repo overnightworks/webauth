@@ -644,7 +644,7 @@ def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
             id="a browser's default Accept header",
         ),
         pytest.param(
-            "text/html,,application/json;q=0.1",
+            "application/json;q=0.1,,text/html",
             302,
             id="an empty entry is skipped",
         ),
@@ -654,9 +654,19 @@ def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
             id="an unparsable q counts as 1.0",
         ),
         pytest.param(
-            "application/json;level=1, text/html",
+            "application/json;level=0.5, text/html",
             401,
             id="a parameter other than q leaves the quality at 1.0, a tie",
+        ),
+        pytest.param(
+            "text/html;q=0.1;q=0.9, application/json;q=0.5",
+            302,
+            id="the last q within an entry wins",
+        ),
+        pytest.param(
+            "text/html ;q=0.9, application/json;q=0.5",
+            302,
+            id="the media range is read up to the first semicolon, spaces stripped",
         ),
         pytest.param(
             "text/*;q=0.2, application/json;q=0.1",

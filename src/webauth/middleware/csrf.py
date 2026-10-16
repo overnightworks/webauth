@@ -112,7 +112,7 @@ def _cross_origin_rejection() -> JSONResponse:
     return JSONResponse({"detail": "Cross-origin request rejected"}, status_code=403)
 
 
-def _cross_origin_refusal(request: Request) -> JSONResponse | None:
+def _origin_check_refusal(request: Request) -> JSONResponse | None:
     fetch_site = request.headers.get(_SEC_FETCH_SITE)
     if fetch_site is not None:
         allowed = _sec_fetch_site_allows(fetch_site)
@@ -154,7 +154,7 @@ class CsrfOriginMiddleware(BaseHTTPMiddleware):
             request.method in _MUTATING_METHODS
             and self._policy.requires_same_origin(request.url.path)
         ):
-            refusal = _cross_origin_refusal(request)
+            refusal = _origin_check_refusal(request)
             if refusal is not None:
                 return refusal
         return await call_next(request)
