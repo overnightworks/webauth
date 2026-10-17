@@ -46,7 +46,7 @@ from playwright.sync_api import Browser, sync_playwright
 from shim import TlsShim
 from suite import HeldSuite, SuiteApi
 
-from webauth.jwt_verification import RejectionReason
+from webauth.jwt_verification import RejectionReason, _is_rs256_verification_key
 from webauth.oidc import OidcRefusalReason
 
 SUITE_HOST = "conformance.example.test"
@@ -62,6 +62,7 @@ ISSUER = f"https://{SUITE_HOST}/test/a/{ALIAS}/"
 MODULE_REACHES_WAITING_SECONDS = 60
 MODULE_FINISHES_SECONDS = 30
 JWKS_TIMEOUT_SECONDS = 30
+MODULE_COLUMN_WIDTH = 42
 
 
 class Verdict(StrEnum):
@@ -82,6 +83,7 @@ class SuiteState(NamedTuple):
 
 
 FINISHED_PASSED = SuiteState("FINISHED", "PASSED")
+FINISHED_SKIPPED = SuiteState("FINISHED", "SKIPPED")
 WAITING_FOR_USERINFO = SuiteState("WAITING", None)
 
 
@@ -134,12 +136,12 @@ def token_rejected(rejection: RejectionReason) -> Decision:
 @dataclass(frozen=True)
 class KnownFinding:
     """A defect of the library, predicted from the suite's sources: the decision it
-    produces, how many RSA signing keys the module's key set must hold, and the suite
+    produces, how many RS256-eligible keys the module's key set must hold, and the suite
     state it leaves."""
 
     name: str
     decision: Decision
-    rsa_signing_keys: int
+    rs256_eligible_keys: int
     suite_state: SuiteState
 
 
@@ -152,13 +154,13 @@ class Expectation:
     finding: KnownFinding | None = None
 
     def judge(
-        self, suite_state: SuiteState, decision: Decision, rsa_signing_keys: int
+        self, suite_state: SuiteState, decision: Decision, rs256_eligible_keys: int
     ) -> Verdict:
         if (decision, suite_state) == (self.decision, self.suite_state):
             return Verdict.HELD
         finding = self.finding
-        if finding and (decision, rsa_signing_keys, suite_state) == (
-            finding.decision, finding.rsa_signing_keys, finding.suite_state
+        if finding and (decision, rs256_eligible_keys, suite_state) == (
+            finding.decision, finding.rs256_eligible_keys, finding.suite_state
         ):
             return Verdict.FAILED_AS_FOUND
         return Verdict.FAILED
@@ -171,9 +173,9 @@ class Skip:
 
 
 KID_ABSENT_SINGLE_KEY = KnownFinding(
-    name="P2: a token without kid against a one-key set is refused",
+    name="P2: a token without kid against a one-key set (one RS256-eligible key) is refused",
     decision=token_rejected(RejectionReason.INVALID_KEY_ID),
-    rsa_signing_keys=1,
+    rs256_eligible_keys=1,
     suite_state=WAITING_FOR_USERINFO,
 )
 
@@ -221,11 +223,11 @@ PLAN_TABLE: tuple[Expectation | Skip, ...] = (
         "OIDCCClientTestIdTokenSignedUsingRS256: the client must accept an RS256 ID token, "
         "the one algorithm the verifier supports.",
     ),
-    Skip(
-        "oidcc-client-test-idtoken-sig-none",
-        "OIDCCClientTestIdTokenSigAlgNone: clients are not required to support unsigned ID "
-        "tokens, the suite itself ends the module skipped after a timeout, and webauth refuses "
-        "alg none by design, so a run would prove nothing.",
+    Expectation(
+        "oidcc-client-test-idtoken-sig-none", token_rejected(RejectionReason.UNSUPPORTED_ALGORITHM),
+        "OIDCCClientTestIdTokenSigAlgNone: clients need not support unsigned ID tokens; "
+        "webauth refuses alg none, and the suite ends the module skipped after its timeout.",
+        suite_state=FINISHED_SKIPPED,
     ),
     Expectation(
         "oidcc-client-test-invalid-sig-rs256",
@@ -322,7 +324,7 @@ def drive_plan(
         run.fail(f"the suite lists {len(modules)} modules, expected {EXPECTED_MODULE_COUNT}")
     rows = rows_for_plan(run, modules)
     run.record(
-        f"{'module':<42} | suite status/result | webauth decision | expected | verdict | why"
+        table_row("module", "suite status/result", "webauth decision", "expected", "verdict", "why")
     )
     drive_browser_off_the_main_thread(
         run, lambda: drive_modules(run, runtime, api, tls, shim, host, settings, plan["id"], rows)
@@ -390,7 +392,9 @@ def run_module(
             run.fail(f"{expectation.module} reached {state}, expected WAITING")
             return
         check_exposed_issuer(run, expectation.module, api.module_status(module_id))
-        rsa_signing_keys = count_keys_at_jwks_url(run, expectation.module, tls, settings)
+        rs256_eligible_keys = count_rs256_eligible_keys_at_jwks_url(
+            run, expectation.module, tls, settings
+        )
         reset_host(host)
         sign_in_at_the_relying_party(run, browser)
         api.state_within(
@@ -400,7 +404,7 @@ def run_module(
             return
         report_row(
             run, expectation, api.module_info(module_id), Decision.of(host_state(host)),
-            rsa_signing_keys,
+            rs256_eligible_keys,
         )
     finally:
         cancel_unless_finished(api, module_id)
@@ -419,13 +423,13 @@ def cancel_unless_finished(api: SuiteApi, module_id: str) -> None:
 
 def report_row(
     run: RunRecord, expectation: Expectation, info: dict[str, Any], decision: Decision,
-    rsa_signing_keys: int,
+    rs256_eligible_keys: int,
 ) -> None:
     suite_state = SuiteState(info["status"], info.get("result"))
-    verdict = expectation.judge(suite_state, decision, rsa_signing_keys)
-    row = (
-        f"{expectation.module:<42} | {suite_state.describe()} | {decision.describe()} | "
-        f"{expectation.decision.describe()} | {verdict} | {expectation.justification}"
+    verdict = expectation.judge(suite_state, decision, rs256_eligible_keys)
+    row = table_row(
+        expectation.module, suite_state.describe(), decision.describe(),
+        expectation.decision.describe(), verdict, expectation.justification,
     )
     if verdict is Verdict.FAILED:
         run.fail(row)
@@ -436,7 +440,11 @@ def report_row(
 
 
 def skip_row(skip: Skip) -> str:
-    return f"{skip.module:<42} | - | not driven | skip | {Verdict.SKIPPED} | {skip.reason}"
+    return table_row(skip.module, "-", "not driven", "skip", Verdict.SKIPPED, skip.reason)
+
+
+def table_row(module: str, *cells: str) -> str:
+    return " | ".join([f"{module:<{MODULE_COLUMN_WIDTH}}", *cells])
 
 
 def check_exposed_issuer(run: RunRecord, module: str, status: dict[str, object]) -> None:
@@ -448,24 +456,22 @@ def check_exposed_issuer(run: RunRecord, module: str, status: dict[str, object])
         run.fail(f"{module} exposes issuer {issuer!r}, expected {ISSUER!r}")
 
 
-def count_keys_at_jwks_url(
+def count_rs256_eligible_keys_at_jwks_url(
     run: RunRecord, module: str, tls: ThrowawayTls, settings: HostSettings
 ) -> int:
-    """Logs the key set the host's ``jwks_url`` serves and returns how many RSA signing keys
-    it holds: the suite pads a single-key module's set with other key types."""
+    """Logs the key set the host's ``jwks_url`` serves and returns how many keys the library's
+    own RS256 check admits: the suite pads a single-key module's set with other key types."""
     answer = httpx.get(
         settings.jwks_url, verify=str(tls.ca_certificate), timeout=JWKS_TIMEOUT_SECONDS
     )
     answer.raise_for_status()
     keys = answer.json()["keys"]
-    rsa_signing_keys = sum(
-        1 for key in keys if key["kty"] == "RSA" and key.get("use", "sig") == "sig"
-    )
+    rs256_eligible_keys = sum(1 for key in keys if _is_rs256_verification_key(key))
     run.record(
         f"{module} key set at the host's jwks_url held: {len(keys)} keys, "
-        f"{rsa_signing_keys} RSA signing"
+        f"{rs256_eligible_keys} RS256-eligible"
     )
-    return rsa_signing_keys
+    return rs256_eligible_keys
 
 
 def error_chain(error: BaseException) -> list[BaseException]:

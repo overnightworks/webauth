@@ -137,7 +137,7 @@ module is admitted with UserInfo answered, and every module the suite finishes e
 FINISHED/PASSED. `skipped` is a justified row that is not driven. `FAILED-as-found` (a
 finding, not a failed run) is only for a named known finding on its own module, and needs
 all three: the decision equals the finding's signature, the key set at the host's
-`jwks_url` holds the finding's number of RSA signing keys, and the suite is in the state
+`jwks_url` holds the finding's number of keys that webauth's own RS256 check admits, and the suite is in the state
 the finding predicts (WAITING with no result for an accepting module, since the UserInfo
 request never comes). Every other row that is not `held` fails the run, so a wrong
 `jwks_url`, a missing CA trust or a clock skew cannot pass as the finding.
@@ -162,7 +162,7 @@ Each expectation is built from the module's class in the suite's sources
 
 ### Last run: the whole Basic plan
 
-12 modules driven, 2 skipped, 1 known finding, exit status 0:
+13 modules driven, 1 skipped, 1 known finding, exit status 0:
 
 | Module | Suite | webauth decision | Verdict |
 |---|---|---|---|
@@ -171,28 +171,28 @@ Each expectation is built from the module's class in the suite's sources
 | `oidcc-client-test-missing-sub` | FINISHED/PASSED | `invalid-identity-claim` | held |
 | `oidcc-client-test-invalid-aud` | FINISHED/PASSED | `id-token-rejected/invalid-audience` | held |
 | `oidcc-client-test-missing-iat` | FINISHED/PASSED | `id-token-rejected/invalid-claim` | held |
-| `oidcc-client-test-kid-absent-single-jwks` | WAITING/none | `id-token-rejected/invalid-key-id` | FAILED-as-found (P2) |
+| `oidcc-client-test-kid-absent-single-jwks` | WAITING/- | `id-token-rejected/invalid-key-id` | FAILED-as-found (P2) |
 | `oidcc-client-test-kid-absent-multiple-jwks` | FINISHED/PASSED | `id-token-rejected/invalid-key-id` | held |
 | `oidcc-client-test-idtoken-sig-rs256` | FINISHED/PASSED | admitted, UserInfo answered | held |
-| `oidcc-client-test-idtoken-sig-none` | not driven | not driven | skipped |
+| `oidcc-client-test-idtoken-sig-none` | FINISHED/SKIPPED | `id-token-rejected/unsupported-algorithm` | held |
 | `oidcc-client-test-invalid-sig-rs256` | FINISHED/PASSED | `id-token-rejected/invalid-signature` | held |
 | `oidcc-client-test-userinfo-invalid-sub` | not driven | not driven | skipped |
 | `oidcc-client-test-nonce-invalid` | FINISHED/PASSED | `nonce-mismatch` | held |
 | `oidcc-client-test-scope-userinfo-claims` | FINISHED/PASSED | admitted, UserInfo answered | held |
 | `oidcc-client-test-client-secret-basic` | FINISHED/PASSED | admitted, UserInfo answered | held |
 
-Skips:
-- `oidcc-client-test-idtoken-sig-none`: clients are not required to support unsigned ID
-  tokens, the suite itself ends the module skipped after a timeout, and webauth refuses
-  alg none by design, so a run would prove nothing.
+Skip:
 - `oidcc-client-test-userinfo-invalid-sub`: webauth takes identity only from the verified
   ID token and never reads a UserInfo answer, so there is no sub to compare.
 
 Known finding, **P2**: `oidcc-client-test-kid-absent-single-jwks` signs its ID token
-without a `kid`, from a key set whose only RSA signing key has none either (the suite
+without a `kid`, from a key set whose only RS256-eligible key has none either (the suite
 pads it to 6 keys with three non-RSA signing and two encryption keys). The suite expects
 acceptance (OIDC Core 10.1); webauth refuses the header with `invalid-key-id`, UserInfo is
-never requested and the module stays WAITING. The earlier P1 finding is gone: the 13-key
+never requested and the module stays WAITING.
+`oidcc-client-test-idtoken-sig-none` is driven: webauth refuses alg none with
+`id-token-rejected/unsupported-algorithm` and the suite ends the module FINISHED/SKIPPED
+after its timeout. The earlier P1 finding is gone: the 13-key
 sets of the other modules are accepted since #147.
 
 Pull the images first, outside the lock:
