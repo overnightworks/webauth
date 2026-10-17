@@ -34,6 +34,7 @@ from webauth_arrangement import (
     an_idle_auth_app,
     an_idle_session,
     session_cookie_header,
+    signed_like_release_0_14,
     signed_without_bound,
 )
 
@@ -118,6 +119,11 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
             sign_session_id(SESSION_ID, b"a different signing key entirely"),
             INVALID_SESSION_DETAIL,
             id="a cookie signed with another key",
+        ),
+        pytest.param(
+            signed_like_release_0_14(SESSION_ID, a_web_auth_config().signing_key),
+            INVALID_SESSION_DETAIL,
+            id="a cookie signed the way 0.14.x did",
         ),
     ],
 )

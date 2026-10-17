@@ -20,6 +20,7 @@ from webauth_arrangement import (
     THIRTY_DAYS_SECONDS,
     a_web_auth_config,
     session_cookie_header,
+    signed_like_release_0_14,
     signed_without_bound,
 )
 
@@ -141,6 +142,29 @@ def test_verify_rejects_another_secret() -> None:
     assert verify_session_cookie(signed, b"b" * 64) is None
 
 
+@pytest.mark.parametrize(
+    "borrowed_cookie",
+    [
+        pytest.param(
+            f"csrf:my-session-token.{generate_csrf_token('my-session-token', _TEST_SECRET)}",
+            id="a CSRF token appended to its signing input",
+        ),
+        pytest.param(
+            f"oidc-pending:{sign_pending_login(_PENDING, _TEST_SECRET)}",
+            id="a pending-login signature appended to its signing input",
+        ),
+        pytest.param(
+            signed_like_release_0_14("my-session-token", _TEST_SECRET),
+            id="a session cookie as 0.14.x signed it",
+        ),
+    ],
+)
+def test_a_signature_made_for_another_purpose_is_no_session_cookie(
+    borrowed_cookie: str,
+) -> None:
+    assert verify_session_cookie(borrowed_cookie, _TEST_SECRET) is None
+
+
 def test_generate_csrf_token_deterministic() -> None:
     t1 = generate_csrf_token("session-abc", _TEST_SECRET)
     t2 = generate_csrf_token("session-abc", _TEST_SECRET)
@@ -218,7 +242,7 @@ PLAIN_HTTP = "http://songmaker.example"
 OVER_HTTPS = "https://songmaker.example"
 DEFAULT_SESSION_SET_COOKIE = (
     "__Host-session_id="
-    "session-1.69aa4d225bc23dcce050c2be44156a8b099336a14cc6eb8fcebb4b350bc4f2ee; "
+    "session-1.3052044bf3b276887bd8a25118374c1f96ff3567d5ab5568d6c393505b2e891d; "
     "HttpOnly; Max-Age=3600; Path=/; SameSite=strict; Secure"
 )
 DEFAULT_CSRF_SET_COOKIE = (

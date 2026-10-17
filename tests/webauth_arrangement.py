@@ -139,8 +139,13 @@ def assert_carries_policy_headers(
 
 def signed_without_bound(payload: str, secret: bytes) -> str:
     """``payload`` signed like a session cookie but never refused for its length."""
-    signature = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(secret, b"session:" + payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{signature}"
+
+
+def signed_like_release_0_14(session_id: str, secret: bytes) -> str:
+    """``session_id`` signed bare, the way 0.14.x and earlier issued session cookies."""
+    return f"{session_id}.{hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()}"
 
 
 def session_cookie_header(*cookie_values: str) -> str:
