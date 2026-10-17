@@ -198,10 +198,11 @@ def admit_identity(
     """The account ``identity`` signs in as, created on its first visit.
 
     A known subject keeps its account as it is, whatever username the issuer
-    now suggests. Any stored account whose ``id`` exactly equals the subject, with
-    no case or accent folding, is that subject's account and signs in as it is,
-    whatever created it. A host that migrates legacy accounts makes sure that no
-    legacy ``id`` can equal a subject of the bound issuer.
+    now suggests. Any stored account whose ``id`` equals the subject character
+    for character is that subject's account and signs in as it is, whatever
+    created it; ``SubjectUserStore.get`` must compare exactly. A host that
+    migrates legacy accounts makes sure that no legacy ``id`` can equal a
+    subject of the bound issuer.
     """
     if identity.issuer != bound_issuer:
         return AdmissionRefusal.FOREIGN_ISSUER

@@ -50,9 +50,11 @@ class SubjectUserStore(Protocol):
     """
 
     def get(self, user_id: str) -> UserRecord | None:
-        """The account whose ``id`` is exactly ``user_id``, without case or accent folding.
+        """The account whose ``id`` equals ``user_id`` character for character.
 
-        A host whose id column compares case- or accent-insensitively compares exactly here.
+        The host must compare exactly here, with no case, accent or
+        trailing-space folding, even where its id column's collation folds; a
+        binary collation does.
         """
         ...
 
