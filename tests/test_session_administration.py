@@ -34,8 +34,6 @@ from webauth.session_administration import (
     UnknownSessionError,
 )
 
-STORED_PASSWORD_HASH = "stored-password-hash"
-
 
 @pytest.fixture
 def administration() -> SessionAdministration:
@@ -43,11 +41,9 @@ def administration() -> SessionAdministration:
     return a_session_administration(
         FakeUser(
             id="actor", username="administrator", role=config.admin_role,
-            password_hash=STORED_PASSWORD_HASH,
         ),
         FakeUser(
             id="subject", username="member", role=config.user_role,
-            password_hash=STORED_PASSWORD_HASH,
         ),
         config=config,
     )
@@ -98,10 +94,7 @@ def test_REQ_ADMIN_12_listing_returns_only_public_fields_in_the_stores_page_orde
     assert administration.sessions.count_active() == len(stored_sessions)
     assert administration.audit.user_management_events == []
     evidence = repr(summaries) + caplog.text
-    for secret in (
-        STORED_PASSWORD_HASH,
-        *(record.id for record in stored_sessions),
-    ):
+    for secret in (record.id for record in stored_sessions):
         assert secret not in evidence
 
 
@@ -134,10 +127,7 @@ def test_REQ_ADMIN_12_an_admin_revokes_one_listed_session_without_its_raw_token(
         "session_ref": summary.session_ref,
     }]
     evidence = repr(administration.audit.user_management_events) + caplog.text
-    for secret in (
-        STORED_PASSWORD_HASH,
-        summary.username, *(record.id for record in stored_sessions),
-    ):
+    for secret in (summary.username, *(record.id for record in stored_sessions)):
         assert secret not in evidence
 
 

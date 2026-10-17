@@ -227,21 +227,6 @@ class FakeUser:
     username: str = "alice"
     role: str = MEMBER_ROLE
     is_active: bool = True
-    password_hash: str = "unused"
-
-
-@dataclass
-class PasswordlessUser:
-    """An account an identity provider vouches for: its id is the issuer's subject."""
-
-    id: str = "5f0c2a1e-subject"
-    username: str = "lena"
-    role: str = MEMBER_ROLE
-    is_active: bool = True
-    password_hash: None = None
-
-
-StoredUser = FakeUser | PasswordlessUser
 
 
 class UnknownAccountError(LookupError):
@@ -260,21 +245,21 @@ def _require_held_lock(lock: WriteLockInMemory | None) -> None:
 class UsersInMemory:
     """Accounts sharing the same mutable records as the host's session store."""
 
-    def __init__(self, *users: StoredUser, lock: WriteLockInMemory | None = None) -> None:
+    def __init__(self, *users: FakeUser, lock: WriteLockInMemory | None = None) -> None:
         self._lock = lock
         self._users = {user.id: user for user in users}
         self._usernames = {user.username: user for user in users}
 
-    def get(self, user_id: str) -> StoredUser | None:
+    def get(self, user_id: str) -> FakeUser | None:
         return self._users.get(user_id)
 
-    def get_by_username(self, username: str) -> StoredUser | None:
+    def get_by_username(self, username: str) -> FakeUser | None:
         return self._usernames.get(username)
 
-    def create_for_subject(self, subject: str, username: str, role: str) -> PasswordlessUser:
-        return self._add(PasswordlessUser(id=subject, username=username, role=role))
+    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
+        return self._add(FakeUser(id=subject, username=username, role=role))
 
-    def _add[UserT: StoredUser](self, user: UserT) -> UserT:
+    def _add(self, user: FakeUser) -> FakeUser:
         _require_held_lock(self._lock)
         if user.username in self._usernames:
             raise UsernameTakenError("Username is already taken")
@@ -282,14 +267,14 @@ class UsersInMemory:
         self._usernames[user.username] = user
         return user
 
-    def list(self) -> list[StoredUser]:
+    def list(self) -> list[FakeUser]:
         return list(self._users.values())
 
 
 class UsersWithCaseInsensitiveUsernames(UsersInMemory):
     """A store whose unique index ignores case, while its lookup does not."""
 
-    def create_for_subject(self, subject: str, username: str, role: str) -> PasswordlessUser:
+    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
         if any(user.username.casefold() == username.casefold() for user in self.list()):
             raise UsernameTakenError("Username is already taken")
         return super().create_for_subject(subject, username, role)
@@ -518,7 +503,7 @@ class RecordingAuditSink:
         self.user_management_events.append(event)
 
 
-def a_session_administration(*users: StoredUser, config: WebAuthConfig) -> SessionAdministration:
+def a_session_administration(*users: FakeUser, config: WebAuthConfig) -> SessionAdministration:
     lock = WriteLockInMemory()
     return SessionAdministration(
         sessions=SessionRecordsInMemory(users=UsersInMemory(*users, lock=lock), lock=lock),
