@@ -19,10 +19,9 @@ import secrets
 import signal
 import ssl
 import sys
-import threading
 import urllib.parse
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +38,7 @@ from harness import (
     STOP_SIGNALS,
     Host,
     Interrupted,
+    RunRecord,
     drive_browser_off_the_main_thread,
     free_port,
     keep_clean_evidence,
@@ -113,13 +113,9 @@ class Finding(Exception):
 
 
 @dataclass
-class Proof:
+class Proof(RunRecord):
     """One run: what it created, what it saw, and what it concluded."""
 
-    evidence_dir: Path
-    registry: SecretRegistry
-    log: NetworkLog
-    lines: list[str] = field(default_factory=list)
     browser: Browser | None = None
     app_port: int = 0
     observe_port: int = 0
@@ -132,26 +128,6 @@ class Proof:
     stack: HeldStack | None = None
     width: Width = DESKTOP
     browser_tmp: Path | None = None
-    failures: int = 0
-    stop_requested: threading.Event = field(default_factory=threading.Event)
-    winding_down: bool = False
-    browser_outlived_run: bool = False
-
-    @property
-    def all_held(self) -> bool:
-        return bool(self.lines) and not self.failures
-
-    def fail(self, message: str) -> None:
-        self.failures += 1
-        self.record(f"FAILED: {without_query_values(message)}")
-
-    def record(self, line: str) -> None:
-        masked_line = self.registry.masked(line)
-        self.lines.append(masked_line)
-        print(masked_line, flush=True)
-        leaked = self.registry.labels_in(line.encode())
-        if leaked:
-            self.fail(f"a recorded line held {', '.join(leaked)}")
 
     def held_or_failed(self, label: str, check: Callable[[], str]) -> bool:
         if self.stop_requested.is_set():

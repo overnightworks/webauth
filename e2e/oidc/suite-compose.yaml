@@ -1,0 +1,26 @@
+# The OpenID Foundation conformance suite, release-v5.3.3 (7d420f7), without its nginx:
+# the driver puts a throwaway-certificate TLS shim in front of the published port.
+# SUITE_HOST is the public name the suite builds every URL from; suite.py sets it.
+services:
+  mongodb:
+    image: mongo:6.0.13@sha256:b415b12f638e2685d06c58ab7fb5943577c50fadec6d9340ef67d21aeac72070
+    command: ["--wiredTigerCacheSizeGB", "0.25"]
+    tmpfs:
+      - /data/db
+      - /data/configdb
+  server:
+    image: registry.gitlab.com/openid/conformance-suite@sha256:377ab51f011d821c4b6f7729053e85adf062d691e51a3615f40507fd900a2436
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      BASE_URL: https://${SUITE_HOST:?the public host name of the suite}
+      BASE_MTLS_URL: https://${SUITE_HOST}
+      MONGODB_HOST: mongodb
+      JAVA_EXTRA_ARGS: -Xmx1g
+      OIDC_GOOGLE_CLIENTID: google-client
+      OIDC_GOOGLE_SECRET: google-secret
+      OIDC_GITLAB_CLIENTID: gitlab-client
+      OIDC_GITLAB_SECRET: gitlab-secret
+    ports:
+      - "127.0.0.1::8080"
+    depends_on:
+      - mongodb
