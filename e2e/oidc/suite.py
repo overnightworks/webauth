@@ -48,6 +48,8 @@ def project_objects(project: str, kind: str) -> list[str]:
 
 def describe_failure(what: str, error: Exception) -> str:
     stderr = getattr(error, "stderr", None)
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode(errors="replace")
     detail = stderr if isinstance(stderr, str) and stderr.strip() else str(error)
     return f"{what} failed: {type(error).__name__}: {detail.strip()[-STDERR_CHARS_IN_ERRORS:]}"
 
@@ -63,7 +65,12 @@ class HeldSuite:
     project: str = field(default_factory=lambda: f"d2-suite-{secrets.token_hex(4)}")
     port: int = 0
     down_completed: bool = field(default=False, init=False)
-    leftovers: list[str] = field(default_factory=list, init=False)
+    failures: list[str] = field(default_factory=list, init=False)
+    remaining: list[str] = field(default_factory=list, init=False)
+
+    @property
+    def leftovers(self) -> list[str]:
+        return [*self.failures, *self.remaining]
 
     def __enter__(self) -> HeldSuite:
         try:
@@ -90,23 +97,24 @@ class HeldSuite:
 
         The down always runs; the containers, volumes and networks are listed by three
         independent calls. Nothing escapes: every failure or timeout is a line of its own,
-        and the lines are kept in ``leftovers``. ``down_completed`` says whether the down
+        and the lines are kept in ``leftovers``: the failures of every call, and the objects the
+        latest call still found. ``down_completed`` says whether the down
         exited cleanly, so a caller runs this again only when it did not. Worst case of one
         call: 60 s down + 3 x 10 s listing = 90 s; with the 30 s module cancel, a first
         call and one backstop call the run's teardown takes 30 + 90 + 90 = 210 s, inside
         ``--kill-after=240``."""
-        self.leftovers = []
+        self.remaining = []
         self.down_completed = False
         try:
             self._compose("down", "-v", "--remove-orphans", timeout=DOWN_TIMEOUT_SECONDS)
             self.down_completed = True
         except (subprocess.SubprocessError, OSError, StackError) as error:
-            self.leftovers.append(describe_failure("docker compose down", error))
+            self.failures.append(describe_failure("docker compose down", error))
         for kind in DOCKER_OBJECTS:
             try:
-                self.leftovers.extend(project_objects(self.project, kind))
+                self.remaining.extend(project_objects(self.project, kind))
             except (subprocess.SubprocessError, OSError) as error:
-                self.leftovers.append(describe_failure(f"listing the project's {kind}s", error))
+                self.failures.append(describe_failure(f"listing the project's {kind}s", error))
         return self.leftovers
 
     def _compose(
