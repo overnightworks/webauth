@@ -47,6 +47,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   compare ids exactly (no case, accent or trailing-space folding); a host that
   migrates legacy accounts makes sure that no legacy id can equal a subject of
   the bound issuer.
+- The module `webauth.passwords` is gone with `Argon2idPasswordHasher`, `OWASP_ARGON2ID`,
+  `MIN_PASSWORD_LENGTH`, `MIN_UNIQUE_CHARS`, `check_password_strength` and
+  `UnknownHashFormatError`, and `ports.PasswordHasher` and `WebAuthConfig.password_hasher`
+  with it: a host that passes `password_hasher` gets `TypeError`. `argon2-cffi` is no
+  longer installed with webauth; a host that still hashes passwords declares it itself.
 
 ## 0.14.0
 

@@ -72,8 +72,9 @@ def test_names_and_roles_default_to_the_conventional_ones() -> None:
     "login_lockout_threshold",
     "login_lockout_window_seconds",
     "login_rate_window_seconds",
+    "password_hasher",
 ])
-def test_a_removed_password_login_number_is_refused_as_an_unknown_keyword(
+def test_a_removed_password_field_is_refused_as_an_unknown_keyword(
     removed_keyword: str,
 ) -> None:
     with pytest.raises(TypeError, match=removed_keyword):

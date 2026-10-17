@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from starlette.applications import Starlette
 
     from webauth.ports import (
-        PasswordHasher,
         RateLimitBackend,
         SessionLivenessPolicy,
     )
@@ -82,7 +81,6 @@ def _require_positive_count(name: str, value: object) -> None:
 class WebAuthConfig:
     session_secret: SecretStr
     trusted_proxies: TrustedProxies
-    password_hasher: PasswordHasher
     rate_limits: RateLimitBackend
     allowed_hosts_exact: frozenset[str]
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]

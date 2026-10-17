@@ -20,7 +20,6 @@ dependencies = [
     "starlette>=0.46,<2",
     "anyio>=4.12,<5",
     "pydantic>=2.6,<3",
-    "argon2-cffi>=23.1,<26",
 ]
 
 [project.optional-dependencies]
