@@ -34,16 +34,15 @@ from oidc_arrangement import (
 )
 from pydantic import SecretStr
 from webauth_arrangement import (
+    ADMIN_ROLE,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
     HTTPS_TEST_SERVER,
     MEMBER_ROLE,
     SESSION_MAX_AGE_SECONDS,
     FakeUser,
-    PasswordlessUser,
     RecordingAuditSink,
     SessionRecordsInMemory,
-    StoredUser,
     UsersInMemory,
     UsersWithCaseInsensitiveUsernames,
     WriteLockInMemory,
@@ -89,6 +88,19 @@ LENA = OidcIdentity(
 
 
 @dataclass
+class LegacyPasswordUser(FakeUser):
+    """A host model that still carries the field the library no longer reads."""
+
+    password_hash: str = "legacy-hash"
+
+
+LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
+LEGACY_ADMIN_WITH_PASSWORD_FIELD = LegacyPasswordUser(
+    id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE,
+)
+
+
+@dataclass
 class Host:
     accounts: UsersInMemory
     audit: RecordingAuditSink
@@ -105,7 +117,7 @@ class Host:
         )
 
 
-def a_host(*users: StoredUser, store: type[UsersInMemory] = UsersInMemory) -> Host:
+def a_host(*users: FakeUser, store: type[UsersInMemory] = UsersInMemory) -> Host:
     lock = WriteLockInMemory()
     return Host(store(*users, lock=lock), RecordingAuditSink(), lock)
 
@@ -120,7 +132,7 @@ def test_the_in_memory_store_supplies_the_subject_port() -> None:
     pytest.param("", SUBJECT, id="the subject when the suggestion is empty"),
     pytest.param(" \t ", SUBJECT, id="the subject when the suggestion is only whitespace"),
 ])
-def test_a_new_subject_creates_a_passwordless_member_account_and_reports_it(
+def test_a_new_subject_creates_a_member_account_and_reports_it(
     preferred_username: str | None, username: str,
 ) -> None:
     host = a_host()
@@ -130,7 +142,6 @@ def test_a_new_subject_creates_a_passwordless_member_account_and_reports_it(
     assert (account.id, account.username, account.role, account.is_active) == (
         SUBJECT, username, MEMBER_ROLE, True,
     )
-    assert account.password_hash is None
     assert host.accounts.list() == [account]
     assert [asdict(event) for event in host.audit.user_management_events] == [{
         "kind": UserManagementEventKind.USER_CREATED,
@@ -139,6 +150,23 @@ def test_a_new_subject_creates_a_passwordless_member_account_and_reports_it(
         "role": MEMBER_ROLE,
         "session_ref": None,
     }]
+
+
+@pytest.mark.parametrize("legacy", [
+    pytest.param(LEGACY_ADMIN, id="an admin account created outside admission"),
+    pytest.param(
+        LEGACY_ADMIN_WITH_PASSWORD_FIELD, id="an account whose model carries a password field",
+    ),
+])
+def test_a_stored_account_whose_id_is_the_subject_signs_in_as_it_is(legacy: FakeUser) -> None:
+    host = a_host(deepcopy(legacy))
+
+    account = host.admit(LENA)
+
+    assert account is host.accounts.get(SUBJECT)
+    assert (account.username, account.role) == ("lena.legacy", ADMIN_ROLE)
+    assert host.accounts.list() == [legacy]
+    assert host.audit.user_management_events == []
 
 
 def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed() -> None:
@@ -156,19 +184,19 @@ def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed(
 @pytest.mark.parametrize(("identity", "stored", "refusal"), [
     pytest.param(
         replace(LENA, issuer="https://other.example/realms/lab"),
-        [PasswordlessUser(id=SUBJECT)],
+        [LEGACY_ADMIN],
         AdmissionRefusal.FOREIGN_ISSUER,
-        id="another issuer's identity whose subject names a known account",
+        id="another issuer's identity whose subject names a legacy admin",
     ),
     pytest.param(
-        LENA, [PasswordlessUser(id=SUBJECT, is_active=False)],
+        LENA, [FakeUser(id=SUBJECT, username="lena", is_active=False)],
         AdmissionRefusal.ACCOUNT_DEACTIVATED,
         id="a deactivated account",
     ),
     pytest.param(
-        LENA, [FakeUser(id=SUBJECT, username="lena", password_hash="argon2:secret")],
-        AdmissionRefusal.SUBJECT_HELD_BY_PASSWORD_ACCOUNT,
-        id="a subject that names a password account",
+        LENA, [replace(LEGACY_ADMIN_WITH_PASSWORD_FIELD, is_active=False)],
+        AdmissionRefusal.ACCOUNT_DEACTIVATED,
+        id="a deactivated account whose model carries a password field",
     ),
     pytest.param(
         LENA, [FakeUser(id="user-7", username="lena")],
@@ -177,7 +205,7 @@ def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed(
     ),
 ])
 def test_a_refused_identity_changes_neither_the_store_nor_the_audit_log(
-    identity: OidcIdentity, stored: list[StoredUser], refusal: AdmissionRefusal,
+    identity: OidcIdentity, stored: list[FakeUser], refusal: AdmissionRefusal,
 ) -> None:
     host = a_host(*deepcopy(stored))
 
@@ -268,7 +296,7 @@ def an_id_token(nonce: str, wall_clock: FakeClock) -> str:
     return jws(header, claims, rs256(rsa_key("issuer")))
 
 
-def an_oidc_host(*users: StoredUser, **config_overrides: object) -> OidcHost:
+def an_oidc_host(*users: FakeUser, **config_overrides: object) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
     lock = WriteLockInMemory()
     accounts = UsersInMemory(*users, lock=lock)
@@ -322,6 +350,10 @@ def an_oidc_host(*users: StoredUser, **config_overrides: object) -> OidcHost:
             response.status_code = 403
             return {"refusal": outcome.value}
         return open_session(outcome, response)
+
+    @app.get("/admin")
+    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
+        return {"username": user.username}
 
     @app.get("/me")
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
@@ -404,7 +436,7 @@ class RefusedCallback:
     the callback query the browser brings back given the issuer's."""
 
     refusal: str
-    stored: tuple[StoredUser, ...] = ()
+    stored: tuple[FakeUser, ...] = ()
     returned_query: Callable[[OidcHost, str], str] = lambda _host, query: query
 
 
@@ -444,16 +476,10 @@ _REFUSED_CALLBACKS = [
     ),
     pytest.param(
         RefusedCallback(
-            "account-deactivated", stored=(PasswordlessUser(id=SUBJECT, is_active=False),)
+            "account-deactivated",
+            stored=(replace(LEGACY_ADMIN_WITH_PASSWORD_FIELD, is_active=False),),
         ),
-        id="an identity whose account is deactivated",
-    ),
-    pytest.param(
-        RefusedCallback(
-            "subject-held-by-password-account",
-            stored=(FakeUser(id=SUBJECT, username="lena", password_hash="argon2:secret"),),
-        ),
-        id="an identity whose subject names a password account",
+        id="an identity whose legacy account is deactivated",
     ),
 ]
 
@@ -474,6 +500,25 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.accounts.list() == list(refused.stored)
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
+
+
+def test_a_callback_for_a_legacy_admin_signs_in_as_that_admin() -> None:
+    host = an_oidc_host(deepcopy(LEGACY_ADMIN))
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert (response.status_code, response.json()) == (200, {"username": "lena.legacy"})
+    assert host.sessions.count_active() == 1
+    assert host.sessions.record is not None
+    assert host.sessions.record.user_id == SUBJECT
+    assert host.client.get("/me").json() == {"username": "lena.legacy"}
+    assert host.client.get("/admin").json() == {"username": "lena.legacy"}
+    assert host.accounts.list() == [LEGACY_ADMIN]
+
+
+def test_the_password_account_refusal_is_no_longer_an_admission_refusal() -> None:
+    with pytest.raises(ValueError):
+        AdmissionRefusal("subject-held-by-password-account")
 
 
 def test_an_admitted_callback_consumes_its_cookie_and_keeps_the_other_tabs() -> None:
