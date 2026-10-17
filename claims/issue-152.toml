@@ -1,8 +1,0 @@
-claim_id = "e93bdcd4d8ee4edc8d3671aa161b214b"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "8fa23783de810f28bec2445b3b17cb012c751551"
-branch = "claude/issue-152-w8-s7-passwords-und-argon2-gehen"
-scope = [".importlinter", "AGENTS.md", "CHANGELOG.md", "README.md", "pyproject.toml", "src/webauth/config.py", "src/webauth/passwords.py", "src/webauth/ports.py", "tests/test_passwords.py", "tests/test_web_auth_config.py", "tests/webauth_arrangement.py", "uv.lock"]
-opened_commit = "6bc1e4ccd8ac8e43d02b07b484fba7cd54a76b7a"
-whole_reason = "One removal: the password hasher, its module, port, config field and dependency, with their tests, lockfile and the documents that name them"
