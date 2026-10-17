@@ -133,8 +133,8 @@ table takes from the library's enums:
     module | suite status/result | webauth decision | expected | verdict | why
 
 `held` needs the decision and the suite state to agree with the table: an accepting
-module is admitted with UserInfo answered, and every module the suite finishes ends
-FINISHED/PASSED. `skipped` is a justified row that is not driven. `FAILED-as-found` (a
+module is admitted with UserInfo answered, and every module ends in the suite state
+its row names (FINISHED/PASSED, or FINISHED/SKIPPED for sig-none). `skipped` is a justified row that is not driven. `FAILED-as-found` (a
 finding, not a failed run) is only for a named known finding on its own module, and needs
 all three: the decision equals the finding's signature, the key set at the host's
 `jwks_url` holds the finding's number of keys that webauth's own RS256 check admits, and the suite is in the state
