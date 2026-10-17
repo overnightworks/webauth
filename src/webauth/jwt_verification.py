@@ -9,8 +9,8 @@ a logout token's events — belongs to the caller, which reads them from
 
 The token is parsed strictly by this module before PyJWT sees it: bounded
 length and nesting, no duplicate JSON members, canonical base64url, an
-RS256-only header naming its key by `kid`, and no header member that would let
-the token choose its own key. PyJWT then verifies the signature, audience and
+RS256-only header whose `kid`, when present, is a bounded string, and no header
+member that would let the token choose its own key. PyJWT then verifies the signature, audience and
 issuer; the time claims are checked here against the injected wall clock, so
 leeway has one owner.
 
@@ -26,6 +26,14 @@ the whole document is bounded by `MAX_KEY_SET_BYTES`, so passed-over entries
 cost a few lookups each and nothing more. Each entry is checked in this order:
 an object without a secret member, then RS256 eligibility, then the count, then
 the key itself.
+
+A token without a `kid` member is read against the key set's only key, whether
+or not that key carries a `kid`; against several keys it is refused as
+`INVALID_KEY_ID`, as OIDC Core 10.1 requires. An RS256 verification key may lack
+`kid` only when it is the only one in the set; an explicit `"kid": null` is
+malformed. A token without `kid` triggers no refresh, so a rotation of a sole
+key, or a change between one and several keys, stays unseen until the key set
+expires (OIDC Core 10.1.1: an unfamiliar `kid` is the rotation signal).
 
 Install the `jwt` extra to use this module.
 """
@@ -159,13 +167,13 @@ class _InvalidKeySetError(Exception):
 
 @dataclass(frozen=True)
 class _ParsedToken:
-    key_id: str
+    key_id: str | None
     claims: Mapping[str, object]
 
 
 @dataclass(frozen=True)
 class _KeySet:
-    keys: Mapping[str, RSAPublicKey]
+    keys: Mapping[str | None, RSAPublicKey]
     fetched_at: float
 
 
@@ -273,13 +281,15 @@ class JwtVerifier:
             raise VerificationRefusal(RejectionReason.NOT_YET_VALID)
         return expires_at, issued_at
 
-    def _signing_key(self, key_id: str) -> RSAPublicKey:
+    def _signing_key(self, key_id: str | None) -> RSAPublicKey:
         key_set = self._key_set
-        if not self._is_current(key_set) or key_id not in key_set.keys:
+        if not self._is_current(key_set) or (key_id is not None and key_id not in key_set.keys):
             self._refresh_key_set()
             key_set = self._key_set
         if not self._is_current(key_set):
             raise VerificationRefusal(RejectionReason.KEY_SET_UNAVAILABLE)
+        if key_id is None:
+            return _sole_key(key_set)
         key = key_set.keys.get(key_id)
         if key is None:
             # An unknown `kid` is only a forged one when the key set could be
@@ -327,6 +337,13 @@ class JwtVerifier:
             self._refresh_lock.release()
 
 
+def _sole_key(key_set: _KeySet) -> RSAPublicKey:
+    """A token that names no key is read against the only key the set holds."""
+    if len(key_set.keys) != 1:
+        raise VerificationRefusal(RejectionReason.INVALID_KEY_ID)
+    return next(iter(key_set.keys.values()))
+
+
 def _library_checks() -> Options:
     """PyJWT's options, built fresh for every call so no caller can alter a
     shared one. Time claims and `sub` are off here because this module checks
@@ -358,12 +375,14 @@ def _parse_token(token: str) -> _ParsedToken:
     return _ParsedToken(key_id=_header_key_id(header), claims=MappingProxyType(claims))
 
 
-def _header_key_id(header: Mapping[str, object]) -> str:
+def _header_key_id(header: Mapping[str, object]) -> str | None:
     if _FORBIDDEN_HEADER_MEMBERS & header.keys():
         raise VerificationRefusal(RejectionReason.FORBIDDEN_HEADER)
     if header.get("alg") != _ALGORITHM:
         raise VerificationRefusal(RejectionReason.UNSUPPORTED_ALGORITHM)
-    key_id = header.get("kid")
+    if "kid" not in header:
+        return None
+    key_id = header["kid"]
     if not _is_key_id(key_id):
         raise VerificationRefusal(RejectionReason.INVALID_KEY_ID)
     return key_id
@@ -475,7 +494,7 @@ def _finite_number(literal: str) -> float:
     return number
 
 
-def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
+def _parse_key_set(document: bytes) -> Mapping[str | None, RSAPublicKey]:
     if len(document) > MAX_KEY_SET_BYTES:
         raise _InvalidKeySetError(_RefreshFailure.TOO_LARGE)
     try:
@@ -488,8 +507,8 @@ def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
     return MappingProxyType(_rs256_verification_keys(jwks))
 
 
-def _rs256_verification_keys(jwks: list[object]) -> dict[str, RSAPublicKey]:
-    keys: dict[str, RSAPublicKey] = {}
+def _rs256_verification_keys(jwks: list[object]) -> dict[str | None, RSAPublicKey]:
+    keys: dict[str | None, RSAPublicKey] = {}
     for jwk in jwks:
         if not isinstance(jwk, dict):
             raise _InvalidKeySetError(_RefreshFailure.KEY_NOT_AN_OBJECT)
@@ -505,6 +524,8 @@ def _rs256_verification_keys(jwks: list[object]) -> dict[str, RSAPublicKey]:
         keys[key_id] = key
     if not keys:
         raise _InvalidKeySetError(_RefreshFailure.NO_RS256_SIGNING_KEY)
+    if None in keys and len(keys) > 1:
+        raise _InvalidKeySetError(_RefreshFailure.MALFORMED_KEY)
     return keys
 
 
@@ -521,10 +542,14 @@ def _is_rs256_verification_key(jwk: Mapping[str, object]) -> bool:
     )
 
 
-def _public_signing_key(jwk: Mapping[str, object]) -> tuple[str, RSAPublicKey]:
-    key_id = jwk.get("kid")
+def _public_signing_key(jwk: Mapping[str, object]) -> tuple[str | None, RSAPublicKey]:
+    key_id = jwk["kid"] if "kid" in jwk else None
     modulus, exponent = jwk.get("n"), jwk.get("e")
-    if not _is_key_id(key_id) or not isinstance(modulus, str) or not isinstance(exponent, str):
+    if (
+        ("kid" in jwk and not _is_key_id(key_id))
+        or not isinstance(modulus, str)
+        or not isinstance(exponent, str)
+    ):
         raise _InvalidKeySetError(_RefreshFailure.MALFORMED_KEY)
     try:
         key = RSAPublicNumbers(

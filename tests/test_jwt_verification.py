@@ -292,9 +292,9 @@ _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
         ),
         # Headers
         pytest.param(
-            lambda issuer: issuer.token(header={"kid": ABSENT}),
+            lambda issuer: issuer.token(header={"kid": None}),
             RejectionReason.INVALID_KEY_ID,
-            id="kid-missing",
+            id="kid-null",
         ),
         pytest.param(
             lambda issuer: issuer.token(header={"kid": 7}),
@@ -569,6 +569,21 @@ def _defective_key_sets() -> list[Any]:
             id="key-kid-not-a-string",
         ),
         pytest.param(
+            key_set_document(public_jwk(current, "current-key", kid=None)),
+            "malformed-key",
+            id="sole-key-kid-null",
+        ),
+        pytest.param(
+            key_set_document(public_jwk(current, "current-key", kid=ABSENT), valid_jwk),
+            "malformed-key",
+            id="kidless-key-before-another-signing-key",
+        ),
+        pytest.param(
+            key_set_document(valid_jwk, public_jwk(current, "current-key", kid=ABSENT)),
+            "malformed-key",
+            id="kidless-key-after-another-signing-key",
+        ),
+        pytest.param(
             key_set_document(public_jwk(current, "current-key", n=7)),
             "malformed-key",
             id="key-modulus-not-a-string",
@@ -626,17 +641,9 @@ def test_a_defective_key_set_is_refused_as_a_whole(
     assert logged.endswith(failure)
 
 
-@pytest.mark.parametrize(
-    ("passed_over", "signing_keys"),
-    [
-        pytest.param(20, MAX_KEY_SET_KEYS, id="the-most-signing-keys-among-many-passed-over"),
-    ],
-)
-def test_keys_passed_over_do_not_count_toward_the_key_bound(
-    issuer: IssuerScenario, passed_over: int, signing_keys: int
-) -> None:
-    published = _signing_keys(signing_keys)
-    issuer.serve(key_set_document(*published, *_passed_over_keys(passed_over)))
+def test_keys_passed_over_do_not_count_toward_the_key_bound(issuer: IssuerScenario) -> None:
+    published = _signing_keys(MAX_KEY_SET_KEYS)
+    issuer.serve(key_set_document(*published, *_passed_over_keys(20)))
 
     verified = [
         issuer.verifier.verify(issuer.token(header={"kid": jwk["kid"]}))
@@ -762,6 +769,174 @@ def test_an_unknown_kid_is_forged_again_once_a_refresh_succeeds_after_a_failed_o
     assert during_outage == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert after_recovery == Rejected(RejectionReason.UNKNOWN_KEY_ID)
     assert cooling_down == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+
+
+def _kidless(issuer: IssuerScenario, sign: Callable | None = None) -> str:
+    return issuer.token(header={"kid": ABSENT}, sign=sign)
+
+
+def _serve_sole_key(issuer: IssuerScenario, name: str, **changes: Any) -> None:
+    issuer.serve(key_set_document(public_jwk(rsa_key(name), f"{name}-key", **changes)))
+
+
+def _serve_two_keys(issuer: IssuerScenario) -> None:
+    issuer.serve(
+        key_set_document(
+            public_jwk(rsa_key("current"), "current-key"), public_jwk(rsa_key("other"), "other-key")
+        )
+    )
+
+
+def _after_the_ttl(issuer: IssuerScenario) -> None:
+    issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS
+
+
+@pytest.mark.parametrize(
+    "published",
+    [
+        pytest.param(
+            [public_jwk(rsa_key("current"), "current-key", kid=ABSENT), *_passed_over_keys(5)],
+            id="the-measured-kidless-key-among-passed-over-keys",
+        ),
+        pytest.param([public_jwk(rsa_key("current"), "current-key")], id="the-only-key-has-a-kid"),
+    ],
+)
+def test_a_token_without_kid_verifies_against_the_only_signing_key(
+    issuer: IssuerScenario, published: list[dict[str, Any]]
+) -> None:
+    issuer.serve(key_set_document(*published))
+
+    assert issuer.verifier.verify(_kidless(issuer)) == issuer.verified()
+
+
+def test_a_token_without_kid_is_refused_without_a_fetch_when_the_key_set_holds_several_keys(
+    issuer: IssuerScenario,
+) -> None:
+    _serve_two_keys(issuer)
+    issuer.verifier.verify(issuer.token())
+
+    refused = issuer.verifier.verify(_kidless(issuer))
+
+    assert refused == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert len(issuer.endpoint.fetched_urls) == 1
+
+
+def test_a_named_kid_unmatched_by_a_kidless_sole_key_is_unknown_once_the_refresh_succeeds(
+    issuer: IssuerScenario,
+) -> None:
+    _serve_sole_key(issuer, "current", kid=ABSENT)
+    issuer.verifier.verify(_kidless(issuer))
+    issuer.after_cooldown()
+
+    named = issuer.verifier.verify(issuer.token(header={"kid": "x"}))
+
+    assert named == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+
+
+def test_a_named_kid_is_unavailable_when_the_refresh_fails_and_while_it_cools_down(
+    issuer: IssuerScenario,
+) -> None:
+    _serve_sole_key(issuer, "current", kid=ABSENT)
+    issuer.verifier.verify(_kidless(issuer))
+    issuer.serve(KeySetFetchError("GET answered 503"))
+    issuer.after_cooldown()
+    named = issuer.token(header={"kid": "x"})
+
+    assert issuer.verifier.verify(named) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert issuer.verifier.verify(named) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+
+
+def test_a_signature_failure_without_kid_does_not_refresh_the_key_set(
+    issuer: IssuerScenario,
+) -> None:
+    issuer.verifier.verify(issuer.token())
+
+    refused = issuer.verifier.verify(_kidless(issuer, sign=rs256(rsa_key("other"))))
+
+    assert refused == Rejected(RejectionReason.INVALID_SIGNATURE)
+    assert len(issuer.endpoint.fetched_urls) == 1
+
+
+def test_a_token_without_kid_is_unavailable_when_no_key_set_can_be_fetched(
+    issuer: IssuerScenario,
+) -> None:
+    issuer.serve(KeySetFetchError("GET answered 503"))
+
+    assert issuer.verifier.verify(_kidless(issuer)) == Rejected(
+        RejectionReason.KEY_SET_UNAVAILABLE
+    )
+
+
+def test_tokens_without_kid_inside_the_ttl_never_refresh_the_key_set(
+    issuer: IssuerScenario,
+) -> None:
+    before_cooldown = issuer.verifier.verify(_kidless(issuer))
+    issuer.after_cooldown()
+    after_cooldown = issuer.verifier.verify(_kidless(issuer))
+
+    assert [before_cooldown, after_cooldown] == [issuer.verified()] * 2
+    assert len(issuer.endpoint.fetched_urls) == 1
+
+
+def test_rotation_from_two_keys_to_one_is_seen_by_a_token_without_kid_after_the_ttl(
+    issuer: IssuerScenario,
+) -> None:
+    _serve_two_keys(issuer)
+    before_ttl = issuer.verifier.verify(_kidless(issuer))
+    _serve_sole_key(issuer, "current", kid=ABSENT)
+    _after_the_ttl(issuer)
+
+    after_ttl = issuer.verifier.verify(_kidless(issuer))
+
+    assert before_ttl == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert after_ttl == issuer.verified()
+
+
+def test_rotation_from_one_sole_key_to_another_is_seen_by_a_token_without_kid_after_the_ttl(
+    issuer: IssuerScenario,
+) -> None:
+    issuer.verifier.verify(_kidless(issuer))
+    _serve_sole_key(issuer, "other", kid=ABSENT)
+    new_key_token = _kidless(issuer, sign=rs256(rsa_key("other")))
+    before_ttl = issuer.verifier.verify(new_key_token)
+    _after_the_ttl(issuer)
+
+    after_ttl = issuer.verifier.verify(new_key_token)
+    retired_key = issuer.verifier.verify(_kidless(issuer))
+
+    assert before_ttl == Rejected(RejectionReason.INVALID_SIGNATURE)
+    assert after_ttl == issuer.verified()
+    assert retired_key == Rejected(RejectionReason.INVALID_SIGNATURE)
+
+
+def test_rotation_from_one_key_to_two_is_seen_by_a_token_without_kid_after_the_ttl(
+    issuer: IssuerScenario,
+) -> None:
+    issuer.verifier.verify(_kidless(issuer))
+    _serve_two_keys(issuer)
+    before_ttl = issuer.verifier.verify(_kidless(issuer))
+    _after_the_ttl(issuer)
+
+    after_ttl = issuer.verifier.verify(_kidless(issuer))
+
+    assert before_ttl == issuer.verified()
+    assert after_ttl == Rejected(RejectionReason.INVALID_KEY_ID)
+
+
+def test_a_token_without_kid_verifies_again_once_an_expiry_refresh_has_failed_and_recovered(
+    issuer: IssuerScenario,
+) -> None:
+    issuer.verifier.verify(_kidless(issuer))
+    issuer.serve(KeySetFetchError("GET answered 503"))
+    _after_the_ttl(issuer)
+    during_outage = issuer.verifier.verify(_kidless(issuer))
+    _serve_sole_key(issuer, "current")
+    issuer.after_cooldown()
+
+    after_recovery = issuer.verifier.verify(_kidless(issuer))
+
+    assert during_outage == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert after_recovery == issuer.verified()
 
 
 _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signature={_URL_SECRET}"

@@ -63,6 +63,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - A key set that publishes more than ten keys, most of them for other algorithms or for
   encryption, is no longer refused as `key-count-out-of-range`: `MAX_KEY_SET_KEYS` counts
   the RS256 signing keys only. The size of the document stays bounded by 64 KiB.
+- A token without a `kid` header member verifies when the key set holds exactly one
+  RS256 verification key, and that key may lack `kid` (OIDC Core 10.1). Against several
+  keys it is still refused as `invalid-key-id`, an explicit `"kid": null` stays
+  malformed, and a rotation of the sole key is seen when the key set's one-hour TTL
+  expires.
 
 ## 0.14.0
 
