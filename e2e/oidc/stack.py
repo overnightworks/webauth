@@ -40,8 +40,8 @@ def require_pinned_clean_edge(edge: Path) -> None:
 
 
 def _git(edge: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(edge), *arguments], check=True, capture_output=True, text=True
+    return subprocess.run(  # noqa: S603 fixed command list
+        ["git", "-C", str(edge), *arguments], check=True, capture_output=True, text=True  # noqa: S607 the operator's own PATH by design
     ).stdout
 
 
@@ -88,7 +88,7 @@ class HeldStack:
     _drainer: threading.Thread | None = None
 
     def __enter__(self) -> HeldStack:
-        self._process = subprocess.Popen(
+        self._process = subprocess.Popen(  # noqa: S603 fixed command list
             [sys.executable, str(self.edge / "probe/keycloak/probe.py"), "hold",
              "--scratch", str(self.scratch)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,

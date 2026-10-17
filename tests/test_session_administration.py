@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import FrozenInstanceError, asdict, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from webauth_arrangement import (
@@ -67,7 +67,7 @@ def stored_sessions(administration: SessionAdministration) -> list[FakeSessionRe
     return [
         administration.sessions.create(
             user_id,
-            datetime(2030, 1, 1, tzinfo=timezone.utc),
+            datetime(2030, 1, 1, tzinfo=UTC),
             ip_address=CLIENT_ADDRESS,
             user_agent=CLIENT_USER_AGENT,
         )

@@ -70,7 +70,18 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = ["E", "F", "W", "I", "B", "S", "UP"]
+
+[tool.ruff.lint.flake8-bugbear]
+# fastapi.Depends returns a frozen dataclass (fastapi/params.py at the locked 0.141.1); the
+# Annotated[..., Depends()] form cannot resolve the closure-local callables in dependencies.py
+extend-immutable-calls = ["fastapi.Depends"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest's assertion rewriting is how a test asserts
+"tests/**" = ["S101"]
+# prove.py's checks are assertions, and its main refuses to run with assertions stripped
+"e2e/**" = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

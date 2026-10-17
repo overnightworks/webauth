@@ -111,8 +111,8 @@ __all__ = [
 
 
 class RejectionReason(StrEnum):
-    TOKEN_TOO_LONG = "token-too-long"
-    MALFORMED_TOKEN = "malformed-token"
+    TOKEN_TOO_LONG = "token-too-long"  # noqa: S105 a refusal reason, not a credential
+    MALFORMED_TOKEN = "malformed-token"  # noqa: S105 a refusal reason, not a credential
     DUPLICATE_MEMBER = "duplicate-member"
     NESTING_TOO_DEEP = "nesting-too-deep"
     FORBIDDEN_HEADER = "forbidden-header"
@@ -165,7 +165,7 @@ class _RefreshFailure(StrEnum):
     NOT_STRICT_JSON = "not-strict-json"
     KEY_COUNT_OUT_OF_RANGE = "key-count-out-of-range"
     KEY_NOT_AN_OBJECT = "key-not-an-object"
-    SECRET_KEY_PUBLISHED = "secret-key-published"
+    SECRET_KEY_PUBLISHED = "secret-key-published"  # noqa: S105 a refusal reason, not a credential
     DUPLICATE_KEY_ID = "duplicate-key-id"
     NO_RS256_SIGNING_KEY = "no-rs256-signing-key"
     MALFORMED_KEY = "malformed-key"

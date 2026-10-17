@@ -10,7 +10,7 @@ commits it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
@@ -344,7 +344,7 @@ def _authenticate_from_store(
     login_redirect: LoginRedirect | None,
 ) -> AuthenticatedUser:
     record = sessions.load(session_id)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if record is None or not config.session_liveness.admits_stored_session(record, now):
         raise _unauthenticated(request, SESSION_EXPIRED_DETAIL, login_redirect)
 

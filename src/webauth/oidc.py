@@ -170,9 +170,9 @@ class OidcRefusalReason(StrEnum):
     PENDING_LOGIN_EXPIRED = "pending-login-expired"
     ISSUER_MISMATCH = "issuer-mismatch"
     AUTHORIZATION_DENIED = "authorization-denied"
-    TOKEN_REQUEST_REFUSED = "token-request-refused"
-    TOKEN_ENDPOINT_FAILED = "token-endpoint-failed"
-    ID_TOKEN_REJECTED = "id-token-rejected"
+    TOKEN_REQUEST_REFUSED = "token-request-refused"  # noqa: S105 a refusal reason, not a credential
+    TOKEN_ENDPOINT_FAILED = "token-endpoint-failed"  # noqa: S105 a refusal reason, not a credential
+    ID_TOKEN_REJECTED = "id-token-rejected"  # noqa: S105 a refusal reason, not a credential
     NONCE_MISMATCH = "nonce-mismatch"
     AUTHORIZED_PARTY_MISMATCH = "authorized-party-mismatch"
     INVALID_IDENTITY_CLAIM = "invalid-identity-claim"

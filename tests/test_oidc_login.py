@@ -16,7 +16,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import Depends, FastAPI, Request, Response
@@ -91,7 +91,7 @@ LENA = OidcIdentity(
 class LegacyPasswordUser(FakeUser):
     """A host model that still carries the field the library no longer reads."""
 
-    password_hash: str = "legacy-hash"
+    password_hash: str = "legacy-hash"  # noqa: S105 proves a host model still carrying the old password field works
 
 
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
@@ -328,7 +328,7 @@ def an_oidc_host(
     def open_session(account: UserRecord, response: Response) -> dict[str, str]:
         record = sessions.create(
             account.id,
-            datetime.now(timezone.utc) + timedelta(seconds=sessions.max_age_seconds),
+            datetime.now(UTC) + timedelta(seconds=sessions.max_age_seconds),
             ip_address=CLIENT_ADDRESS,
             user_agent=CLIENT_USER_AGENT,
         )
@@ -443,7 +443,7 @@ def test_an_admitted_callback_expires_the_session_by_the_stores_lifetime() -> No
 
     record = host.sessions.record
     assert record is not None
-    expires_in = (record.expires_at - datetime.now(timezone.utc)).total_seconds()
+    expires_in = (record.expires_at - datetime.now(UTC)).total_seconds()
     assert expires_in == pytest.approx(store_max_age_seconds, abs=60)
     session_cookie = set_cookies(response)[host.config.session_cookie_name]
     assert f"max-age={host.config.cookie_max_age_seconds}" in session_cookie

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib
 import pkgutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -71,3 +72,18 @@ def _re_exports_of(module_name: str) -> list[tuple[str, str]]:
 def test_a_re_exported_name_is_public_in_its_defining_module_too(module_name: str) -> None:
     for name, home in _re_exports_of(module_name):
         assert name in importlib.import_module(home).__all__, f"{home} must list {name}"
+
+
+def test_every_module_imports_and_the_single_process_backend_counts_without_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for loaded in [name for name in sys.modules if _is_webauth_module(name)]:
+        monkeypatch.delitem(sys.modules, loaded)
+    monkeypatch.setitem(sys.modules, "redis", None)
+
+    for module_name in WEBAUTH_MODULES:
+        importlib.import_module(module_name)
+    backend = sys.modules["webauth.rate_limit"].SingleProcessRateLimitBackend()
+
+    assert backend.is_allowed("address", limit=1, window_seconds=60)
+    assert not backend.is_allowed("address", limit=1, window_seconds=60)

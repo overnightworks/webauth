@@ -14,7 +14,7 @@ import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from itertools import count
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Final
@@ -539,7 +539,7 @@ def a_session(
     ip_address: str = CLIENT_ADDRESS,
     user_agent: str = CLIENT_USER_AGENT,
 ) -> FakeSessionRecord:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return FakeSessionRecord(
         id=SESSION_ID,
         user=user or FakeUser(),
@@ -617,7 +617,7 @@ def an_idle_session(
     *, seen_ago: timedelta = timedelta(minutes=5), user: FakeUser | None = None,
 ) -> IdleSessionRecord:
     return IdleSessionRecord(
-        id=SESSION_ID, user=user or FakeUser(), last_seen=datetime.now(timezone.utc) - seen_ago,
+        id=SESSION_ID, user=user or FakeUser(), last_seen=datetime.now(UTC) - seen_ago,
     )
 
 

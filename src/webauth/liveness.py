@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import UTC
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -50,10 +50,10 @@ class ExpiryColumnLiveness:
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
-        if record.expires_at.replace(tzinfo=timezone.utc) < now:
+        if record.expires_at.replace(tzinfo=UTC) < now:
             return False
         return _within_absolute_cap(
-            record.created_at.replace(tzinfo=timezone.utc), now, self._absolute_max_age_seconds,
+            record.created_at.replace(tzinfo=UTC), now, self._absolute_max_age_seconds,
         )
 
 
