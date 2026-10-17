@@ -229,11 +229,9 @@ def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None])
     raise_if_stop_pending(run)
     before = own_child_pids()
     crashes: list[BaseException] = []
-    worker_entered = threading.Event()
     worker_ended = threading.Event()
 
     def work() -> None:
-        worker_entered.set()
         try:
             drive()
         except BaseException as error:
@@ -253,7 +251,7 @@ def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None])
         raise
     finally:
         run.winding_down = True
-        if worker_entered.is_set() and not worker_ended.wait(WORKER_ENDS_SECONDS):
+        if worker.is_alive() and not worker_ended.wait(WORKER_ENDS_SECONDS):
             run.browser_outlived_run = True
             run.fail("the browser worker did not stop; evidence is not trustworthy")
     if crashes:

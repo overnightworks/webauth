@@ -84,7 +84,6 @@ class SuiteState(NamedTuple):
 
 FINISHED_PASSED = SuiteState("FINISHED", "PASSED")
 FINISHED_SKIPPED = SuiteState("FINISHED", "SKIPPED")
-WAITING_FOR_USERINFO = SuiteState("WAITING", None)
 
 
 @dataclass(frozen=True)
@@ -172,13 +171,6 @@ class Skip:
     reason: str
 
 
-KID_ABSENT_SINGLE_KEY = KnownFinding(
-    name="P2: a token without kid against a one-key set (one RS256-eligible key) is refused",
-    decision=token_rejected(RejectionReason.INVALID_KEY_ID),
-    rs256_eligible_keys=1,
-    suite_state=WAITING_FOR_USERINFO,
-)
-
 PLAN_TABLE: tuple[Expectation | Skip, ...] = (
     Expectation(
         "oidcc-client-test", ACCEPTED,
@@ -209,8 +201,8 @@ PLAN_TABLE: tuple[Expectation | Skip, ...] = (
     Expectation(
         "oidcc-client-test-kid-absent-single-jwks", ACCEPTED,
         "OIDCCClientTestKidAbsentSingleJwks publishes one RSA signing key and signs without "
-        "a kid, and expects acceptance (OIDC Core 10.1); webauth requires a kid today.",
-        finding=KID_ABSENT_SINGLE_KEY,
+        "a kid, and expects acceptance (OIDC Core 10.1); webauth verifies a kid-less token "
+        "against a set with exactly one RS256 verification key (#160).",
     ),
     Expectation(
         "oidcc-client-test-kid-absent-multiple-jwks",

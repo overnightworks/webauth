@@ -162,7 +162,8 @@ Each expectation is built from the module's class in the suite's sources
 
 ### Last run: the whole Basic plan
 
-13 modules driven, 1 skipped, 1 known finding, exit status 0:
+Verdict: every applicable module is held, and the one skip is justified. 13 modules
+driven and held, 1 skipped, no known finding, exit status 0, evidence scan clean:
 
 | Module | Suite | webauth decision | Verdict |
 |---|---|---|---|
@@ -171,7 +172,7 @@ Each expectation is built from the module's class in the suite's sources
 | `oidcc-client-test-missing-sub` | FINISHED/PASSED | `invalid-identity-claim` | held |
 | `oidcc-client-test-invalid-aud` | FINISHED/PASSED | `id-token-rejected/invalid-audience` | held |
 | `oidcc-client-test-missing-iat` | FINISHED/PASSED | `id-token-rejected/invalid-claim` | held |
-| `oidcc-client-test-kid-absent-single-jwks` | WAITING/- | `id-token-rejected/invalid-key-id` | FAILED-as-found (P2) |
+| `oidcc-client-test-kid-absent-single-jwks` | FINISHED/PASSED | admitted, UserInfo answered | held |
 | `oidcc-client-test-kid-absent-multiple-jwks` | FINISHED/PASSED | `id-token-rejected/invalid-key-id` | held |
 | `oidcc-client-test-idtoken-sig-rs256` | FINISHED/PASSED | admitted, UserInfo answered | held |
 | `oidcc-client-test-idtoken-sig-none` | FINISHED/SKIPPED | `id-token-rejected/unsupported-algorithm` | held |
@@ -185,15 +186,13 @@ Skip:
 - `oidcc-client-test-userinfo-invalid-sub`: webauth takes identity only from the verified
   ID token and never reads a UserInfo answer, so there is no sub to compare.
 
-Known finding, **P2**: `oidcc-client-test-kid-absent-single-jwks` signs its ID token
-without a `kid`, from a key set whose only RS256-eligible key has none either (the suite
-pads it to 6 keys with three non-RSA signing and two encryption keys). The suite expects
-acceptance (OIDC Core 10.1); webauth refuses the header with `invalid-key-id`, UserInfo is
-never requested and the module stays WAITING.
+`oidcc-client-test-kid-absent-single-jwks` signs without a `kid` from a key set whose only
+RS256-eligible key has none either (6 keys); webauth admits it and UserInfo answers (#160).
+`oidcc-client-test-kid-absent-multiple-jwks` offers three kid-less eligible keys: they are
+admitted to the set but unreachable, so webauth refuses with `invalid-key-id`.
 `oidcc-client-test-idtoken-sig-none` is driven: webauth refuses alg none with
 `id-token-rejected/unsupported-algorithm` and the suite ends the module FINISHED/SKIPPED
-after its timeout. The earlier P1 finding is gone: the 13-key
-sets of the other modules are accepted since #147.
+after its timeout. No known finding is left; the mechanism stays for the next one.
 
 Pull the images first, outside the lock:
 
