@@ -1,11 +1,10 @@
-"""Signing in and out, minus everything that touches a transaction.
+"""Signing in, minus everything that touches a transaction.
 
 The application keeps the login route itself: its advisory lock, the failed
 attempt it commits before refusing, and when the request's work becomes
-durable. What is left over lives here — the cookies a signed-in browser
-carries, the failure budget an address has spent, and whether a password
-admits an account at all. None of it reads or writes a store of its own, so
-none of it can leave half a login behind.
+durable. What is left over lives here — the failure budget an address has
+spent, and whether a password admits an account at all. None of it reads or
+writes a store of its own, so none of it can leave half a login behind.
 """
 
 from __future__ import annotations

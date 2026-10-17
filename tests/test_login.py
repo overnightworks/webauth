@@ -1,4 +1,4 @@
-"""What a login hands out, what it refuses, and what a logout takes back."""
+"""What a login refuses, and whether a password admits an account."""
 
 from __future__ import annotations
 
