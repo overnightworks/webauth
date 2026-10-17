@@ -21,11 +21,11 @@ library does no discovery.
 
 `webauth.oidc_login` carries the pending login for the host, so the host
 keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
-Connect. The host serves two routes over its one `OidcRelyingParty`, built as
-shown under [The relying party](#the-relying-party). In the example, the host's
-own are `describe_the_hosts_refusal`, `open_the_hosts_session`, `accounts`,
-`lock`, `audit` and `client_config`; see [Admitting an identity](#admitting-an-identity)
-and [Session lifetime](#session-lifetime).
+Connect. The host serves two routes over its one `OidcRelyingParty`. In the
+example, `config` is the `WebAuthConfig` built under
+[Session lifetime](#session-lifetime) and `relying_party` is built under
+[The relying party](#the-relying-party); see also
+[Admitting an identity](#admitting-an-identity).
 
 ```python
 from fastapi import Request, Response
@@ -98,18 +98,20 @@ never overwrite each other:
 
 `finish_login` reads the state from the callback, selects exactly the cookie
 that state names and clears it on every outcome — admitted or refused —
-while every other tab's cookie stays. The state is read on its own, so a
-callback naming one state beside a malformed rest — another parameter named
-twice, or one that does not decode — still clears that state's cookie; it is
-refused as `MALFORMED_CALLBACK` when that state's cookie is genuine and as
-`STATE_MISMATCH` otherwise. A callback with no state, an empty one, its
-state twice or an undecodable one selects no cookie. Every one of these, and
-a missing, forged, oversized, unknown-version or duplicated cookie, or a
-genuine cookie of another login, is refused before any token request. A state
-named twice or undecodable is `MALFORMED_CALLBACK`; a missing or empty state, and a
-cookie that is missing, not genuine or another login's, is `STATE_MISMATCH`;
-a malformed rest beside one state is `MALFORMED_CALLBACK` only when that state's
-cookie is genuine.
+while every other tab's cookie stays. A callback names a usable state when it
+carries `state` exactly once, non-empty and decodable.
+
+- With a usable state, a malformed rest (another parameter named twice, or one
+  that does not decode) still clears that state's cookie. It is refused as
+  `MALFORMED_CALLBACK` when that cookie is genuine and as `STATE_MISMATCH`
+  otherwise.
+- Without a usable state no cookie is selected. The callback is refused as
+  `MALFORMED_CALLBACK` when any of its parameters is named twice or does not
+  decode, and as `STATE_MISMATCH` otherwise.
+- A missing, forged, oversized, unknown-version or duplicated cookie, or a
+  genuine cookie of another login, is `STATE_MISMATCH`.
+
+Every one of these is refused before any token request.
 
 **Single use, stated honestly.** A pending login is single-use because its
 cookie is cleared on every outcome and the issuer accepts its authorization
@@ -152,12 +154,12 @@ code only, never its description, and a `code` longer than
 `MAX_AUTHORIZATION_CODE_CHARS` (2048) is `MALFORMED_CALLBACK`. A token answer
 that names any member twice, at any depth, is `TOKEN_ENDPOINT_FAILED` rather
 than letting the last one win. The code is exchanged through the `post_token_request` the host
-injects, authenticated with HTTP Basic, and the ID token is verified by a
+injects, and the ID token is verified by a
 `JwtVerifier` whose one accepted audience is the client ID, then checked for
 the pending nonce and an authorized party: a token for several audiences must
 name the client as its `azp`, and any `azp` a token names must be the client.
 
-A Keycloak realm needs one `OidcClientConfig`. The client id and secret come
+For a Keycloak client the host builds one `OidcClientConfig`. The client id and secret come
 from the host's secret channel, never from source:
 
 ```python
@@ -276,7 +278,7 @@ session cookie itself calls this function instead of `request.cookies`.
 ## Configuration
 
 The host builds one `WebAuthConfig` by keyword and installs it. It must state
-`cookie_max_age_seconds`, a positive whole number of seconds: the browser cookie's
+`cookie_max_age_seconds`, the browser cookie's
 `Max-Age`; [Session lifetime](#session-lifetime) states the rule.
 Fields a host may leave out:
 
@@ -644,11 +646,11 @@ It leaves the application everything that touches the application's own truth:
   path.
 - **Identity.** It issues no access or ID tokens: it is no identity provider, and
   it verifies the ID tokens an issuer made.
-- **HTTP framing** is the ASGI server's job: uvicorn refuses conflicting
-  `Content-Length` values or an unsupported `Transfer-Encoding` before the app
-  sees them, and reads a `Content-Length` beside `Transfer-Encoding: chunked` as
-  chunked, as HTTP requires; webauth's body-size limit counts the streamed bytes
-  either way.
+- **HTTP framing** is the ASGI server's job. uvicorn refuses conflicting
+  `Content-Length` values and an unsupported `Transfer-Encoding` before the app
+  sees them. A `Content-Length` beside `Transfer-Encoding: chunked` is read as
+  chunked by its h11 parser and refused by its httptools parser, both of which
+  HTTP allows. webauth's body-size limit counts the streamed bytes either way.
 
 ## Install
 
