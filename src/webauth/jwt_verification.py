@@ -21,11 +21,11 @@ expires on the injected monotonic clock. Keys published for another purpose —
 encryption, another algorithm or key type — are passed over, not refused,
 because issuers such as Keycloak publish them beside the signing keys. They
 do not count toward `MAX_KEY_SET_KEYS`, which bounds the RS256 verification
-keys, named or not, the only ones that cost key construction and cache space. The size of
-the whole document is bounded by `MAX_KEY_SET_BYTES`, so passed-over entries
-cost a few lookups each and nothing more. Each entry is checked in this order:
-an object without a secret member, then RS256 eligibility, then the count, then
-the key itself.
+keys, named or not, the only ones that cost key construction and cache space.
+The size of the whole document is bounded by `MAX_KEY_SET_BYTES`, so
+passed-over entries cost a few lookups each and nothing more. Each entry is
+checked in this order: an object without a secret member, then RS256
+eligibility, then the count, then the key itself.
 
 A token without a `kid` member is read against the key set's only RS256
 verification key, whether or not that key carries a `kid`; against several
@@ -59,15 +59,14 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
 
-# The aliased names are re-exported: hosts imported the key-set fetch, its
-# limits and its error from this module before they moved to webauth.https_client,
-# and webauth.oidc imports is_https_url and ExchangeFailure from here.
-from webauth.https_client import KEY_SET_FETCH_TIMEOUT_SECONDS as KEY_SET_FETCH_TIMEOUT_SECONDS
-from webauth.https_client import MAX_KEY_SET_BYTES as MAX_KEY_SET_BYTES
-from webauth.https_client import ExchangeFailure as ExchangeFailure
-from webauth.https_client import KeySetFetchError as KeySetFetchError
-from webauth.https_client import fetch_key_set_over_https as fetch_key_set_over_https
-from webauth.https_client import is_https_url as is_https_url
+# Plain imports are not public here; ExchangeFailure is the one relay, listed in
+# __all__: webauth.oidc may not import its owner, webauth.https_client.
+from webauth.https_client import (
+    MAX_KEY_SET_BYTES,
+    ExchangeFailure,
+    KeySetFetchError,
+    is_https_url,
+)
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +94,20 @@ MonotonicClock = Callable[[], float]
 """Seconds on a clock that never jumps; ages the key set and its cooldown."""
 KeySetFetch = Callable[[str], bytes]
 """Fetches the key set document at the URL, raising `KeySetFetchError` on failure."""
+
+__all__ = [
+    "KEY_SET_REFRESH_COOLDOWN_SECONDS",
+    "MAX_KEY_SET_KEYS",
+    "MAX_TOKEN_CHARACTERS",
+    "ExchangeFailure",
+    "JwtVerifier",
+    "KeySetFetch",
+    "MonotonicClock",
+    "Rejected",
+    "RejectionReason",
+    "VerifiedClaims",
+    "WallClock",
+]
 
 
 class RejectionReason(StrEnum):
@@ -536,11 +549,11 @@ def _rs256_verification_jwks(jwks: list[object]) -> Iterator[dict[str, object]]:
             raise _InvalidKeySetError(_RefreshFailure.KEY_NOT_AN_OBJECT)
         if _SECRET_KEY_MEMBERS & jwk.keys():
             raise _InvalidKeySetError(_RefreshFailure.SECRET_KEY_PUBLISHED)
-        if _is_rs256_verification_key(jwk):
+        if is_rs256_verification_key(jwk):
             yield jwk
 
 
-def _is_rs256_verification_key(jwk: Mapping[str, object]) -> bool:
+def is_rs256_verification_key(jwk: Mapping[str, object]) -> bool:
     """An RSA key may limit itself by `alg`, `use` and `key_ops`; each it
     names must allow verifying an RS256 signature."""
     key_operations = jwk.get("key_ops", ["verify"])

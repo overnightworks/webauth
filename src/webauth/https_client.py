@@ -59,6 +59,16 @@ KEY_SET_FETCH_DEADLINE_SECONDS = 10
 TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
 MAX_KEY_SET_BYTES = 64 * 1024
 
+__all__ = [
+    "KEY_SET_FETCH_DEADLINE_SECONDS",
+    "MAX_KEY_SET_BYTES",
+    "TOKEN_EXCHANGE_DEADLINE_SECONDS",
+    "ExchangeFailure",
+    "KeySetFetchError",
+    "fetch_key_set_over_https",
+    "is_https_url",
+]
+
 _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 

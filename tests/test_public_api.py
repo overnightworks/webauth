@@ -1,43 +1,57 @@
-"""The names the OIDC-only typing host imports are declared public by their modules."""
+"""Every module declares its public names, and the typing host imports only those."""
 
 from __future__ import annotations
 
 import ast
 import importlib
+import pkgutil
 from pathlib import Path
 
 import pytest
 
+import webauth
+
 TYPING_HOST = Path(__file__).parent / "typing" / "oidc_host.py"
+WEBAUTH_MODULES = [
+    "webauth",
+    *(module.name for module in pkgutil.walk_packages(webauth.__path__, "webauth.")),
+]
+HOST_TREE = ast.parse(TYPING_HOST.read_text())
 
 
-def _names_imported_from_webauth(source: str) -> list[tuple[str, str]]:
+def _is_webauth_module(name: str | None) -> bool:
+    return name is not None and name.split(".")[0] == "webauth"
+
+
+def _names_imported_from_webauth() -> list[tuple[str, str]]:
     return [
-        (statement.module, alias.name)
-        for statement in ast.walk(ast.parse(source))
-        if isinstance(statement, ast.ImportFrom)
-        and statement.module is not None
-        and statement.module.split(".")[0] == "webauth"
+        (statement.module or "", alias.name)
+        for statement in ast.walk(HOST_TREE)
+        if isinstance(statement, ast.ImportFrom) and _is_webauth_module(statement.module)
         for alias in statement.names
     ]
 
 
-def _declared_public_names(module_name: str) -> list[str] | None:
-    return getattr(importlib.import_module(module_name), "__all__", None)
+def _module_imports_in_the_host() -> list[str]:
+    return [
+        alias.name
+        for statement in ast.walk(HOST_TREE)
+        if isinstance(statement, ast.Import)
+        for alias in statement.names
+        if _is_webauth_module(alias.name)
+    ]
 
 
-# Transitional: S10d makes every module declare __all__ and drops the filter.
-_DECLARED_IMPORTS = sorted(
-    (module, name)
-    for module, name in _names_imported_from_webauth(TYPING_HOST.read_text())
-    if _declared_public_names(module) is not None
-)
+def test_the_typing_host_imports_webauth_names_only_with_from_statements() -> None:
+    assert _module_imports_in_the_host() == []
+    assert _names_imported_from_webauth()
 
 
-def test_the_typing_host_imports_from_modules_that_declare_their_public_names() -> None:
-    assert _DECLARED_IMPORTS
+@pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
+def test_every_module_declares_its_public_names(module_name: str) -> None:
+    assert isinstance(getattr(importlib.import_module(module_name), "__all__", None), list)
 
 
-@pytest.mark.parametrize(("module", "name"), _DECLARED_IMPORTS)
+@pytest.mark.parametrize(("module", "name"), sorted(set(_names_imported_from_webauth())))
 def test_every_name_the_oidc_only_host_imports_is_public(module: str, name: str) -> None:
-    assert name in (_declared_public_names(module) or [])
+    assert name in importlib.import_module(module).__all__

@@ -63,6 +63,14 @@ if TYPE_CHECKING:
     from webauth.oidc import OidcIdentity, OidcRelyingParty, TokenRequest
     from webauth.ports import AuditSink, SubjectUserStore, UserRecord, WriteLock
 
+__all__ = [
+    "AdmissionRefusal",
+    "admit_identity",
+    "finish_login",
+    "post_token_request_over_https",
+    "start_login",
+]
+
 MAX_PENDING_LOGINS: Final = 5
 """Pending-login cookies a browser keeps at once. A start beyond them
 evicts the oldest, so repeated starts never crowd out the session cookies."""

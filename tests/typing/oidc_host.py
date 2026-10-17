@@ -16,27 +16,101 @@ from datetime import datetime
 from fastapi import FastAPI, Request, Response
 from pydantic import SecretStr
 
-from webauth.config import WebAuthConfig
-from webauth.cookies import clear_session_cookies, issue_session_cookies
-from webauth.dependencies import AuthDependencies, AuthenticatedUser, current_user_dependency
-from webauth.middleware import install_web_auth_middleware
-from webauth.oidc import OidcRefusal, OidcRelyingParty
-from webauth.oidc_login import AdmissionRefusal, finish_login, start_login
-from webauth.policies import CsrfPolicy, SecurityHeadersPolicy, default_content_security_policy
+from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.cookies import (
+    DEFAULT_CSRF_COOKIE_NAME,
+    DEFAULT_SESSION_COOKIE_NAME,
+    MAX_SESSION_COOKIE_CHARS,
+    PLAIN_CSRF_COOKIE_NAME,
+    PLAIN_SESSION_COOKIE_NAME,
+    PendingLogin,
+    clear_session_cookies,
+    issue_session_cookies,
+    session_reference,
+)
+from webauth.dependencies import (
+    AuthDependencies,
+    AuthenticatedUser,
+    LoginRedirect,
+    current_user_dependency,
+    session_id_from_request,
+    unauthenticated_response,
+)
+from webauth.https_client import (
+    KEY_SET_FETCH_DEADLINE_SECONDS,
+    MAX_KEY_SET_BYTES,
+    TOKEN_EXCHANGE_DEADLINE_SECONDS,
+    ExchangeFailure,
+    KeySetFetchError,
+    fetch_key_set_over_https,
+    is_https_url,
+)
+from webauth.jwt_verification import (
+    MAX_KEY_SET_KEYS,
+    JwtVerifier,
+    KeySetFetch,
+    MonotonicClock,
+    Rejected,
+    VerifiedClaims,
+    WallClock,
+)
+from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
+from webauth.middleware import (
+    BodySizeLimitMiddleware,
+    CsrfOriginMiddleware,
+    CsrfTokenMiddleware,
+    IpRateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    install_web_auth_middleware,
+)
+from webauth.oidc import (
+    MAX_AUTHORIZATION_CODE_CHARS,
+    MAX_TOKEN_RESPONSE_BYTES,
+    PENDING_LOGIN_MAX_AGE_SECONDS,
+    OidcClientConfig,
+    OidcIdentity,
+    OidcRefusal,
+    OidcRelyingParty,
+    TokenEndpointError,
+    TokenRequestPost,
+)
+from webauth.oidc_login import (
+    AdmissionRefusal,
+    finish_login,
+    post_token_request_over_https,
+    start_login,
+)
+from webauth.policies import (
+    DEFAULT_PERMISSIONS_POLICY,
+    BodySizePolicy,
+    CsrfPolicy,
+    SecurityHeadersPolicy,
+    default_content_security_policy,
+)
 from webauth.ports import (
     AuditSink,
+    RateLimitBackend,
     SessionAdministrationStore,
     SessionIdentityChanged,
     SessionLivenessPolicy,
     SessionRecord,
+    SessionRecordStore,
     SubjectUserStore,
+    UserManagementError,
     UserManagementEvent,
+    UsernameTakenError,
     UserRecord,
     WriteLock,
 )
 from webauth.proxies import TrustedProxies
-from webauth.session_administration import SessionAdministration
-from webauth.session_ending import end_session
+from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
+from webauth.session_administration import (
+    NotAnAdminError,
+    SessionAdministration,
+    SessionSummary,
+    UnknownSessionError,
+)
+from webauth.session_ending import end_session, end_user_sessions, prune_sessions
 
 
 @dataclass
@@ -193,3 +267,22 @@ def a_host_signs_a_session_in_and_out(response: Response, config: WebAuthConfig)
 
 def a_host_ends_a_session() -> None:
     end_session(HostSessions(), session_id="session-id")
+
+
+def a_host_names_the_documented_surface() -> tuple[object, ...]:
+    return (
+        BodySizeLimitMiddleware, BodySizePolicy, CsrfOriginMiddleware, CsrfTokenMiddleware,
+        DEFAULT_CSRF_COOKIE_NAME, DEFAULT_PERMISSIONS_POLICY, DEFAULT_SESSION_COOKIE_NAME,
+        ExchangeFailure, ExpiryColumnLiveness, IdleWindowLiveness, IpRateLimitMiddleware,
+        JwtVerifier, KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetch, KeySetFetchError,
+        LoginRedirect, MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
+        MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock, NotAnAdminError,
+        OidcClientConfig, OidcIdentity, PENDING_LOGIN_MAX_AGE_SECONDS, PLAIN_CSRF_COOKIE_NAME,
+        PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend, Rejected,
+        RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore, SessionSummary,
+        SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS, TokenEndpointError,
+        TokenRequestPost, UnknownSessionError, UserManagementError, UsernameTakenError,
+        VerifiedClaims, WallClock, end_user_sessions, fetch_key_set_over_https,
+        install_web_auth_config, is_https_url, post_token_request_over_https, prune_sessions,
+        session_id_from_request, session_reference, unauthenticated_response,
+    )

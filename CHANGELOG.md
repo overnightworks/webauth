@@ -74,12 +74,13 @@ Versions before 0.3.0 and releases without an entry here are described in the
   | IPv6Network`), `FORWARDED_FOR_HEADER`, `FORWARDED_PROTO_HEADER`, `HTTPS_SCHEME`,
   `UNKNOWN_CLIENT_IP`, `ZONE_SEPARATOR` and `log`; `rate_limit.PRUNE_INTERVAL_SECONDS`;
   `middleware.rate_limit.log` and `LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS`;
-  `middleware.refusal.RefusalMiddleware`. Every policy name stays public, and so do both
+  `middleware.refusal.RefusalMiddleware` (the module is now the private
+  `middleware._refusal`). Every policy name stays public, and so do both
   spellings of the middleware classes (`webauth.middleware` and its submodules).
 - A module's public names are the names its `__all__` lists; any other name may
   change or disappear in any release (README, Versioning). A name a module imports is
-  public there only when its `__all__` lists it as a deliberate re-export, which today
-  is only `webauth.middleware`; import any other imported name from the module that
+  public there only when its `__all__` lists it as a deliberate re-export, as `webauth.middleware`
+  does for its middleware names and `webauth.jwt_verification` for `ExchangeFailure`; import any other imported name from the module that
   defines it, for example `webauth.config.WebAuthConfig` (not
   `webauth.dependencies.WebAuthConfig`) and `webauth.proxies.TrustedProxies` (not
   `webauth.config.TrustedProxies`). `webauth.config`, `webauth.cookies`,
@@ -116,6 +117,23 @@ Versions before 0.3.0 and releases without an entry here are described in the
   - `session_administration`: `require_admin` (no public equivalent; `revoke_session`
     checks the role).
   - `ports` and `session_ending`: every name of their own stays public.
+- `webauth.jwt_verification` no longer re-exports `KEY_SET_FETCH_TIMEOUT_SECONDS`,
+  `MAX_KEY_SET_BYTES`, `KeySetFetchError`, `fetch_key_set_over_https` and `is_https_url`:
+  import the four public ones (`MAX_KEY_SET_BYTES`, `KeySetFetchError`,
+  `fetch_key_set_over_https`, `is_https_url`) from `webauth.https_client`.
+  `KEY_SET_FETCH_TIMEOUT_SECONDS` is internal and has no new public home: omit
+  `timeout_seconds` in `fetch_key_set_over_https` to get the library default. Importing
+  `fetch_key_set_over_https` or `KEY_SET_FETCH_TIMEOUT_SECONDS` from the old place raises
+  `ImportError`, and a host's pyright reports the others as not exported.
+  `ExchangeFailure` stays importable from both until the transport split.
+  `webauth.https_client`, `webauth.jwt_verification`, `webauth.oidc`, `webauth.oidc_login`
+  and `webauth` declare `__all__`. Not public: `https_client.post_form_over_https`,
+  `HttpsAnswer`, `HttpsExchangeError` and `KEY_SET_FETCH_TIMEOUT_SECONDS`;
+  `jwt_verification.strict_json_object`, `VerificationRefusal`, `MAX_JSON_NESTING_DEPTH`,
+  `MAX_KEY_ID_CHARACTERS`, `KEY_SET_TTL_SECONDS`, `MIN_RSA_KEY_BITS` and `log`;
+  `oidc.callback_state`; `oidc_login.MAX_PENDING_LOGINS` and
+  `TOKEN_REQUEST_TIMEOUT_SECONDS`. A name a module imports is public only where it is
+  defined: `OidcRefusal` from `webauth.oidc`, `PendingLogin` from `webauth.cookies`.
 
 **Changed**
 

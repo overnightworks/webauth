@@ -46,7 +46,7 @@ from playwright.sync_api import Browser, sync_playwright
 from shim import TlsShim
 from suite import HeldSuite, SuiteApi
 
-from webauth.jwt_verification import RejectionReason, _is_rs256_verification_key
+from webauth.jwt_verification import RejectionReason, is_rs256_verification_key
 from webauth.oidc import OidcRefusalReason
 
 SUITE_HOST = "conformance.example.test"
@@ -458,7 +458,7 @@ def count_rs256_eligible_keys_at_jwks_url(
     )
     answer.raise_for_status()
     keys = answer.json()["keys"]
-    rs256_eligible_keys = sum(1 for key in keys if _is_rs256_verification_key(key))
+    rs256_eligible_keys = sum(1 for key in keys if is_rs256_verification_key(key))
     run.record(
         f"{module} key set at the host's jwks_url held: {len(keys)} keys, "
         f"{rs256_eligible_keys} RS256-eligible"
