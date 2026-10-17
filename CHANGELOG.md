@@ -34,6 +34,13 @@ Versions before 0.3.0 and releases without an entry here are described in the
   event kinds `ROLE_CHANGED`, `USER_DEACTIVATED`, `SESSIONS_REVOKED`,
   `FIRST_ADMIN_CREATED`, `PASSWORD_SET_BY_ADMIN` and `PASSWORD_CHANGED` and
   `UserManagementEvent.session_count`. People, roles and blocking move to the issuer.
+- The password login is gone. The module `webauth.login` is removed with `LoginOutcome`,
+  `LoginRefusal`, `login_attempt_budget`, `judge_credentials`, `http_refusal`,
+  `ACCOUNT_LOCKED_DETAIL`, `TOO_MANY_LOGIN_ATTEMPTS_DETAIL`, `INVALID_CREDENTIALS_DETAIL`
+  and `RETRY_AFTER_HEADER`, and `ports.LoginAttemptStore` with it. `WebAuthConfig` loses
+  `login_rate_limit`, `login_lockout_threshold`, `login_lockout_window_seconds` and
+  `login_rate_window_seconds`, and `DEFAULT_LOGIN_RATE_WINDOW_SECONDS` is gone: a host that
+  passes any of the four gets `TypeError`.
 
 ## 0.14.0
 

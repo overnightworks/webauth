@@ -65,7 +65,19 @@ def test_names_and_roles_default_to_the_conventional_ones() -> None:
     assert config.cookie_secure is True
     assert config.admin_role == "admin"
     assert config.user_role == "user"
-    assert config.login_rate_window_seconds == 300
+
+
+@pytest.mark.parametrize("removed_keyword", [
+    "login_rate_limit",
+    "login_lockout_threshold",
+    "login_lockout_window_seconds",
+    "login_rate_window_seconds",
+])
+def test_a_removed_password_login_number_is_refused_as_an_unknown_keyword(
+    removed_keyword: str,
+) -> None:
+    with pytest.raises(TypeError, match=removed_keyword):
+        a_web_auth_config(**{removed_keyword: 5})
 
 
 @pytest.mark.parametrize("value", [None, "none"])

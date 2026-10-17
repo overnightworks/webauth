@@ -109,9 +109,6 @@ def a_web_auth_config(**overrides: object) -> WebAuthConfig:
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "session_max_age_seconds": SESSION_MAX_AGE_SECONDS,
         "session_liveness": ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS),
-        "login_rate_limit": 5,
-        "login_lockout_threshold": 15,
-        "login_lockout_window_seconds": 3600,
     }
     return WebAuthConfig(**{**defaults, **overrides})
 
@@ -315,23 +312,6 @@ class WriteLockInMemory:
                 yield
             finally:
                 self._hold_depth -= 1
-
-
-@dataclass
-class LegibleHasher:
-    """A host-supplied ``PasswordHasher`` double whose hashes are legible.
-
-    It stands in for a host that plugs in its own algorithm: a test can inject
-    it and read straight off the stored hash which password produced it.
-    """
-
-    prefix: str = "argon2"
-
-    def hash(self, password: str) -> str:
-        return f"{self.prefix}:{password}"
-
-    def verify(self, password: str, stored_hash: str | None) -> bool:
-        return stored_hash == f"{self.prefix}:{password}"
 
 
 @dataclass
