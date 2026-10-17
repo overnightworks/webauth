@@ -1,8 +1,0 @@
-claim_id = "ad55a4166e4e4e4d8f997789e968cd3a"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "7ae8a3362c782393919fec3007fd3fa22641d8c2"
-branch = "claude/issue-146-w8-s6-password-hash-verlaesst-userrecord"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_oidc_login.py", "tests/test_session_administration.py", "tests/webauth_arrangement.py"]
-opened_commit = "ab1b731036ff33dfb8646f69b34574119fe56cbe"
-whole_reason = "One removal: the password field of the account port and the refusal that read it, with their tests and the documents that name them"
