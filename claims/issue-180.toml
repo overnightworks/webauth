@@ -1,8 +1,0 @@
-claim_id = "8d485f98c8354b07a1255d7a18b1150b"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "7d241fc009505f87d9459c09bbbda4e4978c543c"
-branch = "claude/issue-180-ruff-bsup-redis"
-scope = [".importlinter", "AGENTS.md", "e2e/oidc/certificates.py", "e2e/oidc/evidence.py", "e2e/oidc/harness.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "e2e/oidc/stack.py", "e2e/oidc/suite.py", "pyproject.toml", "src/webauth/dependencies.py", "src/webauth/jwt_verification.py", "src/webauth/liveness.py", "src/webauth/oidc.py", "tests/test_https_client.py", "tests/test_jwt_verification.py", "tests/test_liveness.py", "tests/test_oidc.py", "tests/test_oidc_login.py", "tests/test_public_api.py", "tests/test_session_administration.py", "tests/test_session_ending.py", "tests/webauth_arrangement.py"]
-opened_commit = "b749d77412aafb6da9252b15a30e1521fd64ede0"
-whole_reason = "One rule-set change: the selection and the fixes it demands cannot land apart; the tests and e2e edits are mechanical one-line fixes."
