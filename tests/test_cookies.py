@@ -150,8 +150,8 @@ def test_verify_rejects_another_secret() -> None:
             id="a CSRF token appended to its signing input",
         ),
         pytest.param(
-            sign_pending_login(_PENDING, _TEST_SECRET),
-            id="a signed pending login",
+            f"oidc-pending:{sign_pending_login(_PENDING, _TEST_SECRET)}",
+            id="a pending-login signature appended to its signing input",
         ),
         pytest.param(
             signed_like_release_0_14("my-session-token", _TEST_SECRET),
