@@ -432,6 +432,22 @@ class TestRefusedInstallation:
             install_full_stack(app)
         assert app.user_middleware == before
 
+    def test_every_middleware_a_full_install_adds_is_one_the_installer_refuses_to_find_present(
+        self,
+    ) -> None:
+        installed = a_fresh_app()
+        install_full_stack(installed)
+        accepted = []
+        for entry in installed.user_middleware:
+            carrier = a_fresh_app()
+            carrier.add_middleware(entry.cls, *entry.args, **entry.kwargs)
+            try:
+                install_full_stack(carrier)
+            except RuntimeError:
+                continue
+            accepted.append(entry.cls.__name__)
+        assert accepted == []
+
     def test_refused_repeat_leaves_the_budget_charged_once(self) -> None:
         app = a_fresh_app()
         install_full_stack(app, max_requests=2)

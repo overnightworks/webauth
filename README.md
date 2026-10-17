@@ -618,7 +618,7 @@ It owns the machinery an application should not rebuild:
 | Module | Owns |
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
-| `webauth.cookies` | The signed session cookie and the CSRF token bound to it, issued and cleared |
+| `webauth.cookies` | The signed session cookie, the CSRF token bound to it and the pending-login cookie, issued and cleared |
 | `webauth.dependencies` | Turning a signed cookie into the account that made the request |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |

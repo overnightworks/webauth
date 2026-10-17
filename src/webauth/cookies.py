@@ -56,6 +56,9 @@ _PENDING_LOGIN_VERSION: Final = "v1"
 _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
 _SESSION_SIGNING_PREFIX: Final = b"session:"
 _CSRF_SIGNING_PREFIX: Final = b"csrf:"
+# The callback is a top-level navigation from the issuer's site, which a
+# Strict cookie would not accompany.
+_PENDING_LOGIN_SAMESITE: Final = "lax"
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
@@ -252,6 +255,32 @@ class PendingLogin:
     nonce: str = field(repr=False)
     code_verifier: str = field(repr=False)
     issued_at: int
+
+
+def issue_pending_login_cookie(
+    response: Response, pending: PendingLogin, *, max_age_seconds: int, config: WebAuthConfig,
+) -> None:
+    """Hand the browser the signed pending login, in a cookie named for its state."""
+    response.set_cookie(
+        pending_login_cookie_name(pending.state, secure=config.cookie_secure),
+        sign_pending_login(pending, config.signing_key),
+        max_age=max_age_seconds,
+        httponly=True,
+        samesite=_PENDING_LOGIN_SAMESITE,
+        secure=config.cookie_secure,
+        path=COOKIE_PATH,
+    )
+
+
+def clear_pending_login_cookie(response: Response, name: str, config: WebAuthConfig) -> None:
+    """Take a pending-login cookie back, repeating the attributes it was set with."""
+    response.delete_cookie(
+        name,
+        path=COOKIE_PATH,
+        secure=config.cookie_secure,
+        httponly=True,
+        samesite=_PENDING_LOGIN_SAMESITE,
+    )
 
 
 def sign_pending_login(pending: PendingLogin, secret: bytes) -> str:

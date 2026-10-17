@@ -30,12 +30,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 from webauth.cookies import (
-    COOKIE_PATH,
+    clear_pending_login_cookie,
     cookie_pairs,
     cookie_values,
     is_pending_login_cookie_name,
+    issue_pending_login_cookie,
     pending_login_cookie_name,
-    sign_pending_login,
     verify_pending_login,
 )
 from webauth.https_client import (
@@ -78,9 +78,6 @@ TOKEN_REQUEST_TIMEOUT_SECONDS: Final = 5
 """Seconds ``post_token_request_over_https`` waits to connect, and for each
 read, by default."""
 
-# The callback is a top-level navigation from the issuer's site, which a
-# Strict cookie would not accompany.
-_PENDING_LOGIN_SAMESITE: Final = "lax"
 # A cookie that does not verify, or whose name appears twice, ranks below
 # every genuine one and is evicted first.
 _UNRANKED: Final = -1
@@ -101,15 +98,12 @@ def start_login(
     the authorization URL the host redirects the browser to."""
     authorization = relying_party.begin_login()
     for name in _pending_login_cookies_to_evict(request, config):
-        _clear_pending_login_cookie(response, name, config)
-    response.set_cookie(
-        pending_login_cookie_name(authorization.pending.state, secure=config.cookie_secure),
-        sign_pending_login(authorization.pending, config.signing_key),
-        max_age=PENDING_LOGIN_MAX_AGE_SECONDS,
-        httponly=True,
-        samesite=_PENDING_LOGIN_SAMESITE,
-        secure=config.cookie_secure,
-        path=COOKIE_PATH,
+        clear_pending_login_cookie(response, name, config)
+    issue_pending_login_cookie(
+        response,
+        authorization.pending,
+        max_age_seconds=PENDING_LOGIN_MAX_AGE_SECONDS,
+        config=config,
     )
     return authorization.url
 
@@ -140,7 +134,7 @@ def finish_login(
     if isinstance(state, OidcRefusal):
         return state
     cookie_name = pending_login_cookie_name(state, secure=config.cookie_secure)
-    _clear_pending_login_cookie(response, cookie_name, config)
+    clear_pending_login_cookie(response, cookie_name, config)
     pending = _sole_pending_login(request, cookie_name, config)
     if pending is None:
         return OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
@@ -182,16 +176,6 @@ def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> 
 def _issued_at(cookie_value: str, config: WebAuthConfig) -> int:
     pending = verify_pending_login(cookie_value, config.signing_key)
     return _UNRANKED if pending is None else pending.issued_at
-
-
-def _clear_pending_login_cookie(response: Response, name: str, config: WebAuthConfig) -> None:
-    response.delete_cookie(
-        name,
-        path=COOKIE_PATH,
-        secure=config.cookie_secure,
-        httponly=True,
-        samesite=_PENDING_LOGIN_SAMESITE,
-    )
 
 
 def admit_identity(
