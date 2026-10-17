@@ -37,14 +37,17 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - The password login is gone. The module `webauth.login` is removed with `LoginOutcome`,
   `LoginRefusal`, `login_attempt_budget`, `judge_credentials`, `http_refusal`,
   `ACCOUNT_LOCKED_DETAIL`, `TOO_MANY_LOGIN_ATTEMPTS_DETAIL`, `INVALID_CREDENTIALS_DETAIL`
-  and `RETRY_AFTER_HEADER`, and `ports.LoginAttemptStore` with it. `WebAuthConfig` loses
-  `login_rate_limit`, `login_lockout_threshold`, `login_lockout_window_seconds` and
+  and `RETRY_AFTER_HEADER`, and `ports.LoginAttemptStore` with it. A host signs in through
+  OpenID Connect instead: `webauth.oidc_login.start_login` and `finish_login` (README,
+  "OpenID Connect login"). `WebAuthConfig` loses `login_rate_limit`,
+  `login_lockout_threshold`, `login_lockout_window_seconds` and
   `login_rate_window_seconds`, and `DEFAULT_LOGIN_RATE_WINDOW_SECONDS` is gone: a host that
   passes any of the four gets `TypeError`.
 - `UserRecord.password_hash` and `AdmissionRefusal.SUBJECT_HELD_BY_PASSWORD_ACCOUNT` are
   removed. An account whose id equals the subject character for character is
-  admitted whatever fields the host's model has, and `SubjectUserStore.get` must
-  compare ids exactly (no case, accent or trailing-space folding); a host that
+  admitted whatever other fields the host's model has, unless it is inactive:
+  `admit_identity` still refuses that as `account-deactivated`. `SubjectUserStore.get`
+  must compare ids exactly (no case, accent or trailing-space folding); a host that
   migrates legacy accounts makes sure that no legacy id can equal a subject of
   the bound issuer.
 - The module `webauth.passwords` is gone with `Argon2idPasswordHasher`, `OWASP_ARGON2ID`,
@@ -59,11 +62,16 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `session_max_age_seconds` is refused as an unknown keyword. `WebAuthConfig` takes
   keyword arguments only, so a positional call is a `TypeError`.
 - The default Content-Security-Policy holds no host fact: `style-src` is `'self'` without
-  `'unsafe-inline'`, and `font-src` is `'self'` without Google Fonts. A host adds its own
-  sources per directive with `default_content_security_policy(added_sources={CspDirective.STYLE_SRC: [...]})`.
-  `script_hashes` is validated too: each element must be a bare `sha256-`, `sha384-` or
-  `sha512-` hash, and anything else is a `ValueError` (it closed an injection through the
-  unchecked text).
+  `'unsafe-inline'`, and `font-src` is `'self'` without Google Fonts. The signature is
+  now `default_content_security_policy(script_hashes=(), *, added_sources=None)`. A host
+  adds its own sources per directive with
+  `added_sources={CspDirective.STYLE_SRC: [...]}`, where `CspDirective` names the
+  directives it may extend, and each source is validated against a declared CSP3 subset.
+  A non-empty `CspDirective.FRAME_ANCESTORS` addition replaces the default `'none'`.
+  `script_hashes` is validated too (it closed an injection through the unchecked text):
+  each element must be a bare `sha256-`, `sha384-` or `sha512-` hash. A malformed hash or
+  source is a `ValueError` naming the directive; a bare string, a non-sequence, a
+  non-mapping `added_sources` or a non-string element is a `TypeError`.
 - `webauth.proxies`, `webauth.rate_limit`, `webauth.policies` and the `webauth.middleware`
   submodules declare `__all__`. Not public: `proxies.get_client_ip` (call
   `resolve_client_ip(request)`), `budget_address` (it pools IPv6 addresses into a network,
@@ -126,7 +134,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `timeout_seconds` in `fetch_key_set_over_https` to get the library default. Importing
   `fetch_key_set_over_https` or `KEY_SET_FETCH_TIMEOUT_SECONDS` from the old place raises
   `ImportError`, and a host's pyright reports the others as not exported.
-  `ExchangeFailure` stays importable from both until the transport split.
+  `ExchangeFailure` stays importable from both modules.
   `webauth.https_client`, `webauth.jwt_verification`, `webauth.oidc`, `webauth.oidc_login`
   and `webauth` declare `__all__`. Not public: `https_client.post_form_over_https`,
   `HttpsAnswer`, `HttpsExchangeError` and `KEY_SET_FETCH_TIMEOUT_SECONDS`;
@@ -136,8 +144,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `TOKEN_REQUEST_TIMEOUT_SECONDS`; `jwt_verification._is_rs256_verification_key` is now
   the package-internal `is_rs256_verification_key` (no public equivalent). A name a
   module imports is public only where it is defined, unless its `__all__` lists it as
-  a deliberate re-export: `OidcRefusal` from `webauth.oidc`, `PendingLogin` from
-  `webauth.cookies`.
+  a deliberate re-export, for example `OidcRefusal` from `webauth.oidc` (not
+  `oidc_login`) and `PendingLogin` from `webauth.cookies` (not `oidc`).
 
 **Changed**
 
