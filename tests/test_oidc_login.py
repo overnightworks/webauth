@@ -47,6 +47,7 @@ from webauth_arrangement import (
     UsersInMemory,
     UsersWithCaseInsensitiveUsernames,
     WriteLockInMemory,
+    _require_held_lock,
     a_web_auth_config,
     signed_without_bound,
 )
@@ -453,6 +454,7 @@ class UsersReplacingRecords(UsersInMemory):
     """A store whose records are frozen: a role write returns a new record."""
 
     def set_role(self, user_id: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
         replaced = replace(self._users[user_id], role=role)
         self._users[user_id] = replaced
         self._usernames[replaced.username] = replaced
@@ -463,6 +465,7 @@ class UsersMissingTheRoleRow(UsersInMemory):
     """A store whose role write finds no row, as after a concurrent delete."""
 
     def set_role(self, user_id: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
         raise LookupError(user_id)
 
 
