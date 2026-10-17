@@ -14,6 +14,14 @@ if TYPE_CHECKING:
 
     from webauth.policies import SecurityHeadersPolicy
 
+__all__ = [
+    "CONTENT_TYPE_OPTIONS",
+    "FRAME_OPTIONS",
+    "REFERRER_POLICY",
+    "STRICT_TRANSPORT_SECURITY",
+    "SecurityHeadersMiddleware",
+]
+
 CONTENT_TYPE_OPTIONS: Final = "nosniff"
 FRAME_OPTIONS: Final = "DENY"
 REFERRER_POLICY: Final = "strict-origin-when-cross-origin"

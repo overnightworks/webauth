@@ -15,6 +15,10 @@ from webauth.proxies import budget_address, resolve_client_ip
 if TYPE_CHECKING:
     from starlette.requests import Request
 
+__all__ = [
+    "IpRateLimitMiddleware",
+]
+
 log = logging.getLogger(__name__)
 
 LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
