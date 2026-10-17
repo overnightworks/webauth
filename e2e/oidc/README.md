@@ -7,7 +7,11 @@ Keycloak's own form, and the library calls the real token and key-set
 endpoints with its production transport.
 
 `harness.py` is the run plumbing every driver here shares (runtime directory,
-host process, first-signal handling, browser worker, run record, evidence scan).
+host process, first-signal handling, browser worker, run record, evidence scan). It
+also owns the pinned Chromium (`launch_pinned_chromium`: each name mapped to a loopback
+port, one leaf certificate trusted by its public-key hash) and the recording context
+(`recording_context`: requests logged field by field, URL credentials and cookie values
+registered).
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
 Playwright browser, and takes minutes. CI only lints `e2e/`.
@@ -111,37 +115,41 @@ throwaway certificate in front of the server's port, which is published on
 `127.0.0.1` only (the dev-mode API has no login).
 
 The run creates `oidcc-client-basic-certification-test-plan` with a throwaway
-client secret, prints the plan's modules as the suite names them and drives two
-of them with the host app (`host_app.py`) as the relying party under test and a
-real Chromium following the redirects: `oidcc-client-test` (webauth must accept)
-and `oidcc-client-test-nonce-invalid` (webauth must refuse with
-`nonce-mismatch`). It then writes the plan export to `SCRATCH/export/`. The
+client secret, prints the plan's 14 modules as the suite names them (a count other than
+14 fails the run), and drives every module the expectation table in `conformance.py`
+does not skip with the host app (`host_app.py`) as the relying party under test and a
+real Chromium following the redirects. A module without a table row, or a row without a
+module, fails the run. It then writes the plan export to `SCRATCH/export/`. The
 export is a full protocol transcript with the client secret and the suite's
 private keys in it: keep it local, never attach it to anything.
 
 The suite's verdict alone proves nothing: a refusing module passes when no
 further request arrives, whatever the reason. So every row sets the suite's
 status/result beside webauth's own decision, read from the host's `/state`
-(`token_rejection`, `logins_admitted`, `userinfo_calls`, `userinfo_answered`, the last
-refusal), and beside the decision
-expected, which the table in `conformance.py` takes from the library's enums:
+(`token_rejection`, `logins_admitted`, `userinfo_calls`, `userinfo_answered`,
+`access_tokens_refused`, the last refusal), and beside the decision expected, which the
+table takes from the library's enums:
 
-    module | suite status/result | webauth decision | expected | held / FAILED / FAILED-as-found
+    module | suite status/result | webauth decision | expected | verdict | why
 
-`held` needs both to agree. `FAILED-as-found` (a finding, not a failed run) is
-only for one named known finding, and needs all three: the decision is
-`id-token-rejected/key-set-unavailable` (built from `OidcRefusalReason` and
-`RejectionReason`), the run counted more keys at the host's own `jwks_url` than
-`MAX_KEY_SET_KEYS`, and the suite's result is not `FAILED`. Every other row that
-is not `held` fails the run, so a wrong `jwks_url`, a missing CA trust or a clock
-skew cannot pass as the finding. Once the library fix lands the finding stops
-matching by itself.
+`held` needs the decision and the suite state to agree with the table: an accepting
+module is admitted with UserInfo answered, and every module the suite finishes ends
+FINISHED/PASSED. `skipped` is a justified row that is not driven. `FAILED-as-found` (a
+finding, not a failed run) is only for a named known finding on its own module, and needs
+all three: the decision equals the finding's signature, the key set at the host's
+`jwks_url` holds the finding's number of RSA signing keys, and the suite is in the state
+the finding predicts (WAITING with no result for an accepting module, since the UserInfo
+request never comes). Every other row that is not `held` fails the run, so a wrong
+`jwks_url`, a missing CA trust or a clock skew cannot pass as the finding.
 
 The access token never leaves the host process except in the one UserInfo request
 through the shim: it reaches no `/state`, log, HAR or table, a token no header can
-carry is not sent, and a failing UserInfo call is logged by exception type only.
-The host runs with the shipped default `cookie_samesite="strict"`; the pending-login
-cookie is lax in any case and the app and suite hosts are same-site.
+carry is not sent (and counted as refused), and a failing UserInfo call is logged by
+exception type only. The registry holds the client secret raw and in its
+`client_secret_basic` form (base64 of `client_id:secret`), so the scan finds either in
+the Authorization header. The host runs with the shipped default
+`cookie_samesite="strict"`; the pending-login cookie is lax in any case and the app and
+suite hosts are same-site.
 
 The suite finishes an accepting module only on a UserInfo request, which webauth
 never sends. The host therefore keeps the access token of the token answer in
@@ -149,10 +157,43 @@ memory and makes one UserInfo request after, and only after, `finish_login`
 admitted the login. `/reset` builds the relying parties again, as a host
 restarted per module would, because the suite generates new keys per module.
 
-Last run: both rows are `FAILED-as-found` with `id-token-rejected/key-set-unavailable`:
-the suite publishes 13 keys (its regular 8 and 5 deliberately unsupported ones, of
-which only 2 pass the RS256 check), more than the library's `MAX_KEY_SET_KEYS` of 10,
-which is checked before any single key.
+Each expectation is built from the module's class in the suite's sources
+(`net/openid/conformance/openid/client` at release-v5.3.3), named in its justification.
+
+### Last run: the whole Basic plan
+
+12 modules driven, 2 skipped, 1 known finding, exit status 0:
+
+| Module | Suite | webauth decision | Verdict |
+|---|---|---|---|
+| `oidcc-client-test` | FINISHED/PASSED | admitted, UserInfo answered | held |
+| `oidcc-client-test-invalid-iss` | FINISHED/PASSED | `id-token-rejected/invalid-issuer` | held |
+| `oidcc-client-test-missing-sub` | FINISHED/PASSED | `invalid-identity-claim` | held |
+| `oidcc-client-test-invalid-aud` | FINISHED/PASSED | `id-token-rejected/invalid-audience` | held |
+| `oidcc-client-test-missing-iat` | FINISHED/PASSED | `id-token-rejected/invalid-claim` | held |
+| `oidcc-client-test-kid-absent-single-jwks` | WAITING/none | `id-token-rejected/invalid-key-id` | FAILED-as-found (P2) |
+| `oidcc-client-test-kid-absent-multiple-jwks` | FINISHED/PASSED | `id-token-rejected/invalid-key-id` | held |
+| `oidcc-client-test-idtoken-sig-rs256` | FINISHED/PASSED | admitted, UserInfo answered | held |
+| `oidcc-client-test-idtoken-sig-none` | not driven | not driven | skipped |
+| `oidcc-client-test-invalid-sig-rs256` | FINISHED/PASSED | `id-token-rejected/invalid-signature` | held |
+| `oidcc-client-test-userinfo-invalid-sub` | not driven | not driven | skipped |
+| `oidcc-client-test-nonce-invalid` | FINISHED/PASSED | `nonce-mismatch` | held |
+| `oidcc-client-test-scope-userinfo-claims` | FINISHED/PASSED | admitted, UserInfo answered | held |
+| `oidcc-client-test-client-secret-basic` | FINISHED/PASSED | admitted, UserInfo answered | held |
+
+Skips:
+- `oidcc-client-test-idtoken-sig-none`: clients are not required to support unsigned ID
+  tokens, the suite itself ends the module skipped after a timeout, and webauth refuses
+  alg none by design, so a run would prove nothing.
+- `oidcc-client-test-userinfo-invalid-sub`: webauth takes identity only from the verified
+  ID token and never reads a UserInfo answer, so there is no sub to compare.
+
+Known finding, **P2**: `oidcc-client-test-kid-absent-single-jwks` signs its ID token
+without a `kid`, from a key set whose only RSA signing key has none either (the suite
+pads it to 6 keys with three non-RSA signing and two encryption keys). The suite expects
+acceptance (OIDC Core 10.1); webauth refuses the header with `invalid-key-id`, UserInfo is
+never requested and the module stays WAITING. The earlier P1 finding is gone: the 13-key
+sets of the other modules are accepted since #147.
 
 Pull the images first, outside the lock:
 

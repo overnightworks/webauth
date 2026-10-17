@@ -4,9 +4,9 @@
         uv run --extra dev --group e2e python e2e/oidc/conformance.py --scratch EMPTY_DIR
 
 Read ``README.md`` beside this file first. The run lists the plan's modules as
-the suite names them, drives the two it has an expectation for through the host
-app in a real browser, writes one row per module (the suite's verdict beside
-webauth's own decision) and exports the plan into ``SCRATCH/export/``."""
+the suite names them, drives each one the expectation table does not skip through
+the host app in a real browser, writes one row per module (the suite's verdict
+beside webauth's own decision) and exports the plan into ``SCRATCH/export/``."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 from certificates import ThrowawayTls, issue_throwaway_tls
@@ -46,7 +46,7 @@ from playwright.sync_api import Browser, sync_playwright
 from shim import TlsShim
 from suite import HeldSuite, SuiteApi
 
-from webauth.jwt_verification import MAX_KEY_SET_KEYS, RejectionReason
+from webauth.jwt_verification import RejectionReason
 from webauth.oidc import OidcRefusalReason
 
 SUITE_HOST = "conformance.example.test"
@@ -66,8 +66,23 @@ JWKS_TIMEOUT_SECONDS = 30
 
 class Verdict(StrEnum):
     HELD = "held"
+    SKIPPED = "skipped"
     FAILED = "FAILED"
     FAILED_AS_FOUND = "FAILED-as-found"
+
+
+class SuiteState(NamedTuple):
+    """The suite's ``status`` and ``result`` of a module; ``result`` is None until it has one."""
+
+    status: str
+    result: str | None
+
+    def describe(self) -> str:
+        return f"{self.status}/{self.result or '-'}"
+
+
+FINISHED_PASSED = SuiteState("FINISHED", "PASSED")
+WAITING_FOR_USERINFO = SuiteState("WAITING", None)
 
 
 @dataclass(frozen=True)
@@ -79,6 +94,7 @@ class Decision:
     userinfo_answered: bool = False
     refusal: str | None = None
     token_rejection: str | None = None
+    access_token_refused: bool = False
 
     @staticmethod
     def of(state: dict[str, Any]) -> Decision:
@@ -88,51 +104,154 @@ class Decision:
             userinfo_answered=state["userinfo_answered"] > 0,
             refusal=state["last_refusal"],
             token_rejection=state["token_rejection"],
+            access_token_refused=state["access_tokens_refused"] > 0,
         )
 
     def describe(self) -> str:
         if self.admitted:
             if self.userinfo_answered:
                 return "admitted, UserInfo answered"
-            return "admitted, UserInfo failed" if self.userinfo_called else "admitted"
+            if self.userinfo_called:
+                return "admitted, UserInfo failed"
+            if self.access_token_refused:
+                return "admitted, access token refused"
+            return "admitted"
         reason = self.refusal or "no decision"
         return f"{reason}/{self.token_rejection}" if self.token_rejection else reason
+
+
+ACCEPTED = Decision(admitted=True, userinfo_called=True, userinfo_answered=True)
+
+
+def refused(reason: OidcRefusalReason, rejection: RejectionReason | None = None) -> Decision:
+    return Decision(admitted=False, refusal=reason, token_rejection=rejection)
+
+
+def token_rejected(rejection: RejectionReason) -> Decision:
+    return refused(OidcRefusalReason.ID_TOKEN_REJECTED, rejection)
+
+
+@dataclass(frozen=True)
+class KnownFinding:
+    """A defect of the library, predicted from the suite's sources: the decision it
+    produces, how many RSA signing keys the module's key set must hold, and the suite
+    state it leaves."""
+
+    name: str
+    decision: Decision
+    rsa_signing_keys: int
+    suite_state: SuiteState
 
 
 @dataclass(frozen=True)
 class Expectation:
     module: str
     decision: Decision
-    suite_status: str = "FINISHED"
-    suite_result: str = "PASSED"
+    justification: str
+    suite_state: SuiteState = FINISHED_PASSED
+    finding: KnownFinding | None = None
 
     def judge(
-        self, suite_status: str, suite_result: str, decision: Decision, key_count: int
+        self, suite_state: SuiteState, decision: Decision, rsa_signing_keys: int
     ) -> Verdict:
-        suite_agrees = (suite_status, suite_result) == (self.suite_status, self.suite_result)
-        if decision == self.decision and suite_agrees:
+        if (decision, suite_state) == (self.decision, self.suite_state):
             return Verdict.HELD
-        key_set_is_over_the_bound = key_count > MAX_KEY_SET_KEYS
-        if decision == KNOWN_FINDING and key_set_is_over_the_bound and suite_result != "FAILED":
+        finding = self.finding
+        if finding and (decision, rsa_signing_keys, suite_state) == (
+            finding.decision, finding.rsa_signing_keys, finding.suite_state
+        ):
             return Verdict.FAILED_AS_FOUND
         return Verdict.FAILED
 
 
-KNOWN_FINDING = Decision(
-    admitted=False,
-    refusal=OidcRefusalReason.ID_TOKEN_REJECTED,
-    token_rejection=RejectionReason.KEY_SET_UNAVAILABLE,
+@dataclass(frozen=True)
+class Skip:
+    module: str
+    reason: str
+
+
+KID_ABSENT_SINGLE_KEY = KnownFinding(
+    name="P2: a token without kid against a one-key set is refused",
+    decision=token_rejected(RejectionReason.INVALID_KEY_ID),
+    rsa_signing_keys=1,
+    suite_state=WAITING_FOR_USERINFO,
 )
 
-
-EXPECTATIONS = (
+PLAN_TABLE: tuple[Expectation | Skip, ...] = (
     Expectation(
-        "oidcc-client-test",
-        Decision(admitted=True, userinfo_called=True, userinfo_answered=True),
+        "oidcc-client-test", ACCEPTED,
+        "OIDCCClientTest, the success case: a well-formed code flow must be admitted and "
+        "the module finishes on the UserInfo request that follows.",
     ),
     Expectation(
-        "oidcc-client-test-nonce-invalid",
-        Decision(admitted=False, refusal=OidcRefusalReason.NONCE_MISMATCH),
+        "oidcc-client-test-invalid-iss", token_rejected(RejectionReason.INVALID_ISSUER),
+        "OIDCCClientTestInvalidIssuerInIdToken: the client must reject a wrong iss; "
+        "the verifier's issuer check refuses it.",
+    ),
+    Expectation(
+        "oidcc-client-test-missing-sub",
+        refused(OidcRefusalReason.INVALID_IDENTITY_CLAIM),
+        "OIDCCClientTestMissingSubInIdToken: the client must reject an ID token without sub; "
+        "the verifier admits it, and the login refuses an identity without a subject.",
+    ),
+    Expectation(
+        "oidcc-client-test-invalid-aud", token_rejected(RejectionReason.INVALID_AUDIENCE),
+        "OIDCCClientTestInvalidAudInIdToken: the client must reject an aud that is not its "
+        "client id; the verifier's audience check refuses it.",
+    ),
+    Expectation(
+        "oidcc-client-test-missing-iat", token_rejected(RejectionReason.INVALID_CLAIM),
+        "OIDCCClientTestMissingIatInIdToken: the client must reject an ID token without iat; "
+        "the verifier requires an integer iat.",
+    ),
+    Expectation(
+        "oidcc-client-test-kid-absent-single-jwks", ACCEPTED,
+        "OIDCCClientTestKidAbsentSingleJwks publishes one RSA signing key and signs without "
+        "a kid, and expects acceptance (OIDC Core 10.1); webauth requires a kid today.",
+        finding=KID_ABSENT_SINGLE_KEY,
+    ),
+    Expectation(
+        "oidcc-client-test-kid-absent-multiple-jwks",
+        token_rejected(RejectionReason.INVALID_KEY_ID),
+        "OIDCCClientTestKidAbsentMultipleMatchingKeysInJwks accepts either answer; webauth "
+        "chooses the key by kid and refuses a header without one.",
+    ),
+    Expectation(
+        "oidcc-client-test-idtoken-sig-rs256", ACCEPTED,
+        "OIDCCClientTestIdTokenSignedUsingRS256: the client must accept an RS256 ID token, "
+        "the one algorithm the verifier supports.",
+    ),
+    Skip(
+        "oidcc-client-test-idtoken-sig-none",
+        "OIDCCClientTestIdTokenSigAlgNone: clients are not required to support unsigned ID "
+        "tokens, the suite itself ends the module skipped after a timeout, and webauth refuses "
+        "alg none by design, so a run would prove nothing.",
+    ),
+    Expectation(
+        "oidcc-client-test-invalid-sig-rs256",
+        token_rejected(RejectionReason.INVALID_SIGNATURE),
+        "OIDCCClientTestInvalidIdTokenSignatureWithRS256: the client should reject a corrupted "
+        "signature even from the token endpoint; the verifier's signature check refuses it.",
+    ),
+    Skip(
+        "oidcc-client-test-userinfo-invalid-sub",
+        "OIDCCClientTestInvalidSubInUserinfoResponse: webauth takes identity only from the "
+        "verified ID token and never reads a UserInfo answer, so there is no sub to compare.",
+    ),
+    Expectation(
+        "oidcc-client-test-nonce-invalid", refused(OidcRefusalReason.NONCE_MISMATCH),
+        "OIDCCClientTestNonceInvalid: the client must reject a nonce it did not send; "
+        "the login refuses it.",
+    ),
+    Expectation(
+        "oidcc-client-test-scope-userinfo-claims", ACCEPTED,
+        "OIDCCClientTestScopeUserInfoClaims: the authorize request must carry one of profile, "
+        "email, phone or address, which the host's scopes do; the login is admitted.",
+    ),
+    Expectation(
+        "oidcc-client-test-client-secret-basic", ACCEPTED,
+        "OIDCCClientTestClientSecretBasic: the token request must use client_secret_basic, "
+        "which the library sends; the login is admitted.",
     ),
 )
 
@@ -174,7 +293,7 @@ def drive_suite(run: RunRecord, runtime: Path, suite: HeldSuite, export_dir: Pat
     tls = issue_throwaway_tls(runtime, "d2", [SUITE_HOST, APP_HOST, "localhost"])
     client_secret = secrets.token_urlsafe(24)
     session_secret = secrets.token_urlsafe(48)
-    run.registry.add("client secret", client_secret)
+    run.registry.add_client_secret(CLIENT_ID, client_secret)
     run.registry.add("session secret", session_secret)
     with suite, TlsShim(tls, suite.port, SUITE_HOST) as shim:
         host: Host | None = None
@@ -196,13 +315,17 @@ def drive_plan(
 ) -> None:
     plan = api.create_plan(PLAN_NAME, PLAN_VARIANT, plan_configuration(client_secret))
     modules = [entry["testModule"] for entry in plan["modules"]]
+    run.record(f"the plan lists {len(modules)} modules")
     for number, module in enumerate(modules, start=1):
         run.record(f"module {number}: {module}")
     if len(modules) != EXPECTED_MODULE_COUNT:
         run.fail(f"the suite lists {len(modules)} modules, expected {EXPECTED_MODULE_COUNT}")
-    run.record(f"{'module':<34} | suite status/result | webauth decision | expected | verdict")
+    rows = rows_for_plan(run, modules)
+    run.record(
+        f"{'module':<42} | suite status/result | webauth decision | expected | verdict | why"
+    )
     drive_browser_off_the_main_thread(
-        run, lambda: drive_modules(run, runtime, api, tls, shim, host, settings, plan["id"])
+        run, lambda: drive_modules(run, runtime, api, tls, shim, host, settings, plan["id"], rows)
     )
     raise_if_stop_pending(run)
     export = export_dir / f"{PLAN_NAME}-{plan['id']}.zip"
@@ -210,9 +333,21 @@ def drive_plan(
     run.record(f"export held: {export}")
 
 
+def rows_for_plan(run: RunRecord, modules: list[str]) -> list[Expectation | Skip]:
+    """The table's row for each module of the plan, in plan order; a module without a row,
+    or a row without a module, fails the run."""
+    table = {row.module: row for row in PLAN_TABLE}
+    for module in modules:
+        if module not in table:
+            run.fail(f"the plan lists {module}, which the expectation table has no row for")
+    for module in table.keys() - set(modules):
+        run.fail(f"the expectation table has a row for {module}, which the plan does not list")
+    return [table[module] for module in modules if module in table]
+
+
 def drive_modules(
     run: RunRecord, runtime: Path, api: SuiteApi, tls: ThrowawayTls, shim: TlsShim, host: Host,
-    settings: HostSettings, plan_id: str,
+    settings: HostSettings, plan_id: str, rows: list[Expectation | Skip],
 ) -> None:
     with sync_playwright() as playwright:
         browser = launch_pinned_chromium(
@@ -221,10 +356,13 @@ def drive_modules(
             tls.leaf_spki_sha256_base64,
         )
         try:
-            for expectation in EXPECTATIONS:
+            for row in rows:
                 if run.stop_requested.is_set():
                     return
-                run_module(run, api, tls, host, settings, browser, plan_id, expectation)
+                if isinstance(row, Skip):
+                    run.record(skip_row(row))
+                else:
+                    run_module(run, api, tls, host, settings, browser, plan_id, row)
         finally:
             browser.close()
 
@@ -239,16 +377,20 @@ def run_module(
             module_id, ["CONFIGURED", "WAITING"], MODULE_REACHES_WAITING_SECONDS,
             run.stop_requested.is_set,
         )
+        if run.stop_requested.is_set():
+            return
         if state == "CONFIGURED":
             api.start_module(module_id)
             state = api.state_within(
                 module_id, ["WAITING"], MODULE_REACHES_WAITING_SECONDS, run.stop_requested.is_set
             )
+            if run.stop_requested.is_set():
+                return
         if state != "WAITING":
             run.fail(f"{expectation.module} reached {state}, expected WAITING")
             return
         check_exposed_issuer(run, expectation.module, api.module_status(module_id))
-        key_count = count_keys_at_jwks_url(run, expectation.module, tls, settings)
+        rsa_signing_keys = count_keys_at_jwks_url(run, expectation.module, tls, settings)
         reset_host(host)
         sign_in_at_the_relying_party(run, browser)
         api.state_within(
@@ -257,7 +399,8 @@ def run_module(
         if run.stop_requested.is_set():
             return
         report_row(
-            run, expectation, api.module_info(module_id), Decision.of(host_state(host)), key_count
+            run, expectation, api.module_info(module_id), Decision.of(host_state(host)),
+            rsa_signing_keys,
         )
     finally:
         cancel_unless_finished(api, module_id)
@@ -276,18 +419,24 @@ def cancel_unless_finished(api: SuiteApi, module_id: str) -> None:
 
 def report_row(
     run: RunRecord, expectation: Expectation, info: dict[str, Any], decision: Decision,
-    key_count: int,
+    rsa_signing_keys: int,
 ) -> None:
-    status, result = info["status"], info.get("result", "-")
-    verdict = expectation.judge(status, result, decision, key_count)
+    suite_state = SuiteState(info["status"], info.get("result"))
+    verdict = expectation.judge(suite_state, decision, rsa_signing_keys)
     row = (
-        f"{expectation.module:<34} | {status}/{result} | {decision.describe()} | "
-        f"{expectation.decision.describe()} | {verdict}"
+        f"{expectation.module:<42} | {suite_state.describe()} | {decision.describe()} | "
+        f"{expectation.decision.describe()} | {verdict} | {expectation.justification}"
     )
     if verdict is Verdict.FAILED:
         run.fail(row)
     else:
         run.record(row)
+    if verdict is Verdict.FAILED_AS_FOUND and expectation.finding:
+        run.record(f"known finding: {expectation.finding.name}")
+
+
+def skip_row(skip: Skip) -> str:
+    return f"{skip.module:<42} | - | not driven | skip | {Verdict.SKIPPED} | {skip.reason}"
 
 
 def check_exposed_issuer(run: RunRecord, module: str, status: dict[str, object]) -> None:
@@ -302,13 +451,21 @@ def check_exposed_issuer(run: RunRecord, module: str, status: dict[str, object])
 def count_keys_at_jwks_url(
     run: RunRecord, module: str, tls: ThrowawayTls, settings: HostSettings
 ) -> int:
+    """Logs the key set the host's ``jwks_url`` serves and returns how many RSA signing keys
+    it holds: the suite pads a single-key module's set with other key types."""
     answer = httpx.get(
         settings.jwks_url, verify=str(tls.ca_certificate), timeout=JWKS_TIMEOUT_SECONDS
     )
     answer.raise_for_status()
-    count = len(answer.json()["keys"])
-    run.record(f"{module} key set at the host's jwks_url held: {count} keys")
-    return count
+    keys = answer.json()["keys"]
+    rsa_signing_keys = sum(
+        1 for key in keys if key["kty"] == "RSA" and key.get("use", "sig") == "sig"
+    )
+    run.record(
+        f"{module} key set at the host's jwks_url held: {len(keys)} keys, "
+        f"{rsa_signing_keys} RSA signing"
+    )
+    return rsa_signing_keys
 
 
 def error_chain(error: BaseException) -> list[BaseException]:
