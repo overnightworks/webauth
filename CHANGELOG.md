@@ -42,7 +42,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `login_rate_window_seconds`, and `DEFAULT_LOGIN_RATE_WINDOW_SECONDS` is gone: a host that
   passes any of the four gets `TypeError`.
 - `UserRecord.password_hash` and `AdmissionRefusal.SUBJECT_HELD_BY_PASSWORD_ACCOUNT` are
-  removed. An account whose id is the subject is admitted whatever fields the host's model
+  removed. An account whose id exactly equals the subject is admitted whatever fields the host's model
   has; a host that migrates legacy accounts makes sure that no legacy id can equal a
   subject of the bound issuer.
 

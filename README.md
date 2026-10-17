@@ -506,8 +506,9 @@ passes it as `bound_issuer`; changing the issuer is a migration of the host's
 accounts, never a configuration change. `accounts` is a `SubjectUserStore`
 (`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
 which adds an account whose `id` is the subject, so a back-channel logout names
-the account directly). Any stored account whose `id` equals the subject is that
-subject's account and signs in as it is, whatever created it. A host that
+the account directly). Any stored account whose `id` exactly equals the subject (no case or accent
+folding; `get` compares exactly) is that subject's account and signs in as it
+is, whatever created it. A host that
 migrates legacy accounts makes sure that no legacy `id` can equal a subject of
 the bound issuer. Admission holds `lock.hold()` and never commits:
 

@@ -49,7 +49,12 @@ class SubjectUserStore(Protocol):
     issuer's ``sub`` and a back-channel logout names it directly.
     """
 
-    def get(self, user_id: str) -> UserRecord | None: ...
+    def get(self, user_id: str) -> UserRecord | None:
+        """The account whose ``id`` is exactly ``user_id``, without case or accent folding.
+
+        A host whose id column compares case- or accent-insensitively compares exactly here.
+        """
+        ...
 
     def get_by_username(self, username: str) -> UserRecord | None: ...
 
