@@ -4,7 +4,7 @@ dynamic = ["version"]
 description = "Web authentication for FastAPI applications: sessions, cookies, CSRF, rate limits, audit ports"
 authors = [{ name = "Flex0r (Felix Hummert)", email = "felix.hummert@gmail.com" }]
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.12"
 keywords = ["fastapi", "authentication", "session", "csrf", "cookies", "rate-limit", "oidc"]
 classifiers = [
@@ -53,7 +53,7 @@ Issues = "https://github.com/overnightworks/webauth/issues"
 Changelog = "https://github.com/overnightworks/webauth/blob/main/CHANGELOG.md"
 
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]

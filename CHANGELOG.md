@@ -48,6 +48,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   migrates legacy accounts makes sure that no legacy id can equal a subject of
   the bound issuer.
 
+**Changed**
+
+- The wheel declares its license as the SPDX expression `MIT`, and releases build
+  with a hash-pinned setuptools.
+
 ## 0.14.0
 
 This is the last release with password parts.
