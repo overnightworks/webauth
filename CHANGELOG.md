@@ -64,6 +64,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `script_hashes` is validated too: each element must be a bare `sha256-`, `sha384-` or
   `sha512-` hash, and anything else is a `ValueError` (it closed an injection through the
   unchecked text).
+- `webauth.proxies`, `webauth.rate_limit`, `webauth.policies` and the `webauth.middleware` submodules declare `__all__`. Not public: `proxies.get_client_ip` (call `resolve_client_ip(request)`), `budget_address` (it pools IPv6 addresses into a network, `proxies.py:128`, which `resolve_client_ip`, returning the client's own address, does not do: the helper loses public support, and a host that needs per-address rate limits uses `IpRateLimitMiddleware`), `MAX_ADDRESS_CHARS`, `MAX_FORWARDED_FOR_HOPS`, `IpAddress` (write `ipaddress.IPv4Address | IPv6Address`), `IpNetwork` (write `ipaddress.IPv4Network | IPv6Network`), the header constants, `UNKNOWN_CLIENT_IP`, `ZONE_SEPARATOR` and `log`; `rate_limit.PRUNE_INTERVAL_SECONDS`; `middleware.rate_limit.log` and `LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS`; `middleware.refusal.RefusalMiddleware`. Every policy name stays public, and so do both spellings of the middleware classes (`webauth.middleware` and its submodules).
 
 **Changed**
 

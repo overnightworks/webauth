@@ -22,6 +22,13 @@ if TYPE_CHECKING:
 
     from starlette.requests import Request
 
+__all__ = [
+    "TrustedProxies",
+    "client_user_agent",
+    "request_is_https",
+    "resolve_client_ip",
+]
+
 log = logging.getLogger(__name__)
 
 IpAddress = IPv4Address | IPv6Address

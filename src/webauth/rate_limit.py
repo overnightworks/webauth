@@ -19,6 +19,11 @@ from typing import TYPE_CHECKING, Final
 if TYPE_CHECKING:
     from redis import Redis
 
+__all__ = [
+    "RedisRateLimitBackend",
+    "SingleProcessRateLimitBackend",
+]
+
 
 class RedisRateLimitBackend:
     """Sliding-window rate limiter backed by Redis sorted sets.
