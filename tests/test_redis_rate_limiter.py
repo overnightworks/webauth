@@ -102,7 +102,7 @@ class TestRedisRateLimitBackend:
         world_clock.now += 2
         assert backend.is_allowed("rl:test", limit=1, window_seconds=1) is True
 
-    def test_trims_a_request_only_once_a_full_window_has_passed_to_the_microsecond(
+    def test_trims_a_request_only_once_a_full_window_has_passed_to_the_fraction_of_a_second(
         self, fake_redis, world_clock
     ) -> None:
         backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
