@@ -1,8 +1,0 @@
-claim_id = "bd2259346c404ae6abafc11a54f03407"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "b9d00f2e0c6307d0ed98a5bbd72d56cbd9db2410"
-branch = "claude/issue-134-w8-s1-cookies-py-besitzt-das-session-coo"
-scope = ["CHANGELOG.md", "README.md", "SECURITY.md", "e2e/oidc/host_app.py", "src/webauth/cookies.py", "src/webauth/login.py", "src/webauth/oidc_login.py", "tests/test_cookies.py", "tests/test_login.py", "tests/test_oidc_login.py"]
-opened_commit = "246f59304363ee0423fb6e50e10bb1abc3fbb761"
-whole_reason = "One move of three public names with their tests and the documents that name them; the D2 sentence rides with the first 0.15.0 change"
