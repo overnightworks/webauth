@@ -554,7 +554,12 @@ Two backends implement it:
 
 - `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
   process that reaches the same Redis. It needs the client library, so a host
-  that uses it installs `overnightworks-webauth[redis]`.
+  that uses it installs `overnightworks-webauth[redis]`. It measures the
+  window on the Redis server's own clock (`TIME`), so hosts with differing
+  clocks share one budget, and it needs Redis 5.0 or later, or Valkey: the
+  script reads `TIME` and so relies on script effects replication. A server
+  that refuses the script answers every rate-limited request with 503, failing
+  closed.
 - `webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
   process's memory and needs no Redis — for a single-node host that runs one
   worker. Two processes or two hosts count independently, so a multi-worker

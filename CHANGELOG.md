@@ -16,6 +16,13 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `dataclasses.replace(config, session_cookie_name=None)` no longer resets the
   field to the default: leave the field out of `replace` instead.
 
+**Fixed**
+
+- Hosts sharing one Redis neither overspend nor deny each other's rate-limit
+  budget when their clocks differ, because `RedisRateLimitBackend` measures the
+  window on the Redis server's clock. The supported server floor is Redis 5.0
+  or later, or Valkey.
+
 ## 0.15.0
 
 **Breaking**
