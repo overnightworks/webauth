@@ -10,11 +10,10 @@ Please do not open a public issue or pull request for a vulnerability.
 
 ## Supported versions
 
-Only the latest minor release receives security fixes. The 0.14 line
-receives none. A 0.14.x tag can still be pushed, but it can no longer be
-released, because the release workflow releases only tags on commits of `main`,
-and `main` carries 0.15.0 changes from this slice on. A host on 0.14.x moves to
-the OpenID Connect release to receive fixes.
+Only the latest minor release receives security fixes. By policy, the 0.14
+line receives none: from 0.15.0 on, fixes ship only in new minor or patch
+releases of the current line. A host on 0.14.x moves to the OpenID Connect
+release to receive fixes.
 
 ## What to expect
 
