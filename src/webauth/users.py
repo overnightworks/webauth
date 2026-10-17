@@ -23,7 +23,7 @@ from webauth.ports import (
     UserRecord,
     WriteLock,
 )
-from webauth.session_administration import NotAnAdminError
+from webauth.session_administration import require_admin
 from webauth.session_ending import end_user_sessions
 
 
@@ -84,7 +84,7 @@ class UserManagement:
     def create_user(
         self, actor: AuthenticatedUser, username: str, password: str, role: str,
     ) -> UserRecord:
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         self._require_role(role)
         password_hash = _hash_password(password, self.config)
         with self.lock.hold():
@@ -102,7 +102,7 @@ class UserManagement:
         return self.users.list()
 
     def change_role(self, actor: AuthenticatedUser, user_id: str, role: str) -> UserRecord:
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         self._require_role(role)
         with self.lock.hold():
             user = self._user(user_id)
@@ -122,7 +122,7 @@ class UserManagement:
             return user
 
     def deactivate_user(self, actor: AuthenticatedUser, user_id: str) -> None:
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         if actor.id == user_id:
             raise SelfDeactivationError("An administrator cannot deactivate themselves")
         with self.lock.hold():
@@ -138,7 +138,7 @@ class UserManagement:
 
     def revoke_user_sessions(self, actor: AuthenticatedUser, user_id: str) -> int:
         """End all sessions, returning the number deleted from the host's store."""
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         with self.lock.hold():
             self._user(user_id)
             session_count = self._delete_user_sessions(user_id)
@@ -152,7 +152,7 @@ class UserManagement:
 
     def set_password(self, actor: AuthenticatedUser, user_id: str, password: str) -> None:
         """Set an account's password and end all its sessions, including this one."""
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         with self.lock.hold():
             self._password_account(user_id)
             password_hash = _hash_password(password, self.config)
@@ -186,10 +186,6 @@ class UserManagement:
             subject_id=user_id,
             session_count=session_count,
         ))
-
-    def _require_admin(self, actor: AuthenticatedUser) -> None:
-        if actor.role != self.config.admin_role:
-            raise NotAnAdminError("Administrator access is required")
 
     def _require_role(self, role: str) -> None:
         if role not in {self.config.admin_role, self.config.user_role}:

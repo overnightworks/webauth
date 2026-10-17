@@ -190,15 +190,15 @@ def test_REQ_ADMIN_12_session_summaries_are_immutable(
         summary.session_ref = "replacement"
 
 
-def test_a_member_cannot_revoke_a_session(
+@pytest.mark.parametrize("role", ["member", "admin", "unknown"])
+def test_REQ_ADMIN_05_only_the_configured_admin_can_revoke_a_session(
     administration: SessionAdministration, actor: AuthenticatedUser,
-    stored_sessions: list[FakeSessionRecord],
+    stored_sessions: list[FakeSessionRecord], role: str,
 ) -> None:
-    member = replace(actor, role=administration.config.user_role)
     reference = administration.list_sessions()[0].session_ref
 
     with pytest.raises(NotAnAdminError):
-        administration.revoke_session(member, reference)
+        administration.revoke_session(replace(actor, role=role), reference)
 
     assert administration.sessions.list_active() == stored_sessions
     assert administration.audit.user_management_events == []

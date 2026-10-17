@@ -28,6 +28,11 @@ class NotAnAdminError(UserManagementError):
     """The actor does not hold the configured administrator role."""
 
 
+def require_admin(actor: AuthenticatedUser, config: WebAuthConfig) -> None:
+    if actor.role != config.admin_role:
+        raise NotAnAdminError("Administrator access is required")
+
+
 class UnknownSessionError(UserManagementError):
     """No active session matches the supplied reference."""
 
@@ -63,7 +68,7 @@ class SessionAdministration:
 
     def revoke_session(self, actor: AuthenticatedUser, session_ref: str) -> None:
         """End one active session identified by its public reference."""
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         reference = session_ref.encode()
         with self.lock.hold():
             for record in self.sessions.list_active(limit=None):
@@ -77,7 +82,3 @@ class SessionAdministration:
                     ))
                     return
             raise UnknownSessionError("Active session does not exist")
-
-    def _require_admin(self, actor: AuthenticatedUser) -> None:
-        if actor.role != self.config.admin_role:
-            raise NotAnAdminError("Administrator access is required")
