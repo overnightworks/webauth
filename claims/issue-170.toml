@@ -1,0 +1,8 @@
+claim_id = "5ec65177b2bf46009faafa91d7cc70ce"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "4ad3432c942ce115f0d994738fd3975c8d956683"
+branch = "claude/issue-170-w8-s10c-edges-all"
+scope = ["CHANGELOG.md", "src/webauth/middleware/body_size.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/rate_limit.py", "src/webauth/middleware/refusal.py", "src/webauth/middleware/security_headers.py", "src/webauth/middleware/stack.py", "src/webauth/policies.py", "src/webauth/proxies.py", "src/webauth/rate_limit.py"]
+opened_commit = "a4c50a378ee0b4e8bb0d721ff47967926efae4e7"
+whole_reason = "One contract: the public names of the proxy, rate-limit, policy and middleware modules"
