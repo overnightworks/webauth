@@ -111,12 +111,48 @@ throwaway certificate in front of the server's port, which is published on
 `127.0.0.1` only (the dev-mode API has no login).
 
 The run creates `oidcc-client-basic-certification-test-plan` with a throwaway
-client secret, prints the plan's modules as the suite names them, brings the
-first module to WAITING, checks the issuer the suite exposes
-(`https://conformance.example.test/test/a/webauth-d2/`), cancels it and writes
-the plan export to `SCRATCH/export/`. The export is a full protocol transcript
-with the client secret and the suite's private keys in it: keep it local, never
-attach it to anything.
+client secret, prints the plan's modules as the suite names them and drives two
+of them with the host app (`host_app.py`) as the relying party under test and a
+real Chromium following the redirects: `oidcc-client-test` (webauth must accept)
+and `oidcc-client-test-nonce-invalid` (webauth must refuse with
+`nonce-mismatch`). It then writes the plan export to `SCRATCH/export/`. The
+export is a full protocol transcript with the client secret and the suite's
+private keys in it: keep it local, never attach it to anything.
+
+The suite's verdict alone proves nothing: a refusing module passes when no
+further request arrives, whatever the reason. So every row sets the suite's
+status/result beside webauth's own decision, read from the host's `/state`
+(`token_rejection`, `logins_admitted`, `userinfo_calls`, `userinfo_answered`, the last
+refusal), and beside the decision
+expected, which the table in `conformance.py` takes from the library's enums:
+
+    module | suite status/result | webauth decision | expected | held / FAILED / FAILED-as-found
+
+`held` needs both to agree. `FAILED-as-found` (a finding, not a failed run) is
+only for one named known finding, and needs all three: the decision is
+`id-token-rejected/key-set-unavailable` (built from `OidcRefusalReason` and
+`RejectionReason`), the run counted more keys at the host's own `jwks_url` than
+`MAX_KEY_SET_KEYS`, and the suite's result is not `FAILED`. Every other row that
+is not `held` fails the run, so a wrong `jwks_url`, a missing CA trust or a clock
+skew cannot pass as the finding. Once the library fix lands the finding stops
+matching by itself.
+
+The access token never leaves the host process except in the one UserInfo request
+through the shim: it reaches no `/state`, log, HAR or table, a token no header can
+carry is not sent, and a failing UserInfo call is logged by exception type only.
+The host runs with the shipped default `cookie_samesite="strict"`; the pending-login
+cookie is lax in any case and the app and suite hosts are same-site.
+
+The suite finishes an accepting module only on a UserInfo request, which webauth
+never sends. The host therefore keeps the access token of the token answer in
+memory and makes one UserInfo request after, and only after, `finish_login`
+admitted the login. `/reset` builds the relying parties again, as a host
+restarted per module would, because the suite generates new keys per module.
+
+Last run: both rows are `FAILED-as-found` with `id-token-rejected/key-set-unavailable`:
+the suite publishes 13 keys (its regular 8 and 5 deliberately unsupported ones, of
+which only 2 pass the RS256 check), more than the library's `MAX_KEY_SET_KEYS` of 10,
+which is checked before any single key.
 
 Pull the images first, outside the lock:
 
@@ -133,8 +169,8 @@ and the run lists the containers, volumes and networks still carrying its
 compose project label. The `down` always runs (60 s) and the three listings are
 independent calls (10 s each), so one failure never hides another kind. The
 `down` runs a second time only when the first did not complete cleanly
-(interrupted, failed or timed out). Worst case: 30 s module cancel + 90 s
-first teardown + 90 s backstop teardown = 210 s, inside `--kill-after=240`.
+(interrupted, failed or timed out). Worst case: 15 s worker join + 30 s host
+stop + 90 s first teardown + 90 s backstop teardown = 225 s, inside `--kill-after=240`.
 Every failure or timeout, with its stderr tail, is reported as a leftover line,
 and the result table and evidence scan still follow. After a SIGKILL nothing can clean up: find the project
 with `docker ps -a --filter name=d2-suite`, then `docker compose -p NAME -f

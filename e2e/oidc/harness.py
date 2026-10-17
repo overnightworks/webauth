@@ -13,19 +13,23 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any
 
+import httpx
 from evidence import (
     NetworkLog,
     SecretRegistry,
     delete_contaminated,
+    recorded_cookie_name,
     scan_evidence,
     without_query_values,
 )
 from host_app import HostSettings
+from playwright.sync_api import Browser, BrowserContext, Playwright
 from shim import LOOPBACK
 from stack import StackError
 
@@ -35,24 +39,12 @@ APP_START_SECONDS = 30
 STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 WORKER_ENDS_SECONDS = 15
 HOST_STOPS_SECONDS = 15
+PAGE_TIMEOUT_MILLISECONDS = 30_000
+URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "nonce", "session_state", "state")
 
 
 class Interrupted(BaseException):
     """The first stop signal, raised wherever the main thread stands."""
-
-
-class Run(Protocol):
-    """What the plumbing needs of a proof run: its stop state, its record and its evidence."""
-
-    evidence_dir: Path
-    registry: SecretRegistry
-    log: NetworkLog
-    lines: list[str]
-    stop_requested: threading.Event
-    winding_down: bool
-    browser_outlived_run: bool
-
-    def fail(self, message: str) -> None: ...
 
 
 @dataclass
@@ -112,7 +104,7 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
-def start_host(run: Run, runtime: Path, settings: HostSettings, ca_certificate: Path) -> Host:
+def start_host(run: RunRecord, runtime: Path, settings: HostSettings, ca_certificate: Path) -> Host:
     cookie_samesite = settings.cookie_samesite
     settings_file = runtime / f"host-settings-{cookie_samesite}.json"
     settings.write(settings_file)
@@ -131,7 +123,61 @@ def start_host(run: Run, runtime: Path, settings: HostSettings, ca_certificate: 
     return Host(process, cookie_samesite, settings.port, settings.observe_port)
 
 
-def wait_until_serving(run: Run, process: subprocess.Popen[bytes], *ports: int) -> None:
+def host_state(host: Host) -> dict[str, Any]:
+    return httpx.get(f"http://{LOOPBACK}:{host.observe_port}/state").json()
+
+
+def tell_host(host: Host, order: str) -> None:
+    httpx.post(f"http://{LOOPBACK}:{host.observe_port}/{order}").raise_for_status()
+
+
+def reset_host(host: Host) -> None:
+    tell_host(host, "reset")
+
+
+def launch_pinned_chromium(
+    playwright: Playwright, runtime: Path, mapped_hosts: dict[str, int], spki_sha256_base64: str
+) -> Browser:
+    """Chromium that resolves each host name to its loopback port and trusts one certificate."""
+    browser_tmp = runtime / "tmp"
+    browser_tmp.mkdir(exist_ok=True)
+    os.environ["TMPDIR"] = str(browser_tmp)
+    rules = ", ".join(f"MAP {name} {LOOPBACK}:{port}" for name, port in mapped_hosts.items())
+    return playwright.chromium.launch(args=[
+        f"--host-resolver-rules={rules}",
+        f"--ignore-certificate-errors-spki-list={spki_sha256_base64}",
+    ])
+
+
+@contextlib.contextmanager
+def recording_context(run: RunRecord, browser: Browser, **options: Any) -> Iterator[BrowserContext]:
+    """A browser context whose URL credentials, requests and cookies the run registers and logs."""
+    context = browser.new_context(**options)
+    context.set_default_timeout(PAGE_TIMEOUT_MILLISECONDS)
+    context.on("request", lambda request: remember_url_credentials(run, request.url))
+    context.on("request", run.log.watch)
+    try:
+        yield context
+    finally:
+        with contextlib.ExitStack() as cleanup:
+            cleanup.callback(context.close)
+            cleanup.callback(run.log.collect)
+            cleanup.callback(remember_cookies, run, context)
+
+
+def remember_url_credentials(run: RunRecord, url: str) -> None:
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+    for name in URL_PARAMETERS_THAT_ARE_CREDENTIALS:
+        for value in query.get(name, []):
+            run.registry.add(f"url parameter {name}", value)
+
+
+def remember_cookies(run: RunRecord, context: BrowserContext) -> None:
+    for cookie in context.cookies():
+        run.registry.add(f"cookie {recorded_cookie_name(cookie['name'])}", cookie["value"])
+
+
+def wait_until_serving(run: RunRecord, process: subprocess.Popen[bytes], *ports: int) -> None:
     deadline = time.monotonic() + APP_START_SECONDS
     pending = list(ports)
     while pending and time.monotonic() < deadline:
@@ -172,7 +218,7 @@ def own_child_pids() -> set[int]:
     return pids
 
 
-def drive_browser_off_the_main_thread(run: Run, drive: Callable[[], None]) -> None:
+def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None]) -> None:
     """Playwright's sync API cannot be torn down from a signal handler, so the
     main thread keeps the signals and kills the browser's driver on a stop."""
     raise_if_stop_pending(run)
@@ -211,14 +257,14 @@ def drive_browser_off_the_main_thread(run: Run, drive: Callable[[], None]) -> No
         ) from crash
 
 
-def raise_if_stop_pending(run: Run) -> None:
+def raise_if_stop_pending(run: RunRecord) -> None:
     """A signal the handler could not raise (it landed in error handling)
     still ends the run at the next place that calls this."""
     if run.stop_requested.is_set() and not run.winding_down:
         raise Interrupted
 
 
-def stop_on_first_signal(run: Run) -> None:
+def stop_on_first_signal(run: RunRecord) -> None:
     """The first SIGTERM or SIGINT ends the run through ``Interrupted``; the
     cleanup that follows is not interruptible, so later signals are ignored."""
 
@@ -255,7 +301,7 @@ def leftovers(scratch: Path, container_filter: str) -> list[str]:
     return left
 
 
-def keep_clean_evidence(run: Run) -> int:
+def keep_clean_evidence(run: RunRecord) -> int:
     if run.browser_outlived_run:
         for screenshot in run.evidence_dir.glob("*.png"):
             screenshot.unlink()

@@ -48,6 +48,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   migrates legacy accounts makes sure that no legacy id can equal a subject of
   the bound issuer.
 
+**Changed**
+
+- The wheel declares its license as the SPDX expression `MIT`, and releases build
+  with a hash-pinned setuptools.
+
 **Fixed**
 
 - A key set that publishes more than ten keys, most of them for other algorithms or for
