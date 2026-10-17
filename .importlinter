@@ -53,3 +53,12 @@ protected_modules =
 allowed_importers =
     webauth.jwt_verification
     webauth.oidc_login
+
+# redis is the optional `[redis]` extra; only the Redis backend's module may reach it.
+[importlinter:contract:only-the-rate-limit-module-imports-redis]
+name = only webauth.rate_limit imports redis
+type = protected
+protected_modules =
+    redis
+allowed_importers =
+    webauth.rate_limit

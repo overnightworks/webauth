@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 
 import pytest
 from webauth_arrangement import (
@@ -20,7 +20,7 @@ from webauth_arrangement import (
 
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 
-A_TIME_FAR_FROM_REAL_NOW = datetime(2000, 1, 1, tzinfo=timezone.utc)
+A_TIME_FAR_FROM_REAL_NOW = datetime(2000, 1, 1, tzinfo=UTC)
 EXPIRY_POLICY = ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS)
 IDLE_POLICY = IdleWindowLiveness(IDLE_WINDOW_SECONDS)
 
@@ -70,7 +70,7 @@ class _RecordWithoutLastSeen:
 def test_the_expiry_column_policy_admits_a_stored_session_within_both_limits(
     idle_offset: timedelta, age: timedelta, admitted: bool,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = _ExpiryRecord(created_at=now - age, expires_at=now + idle_offset)
 
     assert EXPIRY_POLICY.admits_stored_session(record, now) is admitted
@@ -96,7 +96,7 @@ def test_the_expiry_column_policy_follows_the_injected_clock_not_the_real_one() 
 def test_the_idle_window_policy_admits_a_session_seen_within_the_window(
     idle_age: timedelta, admitted: bool,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = IdleSessionRecord(id="session-1", user=FakeUser(), last_seen=now - idle_age)
 
     assert IDLE_POLICY.admits_stored_session(record, now) is admitted
@@ -113,7 +113,7 @@ def test_the_idle_window_policy_admits_a_session_seen_within_the_window(
 def test_a_capped_idle_window_policy_refuses_a_session_older_than_the_cap_however_recently_seen(
     age: timedelta, admitted: bool,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = _CappedIdleRecord(created_at=now - age, last_seen=now)
 
     assert RECOMMENDED_IDLE_POLICY.admits_stored_session(record, now) is admitted
@@ -129,7 +129,7 @@ def test_a_capped_idle_window_policy_refuses_a_session_older_than_the_cap_howeve
 def test_a_capped_idle_window_policy_refuses_to_judge_a_record_without_created_at(
     idle_for: timedelta,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = IdleSessionRecord(id="session-1", user=FakeUser(), last_seen=now - idle_for)
 
     with pytest.raises(TypeError, match="created_at"):
@@ -156,7 +156,7 @@ _NAIVE_ZONES = pytest.mark.parametrize(
 def test_a_capped_idle_window_policy_refuses_to_judge_a_naive_created_at(
     zone: tzinfo | None,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = _CappedIdleRecord(created_at=now.replace(tzinfo=zone), last_seen=now)
 
     with pytest.raises(TypeError, match="timezone-aware created_at"):
@@ -174,7 +174,7 @@ def test_a_capped_idle_window_policy_refuses_to_judge_a_naive_created_at(
 def test_an_idle_window_policy_refuses_to_judge_a_naive_last_seen(
     policy: IdleWindowLiveness, zone: tzinfo | None,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = _CappedIdleRecord(created_at=now, last_seen=now.replace(tzinfo=zone))
 
     with pytest.raises(TypeError, match="timezone-aware last_seen"):
@@ -191,7 +191,7 @@ def test_an_idle_window_policy_refuses_to_judge_a_naive_last_seen(
 def test_a_capped_idle_window_policy_refuses_to_judge_a_record_without_last_seen(
     age: timedelta,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = _RecordWithoutLastSeen(created_at=now - age)
 
     with pytest.raises(AttributeError, match="last_seen"):
@@ -233,7 +233,7 @@ def test_the_idle_window_policy_follows_the_injected_clock_not_the_real_one() ->
 
 
 def test_a_touch_puts_last_seen_at_now() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     record = IdleSessionRecord(
         id="session-1", user=FakeUser(), last_seen=A_TIME_FAR_FROM_REAL_NOW,
     )

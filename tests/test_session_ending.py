@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from webauth_arrangement import (
@@ -26,7 +26,7 @@ SessionEnding = Callable[[SessionRecordsInMemory, list[FakeSessionRecord]], obje
 def a_store_of(*owners: FakeUser) -> tuple[SessionRecordsInMemory, list[FakeSessionRecord]]:
     """One stored session per owner, each opened a minute after the one before."""
     sessions = SessionRecordsInMemory(users=UsersInMemory(SUBJECT, BYSTANDER))
-    first_expiry = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    first_expiry = datetime(2030, 1, 1, tzinfo=UTC)
     records = [
         sessions.create(
             owner.id, first_expiry + timedelta(minutes=minute),

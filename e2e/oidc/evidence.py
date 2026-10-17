@@ -13,7 +13,7 @@ import json
 import re
 import urllib.parse
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -169,7 +169,7 @@ class NetworkLog:
         self._register_set_cookie_values(response_headers)
         started = request.timing.get("startTime", 0) / 1000
         return {
-            "startedDateTime": datetime.fromtimestamp(started, timezone.utc).isoformat(),
+            "startedDateTime": datetime.fromtimestamp(started, UTC).isoformat(),
             "time": 0,
             "request": {
                 "method": request.method,

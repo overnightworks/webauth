@@ -90,7 +90,8 @@ def _with_unused_signature_bits_set(token: str) -> str:
 _ISSUER = "https://login.example.org/realms/workshop"
 _AUDIENCE = "songmaker"
 _JWKS_URL = f"{_ISSUER}/protocol/openid-connect/certs"
-_URL_SECRET = "s3cr3t-in-the-url"
+# Canary whose recognisable text is the point
+_URL_SECRET = "s3cr3t-in-the-url"  # noqa: S105
 _LEEWAY_SECONDS = 30
 
 

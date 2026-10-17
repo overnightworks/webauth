@@ -48,7 +48,8 @@ from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequ
 from webauth.oidc_login import post_token_request_over_https
 
 _CLIENT_ID = "songmaker"
-_CLIENT_SECRET = "canary-client-secret"
+# Canary whose recognisable text is the point
+_CLIENT_SECRET = "canary-client-secret"  # noqa: S105
 _CODE = "canary-authorization-code"
 _CODE_VERIFIER = "canary-code-verifier"
 _URL_QUERY = "session=canary-url-query"

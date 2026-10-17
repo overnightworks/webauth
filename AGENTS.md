@@ -45,7 +45,9 @@ CI, which only lints it.
   `webauth.oidc` imports `webauth.jwt_verification`; only
   `webauth.jwt_verification` and `webauth.oidc_login` import
   `webauth.https_client`. Four `protected` import-linter contracts enforce
-  this.
+  this. A fifth confines `redis` to `webauth.rate_limit`, and
+  `tests/test_public_api.py` imports every module with `redis` blocked, so the
+  in-process backend never needs the extra.
 - The user model, schema, configured role names, transaction boundaries, and
   HTTP routes and responses belong to the host. Session administration
   is a library helper in `webauth.session_administration` over host-supplied

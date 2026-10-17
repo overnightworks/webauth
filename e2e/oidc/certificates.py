@@ -30,7 +30,7 @@ def issue_throwaway_tls(directory: Path, name: str, dns_names: list[str]) -> Thr
     """A CA and one leaf for ``dns_names`` with its own key, written under ``directory``."""
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"{name} throwaway CA")])
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     ca = (
         _builder(ca_subject, ca_subject, ca_key.public_key(), now)
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)

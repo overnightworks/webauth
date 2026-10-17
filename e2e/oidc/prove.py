@@ -658,6 +658,8 @@ def prove(edge: Path, scratch: Path) -> int:
 
 
 def main() -> int:
+    if not __debug__:
+        raise SystemExit("prove.py checks with assert; run it without python -O")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--edge", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
