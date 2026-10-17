@@ -101,15 +101,18 @@ that state names and clears it on every outcome — admitted or refused —
 while every other tab's cookie stays. A callback names a usable state when it
 carries `state` exactly once, non-empty and decodable.
 
-- With a usable state, a malformed rest (another parameter named twice, or one
-  that does not decode) still clears that state's cookie. It is refused as
-  `MALFORMED_CALLBACK` when that cookie is genuine and as `STATE_MISMATCH`
-  otherwise.
+- With a usable state, a malformed rest (a parameter named twice, one that
+  does not decode, or a pair that strict query parsing refuses, such as a
+  trailing `&` or a name without `=`) still clears that state's cookie. It is
+  refused as `MALFORMED_CALLBACK` when that cookie is genuine and as
+  `STATE_MISMATCH` otherwise.
 - Without a usable state no cookie is selected. The callback is refused as
-  `MALFORMED_CALLBACK` when any of its parameters is named twice or does not
-  decode, and as `STATE_MISMATCH` otherwise.
-- A missing, forged, oversized, unknown-version or duplicated cookie, or a
-  genuine cookie of another login, is `STATE_MISMATCH`.
+  `MALFORMED_CALLBACK` when it holds a parameter named twice, one that does
+  not decode, or a pair that strict query parsing refuses, such as a trailing
+  `&` or a name without `=`, and as `STATE_MISMATCH` otherwise.
+- With a well-formed rest, a missing, forged, oversized, unknown-version or
+  duplicated cookie, or a genuine cookie of another login, is
+  `STATE_MISMATCH`.
 
 Every one of these is refused before any token request.
 
@@ -646,11 +649,10 @@ It leaves the application everything that touches the application's own truth:
   path.
 - **Identity.** It issues no access or ID tokens: it is no identity provider, and
   it verifies the ID tokens an issuer made.
-- **HTTP framing** is the ASGI server's job. uvicorn refuses conflicting
-  `Content-Length` values and an unsupported `Transfer-Encoding` before the app
-  sees them. A `Content-Length` beside `Transfer-Encoding: chunked` is read as
-  chunked by its h11 parser and refused by its httptools parser, both of which
-  HTTP allows. webauth's body-size limit counts the streamed bytes either way.
+- **HTTP framing** is the ASGI server's job. uvicorn's two parsers, h11 and
+  httptools, answer some framing conflicts differently, and HTTP allows either
+  answer. webauth never re-parses framing: its body-size limit counts the
+  streamed bytes whatever the headers say.
 
 ## Install
 
