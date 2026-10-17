@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
+import anyio
 import httpx
 import pytest
 from fastapi import BackgroundTasks, FastAPI, Request
@@ -18,6 +19,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, StreamingResponse
+from starlette.types import Message
 from webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
@@ -514,6 +516,54 @@ class TestASlowRateLimiterDoesNotStallTheEventLoop:
             responses = await asyncio.gather(client.get(API_PATH), client.get(API_PATH))
 
         assert [response.status_code for response in responses] == [200, 200]
+
+
+class HeldRateLimitBackend:
+    """Signals that a check is running, then holds it until released."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
+        self.entered.set()
+        assert self.release.wait(timeout=5)
+        return True
+
+
+class TestARequestCancelledDuringItsRateLimitCheck:
+    @pytest.mark.anyio
+    async def test_neither_runs_the_app_nor_sends_a_response(self) -> None:
+        backend = HeldRateLimitBackend()
+        app = a_fresh_app(rate_limits=backend)
+        route_runs: list[str] = []
+
+        async def cancelled_route() -> dict[str, bool]:
+            route_runs.append("ran")
+            return {"ok": True}
+
+        app.add_api_route("/cancelled", cancelled_route, methods=["GET"])
+        install_full_stack(app)
+        sent: list[str] = []
+        request_scope = anyio.CancelScope()
+
+        async def receive() -> Message:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: Message) -> None:
+            sent.append(message["type"])
+
+        async def drive_request() -> None:
+            with request_scope:
+                await app(an_http_scope(app, "/cancelled"), receive, send)
+
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(drive_request)
+            await anyio.to_thread.run_sync(backend.entered.wait)
+            request_scope.cancel()
+            backend.release.set()
+
+        assert (route_runs, sent) == ([], [])
 
 
 class TestCompetingRefusals:

@@ -7,6 +7,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from anyio import to_thread
+from anyio.lowlevel import checkpoint_if_cancelled
 from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
@@ -56,11 +57,13 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
                 )
             )
         except Exception:
+            await checkpoint_if_cancelled()
             log.exception("IP rate limiter unavailable -- rejecting request")
             return JSONResponse(
                 {"detail": "Rate limiter unavailable"}, status_code=503,
                 headers={"Retry-After": str(LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
             )
+        await checkpoint_if_cancelled()
         if not allowed:
             return JSONResponse(
                 {"detail": "Too many requests"}, status_code=429,
