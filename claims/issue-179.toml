@@ -1,8 +1,0 @@
-claim_id = "0f65b1bee5544da0ad517414a528c32a"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "e522861e2111dbf2441aac35d946aef8c975e76c"
-branch = "claude/issue-179-pyright-gate"
-scope = [".github/workflows/ci.yml", "AGENTS.md", "README.md", "e2e/oidc/conformance.py", "e2e/oidc/evidence.py", "e2e/oidc/harness.py", "e2e/oidc/prove.py", "e2e/oidc/shim.py", "pyproject.toml", "src/webauth/jwt_verification.py", "src/webauth/middleware/stack.py", "src/webauth/oidc.py", "tests/typing/check_against_wheel.sh", "uv.lock"]
-opened_commit = "dca0a6ae981b48efd09327503009d6f7a769d190"
-whole_reason = "One gate: the pyright step goes green only once every error it reports is fixed, so the fixes and the step cannot land apart."
