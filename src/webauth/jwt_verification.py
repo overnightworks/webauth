@@ -10,9 +10,9 @@ a logout token's events — belongs to the caller, which reads them from
 The token is parsed strictly by this module before PyJWT sees it: bounded
 length and nesting, no duplicate JSON members, canonical base64url, an
 RS256-only header whose `kid`, when present, is a bounded string, and no header
-member that would let the token choose its own key. PyJWT then verifies the signature, audience and
-issuer; the time claims are checked here against the injected wall clock, so
-leeway has one owner.
+member that would let the token choose its own key. PyJWT then verifies the
+signature, audience and issuer; the time claims are checked here against the
+injected wall clock, so leeway has one owner.
 
 Signing keys come from the configured key-set URL through the injected fetch.
 A fetched key set replaces the cached one only once every key in it is sound,
@@ -21,19 +21,22 @@ expires on the injected monotonic clock. Keys published for another purpose —
 encryption, another algorithm or key type — are passed over, not refused,
 because issuers such as Keycloak publish them beside the signing keys. They
 do not count toward `MAX_KEY_SET_KEYS`, which bounds the RS256 verification
-keys, the only ones that cost key construction and cache space. The size of
+keys, named or not, the only ones that cost key construction and cache space. The size of
 the whole document is bounded by `MAX_KEY_SET_BYTES`, so passed-over entries
 cost a few lookups each and nothing more. Each entry is checked in this order:
 an object without a secret member, then RS256 eligibility, then the count, then
 the key itself.
 
-A token without a `kid` member is read against the key set's only key, whether
-or not that key carries a `kid`; against several keys it is refused as
-`INVALID_KEY_ID`, as OIDC Core 10.1 requires. An RS256 verification key may lack
-`kid` only when it is the only one in the set; an explicit `"kid": null` is
-malformed. A token without `kid` triggers no refresh, so a rotation of a sole
-key, or a change between one and several keys, stays unseen until the key set
-expires (OIDC Core 10.1.1: an unfamiliar `kid` is the rotation signal).
+A token without a `kid` member is read against the key set's only RS256
+verification key, whether or not that key carries a `kid`; against several
+eligible keys it is refused as `INVALID_KEY_ID`, as OIDC Core 10.1 requires.
+An eligible key may lack `kid`; beside other eligible keys it is admitted but
+unreachable, because a named `kid` looks up only named keys. An explicit
+`"kid": null` is malformed, and a duplicate named `kid` is refused. A token
+without `kid` triggers no refresh of its own, so a rotation of a sole key, or a
+change between one and several keys, can stay unseen until the key set
+expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh
+(OIDC Core 10.1.1: an unfamiliar `kid` is the rotation signal).
 
 Install the `jwt` extra to use this module.
 """
@@ -46,7 +49,7 @@ import logging
 import math
 import re
 import threading
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
@@ -173,7 +176,8 @@ class _ParsedToken:
 
 @dataclass(frozen=True)
 class _KeySet:
-    keys: Mapping[str | None, RSAPublicKey]
+    named: Mapping[str, RSAPublicKey]
+    sole: RSAPublicKey | None
     fetched_at: float
 
 
@@ -283,14 +287,16 @@ class JwtVerifier:
 
     def _signing_key(self, key_id: str | None) -> RSAPublicKey:
         key_set = self._key_set
-        if not self._is_current(key_set) or (key_id is not None and key_id not in key_set.keys):
+        if not self._is_current(key_set) or (key_id is not None and key_id not in key_set.named):
             self._refresh_key_set()
             key_set = self._key_set
         if not self._is_current(key_set):
             raise VerificationRefusal(RejectionReason.KEY_SET_UNAVAILABLE)
         if key_id is None:
-            return _sole_key(key_set)
-        key = key_set.keys.get(key_id)
+            if key_set.sole is None:
+                raise VerificationRefusal(RejectionReason.INVALID_KEY_ID)
+            return key_set.sole
+        key = key_set.named.get(key_id)
         if key is None:
             # An unknown `kid` is only a forged one when the key set could be
             # fetched; after a failed refresh it may be a rotated key.
@@ -320,7 +326,7 @@ class JwtVerifier:
                 return
             self._last_refresh_at = now
             try:
-                keys = _parse_key_set(self._fetch_key_set(self._jwks_url))
+                named, sole = _parse_key_set(self._fetch_key_set(self._jwks_url))
             # The injected fetch's message is not this module's to vouch for:
             # it may quote the key-set URL, and that URL may hold a secret.
             except KeySetFetchError:
@@ -328,20 +334,13 @@ class JwtVerifier:
             except _InvalidKeySetError as refusal:
                 failure = refusal.failure
             else:
-                self._key_set = _KeySet(keys=keys, fetched_at=now)
+                self._key_set = _KeySet(named=named, sole=sole, fetched_at=now)
                 self._last_refresh_failed = False
                 return
             self._last_refresh_failed = True
             log.warning("Refreshing the key set failed: %s", failure)
         finally:
             self._refresh_lock.release()
-
-
-def _sole_key(key_set: _KeySet) -> RSAPublicKey:
-    """A token that names no key is read against the only key the set holds."""
-    if len(key_set.keys) != 1:
-        raise VerificationRefusal(RejectionReason.INVALID_KEY_ID)
-    return next(iter(key_set.keys.values()))
 
 
 def _library_checks() -> Options:
@@ -494,7 +493,9 @@ def _finite_number(literal: str) -> float:
     return number
 
 
-def _parse_key_set(document: bytes) -> Mapping[str | None, RSAPublicKey]:
+def _parse_key_set(
+    document: bytes,
+) -> tuple[Mapping[str, RSAPublicKey], RSAPublicKey | None]:
     if len(document) > MAX_KEY_SET_BYTES:
         raise _InvalidKeySetError(_RefreshFailure.TOO_LARGE)
     try:
@@ -504,29 +505,39 @@ def _parse_key_set(document: bytes) -> Mapping[str | None, RSAPublicKey]:
     jwks = parsed.get("keys")
     if not isinstance(jwks, list) or not jwks:
         raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
-    return MappingProxyType(_rs256_verification_keys(jwks))
+    named, sole = _rs256_verification_keys(jwks)
+    return MappingProxyType(named), sole
 
 
-def _rs256_verification_keys(jwks: list[object]) -> dict[str | None, RSAPublicKey]:
-    keys: dict[str | None, RSAPublicKey] = {}
+def _rs256_verification_keys(
+    jwks: list[object],
+) -> tuple[dict[str, RSAPublicKey], RSAPublicKey | None]:
+    named: dict[str, RSAPublicKey] = {}
+    eligible = 0
+    last_key: RSAPublicKey | None = None
+    for jwk in _rs256_verification_jwks(jwks):
+        if eligible == MAX_KEY_SET_KEYS:
+            raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
+        key_id, last_key = _public_signing_key(jwk)
+        eligible += 1
+        if key_id is None:
+            continue
+        if key_id in named:
+            raise _InvalidKeySetError(_RefreshFailure.DUPLICATE_KEY_ID)
+        named[key_id] = last_key
+    if not eligible:
+        raise _InvalidKeySetError(_RefreshFailure.NO_RS256_SIGNING_KEY)
+    return named, last_key if eligible == 1 else None
+
+
+def _rs256_verification_jwks(jwks: list[object]) -> Iterator[dict[str, object]]:
     for jwk in jwks:
         if not isinstance(jwk, dict):
             raise _InvalidKeySetError(_RefreshFailure.KEY_NOT_AN_OBJECT)
         if _SECRET_KEY_MEMBERS & jwk.keys():
             raise _InvalidKeySetError(_RefreshFailure.SECRET_KEY_PUBLISHED)
-        if not _is_rs256_verification_key(jwk):
-            continue
-        if len(keys) == MAX_KEY_SET_KEYS:
-            raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
-        key_id, key = _public_signing_key(jwk)
-        if key_id in keys:
-            raise _InvalidKeySetError(_RefreshFailure.DUPLICATE_KEY_ID)
-        keys[key_id] = key
-    if not keys:
-        raise _InvalidKeySetError(_RefreshFailure.NO_RS256_SIGNING_KEY)
-    if None in keys and len(keys) > 1:
-        raise _InvalidKeySetError(_RefreshFailure.MALFORMED_KEY)
-    return keys
+        if _is_rs256_verification_key(jwk):
+            yield jwk
 
 
 def _is_rs256_verification_key(jwk: Mapping[str, object]) -> bool:

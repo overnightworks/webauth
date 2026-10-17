@@ -471,6 +471,18 @@ def _signing_keys(count: int) -> list[dict[str, Any]]:
     ]
 
 
+def _kidless_keys(count: int) -> list[dict[str, Any]]:
+    return [public_jwk(rsa_key(f"kidless-{index}"), "unused", kid=ABSENT) for index in range(count)]
+
+
+def _mixed_keys(count: int) -> list[dict[str, Any]]:
+    keys = _kidless_keys(count)
+    keys[::2] = [public_jwk(rsa_key("current"), "current-key")] + [
+        public_jwk(rsa_key("current"), f"named-{index}") for index in range(len(keys[::2]) - 1)
+    ]
+    return keys
+
+
 def _passed_over_keys(count: int) -> list[dict[str, Any]]:
     """What the OpenID Foundation suite's OP publishes beside its two RS256
     keys: other signing algorithms, encryption keys, and entries no verifier
@@ -574,14 +586,19 @@ def _defective_key_sets() -> list[Any]:
             id="sole-key-kid-null",
         ),
         pytest.param(
-            key_set_document(public_jwk(current, "current-key", kid=ABSENT), valid_jwk),
+            key_set_document(valid_jwk, public_jwk(current, "other-key", kid=None)),
             "malformed-key",
-            id="kidless-key-before-another-signing-key",
+            id="kid-null-beside-another-signing-key",
         ),
         pytest.param(
-            key_set_document(valid_jwk, public_jwk(current, "current-key", kid=ABSENT)),
-            "malformed-key",
-            id="kidless-key-after-another-signing-key",
+            key_set_document(*_kidless_keys(MAX_KEY_SET_KEYS + 1)),
+            "key-count-out-of-range",
+            id="too-many-kidless-keys",
+        ),
+        pytest.param(
+            key_set_document(*_mixed_keys(MAX_KEY_SET_KEYS + 1)),
+            "key-count-out-of-range",
+            id="too-many-named-and-kidless-keys",
         ),
         pytest.param(
             key_set_document(public_jwk(current, "current-key", n=7)),
@@ -651,6 +668,53 @@ def test_keys_passed_over_do_not_count_toward_the_key_bound(issuer: IssuerScenar
     ]
 
     assert verified == [issuer.verified()] * 2
+
+
+@pytest.mark.parametrize(
+    "published",
+    [
+        pytest.param(_kidless_keys(MAX_KEY_SET_KEYS), id="all-kidless"),
+        pytest.param(_mixed_keys(MAX_KEY_SET_KEYS), id="named-and-kidless"),
+    ],
+)
+def test_the_key_bound_admits_that_many_eligible_keys_named_or_not(
+    issuer: IssuerScenario, published: list[dict[str, Any]]
+) -> None:
+    issuer.serve(key_set_document(*published))
+    kidless = issuer.verifier.verify(_kidless(issuer))
+    issuer.after_cooldown()
+
+    unfamiliar = issuer.verifier.verify(issuer.token(header={"kid": "x"}))
+
+    assert kidless == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert unfamiliar == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [
+        pytest.param(
+            key_set_document(
+                public_jwk(rsa_key("current"), "current-key"),
+                public_jwk(rsa_key("other"), "current-key"),
+            ),
+            id="duplicate-named-kid",
+        ),
+        pytest.param(key_set_document(*_kidless_keys(MAX_KEY_SET_KEYS + 1)), id="too-many-keys"),
+    ],
+)
+def test_a_refused_key_set_keeps_the_last_good_snapshot(
+    issuer: IssuerScenario, refused: bytes
+) -> None:
+    issuer.verifier.verify(issuer.token())
+    issuer.serve(refused)
+    issuer.after_cooldown()
+
+    unfamiliar = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
+    known = issuer.verifier.verify(issuer.token())
+
+    assert unfamiliar == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert known == issuer.verified()
 
 
 def test_the_measured_key_set_of_two_unlabelled_signing_keys_among_thirteen_verifies_each_key(
@@ -814,11 +878,44 @@ def test_a_token_without_kid_is_refused_without_a_fetch_when_the_key_set_holds_s
 ) -> None:
     _serve_two_keys(issuer)
     issuer.verifier.verify(issuer.token())
+    issuer.after_cooldown()
 
     refused = issuer.verifier.verify(_kidless(issuer))
 
     assert refused == Rejected(RejectionReason.INVALID_KEY_ID)
     assert len(issuer.endpoint.fetched_urls) == 1
+
+
+@pytest.mark.parametrize("kidless_first", [True, False], ids=["kidless-first", "named-first"])
+def test_a_kidless_key_beside_a_named_one_is_admitted_but_verifies_nothing(
+    issuer: IssuerScenario, kidless_first: bool
+) -> None:
+    named = public_jwk(rsa_key("current"), "current-key")
+    kidless = public_jwk(rsa_key("other"), "other-key", kid=ABSENT)
+    issuer.serve(key_set_document(*([kidless, named] if kidless_first else [named, kidless])))
+    signed_by_kidless_key = rs256(rsa_key("other"))
+
+    assert issuer.verifier.verify(issuer.token()) == issuer.verified()
+    assert issuer.verifier.verify(_kidless(issuer)) == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert issuer.verifier.verify(
+        _kidless(issuer, sign=signed_by_kidless_key)
+    ) == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert issuer.verifier.verify(issuer.token(sign=signed_by_kidless_key)) == Rejected(
+        RejectionReason.INVALID_SIGNATURE
+    )
+
+
+def test_several_kidless_keys_are_admitted_and_answer_every_token_as_ambiguous(
+    issuer: IssuerScenario,
+) -> None:
+    issuer.serve(key_set_document(*_kidless_keys(3)))
+    kidless = issuer.verifier.verify(_kidless(issuer))
+    issuer.after_cooldown()
+
+    named = issuer.verifier.verify(issuer.token(header={"kid": "x"}))
+
+    assert kidless == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert named == Rejected(RejectionReason.UNKNOWN_KEY_ID)
 
 
 def test_a_named_kid_unmatched_by_a_kidless_sole_key_is_unknown_once_the_refresh_succeeds(
@@ -850,6 +947,7 @@ def test_a_signature_failure_without_kid_does_not_refresh_the_key_set(
     issuer: IssuerScenario,
 ) -> None:
     issuer.verifier.verify(issuer.token())
+    issuer.after_cooldown()
 
     refused = issuer.verifier.verify(_kidless(issuer, sign=rs256(rsa_key("other"))))
 
@@ -883,8 +981,10 @@ def test_rotation_from_two_keys_to_one_is_seen_by_a_token_without_kid_after_the_
     issuer: IssuerScenario,
 ) -> None:
     _serve_two_keys(issuer)
-    before_ttl = issuer.verifier.verify(_kidless(issuer))
+    issuer.verifier.verify(issuer.token())
     _serve_sole_key(issuer, "current", kid=ABSENT)
+    issuer.after_cooldown()
+    before_ttl = issuer.verifier.verify(_kidless(issuer))
     _after_the_ttl(issuer)
 
     after_ttl = issuer.verifier.verify(_kidless(issuer))
@@ -898,6 +998,7 @@ def test_rotation_from_one_sole_key_to_another_is_seen_by_a_token_without_kid_af
 ) -> None:
     issuer.verifier.verify(_kidless(issuer))
     _serve_sole_key(issuer, "other", kid=ABSENT)
+    issuer.after_cooldown()
     new_key_token = _kidless(issuer, sign=rs256(rsa_key("other")))
     before_ttl = issuer.verifier.verify(new_key_token)
     _after_the_ttl(issuer)
@@ -915,6 +1016,7 @@ def test_rotation_from_one_key_to_two_is_seen_by_a_token_without_kid_after_the_t
 ) -> None:
     issuer.verifier.verify(_kidless(issuer))
     _serve_two_keys(issuer)
+    issuer.after_cooldown()
     before_ttl = issuer.verifier.verify(_kidless(issuer))
     _after_the_ttl(issuer)
 
