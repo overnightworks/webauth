@@ -874,7 +874,8 @@ def test_tokens_without_kid_inside_the_ttl_never_refresh_the_key_set(
     issuer.after_cooldown()
     after_cooldown = issuer.verifier.verify(_kidless(issuer))
 
-    assert [before_cooldown, after_cooldown] == [issuer.verified()] * 2
+    assert before_cooldown == issuer.verified()
+    assert after_cooldown == issuer.verified()
     assert len(issuer.endpoint.fetched_urls) == 1
 
 
