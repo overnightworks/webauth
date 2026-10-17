@@ -18,8 +18,13 @@ host's accounts, never a configuration change. This module builds on
 
 Admission holds the host's write lock and never commits: the host commits or
 rolls back, and a refusal writes nothing. An ``AdmissionConfig`` states who
-may enter: the bound issuer and the app's ``login_group``, a Keycloak group
-path such as ``/apps/songmaker``. A person is a member when one of their
+may enter and who is admin: the bound issuer, the app's ``login_group``, a
+Keycloak group path such as ``/apps/songmaker``, and its ``admin_group``, a
+path below it such as ``/apps/songmaker/admin`` (or ``NoAdmins``). Only the
+issuer's groups decide the role: it is rewritten at every login, so a person
+taken out of the admin group is a plain user from the next login and, the
+role living on the account, on every device at once. Until that login an open
+session keeps the old role. A person is a member when one of their
 groups is that path or a subgroup of it, compared character for character
 and by path segment, so ``/apps/songmaker/admin`` counts and
 ``/apps/songmaker2`` does not. The check runs on every login, before any
@@ -80,6 +85,7 @@ __all__ = [
     "AdmissionConfig",
     "AdmissionRefusal",
     "EverySubject",
+    "NoAdmins",
     "admit_identity",
     "finish_login",
     "post_token_request_over_https",
@@ -106,24 +112,43 @@ class EverySubject(Enum):
     OF_THE_BOUND_ISSUER = "every-subject"
 
 
+class NoAdmins(Enum):
+    """This app has no admins: every account is ``user_role``, and a stored
+    ``admin_role`` is overwritten at the next login."""
+
+    IN_THIS_APP = "no-admins"
+
+
 @dataclass(frozen=True, kw_only=True)
 class AdmissionConfig:
-    """Who may enter: the issuer the host's store is bound to, and the group
-    path of the app (or ``EverySubject.OF_THE_BOUND_ISSUER``).
+    """Who may enter and who is admin: the issuer the host's store is bound to,
+    the group path of the app (or ``EverySubject.OF_THE_BOUND_ISSUER``), and the
+    group path of its admins (or ``NoAdmins.IN_THIS_APP``).
 
-    ``ValueError`` at construction names a ``login_group`` that is not a group
-    path: one that does not start with ``/``, ends with ``/``, has an empty
-    segment, whitespace around a segment, or a control, format or line-separator character."""
+    ``ValueError`` at construction names a ``login_group`` or ``admin_group``
+    that is not a group path: one that does not start with ``/``, ends with
+    ``/``, has an empty segment, whitespace around a segment, or a control,
+    format or line-separator character. Under a ``login_group`` path, the
+    ``admin_group`` must lie strictly below it, such as ``/apps/songmaker/admin``."""
 
     bound_issuer: str
     login_group: str | EverySubject
+    admin_group: str | NoAdmins
 
     def __post_init__(self) -> None:
-        if isinstance(self.login_group, EverySubject):
+        if not isinstance(self.login_group, EverySubject):
+            if not isinstance(self.login_group, str):
+                raise ValueError("login_group must be a group path or EverySubject")
+            _require_group_path("login_group", self.login_group)
+        if isinstance(self.admin_group, NoAdmins):
             return
-        if not isinstance(self.login_group, str):
-            raise ValueError("login_group must be a group path or EverySubject")
-        _require_group_path("login_group", self.login_group)
+        if not isinstance(self.admin_group, str):
+            raise ValueError("admin_group must be a group path or NoAdmins")
+        _require_group_path("admin_group", self.admin_group)
+        if isinstance(self.login_group, str) and not _is_below(self.login_group, self.admin_group):
+            raise ValueError(
+                f"admin_group must lie below login_group, such as {self.login_group}/admin"
+            )
 
 
 _FORBIDDEN_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
@@ -139,8 +164,12 @@ def _require_group_path(field: str, path: str) -> None:
         raise ValueError(f"{field} must not contain control, format or line-separator characters")
 
 
+def _is_below(group_path: str, group: str) -> bool:
+    return group.startswith(group_path + "/")
+
+
 def _is_member_of(group_path: str, groups: tuple[str, ...]) -> bool:
-    return any(group == group_path or group.startswith(group_path + "/") for group in groups)
+    return any(group == group_path or _is_below(group_path, group) for group in groups)
 
 
 class AdmissionRefusal(StrEnum):
@@ -250,29 +279,59 @@ def admit_identity(
 ) -> UserRecord | AdmissionRefusal:
     """The account ``identity`` signs in as, created on its first visit.
 
-    A known subject keeps its account as it is, whatever username the issuer
-    now suggests. Any stored account whose ``id`` equals the subject character
-    for character is that subject's account and signs in as it is, whatever
-    created it; ``SubjectUserStore.get`` must compare exactly. A host that
-    migrates legacy accounts makes sure that no legacy ``id`` can equal a
-    subject of the bound issuer.
+    A known subject keeps its account and username, whatever username the
+    issuer now suggests, but its role follows the groups: ``admin_role`` when
+    the identity is a member of ``admission.admin_group`` (or below it),
+    otherwise ``user_role``, whatever role the account stored and whatever
+    created it. A role that differs is written with ``SubjectUserStore.set_role``
+    and recorded as ``ROLE_CHANGED``; an equal role writes nothing.
+    ``SubjectUserStore.get`` must compare exactly. A host that migrates legacy
+    accounts makes sure that no legacy ``id`` can equal a subject of the bound
+    issuer.
 
     The order of refusals is ``FOREIGN_ISSUER``, then ``NOT_A_MEMBER`` (the
     identity's groups hold no path of ``admission.login_group``, or are
     missing or empty), then the account's own state. The first two write
-    nothing and look up no account.
+    nothing and look up no account; a deactivated account is refused before
+    any role is written.
     """
     if identity.issuer != admission.bound_issuer:
         return AdmissionRefusal.FOREIGN_ISSUER
     if not _admits(admission.login_group, identity):
         return AdmissionRefusal.NOT_A_MEMBER
+    role = _derived_role(admission.admin_group, identity, config)
     with lock.hold():
         account = accounts.get(identity.subject)
         if account is None:
-            return _provision(identity, accounts=accounts, audit=audit, config=config)
+            return _provision(identity, role, accounts=accounts, audit=audit)
         if not account.is_active:
             return AdmissionRefusal.ACCOUNT_DEACTIVATED
+        return _with_role(account, role, accounts=accounts, audit=audit)
+
+
+def _derived_role(
+    admin_group: str | NoAdmins, identity: OidcIdentity, config: WebAuthConfig,
+) -> str:
+    if isinstance(admin_group, str) and _is_member_of(admin_group, identity.groups):
+        return config.admin_role
+    return config.user_role
+
+
+def _with_role(
+    account: UserRecord, role: str, *, accounts: SubjectUserStore, audit: AuditSink,
+) -> UserRecord:
+    previous_role = account.role
+    if previous_role == role:
         return account
+    updated = accounts.set_role(account.id, role)
+    audit.user_management_event(UserManagementEvent(
+        kind=UserManagementEventKind.ROLE_CHANGED,
+        actor_id=None,
+        subject_id=updated.id,
+        role=role,
+        previous_role=previous_role,
+    ))
+    return updated
 
 
 def _admits(login_group: str | EverySubject, identity: OidcIdentity) -> bool:
@@ -283,16 +342,16 @@ def _admits(login_group: str | EverySubject, identity: OidcIdentity) -> bool:
 
 def _provision(
     identity: OidcIdentity,
+    role: str,
     *,
     accounts: SubjectUserStore,
     audit: AuditSink,
-    config: WebAuthConfig,
 ) -> UserRecord | AdmissionRefusal:
     username = _username_for(identity)
     if accounts.get_by_username(username) is not None:
         return AdmissionRefusal.USERNAME_TAKEN
     try:
-        account = accounts.create_for_subject(identity.subject, username, config.user_role)
+        account = accounts.create_for_subject(identity.subject, username, role)
     except UsernameTakenError:
         return AdmissionRefusal.USERNAME_TAKEN
     audit.user_management_event(UserManagementEvent(

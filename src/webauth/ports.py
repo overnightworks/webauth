@@ -85,6 +85,15 @@ class SubjectUserStore(Protocol):
         """
         ...
 
+    def set_role(self, user_id: str, role: str) -> UserRecord:
+        """Change the role of the account whose ``id`` is ``user_id`` and return it.
+
+        Runs in the caller's transaction and never commits. Raises when no
+        account has ``user_id``: admission only calls it for an account it just
+        read, so a missing row is the host's defect and the host rolls back.
+        """
+        ...
+
 
 class UserManagementError(Exception):
     """A refused user-management operation, translated by the host."""
@@ -230,6 +239,7 @@ class SessionIdentityChanged:
 class UserManagementEventKind(Enum):
     USER_CREATED = "user_created"
     SESSION_REVOKED = "session_revoked"
+    ROLE_CHANGED = "role_changed"
 
 
 @dataclass(frozen=True)
@@ -241,6 +251,7 @@ class UserManagementEvent:
     subject_id: str
     role: str | None = None
     session_ref: str | None = None
+    previous_role: str | None = None
 
 
 @runtime_checkable

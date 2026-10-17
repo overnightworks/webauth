@@ -78,6 +78,7 @@ from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
     EverySubject,
+    NoAdmins,
     admit_identity,
     finish_login,
     post_token_request_over_https,
@@ -144,6 +145,9 @@ class HostAccounts:
 
     def create_for_subject(self, subject: str, username: str, role: str) -> UserRecord:
         return HostAccount(subject, username, role, True)
+
+    def set_role(self, user_id: str, role: str) -> UserRecord:
+        return HostAccount(user_id, "someone", role, True)
 
 
 class HostSessions:
@@ -241,6 +245,7 @@ def a_host_finishes_a_keycloak_login(
         admission=AdmissionConfig(
             bound_issuer="https://keycloak.example/realms/host",
             login_group="/apps/host",
+            admin_group="/apps/host/admin",
         ),
         accounts=accounts, lock=lock, audit=audit,
     )
@@ -257,6 +262,7 @@ def a_host_admits_an_identity(
         admission=AdmissionConfig(
             bound_issuer="https://keycloak.example/realms/host",
             login_group=EverySubject.OF_THE_BOUND_ISSUER,
+            admin_group=NoAdmins.IN_THIS_APP,
         ),
         accounts=accounts, lock=lock, audit=audit, config=config,
     )
