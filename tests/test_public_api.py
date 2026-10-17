@@ -1,4 +1,4 @@
-"""The names the OIDC-only typing host imports are the names their modules declare public."""
+"""The names the OIDC-only typing host imports are declared public by their modules."""
 
 from __future__ import annotations
 
