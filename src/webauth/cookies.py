@@ -39,6 +39,8 @@ which are minted with ``secrets.token_urlsafe``."""
 
 _PENDING_LOGIN_VERSION: Final = "v1"
 _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
+_SESSION_SIGNING_PREFIX: Final = b"session:"
+_CSRF_SIGNING_PREFIX: Final = b"csrf:"
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
@@ -125,6 +127,12 @@ def session_reference(session_id: str) -> str:
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
+def _session_signature(session_id: str, secret: bytes) -> str:
+    return hmac.new(
+        secret, _SESSION_SIGNING_PREFIX + session_id.encode(), hashlib.sha256
+    ).hexdigest()
+
+
 def sign_session_id(session_id: str, secret: bytes) -> str:
     """Return ``session_id.hmac_hex`` for use as a cookie value.
 
@@ -134,8 +142,7 @@ def sign_session_id(session_id: str, secret: bytes) -> str:
     """
     if not session_id:
         raise ValueError("the session id must not be empty")
-    sig = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
-    signed = f"{session_id}.{sig}"
+    signed = f"{session_id}.{_session_signature(session_id, secret)}"
     if len(signed) > MAX_SESSION_COOKIE_CHARS:
         raise ValueError("the session id does not fit the session cookie")
     return signed
@@ -148,7 +155,7 @@ def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
     session_id, sig = cookie_value.rsplit(".", 1)
     if not session_id or not sig:
         return None
-    expected = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
+    expected = _session_signature(session_id, secret)
     if hmac.compare_digest(sig.encode(), expected.encode()):
         return session_id
     return None
@@ -156,7 +163,9 @@ def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
 
 def generate_csrf_token(session_id: str, secret: bytes) -> str:
     """Generate a CSRF token cryptographically bound to the session."""
-    return hmac.new(secret, f"csrf:{session_id}".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(
+        secret, _CSRF_SIGNING_PREFIX + session_id.encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def verify_csrf_token(token: str, session_id: str, secret: bytes) -> bool:

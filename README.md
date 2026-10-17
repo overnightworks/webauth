@@ -197,7 +197,7 @@ the verified session identifier, or `None` when the cookie is missing, longer
 than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
 forged, or present more than once. The limit holds even for a correctly signed
 cookie, so `issue_session_cookies` raises `ValueError` for an identifier whose
-signed cookie would exceed it (identifiers up to 135 characters fit) or that is empty. A sibling
+signed cookie would exceed it (identifiers up to 135 characters fit) or that is empty. The signature is an HMAC-SHA256 over `session:` and the identifier, so a signature made for a CSRF token or a pending login is no session cookie, and a cookie issued by 0.14.x or earlier is refused. A sibling
 subdomain can set a second cookie of the same name, so a request carrying two
 is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
