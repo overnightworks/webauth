@@ -57,6 +57,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
                 )
             )
         except Exception:
+            # The worker call is shielded: a cancellation arriving during it is delivered only here.
             await checkpoint_if_cancelled()
             log.exception("IP rate limiter unavailable -- rejecting request")
             return JSONResponse(

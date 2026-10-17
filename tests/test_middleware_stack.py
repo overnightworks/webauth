@@ -519,22 +519,28 @@ class TestASlowRateLimiterDoesNotStallTheEventLoop:
 
 
 class HeldRateLimitBackend:
-    """Signals that a check is running, then holds it until released."""
+    """Signals that a check is running, then holds it until released, then fails or allows."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, fails_after_release: bool) -> None:
+        self.fails_after_release = fails_after_release
         self.entered = threading.Event()
         self.release = threading.Event()
 
     def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
         self.entered.set()
         assert self.release.wait(timeout=5)
+        if self.fails_after_release:
+            raise ConnectionError("rate limit store unreachable")
         return True
 
 
 class TestARequestCancelledDuringItsRateLimitCheck:
     @pytest.mark.anyio
-    async def test_neither_runs_the_app_nor_sends_a_response(self) -> None:
-        backend = HeldRateLimitBackend()
+    @pytest.mark.parametrize("fails_after_release", [False, True], ids=["allowing", "failing"])
+    async def test_neither_runs_the_app_nor_sends_a_response(
+        self, fails_after_release: bool
+    ) -> None:
+        backend = HeldRateLimitBackend(fails_after_release=fails_after_release)
         app = a_fresh_app(rate_limits=backend)
         route_runs: list[str] = []
 
