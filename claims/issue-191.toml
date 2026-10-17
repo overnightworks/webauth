@@ -1,0 +1,8 @@
+claim_id = "f73b44420d19412a923bad7f3997feaf"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "fbfa7c1e9a075f368585bb2c04b7c6493baa16fc"
+branch = "claude/issue-191-rate-limit-off-loop"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/middleware/_refusal.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/rate_limit.py", "src/webauth/ports.py", "tests/test_middleware_stack.py"]
+opened_commit = "abb6e849c58d272e15169b3cfafd488d156c76b6"
+whole_reason = "One contract change and its proof: the async refusal hook, the offload, the port's thread duty, its docs and the concurrency test cannot land apart."
