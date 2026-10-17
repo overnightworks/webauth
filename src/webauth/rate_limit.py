@@ -32,6 +32,8 @@ class RedisRateLimitBackend:
     window slides on every check, so a caller regains budget continuously
     rather than at a fixed reset. The whole check is one Lua script so that
     trimming, counting, and recording cannot interleave with another request.
+    The Redis server's clock decides the window, so hosts sharing one Redis
+    cannot overspend or deny each other's budget when their own clocks differ.
     A Redis that cannot answer raises, and the middleware fails the request
     closed rather than guessing.
 
@@ -46,10 +48,11 @@ class RedisRateLimitBackend:
 
     _LUA_SLIDING_WINDOW = """
     local key = KEYS[1]
-    local now = tonumber(ARGV[1])
-    local window = tonumber(ARGV[2])
-    local max_requests = tonumber(ARGV[3])
-    local member = ARGV[4]
+    local window = tonumber(ARGV[1])
+    local max_requests = tonumber(ARGV[2])
+    local member = ARGV[3]
+    local clock = redis.call('TIME')
+    local now = tonumber(clock[1]) + tonumber(clock[2]) / 1000000
     redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
     local count = redis.call('ZCARD', key)
     if count >= max_requests then return count + 1 end
@@ -59,12 +62,10 @@ class RedisRateLimitBackend:
     """
 
     def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
-        now = time.time()
         count = self._redis.eval(
             self._LUA_SLIDING_WINDOW,
             1,
             f"{self._key_prefix}:{key}",
-            now,
             window_seconds,
             limit,
             uuid.uuid4().hex,
