@@ -12,10 +12,11 @@ import base64
 import json
 import re
 import urllib.parse
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 from webauth.cookies import is_pending_login_cookie_name, pending_login_cookie_prefix
 
@@ -37,14 +38,32 @@ QUERY_IN_TEXT = re.compile(r"\?[^\s\"'<>]*")
 HAR_VERSION = "1.2"
 
 
+
+class HeaderPair(TypedDict):
+    name: str
+    value: str
+
+
+class RequestTiming(TypedDict):
+    startTime: float
+
+
+HeaderPairs = Sequence[HeaderPair]
+
+
 class RequestEvent(Protocol):
     """The part of a Playwright request the log reads."""
 
-    url: str
-    method: str
-    timing: dict[str, float]
+    @property
+    def url(self) -> str: ...
 
-    def headers_array(self) -> list[dict[str, str]]: ...
+    @property
+    def method(self) -> str: ...
+
+    @property
+    def timing(self) -> RequestTiming: ...
+
+    def headers_array(self) -> HeaderPairs: ...
 
     def response(self) -> Any: ...
 
@@ -167,7 +186,7 @@ class NetworkLog:
         request_headers = request.headers_array()
         response_headers = response.headers_array() if response else []
         self._register_set_cookie_values(response_headers)
-        started = request.timing.get("startTime", 0) / 1000
+        started = request.timing["startTime"] / 1000
         return {
             "startedDateTime": datetime.fromtimestamp(started, UTC).isoformat(),
             "time": 0,
@@ -199,7 +218,7 @@ class NetworkLog:
             "timings": {"send": 0, "wait": 0, "receive": 0},
         }
 
-    def _register_set_cookie_values(self, headers: list[dict[str, str]]) -> None:
+    def _register_set_cookie_values(self, headers: HeaderPairs) -> None:
         for header in headers:
             if header["name"].lower() == "set-cookie":
                 for line in header["value"].splitlines():
@@ -208,7 +227,7 @@ class NetworkLog:
                     self._registry.add(label, rest.split(";", 1)[0])
 
 
-def _headers(headers: list[dict[str, str]]) -> list[dict[str, str]]:
+def _headers(headers: HeaderPairs) -> list[dict[str, str]]:
     return [
         {
             "name": header["name"],
@@ -218,7 +237,7 @@ def _headers(headers: list[dict[str, str]]) -> list[dict[str, str]]:
     ]
 
 
-def cookie_names(request_headers: list[dict[str, str]]) -> list[str]:
+def cookie_names(request_headers: HeaderPairs) -> list[str]:
     return [
         pair.split("=", 1)[0].strip()
         for header in request_headers if header["name"].lower() == "cookie"
@@ -226,7 +245,7 @@ def cookie_names(request_headers: list[dict[str, str]]) -> list[str]:
     ]
 
 
-def _set_cookies(response_headers: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _set_cookies(response_headers: HeaderPairs) -> list[dict[str, Any]]:
     cookies = []
     for header in response_headers:
         if header["name"].lower() != "set-cookie":
@@ -247,7 +266,7 @@ def _set_cookies(response_headers: list[dict[str, str]]) -> list[dict[str, Any]]
     return cookies
 
 
-def _redirect_target(response_headers: list[dict[str, str]], request_url: str) -> str:
+def _redirect_target(response_headers: HeaderPairs, request_url: str) -> str:
     for header in response_headers:
         if header["name"].lower() == "location":
             url, _ = sanitized_url(urllib.parse.urljoin(request_url, header["value"]))

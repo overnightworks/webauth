@@ -511,7 +511,7 @@ def conform(scratch: Path) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--scratch", type=Path, required=True)
     return conform(parser.parse_args().scratch.resolve())
 

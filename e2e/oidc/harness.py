@@ -34,7 +34,7 @@ from evidence import (
     without_query_values,
 )
 from host_app import HostSettings
-from playwright.sync_api import Browser, BrowserContext, Playwright
+from playwright.sync_api import Browser, BrowserContext, Cookie, Playwright
 from shim import LOOPBACK
 from stack import StackError
 
@@ -178,9 +178,18 @@ def remember_url_credentials(run: RunRecord, url: str) -> None:
             run.registry.add(f"url parameter {name}", value)
 
 
+def cookie_name_and_value(cookie: Cookie) -> tuple[str, str]:
+    if "name" not in cookie or "value" not in cookie:
+        raise AssertionError(
+            f"Playwright returned a cookie without name or value; keys: {sorted(cookie)}"
+        )
+    return cookie["name"], cookie["value"]
+
+
 def remember_cookies(run: RunRecord, context: BrowserContext) -> None:
     for cookie in context.cookies():
-        run.registry.add(f"cookie {recorded_cookie_name(cookie['name'])}", cookie["value"])
+        name, value = cookie_name_and_value(cookie)
+        run.registry.add(f"cookie {recorded_cookie_name(name)}", value)
 
 
 def wait_until_serving(run: RunRecord, process: subprocess.Popen[bytes], *ports: int) -> None:

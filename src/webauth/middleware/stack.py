@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from starlette.middleware import Middleware
+
 from webauth.middleware.body_size import BodySizeLimitMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
@@ -78,9 +80,14 @@ def install_web_auth_middleware(
             "The app already carries library middleware; install the stack once "
             "and add no library middleware by hand.",
         )
-    policies = (security_headers, body_size, rate_limit, csrf_origin, csrf_token)
-    for middleware, policy in reversed(
-        list(zip(_LIBRARY_MIDDLEWARE, policies, strict=True)),
-    ):
-        if policy is not None:
-            app.add_middleware(middleware, policy=policy)
+    entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
+    if body_size is not None:
+        entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
+    if rate_limit is not None:
+        entries.append(Middleware(IpRateLimitMiddleware, policy=rate_limit))
+    if csrf_origin is not None:
+        entries.append(Middleware(CsrfOriginMiddleware, policy=csrf_origin))
+    if csrf_token is not None:
+        entries.append(Middleware(CsrfTokenMiddleware, policy=csrf_token))
+    for entry in reversed(entries):
+        app.add_middleware(entry.cls, *entry.args, **entry.kwargs)

@@ -38,6 +38,7 @@ dev = [
     "httpx>=0.27,<1",
     "ruff>=0.4,<1",
     "import-linter>=2,<3",
+    "pyright>=1.1.414,<2",
 ]
 
 [dependency-groups]
@@ -85,6 +86,10 @@ extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src/webauth", "e2e"]
+pythonVersion = "3.12"
 
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/webauth/__init__.py" }]
