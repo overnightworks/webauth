@@ -629,9 +629,7 @@ def test_a_defective_key_set_is_refused_as_a_whole(
 @pytest.mark.parametrize(
     ("passed_over", "signing_keys"),
     [
-        pytest.param(11, 2, id="the-measured-shape-of-two-signing-keys-among-thirteen"),
         pytest.param(20, MAX_KEY_SET_KEYS, id="the-most-signing-keys-among-many-passed-over"),
-        pytest.param(MAX_KEY_SET_KEYS, 1, id="one-signing-key-among-encryption-keys"),
     ],
 )
 def test_keys_passed_over_do_not_count_toward_the_key_bound(
@@ -646,6 +644,45 @@ def test_keys_passed_over_do_not_count_toward_the_key_bound(
     ]
 
     assert verified == [issuer.verified()] * 2
+
+
+def test_the_measured_key_set_of_two_unlabelled_signing_keys_among_thirteen_verifies_each_key(
+    issuer: IssuerScenario,
+) -> None:
+    issuer.serve(
+        key_set_document(
+            public_jwk(rsa_key("current"), "current-key", alg=ABSENT),
+            public_jwk(rsa_key("other"), "other-key", alg=ABSENT),
+            *_passed_over_keys(11),
+        )
+    )
+    other_signature = rs256(rsa_key("other"))
+
+    assert issuer.verifier.verify(issuer.token()) == issuer.verified()
+    assert (
+        issuer.verifier.verify(issuer.token(header={"kid": "other-key"}, sign=other_signature))
+        == issuer.verified()
+    )
+    assert issuer.verifier.verify(issuer.token(sign=other_signature)) == Rejected(
+        RejectionReason.INVALID_SIGNATURE
+    )
+
+
+def test_one_signing_key_among_the_most_encryption_keys_is_accepted(
+    issuer: IssuerScenario,
+) -> None:
+    current = rsa_key("current")
+    issuer.serve(
+        key_set_document(
+            public_jwk(current, "current-key"),
+            *(
+                public_jwk(current, f"encryption-{index}", use="enc")
+                for index in range(MAX_KEY_SET_KEYS)
+            ),
+        )
+    )
+
+    assert issuer.verifier.verify(issuer.token()) == issuer.verified()
 
 
 def test_keys_published_for_other_purposes_beside_the_signing_key_are_passed_over(

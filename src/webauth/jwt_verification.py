@@ -490,7 +490,6 @@ def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
 
 def _rs256_verification_keys(jwks: list[object]) -> dict[str, RSAPublicKey]:
     keys: dict[str, RSAPublicKey] = {}
-    eligible_keys = 0
     for jwk in jwks:
         if not isinstance(jwk, dict):
             raise _InvalidKeySetError(_RefreshFailure.KEY_NOT_AN_OBJECT)
@@ -498,8 +497,7 @@ def _rs256_verification_keys(jwks: list[object]) -> dict[str, RSAPublicKey]:
             raise _InvalidKeySetError(_RefreshFailure.SECRET_KEY_PUBLISHED)
         if not _is_rs256_verification_key(jwk):
             continue
-        eligible_keys += 1
-        if eligible_keys > MAX_KEY_SET_KEYS:
+        if len(keys) == MAX_KEY_SET_KEYS:
             raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
         key_id, key = _public_signing_key(jwk)
         if key_id in keys:
