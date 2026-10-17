@@ -6,15 +6,15 @@ signs ID tokens with RS256 and publishes static endpoints works. The host serves
 a start and a callback route. webauth runs the flow, then keeps the session:
 sessions the store decides on every request, HMAC-signed cookies, CSRF
 double-submit, admin checks, per-address rate limits, and the audit events they
-raise.
+raise. The client is a confidential client: it authenticates at the token
+endpoint with HTTP Basic and sends PKCE with the `S256` method.
 
 Distribution `overnightworks-webauth`, import package `webauth`. The login needs
-the `jwt` extra; see [Install](#install).
+the `jwt` extra, which [Install](#install) names.
 
 ## OpenID Connect login
 
-Login runs at an OpenID Connect issuer with the authorization-code flow and PKCE. The
-host names the issuer's authorization, token and key-set URLs itself; the
+The host names the issuer's authorization, token and key-set URLs itself; the
 library does no discovery.
 
 ### The host's start and callback routes
@@ -22,9 +22,19 @@ library does no discovery.
 `webauth.oidc_login` carries the pending login for the host, so the host
 keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
 Connect. The host serves two routes over its one `OidcRelyingParty`, built as
-under [The relying party](#the-relying-party):
+shown under [The relying party](#the-relying-party). In the example, the host's
+own are `describe_the_hosts_refusal`, `open_the_hosts_session`, `accounts`,
+`lock`, `audit` and `client_config`; see [Admitting an identity](#admitting-an-identity)
+and [Session lifetime](#session-lifetime).
 
 ```python
+from fastapi import Request, Response
+
+from webauth.cookies import issue_session_cookies
+from webauth.oidc import OidcRefusal
+from webauth.oidc_login import AdmissionRefusal, finish_login, start_login
+
+
 @app.get("/login/oidc")
 def start(request: Request) -> Response:
     response = Response(status_code=303)
@@ -95,9 +105,11 @@ refused as `MALFORMED_CALLBACK` when that state's cookie is genuine and as
 `STATE_MISMATCH` otherwise. A callback with no state, an empty one, its
 state twice or an undecodable one selects no cookie. Every one of these, and
 a missing, forged, oversized, unknown-version or duplicated cookie, or a
-genuine cookie of another login, is refused before any token request:
-`MALFORMED_CALLBACK` for a malformed query that names a single state whose
-cookie is genuine, otherwise `STATE_MISMATCH`.
+genuine cookie of another login, is refused before any token request. A state
+named twice or undecodable is `MALFORMED_CALLBACK`; a missing or empty state, and a
+cookie that is missing, not genuine or another login's, is `STATE_MISMATCH`;
+a malformed rest beside one state is `MALFORMED_CALLBACK` only when that state's
+cookie is genuine.
 
 **Single use, stated honestly.** A pending login is single-use because its
 cookie is cleared on every outcome and the issuer accepts its authorization
@@ -144,6 +156,29 @@ injects, authenticated with HTTP Basic, and the ID token is verified by a
 `JwtVerifier` whose one accepted audience is the client ID, then checked for
 the pending nonce and an authorized party: a token for several audiences must
 name the client as its `azp`, and any `azp` a token names must be the client.
+
+A Keycloak realm needs one `OidcClientConfig`. The client id and secret come
+from the host's secret channel, never from source:
+
+```python
+import os
+
+from pydantic import SecretStr
+
+from webauth.oidc import OidcClientConfig
+
+realm = "https://auth.example.test/realms/example"
+client_config = OidcClientConfig(
+    issuer=realm,
+    authorization_endpoint=f"{realm}/protocol/openid-connect/auth",
+    token_endpoint=f"{realm}/protocol/openid-connect/token",
+    jwks_url=f"{realm}/protocol/openid-connect/certs",
+    client_id=os.environ["OIDC_CLIENT_ID"],
+    client_secret=SecretStr(os.environ["OIDC_CLIENT_SECRET"]),
+    redirect_uri="https://app.example.test/auth/callback",
+    leeway_seconds=30,
+)
+```
 
 In production both outbound calls go through `webauth.https_client`, the one
 module that imports urllib3:
@@ -242,7 +277,7 @@ session cookie itself calls this function instead of `request.cookies`.
 
 The host builds one `WebAuthConfig` by keyword and installs it. It must state
 `cookie_max_age_seconds`, a positive whole number of seconds: the browser cookie's
-`Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime).
+`Max-Age`; [Session lifetime](#session-lifetime) states the rule.
 Fields a host may leave out:
 
 | Field | Default | Values |
@@ -583,7 +618,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols none of which commits: the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
+| `webauth.ports` | What the host supplies, as Protocols: the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.session_ending` | The one place a session ends in the host's store |
@@ -606,11 +641,14 @@ It leaves the application everything that touches the application's own truth:
   not the request succeeds.
 - **Routes.** It defines none. The only responses it writes are its own
   refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
-  path. The start and callback routes are the host's.
+  path.
 - **Identity.** It issues no access or ID tokens: it is no identity provider, and
   it verifies the ID tokens an issuer made.
-- **HTTP framing.** A conflicting `Content-Length` or `Transfer-Encoding`, for
-  example, is the ASGI server's job. uvicorn refuses it before the app sees it.
+- **HTTP framing** is the ASGI server's job: uvicorn refuses conflicting
+  `Content-Length` values or an unsupported `Transfer-Encoding` before the app
+  sees them, and reads a `Content-Length` beside `Transfer-Encoding: chunked` as
+  chunked, as HTTP requires; webauth's body-size limit counts the streamed bytes
+  either way.
 
 ## Install
 
@@ -619,14 +657,14 @@ from the [Releases page](https://github.com/overnightworks/webauth/releases)
 and put it in place of `X.Y.Z`:
 
 ```bash
-uv pip install https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl
+uv pip install "overnightworks-webauth[jwt] @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl"
 ```
 
 In a `pyproject.toml`:
 
 ```toml
 dependencies = [
-    "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
+    "overnightworks-webauth[jwt] @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
 ]
 ```
 
