@@ -1,0 +1,8 @@
+claim_id = "a13e87ca6d96455ab8b01e3f6f840322"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "c82513aaafd2dc2bbcb2332deb3b459913cc2b61"
+branch = "claude/issue-186-pending-cookie-owner"
+scope = ["README.md", "src/webauth/cookies.py", "src/webauth/oidc_login.py", "tests/test_middleware_stack.py"]
+opened_commit = "3d44de21602ac541b001e408158822608974d89b"
+whole_reason = "Bundle of two small cards (findings 6 and 32): their disjoint files share one claim, worktree and landing."
