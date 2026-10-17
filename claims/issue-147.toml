@@ -1,8 +1,0 @@
-claim_id = "0b2772a79e284278acce4df07a8408bf"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "7ae8a3362c782393919fec3007fd3fa22641d8c2"
-branch = "claude/issue-147-p1-key-set-grenze"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/jwt_verification.py", "tests/test_jwt_verification.py"]
-opened_commit = "fd40c5a3134d4d3af648c2765f0bb34d82b2a580"
-whole_reason = "One bound: what MAX_KEY_SET_KEYS counts, its tests and the two documents that state it"
