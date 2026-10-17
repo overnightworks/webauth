@@ -1,8 +1,8 @@
 """A Keycloak-only host: accounts, sessions and sign-in without any local credential.
 
 Every part is typed against the public ports and entry points. CI checks this
-file with a pinned pyright, so a port change that would break such a host
-fails the build instead of the host's next upgrade.
+file with a pinned pyright against the built wheel, so a port change or an
+export a host cannot import fails the build instead of the host's next upgrade.
 """
 
 from __future__ import annotations
@@ -13,13 +13,16 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import Request, Response
+from fastapi import FastAPI, Request, Response
 from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig
+from webauth.cookies import clear_session_cookies, issue_session_cookies
 from webauth.dependencies import AuthDependencies, AuthenticatedUser, current_user_dependency
+from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import OidcRefusal, OidcRelyingParty
 from webauth.oidc_login import AdmissionRefusal, finish_login, start_login
+from webauth.policies import CsrfPolicy, SecurityHeadersPolicy, default_content_security_policy
 from webauth.ports import (
     AuditSink,
     SessionAdministrationStore,
@@ -33,6 +36,7 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.session_administration import SessionAdministration
+from webauth.session_ending import end_session
 
 
 @dataclass
@@ -169,3 +173,23 @@ def a_host_resolves_the_current_user(
         audit_sink=HostAudit,
         on_authenticated=on_authenticated,
     )
+
+
+def a_host_installs_the_middleware(app: FastAPI) -> None:
+    install_web_auth_middleware(
+        app,
+        security_headers=SecurityHeadersPolicy(
+            content_security_policy=default_content_security_policy(),
+        ),
+        csrf_origin=CsrfPolicy(),
+        csrf_token=CsrfPolicy(),
+    )
+
+
+def a_host_signs_a_session_in_and_out(response: Response, config: WebAuthConfig) -> None:
+    issue_session_cookies(response, "session-id", config)
+    clear_session_cookies(response, config)
+
+
+def a_host_ends_a_session() -> None:
+    end_session(HostSessions(), session_id="session-id")
