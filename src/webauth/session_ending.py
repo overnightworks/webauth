@@ -9,6 +9,12 @@ from __future__ import annotations
 
 from webauth.ports import SessionRecordStore
 
+__all__ = [
+    "end_session",
+    "end_user_sessions",
+    "prune_sessions",
+]
+
 
 def end_session(sessions: SessionRecordStore, *, session_id: str) -> None:
     """End one session, as on logout or an administrator's revocation."""

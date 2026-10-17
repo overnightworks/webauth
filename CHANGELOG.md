@@ -64,6 +64,18 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `script_hashes` is validated too: each element must be a bare `sha256-`, `sha384-` or
   `sha512-` hash, and anything else is a `ValueError` (it closed an injection through the
   unchecked text).
+- A module's public names are the names its `__all__` lists; any other name may
+  change or disappear in any release (README, Versioning). `webauth.config`,
+  `webauth.cookies`, `webauth.dependencies`, `webauth.liveness`, `webauth.ports`,
+  `webauth.session_administration` and `webauth.session_ending` declare it. A host
+  that imports any of these switches to the public API: `cookies.verify_session_cookie`
+  (read the session with `dependencies.session_id_from_request`),
+  `cookies.generate_csrf_token`, `verify_csrf_token`, `cookie_pairs`, `cookie_values`,
+  `DEFAULT_CSRF_HEADER_NAME` (read `config.csrf_header_name`), `DEFAULT_COOKIE_SAMESITE`,
+  the pending-login helpers and constants, `config.MIN_SESSION_SECRET_CHARS`,
+  `WEB_AUTH_STATE_ATTRIBUTE`, the `DEFAULT_*` role and limit constants,
+  `dependencies.*_DETAIL`, and `session_administration.require_admin`
+  (`revoke_session` checks the role).
 
 **Changed**
 

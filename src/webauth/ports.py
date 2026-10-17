@@ -15,6 +15,24 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Protocol, runtime_checkable
 
+__all__ = [
+    "AuditSink",
+    "RateLimitBackend",
+    "SessionAdministrationStore",
+    "SessionIdentityChange",
+    "SessionIdentityChanged",
+    "SessionLivenessPolicy",
+    "SessionRecord",
+    "SessionRecordStore",
+    "SubjectUserStore",
+    "UserManagementError",
+    "UserManagementEvent",
+    "UserManagementEventKind",
+    "UserRecord",
+    "UsernameTakenError",
+    "WriteLock",
+]
+
 
 class UserRecord(Protocol):
     """The account fields the auth machinery reads."""
