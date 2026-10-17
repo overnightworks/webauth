@@ -61,17 +61,6 @@ class _DefaultCookieName(str):
     __slots__ = ()
 
 
-class _DefaultCookieMaxAge(int):
-    """A cookie lifetime the library took from ``session_max_age_seconds``.
-
-    Like `_DefaultCookieName`, the type remembers that the host left the value
-    open, so ``dataclasses.replace`` with a new ``session_max_age_seconds``
-    derives the cookie lifetime again instead of keeping the old one.
-    """
-
-    __slots__ = ()
-
-
 def _require_positive_count(name: str, value: object) -> None:
     if type(value) is not int or value <= 0:
         raise ValueError(f"{name} must be a positive int, not {value!r}")
@@ -84,7 +73,7 @@ class WebAuthConfig:
     rate_limits: RateLimitBackend
     allowed_hosts_exact: frozenset[str]
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
-    session_max_age_seconds: int
+    cookie_max_age_seconds: int
     session_liveness: SessionLivenessPolicy
     session_cookie_name: str | None = None
     csrf_cookie_name: str | None = None
@@ -95,7 +84,6 @@ class WebAuthConfig:
     ipv6_budget_prefix: int = DEFAULT_IPV6_BUDGET_PREFIX
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
-    cookie_max_age_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if len(self.session_secret.get_secret_value()) < MIN_SESSION_SECRET_CHARS:
@@ -115,8 +103,6 @@ class WebAuthConfig:
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
-        _require_positive_seconds("session_max_age_seconds", self.session_max_age_seconds)
-        self._resolve_cookie_max_age()
         _require_positive_seconds("cookie_max_age_seconds", self.cookie_max_age_seconds)
         if (
             type(self.ipv6_budget_prefix) is not int
@@ -154,18 +140,6 @@ class WebAuthConfig:
             raise ValueError(
                 f"{field} {name!r} needs cookie_secure=True; browsers drop a __Host- "
                 "or __Secure- cookie without Secure, so nobody could stay signed in",
-            )
-
-    def _resolve_cookie_max_age(self) -> None:
-        # The browser cookie may outlive the server's idle window: a 30-day
-        # cookie with a 7-day window keeps a regularly used session signed in,
-        # because the cookie is issued once at login and never reissued.
-        if self.cookie_max_age_seconds is None or isinstance(
-            self.cookie_max_age_seconds, _DefaultCookieMaxAge,
-        ):
-            # The dataclass is frozen; resolving a default is part of construction.
-            object.__setattr__(
-                self, "cookie_max_age_seconds", _DefaultCookieMaxAge(self.session_max_age_seconds),
             )
 
     @property
