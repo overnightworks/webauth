@@ -148,6 +148,9 @@ a minor release may break a public contract and says so under **Breaking** in th
 [CHANGELOG](CHANGELOG.md); a patch release never does. Only the latest minor
 release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 
+A module's public names are the names its `__all__` lists. Any other name, with or
+without a leading underscore, may change or disappear in any release.
+
 ## What it does not do
 
 - It persists nothing and holds no schema or ORM.

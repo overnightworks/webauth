@@ -23,7 +23,7 @@ from webauth.cookies import (
     is_host_only_cookie_name,
     is_secure_prefixed_cookie_name,
 )
-from webauth.liveness import _require_positive_seconds
+from webauth.liveness import require_positive_seconds
 
 if TYPE_CHECKING:
     import re
@@ -36,6 +36,13 @@ if TYPE_CHECKING:
         SessionLivenessPolicy,
     )
     from webauth.proxies import TrustedProxies
+
+__all__ = [
+    "WebAuthConfig",
+    "install_web_auth_config",
+    "installed_web_auth_config",
+    "web_auth_config",
+]
 
 MIN_SESSION_SECRET_CHARS: Final = 32
 DEFAULT_MAX_USER_AGENT_CHARS: Final = 500
@@ -103,7 +110,7 @@ class WebAuthConfig:
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
-        _require_positive_seconds("cookie_max_age_seconds", self.cookie_max_age_seconds)
+        require_positive_seconds("cookie_max_age_seconds", self.cookie_max_age_seconds)
         if (
             type(self.ipv6_budget_prefix) is not int
             or self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE

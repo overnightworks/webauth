@@ -36,6 +36,15 @@ from webauth.proxies import client_user_agent, resolve_client_ip
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+__all__ = [
+    "AuthDependencies",
+    "AuthenticatedUser",
+    "LoginRedirect",
+    "current_user_dependency",
+    "session_id_from_request",
+    "unauthenticated_response",
+]
+
 
 AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
 INVALID_SESSION_DETAIL: Final = "Invalid session"
