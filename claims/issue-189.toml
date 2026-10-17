@@ -1,0 +1,8 @@
+claim_id = "005defff88fe41a7878bd0775f896c8d"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "4c44541619f415e0ace718f6bda7045e021c568c"
+branch = "claude/issue-189-redis-server-clock"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/rate_limit.py", "tests/test_redis_rate_limiter.py"]
+opened_commit = "6a44c8c59e81b534c1017f5a436cbe5260121171"
+whole_reason = "One fix and its proof: the script, its regression tests, the README server floor and the CHANGELOG bullet cannot land apart."
