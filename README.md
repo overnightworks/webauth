@@ -505,9 +505,11 @@ binds its store to one issuer — the `issuer` of its `OidcClientConfig` — and
 passes it as `bound_issuer`; changing the issuer is a migration of the host's
 accounts, never a configuration change. `accounts` is a `SubjectUserStore`
 (`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
-which adds an account whose `id` is the subject and which has no password, so
-a back-channel logout names the account directly). Admission holds
-`lock.hold()` and never commits:
+which adds an account whose `id` is the subject, so a back-channel logout names
+the account directly). Any stored account whose `id` equals the subject is that
+subject's account and signs in as it is, whatever created it. A host that
+migrates legacy accounts makes sure that no legacy `id` can equal a subject of
+the bound issuer. Admission holds `lock.hold()` and never commits:
 
 - A new subject gets an account with the issuer's `preferred_username` (or the
   subject when it suggests none, or only whitespace) and `config.user_role` (never equal to `admin_role`, so no new account is an admin by accident),
@@ -515,9 +517,7 @@ a back-channel logout names the account directly). Admission holds
 - A known subject reuses its account unchanged, even when its suggested
   username changed.
 - Otherwise it answers an `AdmissionRefusal` and writes nothing:
-  `FOREIGN_ISSUER` for an identity from another issuer, `ACCOUNT_DEACTIVATED`,
-  `SUBJECT_HELD_BY_PASSWORD_ACCOUNT` when the subject names an existing
-  password account (linking the two is the host's migration to decide), and
+  `FOREIGN_ISSUER` for an identity from another issuer, `ACCOUNT_DEACTIVATED`, and
   `USERNAME_TAKEN` when a new subject's username belongs to another account
   — including when the store's own uniqueness is stricter than its lookup
   and `create_for_subject` raises `UsernameTakenError`.
@@ -603,9 +603,6 @@ cookie is cleared on every outcome and the issuer accepts its authorization
 code once. webauth keeps no server-side replay store: a copy of the cookie
 taken before the callback is stopped by the issuer refusing the spent code
 (`TOKEN_REQUEST_REFUSED`), not by webauth remembering it.
-
-`UserRecord.password_hash` is a read-only `str | None` property, so a
-password-only host whose model types the field `str` keeps satisfying it.
 
 ## Development
 

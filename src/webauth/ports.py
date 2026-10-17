@@ -24,15 +24,6 @@ class UserRecord(Protocol):
     role: str
     is_active: bool
 
-    @property
-    def password_hash(self) -> str | None:
-        """The stored hash, or ``None`` for an account that has no password.
-
-        Read-only, so a host model whose field is typed ``str`` still satisfies
-        it: a password-only host never holds an account without one.
-        """
-        ...
-
 
 class SessionRecord(Protocol):
     """One stored session and the account it belongs to.
@@ -63,7 +54,7 @@ class SubjectUserStore(Protocol):
     def get_by_username(self, username: str) -> UserRecord | None: ...
 
     def create_for_subject(self, subject: str, username: str, role: str) -> UserRecord:
-        """Add an account whose ``id`` is ``subject`` and that has no password.
+        """Add an account whose ``id`` is ``subject``.
 
         Raises ``UsernameTakenError`` for a duplicate username.
         """
