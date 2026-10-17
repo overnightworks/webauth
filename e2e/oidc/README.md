@@ -111,12 +111,35 @@ throwaway certificate in front of the server's port, which is published on
 `127.0.0.1` only (the dev-mode API has no login).
 
 The run creates `oidcc-client-basic-certification-test-plan` with a throwaway
-client secret, prints the plan's modules as the suite names them, brings the
-first module to WAITING, checks the issuer the suite exposes
-(`https://conformance.example.test/test/a/webauth-d2/`), cancels it and writes
-the plan export to `SCRATCH/export/`. The export is a full protocol transcript
-with the client secret and the suite's private keys in it: keep it local, never
-attach it to anything.
+client secret, prints the plan's modules as the suite names them and drives two
+of them with the host app (`host_app.py`) as the relying party under test and a
+real Chromium following the redirects: `oidcc-client-test` (webauth must accept)
+and `oidcc-client-test-nonce-invalid` (webauth must refuse with
+`nonce-mismatch`). It then writes the plan export to `SCRATCH/export/`. The
+export is a full protocol transcript with the client secret and the suite's
+private keys in it: keep it local, never attach it to anything.
+
+The suite's verdict alone proves nothing: a refusing module passes when no
+further request arrives, whatever the reason. So every row sets the suite's
+status/result beside webauth's own decision, read from the host's `/state`
+(`token_rejection`, `userinfo_calls`, the last refusal), and beside the decision
+expected, which the table in `conformance.py` takes from the library's enums:
+
+    module | suite status/result | webauth decision | expected | held / FAILED / FAILED-as-found
+
+`held` needs both to agree. A library refusal of the token that differs from the
+expected decision is `FAILED-as-found` (a finding, not a failed run); any other
+disagreement, such as a suite pass for another reason, is `FAILED`.
+
+The suite finishes an accepting module only on a UserInfo request, which webauth
+never sends. The host therefore keeps the access token of the token answer in
+memory and makes one UserInfo request after, and only after, `finish_login`
+admitted the login. `/reset` builds the relying parties again, as a host
+restarted per module would, because the suite generates new keys per module.
+
+Last run: both rows are `FAILED-as-found` with `id-token-rejected/key-set-unavailable`:
+the suite publishes 13 keys (8 usable and 5 deliberately unusable), more than the
+library's `MAX_KEY_SET_KEYS` of 10.
 
 Pull the images first, outside the lock:
 

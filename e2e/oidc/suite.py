@@ -202,6 +202,10 @@ class SuiteApi:
         """The running module's state and the values it exposes, among them its issuer."""
         return self._call("GET", f"/api/runner/{module_id}", expected=200).json()
 
+    def module_info(self, module_id: str) -> dict[str, Any]:
+        """The module's ``status`` and, once it has one, its ``result``."""
+        return self._call("GET", f"/api/info/{module_id}", expected=200).json()
+
     def cancel_module(self, module_id: str) -> None:
         self._call("DELETE", f"/api/runner/{module_id}", expected=200)
 
