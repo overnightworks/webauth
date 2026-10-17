@@ -1,9 +1,8 @@
 """Authentication machinery a FastAPI application should not rebuild.
 
 Owns sessions the store decides on every request, HMAC-signed cookies, CSRF, admin
-checks, rate limits, and the audit events they raise. User administration
-and first-run setup live in `webauth.users`, whose `UserManagement` and
-`complete_first_run_setup` work through the host ports in `webauth.ports`.
+checks, rate limits, and the audit events they raise. Session administration
+works through the host ports in `webauth.ports`.
 The user model, schema, configured role names, transaction boundaries, and
 HTTP routes and responses stay with the host application.
 

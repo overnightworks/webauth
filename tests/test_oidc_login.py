@@ -139,7 +139,6 @@ def test_a_new_subject_creates_a_passwordless_member_account_and_reports_it(
         "actor_id": None,
         "subject_id": SUBJECT,
         "role": MEMBER_ROLE,
-        "session_count": None,
         "session_ref": None,
     }]
 

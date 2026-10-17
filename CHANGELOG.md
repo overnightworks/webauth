@@ -24,6 +24,16 @@ Versions before 0.3.0 and releases without an entry here are described in the
   session store, an audit sink, a lock and the config.
 - `SessionSummary`, `UnknownSessionError` and `NotAnAdminError` moved to
   `webauth.session_administration`.
+- The module `webauth.users` is gone with `UserManagement`, `complete_first_run_setup`,
+  `UnknownRoleError`, `LastAdminError`, `SelfDeactivationError`, `WeakPasswordError`,
+  `WrongPasswordError`, `PasswordlessAccountError`, `SetupAlreadyDoneError` and
+  `SetupRacedError`, and with them `change_role`, `deactivate_user`,
+  `ensure_not_last_admin`, `revoke_user_sessions`, `create_user`, `list_users`,
+  `set_password` and `change_own_password`. `ports.UserStore`,
+  `ports.UserAdministrationStore` and `ports.UnknownUserError` are gone, and so are the
+  event kinds `ROLE_CHANGED`, `USER_DEACTIVATED`, `SESSIONS_REVOKED`,
+  `FIRST_ADMIN_CREATED`, `PASSWORD_SET_BY_ADMIN` and `PASSWORD_CHANGED` and
+  `UserManagementEvent.session_count`. People, roles and blocking move to the issuer.
 
 ## 0.14.0
 

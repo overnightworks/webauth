@@ -22,7 +22,6 @@ It owns the machinery an application should not rebuild:
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
-| `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
 | `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
@@ -30,11 +29,10 @@ It owns the machinery an application should not rebuild:
 | `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
 It leaves the application everything that touches the application's own truth:
-the user model, configured roles, setup and login routes, and their
+the user model, configured roles, login routes, and their
 transaction boundaries. The library persists nothing itself — it holds no schema
 and no ORM, and an import-linter contract keeps it that way. What it needs
-reaches it through the Protocols in `webauth.ports`: `UserStore`,
-`SubjectUserStore`, `SessionRecordStore`, `LoginAttemptStore`, `AuditSink`,
+reaches it through the Protocols in `webauth.ports`: `SubjectUserStore`, `SessionRecordStore`, `LoginAttemptStore`, `AuditSink`,
 and `PasswordHasher`.
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote, except the rate-limit
@@ -133,7 +131,7 @@ release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 - It has no user model and no role names beyond the configured ones.
 - It commits no transaction; the caller owns it.
 - It issues no access or ID tokens: it is no identity provider, and it verifies the ID tokens an issuer made.
-- It decides no authorisation beyond the admin check and the user-administration guards.
+- It decides no authorisation beyond the admin check.
 
 ## A login route
 
@@ -175,7 +173,7 @@ signed_in = client.post("/login", params={"password": "the-correct-password"})
 print(signed_in.status_code, signed_in.cookies[config.session_cookie_name])
 ```
 
-The real application replaces `FakeUser` with a lookup through its `UserStore`,
+The real application replaces `FakeUser` with a lookup through its own account store,
 guards the attempt with `login_attempt_budget` (raising `http_refusal` on the
 `LoginRefusal` it returns), and records the failed attempt itself — the library
 never writes.
@@ -299,79 +297,21 @@ callback routes alike:
 - **Entropy:** at least 128 bits from a CSPRNG. `secrets.token_urlsafe(32)`
   gives 43 characters, under the 135-character bound.
 
-## users
-
-Host developers use [`webauth.users`](src/webauth/users.py) to administer
-accounts without moving their model, persistence, or HTTP API into the library.
-Construct `UserManagement(users, sessions, audit, lock, config)` with the host's
-stores and `WebAuthConfig`. The additional [ports](src/webauth/ports.py) are:
-
-- `UserAdministrationStore`: extends `UserStore` with `list`, `update`, and
-  `count_active_admins`. Duplicate usernames raise `UsernameTakenError`;
-  updates to missing accounts raise `UnknownUserError`.
-- `SessionAdministrationStore`: extends `SessionRecordStore` with
-  `list_active(*, offset=0, limit=None)` and `count_active()`. The host selects
-  active records using its liveness rules and owns their order. These reads
-  need no write lock; `limit=None` returns all remaining records.
-- `WriteLock.hold()`: serializes checks and writes across the supplied stores
-  in one host-owned transaction. Helpers acquire it for mutations and never
-  commit. The host commits on success and rolls back on failure, including
-  `SetupRacedError`. A transaction-scoped lock can remain held until then.
-
-`UserManagement` provides these helpers:
-
-| Helper | Behavior |
-|---|---|
-| `create_user(actor, username, password, role)` | Creates an active account with either configured role |
-| `list_users()` | Returns all accounts in store order |
-| `change_role(actor, user_id, role)` | Changes the role and ends all sessions; an unchanged role does neither |
-| `deactivate_user(actor, user_id)` | Deactivates the account and ends all sessions; refuses self-deactivation |
-| `revoke_user_sessions(actor, user_id)` | Ends all account sessions and returns the store's deletion count |
-| `set_password(actor, user_id, password)` | Sets a strength-checked password using the configured hasher and ends all sessions |
-| `change_own_password(actor, current, new)` | Verifies the current password, replaces it, and ends all sessions |
-| `ensure_not_last_admin(user_id)` | Guards a host write against removing the last active admin; the caller holds the lock around both |
-
-Every helper taking `actor` first requires `config.admin_role` (which `WebAuthConfig` keeps distinct from `user_role`), except
-`change_own_password`, which lets any authenticated user change their own
-password. The host authenticates the actor and guards `list_users`
-with its admin dependency. A wrong current password raises `WrongPasswordError`;
-the host owns the failed-attempt budget. An account without a password signs
-in only through its identity provider, so `set_password` and
-`change_own_password` refuse it with `PasswordlessAccountError` and write
-nothing. Refusals derive from `UserManagementError`, which the host translates
-into its own responses.
-
-Both password paths delete every account session from the store, including the
-current session. The host opens a new session and issues new cookies
-afterwards.
-
-`complete_first_run_setup(management, username, password)` creates the first
-administrator only while no account exists. Both a setup route and a bootstrap
-command can call it; the host supplies bootstrap credentials through its own
-configuration and owns the setup surface.
-
-Map `AuditSink.user_management_event(event)` to the host's audit system, or
-explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
-`subject_id`; setup has `actor_id=None`. Optional fields default to `None`:
-
-| Event kind | Additional fields |
-|---|---|
-| `user_created`, `first_admin_created` | `role` |
-| `role_changed` | `role`, `session_count` |
-| `user_deactivated`, `sessions_revoked` | `session_count` |
-| `password_set_by_admin`, `password_changed` | `session_count` |
-| `session_revoked` | `session_ref` |
-
-Management events contain no passwords, hashes, raw session identifiers, or
-usernames. [The users tests](tests/test_users.py) verify the helpers, including
-REQ-ADMIN-10 for password invalidation.
-
 ## Session administration
 
 Host developers use [`webauth.session_administration`](src/webauth/session_administration.py)
 to list and end sessions without a user store. Construct
 `SessionAdministration(sessions, audit, lock, config)` with the host's
 `SessionAdministrationStore`, `AuditSink`, `WriteLock` and `WebAuthConfig`.
+
+- `SessionAdministrationStore`: extends `SessionRecordStore` with
+  `list_active(*, offset=0, limit=None)` and `count_active()`. The host selects
+  active records using its liveness rules and owns their order. These reads
+  need no write lock; `limit=None` returns all remaining records.
+- `WriteLock.hold()`: serializes checks and writes across the supplied stores
+  in one host-owned transaction. `revoke_session` acquires it and never
+  commits. The host commits on success and rolls back on failure. A
+  transaction-scoped lock can remain held until then.
 
 | Helper | Behavior |
 |---|---|
@@ -386,6 +326,24 @@ SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
 any timestamps from its own records. Refusals derive from `UserManagementError`.
 [The session administration tests](tests/test_session_administration.py) verify
 the helpers, including REQ-ADMIN-12 for listed references.
+
+## Audit events
+
+Map `AuditSink.user_management_event(event)` to the host's audit system, or
+explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
+`subject_id`; optional fields default to `None`:
+
+| Event kind | Additional fields |
+|---|---|
+| `user_created` | `role` |
+| `session_revoked` | `session_ref` |
+
+Events contain no passwords, hashes, raw session identifiers, or usernames.
+
+`AuditSink` has a second method, `session_identity_changed(event)`, which
+receives a `SessionIdentityChanged` with `change`, `user_id`, `session_ref`,
+`previous`, and `current` when a live session begins arriving from somewhere
+else.
 
 ## PasswordHasher
 
@@ -413,7 +371,7 @@ one), and an Argon2id hash whose salt or digest is not canonical unpadded
 base64 of the profile's salt and hash length. A well-formed hash that Argon2
 still fails to check, for example under memory or thread exhaustion, raises
 Argon2's own `argon2.exceptions.VerificationError` unchanged. After changing the parameters, set each
-password anew, for example with `set_password`. A host with another algorithm
+password anew. A host with another algorithm
 supplies its own class implementing the same protocol.
 
 ## Rate limiting, and the optional Redis extra
@@ -489,7 +447,7 @@ from the store itself; `end_user_sessions(sessions, user_id)` ends every session
 of an account and returns the store's count, and
 `prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
 a cap after a login and returns their identifiers. The next request carrying an
-ended session's cookie is refused. The `users` and `session_administration` helpers
+ended session's cookie is refused. The `session_administration` helpers
 end sessions through the same functions.
 
 ## CSRF origin
