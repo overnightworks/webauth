@@ -23,6 +23,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.users` | User administration and first-run setup through host-owned stores and a write lock |
+| `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) keys, counting the encryption and other keys it passes over. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
@@ -328,13 +329,11 @@ stores and `WebAuthConfig`. The additional [ports](src/webauth/ports.py) are:
 | `revoke_user_sessions(actor, user_id)` | Ends all account sessions and returns the store's deletion count |
 | `set_password(actor, user_id, password)` | Sets a strength-checked password using the configured hasher and ends all sessions |
 | `change_own_password(actor, current, new)` | Verifies the current password, replaces it, and ends all sessions |
-| `list_sessions(offset=0, limit=None)` | Returns frozen `SessionSummary` records with `session_ref`, `user_id`, `username`, `ip_address`, and `user_agent` |
-| `revoke_session(actor, session_ref)` | Ends the active session identified by a listed reference; raises `UnknownSessionError` if absent |
 | `ensure_not_last_admin(user_id)` | Guards a host write against removing the last active admin; the caller holds the lock around both |
 
 Every helper taking `actor` first requires `config.admin_role` (which `WebAuthConfig` keeps distinct from `user_role`), except
 `change_own_password`, which lets any authenticated user change their own
-password. The host authenticates the actor and guards the two list methods
+password. The host authenticates the actor and guards `list_users`
 with its admin dependency. A wrong current password raises `WrongPasswordError`;
 the host owns the failed-attempt budget. An account without a password signs
 in only through its identity provider, so `set_password` and
@@ -344,11 +343,7 @@ into its own responses.
 
 Both password paths delete every account session from the store, including the
 current session. The host opens a new session and issues new cookies
-afterwards. Public references
-come only from `webauth.cookies.session_reference(session_id)`: SHA-256 hex of
-the UTF-8 raw identifier. Lists, management events, and `SessionIdentityChanged`
-(its `session_ref`) expose no raw token; the host reads any timestamps from its
-own records.
+afterwards.
 
 `complete_first_run_setup(management, username, password)` creates the first
 administrator only while no account exists. Both a setup route and a bootstrap
@@ -369,7 +364,28 @@ explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 
 Management events contain no passwords, hashes, raw session identifiers, or
 usernames. [The users tests](tests/test_users.py) verify the helpers, including
-REQ-ADMIN-10 for password invalidation and REQ-ADMIN-12 for listed references.
+REQ-ADMIN-10 for password invalidation.
+
+## Session administration
+
+Host developers use [`webauth.session_administration`](src/webauth/session_administration.py)
+to list and end sessions without a user store. Construct
+`SessionAdministration(sessions, audit, lock, config)` with the host's
+`SessionAdministrationStore`, `AuditSink`, `WriteLock` and `WebAuthConfig`.
+
+| Helper | Behavior |
+|---|---|
+| `list_sessions(offset=0, limit=None)` | Returns frozen `SessionSummary` records with `session_ref`, `user_id`, `username`, `ip_address`, and `user_agent` |
+| `revoke_session(actor, session_ref)` | Ends the active session identified by a listed reference; raises `UnknownSessionError` if absent |
+
+`revoke_session` requires `config.admin_role` and raises `NotAnAdminError`
+otherwise; the host guards `list_sessions` with its admin dependency. Public
+references come only from `webauth.cookies.session_reference(session_id)`:
+SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
+`SessionIdentityChanged` (its `session_ref`) expose no raw token; the host reads
+any timestamps from its own records. Refusals derive from `UserManagementError`.
+[The session administration tests](tests/test_session_administration.py) verify
+the helpers, including REQ-ADMIN-12 for listed references.
 
 ## PasswordHasher
 
@@ -473,8 +489,8 @@ from the store itself; `end_user_sessions(sessions, user_id)` ends every session
 of an account and returns the store's count, and
 `prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
 a cap after a login and returns their identifiers. The next request carrying an
-ended session's cookie is refused. The `users` helpers end sessions through the
-same functions.
+ended session's cookie is refused. The `users` and `session_administration` helpers
+end sessions through the same functions.
 
 ## CSRF origin
 

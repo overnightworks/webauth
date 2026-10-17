@@ -19,6 +19,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   identifier, so a signature made for another purpose is no session cookie. Cookies
   issued by 0.14.x and earlier no longer verify: everyone signs in once after the
   upgrade. CSRF tokens are unchanged (#28 finding 36).
+- `UserManagement.list_sessions` and `revoke_session` became
+  `webauth.session_administration.SessionAdministration`, which needs only a
+  session store, an audit sink, a lock and the config.
+- `SessionSummary`, `UnknownSessionError` and `NotAnAdminError` moved to
+  `webauth.session_administration`.
 
 ## 0.14.0
 

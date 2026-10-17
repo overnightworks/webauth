@@ -7,11 +7,9 @@ operation must be rolled back by the host, including a raced first setup.
 
 from __future__ import annotations
 
-import hmac
 from dataclasses import dataclass
 
 from webauth.config import WebAuthConfig
-from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.passwords import check_password_strength
 from webauth.ports import (
@@ -25,11 +23,8 @@ from webauth.ports import (
     UserRecord,
     WriteLock,
 )
-from webauth.session_ending import end_session, end_user_sessions
-
-
-class NotAnAdminError(UserManagementError):
-    """The actor does not hold the configured administrator role."""
+from webauth.session_administration import require_admin
+from webauth.session_ending import end_user_sessions
 
 
 class UnknownRoleError(UserManagementError):
@@ -56,25 +51,12 @@ class PasswordlessAccountError(UserManagementError):
     """The account signs in only through its identity provider and has no password."""
 
 
-class UnknownSessionError(UserManagementError):
-    """No active session matches the supplied reference."""
-
-
 class SetupAlreadyDoneError(UserManagementError):
     """First-run setup is closed because an account already exists."""
 
 
 class SetupRacedError(UserManagementError):
     """Another account appeared during setup; the host must roll back."""
-
-
-@dataclass(frozen=True)
-class SessionSummary:
-    session_ref: str
-    user_id: str
-    username: str
-    ip_address: str
-    user_agent: str
 
 
 @dataclass(frozen=True)
@@ -102,7 +84,7 @@ class UserManagement:
     def create_user(
         self, actor: AuthenticatedUser, username: str, password: str, role: str,
     ) -> UserRecord:
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         self._require_role(role)
         password_hash = _hash_password(password, self.config)
         with self.lock.hold():
@@ -120,7 +102,7 @@ class UserManagement:
         return self.users.list()
 
     def change_role(self, actor: AuthenticatedUser, user_id: str, role: str) -> UserRecord:
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         self._require_role(role)
         with self.lock.hold():
             user = self._user(user_id)
@@ -140,7 +122,7 @@ class UserManagement:
             return user
 
     def deactivate_user(self, actor: AuthenticatedUser, user_id: str) -> None:
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         if actor.id == user_id:
             raise SelfDeactivationError("An administrator cannot deactivate themselves")
         with self.lock.hold():
@@ -156,7 +138,7 @@ class UserManagement:
 
     def revoke_user_sessions(self, actor: AuthenticatedUser, user_id: str) -> int:
         """End all sessions, returning the number deleted from the host's store."""
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         with self.lock.hold():
             self._user(user_id)
             session_count = self._delete_user_sessions(user_id)
@@ -170,7 +152,7 @@ class UserManagement:
 
     def set_password(self, actor: AuthenticatedUser, user_id: str, password: str) -> None:
         """Set an account's password and end all its sessions, including this one."""
-        self._require_admin(actor)
+        require_admin(actor, self.config)
         with self.lock.hold():
             self._password_account(user_id)
             password_hash = _hash_password(password, self.config)
@@ -192,36 +174,6 @@ class UserManagement:
                 actor, actor.id, password_hash, UserManagementEventKind.PASSWORD_CHANGED,
             )
 
-    def list_sessions(self, offset: int = 0, limit: int | None = None) -> list[SessionSummary]:
-        """List public references; the host's admin dependency protects access."""
-        return [
-            SessionSummary(
-                session_ref=session_reference(record.id),
-                user_id=record.user_id,
-                username=record.user.username,
-                ip_address=record.ip_address,
-                user_agent=record.user_agent,
-            )
-            for record in self.sessions.list_active(offset=offset, limit=limit)
-        ]
-
-    def revoke_session(self, actor: AuthenticatedUser, session_ref: str) -> None:
-        """End one active session identified by its public reference."""
-        self._require_admin(actor)
-        reference = session_ref.encode()
-        with self.lock.hold():
-            for record in self.sessions.list_active(limit=None):
-                if hmac.compare_digest(session_reference(record.id).encode(), reference):
-                    end_session(self.sessions, session_id=record.id)
-                    self.audit.user_management_event(UserManagementEvent(
-                        kind=UserManagementEventKind.SESSION_REVOKED,
-                        actor_id=actor.id,
-                        subject_id=record.user_id,
-                        session_ref=session_ref,
-                    ))
-                    return
-            raise UnknownSessionError("Active session does not exist")
-
     def _replace_password(
         self, actor: AuthenticatedUser, user_id: str, password_hash: str,
         kind: UserManagementEventKind,
@@ -234,10 +186,6 @@ class UserManagement:
             subject_id=user_id,
             session_count=session_count,
         ))
-
-    def _require_admin(self, actor: AuthenticatedUser) -> None:
-        if actor.role != self.config.admin_role:
-            raise NotAnAdminError("Administrator access is required")
 
     def _require_role(self, role: str) -> None:
         if role not in {self.config.admin_role, self.config.user_role}:
