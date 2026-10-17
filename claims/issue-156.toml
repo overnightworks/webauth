@@ -1,0 +1,8 @@
+claim_id = "f8fc681e7251417994cb09371dfd3a3f"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "27b608aa5a1ef577a82b1e9b90a2fc6bd2e53719"
+branch = "claude/issue-156-w8-s13-strikte-csp"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/policies.py", "tests/test_policies.py", "tests/test_security_headers.py"]
+opened_commit = "786980a449a8ffe49c50a5017c2a0d1a040676fa"
+whole_reason = "One default and its extension seam: the CSP the library ships, the per-directive API a host extends it with, their tests and the two documents that state it"
