@@ -126,7 +126,7 @@ class World:
     def deactivate_accounts(self) -> None:
         with self.lock.hold():
             for account in self.accounts.list():
-                self.accounts.update(account.id, is_active=False)
+                account.is_active = False
 
     def counts(self) -> dict[str, object]:
         return {

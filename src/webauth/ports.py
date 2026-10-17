@@ -51,19 +51,6 @@ class SessionRecord(Protocol):
 
 
 @runtime_checkable
-class UserStore(Protocol):
-    def get(self, user_id: str) -> UserRecord | None: ...
-
-    def get_by_username(self, username: str) -> UserRecord | None: ...
-
-    def count(self) -> int: ...
-
-    def create(self, username: str, password_hash: str, role: str) -> UserRecord:
-        """Add an account, including whatever else the application ties to one."""
-        ...
-
-
-@runtime_checkable
 class SubjectUserStore(Protocol):
     """Accounts an identity provider vouches for, keyed by its subject.
 
@@ -91,44 +78,12 @@ class UsernameTakenError(UserManagementError):
     """The store could not create an account because its username is taken."""
 
 
-class UnknownUserError(UserManagementError):
-    """The requested account does not exist."""
-
-
-@runtime_checkable
-class UserAdministrationStore(UserStore, Protocol):
-    """Account administration over the host's model and transaction.
-
-    ``create`` raises ``UsernameTakenError`` for a duplicate username. Store
-    errors carry no passwords, hashes, or raw session identifiers.
-    """
-
-    def list(self) -> list[UserRecord]:
-        """All accounts, in the order the store chooses."""
-        ...
-
-    def update(
-        self,
-        user_id: str,
-        *,
-        role: str | None = None,
-        is_active: bool | None = None,
-        password_hash: str | None = None,
-    ) -> UserRecord:
-        """Change the supplied fields, or raise ``UnknownUserError``."""
-        ...
-
-    def count_active_admins(self, role: str) -> int:
-        """Count active accounts with ``role``; the caller holds any lock."""
-        ...
-
-
 @runtime_checkable
 class WriteLock(Protocol):
     """Serialize check-then-write operations in the host's transaction.
 
     All stores used inside ``hold`` share that transaction. The host owns
-    commit and rollback, including rollback after ``SetupRacedError``. A
+    commit and rollback. A
     transaction-scoped database lock may remain held after context exit until
     the host finishes its transaction; exiting never commits implicitly.
     """
@@ -286,12 +241,6 @@ class SessionIdentityChanged:
 
 class UserManagementEventKind(Enum):
     USER_CREATED = "user_created"
-    ROLE_CHANGED = "role_changed"
-    USER_DEACTIVATED = "user_deactivated"
-    SESSIONS_REVOKED = "sessions_revoked"
-    FIRST_ADMIN_CREATED = "first_admin_created"
-    PASSWORD_SET_BY_ADMIN = "password_set_by_admin"
-    PASSWORD_CHANGED = "password_changed"
     SESSION_REVOKED = "session_revoked"
 
 
@@ -303,7 +252,6 @@ class UserManagementEvent:
     actor_id: str | None
     subject_id: str
     role: str | None = None
-    session_count: int | None = None
     session_ref: str | None = None
 
 

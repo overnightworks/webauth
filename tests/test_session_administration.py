@@ -22,7 +22,9 @@ from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
     AuditSink,
     SessionAdministrationStore,
+    UserManagementError,
     UserManagementEventKind,
+    UsernameTakenError,
     WriteLock,
 )
 from webauth.session_administration import (
@@ -129,7 +131,6 @@ def test_REQ_ADMIN_12_an_admin_revokes_one_listed_session_without_its_raw_token(
         "actor_id": actor.id,
         "subject_id": summary.user_id,
         "role": None,
-        "session_count": None,
         "session_ref": summary.session_ref,
     }]
     evidence = repr(administration.audit.user_management_events) + caplog.text
@@ -239,3 +240,11 @@ def test_the_arrangement_supplies_the_administration_protocols(
     assert isinstance(administration.sessions, SessionAdministrationStore)
     assert isinstance(administration.audit, AuditSink)
     assert isinstance(administration.lock, WriteLock)
+
+
+@pytest.mark.parametrize("error_type", [UsernameTakenError, NotAnAdminError, UnknownSessionError])
+def test_hosts_can_catch_every_management_refusal_through_its_common_base(
+    error_type: type[UserManagementError],
+) -> None:
+    with pytest.raises(UserManagementError):
+        raise error_type()

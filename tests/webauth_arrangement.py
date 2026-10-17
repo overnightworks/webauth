@@ -58,7 +58,6 @@ from webauth.policies import (
 from webauth.ports import (
     RateLimitBackend,
     SessionIdentityChanged,
-    UnknownUserError,
     UserManagementEvent,
     UsernameTakenError,
 )
@@ -66,7 +65,6 @@ from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 from webauth.session_administration import SessionAdministration
 from webauth.session_ending import end_session
-from webauth.users import UserManagement
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 ALLOWED_HOST = "songmaker.example"
@@ -249,6 +247,10 @@ class PasswordlessUser:
 StoredUser = FakeUser | PasswordlessUser
 
 
+class UnknownAccountError(LookupError):
+    """A session was requested for an account the arrangement does not hold."""
+
+
 class LockNotHeldError(RuntimeError):
     """A store operation requires the host's write lock."""
 
@@ -265,25 +267,12 @@ class UsersInMemory:
         self._lock = lock
         self._users = {user.id: user for user in users}
         self._usernames = {user.username: user for user in users}
-        self._ids = count(1)
 
     def get(self, user_id: str) -> StoredUser | None:
         return self._users.get(user_id)
 
     def get_by_username(self, username: str) -> StoredUser | None:
         return self._usernames.get(username)
-
-    def count(self) -> int:
-        _require_held_lock(self._lock)
-        return len(self._users)
-
-    def create(self, username: str, password_hash: str, role: str) -> FakeUser:
-        user_id = f"user-{next(self._ids)}"
-        while user_id in self._users:
-            user_id = f"user-{next(self._ids)}"
-        return self._add(FakeUser(
-            id=user_id, username=username, password_hash=password_hash, role=role,
-        ))
 
     def create_for_subject(self, subject: str, username: str, role: str) -> PasswordlessUser:
         return self._add(PasswordlessUser(id=subject, username=username, role=role))
@@ -299,30 +288,6 @@ class UsersInMemory:
     def list(self) -> list[StoredUser]:
         return list(self._users.values())
 
-    def update(
-        self,
-        user_id: str,
-        *,
-        role: str | None = None,
-        is_active: bool | None = None,
-        password_hash: str | None = None,
-    ) -> StoredUser:
-        _require_held_lock(self._lock)
-        user = self.get(user_id)
-        if user is None:
-            raise UnknownUserError("Account does not exist")
-        if role is not None:
-            user.role = role
-        if is_active is not None:
-            user.is_active = is_active
-        if password_hash is not None:
-            user.password_hash = password_hash
-        return user
-
-    def count_active_admins(self, role: str) -> int:
-        _require_held_lock(self._lock)
-        return sum(user.is_active and user.role == role for user in self._users.values())
-
 
 class UsersWithCaseInsensitiveUsernames(UsersInMemory):
     """A store whose unique index ignores case, while its lookup does not."""
@@ -331,15 +296,6 @@ class UsersWithCaseInsensitiveUsernames(UsersInMemory):
         if any(user.username.casefold() == username.casefold() for user in self.list()):
             raise UsernameTakenError("Username is already taken")
         return super().create_for_subject(subject, username, role)
-
-
-class UsersWithSetupRace(UsersInMemory):
-    """A store exposing a second creator that escaped the host's setup lock."""
-
-    def create(self, username: str, password_hash: str, role: str) -> FakeUser:
-        user = super().create(username, password_hash, role)
-        super().create("concurrent-account", "unused", role)
-        return user
 
 
 @dataclass
@@ -429,7 +385,7 @@ class SessionRecordsInMemory:
     ) -> FakeSessionRecord:
         user = self._users.get(user_id)
         if user is None:
-            raise UnknownUserError("Account does not exist")
+            raise UnknownAccountError("Account does not exist")
         session_id = f"session-{next(self._ids)}"
         while session_id in self._records:
             session_id = f"session-{next(self._ids)}"
@@ -580,18 +536,6 @@ class RecordingAuditSink:
 
     def user_management_event(self, event: UserManagementEvent) -> None:
         self.user_management_events.append(event)
-
-
-def a_user_management(*users: StoredUser, config: WebAuthConfig) -> UserManagement:
-    lock = WriteLockInMemory()
-    user_store = UsersInMemory(*users, lock=lock)
-    return UserManagement(
-        users=user_store,
-        sessions=SessionRecordsInMemory(users=user_store, lock=lock),
-        audit=RecordingAuditSink(),
-        lock=lock,
-        config=config,
-    )
 
 
 def a_session_administration(*users: StoredUser, config: WebAuthConfig) -> SessionAdministration:

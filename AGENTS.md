@@ -47,9 +47,9 @@ CI, which only lints it.
   `webauth.https_client`. Four `protected` import-linter contracts enforce
   this.
 - The user model, schema, configured role names, transaction boundaries, and
-  HTTP routes and responses belong to the host. User administration and
-  first-run setup are library helpers in `webauth.users` over host-supplied
-  ports and a write lock; the host commits or rolls back their work.
+  HTTP routes and responses belong to the host. Session administration
+  is a library helper in `webauth.session_administration` over host-supplied
+  ports and a write lock; the host commits or rolls back its work.
 
 ## Checks
 
