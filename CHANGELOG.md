@@ -79,9 +79,10 @@ Versions before 0.3.0 and releases without an entry here are described in the
   spellings of the middleware classes (`webauth.middleware` and its submodules).
 - A module's public names are the names its `__all__` lists; any other name may
   change or disappear in any release (README, Versioning). A name a module imports is
-  public there only when its `__all__` lists it as a deliberate re-export, as `webauth.middleware`
-  does for its middleware names and `webauth.jwt_verification` for `ExchangeFailure`; import any other imported name from the module that
-  defines it, for example `webauth.config.WebAuthConfig` (not
+  public there only when its `__all__` lists it as a deliberate re-export, as
+  `webauth.middleware` does for its middleware names and `webauth.jwt_verification`
+  for `ExchangeFailure`; import any other imported name from the module that defines
+  it, for example `webauth.config.WebAuthConfig` (not
   `webauth.dependencies.WebAuthConfig`) and `webauth.proxies.TrustedProxies` (not
   `webauth.config.TrustedProxies`). `webauth.config`, `webauth.cookies`,
   `webauth.dependencies`, `webauth.liveness`, `webauth.ports`,
@@ -132,8 +133,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `jwt_verification.strict_json_object`, `VerificationRefusal`, `MAX_JSON_NESTING_DEPTH`,
   `MAX_KEY_ID_CHARACTERS`, `KEY_SET_TTL_SECONDS`, `MIN_RSA_KEY_BITS` and `log`;
   `oidc.callback_state`; `oidc_login.MAX_PENDING_LOGINS` and
-  `TOKEN_REQUEST_TIMEOUT_SECONDS`. A name a module imports is public only where it is
-  defined: `OidcRefusal` from `webauth.oidc`, `PendingLogin` from `webauth.cookies`.
+  `TOKEN_REQUEST_TIMEOUT_SECONDS`; `jwt_verification._is_rs256_verification_key` is now
+  the package-internal `is_rs256_verification_key` (no public equivalent). A name a
+  module imports is public only where it is defined, unless its `__all__` lists it as
+  a deliberate re-export: `OidcRefusal` from `webauth.oidc`, `PendingLogin` from
+  `webauth.cookies`.
 
 **Changed**
 

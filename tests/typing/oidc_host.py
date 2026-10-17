@@ -76,6 +76,7 @@ from webauth.oidc import (
 )
 from webauth.oidc_login import (
     AdmissionRefusal,
+    admit_identity,
     finish_login,
     post_token_request_over_https,
     start_login,
@@ -83,6 +84,7 @@ from webauth.oidc_login import (
 from webauth.policies import (
     DEFAULT_PERMISSIONS_POLICY,
     BodySizePolicy,
+    CspDirective,
     CsrfPolicy,
     SecurityHeadersPolicy,
     default_content_security_policy,
@@ -239,6 +241,25 @@ def a_host_finishes_a_keycloak_login(
     )
 
 
+def a_host_admits_an_identity(
+    identity: OidcIdentity, config: WebAuthConfig,
+) -> UserRecord | AdmissionRefusal:
+    accounts: SubjectUserStore = HostAccounts()
+    lock: WriteLock = HostLock()
+    audit: AuditSink = HostAudit()
+    return admit_identity(
+        identity,
+        bound_issuer="https://keycloak.example/realms/host",
+        accounts=accounts, lock=lock, audit=audit, config=config,
+    )
+
+
+def a_host_uses_the_production_transports() -> tuple[KeySetFetch, TokenRequestPost]:
+    key_set_fetch: KeySetFetch = fetch_key_set_over_https
+    token_post: TokenRequestPost = post_token_request_over_https
+    return key_set_fetch, token_post
+
+
 def a_host_resolves_the_current_user(
     on_authenticated: Callable[[AuthenticatedUser], None],
 ) -> AuthDependencies:
@@ -253,7 +274,9 @@ def a_host_installs_the_middleware(app: FastAPI) -> None:
     install_web_auth_middleware(
         app,
         security_headers=SecurityHeadersPolicy(
-            content_security_policy=default_content_security_policy(),
+            content_security_policy=default_content_security_policy(
+                added_sources={CspDirective.STYLE_SRC: ["'unsafe-inline'"]},
+            ),
         ),
         csrf_origin=CsrfPolicy(),
         csrf_token=CsrfPolicy(),
@@ -271,18 +294,19 @@ def a_host_ends_a_session() -> None:
 
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
-        BodySizeLimitMiddleware, BodySizePolicy, CsrfOriginMiddleware, CsrfTokenMiddleware,
-        DEFAULT_CSRF_COOKIE_NAME, DEFAULT_PERMISSIONS_POLICY, DEFAULT_SESSION_COOKIE_NAME,
-        ExchangeFailure, ExpiryColumnLiveness, IdleWindowLiveness, IpRateLimitMiddleware,
-        JwtVerifier, KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetch, KeySetFetchError,
-        LoginRedirect, MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
-        MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock, NotAnAdminError,
-        OidcClientConfig, OidcIdentity, PENDING_LOGIN_MAX_AGE_SECONDS, PLAIN_CSRF_COOKIE_NAME,
-        PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend, Rejected,
-        RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore, SessionSummary,
-        SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS, TokenEndpointError,
-        TokenRequestPost, UnknownSessionError, UserManagementError, UsernameTakenError,
-        VerifiedClaims, WallClock, end_user_sessions, fetch_key_set_over_https,
-        install_web_auth_config, is_https_url, post_token_request_over_https, prune_sessions,
-        session_id_from_request, session_reference, unauthenticated_response,
+        BodySizeLimitMiddleware, BodySizePolicy, CsrfOriginMiddleware,
+        CsrfTokenMiddleware, DEFAULT_CSRF_COOKIE_NAME, DEFAULT_PERMISSIONS_POLICY,
+        DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, ExpiryColumnLiveness,
+        IdleWindowLiveness, IpRateLimitMiddleware, JwtVerifier,
+        KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
+        MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
+        MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock,
+        NotAnAdminError, OidcClientConfig, PENDING_LOGIN_MAX_AGE_SECONDS,
+        PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
+        Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore,
+        SessionSummary, SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
+        TokenEndpointError, UnknownSessionError, UserManagementError, UsernameTakenError,
+        VerifiedClaims, WallClock, end_user_sessions, install_web_auth_config,
+        is_https_url, prune_sessions, session_id_from_request, session_reference,
+        unauthenticated_response,
     )

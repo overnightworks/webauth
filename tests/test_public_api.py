@@ -55,3 +55,19 @@ def test_every_module_declares_its_public_names(module_name: str) -> None:
 @pytest.mark.parametrize(("module", "name"), sorted(set(_names_imported_from_webauth())))
 def test_every_name_the_oidc_only_host_imports_is_public(module: str, name: str) -> None:
     assert name in importlib.import_module(module).__all__
+
+
+def _re_exports_of(module_name: str) -> list[tuple[str, str]]:
+    module = importlib.import_module(module_name)
+    return [
+        (name, home)
+        for name in module.__all__
+        if _is_webauth_module(home := getattr(getattr(module, name), "__module__", None))
+        and home != module_name
+    ]
+
+
+@pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
+def test_a_re_exported_name_is_public_in_its_defining_module_too(module_name: str) -> None:
+    for name, home in _re_exports_of(module_name):
+        assert name in importlib.import_module(home).__all__, f"{home} must list {name}"
