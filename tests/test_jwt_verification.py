@@ -164,7 +164,9 @@ class IssuerScenario:
 
 @pytest.fixture
 def issuer() -> IssuerScenario:
-    endpoint = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    endpoint = FakeKeySetEndpoint(
+        key_set_document(public_jwk(rsa_key("current"), "current-key"))
+    )
     return IssuerScenario(endpoint, FakeClock(1_800_000_000.0), FakeClock(5_000.0))
 
 
