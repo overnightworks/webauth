@@ -126,13 +126,16 @@ class AdmissionConfig:
         _require_group_path("login_group", self.login_group)
 
 
+_FORBIDDEN_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
 def _require_group_path(field: str, path: str) -> None:
     segments = path.split("/")
     if segments[0] != "" or len(segments) < 2 or not all(segments[1:]):
         raise ValueError(f"{field} must be a group path such as /apps/name")
     if any(segment != segment.strip() for segment in segments):
         raise ValueError(f"{field} must not have whitespace around a segment")
-    if any(unicodedata.category(character) == "Cc" for character in path):
+    if any(unicodedata.category(character) in _FORBIDDEN_PATH_CATEGORIES for character in path):
         raise ValueError(f"{field} must not contain control characters")
 
 

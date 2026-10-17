@@ -249,7 +249,7 @@ character for character is that subject's account and signs in as it is,
 whatever created it. The host's `get` must compare exactly: no case, accent or
 trailing-space folding, even where its id column's collation folds. A host that
 migrates legacy accounts makes sure that no legacy `id` can equal a subject of
-the bound issuer. Admission holds `lock.hold()` and never commits:
+the bound issuer. Membership is checked first, before any lock or account:
 
 - A person is a member when one of the identity's groups is `login_group` or
   below it, compared character for character and by path segment:
@@ -263,6 +263,8 @@ the bound issuer. Admission holds `lock.hold()` and never commits:
   account and data stay, and putting them back returns them to the same
   account. A session that is already open runs on until the host's session
   lifetime (below) ends it.
+
+After that, admission holds `lock.hold()` and never commits:
 
 - A new subject gets an account with the issuer's `preferred_username` (or the
   subject when it suggests none, or only whitespace) and `config.user_role` (never equal to `admin_role`, so no new account is an admin by accident),
@@ -429,12 +431,13 @@ caps of both liveness policies — must be a positive whole number of seconds; `
 value, a `float`, a string or a `bool` is refused when the object is built.
 
 The recommended policy for a host that admits by `login_group` is a 12-hour
-cookie, a 2-hour idle window and a 12-hour absolute cap. The cookie and the cap
+cookie and cap, with the idle window left to the host. The cookie and the cap
 set the worst-case delay before a removal from the group takes effect, because
 an open session is not re-checked. Every login checks the group again, and
 Keycloak's own SSO session (30 days, 7 days idle) turns that login into a
-redirect the person does not notice. `edge lock` is the immediate path, and
-back-channel logout will be the other.
+redirect the person does not notice. A removal takes effect at once only with
+`edge lock` together with W5's back-channel logout; until that integration
+exists, an open app session stays valid until it expires.
 
 ```python
 import re
@@ -446,7 +449,6 @@ from webauth.liveness import IdleWindowLiveness
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 
-TWO_HOURS = 2 * 3600
 TWELVE_HOURS = 12 * 3600
 
 config = WebAuthConfig(
@@ -456,7 +458,7 @@ config = WebAuthConfig(
     allowed_hosts_exact=frozenset({"app.example.com"}),
     allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
     cookie_max_age_seconds=TWELVE_HOURS,
-    session_liveness=IdleWindowLiveness(TWO_HOURS, absolute_max_age_seconds=TWELVE_HOURS),
+    session_liveness=IdleWindowLiveness(TWELVE_HOURS, absolute_max_age_seconds=TWELVE_HOURS),
 )
 ```
 

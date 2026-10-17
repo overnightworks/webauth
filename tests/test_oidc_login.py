@@ -14,6 +14,7 @@ import threading
 import urllib.parse
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -187,9 +188,7 @@ def test_a_person_is_admitted_when_a_group_is_the_login_group_or_below_it(
 
 def test_the_every_subject_value_admits_a_person_without_groups() -> None:
     host = a_host()
-    everyone = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
-
-    account = host.admit(replace(LENA, groups=()), everyone)
+    account = host.admit(replace(LENA, groups=()), EVERYONE)
 
     assert account == host.accounts.get(SUBJECT)
 
@@ -206,11 +205,44 @@ def test_a_person_taken_out_of_the_group_is_refused_and_back_in_returns_to_the_a
     assert len(host.audit.user_management_events) == 1
 
 
-def test_a_foreign_issuer_is_refused_as_such_before_the_group_is_read() -> None:
-    host = a_host()
-    foreign = replace(LENA, issuer="https://other.example/realms/lab", groups=())
+class UntouchableAccounts(UsersInMemory):
+    def get(self, user_id: str) -> FakeUser | None:
+        raise AssertionError("a refusal must not read an account")
 
-    assert host.admit(foreign) is AdmissionRefusal.FOREIGN_ISSUER
+    def get_by_username(self, username: str) -> FakeUser | None:
+        raise AssertionError("a refusal must not read an account")
+
+
+class UntouchableLock(WriteLockInMemory):
+    def hold(self) -> AbstractContextManager[None]:
+        raise AssertionError("a refusal must not take the write lock")
+
+
+FOREIGN_ISSUER = "https://other.example/realms/lab"
+EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
+
+
+@pytest.mark.parametrize(("identity", "admission", "refusal"), [
+    pytest.param(
+        replace(LENA, groups=()), ADMISSION, AdmissionRefusal.NOT_A_MEMBER,
+        id="a person outside the group",
+    ),
+    pytest.param(
+        replace(LENA, issuer=FOREIGN_ISSUER, groups=()), ADMISSION,
+        AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer, checked before the group",
+    ),
+    pytest.param(
+        replace(LENA, issuer=FOREIGN_ISSUER), EVERYONE,
+        AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer where every subject is admitted",
+    ),
+])
+def test_a_refusal_before_any_account_takes_no_lock_reads_no_account_and_audits_nothing(
+    identity: OidcIdentity, admission: AdmissionConfig, refusal: AdmissionRefusal,
+) -> None:
+    host = Host(UntouchableAccounts(), RecordingAuditSink(), UntouchableLock())
+
+    assert host.admit(identity, admission) is refusal
+    assert host.audit.user_management_events == []
 
 
 def test_a_person_outside_the_group_is_refused_before_a_deactivated_account_is_read() -> None:
@@ -242,6 +274,9 @@ def test_a_well_formed_login_group_is_accepted(login_group: str | EverySubject) 
     pytest.param("/apps/\tlab", id="a tab inside a segment"),
     pytest.param("/apps/la\x00b", id="a control character"),
     pytest.param("/apps/la\nb", id="a newline"),
+    pytest.param("/apps/la\u200bb", id="a zero-width space"),
+    pytest.param("/apps/la\u2028b", id="a line separator"),
+    pytest.param("/apps/la\u2029b", id="a paragraph separator"),
 ])
 def test_a_malformed_login_group_fails_at_construction(login_group: object) -> None:
     with pytest.raises(ValueError):

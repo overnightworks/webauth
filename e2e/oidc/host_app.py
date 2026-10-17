@@ -114,8 +114,8 @@ class HostSettings:
     tls_certificate: str
     tls_key: str
     issuer: str
-    login_group: str | None
-    """The host's app group; ``None`` admits every subject of the issuer."""
+    login_group: str
+    """The host's app group, or the value of ``EverySubject.OF_THE_BOUND_ISSUER``."""
     authorization_endpoint: str
     token_endpoint: str
     jwks_url: str
@@ -287,7 +287,11 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
 
     admission = AdmissionConfig(
         bound_issuer=settings.issuer,
-        login_group=settings.login_group or EverySubject.OF_THE_BOUND_ISSUER,
+        login_group=(
+            EverySubject.OF_THE_BOUND_ISSUER
+            if settings.login_group == EverySubject.OF_THE_BOUND_ISSUER.value
+            else settings.login_group
+        ),
     )
 
     def relying_party_of(request: Request) -> OidcRelyingParty:
