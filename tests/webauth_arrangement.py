@@ -255,6 +255,12 @@ class UsersInMemory:
     def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
         return self._add(FakeUser(id=subject, username=username, role=role))
 
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
+        user = self._users[user_id]
+        user.role = role
+        return user
+
     def _add(self, user: FakeUser) -> FakeUser:
         _require_held_lock(self._lock)
         if user.username in self._usernames:

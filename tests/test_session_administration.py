@@ -125,6 +125,7 @@ def test_REQ_ADMIN_12_an_admin_revokes_one_listed_session_without_its_raw_token(
         "subject_id": summary.user_id,
         "role": None,
         "session_ref": summary.session_ref,
+        "previous_role": None,
     }]
     evidence = repr(administration.audit.user_management_events) + caplog.text
     for secret in (summary.username, *(record.id for record in stored_sessions)):

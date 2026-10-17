@@ -34,7 +34,11 @@ from webauth.cookies import issue_session_cookies
 from webauth.oidc import OidcRefusal
 from webauth.oidc_login import AdmissionConfig, AdmissionRefusal, finish_login, start_login
 
-admission = AdmissionConfig(bound_issuer=client_config.issuer, login_group="/apps/songmaker")
+admission = AdmissionConfig(
+    bound_issuer=client_config.issuer,
+    login_group="/apps/songmaker",
+    admin_group="/apps/songmaker/admin",
+)
 
 
 @app.get("/login/oidc")
@@ -233,7 +237,7 @@ names the `ExchangeFailure` that ended the request, so a caller can tell
 `webauth.oidc_login.admit_identity(identity, *, admission, accounts, lock,
 audit, config)` turns that identity into the account it signs in as, and
 `finish_login` takes the same `admission`. It is an
-`AdmissionConfig(bound_issuer=..., login_group=...)` the host builds once at
+`AdmissionConfig(bound_issuer=..., login_group=..., admin_group=...)` the host builds once at
 startup. The host binds its store to one issuer — the `issuer` of its
 `OidcClientConfig` — and passes it as `bound_issuer`; changing the issuer is a
 migration of the host's accounts, never a configuration change. `login_group`
@@ -242,11 +246,13 @@ that leaves it out gets a `TypeError`; one whose value is not a group path (no
 leading `/`, a trailing `/`, an empty segment, whitespace around a segment, a
 control, format or line-separator character) gets a `ValueError`, both at startup. Whether the group
 exists in Keycloak is not checked here. `accounts` is a `SubjectUserStore`
-(`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
+(`get`, `get_by_username`, `create_for_subject(subject, username, role)`,
 which adds an account whose `id` is the subject, so a back-channel logout names
-the account directly). Any stored account whose `id` equals the subject
-character for character is that subject's account and signs in as it is,
-whatever created it. The host's `get` must compare exactly: no case, accent or
+the account directly, and `set_role(user_id, role)`, which changes an account's
+role in the caller's transaction, never commits, and returns the record). Any
+stored account whose `id` equals the subject character for character is that
+subject's account, whatever created it, and keeps its username; its role
+follows the groups (below). The host's `get` must compare exactly: no case, accent or
 trailing-space folding, even where its id column's collation folds. A host that
 migrates legacy accounts makes sure that no legacy `id` can equal a subject of
 the bound issuer. After the issuer, membership is checked, before any lock or account:
@@ -267,10 +273,28 @@ the bound issuer. After the issuer, membership is checked, before any lock or ac
 After that, admission holds `lock.hold()` and never commits:
 
 - A new subject gets an account with the issuer's `preferred_username` (or the
-  subject when it suggests none, or only whitespace) and `config.user_role` (never equal to `admin_role`, so no new account is an admin by accident),
-  and the audit sink hears `user_created` with `actor_id=None`.
-- A known subject reuses its account unchanged, even when its suggested
-  username changed.
+  subject when it suggests none, or only whitespace) and `config.user_role`
+  (or `admin_role`, for a member of `admin_group`), and the audit sink hears
+  `user_created` with `actor_id=None`.
+- A known subject reuses its account, even when its suggested username
+  changed. A deactivated account is refused before any role is written.
+- The role comes from `admin_group`, a required setting: a group path strictly
+  below `login_group`, such as `/apps/songmaker/admin`, or
+  `NoAdmins.IN_THIS_APP` when the app has no admins. A missing `admin_group`
+  is a `TypeError`; a malformed path, or one not below `login_group`,
+  is a `ValueError`, both at startup (under `EverySubject`, any group path is
+  allowed). A person who is in `admin_group` or below it gets `admin_role`;
+  everyone else, and everyone under `NoAdmins`, gets `user_role`. This holds at
+  every login, for new and known accounts alike: a known account whose stored
+  role differs is rewritten with `set_role` and the audit sink hears
+  `role_changed`; a stored role other than `admin_role` or `user_role` is
+  overwritten to `user_role` (unless the identity belongs to `admin_group`,
+  which gives `admin_role`). The issuer's groups are the only source of admin:
+  a person taken out of the group is a plain user from their next login, on
+  every device at once, since the role lives on the account, while a session
+  that is already open keeps the old role until then. Only the derived role is
+  stored, never the groups. Migrating from a store with its own admins: put them
+  into the admin group first, or they are demoted at their next login.
 - Otherwise it answers an `AdmissionRefusal` and writes nothing:
   `FOREIGN_ISSUER` for an identity from another issuer, `NOT_A_MEMBER` for a
   person outside `login_group`, `ACCOUNT_DEACTIVATED`, and
@@ -652,8 +676,10 @@ explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 |---|---|
 | `user_created` | `role` |
 | `session_revoked` | `session_ref` |
+| `role_changed` | `previous_role`, `role` |
 
-Events contain no raw session identifiers or usernames.
+Events contain no raw session identifiers or usernames. An admission event
+with `actor_id=None` means the issuer's groups decided, not a person.
 
 `AuditSink` has a second method, `session_identity_changed(event)`, which
 receives a `SessionIdentityChanged` with `change`, `user_id`, `session_ref`,
@@ -680,12 +706,14 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
 It leaves the application everything that touches the application's own truth:
 
 - **Users and roles.** It has no user model and no role names beyond the
-  configured ones, and it decides no authorisation beyond the admin check.
+  configured ones; the one thing it writes to an account is the role admission
+  derives from the issuer's groups (`admin_role` or `user_role`), and it
+  decides no authorisation beyond the admin check.
 - **Persistence.** It holds no schema and no ORM, and an import-linter contract
   keeps it that way. What it needs reaches it through the Protocols in
   `webauth.ports`.

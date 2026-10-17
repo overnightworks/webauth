@@ -58,6 +58,7 @@ from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
     EverySubject,
+    NoAdmins,
     finish_login,
     post_token_request_over_https,
     start_login,
@@ -116,6 +117,8 @@ class HostSettings:
     issuer: str
     login_group: str
     """The host's app group, or the value of ``EverySubject.OF_THE_BOUND_ISSUER``."""
+    admin_group: str
+    """The host's admin group, or the value of ``NoAdmins.IN_THIS_APP``."""
     authorization_endpoint: str
     token_endpoint: str
     jwks_url: str
@@ -292,6 +295,11 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             if settings.login_group == EverySubject.OF_THE_BOUND_ISSUER.value
             else settings.login_group
         ),
+        admin_group=(
+            NoAdmins.IN_THIS_APP
+            if settings.admin_group == NoAdmins.IN_THIS_APP.value
+            else settings.admin_group
+        ),
     )
 
     def relying_party_of(request: Request) -> OidcRelyingParty:
@@ -374,6 +382,10 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
 
     @app.get("/me")
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
+        return {"username": user.username}
+
+    @app.get("/admin")
+    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
 
     @app.post("/logout", dependencies=[Depends(dependencies.current_user)])

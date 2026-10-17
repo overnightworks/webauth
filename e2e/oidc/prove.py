@@ -287,12 +287,14 @@ def login(proof: Proof, width: Width) -> str:
         assert headline == f"Signed in as {USER_NAME}", f"the page says {headline!r}"
         me_status = proof.status_of(page, "/me")
         assert me_status == 200, f"/me answered {me_status}"
+        admin_status = proof.status_of(page, "/admin")
+        assert admin_status == 403, f"/admin answered {admin_status} to a plain member"
         proof.shot(page, f"1-{width.label}", "result")
     held = proof.host_state()
     assert held["accounts"] == 1 and held["sessions"] == 1, f"the host holds {held}"
     signed_in = (
-        f"{USER_NAME} signed in at Keycloak's form; '/' says 'Signed in as {USER_NAME}' "
-        "and GET /me answered 200"
+        f"{USER_NAME} signed in at Keycloak's form; '/' says 'Signed in as {USER_NAME}', "
+        "GET /me answered 200 and GET /admin 403"
     )
     return f"{signed_in}; {a_wrong_password_stays_at_keycloak(proof, width)}"
 
@@ -393,12 +395,14 @@ def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
         page.goto(f"{APP_ORIGIN}/")
         headline = proof.headline(page)
         assert headline == f"Signed in as {ADMIN_NAME}", f"the page says {headline!r}"
+        admin_status = proof.status_of(page, "/admin")
+        assert admin_status == 200, f"/admin answered {admin_status} to a member of {ADMIN_GROUP}"
         proof.shot(page, scenario, "result")
     held = proof.host_state()
     assert (held["accounts"], held["sessions"]) == (1, 1), f"the host holds {held}"
     return (
-        f"{ADMIN_NAME}, a member of {ADMIN_GROUP} only, was admitted: "
-        "host accounts 1, sessions 1"
+        f"{ADMIN_NAME}, a member of {ADMIN_GROUP} only, was admitted "
+        "and GET /admin answered 200: host accounts 1, sessions 1"
     )
 
 
@@ -596,6 +600,7 @@ def host_settings(
         tls_key=str(tls.leaf_key),
         issuer=ISSUER,
         login_group=USER_GROUP,
+        admin_group=ADMIN_GROUP,
         authorization_endpoint=f"{OIDC_PATH}/auth",
         token_endpoint=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/token",
         jwks_url=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/certs",

@@ -86,7 +86,8 @@ digest of the login's state; the log keeps `__Host-oidc_pending_*`.
 
 ## What it proves
 
-`SCENARIO 1` is the login, `SCENARIO 2` the logout. The logout ends the session
+`SCENARIO 1` is the login (the plain member `d1-user` gets 403 from `/admin`),
+`SCENARIO 2` the logout. The logout ends the session
 in the app, not Keycloak's SSO session: a second "Sign in" re-logs in silently,
 and the table says so.
 
@@ -99,13 +100,17 @@ Keycloak, reaches the callback and sees "Sign-in refused" with `not-a-member`;
 the host holds 0 accounts and 0 sessions and the browser carries no session
 cookie. `SCENARIO 8` is `d1-admin`, a member of `/apps/songmaker/admin` only
 (the subgroup the run creates, since the pinned realm has none): it is
-admitted, and the host holds 1 account. `CHECK outsider-groups-claim` records,
+admitted, `/admin` answers 200 (the host's `admin_group` is that subgroup),
+and the host holds 1 account. `CHECK outsider-groups-claim` records,
 as a count only, whether Keycloak sends the outsider a `groups` claim at all;
 Keycloak leaves the claim out for a person in no group (claim absent).
 Scenarios 1, 4, 6 and 7 run at 390x844 (mobile emulation, touch) and 1280x800;
-scenario 8 runs at 1280x800. The host's `login_group` is `/apps/songmaker`;
-`conformance.py` states the value of `EverySubject.OF_THE_BOUND_ISSUER`, because the OIDF
-suite's tokens carry no `groups` claim. The run stays inside its 900 s budget.
+scenario 8 runs at 1280x800. The host's `login_group` is `/apps/songmaker` and its `admin_group`
+`/apps/songmaker/admin`; `conformance.py` states the value of
+`EverySubject.OF_THE_BOUND_ISSUER` and of `NoAdmins.IN_THIS_APP`, because the OIDF
+suite's tokens carry no `groups` claim. The demotion of a person taken out of the
+admin group is proven at the `finish_login` layer, not here: a D1 step would need
+an `Admin.delete` in `stack.py`. The run stays inside its 900 s budget.
 
 `SCENARIO 5` is the session cookie after the callback redirect. One host
 process per `cookie_samesite` serves both app origins; each cell uses a fresh

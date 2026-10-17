@@ -47,6 +47,7 @@ from webauth_arrangement import (
     UsersInMemory,
     UsersWithCaseInsensitiveUsernames,
     WriteLockInMemory,
+    _require_held_lock,
     a_web_auth_config,
     signed_without_bound,
 )
@@ -73,6 +74,7 @@ from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
     EverySubject,
+    NoAdmins,
     admit_identity,
     finish_login,
     start_login,
@@ -81,7 +83,10 @@ from webauth.ports import SubjectUserStore, UserManagementEventKind, UserRecord
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
-ADMISSION = AdmissionConfig(bound_issuer=BOUND_ISSUER, login_group=LOGIN_GROUP)
+ADMIN_GROUP = f"{LOGIN_GROUP}/admin"
+ADMISSION = AdmissionConfig(
+    bound_issuer=BOUND_ISSUER, login_group=LOGIN_GROUP, admin_group=ADMIN_GROUP,
+)
 SUBJECT = "5f0c2a1e-7d4b-4c55-9a51-2f8e3c6b1d90"
 LENA = OidcIdentity(
     subject=SUBJECT,
@@ -100,6 +105,7 @@ class LegacyPasswordUser(FakeUser):
     password_hash: str = "legacy-hash"  # noqa: S105
 
 
+LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(ADMIN_GROUP,))
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
 LEGACY_ADMIN_WITH_PASSWORD_FIELD = LegacyPasswordUser(
     id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE,
@@ -157,6 +163,7 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
         "subject_id": SUBJECT,
         "role": MEMBER_ROLE,
         "session_ref": None,
+        "previous_role": None,
     }]
 
 
@@ -251,19 +258,24 @@ def test_a_person_outside_the_group_is_refused_before_a_deactivated_account_is_r
     assert host.admit(replace(LENA, groups=())) is AdmissionRefusal.NOT_A_MEMBER
 
 
-@pytest.mark.parametrize("login_group", [
-    pytest.param("/apps/lab", id="a path"),
-    pytest.param("/apps/Team A", id="a space inside a segment"),
-    pytest.param("/apps/~lab", id="a tilde"),
-    pytest.param(EverySubject.OF_THE_BOUND_ISSUER, id="every subject"),
+@pytest.mark.parametrize(("login_group", "admin_group"), [
+    pytest.param("/apps/lab", "/apps/lab/admin", id="a path with an admin group below it"),
+    pytest.param("/apps/lab", "/apps/lab/ops/admin", id="an admin group two levels below"),
+    pytest.param("/apps/Team A", "/apps/Team A/~admin", id="a space and a tilde inside a segment"),
+    pytest.param("/apps/lab", NoAdmins.IN_THIS_APP, id="no admins in this app"),
+    pytest.param(EverySubject.OF_THE_BOUND_ISSUER, "/apps/lab/admin", id="every subject"),
+    pytest.param(EverySubject.OF_THE_BOUND_ISSUER, "/admins", id="every subject, any admin path"),
+    pytest.param(EverySubject.OF_THE_BOUND_ISSUER, NoAdmins.IN_THIS_APP, id="neither group"),
 ])
-def test_a_well_formed_login_group_is_accepted(login_group: str | EverySubject) -> None:
-    assert AdmissionConfig(bound_issuer=BOUND_ISSUER, login_group=login_group)
+def test_a_well_formed_admission_config_is_accepted(
+    login_group: str | EverySubject, admin_group: str | NoAdmins,
+) -> None:
+    assert AdmissionConfig(
+        bound_issuer=BOUND_ISSUER, login_group=login_group, admin_group=admin_group,
+    )
 
 
-@pytest.mark.parametrize("login_group", [
-    pytest.param(None, id="none"),
-    pytest.param(7, id="an int"),
+MALFORMED_GROUP_PATHS = [
     pytest.param("", id="empty"),
     pytest.param("apps/lab", id="no leading slash"),
     pytest.param("/", id="a bare slash"),
@@ -277,15 +289,61 @@ def test_a_well_formed_login_group_is_accepted(login_group: str | EverySubject) 
     pytest.param("/apps/la\u200bb", id="a zero-width space"),
     pytest.param("/apps/la\u2028b", id="a line separator"),
     pytest.param("/apps/la\u2029b", id="a paragraph separator"),
+]
+
+
+@pytest.mark.parametrize("login_group", [
+    pytest.param(None, id="none"),
+    pytest.param(7, id="an int"),
+    *MALFORMED_GROUP_PATHS,
 ])
 def test_a_malformed_login_group_fails_at_construction(login_group: object) -> None:
     with pytest.raises(ValueError):
-        AdmissionConfig(bound_issuer=BOUND_ISSUER, login_group=login_group)
+        AdmissionConfig(
+            bound_issuer=BOUND_ISSUER, login_group=login_group, admin_group=NoAdmins.IN_THIS_APP,
+        )
 
 
-def test_an_admission_config_without_a_login_group_fails_at_construction() -> None:
+@pytest.mark.parametrize("admin_group", [
+    pytest.param(None, id="none, as an unset variable reads"),
+    pytest.param(7, id="an int"),
+    pytest.param(EverySubject.OF_THE_BOUND_ISSUER, id="the every-subject value"),
+    *MALFORMED_GROUP_PATHS,
+])
+def test_a_malformed_admin_group_fails_at_construction(admin_group: object) -> None:
+    with pytest.raises(ValueError):
+        AdmissionConfig(
+            bound_issuer=BOUND_ISSUER,
+            login_group=EverySubject.OF_THE_BOUND_ISSUER,
+            admin_group=admin_group,
+        )
+
+
+@pytest.mark.parametrize("admin_group", [
+    pytest.param(LOGIN_GROUP, id="the login group itself"),
+    pytest.param("/apps", id="the parent of the login group"),
+    pytest.param("/apps/other/admin", id="another app's admin group"),
+    pytest.param(f"{LOGIN_GROUP}2/admin", id="a group named like the login group with a suffix"),
+    pytest.param(LOGIN_GROUP.upper() + "/admin", id="another case"),
+])
+def test_an_admin_group_outside_the_login_group_fails_at_construction(admin_group: str) -> None:
+    message = f"admin_group must lie below login_group, such as {LOGIN_GROUP}/admin"
+    with pytest.raises(ValueError, match=message):
+        AdmissionConfig(
+            bound_issuer=BOUND_ISSUER, login_group=LOGIN_GROUP, admin_group=admin_group,
+        )
+
+
+@pytest.mark.parametrize("settings", [
+    pytest.param({"login_group": LOGIN_GROUP}, id="without an admin group"),
+    pytest.param({"admin_group": ADMIN_GROUP}, id="without a login group"),
+    pytest.param({}, id="without either"),
+])
+def test_an_admission_config_missing_a_required_group_setting_fails_at_construction(
+    settings: dict[str, str],
+) -> None:
     with pytest.raises(TypeError):
-        AdmissionConfig(bound_issuer=BOUND_ISSUER)
+        AdmissionConfig(bound_issuer=BOUND_ISSUER, **settings)
 
 
 @pytest.mark.parametrize("legacy", [
@@ -294,15 +352,163 @@ def test_an_admission_config_without_a_login_group_fails_at_construction() -> No
         LEGACY_ADMIN_WITH_PASSWORD_FIELD, id="an account whose model carries a password field",
     ),
 ])
-def test_a_stored_account_whose_id_is_the_subject_signs_in_as_it_is(legacy: FakeUser) -> None:
+def test_a_stored_admin_outside_the_admin_group_is_demoted_and_audited_at_login(
+    legacy: FakeUser,
+) -> None:
     host = a_host(deepcopy(legacy))
 
     account = host.admit(LENA)
 
     assert account is host.accounts.get(SUBJECT)
-    assert (account.username, account.role) == ("lena.legacy", ADMIN_ROLE)
-    assert host.accounts.list() == [legacy]
+    assert (account.username, account.role) == ("lena.legacy", MEMBER_ROLE)
+    assert [asdict(event) for event in host.audit.user_management_events] == [{
+        "kind": UserManagementEventKind.ROLE_CHANGED,
+        "actor_id": None,
+        "subject_id": SUBJECT,
+        "role": MEMBER_ROLE,
+        "session_ref": None,
+        "previous_role": ADMIN_ROLE,
+    }]
+
+
+@dataclass(frozen=True)
+class RoleCase:
+    stored_role: str | None
+    groups: tuple[str, ...]
+    admission: AdmissionConfig
+    role: str
+    changed: bool
+
+
+NO_ADMINS = replace(ADMISSION, admin_group=NoAdmins.IN_THIS_APP)
+EVERYONE_WITH_ADMIN_GROUP = replace(EVERYONE, admin_group="/apps/other/admin")
+
+
+@pytest.mark.parametrize("case", [
+    pytest.param(RoleCase(None, (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, False),
+                 id="a new member"),
+    pytest.param(RoleCase(None, (ADMIN_GROUP,), ADMISSION, ADMIN_ROLE, False),
+                 id="a new member of the admin group"),
+    pytest.param(RoleCase(None, (f"{ADMIN_GROUP}/ops",), ADMISSION, ADMIN_ROLE, False),
+                 id="a new member of a subgroup of the admin group"),
+    pytest.param(RoleCase(None, ("/apps/other/admin",), EVERYONE_WITH_ADMIN_GROUP, ADMIN_ROLE,
+                          False), id="a new member of the admin group under every subject"),
+    pytest.param(RoleCase(None, (ADMIN_GROUP,), NO_ADMINS, MEMBER_ROLE, False),
+                 id="a new person in a group named admin where the app has no admins"),
+    pytest.param(RoleCase(MEMBER_ROLE, (ADMIN_GROUP,), ADMISSION, ADMIN_ROLE, True),
+                 id="a member put into the admin group"),
+    pytest.param(RoleCase(ADMIN_ROLE, (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, True),
+                 id="an admin taken out of the admin group"),
+    pytest.param(RoleCase(ADMIN_ROLE, (ADMIN_GROUP,), ADMISSION, ADMIN_ROLE, False),
+                 id="an admin still in the admin group"),
+    pytest.param(RoleCase(MEMBER_ROLE, (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, False),
+                 id="a member outside the admin group"),
+    pytest.param(RoleCase(ADMIN_ROLE, (ADMIN_GROUP,), NO_ADMINS, MEMBER_ROLE, True),
+                 id="an admin where the app has no admins"),
+    pytest.param(RoleCase("owner", (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, True),
+                 id="a stored role the library does not know"),
+    pytest.param(RoleCase(MEMBER_ROLE, (f"{LOGIN_GROUP}/admins",), ADMISSION, MEMBER_ROLE, False),
+                 id="a group named like the admin group with a suffix"),
+    pytest.param(RoleCase(MEMBER_ROLE, (LOGIN_GROUP, ADMIN_GROUP.upper()), ADMISSION,
+                          MEMBER_ROLE, False), id="the admin group in another case"),
+])
+def test_an_account_gets_the_role_its_groups_derive_at_every_login(case: RoleCase) -> None:
+    host = a_host(*(
+        [FakeUser(id=SUBJECT, username="lena", role=case.stored_role)]
+        if case.stored_role else []
+    ))
+
+    account = host.admit(replace(LENA, groups=case.groups), case.admission)
+
+    assert isinstance(account, FakeUser)
+    assert account.role == case.role
+    assert host.accounts.get(SUBJECT) is account
+    kinds = [event.kind for event in host.audit.user_management_events]
+    expected = [UserManagementEventKind.ROLE_CHANGED] if case.changed else (
+        [] if case.stored_role else [UserManagementEventKind.USER_CREATED]
+    )
+    assert kinds == expected
+
+
+def test_a_role_change_audit_event_carries_the_roles_and_no_username() -> None:
+    host = a_host(FakeUser(id=SUBJECT, username="lena.private", role=MEMBER_ROLE))
+
+    host.admit(LENA_IN_THE_ADMIN_GROUP)
+
+    [event] = host.audit.user_management_events
+    assert (event.actor_id, event.subject_id, event.previous_role, event.role) == (
+        None, SUBJECT, MEMBER_ROLE, ADMIN_ROLE,
+    )
+    assert "lena.private" not in repr(event)
+
+
+def test_a_deactivated_admin_is_refused_before_any_role_is_written() -> None:
+    host = a_host(FakeUser(id=SUBJECT, username="lena", role=ADMIN_ROLE, is_active=False))
+
+    assert host.admit(LENA) is AdmissionRefusal.ACCOUNT_DEACTIVATED
+    assert host.accounts.get(SUBJECT).role == ADMIN_ROLE
     assert host.audit.user_management_events == []
+
+
+class UsersReplacingRecords(UsersInMemory):
+    """A store whose records are frozen: a role write returns a new record."""
+
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
+        replaced = replace(self._users[user_id], role=role)
+        self._users[user_id] = replaced
+        self._usernames[replaced.username] = replaced
+        return replaced
+
+
+class UsersMissingTheRoleRow(UsersInMemory):
+    """A store whose role write finds no row, as after a concurrent delete."""
+
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
+        raise LookupError(user_id)
+
+
+class UsersRejectingNeedlessRoleWrites(UsersInMemory):
+    """A store that fails on a role write that changes nothing."""
+
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        if self._users[user_id].role == role:
+            raise AssertionError(f"role {role!r} written to an account that holds it")
+        return super().set_role(user_id, role)
+
+
+def test_admission_answers_the_record_the_role_write_returned() -> None:
+    host = a_host(FakeUser(id=SUBJECT, username="lena", role=MEMBER_ROLE),
+                  store=UsersReplacingRecords)
+    read_before = host.accounts.get(SUBJECT)
+
+    account = host.admit(LENA_IN_THE_ADMIN_GROUP)
+
+    assert account is not read_before
+    assert account is host.accounts.get(SUBJECT)
+    assert account.role == ADMIN_ROLE
+
+
+def test_a_role_write_that_finds_no_row_fails_admission_and_audits_nothing() -> None:
+    host = a_host(FakeUser(id=SUBJECT, username="lena", role=MEMBER_ROLE),
+                  store=UsersMissingTheRoleRow)
+
+    with pytest.raises(LookupError):
+        host.admit(LENA_IN_THE_ADMIN_GROUP)
+
+    assert host.audit.user_management_events == []
+
+
+def test_a_role_that_does_not_change_is_written_by_no_second_login() -> None:
+    host = a_host(store=UsersRejectingNeedlessRoleWrites)
+    host.admit(LENA_IN_THE_ADMIN_GROUP)
+
+    host.admit(LENA_IN_THE_ADMIN_GROUP)
+
+    assert [event.kind for event in host.audit.user_management_events] == [
+        UserManagementEventKind.USER_CREATED,
+    ]
 
 
 def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed() -> None:
@@ -386,6 +592,7 @@ class OidcHost:
     wall_clock: FakeClock
     accounts: UsersInMemory
     sessions: SessionRecordsInMemory
+    audit: RecordingAuditSink
     config: WebAuthConfig
 
     def start(self) -> str:
@@ -511,6 +718,7 @@ def an_oidc_host(
         wall_clock=wall_clock,
         accounts=accounts,
         sessions=sessions,
+        audit=audit,
         config=config,
     )
 
@@ -673,18 +881,49 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
 
 
-def test_a_callback_for_a_legacy_admin_signs_in_as_that_admin() -> None:
+def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
     host = an_oidc_host(deepcopy(LEGACY_ADMIN))
 
     response = host.callback(host.sign_in_at_issuer())
 
     assert (response.status_code, response.json()) == (200, {"username": "lena.legacy"})
     assert host.sessions.count_active() == 1
-    assert host.sessions.record is not None
-    assert host.sessions.record.user_id == SUBJECT
     assert host.client.get("/me").json() == {"username": "lena.legacy"}
+    assert host.client.get("/admin").status_code == 403
+    assert [event.kind for event in host.audit.user_management_events] == [
+        UserManagementEventKind.ROLE_CHANGED,
+    ]
+
+
+def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
+    host = an_oidc_host(deepcopy(LEGACY_ADMIN), groups_claim=[ADMIN_GROUP])
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert response.status_code == 200
     assert host.client.get("/admin").json() == {"username": "lena.legacy"}
-    assert host.accounts.list() == [LEGACY_ADMIN]
+    assert host.audit.user_management_events == []
+
+
+@pytest.mark.parametrize(("before", "after", "status_before", "status_after"), [
+    pytest.param([LOGIN_GROUP], [ADMIN_GROUP], 403, 200, id="put into the admin group"),
+    pytest.param([ADMIN_GROUP], [LOGIN_GROUP], 200, 403, id="taken out of the admin group"),
+])
+def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
+    before: list[str], after: list[str], status_before: int, status_after: int,
+) -> None:
+    groups = list(before)
+    host = an_oidc_host(groups_claim=groups)
+    host.callback(host.sign_in_at_issuer())
+    session_cookie = host.client.cookies[host.config.session_cookie_name]
+    assert host.client.get("/admin").status_code == status_before
+
+    groups[:] = after
+    host.callback(host.sign_in_at_issuer())
+    host.client.cookies.clear()
+    host.client.cookies.set(host.config.session_cookie_name, session_cookie)
+
+    assert host.client.get("/admin").status_code == status_after
 
 
 def test_the_password_account_refusal_is_no_longer_an_admission_refusal() -> None:
