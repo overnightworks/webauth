@@ -42,6 +42,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `login_rate_window_seconds`, and `DEFAULT_LOGIN_RATE_WINDOW_SECONDS` is gone: a host that
   passes any of the four gets `TypeError`.
 
+**Changed**
+
+- The wheel declares its license as the SPDX expression `MIT`, and releases build
+  with a hash-pinned setuptools.
+
 ## 0.14.0
 
 This is the last release with password parts.

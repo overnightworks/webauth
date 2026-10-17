@@ -97,6 +97,12 @@ release workflow's `verify` job checks both and refuses anything else. If
 once CI is green. Never move or re-create the tag (the tag ruleset forbids
 updating and deleting tags) and never bump the version for it.
 
+Both builds (`ci.yml` and `release.yml`) run
+`uv build --build-constraint .github/requirements-build.txt --require-hashes`, so the
+attested wheel is built by the setuptools pinned there, and a hash that does not match
+fails the build. Regenerate the file with the command in its first line; a setuptools
+bump is an ordinary Dependabot pull request (`pip` entry, directory `/.github`).
+
 The release carries the wheel, the sdist, `SHA256SUMS` and build-provenance
 attestations. Check a downloaded file with
 `gh attestation verify <file> -R overnightworks/webauth` and
