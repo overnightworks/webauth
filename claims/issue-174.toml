@@ -1,8 +1,0 @@
-claim_id = "fc41e3f3b8e74dc0aedd07ae4f7e8b96"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "e55bcbaa048ce8f891d2951b711d20020da1ac9d"
-branch = "claude/issue-174-w8-s10d-oidc-family-all"
-scope = ["CHANGELOG.md", "e2e/oidc/conformance.py", "src/webauth/__init__.py", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/rate_limit.py", "src/webauth/middleware/refusal.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "tests/test_https_client.py", "tests/test_public_api.py", "tests/typing/oidc_host.py"]
-opened_commit = "bc331d68b931a74e960b79fee27c8670e4b61a0f"
-whole_reason = "One contract: the public names of the OIDC family and the root package, the end of the jwt aliases, and the consumer test over every module"
