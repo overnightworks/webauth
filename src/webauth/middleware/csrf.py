@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from webauth.config import web_auth_config
 from webauth.cookies import verify_csrf_token
 from webauth.dependencies import session_id_from_request
-from webauth.middleware.refusal import RefusalMiddleware
+from webauth.middleware._refusal import RefusalMiddleware
 from webauth.policies import CsrfPolicy
 
 if TYPE_CHECKING:

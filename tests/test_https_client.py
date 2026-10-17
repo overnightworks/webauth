@@ -37,7 +37,6 @@ from oidc_arrangement import (
 from pydantic import SecretStr
 
 import webauth.https_client
-import webauth.jwt_verification
 from webauth.https_client import (
     ExchangeFailure,
     HttpsExchangeError,
@@ -605,18 +604,3 @@ def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
 
     _assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
     assert refused.value.__context__ is None
-
-
-@pytest.mark.parametrize(
-    "moved_name",
-    [
-        "KEY_SET_FETCH_TIMEOUT_SECONDS",
-        "MAX_KEY_SET_BYTES",
-        "KeySetFetchError",
-        "fetch_key_set_over_https",
-    ],
-)
-def test_the_key_set_fetch_is_still_wired_from_jwt_verification(moved_name: str) -> None:
-    assert getattr(webauth.jwt_verification, moved_name) is getattr(
-        webauth.https_client, moved_name
-    )

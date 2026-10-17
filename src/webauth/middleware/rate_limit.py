@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final
 from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
-from webauth.middleware.refusal import RefusalMiddleware
+from webauth.middleware._refusal import RefusalMiddleware
 from webauth.policies import RateLimitClass, RateLimitPolicy
 from webauth.proxies import budget_address, resolve_client_ip
 
