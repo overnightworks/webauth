@@ -7,11 +7,9 @@ operation must be rolled back by the host, including a raced first setup.
 
 from __future__ import annotations
 
-import hmac
 from dataclasses import dataclass
 
 from webauth.config import WebAuthConfig
-from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.passwords import check_password_strength
 from webauth.ports import (
@@ -25,11 +23,8 @@ from webauth.ports import (
     UserRecord,
     WriteLock,
 )
-from webauth.session_ending import end_session, end_user_sessions
-
-
-class NotAnAdminError(UserManagementError):
-    """The actor does not hold the configured administrator role."""
+from webauth.session_administration import NotAnAdminError
+from webauth.session_ending import end_user_sessions
 
 
 class UnknownRoleError(UserManagementError):
@@ -56,25 +51,12 @@ class PasswordlessAccountError(UserManagementError):
     """The account signs in only through its identity provider and has no password."""
 
 
-class UnknownSessionError(UserManagementError):
-    """No active session matches the supplied reference."""
-
-
 class SetupAlreadyDoneError(UserManagementError):
     """First-run setup is closed because an account already exists."""
 
 
 class SetupRacedError(UserManagementError):
     """Another account appeared during setup; the host must roll back."""
-
-
-@dataclass(frozen=True)
-class SessionSummary:
-    session_ref: str
-    user_id: str
-    username: str
-    ip_address: str
-    user_agent: str
 
 
 @dataclass(frozen=True)
@@ -191,36 +173,6 @@ class UserManagement:
             self._replace_password(
                 actor, actor.id, password_hash, UserManagementEventKind.PASSWORD_CHANGED,
             )
-
-    def list_sessions(self, offset: int = 0, limit: int | None = None) -> list[SessionSummary]:
-        """List public references; the host's admin dependency protects access."""
-        return [
-            SessionSummary(
-                session_ref=session_reference(record.id),
-                user_id=record.user_id,
-                username=record.user.username,
-                ip_address=record.ip_address,
-                user_agent=record.user_agent,
-            )
-            for record in self.sessions.list_active(offset=offset, limit=limit)
-        ]
-
-    def revoke_session(self, actor: AuthenticatedUser, session_ref: str) -> None:
-        """End one active session identified by its public reference."""
-        self._require_admin(actor)
-        reference = session_ref.encode()
-        with self.lock.hold():
-            for record in self.sessions.list_active(limit=None):
-                if hmac.compare_digest(session_reference(record.id).encode(), reference):
-                    end_session(self.sessions, session_id=record.id)
-                    self.audit.user_management_event(UserManagementEvent(
-                        kind=UserManagementEventKind.SESSION_REVOKED,
-                        actor_id=actor.id,
-                        subject_id=record.user_id,
-                        session_ref=session_ref,
-                    ))
-                    return
-            raise UnknownSessionError("Active session does not exist")
 
     def _replace_password(
         self, actor: AuthenticatedUser, user_id: str, password_hash: str,

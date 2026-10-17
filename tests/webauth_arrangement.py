@@ -64,6 +64,7 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
+from webauth.session_administration import SessionAdministration
 from webauth.session_ending import end_session
 from webauth.users import UserManagement
 
@@ -582,6 +583,16 @@ def a_user_management(*users: StoredUser, config: WebAuthConfig) -> UserManageme
     return UserManagement(
         users=user_store,
         sessions=SessionRecordsInMemory(users=user_store, lock=lock),
+        audit=RecordingAuditSink(),
+        lock=lock,
+        config=config,
+    )
+
+
+def a_session_administration(*users: StoredUser, config: WebAuthConfig) -> SessionAdministration:
+    lock = WriteLockInMemory()
+    return SessionAdministration(
+        sessions=SessionRecordsInMemory(users=UsersInMemory(*users, lock=lock), lock=lock),
         audit=RecordingAuditSink(),
         lock=lock,
         config=config,

@@ -15,6 +15,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   and keeps no alias: import them from `webauth.cookies`.
 - The 0.14 line receives no further fixes; see [SECURITY.md](SECURITY.md). A host
   on 0.14.x moves to the OpenID Connect login to receive fixes.
+- `UserManagement.list_sessions` and `revoke_session` became
+  `webauth.session_administration.SessionAdministration`, which needs only a
+  session store, an audit sink, a lock and the config.
+- `SessionSummary`, `UnknownSessionError` and `NotAnAdminError` moved to
+  `webauth.session_administration`.
 
 ## 0.14.0
 
