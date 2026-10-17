@@ -113,7 +113,7 @@ class AdmissionConfig:
 
     ``ValueError`` at construction names a ``login_group`` that is not a group
     path: one that does not start with ``/``, ends with ``/``, has an empty
-    segment, whitespace around a segment, or a control character."""
+    segment, whitespace around a segment, or a control, format or line-separator character."""
 
     bound_issuer: str
     login_group: str | EverySubject
@@ -136,7 +136,7 @@ def _require_group_path(field: str, path: str) -> None:
     if any(segment != segment.strip() for segment in segments):
         raise ValueError(f"{field} must not have whitespace around a segment")
     if any(unicodedata.category(character) in _FORBIDDEN_PATH_CATEGORIES for character in path):
-        raise ValueError(f"{field} must not contain control characters")
+        raise ValueError(f"{field} must not contain control, format or line-separator characters")
 
 
 def _is_member_of(group_path: str, groups: tuple[str, ...]) -> bool:

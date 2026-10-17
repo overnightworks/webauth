@@ -240,7 +240,7 @@ migration of the host's accounts, never a configuration change. `login_group`
 is required: the app's Keycloak group path, such as `/apps/songmaker`. A host
 that leaves it out gets a `TypeError`; one whose value is not a group path (no
 leading `/`, a trailing `/`, an empty segment, whitespace around a segment, a
-control character) gets a `ValueError`, both at startup. Whether the group
+control, format or line-separator character) gets a `ValueError`, both at startup. Whether the group
 exists in Keycloak is not checked here. `accounts` is a `SubjectUserStore`
 (`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
 which adds an account whose `id` is the subject, so a back-channel logout names
@@ -249,7 +249,7 @@ character for character is that subject's account and signs in as it is,
 whatever created it. The host's `get` must compare exactly: no case, accent or
 trailing-space folding, even where its id column's collation folds. A host that
 migrates legacy accounts makes sure that no legacy `id` can equal a subject of
-the bound issuer. Membership is checked first, before any lock or account:
+the bound issuer. After the issuer, membership is checked, before any lock or account:
 
 - A person is a member when one of the identity's groups is `login_group` or
   below it, compared character for character and by path segment:
