@@ -1,8 +1,0 @@
-claim_id = "cdbd0f525f744d7aaa7578176795834f"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "505fcda409bf47747f64923c19f0fd523601d141"
-branch = "claude/issue-142-w8-s4-der-passwort-login-geht-webauth-lo"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "src/webauth/login.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_login.py", "tests/test_oidc_login.py", "tests/test_passwords.py", "tests/test_web_auth_config.py", "tests/typing/password_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "fe110fb01758bce96da0cc821647418c7a7fd356"
-whole_reason = "One removal: the password login module, its port, its config fields, their tests and the documents that name them"
