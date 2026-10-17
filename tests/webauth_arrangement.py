@@ -20,7 +20,6 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any, Final
 
 import anyio
-from argon2.profiles import CHEAPEST
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
@@ -47,7 +46,6 @@ from webauth.middleware.security_headers import (
     REFERRER_POLICY,
     STRICT_TRANSPORT_SECURITY,
 )
-from webauth.passwords import Argon2idPasswordHasher
 from webauth.policies import (
     PathRules,
     RateLimitBudget,
@@ -93,17 +91,11 @@ DRIVE_DEADLINE_SECONDS: Final = 5
 
 
 
-def a_cheap_argon2id_hasher() -> Argon2idPasswordHasher:
-    """The real Argon2id hasher at argon2-cffi's cheapest costs, so tests stay fast."""
-    return Argon2idPasswordHasher(CHEAPEST)
-
-
 def a_web_auth_config(**overrides: object) -> WebAuthConfig:
     """A complete configuration; a keyword replaces the field it names."""
     defaults = {
         "session_secret": SecretStr("s" * MIN_SESSION_SECRET_CHARS),
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
-        "password_hasher": a_cheap_argon2id_hasher(),
         "rate_limits": SingleProcessRateLimitBackend(),
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
