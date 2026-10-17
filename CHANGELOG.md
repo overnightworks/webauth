@@ -104,7 +104,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
     `web_auth_config` (from `config`), `MAX_SESSION_COOKIE_CHARS` and `session_reference`
     (from `cookies`), `AuditSink`, `SessionIdentityChange`, `SessionIdentityChanged` and
     `SessionRecordStore` (from `ports`), `cookie_values` and `verify_session_cookie` (see
-    `cookies`), `client_user_agent` and `resolve_client_ip` (no public equivalent).
+    `cookies`), `client_user_agent` and `resolve_client_ip` (from `webauth.proxies`).
   - `liveness`: `require_positive_seconds` (no public equivalent).
   - `session_administration`: `require_admin` (no public equivalent; `revoke_session`
     checks the role). Imported names: `WebAuthConfig` (from `config`),
