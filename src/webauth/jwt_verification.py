@@ -20,8 +20,12 @@ so a failed or poisoned refresh never evicts the last good set; that set
 expires on the injected monotonic clock. Keys published for another purpose —
 encryption, another algorithm or key type — are passed over, not refused,
 because issuers such as Keycloak publish them beside the signing keys. They
-still count toward `MAX_KEY_SET_KEYS`, which bounds every key the set
-publishes: ten covers Keycloak's signing and encryption keys during a rotation.
+do not count toward `MAX_KEY_SET_KEYS`, which bounds the RS256 verification
+keys, the only ones that cost key construction and cache space. The size of
+the whole document is bounded by `MAX_KEY_SET_BYTES`, so passed-over entries
+cost a few lookups each and nothing more. Each entry is checked in this order:
+an object without a secret member, then RS256 eligibility, then the count, then
+the key itself.
 
 Install the `jwt` extra to use this module.
 """
@@ -479,8 +483,12 @@ def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
     except VerificationRefusal:
         raise _InvalidKeySetError(_RefreshFailure.NOT_STRICT_JSON) from None
     jwks = parsed.get("keys")
-    if not isinstance(jwks, list) or not 0 < len(jwks) <= MAX_KEY_SET_KEYS:
+    if not isinstance(jwks, list) or not jwks:
         raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
+    return MappingProxyType(_rs256_verification_keys(jwks))
+
+
+def _rs256_verification_keys(jwks: list[object]) -> dict[str, RSAPublicKey]:
     keys: dict[str, RSAPublicKey] = {}
     for jwk in jwks:
         if not isinstance(jwk, dict):
@@ -489,13 +497,15 @@ def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
             raise _InvalidKeySetError(_RefreshFailure.SECRET_KEY_PUBLISHED)
         if not _is_rs256_verification_key(jwk):
             continue
+        if len(keys) == MAX_KEY_SET_KEYS:
+            raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
         key_id, key = _public_signing_key(jwk)
         if key_id in keys:
             raise _InvalidKeySetError(_RefreshFailure.DUPLICATE_KEY_ID)
         keys[key_id] = key
     if not keys:
         raise _InvalidKeySetError(_RefreshFailure.NO_RS256_SIGNING_KEY)
-    return MappingProxyType(keys)
+    return keys
 
 
 def _is_rs256_verification_key(jwk: Mapping[str, object]) -> bool:

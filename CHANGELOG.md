@@ -53,6 +53,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - The wheel declares its license as the SPDX expression `MIT`, and releases build
   with a hash-pinned setuptools.
 
+**Fixed**
+
+- A key set that publishes more than ten keys, most of them for other algorithms or for
+  encryption, is no longer refused as `key-count-out-of-range`: `MAX_KEY_SET_KEYS` counts
+  the RS256 signing keys only. The size of the document stays bounded by 64 KiB.
+
 ## 0.14.0
 
 This is the last release with password parts.
