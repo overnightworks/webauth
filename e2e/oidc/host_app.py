@@ -32,9 +32,9 @@ from fastapi.responses import HTMLResponse
 from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.cookies import clear_session_cookies, issue_session_cookies
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
 from webauth.https_client import fetch_key_set_over_https
-from webauth.login import clear_session_cookies, issue_session_cookies
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.oidc import OidcClientConfig, OidcRefusal, OidcRelyingParty
 from webauth.oidc_login import (

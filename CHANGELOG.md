@@ -6,6 +6,16 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.15.0 - Unreleased
+
+**Breaking**
+
+- `COOKIE_PATH`, `issue_session_cookies` and `clear_session_cookies` moved from
+  `webauth.login` to `webauth.cookies`. `webauth.login` no longer exports them
+  and keeps no alias: import them from `webauth.cookies`.
+- The 0.14 line receives no further fixes; see [SECURITY.md](SECURITY.md). A host
+  on 0.14.x moves to the OpenID Connect login to receive fixes.
+
 ## 0.14.0
 
 This is the last release with password parts.

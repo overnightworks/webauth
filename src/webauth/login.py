@@ -1,11 +1,10 @@
-"""Signing in and out, minus everything that touches a transaction.
+"""Signing in, minus everything that touches a transaction.
 
 The application keeps the login route itself: its advisory lock, the failed
 attempt it commits before refusing, and when the request's work becomes
-durable. What is left over lives here — the cookies a signed-in browser
-carries, the failure budget an address has spent, and whether a password
-admits an account at all. None of it reads or writes a store of its own, so
-none of it can leave half a login behind.
+durable. What is left over lives here — the failure budget an address has
+spent, and whether a password admits an account at all. None of it reads or
+writes a store of its own, so none of it can leave half a login behind.
 """
 
 from __future__ import annotations
@@ -16,11 +15,7 @@ from typing import TYPE_CHECKING, Final
 
 from fastapi import HTTPException
 
-from webauth.cookies import generate_csrf_token, sign_session_id
-
 if TYPE_CHECKING:
-    from starlette.responses import Response
-
     from webauth.config import WebAuthConfig
     from webauth.ports import LoginAttemptStore, PasswordHasher, UserRecord
 
@@ -30,8 +25,6 @@ ACCOUNT_LOCKED_DETAIL: Final = (
 TOO_MANY_LOGIN_ATTEMPTS_DETAIL: Final = "Too many login attempts. Try again later."
 INVALID_CREDENTIALS_DETAIL: Final = "Invalid username or password"
 RETRY_AFTER_HEADER: Final = "Retry-After"
-
-COOKIE_PATH: Final = "/"
 
 
 class LoginOutcome(enum.Enum):
@@ -59,60 +52,6 @@ class LoginRefusal:
     def __post_init__(self) -> None:
         if self.outcome is LoginOutcome.ADMITTED:
             raise ValueError("ADMITTED is an admission, not a refusal")
-
-
-def issue_session_cookies(
-    response: Response, session_id: str, config: WebAuthConfig,
-) -> None:
-    """Hand the browser its signed session and the CSRF token bound to it.
-
-    Only the session cookie is kept from scripts: the CSRF token has to be
-    readable, because the double-submit check compares it against a header the
-    client sends back itself. Both carry ``Secure`` unless the host switched
-    ``cookie_secure`` off: a request's scheme is not trusted to decide it,
-    because behind an unlisted TLS proxy every request looks like plain http.
-    """
-    secure = config.cookie_secure
-    max_age = config.cookie_max_age_seconds
-    samesite = config.cookie_samesite
-    response.set_cookie(
-        config.session_cookie_name,
-        sign_session_id(session_id, config.signing_key),
-        max_age=max_age,
-        httponly=True,
-        samesite=samesite,
-        secure=secure,
-        path=COOKIE_PATH,
-    )
-    response.set_cookie(  # NOSONAR The client must read this CSRF token for double-submit.
-        config.csrf_cookie_name,
-        generate_csrf_token(session_id, config.signing_key),
-        max_age=max_age,
-        httponly=False,
-        samesite=samesite,
-        secure=secure,
-        path=COOKIE_PATH,
-    )
-
-
-def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
-    """Take both cookies back, so the browser stops carrying a dead session.
-
-    Each deletion repeats the attributes its cookie was set with, so a browser
-    that only lets a secure context overwrite a ``Secure`` cookie accepts it.
-    """
-    samesite = config.cookie_samesite
-    secure = config.cookie_secure
-    response.delete_cookie(
-        config.session_cookie_name,
-        path=COOKIE_PATH,
-        samesite=samesite,
-        secure=secure,
-        httponly=True,
-    )
-    response.delete_cookie(
-        config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite, secure=secure,
-    )
 
 
 def login_attempt_budget(

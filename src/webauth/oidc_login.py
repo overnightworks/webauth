@@ -30,6 +30,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 from webauth.cookies import (
+    COOKIE_PATH,
     cookie_pairs,
     cookie_values,
     is_pending_login_cookie_name,
@@ -42,7 +43,6 @@ from webauth.https_client import (
     HttpsExchangeError,
     post_form_over_https,
 )
-from webauth.login import COOKIE_PATH
 from webauth.oidc import (
     MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
