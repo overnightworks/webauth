@@ -75,7 +75,9 @@ from webauth.oidc import (
     TokenRequestPost,
 )
 from webauth.oidc_login import (
+    AdmissionConfig,
     AdmissionRefusal,
+    EverySubject,
     admit_identity,
     finish_login,
     post_token_request_over_https,
@@ -236,7 +238,10 @@ def a_host_finishes_a_keycloak_login(
     audit: AuditSink = HostAudit()
     return finish_login(
         relying_party, request, response, config,
-        bound_issuer="https://keycloak.example/realms/host",
+        admission=AdmissionConfig(
+            bound_issuer="https://keycloak.example/realms/host",
+            login_group="/apps/host",
+        ),
         accounts=accounts, lock=lock, audit=audit,
     )
 
@@ -249,7 +254,10 @@ def a_host_admits_an_identity(
     audit: AuditSink = HostAudit()
     return admit_identity(
         identity,
-        bound_issuer="https://keycloak.example/realms/host",
+        admission=AdmissionConfig(
+            bound_issuer="https://keycloak.example/realms/host",
+            login_group=EverySubject.OF_THE_BOUND_ISSUER,
+        ),
         accounts=accounts, lock=lock, audit=audit, config=config,
     )
 

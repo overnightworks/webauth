@@ -82,6 +82,9 @@ CLIENT_ID = "d1-host"
 USER_NAME = "d1-user"
 USER_GROUP = "/apps/songmaker"
 DISABLED_USER_NAME = "d1-disabled"
+OUTSIDER_NAME = "d1-outsider"
+ADMIN_NAME = "d1-admin"
+ADMIN_GROUP = f"{USER_GROUP}/admin"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
 
@@ -127,6 +130,10 @@ class Proof(RunRecord):
     user_password: str = ""
     disabled_user_password: str = ""
     disabled_user_id: str = ""
+    outsider_password: str = ""
+    outsider_id: str = ""
+    admin_password: str = ""
+    client_uuid: str = ""
     client_secret: str = ""
     stack: HeldStack | None = None
     width: Width = DESKTOP
@@ -356,6 +363,59 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
     )
 
 
+def outsider_is_refused(proof: Proof, width: Width) -> str:
+    scenario = f"7-{width.label}"
+    proof.reset_host()
+    with proof.browsing(width) as page:
+        proof.sign_in(
+            page, scenario, username=OUTSIDER_NAME, password=proof.outsider_password
+        )
+        assert proof.headline(page) == "Sign-in refused", f"the page says {proof.headline(page)!r}"
+        assert "not-a-member" in page.inner_text("body"), "the page does not name the reason"
+        proof.assert_fits(page, "h1")
+        proof.shot(page, scenario, "result")
+        carried = {cookie_name_and_value(c)[0] for c in page.context.cookies(APP_ORIGIN)}
+        assert DEFAULT_SESSION_COOKIE_NAME not in carried, "a session cookie was issued"
+    held = proof.host_state()
+    assert (held["accounts"], held["sessions"]) == (0, 0), f"the host holds {held}"
+    assert held["last_refusal"] == "not-a-member", f"the host refused {held}"
+    return (
+        f"{OUTSIDER_NAME}, in no group, signed in at Keycloak and the callback was refused with "
+        "'not-a-member': host accounts 0, sessions 0, no session cookie"
+    )
+
+
+def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
+    scenario = f"8-{width.label}"
+    proof.reset_host()
+    with proof.browsing(width) as page:
+        proof.sign_in(page, scenario, username=ADMIN_NAME, password=proof.admin_password)
+        page.goto(f"{APP_ORIGIN}/")
+        headline = proof.headline(page)
+        assert headline == f"Signed in as {ADMIN_NAME}", f"the page says {headline!r}"
+        proof.shot(page, scenario, "result")
+    held = proof.host_state()
+    assert (held["accounts"], held["sessions"]) == (1, 1), f"the host holds {held}"
+    return (
+        f"{ADMIN_NAME}, a member of {ADMIN_GROUP} only, was admitted: "
+        "host accounts 1, sessions 1"
+    )
+
+
+def outsiders_groups_claim_is_recorded(proof: Proof) -> str:
+    assert proof.stack is not None
+    admin = proof.stack.admin()
+    proof.registry.add("admin token", admin.token)
+    example = admin.get(
+        f"/{REALM}/clients/{proof.client_uuid}/evaluate-scopes/generate-example-id-token"
+        f"?userId={proof.outsider_id}&scope=openid%20groups"
+    )
+    if "groups" not in example:
+        return "Keycloak leaves the groups claim out for a person in no group (claim absent)"
+    sent = len(example["groups"])
+    return f"Keycloak sends the groups claim for a person in no group ({sent} entries)"
+
+
 def pages_fit_the_window(proof: Proof, width: Width) -> str:
     scenario = f"6-{width.label}"
     proof.reset_host()
@@ -474,7 +534,7 @@ def second_sign_in(proof: Proof, page: Page) -> str:
     )
 
 
-def create_user(admin: Admin, username: str, password: str) -> str:
+def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
     user_id = admin.create(f"/{REALM}/users", {
         "username": username,
         "enabled": True,
@@ -484,13 +544,14 @@ def create_user(admin: Admin, username: str, password: str) -> str:
         "lastName": "User",
         "credentials": [{"type": "password", "value": password, "temporary": False}],
     })
-    group = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")
-    admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")
+    for path in groups:
+        group = admin.get(f"/{REALM}/group-by-path{path}")
+        admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")
     return user_id
 
 
 def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
-    admin.create(f"/{REALM}/clients", {
+    proof.client_uuid = admin.create(f"/{REALM}/clients", {
         "clientId": CLIENT_ID,
         "enabled": True,
         "publicClient": False,
@@ -505,8 +566,14 @@ def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
         ],
         "defaultClientScopes": ["basic", "profile", "groups"],
     })
-    create_user(admin, USER_NAME, proof.user_password)
-    proof.disabled_user_id = create_user(admin, DISABLED_USER_NAME, proof.disabled_user_password)
+    songmaker = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")
+    admin.create(f"/{REALM}/groups/{songmaker['id']}/children", {"name": "admin"})
+    create_user(admin, USER_NAME, proof.user_password, (USER_GROUP,))
+    proof.disabled_user_id = create_user(
+        admin, DISABLED_USER_NAME, proof.disabled_user_password, (USER_GROUP,)
+    )
+    proof.outsider_id = create_user(admin, OUTSIDER_NAME, proof.outsider_password, ())
+    create_user(admin, ADMIN_NAME, proof.admin_password, (ADMIN_GROUP,))
 
 
 def register_stack_secrets(stack: HeldStack, admin: Admin, registry: SecretRegistry) -> None:
@@ -528,6 +595,7 @@ def host_settings(
         tls_certificate=str(tls.leaf_certificate),
         tls_key=str(tls.leaf_key),
         issuer=ISSUER,
+        login_group=USER_GROUP,
         authorization_endpoint=f"{OIDC_PATH}/auth",
         token_endpoint=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/token",
         jwks_url=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/certs",
@@ -543,9 +611,12 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
     proof.user_password = secrets.token_urlsafe(18)
     proof.client_secret = secrets.token_urlsafe(24)
     proof.disabled_user_password = secrets.token_urlsafe(18)
+    proof.outsider_password = secrets.token_urlsafe(18)
+    proof.admin_password = secrets.token_urlsafe(18)
     for label, value in (
         ("session secret", proof.session_secret), ("user password", proof.user_password),
         ("disabled user password", proof.disabled_user_password),
+        ("outsider password", proof.outsider_password), ("admin password", proof.admin_password),
         ("client secret", proof.client_secret),
     ):
         proof.registry.add(label, value)
@@ -613,6 +684,7 @@ def drive_browser(
 
 SCENARIOS_PER_WIDTH = (
     (1, login), (4, disabled_user_is_refused), (6, pages_fit_the_window),
+    (7, outsider_is_refused),
 )
 
 
@@ -626,12 +698,19 @@ def run_default_scenarios(proof: Proof) -> bool:
         "CHECK untrusted-certificate", lambda: untrusted_certificate_is_refused(proof)
     ):
         return False
+    proof.held_or_failed(
+        "CHECK outsider-groups-claim", lambda: outsiders_groups_claim_is_recorded(proof)
+    )
     for width in WIDTHS:
         for number, scenario in SCENARIOS_PER_WIDTH:
             proof.held_or_failed(
                 f"SCENARIO {number} {width.label} {APP_ORIGIN}",
                 lambda scenario=scenario, width=width: scenario(proof, width),
             )
+    proof.held_or_failed(
+        f"SCENARIO 8 {DESKTOP.label} {APP_ORIGIN}",
+        lambda: subgroup_member_is_admitted(proof, DESKTOP),
+    )
     proof.held_or_failed(f"SCENARIO 2 {DESKTOP.label} {APP_ORIGIN}", lambda: logout(proof))
     return True
 

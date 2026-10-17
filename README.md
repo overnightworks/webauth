@@ -32,7 +32,9 @@ from fastapi import Request, Response
 
 from webauth.cookies import issue_session_cookies
 from webauth.oidc import OidcRefusal
-from webauth.oidc_login import AdmissionRefusal, finish_login, start_login
+from webauth.oidc_login import AdmissionConfig, AdmissionRefusal, finish_login, start_login
+
+admission = AdmissionConfig(bound_issuer=client_config.issuer, login_group="/apps/songmaker")
 
 
 @app.get("/login/oidc")
@@ -46,7 +48,7 @@ def start(request: Request) -> Response:
 def callback(request: Request, response: Response) -> dict[str, str]:
     outcome = finish_login(
         relying_party, request, response, config,
-        bound_issuer=client_config.issuer, accounts=accounts, lock=lock, audit=audit,
+        admission=admission, accounts=accounts, lock=lock, audit=audit,
     )
     if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
         response.status_code = 403
@@ -228,11 +230,18 @@ names the `ExchangeFailure` that ended the request, so a caller can tell
 
 ### Admitting an identity
 
-`webauth.oidc_login.admit_identity(identity, *, bound_issuer, accounts, lock,
-audit, config)` turns that identity into the account it signs in as. The host
-binds its store to one issuer — the `issuer` of its `OidcClientConfig` — and
-passes it as `bound_issuer`; changing the issuer is a migration of the host's
-accounts, never a configuration change. `accounts` is a `SubjectUserStore`
+`webauth.oidc_login.admit_identity(identity, *, admission, accounts, lock,
+audit, config)` turns that identity into the account it signs in as, and
+`finish_login` takes the same `admission`. It is an
+`AdmissionConfig(bound_issuer=..., login_group=...)` the host builds once at
+startup. The host binds its store to one issuer — the `issuer` of its
+`OidcClientConfig` — and passes it as `bound_issuer`; changing the issuer is a
+migration of the host's accounts, never a configuration change. `login_group`
+is required: the app's Keycloak group path, such as `/apps/songmaker`. A host
+that leaves it out gets a `TypeError`; one whose value is not a group path (no
+leading `/`, a trailing `/`, an empty segment, whitespace around a segment, a
+control, format or line-separator character) gets a `ValueError`, both at startup. Whether the group
+exists in Keycloak is not checked here. `accounts` is a `SubjectUserStore`
 (`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
 which adds an account whose `id` is the subject, so a back-channel logout names
 the account directly). Any stored account whose `id` equals the subject
@@ -240,7 +249,22 @@ character for character is that subject's account and signs in as it is,
 whatever created it. The host's `get` must compare exactly: no case, accent or
 trailing-space folding, even where its id column's collation folds. A host that
 migrates legacy accounts makes sure that no legacy `id` can equal a subject of
-the bound issuer. Admission holds `lock.hold()` and never commits:
+the bound issuer. After the issuer, membership is checked, before any lock or account:
+
+- A person is a member when one of the identity's groups is `login_group` or
+  below it, compared character for character and by path segment:
+  `/apps/songmaker/admin` counts for `/apps/songmaker`, `/apps/songmaker2` and
+  a bare `songmaker` do not. A missing or empty `groups` claim means no
+  membership; a malformed one is refused as `INVALID_IDENTITY_CLAIM`. The
+  check runs on every login, after `FOREIGN_ISSUER` and before any account is
+  looked up or created, so a refusal writes nothing and sets no session
+  cookie. What the refused person sees is the host's page.
+- Taking someone out of the group refuses them at their next login; their
+  account and data stay, and putting them back returns them to the same
+  account. A session that is already open runs on until the host's session
+  lifetime (below) ends it.
+
+After that, admission holds `lock.hold()` and never commits:
 
 - A new subject gets an account with the issuer's `preferred_username` (or the
   subject when it suggests none, or only whitespace) and `config.user_role` (never equal to `admin_role`, so no new account is an admin by accident),
@@ -248,10 +272,20 @@ the bound issuer. Admission holds `lock.hold()` and never commits:
 - A known subject reuses its account unchanged, even when its suggested
   username changed.
 - Otherwise it answers an `AdmissionRefusal` and writes nothing:
-  `FOREIGN_ISSUER` for an identity from another issuer, `ACCOUNT_DEACTIVATED`, and
+  `FOREIGN_ISSUER` for an identity from another issuer, `NOT_A_MEMBER` for a
+  person outside `login_group`, `ACCOUNT_DEACTIVATED`, and
   `USERNAME_TAKEN` when a new subject's username belongs to another account
   — including when the store's own uniqueness is stricter than its lookup
   and `create_for_subject` raises `UsernameTakenError`.
+
+`login_group` may instead be `EverySubject.OF_THE_BOUND_ISSUER`, which admits
+without looking at groups. It admits every subject of the realm, the users of
+other apps included, so a host says it on purpose and only when the issuer
+already limits who can sign in.
+
+The issuer must send full group paths: in Keycloak the group membership mapper
+needs `full.path` on. Without it the claim holds bare names, no group path
+matches and everyone is refused, which fails safe.
 
 ## Reading the session
 
@@ -396,9 +430,14 @@ Every lifetime — `cookie_max_age_seconds` and the windows and
 caps of both liveness policies — must be a positive whole number of seconds; `0`, a negative
 value, a `float`, a string or a `bool` is refused when the object is built.
 
-The recommended policy is a 30-day cookie, a 7-day idle window and a 30-day
-absolute cap: someone who comes back at least weekly stays signed in for up to
-30 days, and anyone away for more than 7 days signs in again.
+The recommended policy for a host that admits by `login_group` is a 12-hour
+cookie and cap, with the idle window left to the host. The cookie and the cap
+set the worst-case delay before a removal from the group takes effect, because
+an open session is not re-checked. Every login checks the group again, and
+Keycloak's own SSO session (30 days, 7 days idle) turns that login into a
+redirect the person does not notice. A removal takes effect at once only with
+`edge lock` together with W5's back-channel logout; until that integration
+exists, an open app session stays valid until it expires.
 
 ```python
 import re
@@ -410,8 +449,7 @@ from webauth.liveness import IdleWindowLiveness
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 
-SEVEN_DAYS = 7 * 24 * 3600
-THIRTY_DAYS = 30 * 24 * 3600
+TWELVE_HOURS = 12 * 3600
 
 config = WebAuthConfig(
     session_secret=SecretStr("a-secret-of-at-least-thirty-two-characters"),
@@ -419,8 +457,8 @@ config = WebAuthConfig(
     rate_limits=SingleProcessRateLimitBackend(),
     allowed_hosts_exact=frozenset({"app.example.com"}),
     allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
-    cookie_max_age_seconds=THIRTY_DAYS,
-    session_liveness=IdleWindowLiveness(SEVEN_DAYS, absolute_max_age_seconds=THIRTY_DAYS),
+    cookie_max_age_seconds=TWELVE_HOURS,
+    session_liveness=IdleWindowLiveness(TWELVE_HOURS, absolute_max_age_seconds=TWELVE_HOURS),
 )
 ```
 

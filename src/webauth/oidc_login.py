@@ -17,7 +17,18 @@ host's accounts, never a configuration change. This module builds on
 ``webauth.oidc``, so a host using it installs the ``jwt`` extra.
 
 Admission holds the host's write lock and never commits: the host commits or
-rolls back, and a refusal writes nothing.
+rolls back, and a refusal writes nothing. An ``AdmissionConfig`` states who
+may enter: the bound issuer and the app's ``login_group``, a Keycloak group
+path such as ``/apps/songmaker``. A person is a member when one of their
+groups is that path or a subgroup of it, compared character for character
+and by path segment, so ``/apps/songmaker/admin`` counts and
+``/apps/songmaker2`` does not. The check runs on every login, before any
+account is looked up or created, so a person removed from the group is
+refused at their next login while their account and data stay, and a person
+put back returns to the same account. It ends no session that is already
+open; that lasts until the host's session lifetime runs out. The groups claim
+must carry full paths (Keycloak's group mapper with ``full.path`` on); a
+missing or empty claim means no membership.
 
 ``post_token_request_over_https`` is the production ``TokenRequestPost`` the
 host gives its ``OidcRelyingParty``, beside ``fetch_key_set_over_https``; both
@@ -26,7 +37,9 @@ send their request through ``webauth.https_client``.
 
 from __future__ import annotations
 
-from enum import StrEnum
+import unicodedata
+from dataclasses import dataclass
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
 from webauth.cookies import (
@@ -64,7 +77,9 @@ if TYPE_CHECKING:
     from webauth.ports import AuditSink, SubjectUserStore, UserRecord, WriteLock
 
 __all__ = [
+    "AdmissionConfig",
     "AdmissionRefusal",
+    "EverySubject",
     "admit_identity",
     "finish_login",
     "post_token_request_over_https",
@@ -83,10 +98,56 @@ read, by default."""
 _UNRANKED: Final = -1
 
 
+class EverySubject(Enum):
+    """Admit every subject of the bound issuer, whatever their groups.
+
+    That includes the issuer's people who belong to other apps."""
+
+    OF_THE_BOUND_ISSUER = "every-subject"
+
+
+@dataclass(frozen=True, kw_only=True)
+class AdmissionConfig:
+    """Who may enter: the issuer the host's store is bound to, and the group
+    path of the app (or ``EverySubject.OF_THE_BOUND_ISSUER``).
+
+    ``ValueError`` at construction names a ``login_group`` that is not a group
+    path: one that does not start with ``/``, ends with ``/``, has an empty
+    segment, whitespace around a segment, or a control, format or line-separator character."""
+
+    bound_issuer: str
+    login_group: str | EverySubject
+
+    def __post_init__(self) -> None:
+        if isinstance(self.login_group, EverySubject):
+            return
+        if not isinstance(self.login_group, str):
+            raise ValueError("login_group must be a group path or EverySubject")
+        _require_group_path("login_group", self.login_group)
+
+
+_FORBIDDEN_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+def _require_group_path(field: str, path: str) -> None:
+    segments = path.split("/")
+    if segments[0] != "" or len(segments) < 2 or not all(segments[1:]):
+        raise ValueError(f"{field} must be a group path such as /apps/name")
+    if any(segment != segment.strip() for segment in segments):
+        raise ValueError(f"{field} must not have whitespace around a segment")
+    if any(unicodedata.category(character) in _FORBIDDEN_PATH_CATEGORIES for character in path):
+        raise ValueError(f"{field} must not contain control, format or line-separator characters")
+
+
+def _is_member_of(group_path: str, groups: tuple[str, ...]) -> bool:
+    return any(group == group_path or group.startswith(group_path + "/") for group in groups)
+
+
 class AdmissionRefusal(StrEnum):
     """Why a verified identity does not become a signed-in account."""
 
     FOREIGN_ISSUER = "foreign-issuer"
+    NOT_A_MEMBER = "not-a-member"
     ACCOUNT_DEACTIVATED = "account-deactivated"
     USERNAME_TAKEN = "username-taken"
 
@@ -114,7 +175,7 @@ def finish_login(
     response: Response,
     config: WebAuthConfig,
     *,
-    bound_issuer: str,
+    admission: AdmissionConfig,
     accounts: SubjectUserStore,
     lock: WriteLock,
     audit: AuditSink,
@@ -143,7 +204,7 @@ def finish_login(
         return identity
     return admit_identity(
         identity,
-        bound_issuer=bound_issuer,
+        admission=admission,
         accounts=accounts,
         lock=lock,
         audit=audit,
@@ -181,7 +242,7 @@ def _issued_at(cookie_value: str, config: WebAuthConfig) -> int:
 def admit_identity(
     identity: OidcIdentity,
     *,
-    bound_issuer: str,
+    admission: AdmissionConfig,
     accounts: SubjectUserStore,
     lock: WriteLock,
     audit: AuditSink,
@@ -195,9 +256,16 @@ def admit_identity(
     created it; ``SubjectUserStore.get`` must compare exactly. A host that
     migrates legacy accounts makes sure that no legacy ``id`` can equal a
     subject of the bound issuer.
+
+    The order of refusals is ``FOREIGN_ISSUER``, then ``NOT_A_MEMBER`` (the
+    identity's groups hold no path of ``admission.login_group``, or are
+    missing or empty), then the account's own state. The first two write
+    nothing and look up no account.
     """
-    if identity.issuer != bound_issuer:
+    if identity.issuer != admission.bound_issuer:
         return AdmissionRefusal.FOREIGN_ISSUER
+    if not _admits(admission.login_group, identity):
+        return AdmissionRefusal.NOT_A_MEMBER
     with lock.hold():
         account = accounts.get(identity.subject)
         if account is None:
@@ -205,6 +273,12 @@ def admit_identity(
         if not account.is_active:
             return AdmissionRefusal.ACCOUNT_DEACTIVATED
         return account
+
+
+def _admits(login_group: str | EverySubject, identity: OidcIdentity) -> bool:
+    if isinstance(login_group, EverySubject):
+        return True
+    return _is_member_of(login_group, identity.groups)
 
 
 def _provision(

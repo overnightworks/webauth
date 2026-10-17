@@ -14,6 +14,7 @@ import threading
 import urllib.parse
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -69,7 +70,9 @@ from webauth.oidc import (
 )
 from webauth.oidc_login import (
     MAX_PENDING_LOGINS,
+    AdmissionConfig,
     AdmissionRefusal,
+    EverySubject,
     admit_identity,
     finish_login,
     start_login,
@@ -77,11 +80,13 @@ from webauth.oidc_login import (
 from webauth.ports import SubjectUserStore, UserManagementEventKind, UserRecord
 
 BOUND_ISSUER = "https://id.example/realms/lab"
+LOGIN_GROUP = "/apps/lab"
+ADMISSION = AdmissionConfig(bound_issuer=BOUND_ISSUER, login_group=LOGIN_GROUP)
 SUBJECT = "5f0c2a1e-7d4b-4c55-9a51-2f8e3c6b1d90"
 LENA = OidcIdentity(
     subject=SUBJECT,
     issuer=BOUND_ISSUER,
-    groups=(),
+    groups=(LOGIN_GROUP,),
     session_id=None,
     preferred_username="lena",
 )
@@ -107,10 +112,12 @@ class Host:
     audit: RecordingAuditSink
     lock: WriteLockInMemory
 
-    def admit(self, identity: OidcIdentity) -> UserRecord | AdmissionRefusal:
+    def admit(
+        self, identity: OidcIdentity, admission: AdmissionConfig = ADMISSION,
+    ) -> UserRecord | AdmissionRefusal:
         return admit_identity(
             identity,
-            bound_issuer=BOUND_ISSUER,
+            admission=admission,
             accounts=self.accounts,
             lock=self.lock,
             audit=self.audit,
@@ -151,6 +158,134 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
         "role": MEMBER_ROLE,
         "session_ref": None,
     }]
+
+
+@pytest.mark.parametrize(("groups", "admitted"), [
+    pytest.param((LOGIN_GROUP,), True, id="the group itself"),
+    pytest.param((f"{LOGIN_GROUP}/admin",), True, id="a subgroup only"),
+    pytest.param((f"{LOGIN_GROUP}/admin/ops",), True, id="a deeper subgroup"),
+    pytest.param(("/other", LOGIN_GROUP), True, id="the group among others"),
+    pytest.param((), False, id="no groups, as a missing or empty claim reads"),
+    pytest.param((f"{LOGIN_GROUP}2",), False, id="a group named like it with a suffix"),
+    pytest.param(("/apps",), False, id="the parent of the group"),
+    pytest.param(("/apps/other",), False, id="another app's group"),
+    pytest.param(("lab",), False, id="the bare name"),
+    pytest.param((LOGIN_GROUP.upper(),), False, id="another case"),
+    pytest.param(tuple(f"/g/{n}" for n in range(1000)), False, id="a thousand foreign groups"),
+    pytest.param((*(f"/g/{n}" for n in range(1000)), LOGIN_GROUP), True,
+                 id="the group after a thousand others"),
+])
+def test_a_person_is_admitted_when_a_group_is_the_login_group_or_below_it(
+    groups: tuple[str, ...], *, admitted: bool,
+) -> None:
+    host = a_host()
+
+    outcome = host.admit(replace(LENA, groups=groups))
+
+    assert (outcome is not AdmissionRefusal.NOT_A_MEMBER) is admitted
+    assert len(host.accounts.list()) == int(admitted)
+
+
+def test_the_every_subject_value_admits_a_person_without_groups() -> None:
+    host = a_host()
+    account = host.admit(replace(LENA, groups=()), EVERYONE)
+
+    assert account == host.accounts.get(SUBJECT)
+
+
+def test_a_person_taken_out_of_the_group_is_refused_and_back_in_returns_to_the_account() -> None:
+    host = a_host()
+    first = host.admit(LENA)
+    stored = deepcopy(host.accounts.list())
+
+    assert host.admit(replace(LENA, groups=())) is AdmissionRefusal.NOT_A_MEMBER
+    assert host.accounts.list() == stored
+
+    assert host.admit(LENA) is first
+    assert len(host.audit.user_management_events) == 1
+
+
+class UntouchableAccounts(UsersInMemory):
+    def get(self, user_id: str) -> FakeUser | None:
+        raise AssertionError("a refusal must not read an account")
+
+    def get_by_username(self, username: str) -> FakeUser | None:
+        raise AssertionError("a refusal must not read an account")
+
+
+class UntouchableLock(WriteLockInMemory):
+    def hold(self) -> AbstractContextManager[None]:
+        raise AssertionError("a refusal must not take the write lock")
+
+
+FOREIGN_ISSUER = "https://other.example/realms/lab"
+EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
+
+
+@pytest.mark.parametrize(("identity", "admission", "refusal"), [
+    pytest.param(
+        replace(LENA, groups=()), ADMISSION, AdmissionRefusal.NOT_A_MEMBER,
+        id="a person outside the group",
+    ),
+    pytest.param(
+        replace(LENA, issuer=FOREIGN_ISSUER, groups=()), ADMISSION,
+        AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer, checked before the group",
+    ),
+    pytest.param(
+        replace(LENA, issuer=FOREIGN_ISSUER), EVERYONE,
+        AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer where every subject is admitted",
+    ),
+])
+def test_a_refusal_before_any_account_takes_no_lock_reads_no_account_and_audits_nothing(
+    identity: OidcIdentity, admission: AdmissionConfig, refusal: AdmissionRefusal,
+) -> None:
+    host = Host(UntouchableAccounts(), RecordingAuditSink(), UntouchableLock())
+
+    assert host.admit(identity, admission) is refusal
+    assert host.audit.user_management_events == []
+
+
+def test_a_person_outside_the_group_is_refused_before_a_deactivated_account_is_read() -> None:
+    host = a_host(FakeUser(id=SUBJECT, username="lena", is_active=False))
+
+    assert host.admit(replace(LENA, groups=())) is AdmissionRefusal.NOT_A_MEMBER
+
+
+@pytest.mark.parametrize("login_group", [
+    pytest.param("/apps/lab", id="a path"),
+    pytest.param("/apps/Team A", id="a space inside a segment"),
+    pytest.param("/apps/~lab", id="a tilde"),
+    pytest.param(EverySubject.OF_THE_BOUND_ISSUER, id="every subject"),
+])
+def test_a_well_formed_login_group_is_accepted(login_group: str | EverySubject) -> None:
+    assert AdmissionConfig(bound_issuer=BOUND_ISSUER, login_group=login_group)
+
+
+@pytest.mark.parametrize("login_group", [
+    pytest.param(None, id="none"),
+    pytest.param(7, id="an int"),
+    pytest.param("", id="empty"),
+    pytest.param("apps/lab", id="no leading slash"),
+    pytest.param("/", id="a bare slash"),
+    pytest.param("/apps/lab/", id="a trailing slash"),
+    pytest.param("/apps//lab", id="an empty segment"),
+    pytest.param("/apps/ lab", id="leading whitespace on a segment"),
+    pytest.param("/apps/lab ", id="trailing whitespace on a segment"),
+    pytest.param("/apps/\tlab", id="a tab inside a segment"),
+    pytest.param("/apps/la\x00b", id="a control character"),
+    pytest.param("/apps/la\nb", id="a newline"),
+    pytest.param("/apps/la\u200bb", id="a zero-width space"),
+    pytest.param("/apps/la\u2028b", id="a line separator"),
+    pytest.param("/apps/la\u2029b", id="a paragraph separator"),
+])
+def test_a_malformed_login_group_fails_at_construction(login_group: object) -> None:
+    with pytest.raises(ValueError):
+        AdmissionConfig(bound_issuer=BOUND_ISSUER, login_group=login_group)
+
+
+def test_an_admission_config_without_a_login_group_fails_at_construction() -> None:
+    with pytest.raises(TypeError):
+        AdmissionConfig(bound_issuer=BOUND_ISSUER)
 
 
 @pytest.mark.parametrize("legacy", [
@@ -282,7 +417,7 @@ class OidcHost:
         return f"{name}={self.client.cookies[name]}"
 
 
-def an_id_token(nonce: str, wall_clock: FakeClock) -> str:
+def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object) -> str:
     now = int(wall_clock.now)
     claims = {
         "iss": BOUND_ISSUER,
@@ -292,6 +427,7 @@ def an_id_token(nonce: str, wall_clock: FakeClock) -> str:
         "iat": now - 10,
         "nonce": nonce,
         "preferred_username": "lena",
+        "groups": groups_claim,
     }
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
     return jws(header, claims, rs256(rsa_key("issuer")))
@@ -299,6 +435,7 @@ def an_id_token(nonce: str, wall_clock: FakeClock) -> str:
 
 def an_oidc_host(
     *users: FakeUser, store_max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
+    groups_claim: object = (LOGIN_GROUP,),
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
@@ -309,7 +446,7 @@ def an_oidc_host(
     )
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
-    issuer = FakeIssuer(mint_id_token=lambda nonce: an_id_token(nonce, wall_clock))
+    issuer = FakeIssuer(mint_id_token=lambda nonce: an_id_token(nonce, wall_clock, groups_claim))
     relying_party = OidcRelyingParty(
         a_client_config(),
         post_token_request=issuer,
@@ -347,7 +484,7 @@ def an_oidc_host(
     def callback(request: Request, response: Response) -> dict[str, str]:
         outcome = finish_login(
             relying_party, request, response, config,
-            bound_issuer=BOUND_ISSUER, accounts=accounts, lock=lock, audit=audit,
+            admission=ADMISSION, accounts=accounts, lock=lock, audit=audit,
         )
         if isinstance(outcome, OidcRefusal):
             response.status_code = 403
@@ -458,6 +595,7 @@ class RefusedCallback:
 
     refusal: str
     stored: tuple[FakeUser, ...] = ()
+    groups_claim: object = (LOGIN_GROUP,)
     returned_query: Callable[[OidcHost, str], str] = lambda _host, query: query
 
 
@@ -502,6 +640,18 @@ _REFUSED_CALLBACKS = [
         ),
         id="an identity whose legacy account is deactivated",
     ),
+    pytest.param(
+        RefusedCallback("not-a-member", groups_claim=["/apps/other"]),
+        id="a person in another app's group only",
+    ),
+    pytest.param(
+        RefusedCallback("not-a-member", groups_claim=[]),
+        id="a person whose groups claim is empty",
+    ),
+    pytest.param(
+        RefusedCallback("invalid-identity-claim", groups_claim="/apps/lab"),
+        id="a groups claim that is not a list",
+    ),
 ]
 
 
@@ -509,7 +659,7 @@ _REFUSED_CALLBACKS = [
 def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its_cookie(
     refused: RefusedCallback,
 ) -> None:
-    host = an_oidc_host(*deepcopy(refused.stored))
+    host = an_oidc_host(*deepcopy(refused.stored), groups_claim=refused.groups_claim)
     other_tab = host.sign_in_at_issuer()
     query = host.sign_in_at_issuer()
 

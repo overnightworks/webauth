@@ -48,6 +48,7 @@ from suite import HeldSuite, SuiteApi
 
 from webauth.jwt_verification import RejectionReason, is_rs256_verification_key
 from webauth.oidc import OidcRefusalReason
+from webauth.oidc_login import EverySubject
 
 SUITE_HOST = "conformance.example.test"
 APP_HOST = "rp.example.test"
@@ -273,6 +274,7 @@ def host_settings(
         tls_certificate=str(tls.leaf_certificate),
         tls_key=str(tls.leaf_key),
         issuer=ISSUER,
+        login_group=EverySubject.OF_THE_BOUND_ISSUER.value,
         authorization_endpoint=f"{ISSUER}authorize",
         token_endpoint=f"{reached_through_shim}/token",
         jwks_url=f"{reached_through_shim}/jwks",
