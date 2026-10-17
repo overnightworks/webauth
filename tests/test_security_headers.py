@@ -22,6 +22,7 @@ from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import (
     CacheControlRule,
+    CspDirective,
     PathRules,
     SecurityHeadersPolicy,
     default_content_security_policy,
@@ -41,9 +42,15 @@ class RouteFailure(RuntimeError):
     pass
 
 
-def an_app(*, cookie_secure: bool = True, configured: bool = True, debug: bool = False) -> FastAPI:
+def an_app(
+    *,
+    cookie_secure: bool = True,
+    configured: bool = True,
+    debug: bool = False,
+    policy: SecurityHeadersPolicy = POLICY,
+) -> FastAPI:
     app = FastAPI(debug=debug)
-    app.add_middleware(SecurityHeadersMiddleware, policy=POLICY)
+    app.add_middleware(SecurityHeadersMiddleware, policy=policy)
     if configured:
         install_web_auth_config(app, a_web_auth_config(cookie_secure=cookie_secure))
     return app
@@ -304,3 +311,19 @@ def test_a_normal_response_keeps_its_background_task() -> None:
     assert response.json() == {"ok": True}
     assert_carries_policy_headers(response.headers, POLICY, hsts=True)
     assert background_ran == [True]
+
+
+def test_a_customised_policy_reaches_the_response_header_as_returned() -> None:
+    customised = default_content_security_policy(
+        added_sources={CspDirective.STYLE_SRC: ["'unsafe-inline'"]},
+    )
+    app = an_app(policy=SecurityHeadersPolicy(customised))
+
+    @app.get("/ok")
+    def ok() -> dict[str, bool]:
+        return {"ok": True}
+
+    response = TestClient(app).get("/ok")
+
+    assert response.headers["content-security-policy"] == customised
+    assert "style-src 'self' 'unsafe-inline';" in customised
