@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import TYPE_CHECKING, Final
 
+from anyio import to_thread
 from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
@@ -36,7 +38,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     of the configured prefix -- see ``budget_address``.
     """
 
-    def _refusal(self, request: Request) -> JSONResponse | None:
+    async def _refusal(self, request: Request) -> JSONResponse | None:
         path = request.url.path
         if self._policy.is_exempt(path):
             return None
@@ -45,10 +47,13 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
         rate_limit_class = self._policy.classify(path)
         budget = self._policy.budget(rate_limit_class)
         try:
-            allowed = config.rate_limits.is_allowed(
-                _rate_limit_key(rate_limit_class, budget_identity),
-                limit=budget.max_requests,
-                window_seconds=budget.window_seconds,
+            allowed = await to_thread.run_sync(
+                partial(
+                    config.rate_limits.is_allowed,
+                    _rate_limit_key(rate_limit_class, budget_identity),
+                    limit=budget.max_requests,
+                    window_seconds=budget.window_seconds,
+                )
             )
         except Exception:
             log.exception("IP rate limiter unavailable -- rejecting request")

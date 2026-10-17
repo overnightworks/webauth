@@ -10,6 +10,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `IpRateLimitMiddleware` calls `RateLimitBackend.is_allowed` from a worker
+  thread, so a slow limiter no longer stalls the event loop; a host's own
+  backend must be thread-safe (both library backends are).
 - `WebAuthConfig.session_cookie_name` and `csrf_cookie_name` are annotated `str`,
   with the library's default as their default. An explicit `None` (or any other
   non-`str`) raises `ValueError`, so

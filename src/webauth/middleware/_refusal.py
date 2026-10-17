@@ -23,12 +23,12 @@ class RefusalMiddleware[PolicyT](ABC):
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
-            refusal = self._refusal(Request(scope))
+            refusal = await self._refusal(Request(scope))
             if refusal is not None:
                 await refusal(scope, receive, send)
                 return
         await self._app(scope, receive, send)
 
     @abstractmethod
-    def _refusal(self, request: Request) -> Response | None:
+    async def _refusal(self, request: Request) -> Response | None:
         """The response that refuses ``request``, or None to admit it."""

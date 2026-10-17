@@ -42,7 +42,7 @@ _SAME_SITE: Final = "same-site"
 class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
     """Reject a state-changing request whose CSRF token does not match its session."""
 
-    def _refusal(self, request: Request) -> JSONResponse | None:
+    async def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
             and self._policy.requires_token(request.url.path)
@@ -146,7 +146,7 @@ class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
     POST is refused.
     """
 
-    def _refusal(self, request: Request) -> JSONResponse | None:
+    async def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
             and self._policy.requires_same_origin(request.url.path)

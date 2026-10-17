@@ -550,6 +550,12 @@ with one method — `is_allowed(key, *, limit, window_seconds) -> bool` — that
 counts the current event against a sliding window and raises rather than
 guessing when it cannot answer, so the middleware fails the request closed.
 
+The middleware calls `is_allowed` from a worker thread, so a slow limiter does
+not stall the event loop, and calls may overlap: a backend of your own must be
+thread-safe (both backends below are). A check holds its worker thread until the
+backend gives up, so give a Redis client short timeouts and few retries; the
+client defaults can hold a thread for a minute.
+
 Two backends implement it:
 
 - `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
