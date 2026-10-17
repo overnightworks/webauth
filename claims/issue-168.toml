@@ -1,8 +1,0 @@
-claim_id = "afc0d8e9b16c4862a383a26e72662770"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "4ad3432c942ce115f0d994738fd3975c8d956683"
-branch = "claude/issue-168-w8-s10a-wheel-typing"
-scope = [".github/workflows/ci.yml", "AGENTS.md", "README.md", "tests/typing/check_against_wheel.sh", "tests/typing/oidc_host.py"]
-opened_commit = "f72dffb5612d7103116b25e118678ff359323312"
-whole_reason = "One CI guard: the typing host checked against the built wheel, its script, its host flows and the two documents that name the command"
