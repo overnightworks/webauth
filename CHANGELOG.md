@@ -52,6 +52,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `UnknownHashFormatError`, and `ports.PasswordHasher` and `WebAuthConfig.password_hasher`
   with it: a host that passes `password_hasher` gets `TypeError`. `argon2-cffi` is no
   longer installed with webauth; a host that still hashes passwords declares it itself.
+- `WebAuthConfig.session_max_age_seconds` is removed, and `cookie_max_age_seconds` is
+  required: the library never reads a session lifetime, which belongs to the host's
+  store, and a host states the cookie's `Max-Age` once. A config without
+  `cookie_max_age_seconds` is a `TypeError`, and one that passes
+  `session_max_age_seconds` is refused as an unknown keyword. `WebAuthConfig` takes
+  keyword arguments only, so a positional call is a `TypeError`.
 
 **Changed**
 

@@ -3,9 +3,9 @@ over the library's own in-memory stores, served over TLS.
 
 One process serves one cookie configuration on every origin it is told. Beside
 it a plain-http listener on loopback, which no browser is ever pointed at, answers
-``GET /state`` with counts only, clears everything on ``POST /reset`` (the
-relying parties, with their key-set caches, are built again) and deactivates every
-known account on ``POST /deactivate``.
+``GET /state`` with counts only (among them the access tokens refused as unfit for a
+header), clears everything on ``POST /reset`` (the relying parties, with their key-set
+caches, are built again) and deactivates every known account on ``POST /deactivate``.
 
 Where an issuer is told a ``userinfo_endpoint``, the host calls it once, with the
 access token of the token answer, after and only after a login was admitted: the
@@ -137,21 +137,24 @@ class AccessTokenKept:
     def __init__(self, post_token_request: TokenRequestPost) -> None:
         self._post_token_request = post_token_request
         self.access_token: str | None = None
+        self.refused = 0
 
     def __call__(self, request: TokenRequest) -> TokenEndpointAnswer:
         answer = self._post_token_request(request)
         self.access_token = self._access_token_in(answer)
         return answer
 
-    @staticmethod
-    def _access_token_in(answer: TokenEndpointAnswer) -> str | None:
+    def _access_token_in(self, answer: TokenEndpointAnswer) -> str | None:
         try:
             token = json.loads(answer.body).get("access_token")
         except (ValueError, AttributeError):
             return None  # the relying party judges an answer that is no token answer
+        if token is None:
+            return None
         if isinstance(token, str) and BEARER_TOKEN.fullmatch(token):
             return token
-        return None  # a token no header can carry is never sent, so no transport error quotes it
+        self.refused += 1  # never sent, so no transport error quotes a token no header can carry
+        return None
 
 
 class World:
@@ -190,6 +193,7 @@ class World:
             "logins_admitted": self.logins_admitted,
             "userinfo_calls": self.userinfo_calls,
             "userinfo_answered": self.userinfo_answered,
+            "access_tokens_refused": self.token_requests.refused,
         }
 
 
@@ -346,7 +350,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         with current.lock.hold():
             record = current.sessions.create(
                 outcome.id,
-                datetime.now(timezone.utc) + timedelta(seconds=config.session_max_age_seconds),
+                datetime.now(timezone.utc) + timedelta(seconds=current.sessions.max_age_seconds),
                 ip_address=request.client.host if request.client else "",
                 user_agent=request.headers.get("user-agent", "")[: config.max_user_agent_chars],
             )

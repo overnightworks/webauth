@@ -41,6 +41,7 @@ from webauth.cookies import (
     verify_session_cookie,
 )
 from webauth.dependencies import session_id_from_request
+from webauth.liveness import IdleWindowLiveness
 from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import SecurityHeadersPolicy, default_content_security_policy
 
@@ -370,7 +371,7 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
 
     assert "HttpOnly" in header
     assert "SameSite=strict" in header
-    assert f"Max-Age={cookie_app.config.session_max_age_seconds}" in header
+    assert f"Max-Age={cookie_app.config.cookie_max_age_seconds}" in header
     assert "Path=/" in header
 
 
@@ -378,7 +379,8 @@ def test_a_cookie_lifetime_longer_than_the_idle_window_is_what_the_browser_keeps
     """A 30-day cookie over a 7-day idle window: the cookie is issued once, so it
     must outlive the window for a session used every few days to stay signed in."""
     app = a_cookie_app(
-        session_max_age_seconds=SEVEN_DAYS_SECONDS, cookie_max_age_seconds=THIRTY_DAYS_SECONDS,
+        cookie_max_age_seconds=THIRTY_DAYS_SECONDS,
+        session_liveness=IdleWindowLiveness(SEVEN_DAYS_SECONDS),
     )
     response = app.issue()
 
