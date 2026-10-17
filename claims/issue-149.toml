@@ -1,8 +1,0 @@
-claim_id = "47d808b340cc4de3917d401d91de376e"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "7ae8a3362c782393919fec3007fd3fa22641d8c2"
-branch = "claude/issue-149-b4-hash-gepinntes-setuptools"
-scope = [".github/dependabot.yml", ".github/requirements-build.txt", ".github/workflows/ci.yml", ".github/workflows/release.yml", "AGENTS.md", "CHANGELOG.md", "pyproject.toml"]
-opened_commit = "79348a42077ad7f048584248ac20aa70edae2b7b"
-whole_reason = "One release-build rule: the hash-pinned build backend in both builds, its watcher, its documentation, and the license metadata the same build warns about"
