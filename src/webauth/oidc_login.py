@@ -125,8 +125,8 @@ def finish_login(
     ``response`` on every outcome, refusals included; every other tab's
     cookie stays. A callback naming no state or naming it twice, or whose state
     names no single genuine cookie, is refused before any token request. On
-    an account, the host opens its session and calls ``issue_session_cookies``
-    as after a password login.
+    an account, the host opens its session and then calls
+    ``issue_session_cookies``.
     """
     callback_query = request.url.query
     state = callback_state(callback_query)

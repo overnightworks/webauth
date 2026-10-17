@@ -2,7 +2,7 @@
 
 The admission tests drive `admit_identity` on its own: an identity the bound
 issuer vouched for becomes, or reuses, an account. The host tests drive a
-FastAPI host with a password route, a start route and a callback route
+FastAPI host with a start route and a callback route
 through a `TestClient` whose cookie jar is the browser, against a stateful
 fake issuer that answers each code once.
 """
@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from oidc_arrangement import (
@@ -32,7 +32,7 @@ from oidc_arrangement import (
     rs256,
     rsa_key,
 )
-from pydantic import BaseModel, SecretStr
+from pydantic import SecretStr
 from webauth_arrangement import (
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
@@ -47,7 +47,6 @@ from webauth_arrangement import (
     UsersInMemory,
     UsersWithCaseInsensitiveUsernames,
     WriteLockInMemory,
-    a_cheap_argon2id_hasher,
     a_web_auth_config,
     signed_without_bound,
 )
@@ -62,7 +61,6 @@ from webauth.cookies import (
     sign_pending_login,
 )
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
-from webauth.login import LoginOutcome, judge_credentials
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcClientConfig,
@@ -199,7 +197,6 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
 
 NOW = 1_800_000_000
 CLIENT_ID = "lab-app"
-PASSWORD = "correct horse battery staple"
 CALLBACK_PATH = "/auth/callback"
 
 
@@ -214,11 +211,6 @@ def a_client_config() -> OidcClientConfig:
         redirect_uri=f"{HTTPS_TEST_SERVER}{CALLBACK_PATH}",
         leeway_seconds=30,
     )
-
-
-class PasswordLogin(BaseModel):
-    username: str
-    password: str
 
 
 @dataclass
@@ -246,11 +238,6 @@ class OidcHost:
             self.client.cookies.clear()
         headers = {} if cookie is None else {"cookie": cookie}
         return self.client.get(f"{CALLBACK_PATH}?{query}", headers=headers)
-
-    def password_login(self, username: str) -> HttpxResponse:
-        return self.client.post(
-            "/login/password", json={"username": username, "password": PASSWORD}
-        )
 
     def pending_cookie_names(self) -> set[str]:
         prefix = pending_login_cookie_prefix(secure=self.config.cookie_secure)
@@ -318,14 +305,6 @@ def an_oidc_host(*users: StoredUser, **config_overrides: object) -> OidcHost:
     app = FastAPI()
     install_web_auth_config(app, config)
 
-    @app.post("/login/password")
-    def password_login(login: PasswordLogin, response: Response) -> dict[str, str]:
-        account = accounts.get_by_username(login.username)
-        outcome = judge_credentials(login.password, account, hasher=config.password_hasher)
-        if account is None or outcome is not LoginOutcome.ADMITTED:
-            raise HTTPException(401)
-        return open_session(account, response)
-
     @app.get("/login/oidc")
     def start(request: Request, response: Response) -> dict[str, str]:
         return {"authorization_url": start_login(relying_party, request, response, config)}
@@ -380,12 +359,6 @@ def is_cleared(response: HttpxResponse, name: str) -> bool:
     return "max-age=0" in set_cookies(response).get(name, set())
 
 
-def a_password_account() -> FakeUser:
-    return FakeUser(
-        id="user-1", username="kai", password_hash=a_cheap_argon2id_hasher().hash(PASSWORD)
-    )
-
-
 @pytest.mark.parametrize(("cookie_secure", "prefix", "secure_attribute"), [
     pytest.param(True, "__Host-oidc_pending_", {"secure"}, id="secure"),
     pytest.param(False, "oidc_pending_", set(), id="insecure-development"),
@@ -412,16 +385,16 @@ def test_a_start_sets_one_lax_http_only_pending_cookie_and_answers_the_issuer_ur
     }
 
 
-def test_an_oidc_login_issues_the_same_session_cookies_a_password_login_does() -> None:
-    host = an_oidc_host(a_password_account())
-    by_password = host.password_login("kai")
-    host.client.cookies.clear()
+def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies() -> None:
+    host = an_oidc_host()
 
-    by_issuer = host.callback(host.sign_in_at_issuer())
+    response = host.callback(host.sign_in_at_issuer())
 
-    assert (by_password.status_code, by_issuer.status_code) == (200, 200)
-    for name in (host.config.session_cookie_name, host.config.csrf_cookie_name):
-        assert set_cookies(by_issuer)[name] == set_cookies(by_password)[name]
+    configured = {"path=/", f"max-age={host.config.cookie_max_age_seconds}",
+                  f"samesite={host.config.cookie_samesite}", "secure"}
+    assert response.status_code == 200
+    assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
+    assert set_cookies(response)[host.config.csrf_cookie_name] == configured
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
@@ -673,8 +646,8 @@ def test_two_tabs_both_sign_in_whichever_returns_first(*, second_returns_first: 
 
 
 def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_session() -> None:
-    host = an_oidc_host(a_password_account())
-    host.password_login("kai")
+    host = an_oidc_host()
+    host.callback(host.sign_in_at_issuer())
     queries = []
     for _ in range(MAX_PENDING_LOGINS + 1):
         queries.append(host.sign_in_at_issuer())
@@ -684,7 +657,7 @@ def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_sess
     assert {host.config.session_cookie_name, host.config.csrf_cookie_name} <= set(
         host.client.cookies
     )
-    assert host.client.get("/me").json() == {"username": "kai"}
+    assert host.client.get("/me").json() == {"username": "lena"}
     assert host.callback(queries[0]).json() == {"refusal": "state-mismatch"}
 
 

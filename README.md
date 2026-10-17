@@ -15,7 +15,6 @@ It owns the machinery an application should not rebuild:
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
 | `webauth.cookies` | The signed session cookie and the CSRF token bound to it, issued and cleared |
 | `webauth.dependencies` | Turning a signed cookie into the account that made the request |
-| `webauth.login` | The failure budgets, password admission |
 | `webauth.passwords` | Password hashing and the strength rules a chosen password must meet |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
@@ -32,7 +31,7 @@ It leaves the application everything that touches the application's own truth:
 the user model, configured roles, login routes, and their
 transaction boundaries. The library persists nothing itself — it holds no schema
 and no ORM, and an import-linter contract keeps it that way. What it needs
-reaches it through the Protocols in `webauth.ports`: `SubjectUserStore`, `SessionRecordStore`, `LoginAttemptStore`, `AuditSink`,
+reaches it through the Protocols in `webauth.ports`: `SubjectUserStore`, `SessionRecordStore`, `AuditSink`,
 and `PasswordHasher`.
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote, except the rate-limit
@@ -133,50 +132,7 @@ release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 - It issues no access or ID tokens: it is no identity provider, and it verifies the ID tokens an issuer made.
 - It decides no authorisation beyond the admin check.
 
-## A login route
-
-The suite's `tests/webauth_arrangement.py` builds a complete configuration and
-the fake stores, so the shape of a login is visible without a database. Run
-this from `tests/`:
-
-```python
-import secrets
-
-from fastapi import FastAPI, Response
-from fastapi.testclient import TestClient
-from webauth_arrangement import FakeUser, a_web_auth_config
-
-from webauth.config import install_web_auth_config
-from webauth.cookies import issue_session_cookies
-from webauth.login import (
-    LoginOutcome,
-    LoginRefusal,
-    http_refusal,
-    judge_credentials,
-)
-config = a_web_auth_config()
-app = FastAPI()
-install_web_auth_config(app, config)
-
-alice = FakeUser(password_hash=config.password_hasher.hash("the-correct-password"))
-
-@app.post("/login")
-def login(response: Response, password: str) -> dict[str, str]:
-    outcome = judge_credentials(password, alice, hasher=config.password_hasher)
-    if outcome is not LoginOutcome.ADMITTED:
-        raise http_refusal(LoginRefusal(outcome))
-    issue_session_cookies(response, secrets.token_urlsafe(32), config)
-    return {"status": "ok"}
-
-client = TestClient(app, base_url="https://songmaker.example")
-signed_in = client.post("/login", params={"password": "the-correct-password"})
-print(signed_in.status_code, signed_in.cookies[config.session_cookie_name])
-```
-
-The real application replaces `FakeUser` with a lookup through its own account store,
-guards the attempt with `login_attempt_budget` (raising `http_refusal` on the
-`LoginRefusal` it returns), and records the failed attempt itself — the library
-never writes.
+## Reading the session
 
 `webauth.dependencies.current_user_dependency` answers 401 for a missing or
 dead session by default. A server-rendered host instead passes
@@ -282,8 +238,8 @@ The library sends a response's start whole: a cancellation inside the app waits 
 
 ### The host's duties at login
 
-The library never writes, so these belong to the host's login and OIDC
-callback routes alike:
+The library never writes, so these belong to the host's OIDC
+callback route:
 
 - **`next`:** validate the final decoded value against the rule
   `LoginRedirect.path` enforces: one leading `/`; never `//` or a backslash
@@ -596,8 +552,7 @@ def callback(request: Request, response: Response) -> dict[str, str]:
 
 `start_login(relying_party, request, response, config)` begins a login, sets
 its pending-login cookie on `response` and returns the authorization URL.
-`finish_login(...)` answers the `UserRecord` to open a session for, as after
-a password login, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
+`finish_login(...)` answers the `UserRecord` to open a session for, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
 the host commits on an account and opens the session itself. `finish_login`
 sets the header that clears the pending-login cookie on `response`, so the
 host answers with that response on every outcome, refusals included: FastAPI
@@ -650,9 +605,7 @@ taken before the callback is stopped by the issuer refusing the spent code
 (`TOKEN_REQUEST_REFUSED`), not by webauth remembering it.
 
 `UserRecord.password_hash` is a read-only `str | None` property, so a
-password-only host whose model types the field `str` keeps satisfying it, and
-password login answers `WRONG_PASSWORD` for an account without one after the
-same single hash verification a wrong password costs.
+password-only host whose model types the field `str` keeps satisfying it.
 
 ## Development
 

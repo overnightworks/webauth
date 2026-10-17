@@ -10,9 +10,8 @@ from argon2 import Parameters, Type, extract_parameters
 from argon2 import PasswordHasher as Argon2PasswordHasher
 from argon2.exceptions import VerificationError
 from argon2.profiles import CHEAPEST
-from webauth_arrangement import FakeUser, LegibleHasher, a_cheap_argon2id_hasher
+from webauth_arrangement import a_cheap_argon2id_hasher
 
-from webauth.login import LoginOutcome, judge_credentials
 from webauth.passwords import (
     Argon2idPasswordHasher,
     UnknownHashFormatError,
@@ -251,15 +250,3 @@ def test_a_strong_password_is_accepted_in_its_nfc_form(password: str, returned: 
 def test_an_unset_password_passes_the_strength_check() -> None:
     assert check_password_strength(None) is None
 
-
-def test_an_injected_hasher_admits_the_account_it_signed() -> None:
-    hasher = LegibleHasher()
-    user = FakeUser(password_hash=hasher.hash("open-sesame-42"))
-    assert (
-        judge_credentials("open-sesame-42", user, hasher=hasher)
-        is LoginOutcome.ADMITTED
-    )
-    assert (
-        judge_credentials("not-the-password", user, hasher=hasher)
-        is LoginOutcome.WRONG_PASSWORD
-    )
