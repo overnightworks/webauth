@@ -10,8 +10,10 @@ Please do not open a public issue or pull request for a vulnerability.
 
 ## Supported versions
 
-Only the latest minor release receives security fixes. If you run an older
-minor release, upgrade to the latest one.
+Only the latest minor release receives security fixes. The 0.14
+line receives none: from the first 0.15.0 change on `main` a 0.14.x patch can no longer be tagged, because
+the release workflow tags only commits of `main`. A host on 0.14.x moves to the OpenID Connect login to
+receive fixes.
 
 ## What to expect
 

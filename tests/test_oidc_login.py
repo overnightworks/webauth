@@ -56,12 +56,13 @@ from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     MAX_PENDING_LOGIN_COOKIE_CHARS,
     PendingLogin,
+    issue_session_cookies,
     pending_login_cookie_name,
     pending_login_cookie_prefix,
     sign_pending_login,
 )
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
-from webauth.login import LoginOutcome, issue_session_cookies, judge_credentials
+from webauth.login import LoginOutcome, judge_credentials
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcClientConfig,

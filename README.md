@@ -13,9 +13,9 @@ It owns the machinery an application should not rebuild:
 | Module | Owns |
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
-| `webauth.cookies` | The signed session cookie and the CSRF token bound to it |
+| `webauth.cookies` | The signed session cookie and the CSRF token bound to it, issued and cleared |
 | `webauth.dependencies` | Turning a signed cookie into the account that made the request |
-| `webauth.login` | Cookies issued and cleared, the failure budgets, password admission |
+| `webauth.login` | The failure budgets, password admission |
 | `webauth.passwords` | Password hashing and the strength rules a chosen password must meet |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
@@ -148,11 +148,11 @@ from fastapi.testclient import TestClient
 from webauth_arrangement import FakeUser, a_web_auth_config
 
 from webauth.config import install_web_auth_config
+from webauth.cookies import issue_session_cookies
 from webauth.login import (
     LoginOutcome,
     LoginRefusal,
     http_refusal,
-    issue_session_cookies,
     judge_credentials,
 )
 config = a_web_auth_config()
