@@ -1,8 +1,0 @@
-claim_id = "079199a6cb654e3e947d4120b4b4c7fa"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "e11d980f530a531c2c98bf45070589c266c28a08"
-branch = "claude/issue-181-login-group-gate"
-scope = ["CHANGELOG.md", "README.md", "e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "src/webauth/oidc_login.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "adb3903b3ccdcb1206936c610c4ec2b74856132c"
-whole_reason = "One gate and its proof: AdmissionConfig, the refusal, every caller, the README session lifetime and the outsider scenario in the real browser cannot land apart."
