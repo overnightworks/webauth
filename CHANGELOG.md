@@ -53,6 +53,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   with it: a host that passes `password_hasher` gets `TypeError`. `argon2-cffi` is no
   longer installed with webauth; a host that still hashes passwords declares it itself.
 
+**Changed**
+
+- The wheel declares its license as the SPDX expression `MIT`, and releases build
+  with a hash-pinned setuptools.
+
 ## 0.14.0
 
 This is the last release with password parts.

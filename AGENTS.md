@@ -97,6 +97,18 @@ release workflow's `verify` job checks both and refuses anything else. If
 once CI is green. Never move or re-create the tag (the tag ruleset forbids
 updating and deleting tags) and never bump the version for it.
 
+Both builds (`ci.yml` and `release.yml`) run
+`uv build --build-constraint .github/requirements-build.txt --require-hashes`, so the
+attested wheel is built by the setuptools pinned there, and a hash that does not match
+fails the build. Regenerate the file from the repository root with
+
+```bash
+echo "setuptools>=77" | uv pip compile - --generate-hashes --python-version 3.12 --no-annotate --custom-compile-command 'See AGENTS.md "Releasing"' --output-file .github/requirements-build.txt
+```
+
+The input floor matches the `[build-system]` floor in `pyproject.toml`. A setuptools
+bump is an ordinary Dependabot pull request (`pip` entry, directory `/.github`).
+
 The release carries the wheel, the sdist, `SHA256SUMS` and build-provenance
 attestations. Check a downloaded file with
 `gh attestation verify <file> -R overnightworks/webauth` and
