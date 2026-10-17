@@ -58,6 +58,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `cookie_max_age_seconds` is a `TypeError`, and one that passes
   `session_max_age_seconds` is refused as an unknown keyword. `WebAuthConfig` takes
   keyword arguments only, so a positional call is a `TypeError`.
+- The default Content-Security-Policy holds no host fact: `style-src` is `'self'` without
+  `'unsafe-inline'`, and `font-src` is `'self'` without Google Fonts. A host adds its own
+  sources per directive with `default_content_security_policy(added_sources={CspDirective.STYLE_SRC: [...]})`.
+  `script_hashes` is validated too: each element must be a bare `sha256-`, `sha384-` or
+  `sha512-` hash, and anything else is a `ValueError` (it closed an injection through the
+  unchecked text).
 
 **Changed**
 

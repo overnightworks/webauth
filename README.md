@@ -98,6 +98,29 @@ A client that reads the CSRF cookie by name reads `config.csrf_cookie_name`.
 A request that reaches the library in an app without `install_web_auth_config` raises
 `RuntimeError`.
 
+### Content-Security-Policy
+
+`default_content_security_policy()` holds no host fact: `default-src 'none'` with
+`'self'` for scripts, styles, connections, fonts, manifests and workers, `data:` and
+`blob:` besides for images, `blob:` for media, and `frame-ancestors 'none'`. A host
+adds its own sources to one directive through `added_sources`, without copying the
+string. A framework that writes style attributes, for example, needs inline style, and
+that is the host's choice, so the host names it:
+
+```python
+default_content_security_policy(
+    added_sources={CspDirective.STYLE_SRC: ["'unsafe-inline'"]},
+)
+```
+
+Callers supply complete source expressions: keywords, nonces and hashes in their
+quotes, hosts and schemes bare. Only `script_hashes` takes bare `sha256-<base64>`
+values and quotes them. Every source is validated against the CSP grammar when the
+policy is built, and a malformed one is a `ValueError`. A non-empty addition to
+`frame-ancestors` replaces its `'none'`. Validation covers a declared subset of CSP Level 3: a
+well-formed keyword outside it, such as `'trusted-types-eval'`, is refused too, and a host that
+needs one writes the whole `SecurityHeadersPolicy` string itself.
+
 ## Install
 
 The wheel is published as an asset on each tag's release; take the version
