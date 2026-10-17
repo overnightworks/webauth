@@ -27,6 +27,7 @@ READY_SECONDS = 240
 READY_POLL_SECONDS = 2
 COMPOSE_TIMEOUT_SECONDS = 120
 DOWN_TIMEOUT_SECONDS = 120
+LISTING_TIMEOUT_SECONDS = 10
 API_TIMEOUT_SECONDS = 30
 WAIT_STATE_SLICE_SECONDS = 5
 LOG_LINES_IN_ERRORS = 5
@@ -42,7 +43,7 @@ def project_leftovers(project: str) -> list[str]:
         listing = ["ps", "-a"] if kind == "container" else [kind, "ls"]
         found = subprocess.run(
             ["docker", *listing, "--filter", f"label={PROJECT_LABEL}={project}", "-q"],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, timeout=LISTING_TIMEOUT_SECONDS,
         ).stdout.split()
         left.extend(f"{kind} {identifier}" for identifier in found)
     return left
@@ -81,9 +82,27 @@ class HeldSuite:
         return SuiteApi(f"http://127.0.0.1:{self.port}")
 
     def remove_everything(self) -> list[str]:
-        """Takes the project down, with its volumes, and returns what still carries its label."""
-        self._compose("down", "-v", "--remove-orphans", timeout=DOWN_TIMEOUT_SECONDS, check=False)
-        return project_leftovers(self.project)
+        """Takes the project down, with its volumes, and returns what still carries its label.
+
+        Nothing escapes: a listing or a ``down`` that fails or times out comes back as a
+        line of its own. The down runs only when the first listing finds something, so a
+        second call after a clean teardown costs three listings. Worst case: 3 x 10 s
+        listing, 120 s down, 3 x 10 s listing = 180 s."""
+        try:
+            if not project_leftovers(self.project):
+                return []
+        except (subprocess.SubprocessError, OSError) as error:
+            return [f"could not list the project's docker objects: {type(error).__name__}"]
+        try:
+            self._compose(
+                "down", "-v", "--remove-orphans", timeout=DOWN_TIMEOUT_SECONDS, check=False
+            )
+        except (subprocess.SubprocessError, OSError) as error:
+            return [f"docker compose down failed: {type(error).__name__}"]
+        try:
+            return project_leftovers(self.project)
+        except (subprocess.SubprocessError, OSError) as error:
+            return [f"could not list what the down left: {type(error).__name__}"]
 
     def _compose(
         self, *arguments: str, timeout: int, check: bool = True
