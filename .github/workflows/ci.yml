@@ -36,8 +36,8 @@ jobs:
       - name: Import boundaries
         run: uv run --locked lint-imports
 
-      - name: An OIDC-only host type-checks
-        run: uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
+      - name: An OIDC-only host type-checks against the built wheel
+        run: tests/typing/check_against_wheel.sh
 
       - name: Tests
         run: uv run --locked pytest tests -q --cov=webauth --cov-report=xml

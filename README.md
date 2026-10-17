@@ -681,6 +681,9 @@ a minor release may break a public contract and says so under **Breaking** in th
 [CHANGELOG](CHANGELOG.md); a patch release never does. Only the latest minor
 release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 
+A module's public names are the names its `__all__` lists. Any other name, with or
+without a leading underscore, may change or disappear in any release.
+
 ## Development
 
 ```bash
@@ -688,7 +691,7 @@ uv sync --extra dev
 uv run pytest tests -q
 uv run ruff check src tests e2e
 uv run lint-imports
-uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
+tests/typing/check_against_wheel.sh
 ```
 
 ## Licence

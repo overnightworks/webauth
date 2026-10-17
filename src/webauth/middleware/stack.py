@@ -19,6 +19,10 @@ if TYPE_CHECKING:
         SecurityHeadersPolicy,
     )
 
+__all__ = [
+    "install_web_auth_middleware",
+]
+
 _LIBRARY_MIDDLEWARE = (
     SecurityHeadersMiddleware,
     BodySizeLimitMiddleware,

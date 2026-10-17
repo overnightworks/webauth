@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from starlette.responses import Response
     from starlette.types import ASGIApp, Receive, Scope, Send
 
+__all__ = []
+
 
 class RefusalMiddleware[PolicyT](ABC):
     """Answer an http request with its refusal, or pass every message through."""

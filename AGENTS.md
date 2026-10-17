@@ -58,11 +58,12 @@ uv sync --extra dev
 uv run pytest tests -q
 uv run ruff check src tests e2e
 uv run lint-imports
-uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
+tests/typing/check_against_wheel.sh
 ```
 
-`tests/typing/` holds a static OIDC-only host that CI type-checks with
-that pinned pyright, so a port change that would break such a host fails here.
+`tests/typing/` holds a static OIDC-only host. The script type-checks it with
+the pinned pyright against the built wheel, from a directory without `src`, so
+a port change or an export a host cannot import fails here.
 
 CI runs these in the `checks` job and re-runs the suite at the lowest declared
 versions in `lowest-direct`. The shared quality gate

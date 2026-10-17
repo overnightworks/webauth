@@ -23,6 +23,13 @@ from webauth.ports import (
 )
 from webauth.session_ending import end_session
 
+__all__ = [
+    "NotAnAdminError",
+    "SessionAdministration",
+    "SessionSummary",
+    "UnknownSessionError",
+]
+
 
 class NotAnAdminError(UserManagementError):
     """The actor does not hold the configured administrator role."""

@@ -64,6 +64,58 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `script_hashes` is validated too: each element must be a bare `sha256-`, `sha384-` or
   `sha512-` hash, and anything else is a `ValueError` (it closed an injection through the
   unchecked text).
+- `webauth.proxies`, `webauth.rate_limit`, `webauth.policies` and the `webauth.middleware`
+  submodules declare `__all__`. Not public: `proxies.get_client_ip` (call
+  `resolve_client_ip(request)`), `budget_address` (it pools IPv6 addresses into a network,
+  which `resolve_client_ip`, returning the client's own address, does not do: the helper
+  loses public support, and a host that needs per-address rate limits uses
+  `IpRateLimitMiddleware`), `MAX_ADDRESS_CHARS`, `MAX_FORWARDED_FOR_HOPS`, `IpAddress`
+  (write `ipaddress.IPv4Address | IPv6Address`), `IpNetwork` (write `ipaddress.IPv4Network
+  | IPv6Network`), `FORWARDED_FOR_HEADER`, `FORWARDED_PROTO_HEADER`, `HTTPS_SCHEME`,
+  `UNKNOWN_CLIENT_IP`, `ZONE_SEPARATOR` and `log`; `rate_limit.PRUNE_INTERVAL_SECONDS`;
+  `middleware.rate_limit.log` and `LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS`;
+  `middleware.refusal.RefusalMiddleware`. Every policy name stays public, and so do both
+  spellings of the middleware classes (`webauth.middleware` and its submodules).
+- A module's public names are the names its `__all__` lists; any other name may
+  change or disappear in any release (README, Versioning). A name a module imports is
+  public there only when its `__all__` lists it as a deliberate re-export, which today
+  is only `webauth.middleware`; import any other imported name from the module that
+  defines it, for example `webauth.config.WebAuthConfig` (not
+  `webauth.dependencies.WebAuthConfig`) and `webauth.proxies.TrustedProxies` (not
+  `webauth.config.TrustedProxies`). `webauth.config`, `webauth.cookies`,
+  `webauth.dependencies`, `webauth.liveness`, `webauth.ports`,
+  `webauth.session_administration` and `webauth.session_ending` declare it. A host
+  that imports a name that left the public surface switches to what follows:
+  - `config`: `MIN_SESSION_SECRET_CHARS` and `IPV6_BUDGET_PREFIX_RANGE` (no public
+    equivalent; `WebAuthConfig` refuses a short secret or an out-of-range prefix with a
+    `ValueError`), `DEFAULT_MAX_USER_AGENT_CHARS`, `DEFAULT_IPV6_BUDGET_PREFIX`,
+    `DEFAULT_ADMIN_ROLE` and `DEFAULT_USER_ROLE` (read `config.max_user_agent_chars`,
+    `ipv6_budget_prefix`, `admin_role`, `user_role`), `WEB_AUTH_STATE_ATTRIBUTE` (use
+    `installed_web_auth_config(app)` or `web_auth_config(request)`).
+  - `cookies`: `default_cookie_name`, `is_host_only_cookie_name`,
+    `is_secure_prefixed_cookie_name`, `HOST_ONLY_COOKIE_PREFIX` and
+    `SECURE_COOKIE_PREFIX` (read `config.session_cookie_name` or
+    `config.csrf_cookie_name`, resolved when the config is built, or use
+    `DEFAULT_SESSION_COOKIE_NAME` and `DEFAULT_CSRF_COOKIE_NAME`);
+    `verify_session_cookie` (read the session with
+    `dependencies.session_id_from_request`); `generate_csrf_token` (`issue_session_cookies`
+    issues the token with the session); `verify_csrf_token` (`CsrfTokenMiddleware`
+    verifies it); `cookie_pairs` and `cookie_values` (no public equivalent);
+    `DEFAULT_CSRF_HEADER_NAME` (read `config.csrf_header_name`);
+    `DEFAULT_COOKIE_SAMESITE` (read `config.cookie_samesite`);
+    `pending_login_cookie_prefix`, `pending_login_cookie_name`,
+    `is_pending_login_cookie_name`, `sign_pending_login`, `verify_pending_login`,
+    `PLAIN_PENDING_LOGIN_COOKIE_NAME`, `MAX_PENDING_LOGIN_COOKIE_CHARS` and
+    `PENDING_SECRET_BYTES` (`webauth.oidc_login.start_login` and `finish_login` own the
+    pending login; `PendingLogin` stays public).
+  - `dependencies`: `ACCOUNT_DISABLED_DETAIL`, `ADMIN_REQUIRED_DETAIL`,
+    `AUTHENTICATION_REQUIRED_DETAIL`, `INVALID_SESSION_DETAIL` and
+    `SESSION_EXPIRED_DETAIL` (no public equivalent).
+  - `liveness`: `_require_positive_seconds` is now the package-internal
+    `require_positive_seconds` (no public equivalent).
+  - `session_administration`: `require_admin` (no public equivalent; `revoke_session`
+    checks the role).
+  - `ports` and `session_ending`: every name of their own stays public.
 
 **Changed**
 
