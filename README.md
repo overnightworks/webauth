@@ -51,6 +51,7 @@ Fields a host may leave out:
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
 | `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused |
+| `csrf_header_name` | `"x-csrf-token"` | the request header that carries the CSRF token |
 | `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused |
 | `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
 | `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
@@ -358,11 +359,24 @@ absolute cap: someone who comes back at least weekly stays signed in for up to
 30 days, and anyone away for more than 7 days signs in again.
 
 ```python
+import re
+
+from pydantic import SecretStr
+
+from webauth.config import WebAuthConfig
+from webauth.liveness import IdleWindowLiveness
+from webauth.proxies import TrustedProxies
+from webauth.rate_limit import SingleProcessRateLimitBackend
+
 SEVEN_DAYS = 7 * 24 * 3600
 THIRTY_DAYS = 30 * 24 * 3600
 
-WebAuthConfig(
-    ...,
+config = WebAuthConfig(
+    session_secret=SecretStr("a-secret-of-at-least-thirty-two-characters"),
+    trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
+    rate_limits=SingleProcessRateLimitBackend(),
+    allowed_hosts_exact=frozenset({"app.example.com"}),
+    allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
     cookie_max_age_seconds=THIRTY_DAYS,
     session_liveness=IdleWindowLiveness(SEVEN_DAYS, absolute_max_age_seconds=THIRTY_DAYS),
 )

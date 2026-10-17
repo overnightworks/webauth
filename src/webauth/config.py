@@ -66,7 +66,7 @@ def _require_positive_count(name: str, value: object) -> None:
         raise ValueError(f"{name} must be a positive int, not {value!r}")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class WebAuthConfig:
     session_secret: SecretStr
     trusted_proxies: TrustedProxies

@@ -56,8 +56,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   required: the library never reads a session lifetime, which belongs to the host's
   store, and a host states the cookie's `Max-Age` once. A config without
   `cookie_max_age_seconds` is a `TypeError`, and one that passes
-  `session_max_age_seconds` is refused as an unknown keyword. Build `WebAuthConfig` by
-  keyword, because the field order changed.
+  `session_max_age_seconds` is refused as an unknown keyword. `WebAuthConfig` takes
+  keyword arguments only, so a positional call is a `TypeError`.
 
 **Changed**
 

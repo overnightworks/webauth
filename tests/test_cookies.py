@@ -16,6 +16,7 @@ from httpx import Response as ClientResponse
 from starlette.requests import Request
 from starlette.responses import Response
 from webauth_arrangement import (
+    SEVEN_DAYS_SECONDS,
     THIRTY_DAYS_SECONDS,
     a_web_auth_config,
     session_cookie_header,
@@ -40,6 +41,7 @@ from webauth.cookies import (
     verify_session_cookie,
 )
 from webauth.dependencies import session_id_from_request
+from webauth.liveness import IdleWindowLiveness
 from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import SecurityHeadersPolicy, default_content_security_policy
 
@@ -376,7 +378,10 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
 def test_a_cookie_lifetime_longer_than_the_idle_window_is_what_the_browser_keeps() -> None:
     """A 30-day cookie over a 7-day idle window: the cookie is issued once, so it
     must outlive the window for a session used every few days to stay signed in."""
-    app = a_cookie_app(cookie_max_age_seconds=THIRTY_DAYS_SECONDS)
+    app = a_cookie_app(
+        cookie_max_age_seconds=THIRTY_DAYS_SECONDS,
+        session_liveness=IdleWindowLiveness(SEVEN_DAYS_SECONDS),
+    )
     response = app.issue()
 
     for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):

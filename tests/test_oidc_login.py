@@ -439,13 +439,14 @@ def test_an_admitted_callback_expires_the_session_by_the_stores_lifetime() -> No
     store_max_age_seconds = 1_200
     host = an_oidc_host(store_max_age_seconds=store_max_age_seconds)
 
-    host.callback(host.sign_in_at_issuer())
+    response = host.callback(host.sign_in_at_issuer())
 
     record = host.sessions.record
     assert record is not None
     expires_in = (record.expires_at - datetime.now(timezone.utc)).total_seconds()
     assert expires_in == pytest.approx(store_max_age_seconds, abs=60)
-    assert host.config.cookie_max_age_seconds != store_max_age_seconds
+    session_cookie = set_cookies(response)[host.config.session_cookie_name]
+    assert f"max-age={host.config.cookie_max_age_seconds}" in session_cookie
     assert host.client.get("/me").json() == {"username": "lena"}
 
 

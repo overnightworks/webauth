@@ -91,6 +91,13 @@ def test_a_configuration_without_a_cookie_lifetime_is_refused() -> None:
         WebAuthConfig(**arguments)
 
 
+def test_a_configuration_built_positionally_is_refused() -> None:
+    arguments = web_auth_config_arguments()
+
+    with pytest.raises(TypeError, match="positional"):
+        WebAuthConfig(*arguments.values())
+
+
 @pytest.mark.parametrize("value", [None, "none"])
 def test_a_cross_site_cookie_samesite_is_refused_at_configuration_time(
     value: str | None,
