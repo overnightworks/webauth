@@ -42,9 +42,15 @@ class RouteFailure(RuntimeError):
     pass
 
 
-def an_app(*, cookie_secure: bool = True, configured: bool = True, debug: bool = False) -> FastAPI:
+def an_app(
+    *,
+    cookie_secure: bool = True,
+    configured: bool = True,
+    debug: bool = False,
+    policy: SecurityHeadersPolicy = POLICY,
+) -> FastAPI:
     app = FastAPI(debug=debug)
-    app.add_middleware(SecurityHeadersMiddleware, policy=POLICY)
+    app.add_middleware(SecurityHeadersMiddleware, policy=policy)
     if configured:
         install_web_auth_config(app, a_web_auth_config(cookie_secure=cookie_secure))
     return app
@@ -311,9 +317,7 @@ def test_a_customised_policy_reaches_the_response_header_as_returned() -> None:
     customised = default_content_security_policy(
         added_sources={CspDirective.STYLE_SRC: ["'unsafe-inline'"]},
     )
-    app = FastAPI()
-    app.add_middleware(SecurityHeadersMiddleware, policy=SecurityHeadersPolicy(customised))
-    install_web_auth_config(app, a_web_auth_config())
+    app = an_app(policy=SecurityHeadersPolicy(customised))
 
     @app.get("/ok")
     def ok() -> dict[str, bool]:

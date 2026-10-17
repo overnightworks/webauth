@@ -311,6 +311,10 @@ def directive_sources(policy: str, directive: CspDirective) -> str:
     return declaration.removeprefix(f"{directive} ")
 
 
+def styled(sources: object) -> dict[str, object]:
+    return {"added_sources": {CspDirective.STYLE_SRC: sources}}
+
+
 class TestDefaultContentSecurityPolicy:
     @pytest.mark.parametrize(
         "arguments",
@@ -324,7 +328,7 @@ class TestDefaultContentSecurityPolicy:
         assert default_content_security_policy(**arguments) == THE_DEFAULT_POLICY  # type: ignore[arg-type]
 
     def test_holds_no_host_fact(self) -> None:
-        assert "google" not in THE_DEFAULT_POLICY
+        assert "google" not in default_content_security_policy()
         assert "unsafe-inline" not in default_content_security_policy()
 
     @pytest.mark.parametrize(
@@ -358,6 +362,8 @@ class TestDefaultContentSecurityPolicy:
             pytest.param("sha256-abc===", id="three-paddings"),
             pytest.param("sha256-ab!c", id="character-outside-the-alphabet"),
             pytest.param("sha256-äbc", id="non-ascii"),
+            pytest.param("ſha256-abc", id="long-s-folds-to-s"),
+            pytest.param("sha256-\u212a", id="kelvin-sign-in-payload"),
             pytest.param("", id="empty"),
         ],
     )
@@ -389,6 +395,11 @@ class TestDefaultContentSecurityPolicy:
             pytest.param("*", id="wildcard-host"),
             pytest.param("example.test:8443/path", id="port-and-path"),
             pytest.param("https://example.test:*", id="wildcard-port"),
+            pytest.param("example.test/a%20b", id="percent-escape"),
+            pytest.param("example.test/", id="root-path"),
+            pytest.param("https://example.test.", id="trailing-dot-origin"),
+            pytest.param("*.example.test.", id="trailing-dot-wildcard"),
+            pytest.param("example.test.:8443/p", id="trailing-dot-port-and-path"),
         ],
     )
     def test_appends_a_valid_added_source_verbatim(self, source: str) -> None:
@@ -409,6 +420,12 @@ class TestDefaultContentSecurityPolicy:
             pytest.param("a,b", id="comma"),
             pytest.param("x\r\n", id="crlf"),
             pytest.param("bücher.example.test", id="non-ascii-host"),
+            pytest.param("'ſelf'", id="long-s-folds-to-s"),
+            pytest.param("example.test/%zz", id="bad-percent-escape"),
+            pytest.param("example.test/a%", id="trailing-percent"),
+            pytest.param("example.test/%0", id="one-hex-digit"),
+            pytest.param("example.test/%G0", id="non-hex-escape"),
+            pytest.param("example.test//x", id="path-starting-with-two-slashes"),
             pytest.param("'self", id="unclosed-quote"),
             pytest.param("'nonce-'", id="empty-nonce"),
             pytest.param("'nonce-a==='", id="three-paddings"),
@@ -462,9 +479,12 @@ class TestDefaultContentSecurityPolicy:
             "'self' https://parent.example.test"
         )
 
-    @pytest.mark.parametrize("source", ["'unsafe-inline'", "'nonce-x'", "'sha256-abc'"])
+    @pytest.mark.parametrize(
+        "source",
+        ["'unsafe-inline'", "'nonce-x'", "'sha256-abc'", "example.test/%zz", "example.test//x"],
+    )
     def test_refuses_a_source_the_ancestor_grammar_lacks(self, source: str) -> None:
-        with pytest.raises(ValueError, match="frame-ancestors"):
+        with pytest.raises(ValueError, match=r"frame-ancestors.*declared subset is 'self', scheme"):
             default_content_security_policy(
                 added_sources={CspDirective.FRAME_ANCESTORS: [source]},
             )
@@ -500,23 +520,39 @@ class TestDefaultContentSecurityPolicy:
             )
 
     @pytest.mark.parametrize(
-        "kwargs",
+        "kwargs, owner",
         [
-            pytest.param({"added_sources": {CspDirective.STYLE_SRC: "'unsafe-inline'"}}, id="str"),
-            pytest.param({"added_sources": {CspDirective.STYLE_SRC: b"x"}}, id="bytes"),
-            pytest.param({"added_sources": {CspDirective.STYLE_SRC: b""}}, id="empty-bytes"),
-            pytest.param({"added_sources": {CspDirective.STYLE_SRC: ""}}, id="empty-str"),
-            pytest.param({"added_sources": {CspDirective.STYLE_SRC: 5}}, id="not-a-sequence"),
-            pytest.param({"script_hashes": "sha256-abc"}, id="hashes-str"),
-            pytest.param({"script_hashes": b""}, id="hashes-empty-bytes"),
-            pytest.param({"added_sources": [(CspDirective.STYLE_SRC, [])]}, id="not-a-mapping"),
-            pytest.param({"added_sources": {CspDirective.STYLE_SRC: [None]}}, id="none-element"),
-            pytest.param({"added_sources": {CspDirective.STYLE_SRC: [b"x"]}}, id="bytes-element"),
-            pytest.param({"script_hashes": [b"sha256-abc"]}, id="bytes-hash"),
+            pytest.param(styled("'unsafe-inline'"), "style-src", id="str"),
+            pytest.param(styled(b"x"), "style-src", id="bytes"),
+            pytest.param(styled(b""), "style-src", id="empty-bytes"),
+            pytest.param(styled(""), "style-src", id="empty-str"),
+            pytest.param(styled(5), "style-src", id="not-a-sequence"),
+            pytest.param({"script_hashes": "sha256-abc"}, "script-src", id="hashes-str"),
+            pytest.param(
+                {"added_sources": {CspDirective.STYLE_SRC: bytearray()}},
+                "style-src",
+                id="empty-bytearray",
+            ),
+            pytest.param(
+                {"added_sources": {CspDirective.STYLE_SRC: memoryview(b"")}},
+                "style-src",
+                id="empty-memoryview",
+            ),
+            pytest.param({"script_hashes": b""}, "script-src", id="hashes-empty-bytes"),
+            pytest.param(
+                {"added_sources": [(CspDirective.STYLE_SRC, [])]},
+                "Mapping",
+                id="not-a-mapping",
+            ),
+            pytest.param(styled([None]), "style-src", id="none-element"),
+            pytest.param(styled([b"x"]), "style-src", id="bytes-element"),
+            pytest.param({"script_hashes": [b"sha256-abc"]}, "script-src", id="bytes-hash"),
         ],
     )
-    def test_refuses_a_wrong_type_with_a_type_error(self, kwargs: dict[str, object]) -> None:
-        with pytest.raises(TypeError):
+    def test_refuses_a_wrong_type_with_a_type_error(
+        self, kwargs: dict[str, object], owner: str,
+    ) -> None:
+        with pytest.raises(TypeError, match=owner):
             default_content_security_policy(**kwargs)  # type: ignore[arg-type]
 
     def test_leaves_the_callers_mapping_and_lists_unchanged(self) -> None:

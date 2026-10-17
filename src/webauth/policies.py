@@ -267,7 +267,7 @@ class SecurityHeadersPolicy:
 
 
 class CspDirective(StrEnum):
-    """The directives the default policy names, in the order it writes them."""
+    """The directives a host may extend, in the order the default policy writes them."""
 
     SCRIPT_SRC = "script-src"
     STYLE_SRC = "style-src"
@@ -280,6 +280,7 @@ class CspDirective(StrEnum):
     FRAME_ANCESTORS = "frame-ancestors"
 
 
+_TEXT_LIKE: Final = (str, bytes, bytearray, memoryview)
 _SELF_KEYWORD: Final = "'self'"
 _NONE_SOURCE: Final = "'none'"
 _GRAMMAR_FLAGS: Final = re.ASCII | re.IGNORECASE
@@ -298,7 +299,10 @@ _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
 _BASE64_VALUE: Final = r"[A-Za-z0-9+/\-_]+={0,2}"
 _HASH_ALGORITHM: Final = r"sha(?:256|384|512)"
 _HOST_LABEL: Final = r"[A-Za-z0-9\-]+"
-_HOST: Final = rf"(?:\*|(?:\*\.)?{_HOST_LABEL}(?:\.{_HOST_LABEL})*)"
+_HOST: Final = rf"(?:\*|(?:\*\.)?{_HOST_LABEL}(?:\.{_HOST_LABEL})*\.?)"
+_PORT: Final = r":(?:[0-9]+|\*)"
+_PATH_CHAR: Final = r"(?:[\w\-.~!$&'()*+=:@]|%[0-9A-Fa-f]{2})"
+_PATH: Final = rf"/(?:{_PATH_CHAR}+(?:/{_PATH_CHAR}*)*)?"
 _SCHEME: Final = r"[A-Za-z][A-Za-z0-9+.\-]*"
 _KEYWORDS: Final = (
     "self",
@@ -318,7 +322,7 @@ _NONCE_SOURCE: Final = re.compile(f"'nonce-{_BASE64_VALUE}'", _GRAMMAR_FLAGS)
 _HASH_SOURCE: Final = re.compile(f"'{_HASH_ALGORITHM}-{_BASE64_VALUE}'", _GRAMMAR_FLAGS)
 _SCHEME_SOURCE: Final = re.compile(f"{_SCHEME}:", _GRAMMAR_FLAGS)
 _HOST_SOURCE: Final = re.compile(
-    rf"(?:{_SCHEME}://)?{_HOST}(?::(?:[0-9]+|\*))?(?:/[\w\-.~%!$&'()*+=:@/]*)?",
+    rf"(?:{_SCHEME}://)?{_HOST}(?:{_PORT})?(?:{_PATH})?",
     _GRAMMAR_FLAGS,
 )
 _SOURCE_GRAMMAR: Final = (
@@ -329,15 +333,16 @@ _SOURCE_GRAMMAR: Final = (
     _HOST_SOURCE,
 )
 _ANCESTOR_GRAMMAR: Final = (_SELF_SOURCE, _SCHEME_SOURCE, _HOST_SOURCE)
-_DECLARED_SUBSET: Final = (
+_SOURCE_SUBSET: Final = (
     "keyword sources "
     + ", ".join(f"'{keyword}'" for keyword in _KEYWORDS)
     + "; nonce and sha256, sha384, sha512 hash sources; scheme sources; host sources"
 )
+_ANCESTOR_SUBSET: Final = "'self', scheme sources and host sources"
 
 
 def _require_source_list(owner: str, sources: object) -> Sequence[str]:
-    if isinstance(sources, str | bytes) or not isinstance(sources, Sequence):
+    if isinstance(sources, _TEXT_LIKE) or not isinstance(sources, Sequence):
         raise TypeError(
             f"{owner}: sources must be a sequence of str, not {type(sources).__name__}.",
         )
@@ -357,11 +362,13 @@ def _validated_hash(script_hash: str) -> str:
 
 
 def _validated_source(directive: CspDirective, source: str) -> str:
-    grammar = _ANCESTOR_GRAMMAR if directive is CspDirective.FRAME_ANCESTORS else _SOURCE_GRAMMAR
+    is_ancestor = directive is CspDirective.FRAME_ANCESTORS
+    grammar = _ANCESTOR_GRAMMAR if is_ancestor else _SOURCE_GRAMMAR
+    subset = _ANCESTOR_SUBSET if is_ancestor else _SOURCE_SUBSET
     if not any(production.fullmatch(source) for production in grammar):
         raise ValueError(
             f"{directive}: {source!r} is not a source this library accepts; "
-            f"the declared subset is {_DECLARED_SUBSET}.",
+            f"the declared subset is {subset}.",
         )
     return source
 
