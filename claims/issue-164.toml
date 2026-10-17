@@ -1,8 +1,0 @@
-claim_id = "3ea15bc27a874cd2aff329e0478dc024"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "9409ae11ee1f96e7506618293fcf520c12b0f2c0"
-branch = "claude/issue-164-d2e-der-urteils-lauf"
-scope = ["e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/harness.py"]
-opened_commit = "150f15a84793ecec1593e82e9390f39f1cb3b0d3"
-whole_reason = "One verdict: the conformance table without the P2 finding, the guard-entry window, and the README's result"
