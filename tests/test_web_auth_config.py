@@ -174,6 +174,8 @@ def a_config_reached_by(
 ) -> WebAuthConfig:
     if how == "construction":
         return a_web_auth_config(cookie_secure=cookie_secure, **cookie_names)
+    if how == "replace-keeping-secure":
+        return replace(a_web_auth_config(cookie_secure=cookie_secure), **cookie_names)
     return replace(
         a_web_auth_config(cookie_secure=not cookie_secure),
         cookie_secure=cookie_secure,
@@ -207,7 +209,7 @@ def test_a_cookie_name_is_kept_or_resolved_by_cookie_secure_however_the_config_i
 
 
 @pytest.mark.parametrize("field", COOKIE_NAME_FIELDS)
-@pytest.mark.parametrize("how", ["construction", "replace"])
+@pytest.mark.parametrize("how", ["construction", "replace", "replace-keeping-secure"])
 @pytest.mark.parametrize(
     ("cookie_secure", "given_name", "message"),
     [
@@ -247,6 +249,7 @@ def test_a_host_only_cookie_name_without_cookie_secure_is_refused_at_configurati
     """A browser would drop the cookie silently and the login would loop."""
     with pytest.raises(ValueError, match="needs cookie_secure=True"):
         a_web_auth_config(cookie_secure=False, **{field: name})
+
 
 @pytest.mark.parametrize(
     ("built_with", "replaced_with", "session_cookie_name", "csrf_cookie_name"),
@@ -298,7 +301,6 @@ def test_replacing_a_field_sets_or_keeps_the_cookie_lifetime(
     config = replace(a_web_auth_config(), **replaced_with)
 
     assert config.cookie_max_age_seconds == cookie_max_age_seconds
-
 
 
 @pytest.mark.parametrize(
