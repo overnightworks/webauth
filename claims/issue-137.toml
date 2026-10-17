@@ -1,8 +1,0 @@
-claim_id = "7a50e5cb2e8a4631b92fbaaf53aaad22"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "94f02b78a87c878f39df53d45e78cacab94f91d0"
-branch = "claude/issue-137-w8-s3-die-session-verwaltung-steht-allei"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/session_administration.py", "src/webauth/users.py", "tests/test_session_administration.py", "tests/test_users.py", "tests/webauth_arrangement.py"]
-opened_commit = "2a289e4b7f3f5c86a3aaf4206c315ed142bfdd89"
-whole_reason = "One module split: the new session-administration owner, the methods leaving UserManagement, their moved tests and the documents that name them"
