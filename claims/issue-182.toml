@@ -1,0 +1,8 @@
+claim_id = "4afeee55f6ba4a578c68d978939a7e9a"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "7d241fc009505f87d9459c09bbbda4e4978c543c"
+branch = "claude/issue-182-cookie-namen-str"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "tests/test_web_auth_config.py"]
+opened_commit = "8f8404452903e2bad60b1c9b2798f3ef49195ed4"
+whole_reason = "One public-contract change: the annotation, its refusal, its tests, README rows and the Breaking bullet cannot land apart."
