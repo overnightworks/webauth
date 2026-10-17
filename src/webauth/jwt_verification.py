@@ -485,6 +485,10 @@ def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
     jwks = parsed.get("keys")
     if not isinstance(jwks, list) or not jwks:
         raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
+    return MappingProxyType(_rs256_verification_keys(jwks))
+
+
+def _rs256_verification_keys(jwks: list[object]) -> dict[str, RSAPublicKey]:
     keys: dict[str, RSAPublicKey] = {}
     eligible_keys = 0
     for jwk in jwks:
@@ -503,7 +507,7 @@ def _parse_key_set(document: bytes) -> Mapping[str, RSAPublicKey]:
         keys[key_id] = key
     if not keys:
         raise _InvalidKeySetError(_RefreshFailure.NO_RS256_SIGNING_KEY)
-    return MappingProxyType(keys)
+    return keys
 
 
 def _is_rs256_verification_key(jwk: Mapping[str, object]) -> bool:
