@@ -1,0 +1,8 @@
+claim_id = "ade00d17c6b049bbabd5891db44079ce"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "94f02b78a87c878f39df53d45e78cacab94f91d0"
+branch = "claude/issue-136-w8-s2-pr-fix-session-f-r-die-session-sig"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/cookies.py", "tests/test_cookies.py", "tests/test_csrf.py", "tests/test_dependencies.py", "tests/webauth_arrangement.py"]
+opened_commit = "6dd66a8cd9d536fb6d3c4fb008f870e61aca4249"
+whole_reason = "One cookie-format change with its signer, its tests, the arrangement's independent signer and the documents that state it"
