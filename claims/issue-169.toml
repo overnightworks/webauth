@@ -1,8 +1,0 @@
-claim_id = "08cd6dd013d44bcdb67344322fb59faf"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "4ad3432c942ce115f0d994738fd3975c8d956683"
-branch = "claude/issue-169-w8-s10b-session-core-all"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/liveness.py", "src/webauth/ports.py", "src/webauth/session_administration.py", "src/webauth/session_ending.py", "tests/test_public_api.py"]
-opened_commit = "445819bd5060cbb58397669d2753c84845379917"
-whole_reason = "One contract: the public names of the seven session-core modules, the policy sentence and the consumer test that enforces it"
