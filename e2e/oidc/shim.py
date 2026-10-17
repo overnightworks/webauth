@@ -29,8 +29,9 @@ class TlsShim:
     def __init__(self, tls: ThrowawayTls, upstream_port: int, public_host: str) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(tls.leaf_certificate, tls.leaf_key)
-        self._server = _ShimServer((LOOPBACK, 0), _forwarding_handler(upstream_port, public_host))
-        self._server.tls_context = context
+        self._server = _ShimServer(
+            (LOOPBACK, 0), _forwarding_handler(upstream_port, public_host, context)
+        )
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property
@@ -52,19 +53,21 @@ class TlsShim:
 
 class _ShimServer(ThreadingHTTPServer):
     daemon_threads = True
-    tls_context: ssl.SSLContext
 
-    def handle_error(self, request: socket.socket, client_address: object) -> None:
+    def handle_error(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object
+    ) -> None:
         """A client that abandons a handshake is no event worth a trace."""
 
 
-def _forwarding_handler(upstream_port: int, public_host: str) -> type[BaseHTTPRequestHandler]:
+def _forwarding_handler(
+    upstream_port: int, public_host: str, tls_context: ssl.SSLContext
+) -> type[BaseHTTPRequestHandler]:
     class Forwarding(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        server: _ShimServer
 
         def setup(self) -> None:
-            self.request = self.server.tls_context.wrap_socket(self.request, server_side=True)
+            self.request = tls_context.wrap_socket(self.request, server_side=True)
             super().setup()
 
         def log_message(self, format: str, *args: object) -> None:

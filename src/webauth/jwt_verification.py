@@ -568,14 +568,19 @@ def is_rs256_verification_key(jwk: Mapping[str, object]) -> bool:
     )
 
 
+def _declared_key_id(jwk: Mapping[str, object]) -> str | None:
+    if "kid" not in jwk:
+        return None
+    key_id = jwk["kid"]
+    if not _is_key_id(key_id):
+        raise _InvalidKeySetError(_RefreshFailure.MALFORMED_KEY)
+    return key_id
+
+
 def _public_signing_key(jwk: Mapping[str, object]) -> tuple[str | None, RSAPublicKey]:
-    key_id = jwk["kid"] if "kid" in jwk else None
+    key_id = _declared_key_id(jwk)
     modulus, exponent = jwk.get("n"), jwk.get("e")
-    if (
-        ("kid" in jwk and not _is_key_id(key_id))
-        or not isinstance(modulus, str)
-        or not isinstance(exponent, str)
-    ):
+    if not isinstance(modulus, str) or not isinstance(exponent, str):
         raise _InvalidKeySetError(_RefreshFailure.MALFORMED_KEY)
     try:
         key = RSAPublicNumbers(

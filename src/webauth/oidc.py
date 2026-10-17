@@ -319,11 +319,13 @@ class OidcRelyingParty:
             id_token = document.get("id_token")
             if isinstance(id_token, str):
                 return id_token
-        elif answer.status in _TOKEN_ERROR_STATUSES and isinstance(document.get("error"), str):
+        elif answer.status in _TOKEN_ERROR_STATUSES and isinstance(
+            error := document.get("error"), str
+        ):
             raise _RefusalError(
                 OidcRefusal(
                     OidcRefusalReason.TOKEN_REQUEST_REFUSED,
-                    idp_error=_idp_error_code(document["error"]),
+                    idp_error=_idp_error_code(error),
                 )
             )
         raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))

@@ -180,7 +180,9 @@ def remember_url_credentials(run: RunRecord, url: str) -> None:
 
 def remember_cookies(run: RunRecord, context: BrowserContext) -> None:
     for cookie in context.cookies():
-        run.registry.add(f"cookie {recorded_cookie_name(cookie['name'])}", cookie["value"])
+        run.registry.add(
+            f"cookie {recorded_cookie_name(cookie.get('name', ''))}", cookie.get("value", "")
+        )
 
 
 def wait_until_serving(run: RunRecord, process: subprocess.Popen[bytes], *ports: int) -> None:

@@ -19,4 +19,4 @@ site="$("$host/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_path(
 [[ -f "$site/webauth/py.typed" ]] || { echo "the built wheel installs no webauth/py.typed" >&2; exit 1; }
 cp "$repo/tests/typing/oidc_host.py" "$host/"
 cd "$host"
-uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python oidc_host.py
+uv run --project "$repo" --locked --extra dev pyright --pythonpath .venv/bin/python oidc_host.py

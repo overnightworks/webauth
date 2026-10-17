@@ -54,7 +54,7 @@ from harness import (
     tell_host,
 )
 from host_app import HostSettings
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Cookie, Page, sync_playwright
 from shim import TlsShim
 from stack import Admin, HeldStack, require_pinned_clean_edge
 
@@ -162,8 +162,8 @@ class Proof(RunRecord):
 
     def register_pending_logins(self, context: BrowserContext) -> None:
         for cookie in context.cookies():
-            if is_pending_login_cookie_name(cookie["name"], secure=True):
-                self._register_pending_login(cookie["value"])
+            if is_pending_login_cookie_name(cookie.get("name", ""), secure=True):
+                self._register_pending_login(cookie.get("value", ""))
 
     def capture_cookies(self, context: BrowserContext) -> None:
         remember_cookies(self, context)
@@ -341,7 +341,7 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
         )
         assert proof.headline(page) == "Sign-in refused", f"the page says {proof.headline(page)!r}"
         proof.shot(page, f"{scenario}-deactivated", "result")
-        carried = {c["name"] for c in page.context.cookies(APP_ORIGIN)}
+        carried = {c.get("name") for c in page.context.cookies(APP_ORIGIN)}
         assert DEFAULT_SESSION_COOKIE_NAME not in carried, "a session cookie was issued"
     held = proof.host_state()
     assert held["last_refusal"] == "account-deactivated", f"the host refused {held}"
@@ -409,16 +409,16 @@ def logout(proof: Proof) -> str:
         proof.sign_in(page, "2")
         page.goto(f"{APP_ORIGIN}/")
         assert proof.headline(page) == f"Signed in as {USER_NAME}"
-        cookies = [c for c in page.context.cookies(APP_ORIGIN)]
-        held_names = {c["name"] for c in cookies}
-        session = next(c for c in cookies if c["name"] == DEFAULT_SESSION_COOKIE_NAME)
-        proof.registry.add("session cookie", session["value"])
+        cookies = page.context.cookies(APP_ORIGIN)
+        held_names = {c.get("name", "") for c in cookies}
+        session = next(c for c in cookies if c.get("name") == DEFAULT_SESSION_COOKIE_NAME)
+        proof.registry.add("session cookie", session.get("value", ""))
         page.click("#logout")
         page.get_by_role("heading", name="Signed out").wait_for()
         page.reload()
         assert proof.headline(page) == "Signed out", "a reload of '/' did not show Sign in"
         proof.shot(page, "2", "result")
-        left = held_names & {c["name"] for c in page.context.cookies(APP_ORIGIN)}
+        left = held_names & {c.get("name", "") for c in page.context.cookies(APP_ORIGIN)}
         assert not left, f"cookies survived: {sorted(left)}"
         me_status = proof.status_of(page, "/me")
         assert me_status == 401, f"/me answered {me_status}"
@@ -441,11 +441,11 @@ def back_button_shows(proof: Proof, page: Page) -> str:
     return f"{page_text} (the host's last sign-in refusal: {proof.host_state()['last_refusal']})"
 
 
-def replayed_session_status(proof: Proof, session: dict[str, Any]) -> int:
+def replayed_session_status(proof: Proof, session: Cookie) -> int:
     assert proof.ca_certificate is not None and proof.host is not None
     return httpx.get(
         f"https://localhost:{proof.host.app_port}/me",
-        headers={"Cookie": f"{session['name']}={session['value']}"},
+        headers={"Cookie": f"{session.get('name', '')}={session.get('value', '')}"},
         verify=ssl.create_default_context(cafile=str(proof.ca_certificate)),
     ).status_code
 
@@ -660,7 +660,7 @@ def prove(edge: Path, scratch: Path) -> int:
 def main() -> int:
     if not __debug__:
         raise SystemExit("prove.py checks with assert; run it without python -O")
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("--edge", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
     arguments = parser.parse_args()

@@ -691,6 +691,7 @@ uv sync --extra dev
 uv run pytest tests -q
 uv run ruff check src tests e2e
 uv run lint-imports
+uv run --group e2e pyright
 tests/typing/check_against_wheel.sh
 ```
 
