@@ -273,6 +273,7 @@ def host_settings(
         tls_certificate=str(tls.leaf_certificate),
         tls_key=str(tls.leaf_key),
         issuer=ISSUER,
+        login_group=None,
         authorization_endpoint=f"{ISSUER}authorize",
         token_endpoint=f"{reached_through_shim}/token",
         jwks_url=f"{reached_through_shim}/jwks",

@@ -10,6 +10,15 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `finish_login` and `admit_identity` take `admission: AdmissionConfig`
+  instead of `bound_issuer: str`. `AdmissionConfig(bound_issuer=...,
+  login_group=...)` requires the app's group path (or
+  `EverySubject.OF_THE_BOUND_ISSUER`, to admit every subject of the issuer on
+  purpose); a missing `login_group` is a `TypeError` and a malformed one a
+  `ValueError`. A person who is in neither `login_group` nor a subgroup of it
+  is refused with the new `AdmissionRefusal.NOT_A_MEMBER` before any account
+  is looked up or created. The README now recommends a 12-hour session
+  instead of 30 days, since an open session is not re-checked.
 - `IpRateLimitMiddleware` calls `RateLimitBackend.is_allowed` from a worker
   thread, so a slow limiter no longer stalls the event loop; a host's own
   backend must be thread-safe (both library backends are).

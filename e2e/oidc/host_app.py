@@ -55,7 +55,9 @@ from webauth.oidc import (
     TokenRequestPost,
 )
 from webauth.oidc_login import (
+    AdmissionConfig,
     AdmissionRefusal,
+    EverySubject,
     finish_login,
     post_token_request_over_https,
     start_login,
@@ -112,6 +114,8 @@ class HostSettings:
     tls_certificate: str
     tls_key: str
     issuer: str
+    login_group: str | None
+    """The host's app group; ``None`` admits every subject of the issuer."""
     authorization_endpoint: str
     token_endpoint: str
     jwks_url: str
@@ -281,6 +285,11 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         allowed_hosts_patterns=(),
     )
 
+    admission = AdmissionConfig(
+        bound_issuer=settings.issuer,
+        login_group=settings.login_group or EverySubject.OF_THE_BOUND_ISSUER,
+    )
+
     def relying_party_of(request: Request) -> OidcRelyingParty:
         return world["world"].relying_parties[f"https://{request.headers['host']}"]
 
@@ -335,7 +344,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         current = world["world"]
         outcome = finish_login(
             relying_party_of(request), request, response, config,
-            bound_issuer=settings.issuer, accounts=current.accounts, lock=current.lock,
+            admission=admission, accounts=current.accounts, lock=current.lock,
             audit=current.audit,
         )
         if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):

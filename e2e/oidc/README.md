@@ -80,7 +80,7 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page, the second sign-in of scenario 2, and, in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenario 2, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
 
@@ -94,8 +94,17 @@ and the table says so.
 the app; enabled again, the same credentials sign in; an account the host
 holds as deactivated is refused at the callback with `account-deactivated`.
 `SCENARIO 6` asserts by bounding boxes that the forms and pages lie inside the
-window. Scenarios 1, 4 and 6 run at 390x844 (mobile emulation, touch) and
-1280x800.
+window. `SCENARIO 7` is the outsider: `d1-outsider` is in no group, signs in at
+Keycloak, reaches the callback and sees "Sign-in refused" with `not-a-member`;
+the host holds 0 accounts and 0 sessions and the browser carries no session
+cookie. `SCENARIO 8` is `d1-admin`, a member of `/apps/songmaker/admin` only
+(the subgroup the run creates, since the pinned realm has none): it is
+admitted, and the host holds 1 account. `CHECK outsider-groups-claim` records,
+as a count only, whether Keycloak sends the outsider a `groups` claim at all.
+Scenarios 1, 4, 6 and 7 run at 390x844 (mobile emulation, touch) and 1280x800;
+scenario 8 runs at 1280x800. The host's `login_group` is `/apps/songmaker`;
+`conformance.py` states `EverySubject.OF_THE_BOUND_ISSUER`, because the OIDF
+suite's tokens carry no `groups` claim. The run stays inside its 900 s budget.
 
 `SCENARIO 5` is the session cookie after the callback redirect. One host
 process per `cookie_samesite` serves both app origins; each cell uses a fresh
