@@ -1,43 +1,242 @@
 # webauth
 
-Session authentication for FastAPI applications: sessions the store decides
-on every request, HMAC-signed cookies, CSRF double-submit, admin checks,
-per-address rate limits, and the audit events they raise.
+OpenID Connect login and session authentication for FastAPI applications. It is
+built for [Keycloak](https://www.keycloak.org/); any OpenID Connect issuer that
+signs ID tokens with RS256 and publishes static endpoints works. The host serves
+a start and a callback route. webauth runs the flow, then keeps the session:
+sessions the store decides on every request, HMAC-signed cookies, CSRF
+double-submit, admin checks, per-address rate limits, and the audit events they
+raise.
 
-Distribution `overnightworks-webauth`, import package `webauth`.
+Distribution `overnightworks-webauth`, import package `webauth`. The login needs
+the `jwt` extra; see [Install](#install).
 
-## What it owns, and what it leaves to the host
+## OpenID Connect login
 
-It owns the machinery an application should not rebuild:
+Login runs at an OpenID Connect issuer with the authorization-code flow and PKCE. The
+host names the issuer's authorization, token and key-set URLs itself; the
+library does no discovery.
 
-| Module | Owns |
-|---|---|
-| `webauth.config` | The deployment facts every other module reads, installed on the app |
-| `webauth.cookies` | The signed session cookie and the CSRF token bound to it, issued and cleared |
-| `webauth.dependencies` | Turning a signed cookie into the account that made the request |
-| `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
-| `webauth.proxies` | Which peers may name a client, and the client identity that follows |
-| `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
-| `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
-| `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
-| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
-| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+### The host's start and callback routes
 
-It leaves the application everything that touches the application's own truth:
-the user model, configured roles, login routes, and their
-transaction boundaries. The library persists nothing itself — it holds no schema
-and no ORM, and an import-linter contract keeps it that way. What it needs
-reaches it through the Protocols in `webauth.ports`: `SubjectUserStore`, `SessionRecordStore`,
-and `AuditSink`.
-None of the stores commits; the caller owns the transaction, so a request that
-fails leaves nothing behind that the auth machinery wrote, except the rate-limit
-budget, which counts attempts whether or not the request succeeds.
-`SessionRecordStore.touch` returns a strict `bool`: `True` when a stored row was
-renewed, `False` when the session is gone, which refuses the request like an
-expired session.
+`webauth.oidc_login` carries the pending login for the host, so the host
+keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
+Connect. The host serves two routes over its one `OidcRelyingParty`, built as
+under [The relying party](#the-relying-party):
+
+```python
+@app.get("/login/oidc")
+def start(request: Request) -> Response:
+    response = Response(status_code=303)
+    response.headers["location"] = start_login(relying_party, request, response, config)
+    return response
+
+
+@app.get("/auth/callback")
+def callback(request: Request, response: Response) -> dict[str, str]:
+    outcome = finish_login(
+        relying_party, request, response, config,
+        bound_issuer=client_config.issuer, accounts=accounts, lock=lock, audit=audit,
+    )
+    if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
+        response.status_code = 403
+        return describe_the_hosts_refusal(outcome)
+    session = open_the_hosts_session(outcome)
+    issue_session_cookies(response, session.id, config)
+    ...
+```
+
+`start_login(relying_party, request, response, config)` begins a login, sets
+its pending-login cookie on `response` and returns the authorization URL.
+`finish_login(...)` answers the `UserRecord` to open a session for, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
+the host commits on an account and opens the session itself. `finish_login`
+sets the header that clears the pending-login cookie on `response`, so the
+host answers with that response on every outcome, refusals included: FastAPI
+copies an injected `response`'s headers only when the route returns a value
+that is not itself a `Response`; a returned `JSONResponse` is sent as-is and a
+raised `HTTPException` gets a new response, so neither carries them, which
+would leave the pending cookie in the browser.
+
+An issuer on another registrable domain than the app needs
+`cookie_samesite="lax"`. With the default `"strict"` the browser withholds the
+session cookie from the first page after the callback redirect, and that page
+is signed out. An issuer on the same site works with either value.
+
+The pending login travels in a cookie of its own, one per login, so two tabs
+never overwrite each other:
+
+- **Name:** the pending-login prefix `__Host-oidc_pending_` followed by the
+  first 16 hex characters of the SHA-256 of the login's state. With
+  `cookie_secure=False` the name is the plain `oidc_pending_…` form and the
+  cookie is not `Secure`; that is for local development over http only, where
+  a sibling host or a network observer can set or read it.
+- **Flags:** `HttpOnly`, `Path=/`, `Max-Age=600`, and `Secure` following
+  `cookie_secure`. It is always `SameSite=Lax`, whatever `cookie_samesite`
+  says: the callback is a top-level navigation from the issuer's site, which a
+  `Strict` cookie would not accompany.
+- **Value:** `v1.` followed by the state, nonce, verifier and `issued_at`,
+  each bounded to the exact shape `begin_login` mints, and an HMAC-SHA256
+  signature under the session signing key with an `oidc-pending:` prefix no
+  other cookie uses; the whole value is at most 256 characters, and the
+  signature is compared in constant time.
+- **Cap:** a browser holds at most five pending-login cookies. A start beyond
+  them clears the oldest by `issued_at` — a cookie that does not verify, or
+  whose name appears twice, counts as oldest — so repeated starts never crowd
+  out the session and CSRF cookies. Only names of the exact pending-login
+  shape, the prefix and 16 lowercase hex characters, count; any other cookie
+  whose name merely starts with the prefix is neither counted nor cleared.
+
+`finish_login` reads the state from the callback, selects exactly the cookie
+that state names and clears it on every outcome — admitted or refused —
+while every other tab's cookie stays. The state is read on its own, so a
+callback naming one state beside a malformed rest — another parameter named
+twice, or one that does not decode — still clears that state's cookie; it is
+refused as `MALFORMED_CALLBACK` when that state's cookie is genuine and as
+`STATE_MISMATCH` otherwise. A callback with no state, an empty one, its
+state twice or an undecodable one selects no cookie. Every one of these, and
+a missing, forged, oversized, unknown-version or duplicated cookie, or a
+genuine cookie of another login, is refused before any token request:
+`MALFORMED_CALLBACK` for a malformed query that names a single state whose
+cookie is genuine, otherwise `STATE_MISMATCH`.
+
+**Single use, stated honestly.** A pending login is single-use because its
+cookie is cleared on every outcome and the issuer accepts its authorization
+code once. webauth keeps no server-side replay store: a copy of the cookie
+taken before the callback is stopped by the issuer refusing the spent code
+(`TOKEN_REQUEST_REFUSED`), not by webauth remembering it.
+
+### The host's duties at login
+
+The library never writes, so these belong to the host's OIDC
+callback route:
+
+- **`next`:** validate the final decoded value against the rule
+  `LoginRedirect.path` enforces: one leading `/`; never `//` or a backslash
+  form after browsers strip tab, CR and LF; no scheme. Otherwise fall back to
+  a fixed local path.
+- **Fresh id:** every successful login mints a fresh session id. Never reuse
+  one from an incoming cookie, and never the issuer's `sid`.
+- **Replaced session:** when a verified session cookie is present, load its
+  record and end it with `end_session(sessions, session_id=<old id>)`, then
+  commit that transaction before `issue_session_cookies`.
+- **Entropy:** at least 128 bits from a CSPRNG. `secrets.token_urlsafe(32)`
+  gives 43 characters, under the 135-character bound.
+
+### The relying party
+
+`webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE
+for one client at one issuer, described by an `OidcClientConfig` whose URLs
+are all https and whose `client_secret` is a `SecretStr`. `begin_login()`
+answers the URL to send the browser to and a `PendingLogin` — its state,
+nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
+`complete_login(pending, callback_query)` takes that pending login and the
+callback's raw query string and answers an `OidcIdentity` (subject, issuer,
+full group paths, `sid`, `preferred_username`) or an `OidcRefusal` naming its
+reason. The state is checked before anything else the callback says; then
+the pending login's age: one older than `PENDING_LOGIN_MAX_AGE_SECONDS`
+(600) or dated in the future is `PENDING_LOGIN_EXPIRED`, and no token
+request is sent. An error the issuer reports is carried as its short error
+code only, never its description, and a `code` longer than
+`MAX_AUTHORIZATION_CODE_CHARS` (2048) is `MALFORMED_CALLBACK`. A token answer
+that names any member twice, at any depth, is `TOKEN_ENDPOINT_FAILED` rather
+than letting the last one win. The code is exchanged through the `post_token_request` the host
+injects, authenticated with HTTP Basic, and the ID token is verified by a
+`JwtVerifier` whose one accepted audience is the client ID, then checked for
+the pending nonce and an authorized party: a token for several audiences must
+name the client as its `azp`, and any `azp` a token names must be the client.
+
+In production both outbound calls go through `webauth.https_client`, the one
+module that imports urllib3:
+
+```python
+import time
+
+from webauth.https_client import fetch_key_set_over_https
+from webauth.oidc import OidcRelyingParty
+from webauth.oidc_login import post_token_request_over_https
+
+relying_party = OidcRelyingParty(
+    client_config,
+    post_token_request=post_token_request_over_https,
+    fetch_key_set=fetch_key_set_over_https,
+    wall_clock=time.time,
+    monotonic_clock=time.monotonic,
+)
+```
+
+Each request is HTTPS only, under the system's trusted certificates
+(`SSL_CERT_FILE` included), with a connect and a read timeout of five seconds
+each and a total deadline of ten seconds — `KEY_SET_FETCH_DEADLINE_SECONDS`
+and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over connecting, the TLS handshake and
+the whole answer, so an origin that drips its answer is cut off as a timeout;
+only the host name lookup runs outside it. No retry, no redirect followed and
+no content decoding. The key-set
+fetch reads at most one byte past `MAX_KEY_SET_BYTES` and refuses any answer
+but 200. The token POST is a form POST with the client's Basic authorization
+and `Accept: application/json`; it hands back any answer but a redirect —
+an issuer's `400 invalid_grant` included — and raises `TokenEndpointError`
+for a redirect, an answer past `MAX_TOKEN_RESPONSE_BYTES`, a TLS failure, a
+timeout or an unreachable origin. Its message is the library's own and never
+quotes the URL, the client secret, the code or the verifier. urllib3 logs
+nothing during either call, since its records quote the URL and whatever
+malformed header text the origin sends back. A `timeout_seconds` or
+`deadline_seconds` of zero or less raises `ValueError`, and
+`post_token_request_over_https` raises `ValueError` when `timeout_seconds`
+exceeds `deadline_seconds` instead of capping it. `TokenEndpointError.failure`
+names the `ExchangeFailure` that ended the request, so a caller can tell
+`TIMED_OUT` from other transport failures.
+
+### Admitting an identity
+
+`webauth.oidc_login.admit_identity(identity, *, bound_issuer, accounts, lock,
+audit, config)` turns that identity into the account it signs in as. The host
+binds its store to one issuer — the `issuer` of its `OidcClientConfig` — and
+passes it as `bound_issuer`; changing the issuer is a migration of the host's
+accounts, never a configuration change. `accounts` is a `SubjectUserStore`
+(`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
+which adds an account whose `id` is the subject, so a back-channel logout names
+the account directly). Any stored account whose `id` equals the subject
+character for character is that subject's account and signs in as it is,
+whatever created it. The host's `get` must compare exactly: no case, accent or
+trailing-space folding, even where its id column's collation folds. A host that
+migrates legacy accounts makes sure that no legacy `id` can equal a subject of
+the bound issuer. Admission holds `lock.hold()` and never commits:
+
+- A new subject gets an account with the issuer's `preferred_username` (or the
+  subject when it suggests none, or only whitespace) and `config.user_role` (never equal to `admin_role`, so no new account is an admin by accident),
+  and the audit sink hears `user_created` with `actor_id=None`.
+- A known subject reuses its account unchanged, even when its suggested
+  username changed.
+- Otherwise it answers an `AdmissionRefusal` and writes nothing:
+  `FOREIGN_ISSUER` for an identity from another issuer, `ACCOUNT_DEACTIVATED`, and
+  `USERNAME_TAKEN` when a new subject's username belongs to another account
+  — including when the store's own uniqueness is stricter than its lookup
+  and `create_for_subject` raises `UsernameTakenError`.
+
+## Reading the session
+
+`webauth.dependencies.current_user_dependency` answers 401 for a missing or
+dead session by default. A server-rendered host instead passes
+`login_redirect=LoginRedirect(path="/login", redirect_query_param="next")` —
+`path` must be a same-origin absolute path, never a scheme or `//` address, nor a backslash or tab/CR/LF form a browser reads as one —
+and a browser navigation (`Accept` rating `text/html` above
+`application/json` by q-value) with no live session then answers 302 to that
+path, with the asked-for address and query string under the query key it
+named, while every other request still gets 401. A dependency can only raise
+an `HTTPException`, so the 302 still carries FastAPI's default JSON body
+(`{"detail":"Found"}`) alongside its `Location` header.
+
+`webauth.dependencies.session_id_from_request(request, config)` is the one
+reader of the session cookie: it parses the raw `Cookie` headers and returns
+the verified session identifier, or `None` when the cookie is missing, longer
+than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
+forged, or present more than once. The limit holds even for a correctly signed
+cookie, so `issue_session_cookies` raises `ValueError` for an identifier whose
+signed cookie would exceed it (identifiers up to 135 characters fit) or that is empty. The signature is an HMAC-SHA256 over `session:` and the identifier, so a signature made for a CSRF token or a pending login is no session cookie, and a cookie issued by 0.14.x or earlier is refused. A sibling
+subdomain can set a second cookie of the same name, so a request carrying two
+is refused rather than resolved to either: `current_user_dependency` answers
+401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
+session cookie itself calls this function instead of `request.cookies`.
 
 ## Configuration
 
@@ -108,6 +307,8 @@ string. A framework that writes style attributes, for example, needs inline styl
 that is the host's choice, so the host names it:
 
 ```python
+from webauth.policies import CspDirective, default_content_security_policy
+
 default_content_security_policy(
     added_sources={CspDirective.STYLE_SRC: ["'unsafe-inline'"]},
 )
@@ -121,66 +322,78 @@ policy is built, and a malformed one is a `ValueError`. A non-empty addition to
 well-formed keyword outside it, such as `'trusted-types-eval'`, is refused too, and a host that
 needs one writes the whole `SecurityHeadersPolicy` string itself.
 
-## Install
+## The store decides every request
 
-The wheel is published as an asset on each tag's release; take the version
-from the [Releases page](https://github.com/overnightworks/webauth/releases)
-and put it in place of `X.Y.Z`:
+The library caches no sessions. Every authenticated request costs one
+`SessionRecordStore.load` and one `touch`, so a session the host ended is
+refused on its next request, with 401 or the login redirect. Whether a loaded
+session still stands is decided by `WebAuthConfig.session_liveness`, a
+`webauth.ports.SessionLivenessPolicy`, and `webauth.dependencies` alone reads
+the wall clock and passes the instant in. `webauth.liveness` ships two:
+`ExpiryColumnLiveness`, for a store with `created_at`/`expires_at` columns, and
+`IdleWindowLiveness`, for one that keeps `last_seen` (and `created_at` when it
+is given an absolute cap).
+`SessionRecordStore.touch` returns a strict `bool`: `True` when a stored row was
+renewed, `False` when the session is gone, which refuses the request like an
+expired session.
 
-```bash
-uv pip install https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl
+## Session lifetime
+
+Three numbers decide how long someone stays signed in, and each has one owner.
+The library reads no session lifetime of its own: the session's expiry belongs
+to the host's session store.
+
+- `WebAuthConfig.cookie_max_age_seconds` is required and is the browser cookie's
+  `Max-Age`. The cookie is issued once at login and never reissued, so it bounds
+  the whole sign-in.
+- The idle window — `IdleWindowLiveness`'s idle argument, or the host's
+  `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
+- The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
+  `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
+  older than the cap, however recently it was used.
+
+Every lifetime — `cookie_max_age_seconds` and the windows and
+caps of both liveness policies — must be a positive whole number of seconds; `0`, a negative
+value, a `float`, a string or a `bool` is refused when the object is built.
+
+The recommended policy is a 30-day cookie, a 7-day idle window and a 30-day
+absolute cap: someone who comes back at least weekly stays signed in for up to
+30 days, and anyone away for more than 7 days signs in again.
+
+```python
+import re
+
+from pydantic import SecretStr
+
+from webauth.config import WebAuthConfig
+from webauth.liveness import IdleWindowLiveness
+from webauth.proxies import TrustedProxies
+from webauth.rate_limit import SingleProcessRateLimitBackend
+
+SEVEN_DAYS = 7 * 24 * 3600
+THIRTY_DAYS = 30 * 24 * 3600
+
+config = WebAuthConfig(
+    session_secret=SecretStr("a-secret-of-at-least-thirty-two-characters"),
+    trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
+    rate_limits=SingleProcessRateLimitBackend(),
+    allowed_hosts_exact=frozenset({"app.example.com"}),
+    allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
+    cookie_max_age_seconds=THIRTY_DAYS,
+    session_liveness=IdleWindowLiveness(SEVEN_DAYS, absolute_max_age_seconds=THIRTY_DAYS),
+)
 ```
 
-In a `pyproject.toml`:
+## Ending a session
 
-```toml
-dependencies = [
-    "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
-]
-```
-
-Tags are never moved; a broken release gets the next patch tag.
-
-## Versioning
-
-The version follows [semantic versioning](https://semver.org/). While it is 0.x,
-a minor release may break a public contract and says so under **Breaking** in the
-[CHANGELOG](CHANGELOG.md); a patch release never does. Only the latest minor
-release receives security fixes, as [SECURITY.md](SECURITY.md) says.
-
-## What it does not do
-
-- It persists nothing and holds no schema or ORM.
-- It defines no routes; the only responses it writes are its own refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login path.
-- It has no user model and no role names beyond the configured ones.
-- It commits no transaction; the caller owns it.
-- It issues no access or ID tokens: it is no identity provider, and it verifies the ID tokens an issuer made.
-- It decides no authorisation beyond the admin check.
-
-## Reading the session
-
-`webauth.dependencies.current_user_dependency` answers 401 for a missing or
-dead session by default. A server-rendered host instead passes
-`login_redirect=LoginRedirect(path="/login", redirect_query_param="next")` —
-`path` must be a same-origin absolute path, never a scheme or `//` address, nor a backslash or tab/CR/LF form a browser reads as one —
-and a browser navigation (`Accept` rating `text/html` above
-`application/json` by q-value) with no live session then answers 302 to that
-path, with the asked-for address and query string under the query key it
-named, while every other request still gets 401. A dependency can only raise
-an `HTTPException`, so the 302 still carries FastAPI's default JSON body
-(`{"detail":"Found"}`) alongside its `Location` header.
-
-`webauth.dependencies.session_id_from_request(request, config)` is the one
-reader of the session cookie: it parses the raw `Cookie` headers and returns
-the verified session identifier, or `None` when the cookie is missing, longer
-than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
-forged, or present more than once. The limit holds even for a correctly signed
-cookie, so `issue_session_cookies` raises `ValueError` for an identifier whose
-signed cookie would exceed it (identifiers up to 135 characters fit) or that is empty. The signature is an HMAC-SHA256 over `session:` and the identifier, so a signature made for a CSRF token or a pending login is no session cookie, and a cookie issued by 0.14.x or earlier is refused. A sibling
-subdomain can set a second cookie of the same name, so a request carrying two
-is refused rather than resolved to either: `current_user_dependency` answers
-401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
-session cookie itself calls this function instead of `request.cookies`.
+`webauth.session_ending` is the one place a session ends in the host's store. A
+logout route calls `end_session(sessions, session_id=...)` rather than deleting
+from the store itself; `end_user_sessions(sessions, user_id)` ends every session
+of an account and returns the store's count, and
+`prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
+a cap after a login and returns their identifiers. The next request carrying an
+ended session's cookie is refused. The `session_administration` helpers
+end sessions through the same functions.
 
 ## Middleware order
 
@@ -261,22 +474,54 @@ The library sends a response's start whole: a cancellation inside the app waits 
 | A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
 | No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
 
-### The host's duties at login
+## CSRF origin
 
-The library never writes, so these belong to the host's OIDC
-callback route:
+`CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
+request: the header overrides the Origin allowlist for `same-origin`
+(passes) and `cross-site` (refused), while `same-site` is decided by the
+allowlist; when the header is absent the allowlist is applied as before.
+When both are absent, a form POST is refused — a JSON POST with neither
+header still passes. An `Origin` or `Referer` that is `null`, empty, has no
+host, carries userinfo or a non-numeric port, or cannot be parsed is refused
+like a foreign origin; an empty `Origin` is not replaced by the `Referer`.
+An exact host matches the parsed host with or without a numeric port. A
+configured host pattern is matched against the whole host plus numeric port,
+so anchor it and allow the port, e.g. `app\.example(:\d+)?`.
 
-- **`next`:** validate the final decoded value against the rule
-  `LoginRedirect.path` enforces: one leading `/`; never `//` or a backslash
-  form after browsers strip tab, CR and LF; no scheme. Otherwise fall back to
-  a fixed local path.
-- **Fresh id:** every successful login mints a fresh session id. Never reuse
-  one from an incoming cookie, and never the issuer's `sid`.
-- **Replaced session:** when a verified session cookie is present, load its
-  record and end it with `end_session(sessions, session_id=<old id>)`, then
-  commit that transaction before `issue_session_cookies`.
-- **Entropy:** at least 128 bits from a CSPRNG. `secrets.token_urlsafe(32)`
-  gives 43 characters, under the 135-character bound.
+`CsrfPolicy` defaults to fail-closed: with `protected` left unset, every
+state-changing request is checked, and `exempt` names the path prefixes that
+carry no session and therefore no token — a sessionless payment-provider
+webhook, say. A deployment that already lists every mutating route in
+`protected` keeps that exact fail-open shape unchanged. It must leave
+`exempt` empty: combining an explicit `protected` list with any exemption is
+refused at startup, because the exemption cannot change that list.
+
+`webauth.dependencies.unauthenticated_response(request, login_redirect)`
+answers exactly what `current_user_dependency` would for the same request —
+the same login redirect or the same 401 — as a real `Response` rather than a
+raised exception, for a host whose own middleware is the session authority
+and cannot rely on FastAPI's dependency-injection or exception-handling
+machinery to reach it.
+
+## Rate limiting, and the optional Redis extra
+
+`WebAuthConfig` requires a `rate_limits`, a `webauth.ports.RateLimitBackend`
+with one method — `is_allowed(key, *, limit, window_seconds) -> bool` — that
+counts the current event against a sliding window and raises rather than
+guessing when it cannot answer, so the middleware fails the request closed.
+
+Two backends implement it:
+
+- `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
+  process that reaches the same Redis. It needs the client library, so a host
+  that uses it installs `overnightworks-webauth[redis]`.
+- `webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
+  process's memory and needs no Redis — for a single-node host that runs one
+  worker. Two processes or two hosts count independently, so a multi-worker
+  deployment uses the Redis backend instead.
+
+Redis is therefore an optional dependency: a deployment that supplies the
+in-process backend installs plain `webauth`.
 
 ## Session administration
 
@@ -319,302 +564,80 @@ explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 | `user_created` | `role` |
 | `session_revoked` | `session_ref` |
 
-Events contain no passwords, hashes, raw session identifiers, or usernames.
+Events contain no raw session identifiers or usernames.
 
 `AuditSink` has a second method, `session_identity_changed(event)`, which
 receives a `SessionIdentityChanged` with `change`, `user_id`, `session_ref`,
 `previous`, and `current` when a live session begins arriving from somewhere
 else.
 
-## Rate limiting, and the optional Redis extra
+## What it owns, and what it leaves to the host
 
-`WebAuthConfig` requires a `rate_limits`, a `webauth.ports.RateLimitBackend`
-with one method — `is_allowed(key, *, limit, window_seconds) -> bool` — that
-counts the current event against a sliding window and raises rather than
-guessing when it cannot answer, so the middleware fails the request closed.
+It owns the machinery an application should not rebuild:
 
-Two backends implement it:
+| Module | Owns |
+|---|---|
+| `webauth.config` | The deployment facts every other module reads, installed on the app |
+| `webauth.cookies` | The signed session cookie and the CSRF token bound to it, issued and cleared |
+| `webauth.dependencies` | Turning a signed cookie into the account that made the request |
+| `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
+| `webauth.proxies` | Which peers may name a client, and the client identity that follows |
+| `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
+| `webauth.ports` | What the host supplies, as Protocols none of which commits: the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
+| `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
+| `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
+| `webauth.session_ending` | The one place a session ends in the host's store |
+| `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
+| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
+| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
+| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
-- `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
-  process that reaches the same Redis. It needs the client library, so a host
-  that uses it installs `overnightworks-webauth[redis]`.
-- `webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
-  process's memory and needs no Redis — for a single-node host that runs one
-  worker. Two processes or two hosts count independently, so a multi-worker
-  deployment uses the Redis backend instead.
+It leaves the application everything that touches the application's own truth:
 
-Redis is therefore an optional dependency: a deployment that supplies the
-in-process backend installs plain `webauth`.
+- **Users and roles.** It has no user model and no role names beyond the
+  configured ones, and it decides no authorisation beyond the admin check.
+- **Persistence.** It holds no schema and no ORM, and an import-linter contract
+  keeps it that way. What it needs reaches it through the Protocols in
+  `webauth.ports`.
+- **Transactions.** None of the stores commits; the caller owns the
+  transaction, so a request that fails leaves nothing behind that the auth
+  machinery wrote, except the rate-limit budget, which counts attempts whether or
+  not the request succeeds.
+- **Routes.** It defines none. The only responses it writes are its own
+  refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
+  path. The start and callback routes are the host's.
+- **Identity.** It issues no access or ID tokens: it is no identity provider, and
+  it verifies the ID tokens an issuer made.
+- **HTTP framing.** A conflicting `Content-Length` or `Transfer-Encoding`, for
+  example, is the ASGI server's job. uvicorn refuses it before the app sees it.
 
-## The store decides every request
+## Install
 
-The library caches no sessions. Every authenticated request costs one
-`SessionRecordStore.load` and one `touch`, so a session the host ended is
-refused on its next request, with 401 or the login redirect. Whether a loaded
-session still stands is decided by `WebAuthConfig.session_liveness`, a
-`webauth.ports.SessionLivenessPolicy`, and `webauth.dependencies` alone reads
-the wall clock and passes the instant in. `webauth.liveness` ships two:
-`ExpiryColumnLiveness`, for a store with `created_at`/`expires_at` columns, and
-`IdleWindowLiveness`, for one that keeps `last_seen` (and `created_at` when it
-is given an absolute cap).
+The wheel is published as an asset on each tag's release; take the version
+from the [Releases page](https://github.com/overnightworks/webauth/releases)
+and put it in place of `X.Y.Z`:
 
-## Session lifetime
-
-Three numbers decide how long someone stays signed in, and each has one owner.
-The library reads no session lifetime of its own: the session's expiry belongs
-to the host's session store.
-
-- `WebAuthConfig.cookie_max_age_seconds` is required and is the browser cookie's
-  `Max-Age`. The cookie is issued once at login and never reissued, so it bounds
-  the whole sign-in.
-- The idle window — `IdleWindowLiveness`'s idle argument, or the host's
-  `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
-- The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
-  `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
-  older than the cap, however recently it was used.
-
-Every lifetime — `cookie_max_age_seconds` and the windows and
-caps of both liveness policies — must be a positive whole number of seconds; `0`, a negative
-value, a `float`, a string or a `bool` is refused when the object is built.
-
-The recommended policy is a 30-day cookie, a 7-day idle window and a 30-day
-absolute cap: someone who comes back at least weekly stays signed in for up to
-30 days, and anyone away for more than 7 days signs in again.
-
-```python
-import re
-
-from pydantic import SecretStr
-
-from webauth.config import WebAuthConfig
-from webauth.liveness import IdleWindowLiveness
-from webauth.proxies import TrustedProxies
-from webauth.rate_limit import SingleProcessRateLimitBackend
-
-SEVEN_DAYS = 7 * 24 * 3600
-THIRTY_DAYS = 30 * 24 * 3600
-
-config = WebAuthConfig(
-    session_secret=SecretStr("a-secret-of-at-least-thirty-two-characters"),
-    trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
-    rate_limits=SingleProcessRateLimitBackend(),
-    allowed_hosts_exact=frozenset({"app.example.com"}),
-    allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
-    cookie_max_age_seconds=THIRTY_DAYS,
-    session_liveness=IdleWindowLiveness(SEVEN_DAYS, absolute_max_age_seconds=THIRTY_DAYS),
-)
+```bash
+uv pip install https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl
 ```
 
-## Ending a session
+In a `pyproject.toml`:
 
-`webauth.session_ending` is the one place a session ends in the host's store. A
-logout route calls `end_session(sessions, session_id=...)` rather than deleting
-from the store itself; `end_user_sessions(sessions, user_id)` ends every session
-of an account and returns the store's count, and
-`prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
-a cap after a login and returns their identifiers. The next request carrying an
-ended session's cookie is refused. The `session_administration` helpers
-end sessions through the same functions.
-
-## CSRF origin
-
-`CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
-request: the header overrides the Origin allowlist for `same-origin`
-(passes) and `cross-site` (refused), while `same-site` is decided by the
-allowlist; when the header is absent the allowlist is applied as before.
-When both are absent, a form POST is refused — a JSON POST with neither
-header still passes. An `Origin` or `Referer` that is `null`, empty, has no
-host, carries userinfo or a non-numeric port, or cannot be parsed is refused
-like a foreign origin; an empty `Origin` is not replaced by the `Referer`.
-An exact host matches the parsed host with or without a numeric port. A
-configured host pattern is matched against the whole host plus numeric port,
-so anchor it and allow the port, e.g. `app\.example(:\d+)?`.
-
-`CsrfPolicy` defaults to fail-closed: with `protected` left unset, every
-state-changing request is checked, and `exempt` names the path prefixes that
-carry no session and therefore no token — a sessionless payment-provider
-webhook, say. A deployment that already lists every mutating route in
-`protected` keeps that exact fail-open shape unchanged. It must leave
-`exempt` empty: combining an explicit `protected` list with any exemption is
-refused at startup, because the exemption cannot change that list.
-
-`webauth.dependencies.unauthenticated_response(request, login_redirect)`
-answers exactly what `current_user_dependency` would for the same request —
-the same login redirect or the same 401 — as a real `Response` rather than a
-raised exception, for a host whose own middleware is the session authority
-and cannot rely on FastAPI's dependency-injection or exception-handling
-machinery to reach it.
-
-## OpenID Connect login
-
-`webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE
-for one client at one issuer, described by an `OidcClientConfig` whose URLs
-are all https and whose `client_secret` is a `SecretStr`. `begin_login()`
-answers the URL to send the browser to and a `PendingLogin` — its state,
-nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
-`complete_login(pending, callback_query)` takes that pending login and the
-callback's raw query string and answers an `OidcIdentity` (subject, issuer,
-full group paths, `sid`, `preferred_username`) or an `OidcRefusal` naming its
-reason. The state is checked before anything else the callback says; then
-the pending login's age: one older than `PENDING_LOGIN_MAX_AGE_SECONDS`
-(600) or dated in the future is `PENDING_LOGIN_EXPIRED`, and no token
-request is sent. An error the issuer reports is carried as its short error
-code only, never its description, and a `code` longer than
-`MAX_AUTHORIZATION_CODE_CHARS` (2048) is `MALFORMED_CALLBACK`. A token answer
-that names any member twice, at any depth, is `TOKEN_ENDPOINT_FAILED` rather
-than letting the last one win. The code is exchanged through the `post_token_request` the host
-injects, authenticated with HTTP Basic, and the ID token is verified by a
-`JwtVerifier` whose one accepted audience is the client ID, then checked for
-the pending nonce and an authorized party: a token for several audiences must
-name the client as its `azp`, and any `azp` a token names must be the client.
-
-In production both outbound calls go through `webauth.https_client`, the one
-module that imports urllib3:
-
-```python
-import time
-
-from webauth.https_client import fetch_key_set_over_https
-from webauth.oidc import OidcRelyingParty
-from webauth.oidc_login import post_token_request_over_https
-
-relying_party = OidcRelyingParty(
-    client_config,
-    post_token_request=post_token_request_over_https,
-    fetch_key_set=fetch_key_set_over_https,
-    wall_clock=time.time,
-    monotonic_clock=time.monotonic,
-)
+```toml
+dependencies = [
+    "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
+]
 ```
 
-Each request is HTTPS only, under the system's trusted certificates
-(`SSL_CERT_FILE` included), with a connect and a read timeout of five seconds
-each and a total deadline of ten seconds — `KEY_SET_FETCH_DEADLINE_SECONDS`
-and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over connecting, the TLS handshake and
-the whole answer, so an origin that drips its answer is cut off as a timeout;
-only the host name lookup runs outside it. No retry, no redirect followed and
-no content decoding. The key-set
-fetch reads at most one byte past `MAX_KEY_SET_BYTES` and refuses any answer
-but 200. The token POST is a form POST with the client's Basic authorization
-and `Accept: application/json`; it hands back any answer but a redirect —
-an issuer's `400 invalid_grant` included — and raises `TokenEndpointError`
-for a redirect, an answer past `MAX_TOKEN_RESPONSE_BYTES`, a TLS failure, a
-timeout or an unreachable origin. Its message is the library's own and never
-quotes the URL, the client secret, the code or the verifier. urllib3 logs
-nothing during either call, since its records quote the URL and whatever
-malformed header text the origin sends back. A `timeout_seconds` or
-`deadline_seconds` of zero or less raises `ValueError`, and
-`post_token_request_over_https` raises `ValueError` when `timeout_seconds`
-exceeds `deadline_seconds` instead of capping it. `TokenEndpointError.failure`
-names the `ExchangeFailure` that ended the request, so a caller can tell
-`TIMED_OUT` from other transport failures.
+Tags are never moved; a broken release gets the next patch tag.
 
-`webauth.oidc_login.admit_identity(identity, *, bound_issuer, accounts, lock,
-audit, config)` turns that identity into the account it signs in as. The host
-binds its store to one issuer — the `issuer` of its `OidcClientConfig` — and
-passes it as `bound_issuer`; changing the issuer is a migration of the host's
-accounts, never a configuration change. `accounts` is a `SubjectUserStore`
-(`get`, `get_by_username`, and `create_for_subject(subject, username, role)`,
-which adds an account whose `id` is the subject, so a back-channel logout names
-the account directly). Any stored account whose `id` equals the subject
-character for character is that subject's account and signs in as it is,
-whatever created it. The host's `get` must compare exactly: no case, accent or
-trailing-space folding, even where its id column's collation folds. A host that
-migrates legacy accounts makes sure that no legacy `id` can equal a subject of
-the bound issuer. Admission holds `lock.hold()` and never commits:
+## Versioning
 
-- A new subject gets an account with the issuer's `preferred_username` (or the
-  subject when it suggests none, or only whitespace) and `config.user_role` (never equal to `admin_role`, so no new account is an admin by accident),
-  and the audit sink hears `user_created` with `actor_id=None`.
-- A known subject reuses its account unchanged, even when its suggested
-  username changed.
-- Otherwise it answers an `AdmissionRefusal` and writes nothing:
-  `FOREIGN_ISSUER` for an identity from another issuer, `ACCOUNT_DEACTIVATED`, and
-  `USERNAME_TAKEN` when a new subject's username belongs to another account
-  — including when the store's own uniqueness is stricter than its lookup
-  and `create_for_subject` raises `UsernameTakenError`.
-
-### The host's start and callback routes
-
-`webauth.oidc_login` carries the pending login for the host, so the host
-keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
-Connect. The host serves two routes over its one `OidcRelyingParty`:
-
-```python
-@app.get("/login/oidc")
-def start(request: Request) -> Response:
-    response = Response(status_code=303)
-    response.headers["location"] = start_login(relying_party, request, response, config)
-    return response
-
-
-@app.get("/auth/callback")
-def callback(request: Request, response: Response) -> dict[str, str]:
-    outcome = finish_login(
-        relying_party, request, response, config,
-        bound_issuer=client_config.issuer, accounts=accounts, lock=lock, audit=audit,
-    )
-    if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
-        response.status_code = 403
-        return describe_the_hosts_refusal(outcome)
-    session = open_the_hosts_session(outcome)
-    issue_session_cookies(response, session.id, config)
-    ...
-```
-
-`start_login(relying_party, request, response, config)` begins a login, sets
-its pending-login cookie on `response` and returns the authorization URL.
-`finish_login(...)` answers the `UserRecord` to open a session for, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
-the host commits on an account and opens the session itself. `finish_login`
-sets the header that clears the pending-login cookie on `response`, so the
-host answers with that response on every outcome, refusals included: FastAPI
-copies an injected `response`'s headers only when the route returns a value
-that is not itself a `Response`; a returned `JSONResponse` is sent as-is and a
-raised `HTTPException` gets a new response, so neither carries them, which
-would leave the pending cookie in the browser.
-
-The pending login travels in a cookie of its own, one per login, so two tabs
-never overwrite each other:
-
-- **Name:** the pending-login prefix `__Host-oidc_pending_` followed by the
-  first 16 hex characters of the SHA-256 of the login's state. With
-  `cookie_secure=False` the name is the plain `oidc_pending_…` form and the
-  cookie is not `Secure`; that is for local development over http only, where
-  a sibling host or a network observer can set or read it.
-- **Flags:** `HttpOnly`, `Path=/`, `Max-Age=600`, and `Secure` following
-  `cookie_secure`. It is always `SameSite=Lax`, whatever `cookie_samesite`
-  says: the callback is a top-level navigation from the issuer's site, which a
-  `Strict` cookie would not accompany.
-- **Value:** `v1.` followed by the state, nonce, verifier and `issued_at`,
-  each bounded to the exact shape `begin_login` mints, and an HMAC-SHA256
-  signature under the session signing key with an `oidc-pending:` prefix no
-  other cookie uses; the whole value is at most 256 characters, and the
-  signature is compared in constant time.
-- **Cap:** a browser holds at most five pending-login cookies. A start beyond
-  them clears the oldest by `issued_at` — a cookie that does not verify, or
-  whose name appears twice, counts as oldest — so repeated starts never crowd
-  out the session and CSRF cookies. Only names of the exact pending-login
-  shape, the prefix and 16 lowercase hex characters, count; any other cookie
-  whose name merely starts with the prefix is neither counted nor cleared.
-
-`finish_login` reads the state from the callback, selects exactly the cookie
-that state names and clears it on every outcome — admitted or refused —
-while every other tab's cookie stays. The state is read on its own, so a
-callback naming one state beside a malformed rest — another parameter named
-twice, or one that does not decode — still clears that state's cookie; it is
-refused as `MALFORMED_CALLBACK` when that state's cookie is genuine and as
-`STATE_MISMATCH` otherwise. A callback with no state, an empty one, its
-state twice or an undecodable one selects no cookie. Every one of these, and
-a missing, forged, oversized, unknown-version or duplicated cookie, or a
-genuine cookie of another login, is refused before any token request:
-`MALFORMED_CALLBACK` for a malformed query that names a single state whose
-cookie is genuine, otherwise `STATE_MISMATCH`.
-
-**Single use, stated honestly.** A pending login is single-use because its
-cookie is cleared on every outcome and the issuer accepts its authorization
-code once. webauth keeps no server-side replay store: a copy of the cookie
-taken before the callback is stopped by the issuer refusing the spent code
-(`TOKEN_REQUEST_REFUSED`), not by webauth remembering it.
+The version follows [semantic versioning](https://semver.org/). While it is 0.x,
+a minor release may break a public contract and says so under **Breaking** in the
+[CHANGELOG](CHANGELOG.md); a patch release never does. Only the latest minor
+release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 
 ## Development
 
