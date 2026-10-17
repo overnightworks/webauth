@@ -83,7 +83,6 @@ class AdmissionRefusal(StrEnum):
 
     FOREIGN_ISSUER = "foreign-issuer"
     ACCOUNT_DEACTIVATED = "account-deactivated"
-    SUBJECT_HELD_BY_PASSWORD_ACCOUNT = "subject-held-by-password-account"
     USERNAME_TAKEN = "username-taken"
 
 
@@ -199,8 +198,11 @@ def admit_identity(
     """The account ``identity`` signs in as, created on its first visit.
 
     A known subject keeps its account as it is, whatever username the issuer
-    now suggests. A subject that names a password account is refused rather
-    than linked: linking is each host's migration to decide.
+    now suggests. Any stored account whose ``id`` equals the subject character
+    for character is that subject's account and signs in as it is, whatever
+    created it; ``SubjectUserStore.get`` must compare exactly. A host that
+    migrates legacy accounts makes sure that no legacy ``id`` can equal a
+    subject of the bound issuer.
     """
     if identity.issuer != bound_issuer:
         return AdmissionRefusal.FOREIGN_ISSUER
@@ -208,8 +210,6 @@ def admit_identity(
         account = accounts.get(identity.subject)
         if account is None:
             return _provision(identity, accounts=accounts, audit=audit, config=config)
-        if account.password_hash is not None:
-            return AdmissionRefusal.SUBJECT_HELD_BY_PASSWORD_ACCOUNT
         if not account.is_active:
             return AdmissionRefusal.ACCOUNT_DEACTIVATED
         return account
