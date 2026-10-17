@@ -164,9 +164,7 @@ class IssuerScenario:
 
 @pytest.fixture
 def issuer() -> IssuerScenario:
-    endpoint = FakeKeySetEndpoint(
-        key_set_document(public_jwk(rsa_key("current"), "current-key"))
-    )
+    endpoint = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key")))
     return IssuerScenario(endpoint, FakeClock(1_800_000_000.0), FakeClock(5_000.0))
 
 
@@ -464,95 +462,188 @@ def test_time_claims_hold_exactly_the_configured_leeway_on_the_wall_clock(
     assert issuer.verifier.verify(issuer.token(changes)) == expected
 
 
+def _signing_keys(count: int) -> list[dict[str, Any]]:
+    current = rsa_key("current")
+    return [public_jwk(current, "current-key")] + [
+        public_jwk(current, f"spare-{index}") for index in range(count - 1)
+    ]
+
+
+def _passed_over_keys(count: int) -> list[dict[str, Any]]:
+    """What the OpenID Foundation suite's OP publishes beside its two RS256
+    keys: other signing algorithms, encryption keys, and entries no verifier
+    can use."""
+    p256 = ec.generate_private_key(ec.SECP256R1()).public_key()
+    secp256k1 = ec.generate_private_key(ec.SECP256K1()).public_key()
+    kinds = [
+        {**ECAlgorithm.to_jwk(p256, as_dict=True), "use": "sig"},
+        {**ECAlgorithm.to_jwk(p256, as_dict=True), "alg": "ES256"},
+        {**ECAlgorithm.to_jwk(secp256k1, as_dict=True), "alg": "ES256K"},
+        {"kty": "OKP", "crv": "Ed25519", "x": "A" * 43, "alg": "EdDSA"},
+        public_jwk(rsa_key("encryption"), "unused", alg="RSA-OAEP", use="enc"),
+        {**ECAlgorithm.to_jwk(p256, as_dict=True), "alg": "ECDH-ES", "use": "enc"},
+        {"kty": "AKP", "alg": "ML-DSA-9999", "pub": "AAAA"},
+        {"kty": "UNKNOWN"},
+        public_jwk(rsa_key("encryption"), "unused", alg="RS9999"),
+        {**ECAlgorithm.to_jwk(p256, as_dict=True), "alg": "ES9999"},
+        {**ECAlgorithm.to_jwk(p256, as_dict=True), "crv": "P-9999"},
+    ]
+    return [{**kinds[index % len(kinds)], "kid": f"passed-over-{index}"} for index in range(count)]
+
+
 def _defective_key_sets() -> list[Any]:
     current = rsa_key("current")
     valid_jwk = public_jwk(current, "current-key")
     return [
-        pytest.param(KeySetFetchError("timed out"), id="fetch-failure"),
-        pytest.param(b" " * MAX_KEY_SET_BYTES + b"{}", id="oversized-response"),
+        pytest.param(KeySetFetchError("timed out"), "fetch-failed", id="fetch-failure"),
+        pytest.param(b" " * MAX_KEY_SET_BYTES + b"{}", "too-large", id="oversized-response"),
         pytest.param(
             key_set_document(
                 valid_jwk,
                 *(public_jwk(current, f"spare-{index}") for index in range(MAX_KEY_SET_KEYS)),
             ),
+            "key-count-out-of-range",
             id="too-many-keys",
         ),
         pytest.param(
             key_set_document(
-                valid_jwk,
-                *(
-                    public_jwk(current, f"encryption-{index}", use="enc")
-                    for index in range(MAX_KEY_SET_KEYS)
-                ),
+                *_signing_keys(MAX_KEY_SET_KEYS),
+                public_jwk(current, "eleventh", n=7),
             ),
-            id="too-many-keys-counting-passed-over-ones",
+            "key-count-out-of-range",
+            id="eleventh-signing-key-malformed-is-counted-before-it-is-built",
+        ),
+        pytest.param(
+            key_set_document(
+                *_signing_keys(MAX_KEY_SET_KEYS),
+                public_jwk(current, "encryption-key", use="enc", d="AQAB"),
+            ),
+            "secret-key-published",
+            id="passed-over-key-carrying-a-private-member",
         ),
         pytest.param(
             key_set_document(valid_jwk, public_jwk(rsa_key("other"), "current-key")),
+            "duplicate-key-id",
             id="duplicate-kid",
         ),
         pytest.param(
             key_set_document(valid_jwk, {"kty": "oct", "kid": "shared", "k": "c2VjcmV0"}),
+            "secret-key-published",
             id="symmetric-key",
         ),
         pytest.param(
             key_set_document({**RSAAlgorithm.to_jwk(current, as_dict=True), "kid": "current-key"}),
+            "secret-key-published",
             id="private-key",
         ),
         pytest.param(
             key_set_document(valid_jwk, weak_public_jwk("weak-key")),
+            "key-too-short",
             id="rsa-key-under-2048-bits",
         ),
         pytest.param(
             key_set_document(public_jwk(current, "current-key", alg="RS512")),
+            "no-rs256-signing-key",
             id="only-an-rs512-key",
         ),
         pytest.param(
             key_set_document(public_jwk(current, "current-key", use="enc")),
+            "no-rs256-signing-key",
             id="only-an-encryption-key",
         ),
         pytest.param(
             key_set_document(public_jwk(current, "current-key", key_ops=["encrypt"])),
+            "no-rs256-signing-key",
             id="only-a-key-without-verify",
         ),
         pytest.param(
             key_set_document(public_jwk(current, "current-key", key_ops="verify")),
+            "no-rs256-signing-key",
             id="only-a-key-whose-key-ops-is-no-list",
         ),
         pytest.param(
-            key_set_document(public_jwk(current, "current-key", kid=7)), id="key-kid-not-a-string"
+            key_set_document(public_jwk(current, "current-key", kid=7)),
+            "malformed-key",
+            id="key-kid-not-a-string",
         ),
         pytest.param(
             key_set_document(public_jwk(current, "current-key", n=7)),
+            "malformed-key",
             id="key-modulus-not-a-string",
         ),
         pytest.param(
-            key_set_document(public_jwk(current, "current-key", e="AAAA")), id="key-exponent-zero"
+            key_set_document(public_jwk(current, "current-key", e="AAAA")),
+            "invalid-rsa-key",
+            id="key-exponent-zero",
         ),
-        pytest.param(key_set_document("not a key"), id="key-not-an-object"),
-        pytest.param(key_set_document(), id="no-keys"),
-        pytest.param(b'{"keys": {"current-key": {}}}', id="keys-not-a-list"),
-        pytest.param(b'{"keys": [], "keys": []}', id="duplicate-member"),
-        pytest.param(b'{"keys": [', id="malformed-json"),
+        pytest.param(key_set_document("not a key"), "key-not-an-object", id="key-not-an-object"),
+        pytest.param(key_set_document(), "key-count-out-of-range", id="no-keys"),
+        pytest.param(
+            b'{"keys": {"current-key": {}}}', "key-count-out-of-range", id="keys-not-a-list"
+        ),
+        pytest.param(b'{"keys": [], "keys": []}', "not-strict-json", id="duplicate-member"),
+        pytest.param(b'{"keys": [', "not-strict-json", id="malformed-json"),
         pytest.param(
             json.dumps({"keys": [valid_jwk], "extra": float("nan")}).encode(),
+            "not-strict-json",
             id="non-json-constant",
         ),
         pytest.param(
             json.dumps({"keys": [valid_jwk]}).encode()[:-1] + b', "extra": 1e999999}',
+            "not-strict-json",
             id="number-overflowing-to-infinity",
         ),
-        pytest.param(gzip.compress(key_set_document(valid_jwk)), id="compressed"),
+        pytest.param(
+            gzip.compress(key_set_document(valid_jwk)), "not-strict-json", id="compressed"
+        ),
     ]
 
 
-@pytest.mark.parametrize("response", _defective_key_sets())
+def _logged_refresh_failures(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "webauth.jwt_verification" and record.levelno == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(("response", "failure"), _defective_key_sets())
 def test_a_defective_key_set_is_refused_as_a_whole(
-    issuer: IssuerScenario, response: bytes | Exception
+    issuer: IssuerScenario,
+    caplog: pytest.LogCaptureFixture,
+    response: bytes | Exception,
+    failure: str,
 ) -> None:
     issuer.serve(response)
 
-    assert issuer.verifier.verify(issuer.token()) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    with caplog.at_level(logging.WARNING, logger="webauth.jwt_verification"):
+        refused = issuer.verifier.verify(issuer.token())
+
+    assert refused == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    [logged] = _logged_refresh_failures(caplog)
+    assert logged.endswith(failure)
+
+
+@pytest.mark.parametrize(
+    ("passed_over", "signing_keys"),
+    [
+        pytest.param(11, 2, id="the-measured-shape-of-two-signing-keys-among-thirteen"),
+        pytest.param(20, MAX_KEY_SET_KEYS, id="the-most-signing-keys-among-many-passed-over"),
+        pytest.param(MAX_KEY_SET_KEYS, 1, id="one-signing-key-among-encryption-keys"),
+    ],
+)
+def test_keys_passed_over_do_not_count_toward_the_key_bound(
+    issuer: IssuerScenario, passed_over: int, signing_keys: int
+) -> None:
+    published = _signing_keys(signing_keys)
+    issuer.serve(key_set_document(*published, *_passed_over_keys(passed_over)))
+
+    verified = [
+        issuer.verifier.verify(issuer.token(header={"kid": jwk["kid"]}))
+        for jwk in (published[0], published[-1])
+    ]
+
+    assert verified == [issuer.verified()] * 2
 
 
 def test_keys_published_for_other_purposes_beside_the_signing_key_are_passed_over(
@@ -590,15 +681,20 @@ def test_a_key_whose_key_ops_include_verify_is_accepted(issuer: IssuerScenario) 
     assert issuer.verifier.verify(issuer.token()) == issuer.verified()
 
 
-@pytest.mark.parametrize("response", _defective_key_sets())
+@pytest.mark.parametrize(("response", "failure"), _defective_key_sets())
 def test_a_failed_refresh_keeps_the_last_valid_key_set_until_its_ttl(
-    issuer: IssuerScenario, response: bytes | Exception
+    issuer: IssuerScenario,
+    caplog: pytest.LogCaptureFixture,
+    response: bytes | Exception,
+    failure: str,
 ) -> None:
     assert issuer.verifier.verify(issuer.token()) == issuer.verified()
     issuer.serve(response)
     issuer.after_cooldown()
 
-    refreshing = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
+    with caplog.at_level(logging.WARNING, logger="webauth.jwt_verification"):
+        refreshing = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
+    assert [message.endswith(failure) for message in _logged_refresh_failures(caplog)] == [True]
     cooling_down = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
     still_cached = issuer.verifier.verify(issuer.token())
     issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS
