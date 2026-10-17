@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import os
 import re
 import secrets
 import signal
@@ -41,16 +40,22 @@ from harness import (
     RunRecord,
     drive_browser_off_the_main_thread,
     free_port,
+    host_state,
     keep_clean_evidence,
+    launch_pinned_chromium,
     leftovers,
+    recording_context,
+    remember_cookies,
+    reset_host,
     runtime_directory,
     start_host,
     stop_host,
     stop_on_first_signal,
+    tell_host,
 )
 from host_app import HostSettings
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
-from shim import LOOPBACK, TlsShim
+from shim import TlsShim
 from stack import Admin, HeldStack, require_pinned_clean_edge
 
 from webauth.cookies import (
@@ -78,8 +83,6 @@ USER_GROUP = "/apps/songmaker"
 DISABLED_USER_NAME = "d1-disabled"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
-PAGE_TIMEOUT_MILLISECONDS = 30_000
-URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "session_state", "state")
 
 
 @dataclass(frozen=True)
@@ -117,8 +120,7 @@ class Proof(RunRecord):
     """One run: what it created, what it saw, and what it concluded."""
 
     browser: Browser | None = None
-    app_port: int = 0
-    observe_port: int = 0
+    host: Host | None = None
     ca_certificate: Path | None = None
     session_secret: str = ""
     user_password: str = ""
@@ -127,7 +129,6 @@ class Proof(RunRecord):
     client_secret: str = ""
     stack: HeldStack | None = None
     width: Width = DESKTOP
-    browser_tmp: Path | None = None
 
     def held_or_failed(self, label: str, check: Callable[[], str]) -> bool:
         if self.stop_requested.is_set():
@@ -152,30 +153,21 @@ class Proof(RunRecord):
     def browsing(self, width: Width = DESKTOP) -> Iterator[Page]:
         assert self.browser is not None
         self.width = width
-        context = self.browser.new_context(**width.context_options)
-        context.set_default_timeout(PAGE_TIMEOUT_MILLISECONDS)
-        context.on("request", self._remember_url_credentials)
-        context.on("request", self.log.watch)
-        page = context.new_page()
-        try:
-            yield page
-        finally:
-            with contextlib.ExitStack() as cleanup:
-                cleanup.callback(context.close)
-                cleanup.callback(self.log.collect)
-                cleanup.callback(self.capture_cookies, context)
+        with recording_context(self, self.browser, **width.context_options) as context:
+            page = context.new_page()
+            try:
+                yield page
+            finally:
+                self.register_pending_logins(context)
 
-    def _remember_url_credentials(self, request: Any) -> None:
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.url).query)
-        for name in URL_PARAMETERS_THAT_ARE_CREDENTIALS:
-            for value in query.get(name, []):
-                self.registry.add(f"url parameter {name}", value)
-
-    def capture_cookies(self, context: BrowserContext) -> None:
+    def register_pending_logins(self, context: BrowserContext) -> None:
         for cookie in context.cookies():
-            self.registry.add(f"cookie {recorded_cookie_name(cookie['name'])}", cookie["value"])
             if is_pending_login_cookie_name(cookie["name"], secure=True):
                 self._register_pending_login(cookie["value"])
+
+    def capture_cookies(self, context: BrowserContext) -> None:
+        remember_cookies(self, context)
+        self.register_pending_logins(context)
 
     def _register_pending_login(self, cookie_value: str) -> None:
         pending = verify_pending_login(cookie_value, self.session_secret.encode())
@@ -191,16 +183,16 @@ class Proof(RunRecord):
         page.screenshot(path=self.evidence_dir / f"{scenario}-{moment}.png")
 
     def host_state(self) -> dict[str, Any]:
-        return httpx.get(f"http://{LOOPBACK}:{self.observe_port}/state").json()
+        assert self.host is not None
+        return host_state(self.host)
 
     def reset_host(self) -> None:
-        self._tell_host("reset")
+        assert self.host is not None
+        reset_host(self.host)
 
     def deactivate_host_accounts(self) -> None:
-        self._tell_host("deactivate")
-
-    def _tell_host(self, order: str) -> None:
-        httpx.post(f"http://{LOOPBACK}:{self.observe_port}/{order}").raise_for_status()
+        assert self.host is not None
+        tell_host(self.host, "deactivate")
 
     def set_user_enabled(self, user_id: str, enabled: bool) -> None:
         assert self.stack is not None
@@ -450,9 +442,9 @@ def back_button_shows(proof: Proof, page: Page) -> str:
 
 
 def replayed_session_status(proof: Proof, session: dict[str, Any]) -> int:
-    assert proof.ca_certificate is not None
+    assert proof.ca_certificate is not None and proof.host is not None
     return httpx.get(
-        f"https://localhost:{proof.app_port}/me",
+        f"https://localhost:{proof.host.app_port}/me",
         headers={"Cookie": f"{session['name']}={session['value']}"},
         verify=ssl.create_default_context(cafile=str(proof.ca_certificate)),
     ).status_code
@@ -540,8 +532,6 @@ def host_settings(
 
 
 def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
-    proof.browser_tmp = runtime / "tmp"
-    proof.browser_tmp.mkdir()
     proof.session_secret = secrets.token_urlsafe(48)
     proof.user_password = secrets.token_urlsafe(18)
     proof.client_secret = secrets.token_urlsafe(24)
@@ -571,7 +561,9 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
                     hosts.append(start_host(proof, runtime, settings, tls.ca_certificate))
                 drive_browser_off_the_main_thread(
                     proof,
-                    lambda: drive_browser(proof, tls, shim.port, untrusted_shim.port, hosts),
+                    lambda: drive_browser(
+                        proof, runtime, tls, shim.port, untrusted_shim.port, hosts
+                    ),
                 )
             finally:
                 proof.winding_down = True
@@ -581,23 +573,22 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
 
 
 def drive_browser(
-    proof: Proof, tls: ThrowawayTls, shim_port: int, untrusted_port: int, hosts: list[Host]
+    proof: Proof, runtime: Path, tls: ThrowawayTls, shim_port: int, untrusted_port: int,
+    hosts: list[Host],
 ) -> None:
-    assert proof.browser_tmp is not None
-    os.environ["TMPDIR"] = str(proof.browser_tmp)
     with sync_playwright() as playwright:
         for host in hosts:
-            proof.app_port, proof.observe_port = host.app_port, host.observe_port
-            rules = ", ".join((
-                f"MAP {IDP_HOST} {LOOPBACK}:{shim_port}",
-                f"MAP {APP_HOST} {LOOPBACK}:{host.app_port}",
-                f"MAP {SECOND_APP_HOST} {LOOPBACK}:{host.app_port}",
-                f"MAP {UNTRUSTED_HOST} {LOOPBACK}:{untrusted_port}",
-            ))
-            proof.browser = playwright.chromium.launch(args=[
-                f"--host-resolver-rules={rules}",
-                f"--ignore-certificate-errors-spki-list={tls.leaf_spki_sha256_base64}",
-            ])
+            proof.host = host
+            proof.browser = launch_pinned_chromium(
+                playwright, runtime,
+                {
+                    IDP_HOST: shim_port,
+                    APP_HOST: host.app_port,
+                    SECOND_APP_HOST: host.app_port,
+                    UNTRUSTED_HOST: untrusted_port,
+                },
+                tls.leaf_spki_sha256_base64,
+            )
             try:
                 shipped_default = host.cookie_samesite == DEFAULT_COOKIE_SAMESITE
                 if shipped_default and not run_default_scenarios(proof):

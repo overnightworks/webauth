@@ -9,7 +9,8 @@ known account on ``POST /deactivate``.
 
 Where an issuer is told a ``userinfo_endpoint``, the host calls it once, with the
 access token of the token answer, after and only after a login was admitted: the
-conformance suite finishes an accepting module on that request."""
+conformance suite finishes an accepting module on that request. A call that fails is
+logged by exception type alone and never ends the admitted login."""
 
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import html
 import importlib.util
 import json
 import os
+import re
 import signal
 import ssl
 import sys
@@ -67,6 +69,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 SCOPES = ("openid", "profile", "groups")
 LEEWAY_SECONDS = 30
 USERINFO_TIMEOUT_SECONDS = 10
+BEARER_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")  # RFC 6750 b64token: fit for a header
 
 PAGE = Template("""<!doctype html>
 <html><head><meta charset="utf-8">
@@ -146,7 +149,9 @@ class AccessTokenKept:
             token = json.loads(answer.body).get("access_token")
         except (ValueError, AttributeError):
             return None  # the relying party judges an answer that is no token answer
-        return token if isinstance(token, str) else None
+        if isinstance(token, str) and BEARER_TOKEN.fullmatch(token):
+            return token
+        return None  # a token no header can carry is never sent, so no transport error quotes it
 
 
 class World:
@@ -164,9 +169,11 @@ class World:
         self.sessions = arrangement.SessionRecordsInMemory(users=self.accounts, lock=self.lock)
         self.audit = arrangement.RecordingAuditSink()
         self.callbacks_received = 0
+        self.logins_admitted = 0
         self.last_refusal: str | None = None
         self.last_token_rejection: str | None = None
         self.userinfo_calls = 0
+        self.userinfo_answered = 0
 
     def deactivate_accounts(self) -> None:
         with self.lock.hold():
@@ -180,7 +187,9 @@ class World:
             "callbacks_received": self.callbacks_received,
             "last_refusal": self.last_refusal,
             "token_rejection": self.last_token_rejection,
+            "logins_admitted": self.logins_admitted,
             "userinfo_calls": self.userinfo_calls,
+            "userinfo_answered": self.userinfo_answered,
         }
 
 
@@ -244,13 +253,17 @@ def call_userinfo(settings: HostSettings, current: World) -> None:
     if settings.userinfo_endpoint is None or access_token is None:
         return
     current.userinfo_calls += 1
-    answer = httpx.get(
-        settings.userinfo_endpoint,
-        headers={"Authorization": f"Bearer {access_token}"},
-        verify=ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"]),
-        timeout=USERINFO_TIMEOUT_SECONDS,
-    )
-    answer.raise_for_status()
+    try:
+        httpx.get(
+            settings.userinfo_endpoint,
+            headers={"Authorization": f"Bearer {access_token}"},
+            verify=ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"]),
+            timeout=USERINFO_TIMEOUT_SECONDS,
+        ).raise_for_status()
+    except httpx.HTTPError as error:
+        print(f"the UserInfo call failed: {type(error).__name__}", flush=True)
+        return
+    current.userinfo_answered += 1
 
 
 def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
@@ -324,10 +337,11 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
             reason = outcome.reason.value if isinstance(outcome, OidcRefusal) else outcome.value
             current.last_refusal = reason
-            if isinstance(outcome, OidcRefusal) and outcome.token_rejection is not None:
-                current.last_token_rejection = outcome.token_rejection.value
+            rejection = outcome.token_rejection if isinstance(outcome, OidcRefusal) else None
+            current.last_token_rejection = rejection.value if rejection else None
             response.status_code = 403
             return PAGE.substitute(headline="Sign-in refused", body=html.escape(reason))
+        current.logins_admitted += 1
         call_userinfo(settings, current)
         with current.lock.hold():
             record = current.sessions.create(
