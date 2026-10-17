@@ -1,0 +1,7 @@
+claim_id = "5b2ad3c42a7d44dba36de899b702c97f"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "4ad3432c942ce115f0d994738fd3975c8d956683"
+branch = "claude/issue-166-w8-s11-readme-oidc-keycloak"
+scope = ["README.md", "SECURITY.md"]
+opened_commit = "94e3c5825baf6ff5a64bab3c72c8d1066954f464"
