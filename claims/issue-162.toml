@@ -1,0 +1,8 @@
+claim_id = "ec87ea61323b4f328cd4e1c2c5a2e220"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "ead34a615fc0a13a9f8374cd9b0a12d8bc9c6ff6"
+branch = "claude/issue-162-w8-s9-oidc-typing-host"
+scope = [".github/workflows/ci.yml", ".importlinter", "AGENTS.md", "tests/typing/oidc_host.py", "tests/typing/password_host.py"]
+opened_commit = "a5d05e88ba88c9f8d4dd7951f819b912e8227e59"
+whole_reason = "One acceptance proof: the typing host that shows a Keycloak-only host type-checks, with the CI step and the agent text that name it"
