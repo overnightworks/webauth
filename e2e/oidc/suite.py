@@ -26,7 +26,7 @@ PROJECT_LABEL = "com.docker.compose.project"
 READY_SECONDS = 240
 READY_POLL_SECONDS = 2
 COMPOSE_TIMEOUT_SECONDS = 120
-DOWN_TIMEOUT_SECONDS = 120
+DOWN_TIMEOUT_SECONDS = 60
 LISTING_TIMEOUT_SECONDS = 10
 API_TIMEOUT_SECONDS = 30
 WAIT_STATE_SLICE_SECONDS = 5
@@ -36,17 +36,20 @@ BEHIND_TLS_FRONT = {"X-Forwarded-Proto": "https"}
 DOCKER_OBJECTS = ("container", "volume", "network")
 
 
-def project_leftovers(project: str) -> list[str]:
-    """Containers, volumes and networks still carrying the project's label."""
-    left = []
-    for kind in DOCKER_OBJECTS:
-        listing = ["ps", "-a"] if kind == "container" else [kind, "ls"]
-        found = subprocess.run(
-            ["docker", *listing, "--filter", f"label={PROJECT_LABEL}={project}", "-q"],
-            check=True, capture_output=True, text=True, timeout=LISTING_TIMEOUT_SECONDS,
-        ).stdout.split()
-        left.extend(f"{kind} {identifier}" for identifier in found)
-    return left
+def project_objects(project: str, kind: str) -> list[str]:
+    """The docker objects of one kind still carrying the project's label."""
+    listing = ["ps", "-a"] if kind == "container" else [kind, "ls"]
+    found = subprocess.run(
+        ["docker", *listing, "--filter", f"label={PROJECT_LABEL}={project}", "-q"],
+        check=True, capture_output=True, text=True, timeout=LISTING_TIMEOUT_SECONDS,
+    ).stdout.split()
+    return [f"{kind} {identifier}" for identifier in found]
+
+
+def describe_failure(what: str, error: Exception) -> str:
+    stderr = getattr(error, "stderr", None)
+    detail = stderr if isinstance(stderr, str) and stderr.strip() else str(error)
+    return f"{what} failed: {type(error).__name__}: {detail.strip()[-STDERR_CHARS_IN_ERRORS:]}"
 
 
 @dataclass
@@ -59,6 +62,8 @@ class HeldSuite:
     stop_check: Callable[[], None]
     project: str = field(default_factory=lambda: f"d2-suite-{secrets.token_hex(4)}")
     port: int = 0
+    down_completed: bool = field(default=False, init=False)
+    leftovers: list[str] = field(default_factory=list, init=False)
 
     def __enter__(self) -> HeldSuite:
         try:
@@ -74,45 +79,45 @@ class HeldSuite:
         self, kind: type[BaseException] | None, error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
-        if left := self.remove_everything():
-            raise StackError(f"the suite project {self.project} left behind: {left}")
+        self.remove_everything()
 
     @property
     def api(self) -> SuiteApi:
         return SuiteApi(f"http://127.0.0.1:{self.port}")
 
     def remove_everything(self) -> list[str]:
-        """Takes the project down, with its volumes, and returns what still carries its label.
+        """Takes the project down, with its volumes, then lists what still carries its label.
 
-        Nothing escapes: a listing or a ``down`` that fails or times out comes back as a
-        line of its own. The down runs only when the first listing finds something, so a
-        second call after a clean teardown costs three listings. Worst case: 3 x 10 s
-        listing, 120 s down, 3 x 10 s listing = 180 s."""
+        The down always runs; the containers, volumes and networks are listed by three
+        independent calls. Nothing escapes: every failure or timeout is a line of its own,
+        and the lines are kept in ``leftovers``. ``down_completed`` says whether the down
+        exited cleanly, so a caller runs this again only when it did not. Worst case of one
+        call: 60 s down + 3 x 10 s listing = 90 s; with the 30 s module cancel, a first
+        call and one backstop call the run's teardown takes 30 + 90 + 90 = 210 s, inside
+        ``--kill-after=240``."""
+        self.leftovers = []
+        self.down_completed = False
         try:
-            if not project_leftovers(self.project):
-                return []
-        except (subprocess.SubprocessError, OSError) as error:
-            return [f"could not list the project's docker objects: {type(error).__name__}"]
-        try:
-            self._compose(
-                "down", "-v", "--remove-orphans", timeout=DOWN_TIMEOUT_SECONDS, check=False
-            )
-        except (subprocess.SubprocessError, OSError) as error:
-            return [f"docker compose down failed: {type(error).__name__}"]
-        try:
-            return project_leftovers(self.project)
-        except (subprocess.SubprocessError, OSError) as error:
-            return [f"could not list what the down left: {type(error).__name__}"]
+            self._compose("down", "-v", "--remove-orphans", timeout=DOWN_TIMEOUT_SECONDS)
+            self.down_completed = True
+        except (subprocess.SubprocessError, OSError, StackError) as error:
+            self.leftovers.append(describe_failure("docker compose down", error))
+        for kind in DOCKER_OBJECTS:
+            try:
+                self.leftovers.extend(project_objects(self.project, kind))
+            except (subprocess.SubprocessError, OSError) as error:
+                self.leftovers.append(describe_failure(f"listing the project's {kind}s", error))
+        return self.leftovers
 
     def _compose(
-        self, *arguments: str, timeout: int, check: bool = True
+        self, *arguments: str, timeout: int
     ) -> subprocess.CompletedProcess[str]:
         finished = subprocess.run(
             ["docker", "compose", "-p", self.project, "-f", str(COMPOSE_FILE), *arguments],
             env={**os.environ, "SUITE_HOST": self.host},
             capture_output=True, text=True, timeout=timeout,
         )
-        if check and finished.returncode:
+        if finished.returncode:
             raise StackError(
                 f"docker compose {arguments[0]} exited {finished.returncode}: "
                 f"{finished.stderr[-STDERR_CHARS_IN_ERRORS:]}"

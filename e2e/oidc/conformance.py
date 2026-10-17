@@ -125,6 +125,10 @@ def error_chain(error: BaseException) -> list[BaseException]:
     return chain
 
 
+def suite_leftovers(suite: HeldSuite) -> list[str]:
+    return suite.leftovers if suite.down_completed else suite.remove_everything()
+
+
 def conform(scratch: Path) -> int:
     if scratch.exists() and any(scratch.iterdir()):
         print(f"FAILED: --scratch {scratch} is not empty")
@@ -151,7 +155,7 @@ def conform(scratch: Path) -> int:
             signal.signal(stop_signal, signal.SIG_IGN)
         if run.stop_requested.is_set():
             run.fail("interrupted")
-        for left in [*runtime_leftovers(scratch), *suite.remove_everything()]:
+        for left in [*runtime_leftovers(scratch), *suite_leftovers(suite)]:
             run.fail(left)
     return max(0 if run.all_held else 1, keep_clean_evidence(run))
 

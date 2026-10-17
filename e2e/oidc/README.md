@@ -129,11 +129,14 @@ Then, with the 1-minute load average at or below 18:
 
 Stopping works as above (SIGTERM to `timeout` or to the python process; exit
 status 1). On every exit path the suite project is taken down with its volumes
-and the run looks for containers, volumes and networks still carrying its
-compose project label. The suite's teardown costs at most 180 s (listing 30 s,
-`down` 120 s, listing 30 s) after the 30 s module cancel, inside `--kill-after=240`;
-a listing or `down` that fails or times out is reported as a leftover line and the
-result table and evidence scan still follow. After a SIGKILL nothing can clean up: find the project
+and the run lists the containers, volumes and networks still carrying its
+compose project label. The `down` always runs (60 s) and the three listings are
+independent calls (10 s each), so one failure never hides another kind. The
+`down` runs a second time only when the first did not complete cleanly
+(interrupted, failed or timed out). Worst case: 30 s module cancel + 90 s
+first teardown + 90 s backstop teardown = 210 s, inside `--kill-after=240`.
+Every failure or timeout, with its stderr tail, is reported as a leftover line,
+and the result table and evidence scan still follow. After a SIGKILL nothing can clean up: find the project
 with `docker ps -a --filter name=d2-suite`, then `docker compose -p NAME -f
 e2e/oidc/suite-compose.yaml down -v --remove-orphans` (with `SUITE_HOST` set to
 anything), and `rm -rf SCRATCH/runtime`.
