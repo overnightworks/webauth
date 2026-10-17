@@ -12,6 +12,10 @@ if TYPE_CHECKING:
 
     from webauth.policies import BodySizePolicy
 
+__all__ = [
+    "BodySizeLimitMiddleware",
+]
+
 
 class _BodyTooLarge(Exception):
     pass
