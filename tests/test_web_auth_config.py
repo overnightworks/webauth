@@ -211,6 +211,16 @@ def test_a_host_only_cookie_name_without_cookie_secure_is_refused_at_configurati
             "sid", DEFAULT_CSRF_COOKIE_NAME,
             id="a name given while replacing becomes the host's own",
         ),
+        pytest.param(
+            {"cookie_secure": False, "session_cookie_name": "sid"}, {"cookie_secure": True},
+            "sid", DEFAULT_CSRF_COOKIE_NAME,
+            id="a named cookie keeps its name when Secure is switched on",
+        ),
+        pytest.param(
+            {"session_cookie_name": "__Host-own"}, {"csrf_cookie_name": "xsrf"},
+            "__Host-own", "xsrf",
+            id="a prefixed host name survives a replace that leaves Secure alone",
+        ),
     ],
 )
 def test_a_replaced_configuration_resolves_unnamed_cookies_again(
@@ -224,6 +234,32 @@ def test_a_replaced_configuration_resolves_unnamed_cookies_again(
 
     assert config.session_cookie_name == session_cookie_name
     assert config.csrf_cookie_name == csrf_cookie_name
+
+
+@pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])
+@pytest.mark.parametrize("not_a_name", [None, 7], ids=["None", "int"])
+@pytest.mark.parametrize("cookie_secure", [True, False])
+def test_a_cookie_name_that_is_not_a_string_is_refused_naming_the_field(
+    field: str, not_a_name: object, cookie_secure: bool,
+) -> None:
+    with pytest.raises(ValueError, match=f"{field} must be a cookie name"):
+        a_web_auth_config(cookie_secure=cookie_secure, **{field: not_a_name})
+
+
+@pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])
+def test_replacing_a_cookie_name_with_none_is_refused_instead_of_resetting_it(
+    field: str,
+) -> None:
+    with pytest.raises(ValueError, match=f"{field} must be a cookie name"):
+        replace(a_web_auth_config(), **{field: None})
+
+
+@pytest.mark.parametrize("field", ["session_cookie_name", "csrf_cookie_name"])
+def test_replacing_cookie_secure_off_refuses_a_hosts_prefixed_name(field: str) -> None:
+    config = a_web_auth_config(**{field: "__Host-own"})
+
+    with pytest.raises(ValueError, match="needs cookie_secure=True"):
+        replace(config, cookie_secure=False)
 
 
 @pytest.mark.parametrize(

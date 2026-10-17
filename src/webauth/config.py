@@ -15,7 +15,9 @@ from starlette.requests import Request
 
 from webauth.cookies import (
     DEFAULT_COOKIE_SAMESITE,
+    DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_CSRF_HEADER_NAME,
+    DEFAULT_SESSION_COOKIE_NAME,
     PLAIN_CSRF_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
     CookieSameSite,
@@ -82,8 +84,8 @@ class WebAuthConfig:
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
     cookie_max_age_seconds: int
     session_liveness: SessionLivenessPolicy
-    session_cookie_name: str | None = None
-    csrf_cookie_name: str | None = None
+    session_cookie_name: str = _DefaultCookieName(DEFAULT_SESSION_COOKIE_NAME)
+    csrf_cookie_name: str = _DefaultCookieName(DEFAULT_CSRF_COOKIE_NAME)
     csrf_header_name: str = DEFAULT_CSRF_HEADER_NAME
     cookie_samesite: CookieSameSite = DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
@@ -137,10 +139,14 @@ class WebAuthConfig:
 
     def _resolve_cookie_name(self, field: str, plain_name: str) -> None:
         name = getattr(self, field)
-        if name is None or isinstance(name, _DefaultCookieName):
+        if isinstance(name, _DefaultCookieName):
             # The dataclass is frozen; resolving a default is part of construction.
             resolved = default_cookie_name(plain_name, secure=self.cookie_secure)
             object.__setattr__(self, field, _DefaultCookieName(resolved))
+        elif not isinstance(name, str):
+            raise ValueError(
+                f"{field} must be a cookie name; leave it out for the library's default",
+            )
         elif (
             is_host_only_cookie_name(name) or is_secure_prefixed_cookie_name(name)
         ) and not self.cookie_secure:

@@ -6,6 +6,16 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.16.0 - Unreleased
+
+**Breaking**
+
+- `WebAuthConfig.session_cookie_name` and `csrf_cookie_name` are annotated `str`,
+  with the library's default as their default. An explicit `None` (or any other
+  non-`str`) raises `ValueError`, so
+  `dataclasses.replace(config, session_cookie_name=None)` no longer resets the
+  field to the default: leave the field out of `replace` instead.
+
 ## 0.15.0
 
 **Breaking**
