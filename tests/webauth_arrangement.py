@@ -91,18 +91,22 @@ DRIVE_DEADLINE_SECONDS: Final = 5
 
 
 
-def a_web_auth_config(**overrides: object) -> WebAuthConfig:
-    """A complete configuration; a keyword replaces the field it names."""
-    defaults = {
+def web_auth_config_arguments() -> dict[str, object]:
+    """Every argument a complete configuration is built from."""
+    return {
         "session_secret": SecretStr("s" * MIN_SESSION_SECRET_CHARS),
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
         "rate_limits": SingleProcessRateLimitBackend(),
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
-        "session_max_age_seconds": SESSION_MAX_AGE_SECONDS,
+        "cookie_max_age_seconds": SESSION_MAX_AGE_SECONDS,
         "session_liveness": ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS),
     }
-    return WebAuthConfig(**{**defaults, **overrides})
+
+
+def a_web_auth_config(**overrides: object) -> WebAuthConfig:
+    """A complete configuration; a keyword replaces the field it names."""
+    return WebAuthConfig(**{**web_auth_config_arguments(), **overrides})
 
 
 SESSION_COOKIE_NAME = a_web_auth_config().session_cookie_name

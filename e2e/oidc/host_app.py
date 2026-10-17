@@ -346,7 +346,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         with current.lock.hold():
             record = current.sessions.create(
                 outcome.id,
-                datetime.now(timezone.utc) + timedelta(seconds=config.session_max_age_seconds),
+                datetime.now(timezone.utc) + timedelta(seconds=current.sessions.max_age_seconds),
                 ip_address=request.client.host if request.client else "",
                 user_agent=request.headers.get("user-agent", "")[: config.max_user_agent_chars],
             )

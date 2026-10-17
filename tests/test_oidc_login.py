@@ -296,11 +296,16 @@ def an_id_token(nonce: str, wall_clock: FakeClock) -> str:
     return jws(header, claims, rs256(rsa_key("issuer")))
 
 
-def an_oidc_host(*users: FakeUser, **config_overrides: object) -> OidcHost:
+def an_oidc_host(
+    *users: FakeUser, store_max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
+    **config_overrides: object,
+) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
     lock = WriteLockInMemory()
     accounts = UsersInMemory(*users, lock=lock)
-    sessions = SessionRecordsInMemory(users=accounts, lock=lock)
+    sessions = SessionRecordsInMemory(
+        max_age_seconds=store_max_age_seconds, users=accounts, lock=lock,
+    )
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
     issuer = FakeIssuer(mint_id_token=lambda nonce: an_id_token(nonce, wall_clock))
@@ -323,7 +328,7 @@ def an_oidc_host(*users: FakeUser, **config_overrides: object) -> OidcHost:
     def open_session(account: UserRecord, response: Response) -> dict[str, str]:
         record = sessions.create(
             account.id,
-            datetime.now(timezone.utc) + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
+            datetime.now(timezone.utc) + timedelta(seconds=sessions.max_age_seconds),
             ip_address=CLIENT_ADDRESS,
             user_agent=CLIENT_USER_AGENT,
         )
@@ -427,6 +432,21 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
     assert response.status_code == 200
     assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
     assert set_cookies(response)[host.config.csrf_cookie_name] == configured
+    assert host.client.get("/me").json() == {"username": "lena"}
+
+
+def test_an_admitted_callback_expires_the_session_by_the_stores_lifetime() -> None:
+    store_max_age_seconds = 1_200
+    host = an_oidc_host(store_max_age_seconds=store_max_age_seconds)
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    record = host.sessions.record
+    assert record is not None
+    expires_in = (record.expires_at - datetime.now(timezone.utc)).total_seconds()
+    assert expires_in == pytest.approx(store_max_age_seconds, abs=60)
+    session_cookie = set_cookies(response)[host.config.session_cookie_name]
+    assert f"max-age={host.config.cookie_max_age_seconds}" in session_cookie
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
