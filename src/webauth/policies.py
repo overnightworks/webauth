@@ -280,21 +280,23 @@ class CspDirective(StrEnum):
     FRAME_ANCESTORS = "frame-ancestors"
 
 
+_SELF_KEYWORD: Final = "'self'"
 _NONE_SOURCE: Final = "'none'"
+_GRAMMAR_FLAGS: Final = re.ASCII | re.IGNORECASE
 _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
-    CspDirective.SCRIPT_SRC: ("'self'",),
-    CspDirective.STYLE_SRC: ("'self'",),
-    CspDirective.CONNECT_SRC: ("'self'",),
-    CspDirective.IMG_SRC: ("'self'", "data:", "blob:"),
-    CspDirective.MEDIA_SRC: ("'self'", "blob:"),
-    CspDirective.FONT_SRC: ("'self'",),
-    CspDirective.MANIFEST_SRC: ("'self'",),
-    CspDirective.WORKER_SRC: ("'self'",),
+    CspDirective.SCRIPT_SRC: (_SELF_KEYWORD,),
+    CspDirective.STYLE_SRC: (_SELF_KEYWORD,),
+    CspDirective.CONNECT_SRC: (_SELF_KEYWORD,),
+    CspDirective.IMG_SRC: (_SELF_KEYWORD, "data:", "blob:"),
+    CspDirective.MEDIA_SRC: (_SELF_KEYWORD, "blob:"),
+    CspDirective.FONT_SRC: (_SELF_KEYWORD,),
+    CspDirective.MANIFEST_SRC: (_SELF_KEYWORD,),
+    CspDirective.WORKER_SRC: (_SELF_KEYWORD,),
     CspDirective.FRAME_ANCESTORS: (_NONE_SOURCE,),
 }
 
 _BASE64_VALUE: Final = r"[A-Za-z0-9+/\-_]+={0,2}"
-_HASH_ALGORITHM: Final = r"(?i:sha(?:256|384|512))"
+_HASH_ALGORITHM: Final = r"sha(?:256|384|512)"
 _HOST_LABEL: Final = r"[A-Za-z0-9\-]+"
 _HOST: Final = rf"(?:\*|(?:\*\.)?{_HOST_LABEL}(?:\.{_HOST_LABEL})*)"
 _SCHEME: Final = r"[A-Za-z][A-Za-z0-9+.\-]*"
@@ -309,15 +311,15 @@ _KEYWORDS: Final = (
     "wasm-unsafe-eval",
 )
 
-_BARE_HASH: Final = re.compile(f"{_HASH_ALGORITHM}-{_BASE64_VALUE}", re.ASCII)
-_KEYWORD_SOURCE: Final = re.compile(f"'(?i:{'|'.join(_KEYWORDS)})'", re.ASCII)
-_SELF_SOURCE: Final = re.compile("'(?i:self)'", re.ASCII)
-_NONCE_SOURCE: Final = re.compile(f"'(?i:nonce)-{_BASE64_VALUE}'", re.ASCII)
-_HASH_SOURCE: Final = re.compile(f"'{_HASH_ALGORITHM}-{_BASE64_VALUE}'", re.ASCII)
-_SCHEME_SOURCE: Final = re.compile(f"{_SCHEME}:", re.ASCII)
+_BARE_HASH: Final = re.compile(f"{_HASH_ALGORITHM}-{_BASE64_VALUE}", _GRAMMAR_FLAGS)
+_KEYWORD_SOURCE: Final = re.compile(f"'(?:{'|'.join(_KEYWORDS)})'", _GRAMMAR_FLAGS)
+_SELF_SOURCE: Final = re.compile(_SELF_KEYWORD, _GRAMMAR_FLAGS)
+_NONCE_SOURCE: Final = re.compile(f"'nonce-{_BASE64_VALUE}'", _GRAMMAR_FLAGS)
+_HASH_SOURCE: Final = re.compile(f"'{_HASH_ALGORITHM}-{_BASE64_VALUE}'", _GRAMMAR_FLAGS)
+_SCHEME_SOURCE: Final = re.compile(f"{_SCHEME}:", _GRAMMAR_FLAGS)
 _HOST_SOURCE: Final = re.compile(
     rf"(?:{_SCHEME}://)?{_HOST}(?::(?:[0-9]+|\*))?(?:/[\w\-.~%!$&'()*+=:@/]*)?",
-    re.ASCII,
+    _GRAMMAR_FLAGS,
 )
 _SOURCE_GRAMMAR: Final = (
     _KEYWORD_SOURCE,
