@@ -342,7 +342,7 @@ def test_an_admission_config_missing_a_required_group_setting_fails_at_construct
     settings: dict[str, str],
 ) -> None:
     with pytest.raises(TypeError):
-        AdmissionConfig(bound_issuer=BOUND_ISSUER, **settings)  # type: ignore[call-arg]
+        AdmissionConfig(bound_issuer=BOUND_ISSUER, **settings)
 
 
 @pytest.mark.parametrize("legacy", [
@@ -449,8 +449,56 @@ def test_a_deactivated_admin_is_refused_before_any_role_is_written() -> None:
     assert host.audit.user_management_events == []
 
 
+class UsersReplacingRecords(UsersInMemory):
+    """A store whose records are frozen: a role write returns a new record."""
+
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        replaced = replace(self._users[user_id], role=role)
+        self._users[user_id] = replaced
+        self._usernames[replaced.username] = replaced
+        return replaced
+
+
+class UsersMissingTheRoleRow(UsersInMemory):
+    """A store whose role write finds no row, as after a concurrent delete."""
+
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        raise LookupError(user_id)
+
+
+class UsersRejectingNeedlessRoleWrites(UsersInMemory):
+    """A store that fails on a role write that changes nothing."""
+
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        if self._users[user_id].role == role:
+            raise AssertionError(f"role {role!r} written to an account that holds it")
+        return super().set_role(user_id, role)
+
+
+def test_admission_answers_the_record_the_role_write_returned() -> None:
+    host = a_host(FakeUser(id=SUBJECT, username="lena", role=MEMBER_ROLE),
+                  store=UsersReplacingRecords)
+    read_before = host.accounts.get(SUBJECT)
+
+    account = host.admit(LENA_IN_THE_ADMIN_GROUP)
+
+    assert account is not read_before
+    assert account is host.accounts.get(SUBJECT)
+    assert account.role == ADMIN_ROLE
+
+
+def test_a_role_write_that_finds_no_row_fails_admission_and_audits_nothing() -> None:
+    host = a_host(FakeUser(id=SUBJECT, username="lena", role=MEMBER_ROLE),
+                  store=UsersMissingTheRoleRow)
+
+    with pytest.raises(LookupError):
+        host.admit(LENA_IN_THE_ADMIN_GROUP)
+
+    assert host.audit.user_management_events == []
+
+
 def test_a_role_that_does_not_change_is_written_by_no_second_login() -> None:
-    host = a_host()
+    host = a_host(store=UsersRejectingNeedlessRoleWrites)
     host.admit(LENA_IN_THE_ADMIN_GROUP)
 
     host.admit(LENA_IN_THE_ADMIN_GROUP)
@@ -854,19 +902,25 @@ def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
     assert host.audit.user_management_events == []
 
 
-def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once() -> None:
-    groups = [LOGIN_GROUP]
+@pytest.mark.parametrize(("before", "after", "status_before", "status_after"), [
+    pytest.param([LOGIN_GROUP], [ADMIN_GROUP], 403, 200, id="put into the admin group"),
+    pytest.param([ADMIN_GROUP], [LOGIN_GROUP], 200, 403, id="taken out of the admin group"),
+])
+def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
+    before: list[str], after: list[str], status_before: int, status_after: int,
+) -> None:
+    groups = list(before)
     host = an_oidc_host(groups_claim=groups)
     host.callback(host.sign_in_at_issuer())
     session_cookie = host.client.cookies[host.config.session_cookie_name]
-    assert host.client.get("/admin").status_code == 403
+    assert host.client.get("/admin").status_code == status_before
 
-    groups[:] = [ADMIN_GROUP]
+    groups[:] = after
     host.callback(host.sign_in_at_issuer())
     host.client.cookies.clear()
     host.client.cookies.set(host.config.session_cookie_name, session_cookie)
 
-    assert host.client.get("/admin").json() == {"username": "lena"}
+    assert host.client.get("/admin").status_code == status_after
 
 
 def test_the_password_account_refusal_is_no_longer_an_admission_refusal() -> None:

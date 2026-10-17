@@ -19,7 +19,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   is refused with the new `AdmissionRefusal.NOT_A_MEMBER` before any account
   is looked up or created. The README now recommends a 12-hour session
   instead of 30 days, since an open session is not re-checked.
-- `AdmissionConfig` also requires `admin_group`: a group path strictly below
+  `AdmissionConfig` also requires `admin_group`: a group path strictly below
   `login_group` (such as `/apps/songmaker/admin`), or `NoAdmins.IN_THIS_APP`
   when the app has no admins. A missing `admin_group` is a `TypeError`; an
   `admin_group` that is malformed or not below `login_group` is a `ValueError`.
@@ -31,7 +31,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `set_role(user_id, role) -> UserRecord`, which changes the role in the
   caller's transaction and never commits. Migration: a stored admin is demoted
   at their next login unless they are in `admin_group`, so a host puts its
-  admins into its Keycloak admin group, created per app at its cutover, before
+  admins into its Keycloak admin group, created per app at its cutover (edge#50, edge#20 row 10), before
   it upgrades.
 - `IpRateLimitMiddleware` calls `RateLimitBackend.is_allowed` from a worker
   thread, so a slow limiter no longer stalls the event loop; a host's own

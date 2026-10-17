@@ -288,7 +288,8 @@ After that, admission holds `lock.hold()` and never commits:
   every login, for new and known accounts alike: a known account whose stored
   role differs is rewritten with `set_role` and the audit sink hears
   `role_changed`; a stored role other than `admin_role` or `user_role` is
-  overwritten to `user_role`. The issuer's groups are the only source of admin:
+  overwritten to `user_role` (unless the identity belongs to `admin_group`,
+  which gives `admin_role`). The issuer's groups are the only source of admin:
   a person taken out of the group is a plain user from their next login, on
   every device at once, since the role lives on the account, while a session
   that is already open keeps the old role until then. Only the derived role is
@@ -710,7 +711,9 @@ It owns the machinery an application should not rebuild:
 It leaves the application everything that touches the application's own truth:
 
 - **Users and roles.** It has no user model and no role names beyond the
-  configured ones, and it decides no authorisation beyond the admin check.
+  configured ones; the one thing it writes to an account is the role admission
+  derives from the issuer's groups (`admin_role` or `user_role`), and it
+  decides no authorisation beyond the admin check.
 - **Persistence.** It holds no schema and no ORM, and an import-linter contract
   keeps it that way. What it needs reaches it through the Protocols in
   `webauth.ports`.
