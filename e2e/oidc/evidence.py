@@ -12,11 +12,11 @@ import base64
 import json
 import re
 import urllib.parse
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 from webauth.cookies import is_pending_login_cookie_name, pending_login_cookie_prefix
 
@@ -37,7 +37,18 @@ CREDENTIAL_NAME_PARTS = ("secret", "credential", "password", "token", "key", "ce
 QUERY_IN_TEXT = re.compile(r"\?[^\s\"'<>]*")
 HAR_VERSION = "1.2"
 
-HeaderPairs = Sequence[Mapping[str, Any]]
+
+
+class HeaderPair(TypedDict):
+    name: str
+    value: str
+
+
+class RequestTiming(TypedDict):
+    startTime: float
+
+
+HeaderPairs = Sequence[HeaderPair]
 
 
 class RequestEvent(Protocol):
@@ -50,7 +61,7 @@ class RequestEvent(Protocol):
     def method(self) -> str: ...
 
     @property
-    def timing(self) -> Mapping[str, Any]: ...
+    def timing(self) -> RequestTiming: ...
 
     def headers_array(self) -> HeaderPairs: ...
 
@@ -175,7 +186,7 @@ class NetworkLog:
         request_headers = request.headers_array()
         response_headers = response.headers_array() if response else []
         self._register_set_cookie_values(response_headers)
-        started = request.timing.get("startTime", 0) / 1000
+        started = request.timing["startTime"] / 1000
         return {
             "startedDateTime": datetime.fromtimestamp(started, UTC).isoformat(),
             "time": 0,

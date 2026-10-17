@@ -38,6 +38,7 @@ from harness import (
     Host,
     Interrupted,
     RunRecord,
+    cookie_name_and_value,
     drive_browser_off_the_main_thread,
     free_port,
     host_state,
@@ -162,8 +163,9 @@ class Proof(RunRecord):
 
     def register_pending_logins(self, context: BrowserContext) -> None:
         for cookie in context.cookies():
-            if is_pending_login_cookie_name(cookie.get("name", ""), secure=True):
-                self._register_pending_login(cookie.get("value", ""))
+            name, value = cookie_name_and_value(cookie)
+            if is_pending_login_cookie_name(name, secure=True):
+                self._register_pending_login(value)
 
     def capture_cookies(self, context: BrowserContext) -> None:
         remember_cookies(self, context)
@@ -341,7 +343,7 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
         )
         assert proof.headline(page) == "Sign-in refused", f"the page says {proof.headline(page)!r}"
         proof.shot(page, f"{scenario}-deactivated", "result")
-        carried = {c.get("name") for c in page.context.cookies(APP_ORIGIN)}
+        carried = {cookie_name_and_value(c)[0] for c in page.context.cookies(APP_ORIGIN)}
         assert DEFAULT_SESSION_COOKIE_NAME not in carried, "a session cookie was issued"
     held = proof.host_state()
     assert held["last_refusal"] == "account-deactivated", f"the host refused {held}"
@@ -410,15 +412,19 @@ def logout(proof: Proof) -> str:
         page.goto(f"{APP_ORIGIN}/")
         assert proof.headline(page) == f"Signed in as {USER_NAME}"
         cookies = page.context.cookies(APP_ORIGIN)
-        held_names = {c.get("name", "") for c in cookies}
-        session = next(c for c in cookies if c.get("name") == DEFAULT_SESSION_COOKIE_NAME)
-        proof.registry.add("session cookie", session.get("value", ""))
+        held_names = {cookie_name_and_value(c)[0] for c in cookies}
+        session = next(
+            c for c in cookies if cookie_name_and_value(c)[0] == DEFAULT_SESSION_COOKIE_NAME
+        )
+        proof.registry.add("session cookie", cookie_name_and_value(session)[1])
         page.click("#logout")
         page.get_by_role("heading", name="Signed out").wait_for()
         page.reload()
         assert proof.headline(page) == "Signed out", "a reload of '/' did not show Sign in"
         proof.shot(page, "2", "result")
-        left = held_names & {c.get("name", "") for c in page.context.cookies(APP_ORIGIN)}
+        left = held_names & {
+            cookie_name_and_value(c)[0] for c in page.context.cookies(APP_ORIGIN)
+        }
         assert not left, f"cookies survived: {sorted(left)}"
         me_status = proof.status_of(page, "/me")
         assert me_status == 401, f"/me answered {me_status}"
@@ -443,9 +449,10 @@ def back_button_shows(proof: Proof, page: Page) -> str:
 
 def replayed_session_status(proof: Proof, session: Cookie) -> int:
     assert proof.ca_certificate is not None and proof.host is not None
+    name, value = cookie_name_and_value(session)
     return httpx.get(
         f"https://localhost:{proof.host.app_port}/me",
-        headers={"Cookie": f"{session.get('name', '')}={session.get('value', '')}"},
+        headers={"Cookie": f"{name}={value}"},
         verify=ssl.create_default_context(cafile=str(proof.ca_certificate)),
     ).status_code
 
