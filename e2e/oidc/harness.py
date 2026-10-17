@@ -114,7 +114,8 @@ def start_host(run: RunRecord, runtime: Path, settings: HostSettings, ca_certifi
     settings_file = runtime / f"host-settings-{cookie_samesite}.json"
     settings.write(settings_file)
     log_file = (runtime / f"host-{cookie_samesite}.log").open("wb")
-    process = subprocess.Popen(  # noqa: S603 fixed command list
+    # Fixed command list
+    process = subprocess.Popen(  # noqa: S603
         [sys.executable, str(Path(__file__).with_name("host_app.py")),
          "--settings", str(settings_file), "--parent-pid", str(os.getpid())],
         env={"PATH": os.environ["PATH"], "SSL_CERT_FILE": str(ca_certificate)},
@@ -209,8 +210,10 @@ def stop_host(process: subprocess.Popen[bytes]) -> None:
 
 
 def containers_left(name_filter: str) -> list[str]:
-    return subprocess.run(  # noqa: S603 fixed command list
-        ["docker", "ps", "-a", "--filter", f"name={name_filter}", "--format", "{{.Names}}"],  # noqa: S607 the operator's own PATH by design
+    # Fixed command list
+    return subprocess.run(  # noqa: S603
+        # The operator's own PATH by design
+        ["docker", "ps", "-a", "--filter", f"name={name_filter}", "--format", "{{.Names}}"],  # noqa: S607
         check=True, capture_output=True, text=True,
     ).stdout.split()
 

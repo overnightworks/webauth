@@ -91,7 +91,8 @@ LENA = OidcIdentity(
 class LegacyPasswordUser(FakeUser):
     """A host model that still carries the field the library no longer reads."""
 
-    password_hash: str = "legacy-hash"  # noqa: S105 proves a host model still carrying the old password field works
+    # Proves a host model still carrying the old password field works
+    password_hash: str = "legacy-hash"  # noqa: S105
 
 
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)

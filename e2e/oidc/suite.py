@@ -39,8 +39,10 @@ DOCKER_OBJECTS = ("container", "volume", "network")
 def project_objects(project: str, kind: str) -> list[str]:
     """The docker objects of one kind still carrying the project's label."""
     listing = ["ps", "-a"] if kind == "container" else [kind, "ls"]
-    found = subprocess.run(  # noqa: S603 fixed command list
-        ["docker", *listing, "--filter", f"label={PROJECT_LABEL}={project}", "-q"],  # noqa: S607 the operator's own PATH by design
+    # Fixed command list
+    found = subprocess.run(  # noqa: S603
+        # The operator's own PATH by design
+        ["docker", *listing, "--filter", f"label={PROJECT_LABEL}={project}", "-q"],  # noqa: S607
         check=True, capture_output=True, text=True, timeout=LISTING_TIMEOUT_SECONDS,
     ).stdout.split()
     return [f"{kind} {identifier}" for identifier in found]
@@ -120,8 +122,10 @@ class HeldSuite:
     def _compose(
         self, *arguments: str, timeout: int
     ) -> subprocess.CompletedProcess[str]:
-        finished = subprocess.run(  # noqa: S603 fixed command list
-            ["docker", "compose", "-p", self.project, "-f", str(COMPOSE_FILE), *arguments],  # noqa: S607 the operator's own PATH by design
+        # Fixed command list
+        finished = subprocess.run(  # noqa: S603
+            # The operator's own PATH by design
+            ["docker", "compose", "-p", self.project, "-f", str(COMPOSE_FILE), *arguments],  # noqa: S607
             env={**os.environ, "SUITE_HOST": self.host},
             capture_output=True, text=True, timeout=timeout,
         )
