@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
+import anyio
+import httpx
 import pytest
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.testclient import TestClient
@@ -15,6 +19,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, StreamingResponse
+from starlette.types import Message
 from webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
@@ -487,6 +492,84 @@ class TestBudgetSemantics:
         assert get_api(client).status_code == 500
         install_web_auth_config(app, config)
         assert get_api(client).status_code == 200
+
+
+class BarrierRateLimitBackend:
+    """Admits a check only once a second check is in flight beside it."""
+
+    def __init__(self) -> None:
+        self._barrier = threading.Barrier(2, timeout=5)
+
+    def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
+        self._barrier.wait()
+        return True
+
+
+class TestASlowRateLimiterDoesNotStallTheEventLoop:
+    @pytest.mark.anyio
+    async def test_two_concurrent_requests_are_checked_side_by_side(self) -> None:
+        app = a_fresh_app(rate_limits=BarrierRateLimitBackend())
+        install_full_stack(app)
+        transport = httpx.ASGITransport(app=app)
+
+        async with httpx.AsyncClient(transport=transport, base_url=HTTPS_TEST_SERVER) as client:
+            responses = await asyncio.gather(client.get(API_PATH), client.get(API_PATH))
+
+        assert [response.status_code for response in responses] == [200, 200]
+
+
+class HeldRateLimitBackend:
+    """Signals that a check is running, then holds it until released, then fails or allows."""
+
+    def __init__(self, *, fails_after_release: bool) -> None:
+        self.fails_after_release = fails_after_release
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
+        self.entered.set()
+        assert self.release.wait(timeout=5)
+        if self.fails_after_release:
+            raise ConnectionError("rate limit store unreachable")
+        return True
+
+
+class TestARequestCancelledDuringItsRateLimitCheck:
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("fails_after_release", [False, True], ids=["allowing", "failing"])
+    async def test_neither_runs_the_app_nor_sends_a_response(
+        self, fails_after_release: bool
+    ) -> None:
+        backend = HeldRateLimitBackend(fails_after_release=fails_after_release)
+        app = a_fresh_app(rate_limits=backend)
+        route_runs: list[str] = []
+
+        async def cancelled_route() -> dict[str, bool]:
+            route_runs.append("ran")
+            return {"ok": True}
+
+        app.add_api_route("/cancelled", cancelled_route, methods=["GET"])
+        install_full_stack(app)
+        sent: list[str] = []
+        request_scope = anyio.CancelScope()
+
+        async def receive() -> Message:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: Message) -> None:
+            sent.append(message["type"])
+
+        async def drive_request() -> None:
+            with request_scope:
+                await app(an_http_scope(app, "/cancelled"), receive, send)
+
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(drive_request)
+            await anyio.to_thread.run_sync(backend.entered.wait)
+            request_scope.cancel()
+            backend.release.set()
+
+        assert (route_runs, sent) == ([], [])
 
 
 class TestCompetingRefusals:
