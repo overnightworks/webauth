@@ -1,0 +1,8 @@
+claim_id = "7d37ed251b4e4c7eb3244071624834fe"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "288a41d657457c81cecd4db8e67967ed822161fa"
+branch = "claude/issue-140-w8-s5-die-nutzerverwaltung-geht-der-e2e"
+scope = ["AGENTS.md", "CHANGELOG.md", "README.md", "e2e/oidc/host_app.py", "src/webauth/__init__.py", "src/webauth/ports.py", "src/webauth/users.py", "tests/test_oidc_login.py", "tests/test_session_administration.py", "tests/test_users.py", "tests/typing/password_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "e33f1bb3c67a3356c9cc3ee6f54ed231d4180ac2"
+whole_reason = "One removal: the module, its ports and events, its tests, the arrangement and typing host that served it, the e2e harness's one caller and the documents that name them"
