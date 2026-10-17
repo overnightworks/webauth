@@ -6,7 +6,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 host="$(mktemp -d)"
 trap 'rm -rf "$host"' EXIT
-uv build "$repo" --wheel --out-dir "$host/dist" \
+uv build "$repo" --out-dir "$host/dist" \
   --build-constraint "$repo/.github/requirements-build.txt" --require-hashes --quiet
 uv export --project "$repo" --locked --no-emit-project --no-hashes --extra jwt \
   --quiet --output-file "$host/constraints.txt"
@@ -16,7 +16,7 @@ uv pip install --quiet --python "$host/.venv/bin/python" --constraints "$host/co
   "overnightworks-webauth[jwt] @ file://${wheels[0]}"
 # Without py.typed pyright reads webauth as untyped and checks no export at all.
 site="$("$host/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
-[[ -f "$site/webauth/py.typed" ]]
+[[ -f "$site/webauth/py.typed" ]] || { echo "the built wheel installs no webauth/py.typed" >&2; exit 1; }
 cp "$repo/tests/typing/oidc_host.py" "$host/"
 cd "$host"
 uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python oidc_host.py
