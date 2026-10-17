@@ -93,12 +93,24 @@ class TestRedisRateLimitBackend:
         assert host_a.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is False
         assert host_b.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is False
 
-    def test_window_expiry(self, fake_redis, world_clock) -> None:
+    def test_regains_budget_once_the_window_slides_on_the_server_clock(
+        self, fake_redis, world_clock
+    ) -> None:
         backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
         assert backend.is_allowed("rl:test", limit=1, window_seconds=1) is True
         assert backend.is_allowed("rl:test", limit=1, window_seconds=1) is False
         world_clock.now += 2
         assert backend.is_allowed("rl:test", limit=1, window_seconds=1) is True
+
+    def test_trims_a_request_only_once_a_full_window_has_passed_to_the_microsecond(
+        self, fake_redis, world_clock
+    ) -> None:
+        backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
+        verdicts = []
+        for seconds_after_start in (0.75, 30.75, 60.50, 60.75):
+            world_clock.now = WORLD_START + seconds_after_start
+            verdicts.append(backend.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS))
+        assert verdicts == [True, True, False, True]
 
     def test_raises_on_redis_failure(self) -> None:
         broken = MagicMock()
@@ -170,4 +182,3 @@ class TestMiddlewareOverRedisBackend:
         rejected = client.get(RATE_LIMITED_PATH)
         assert rejected.status_code == 503
         assert rejected.headers["Retry-After"] == "5"
-
