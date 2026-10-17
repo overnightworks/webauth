@@ -208,7 +208,7 @@ PLAN_TABLE: tuple[Expectation | Skip, ...] = (
         "oidcc-client-test-kid-absent-multiple-jwks",
         token_rejected(RejectionReason.INVALID_KEY_ID),
         "OIDCCClientTestKidAbsentMultipleMatchingKeysInJwks accepts either answer; webauth "
-        "chooses the key by kid and refuses a header without one.",
+        "refuses a kid-less header against several RS256 verification keys (OIDC Core 10.1, #160).",
     ),
     Expectation(
         "oidcc-client-test-idtoken-sig-rs256", ACCEPTED,

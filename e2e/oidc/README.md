@@ -217,7 +217,7 @@ with `docker ps -a --filter name=d2-suite`, then `docker compose -p NAME -f
 e2e/oidc/suite-compose.yaml down -v --remove-orphans` (with `SUITE_HOST` set to
 anything), and `rm -rf SCRATCH/runtime`.
 
-The pins are not watched by Dependabot; their freshness is owned by issue #110.
+The pins are not watched by Dependabot; their freshness is owned by issue #74.
 
 ## Last run: session cookie after the redirect
 

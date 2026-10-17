@@ -233,7 +233,8 @@ def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None])
 
     def work() -> None:
         try:
-            drive()
+            if not run.stop_requested.is_set():
+                drive()
         except BaseException as error:
             crashes.append(error)
         finally:
