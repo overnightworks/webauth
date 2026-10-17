@@ -8,6 +8,7 @@ final scan catches values registered later and deletes the file."""
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import urllib.parse
@@ -57,6 +58,14 @@ class SecretRegistry:
     def add(self, label: str, value: str) -> None:
         if len(value) >= MIN_REGISTERED_VALUE_CHARS:
             self.values.setdefault(label, set()).add(value)
+
+    def add_client_secret(self, client_id: str, secret: str) -> None:
+        """The secret as it is, and as ``client_secret_basic`` sends it: base64 of the
+        form-encoded ``client_id:secret`` (RFC 6749 section 2.3.1, RFC 7617)."""
+        self.add("client secret", secret)
+        credentials = f"{urllib.parse.quote_plus(client_id)}:{urllib.parse.quote_plus(secret)}"
+        header_form = base64.b64encode(credentials.encode()).decode()
+        self.add("client secret (client_secret_basic)", header_form)
 
     def masked(self, text: str) -> str:
         """The text with every registered value, in any encoding, replaced by its label;

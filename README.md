@@ -21,7 +21,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
-| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
+| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
@@ -41,15 +41,18 @@ expired session.
 
 ## Configuration
 
-The host builds one `WebAuthConfig` and installs it. Fields a host may name:
+The host builds one `WebAuthConfig` by keyword and installs it. It must state
+`cookie_max_age_seconds`, a positive whole number of seconds: the browser cookie's
+`Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime).
+Fields a host may leave out:
 
 | Field | Default | Values |
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
 | `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused |
+| `csrf_header_name` | `"x-csrf-token"` | the request header that carries the CSRF token |
 | `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused |
-| `cookie_max_age_seconds` | `session_max_age_seconds`, re-derived when `dataclasses.replace` changes it | a positive whole number of seconds; the browser cookie's `Max-Age`, which may outlive the idle window — see [Session lifetime](#session-lifetime) |
 | `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
 | `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
 | `max_user_agent_chars` | `500` | a positive `int`; zero, a negative number, or a `bool` is refused |
@@ -357,18 +360,20 @@ is given an absolute cap).
 
 ## Session lifetime
 
-Three numbers decide how long someone stays signed in, and each has one owner:
+Three numbers decide how long someone stays signed in, and each has one owner.
+The library reads no session lifetime of its own: the session's expiry belongs
+to the host's session store.
 
-- `WebAuthConfig.cookie_max_age_seconds` is the browser cookie's `Max-Age`. The
-  cookie is issued once at login and never reissued, so it bounds the whole
-  sign-in. It defaults to `session_max_age_seconds`.
+- `WebAuthConfig.cookie_max_age_seconds` is required and is the browser cookie's
+  `Max-Age`. The cookie is issued once at login and never reissued, so it bounds
+  the whole sign-in.
 - The idle window — `IdleWindowLiveness`'s idle argument, or the host's
   `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
 - The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
   `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
   older than the cap, however recently it was used.
 
-Every lifetime — `session_max_age_seconds`, `cookie_max_age_seconds` and the windows and
+Every lifetime — `cookie_max_age_seconds` and the windows and
 caps of both liveness policies — must be a positive whole number of seconds; `0`, a negative
 value, a `float`, a string or a `bool` is refused when the object is built.
 
@@ -377,12 +382,24 @@ absolute cap: someone who comes back at least weekly stays signed in for up to
 30 days, and anyone away for more than 7 days signs in again.
 
 ```python
+import re
+
+from pydantic import SecretStr
+
+from webauth.config import WebAuthConfig
+from webauth.liveness import IdleWindowLiveness
+from webauth.proxies import TrustedProxies
+from webauth.rate_limit import SingleProcessRateLimitBackend
+
 SEVEN_DAYS = 7 * 24 * 3600
 THIRTY_DAYS = 30 * 24 * 3600
 
-WebAuthConfig(
-    ...,
-    session_max_age_seconds=SEVEN_DAYS,
+config = WebAuthConfig(
+    session_secret=SecretStr("a-secret-of-at-least-thirty-two-characters"),
+    trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
+    rate_limits=SingleProcessRateLimitBackend(),
+    allowed_hosts_exact=frozenset({"app.example.com"}),
+    allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
     cookie_max_age_seconds=THIRTY_DAYS,
     session_liveness=IdleWindowLiveness(SEVEN_DAYS, absolute_max_age_seconds=THIRTY_DAYS),
 )

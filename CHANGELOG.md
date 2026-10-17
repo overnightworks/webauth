@@ -52,6 +52,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `UnknownHashFormatError`, and `ports.PasswordHasher` and `WebAuthConfig.password_hasher`
   with it: a host that passes `password_hasher` gets `TypeError`. `argon2-cffi` is no
   longer installed with webauth; a host that still hashes passwords declares it itself.
+- `WebAuthConfig.session_max_age_seconds` is removed, and `cookie_max_age_seconds` is
+  required: the library never reads a session lifetime, which belongs to the host's
+  store, and a host states the cookie's `Max-Age` once. A config without
+  `cookie_max_age_seconds` is a `TypeError`, and one that passes
+  `session_max_age_seconds` is refused as an unknown keyword. `WebAuthConfig` takes
+  keyword arguments only, so a positional call is a `TypeError`.
 - The default Content-Security-Policy holds no host fact: `style-src` is `'self'` without
   `'unsafe-inline'`, and `font-src` is `'self'` without Google Fonts. A host adds its own
   sources per directive with `default_content_security_policy(added_sources={CspDirective.STYLE_SRC: [...]})`.
@@ -69,6 +75,14 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - A key set that publishes more than ten keys, most of them for other algorithms or for
   encryption, is no longer refused as `key-count-out-of-range`: `MAX_KEY_SET_KEYS` counts
   the RS256 signing keys only. The size of the document stays bounded by 64 KiB.
+- A token without a `kid` header member verifies when the key set holds exactly one
+  RS256 verification key, and that key may lack `kid` (OIDC Core 10.1). Against several
+  eligible keys, named or not, it is refused as `invalid-key-id`. A key without `kid`
+  beside other eligible keys is admitted but unreachable; an explicit `"kid": null`
+  stays malformed and a duplicate named `kid` is still refused. `MAX_KEY_SET_KEYS`
+  counts every eligible key. A rotation of the sole key, or a change between one and
+  several keys, can stay unseen until the key set's one-hour TTL expires, unless a
+  token naming an unfamiliar `kid` triggers an earlier refresh.
 
 ## 0.14.0
 

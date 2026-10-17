@@ -1,6 +1,11 @@
 """The run plumbing every proof driver here shares: the private runtime
 directory, the host app process, the first-signal handling, the browser
-worker thread and the evidence scan. Nothing here knows a scenario."""
+worker thread and the evidence scan. Nothing here knows a scenario.
+
+It owns the pinned Chromium (``launch_pinned_chromium``: each host name mapped to
+a loopback port, one certificate trusted by its public-key hash) and the recording
+context (``recording_context``: every request logged field by field, every URL
+credential and cookie value registered)."""
 
 from __future__ import annotations
 
@@ -225,6 +230,7 @@ def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None])
     before = own_child_pids()
     crashes: list[BaseException] = []
     worker_entered = threading.Event()
+    worker_ended = threading.Event()
 
     def work() -> None:
         worker_entered.set()
@@ -232,12 +238,14 @@ def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None])
             drive()
         except BaseException as error:
             crashes.append(error)
+        finally:
+            worker_ended.set()
 
     worker = threading.Thread(target=work, name="browser", daemon=True)
     try:
         worker.start()
-        while worker.is_alive():
-            worker.join(0.5)
+        while not worker_ended.wait(0.5):
+            pass
     except Interrupted:
         for pid in own_child_pids() - before:
             with contextlib.suppress(ProcessLookupError):
@@ -245,9 +253,7 @@ def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None])
         raise
     finally:
         run.winding_down = True
-        if worker_entered.is_set():
-            worker.join(WORKER_ENDS_SECONDS)
-        if worker.is_alive():
+        if worker_entered.is_set() and not worker_ended.wait(WORKER_ENDS_SECONDS):
             run.browser_outlived_run = True
             run.fail("the browser worker did not stop; evidence is not trustworthy")
     if crashes:

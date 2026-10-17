@@ -61,7 +61,7 @@ uv run lint-imports
 uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 ```
 
-`tests/typing/` holds a static password-only host that CI type-checks with
+`tests/typing/` holds a static OIDC-only host that CI type-checks with
 that pinned pyright, so a port change that would break such a host fails here.
 
 CI runs these in the `checks` job and re-runs the suite at the lowest declared
