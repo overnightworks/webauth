@@ -1,0 +1,8 @@
+claim_id = "9267d4134554438eb772182a7fef491a"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "e57f02c03abac12757234751a14dbf833c8ed289"
+branch = "claude/issue-154-d2d-der-ganze-basic-plan"
+scope = ["e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/evidence.py", "e2e/oidc/harness.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py"]
+opened_commit = "4ac756798729b07dfb031e41d936e3e137434d6b"
+whole_reason = "One conformance driver change: the whole Basic plan against one expectation table, with the evidence, stop and guard repairs the reviews of #145 assigned to it"
