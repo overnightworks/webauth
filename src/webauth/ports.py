@@ -1,4 +1,4 @@
-"""What the host supplies: its users, sessions, attempts, audit, hasher, and rate limiter.
+"""What the host supplies: its users, sessions, audit, hasher, and rate limiter.
 
 Each port is a Protocol the application implements over the persistence it
 already owns, so the library needs no schema and no ORM of its own. None of
@@ -166,21 +166,6 @@ class SessionLivenessPolicy[StoredSessionT](Protocol):
 
     def admits_stored_session(self, record: StoredSessionT, now: datetime) -> bool:
         """Whether a session loaded from the store still stands at ``now``."""
-        ...
-
-
-@runtime_checkable
-class LoginAttemptStore(Protocol):
-    def record(self, *, ip_address: str, username: str, success: bool) -> None: ...
-
-    def count_recent_failures(
-        self,
-        *,
-        ip_address: str,
-        window_seconds: int,
-        username: str | None = None,
-    ) -> int:
-        """Failures within the window, by username when given, else by address."""
         ...
 
 

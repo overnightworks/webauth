@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from webauth.proxies import TrustedProxies
 
 MIN_SESSION_SECRET_CHARS: Final = 32
-DEFAULT_LOGIN_RATE_WINDOW_SECONDS: Final = 300
 DEFAULT_MAX_USER_AGENT_CHARS: Final = 500
 DEFAULT_IPV6_BUDGET_PREFIX: Final = 64
 # Shorter than /32 would pool whole providers into one budget; longer than /128
@@ -89,10 +88,6 @@ class WebAuthConfig:
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
     session_max_age_seconds: int
     session_liveness: SessionLivenessPolicy
-    login_rate_limit: int
-    login_lockout_threshold: int
-    login_lockout_window_seconds: int
-    login_rate_window_seconds: int = DEFAULT_LOGIN_RATE_WINDOW_SECONDS
     session_cookie_name: str | None = None
     csrf_cookie_name: str | None = None
     csrf_header_name: str = DEFAULT_CSRF_HEADER_NAME

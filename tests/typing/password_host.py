@@ -1,7 +1,7 @@
 """A password host, written as hosts were before an account could lack a password.
 
 Its account model, ``HostUser``, types ``password_hash`` as ``str`` and must
-remain a ``UserRecord`` that ``judge_credentials`` accepts. CI checks this file
+remain a ``UserRecord``. CI checks this file
 with a pinned pyright, so a port change that would break such a host fails the
 build instead of the host's next upgrade.
 """
@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from webauth.login import LoginOutcome, judge_credentials
-from webauth.ports import PasswordHasher, UserRecord
+from webauth.ports import UserRecord
 
 
 @dataclass
@@ -21,12 +20,6 @@ class HostUser:
     role: str
     is_active: bool
     password_hash: str
-
-
-def sign_in(
-    account: HostUser | None, password: str, hasher: PasswordHasher,
-) -> LoginOutcome:
-    return judge_credentials(password, account, hasher=hasher)
 
 
 def a_host_account_is_a_user_record(user: HostUser) -> UserRecord:
