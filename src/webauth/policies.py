@@ -11,13 +11,11 @@ singleton or an application module of its own.
 from __future__ import annotations
 
 import math
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum, auto
-from typing import TYPE_CHECKING, Final
-
-if TYPE_CHECKING:
-    import re
-    from collections.abc import Mapping, Sequence
+from enum import Enum, StrEnum, auto
+from typing import Final
 
 
 @dataclass(frozen=True)
@@ -268,24 +266,156 @@ class SecurityHeadersPolicy:
         return None
 
 
-def default_content_security_policy(script_hashes: Sequence[str]) -> str:
+class CspDirective(StrEnum):
+    """The directives the default policy names, in the order it writes them."""
+
+    SCRIPT_SRC = "script-src"
+    STYLE_SRC = "style-src"
+    CONNECT_SRC = "connect-src"
+    IMG_SRC = "img-src"
+    MEDIA_SRC = "media-src"
+    FONT_SRC = "font-src"
+    MANIFEST_SRC = "manifest-src"
+    WORKER_SRC = "worker-src"
+    FRAME_ANCESTORS = "frame-ancestors"
+
+
+_NONE_SOURCE: Final = "'none'"
+_DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
+    CspDirective.SCRIPT_SRC: ("'self'",),
+    CspDirective.STYLE_SRC: ("'self'",),
+    CspDirective.CONNECT_SRC: ("'self'",),
+    CspDirective.IMG_SRC: ("'self'", "data:", "blob:"),
+    CspDirective.MEDIA_SRC: ("'self'", "blob:"),
+    CspDirective.FONT_SRC: ("'self'",),
+    CspDirective.MANIFEST_SRC: ("'self'",),
+    CspDirective.WORKER_SRC: ("'self'",),
+    CspDirective.FRAME_ANCESTORS: (_NONE_SOURCE,),
+}
+
+_BASE64_VALUE: Final = r"[A-Za-z0-9+/\-_]+={0,2}"
+_HASH_ALGORITHM: Final = r"(?i:sha(?:256|384|512))"
+_HOST_LABEL: Final = r"[A-Za-z0-9\-]+"
+_HOST: Final = rf"(?:\*|(?:\*\.)?{_HOST_LABEL}(?:\.{_HOST_LABEL})*)"
+_SCHEME: Final = r"[A-Za-z][A-Za-z0-9+.\-]*"
+_KEYWORDS: Final = (
+    "self",
+    "unsafe-inline",
+    "unsafe-eval",
+    "strict-dynamic",
+    "unsafe-hashes",
+    "report-sample",
+    "unsafe-allow-redirects",
+    "wasm-unsafe-eval",
+)
+
+_BARE_HASH: Final = re.compile(f"{_HASH_ALGORITHM}-{_BASE64_VALUE}", re.ASCII)
+_KEYWORD_SOURCE: Final = re.compile(f"'(?i:{'|'.join(_KEYWORDS)})'", re.ASCII)
+_SELF_SOURCE: Final = re.compile("'(?i:self)'", re.ASCII)
+_NONCE_SOURCE: Final = re.compile(f"'(?i:nonce)-{_BASE64_VALUE}'", re.ASCII)
+_HASH_SOURCE: Final = re.compile(f"'{_HASH_ALGORITHM}-{_BASE64_VALUE}'", re.ASCII)
+_SCHEME_SOURCE: Final = re.compile(f"{_SCHEME}:", re.ASCII)
+_HOST_SOURCE: Final = re.compile(
+    rf"(?:{_SCHEME}://)?{_HOST}(?::(?:[0-9]+|\*))?(?:/[\w\-.~%!$&'()*+=:@/]*)?",
+    re.ASCII,
+)
+_SOURCE_GRAMMAR: Final = (
+    _KEYWORD_SOURCE,
+    _NONCE_SOURCE,
+    _HASH_SOURCE,
+    _SCHEME_SOURCE,
+    _HOST_SOURCE,
+)
+_ANCESTOR_GRAMMAR: Final = (_SELF_SOURCE, _SCHEME_SOURCE, _HOST_SOURCE)
+_DECLARED_SUBSET: Final = (
+    "keyword sources "
+    + ", ".join(f"'{keyword}'" for keyword in _KEYWORDS)
+    + "; nonce and sha256, sha384, sha512 hash sources; scheme sources; host sources"
+)
+
+
+def _require_source_list(owner: str, sources: object) -> Sequence[str]:
+    if isinstance(sources, str | bytes) or not isinstance(sources, Sequence):
+        raise TypeError(
+            f"{owner}: sources must be a sequence of str, not {type(sources).__name__}.",
+        )
+    for source in sources:
+        if not isinstance(source, str):
+            raise TypeError(f"{owner}: a source must be a str, not {type(source).__name__}.")
+    return sources
+
+
+def _validated_hash(script_hash: str) -> str:
+    if not _BARE_HASH.fullmatch(script_hash):
+        raise ValueError(
+            f"{CspDirective.SCRIPT_SRC}: {script_hash!r} is not a bare sha256-, sha384- or "
+            "sha512- hash with a base64 value.",
+        )
+    return f"'{script_hash}'"
+
+
+def _validated_source(directive: CspDirective, source: str) -> str:
+    grammar = _ANCESTOR_GRAMMAR if directive is CspDirective.FRAME_ANCESTORS else _SOURCE_GRAMMAR
+    if not any(production.fullmatch(source) for production in grammar):
+        raise ValueError(
+            f"{directive}: {source!r} is not a source this library accepts; "
+            f"the declared subset is {_DECLARED_SUBSET}.",
+        )
+    return source
+
+
+def _validated_additions(
+    added_sources: Mapping[CspDirective, Sequence[str]] | None,
+) -> dict[CspDirective, tuple[str, ...]]:
+    if added_sources is None:
+        return {}
+    if not isinstance(added_sources, Mapping):
+        raise TypeError(f"added_sources must be a Mapping, not {type(added_sources).__name__}.")
+    additions: dict[CspDirective, tuple[str, ...]] = {}
+    for directive, sources in added_sources.items():
+        if not isinstance(directive, CspDirective):
+            raise TypeError(f"added_sources keys must be CspDirective members, not {directive!r}.")
+        additions[directive] = tuple(
+            _validated_source(directive, source)
+            for source in _require_source_list(directive, sources)
+        )
+    return additions
+
+
+def _source_list(
+    directive: CspDirective,
+    quoted_hashes: tuple[str, ...],
+    additions: tuple[str, ...],
+) -> str:
+    defaults = _DEFAULT_SOURCES[directive]
+    if additions and defaults == (_NONE_SOURCE,):
+        defaults = ()
+    hashes = quoted_hashes if directive is CspDirective.SCRIPT_SRC else ()
+    return " ".join(dict.fromkeys((*defaults, *hashes, *additions)))
+
+
+def default_content_security_policy(
+    script_hashes: Sequence[str] = (),
+    *,
+    added_sources: Mapping[CspDirective, Sequence[str]] | None = None,
+) -> str:
     """Nothing loads unless this origin serves it, and no page may frame it.
 
-    Inline scripts a build emits into its own document are admitted by hash,
-    so the policy needs no ``unsafe-inline`` for them.
+    The default holds no host fact. Inline scripts a build emits into its own
+    document are admitted by bare hash (``sha256-<base64>``), which this function
+    quotes. A host adds its own sources per directive in ``added_sources`` as
+    complete source expressions: keywords, nonces and hashes in their quotes,
+    hosts and schemes bare. A non-empty addition to ``frame-ancestors`` replaces
+    its ``'none'``. A source outside the validated grammar is a ``ValueError``
+    and a wrong type a ``TypeError``, raised before any policy is built.
     """
-    script_src = "'self'"
-    for script_hash in script_hashes:
-        script_src += f" '{script_hash}'"
-    return (
-        "default-src 'none'; "
-        f"script-src {script_src}; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "connect-src 'self'; "
-        "img-src 'self' data: blob:; "
-        "media-src 'self' blob:; "
-        "font-src 'self' https://fonts.gstatic.com; "
-        "manifest-src 'self'; "
-        "worker-src 'self'; "
-        "frame-ancestors 'none'"
+    quoted_hashes = tuple(
+        _validated_hash(script_hash)
+        for script_hash in _require_source_list(CspDirective.SCRIPT_SRC, script_hashes)
     )
+    additions = _validated_additions(added_sources)
+    directives = (
+        f"{directive} {_source_list(directive, quoted_hashes, additions.get(directive, ()))}"
+        for directive in CspDirective
+    )
+    return "; ".join(("default-src 'none'", *directives))
