@@ -1,8 +1,0 @@
-claim_id = "d3e327d8ab1a45179b5749f4f8c8f8df"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "ab6f4dd59da599d5e7fb4c39942d4e418989e27c"
-branch = "claude/issue-194-admin-group-role"
-scope = ["CHANGELOG.md", "README.md", "e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_oidc_login.py", "tests/test_session_administration.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "6477176ea0c7a5154e5231184f2496c1169e8302"
-whole_reason = "One rule and its proof: the admin group setting, the role written at every login through a new port method, the hosts in tests and e2e, and the docs cannot land apart."
