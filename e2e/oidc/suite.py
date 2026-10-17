@@ -100,9 +100,9 @@ class HeldSuite:
         and the lines are kept in ``leftovers``: the failures of every call, and the objects the
         latest call still found. ``down_completed`` says whether the down
         exited cleanly, so a caller runs this again only when it did not. Worst case of one
-        call: 60 s down + 3 x 10 s listing = 90 s; with the 30 s module cancel, a first
-        call and one backstop call the run's teardown takes 30 + 90 + 90 = 210 s, inside
-        ``--kill-after=240``."""
+        call: 60 s down + 3 x 10 s listing = 90 s; with the 15 s worker join, the 30 s host
+        stop, a first call and one backstop call the run's teardown takes 15 + 30 + 90 + 90 =
+        225 s, inside ``--kill-after=240``."""
         self.remaining = []
         self.down_completed = False
         try:
@@ -157,7 +157,7 @@ class HeldSuite:
 
 @dataclass(frozen=True)
 class SuiteApi:
-    """The six endpoints a driver needs, plus the readiness probe. The suite refuses
+    """The eight endpoints a driver needs, plus the readiness probe. The suite refuses
     plain http, so every call says what a TLS front in front of it would say."""
 
     base_url: str
@@ -183,11 +183,14 @@ class SuiteApi:
     def start_module(self, module_id: str) -> None:
         self._call("POST", f"/api/runner/{module_id}", expected=200)
 
-    def wait_for_state(self, module_id: str, states: list[str], seconds: float) -> str:
-        """The first of ``states`` (or INTERRUPTED) the module reaches within ``seconds``."""
+    def state_within(
+        self, module_id: str, states: list[str], seconds: float, stop_requested: Callable[[], bool]
+    ) -> str | None:
+        """The first of ``states`` (or INTERRUPTED) the module reaches within ``seconds``;
+        None when the deadline passes or the run is told to stop."""
         wanted = ",".join([*states, "INTERRUPTED"])
         deadline = time.monotonic() + seconds
-        while time.monotonic() < deadline:
+        while time.monotonic() < deadline and not stop_requested():
             answer = self._call(
                 "GET", f"/api/runner/{module_id}/wait-state",
                 params={"states": wanted, "timeoutMs": WAIT_STATE_SLICE_SECONDS * 1000},
@@ -196,11 +199,15 @@ class SuiteApi:
             ).json()
             if state := answer.get("state"):
                 return state
-        raise StackError(f"module {module_id} did not reach {states} in {seconds} s")
+        return None
 
     def module_status(self, module_id: str) -> dict[str, Any]:
         """The running module's state and the values it exposes, among them its issuer."""
         return self._call("GET", f"/api/runner/{module_id}", expected=200).json()
+
+    def module_info(self, module_id: str) -> dict[str, Any]:
+        """The module's ``status`` and, once it has one, its ``result``."""
+        return self._call("GET", f"/api/info/{module_id}", expected=200).json()
 
     def cancel_module(self, module_id: str) -> None:
         self._call("DELETE", f"/api/runner/{module_id}", expected=200)
