@@ -64,9 +64,10 @@ uvx --no-build pyright@1.1.414 --pythonpath .venv/bin/python tests/typing
 `tests/typing/` holds a static password-only host that CI type-checks with
 that pinned pyright, so a port change that would break such a host fails here.
 
-CI runs these in the `checks` job, re-runs the suite at the lowest declared
-versions in `lowest-direct`, then runs the shared quality gate
-(`overnightworks/quality`, pinned by SHA in `ci.yml`) as the `quality` job. The
+CI runs these in the `checks` job and re-runs the suite at the lowest declared
+versions in `lowest-direct`. The shared quality gate
+(`overnightworks/quality`, pinned by SHA in `ci.yml`) is the `quality` job; it
+needs only `checks`, not `lowest-direct`. The
 quality gate's required check is `quality / verdict`; allowances for known
 secret false positives live only in `quality/config.toml`.
 
@@ -83,7 +84,7 @@ tag. It stays a plain string literal, which setuptools reads without importing t
 package; anything computed makes setuptools import `webauth` inside the isolated
 build, where neither the package's own metadata nor its dependencies are
 installed. The same pull request turns `## X.Y.Z - Unreleased` in `CHANGELOG.md`
-into the released heading.
+into the released heading, the bare `## X.Y.Z`.
 
 A pull request that changes behaviour a host can see adds its line to
 `CHANGELOG.md` under the unreleased version (opening `## X.Y.Z - Unreleased` when
