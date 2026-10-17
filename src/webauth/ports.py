@@ -1,4 +1,4 @@
-"""What the host supplies: its users, sessions, audit, hasher, and rate limiter.
+"""What the host supplies: its users, sessions, audit, and rate limiter.
 
 Each port is a Protocol the application implements over the persistence it
 already owns, so the library needs no schema and no ORM of its own. None of
@@ -53,8 +53,8 @@ class SubjectUserStore(Protocol):
         """The account whose ``id`` equals ``user_id`` character for character.
 
         The host must compare exactly here, with no case, accent or
-        trailing-space folding, even where its id column's collation folds; a
-        binary collation does.
+        trailing-space folding, even where its id column's collation folds;
+        comparing bytes does (a binary column or a NO PAD binary collation).
         """
         ...
 
@@ -164,23 +164,6 @@ class SessionLivenessPolicy[StoredSessionT](Protocol):
 
     def admits_stored_session(self, record: StoredSessionT, now: datetime) -> bool:
         """Whether a session loaded from the store still stands at ``now``."""
-        ...
-
-
-@runtime_checkable
-class PasswordHasher(Protocol):
-    """The algorithm the host chose to hash and check its passwords with."""
-
-    def hash(self, password: str) -> str: ...
-
-    def verify(self, password: str, stored_hash: str | None) -> bool:
-        """Whether ``password`` matches ``stored_hash``, at full cost when it cannot.
-
-        A ``None`` hash — a username nobody holds, or an account with no
-        password set — is still verified against a fixed dummy hash rather than
-        rejected outright, so a missing account cannot be told from a wrong
-        password by how long the answer takes.
-        """
         ...
 
 

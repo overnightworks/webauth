@@ -34,7 +34,7 @@ CI, which only lints it.
   application implements over the persistence it already owns. `.importlinter`
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
 - No host application is a dependency. `webauth` depends on FastAPI (with
-  Starlette and anyio, which `src` imports), Pydantic and argon2-cffi at
+  Starlette and anyio, which `src` imports) and Pydantic at
   runtime, and on nothing else. Redis is optional — install
   `overnightworks-webauth[redis]` for the Redis rate-limit backend; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.

@@ -15,7 +15,6 @@ It owns the machinery an application should not rebuild:
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
 | `webauth.cookies` | The signed session cookie and the CSRF token bound to it, issued and cleared |
 | `webauth.dependencies` | Turning a signed cookie into the account that made the request |
-| `webauth.passwords` | Password hashing and the strength rules a chosen password must meet |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
@@ -31,8 +30,8 @@ It leaves the application everything that touches the application's own truth:
 the user model, configured roles, login routes, and their
 transaction boundaries. The library persists nothing itself — it holds no schema
 and no ORM, and an import-linter contract keeps it that way. What it needs
-reaches it through the Protocols in `webauth.ports`: `SubjectUserStore`, `SessionRecordStore`, `AuditSink`,
-and `PasswordHasher`.
+reaches it through the Protocols in `webauth.ports`: `SubjectUserStore`, `SessionRecordStore`,
+and `AuditSink`.
 None of the stores commits; the caller owns the transaction, so a request that
 fails leaves nothing behind that the auth machinery wrote, except the rate-limit
 budget, which counts attempts whether or not the request succeeds.
@@ -300,35 +299,6 @@ Events contain no passwords, hashes, raw session identifiers, or usernames.
 receives a `SessionIdentityChanged` with `change`, `user_id`, `session_ref`,
 `previous`, and `current` when a live session begins arriving from somewhere
 else.
-
-## PasswordHasher
-
-The library hardcodes no hashing algorithm: `WebAuthConfig` requires a
-`password_hasher`, a `webauth.ports.PasswordHasher` with two methods —
-`hash(password) -> str` and `verify(password, stored_hash) -> bool`. `verify`
-must check even a `None` `stored_hash` against a fixed dummy at full cost, so a
-username nobody holds cannot be told from a wrong password by timing.
-
-`webauth.passwords.Argon2idPasswordHasher` is provided and honours that
-contract. It normalises every password to Unicode NFC in both `hash` and
-`verify`, as `check_password_strength` does before measuring it.
-Normalisation is the hasher's job: the library passes the password as typed,
-so a host hasher that wants spelling-independence normalises in both `hash`
-and `verify`. New hashes use OWASP's
-Argon2id costs (m=19 MiB, t=2, p=1), held in `OWASP_ARGON2ID`; a host passes its
-own `argon2.Parameters` to the constructor to change them. Those parameters
-are the host's one cost profile: `verify` accepts only an Argon2id hash that
-encodes exactly them (version, memory, time, parallelism, salt and hash
-length), so an unknown username costs the same as any accepted hash. Every
-other stored value raises `webauth.passwords.UnknownHashFormatError` instead
-of reading as a wrong password — bcrypt, Argon2i, Argon2d, an empty or garbled
-string, an Argon2id hash at other costs (a 64 MiB one as much as a cheaper
-one), and an Argon2id hash whose salt or digest is not canonical unpadded
-base64 of the profile's salt and hash length. A well-formed hash that Argon2
-still fails to check, for example under memory or thread exhaustion, raises
-Argon2's own `argon2.exceptions.VerificationError` unchanged. After changing the parameters, set each
-password anew. A host with another algorithm
-supplies its own class implementing the same protocol.
 
 ## Rate limiting, and the optional Redis extra
 
