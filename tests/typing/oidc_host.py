@@ -18,8 +18,8 @@ from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig
 from webauth.dependencies import AuthDependencies, AuthenticatedUser, current_user_dependency
-from webauth.oidc import OidcRelyingParty
-from webauth.oidc_login import AdmissionRefusal, OidcRefusal, finish_login
+from webauth.oidc import OidcRefusal, OidcRelyingParty
+from webauth.oidc_login import AdmissionRefusal, finish_login, start_login
 from webauth.ports import (
     AuditSink,
     SessionAdministrationStore,
@@ -138,6 +138,13 @@ def a_host_administers_sessions(config: WebAuthConfig) -> SessionAdministration:
     return SessionAdministration(
         sessions=sessions, audit=HostAudit(), lock=HostLock(), config=config,
     )
+
+
+def a_host_starts_a_keycloak_login(
+    relying_party: OidcRelyingParty, request: Request, response: Response,
+    config: WebAuthConfig,
+) -> str:
+    return start_login(relying_party, request, response, config)
 
 
 def a_host_finishes_a_keycloak_login(
