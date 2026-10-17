@@ -1,9 +1,9 @@
 """A password host, written as hosts were before an account could lack a password.
 
-Its account model types ``password_hash`` as ``str`` and it implements the
-password ports but not ``SubjectUserStore``. CI checks this file with a
-pinned pyright, so a port change that would break such a host fails the build
-instead of the host's next upgrade.
+Its account model, ``HostUser``, types ``password_hash`` as ``str`` and must
+remain a ``UserRecord`` that ``judge_credentials`` accepts. CI checks this file
+with a pinned pyright, so a port change that would break such a host fails the
+build instead of the host's next upgrade.
 """
 
 from __future__ import annotations

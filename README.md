@@ -304,6 +304,15 @@ to list and end sessions without a user store. Construct
 `SessionAdministration(sessions, audit, lock, config)` with the host's
 `SessionAdministrationStore`, `AuditSink`, `WriteLock` and `WebAuthConfig`.
 
+- `SessionAdministrationStore`: extends `SessionRecordStore` with
+  `list_active(*, offset=0, limit=None)` and `count_active()`. The host selects
+  active records using its liveness rules and owns their order. These reads
+  need no write lock; `limit=None` returns all remaining records.
+- `WriteLock.hold()`: serializes checks and writes across the supplied stores
+  in one host-owned transaction. `revoke_session` acquires it and never
+  commits. The host commits on success and rolls back on failure. A
+  transaction-scoped lock can remain held until then.
+
 | Helper | Behavior |
 |---|---|
 | `list_sessions(offset=0, limit=None)` | Returns frozen `SessionSummary` records with `session_ref`, `user_id`, `username`, `ip_address`, and `user_agent` |
@@ -330,6 +339,11 @@ explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 | `session_revoked` | `session_ref` |
 
 Events contain no passwords, hashes, raw session identifiers, or usernames.
+
+`AuditSink` has a second method, `session_identity_changed(event)`, which
+receives a `SessionIdentityChanged` with `change`, `user_id`, `session_ref`,
+`previous`, and `current` when a live session begins arriving from somewhere
+else.
 
 ## PasswordHasher
 
