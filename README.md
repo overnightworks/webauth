@@ -13,9 +13,9 @@ It owns the machinery an application should not rebuild:
 | Module | Owns |
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
-| `webauth.cookies` | The signed session cookie and the CSRF token bound to it |
+| `webauth.cookies` | The signed session cookie and the CSRF token bound to it, issued and cleared |
 | `webauth.dependencies` | Turning a signed cookie into the account that made the request |
-| `webauth.login` | Cookies issued and cleared, the failure budgets, password admission |
+| `webauth.login` | The failure budgets, password admission |
 | `webauth.passwords` | Password hashing and the strength rules a chosen password must meet |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
@@ -148,11 +148,11 @@ from fastapi.testclient import TestClient
 from webauth_arrangement import FakeUser, a_web_auth_config
 
 from webauth.config import install_web_auth_config
+from webauth.cookies import issue_session_cookies
 from webauth.login import (
     LoginOutcome,
     LoginRefusal,
     http_refusal,
-    issue_session_cookies,
     judge_credentials,
 )
 config = a_web_auth_config()
@@ -196,7 +196,7 @@ the verified session identifier, or `None` when the cookie is missing, longer
 than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
 forged, or present more than once. The limit holds even for a correctly signed
 cookie, so `issue_session_cookies` raises `ValueError` for an identifier whose
-signed cookie would exceed it (identifiers up to 135 characters fit) or that is empty. A sibling
+signed cookie would exceed it (identifiers up to 135 characters fit) or that is empty. The signature is an HMAC-SHA256 over `session:` and the identifier, so a signature made for a CSRF token or a pending login is no session cookie, and a cookie issued by 0.14.x or earlier is refused. A sibling
 subdomain can set a second cookie of the same name, so a request carrying two
 is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the

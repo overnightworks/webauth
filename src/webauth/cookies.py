@@ -19,6 +19,9 @@ from starlette.requests import cookie_parser
 
 if TYPE_CHECKING:
     from starlette.requests import Request
+    from starlette.responses import Response
+
+    from webauth.config import WebAuthConfig
 
 HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
 SECURE_COOKIE_PREFIX: Final = "__Secure-"
@@ -36,6 +39,8 @@ which are minted with ``secrets.token_urlsafe``."""
 
 _PENDING_LOGIN_VERSION: Final = "v1"
 _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
+_SESSION_SIGNING_PREFIX: Final = b"session:"
+_CSRF_SIGNING_PREFIX: Final = b"csrf:"
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
@@ -52,6 +57,7 @@ _PENDING_LOGIN_SIGNATURE: Final = re.compile(r"[0-9a-f]{64}")
 
 CookieSameSite = Literal["strict", "lax"]
 DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
+COOKIE_PATH: Final = "/"
 
 
 def default_cookie_name(plain_name: str, *, secure: bool) -> str:
@@ -121,6 +127,12 @@ def session_reference(session_id: str) -> str:
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
+def _session_signature(session_id: str, secret: bytes) -> str:
+    return hmac.new(
+        secret, _SESSION_SIGNING_PREFIX + session_id.encode(), hashlib.sha256
+    ).hexdigest()
+
+
 def sign_session_id(session_id: str, secret: bytes) -> str:
     """Return ``session_id.hmac_hex`` for use as a cookie value.
 
@@ -130,8 +142,7 @@ def sign_session_id(session_id: str, secret: bytes) -> str:
     """
     if not session_id:
         raise ValueError("the session id must not be empty")
-    sig = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
-    signed = f"{session_id}.{sig}"
+    signed = f"{session_id}.{_session_signature(session_id, secret)}"
     if len(signed) > MAX_SESSION_COOKIE_CHARS:
         raise ValueError("the session id does not fit the session cookie")
     return signed
@@ -144,7 +155,7 @@ def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
     session_id, sig = cookie_value.rsplit(".", 1)
     if not session_id or not sig:
         return None
-    expected = hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()
+    expected = _session_signature(session_id, secret)
     if hmac.compare_digest(sig.encode(), expected.encode()):
         return session_id
     return None
@@ -152,13 +163,69 @@ def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
 
 def generate_csrf_token(session_id: str, secret: bytes) -> str:
     """Generate a CSRF token cryptographically bound to the session."""
-    return hmac.new(secret, f"csrf:{session_id}".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(
+        secret, _CSRF_SIGNING_PREFIX + session_id.encode(), hashlib.sha256
+    ).hexdigest()
 
 
 def verify_csrf_token(token: str, session_id: str, secret: bytes) -> bool:
     """Verify a CSRF token is valid for the given session."""
     expected = generate_csrf_token(session_id, secret)
     return hmac.compare_digest(token.encode(), expected.encode())
+
+
+def issue_session_cookies(
+    response: Response, session_id: str, config: WebAuthConfig,
+) -> None:
+    """Hand the browser its signed session and the CSRF token bound to it.
+
+    Only the session cookie is kept from scripts: the CSRF token has to be
+    readable, because the double-submit check compares it against a header the
+    client sends back itself. Both carry ``Secure`` unless the host switched
+    ``cookie_secure`` off: a request's scheme is not trusted to decide it,
+    because behind an unlisted TLS proxy every request looks like plain http.
+    """
+    secure = config.cookie_secure
+    max_age = config.cookie_max_age_seconds
+    samesite = config.cookie_samesite
+    response.set_cookie(
+        config.session_cookie_name,
+        sign_session_id(session_id, config.signing_key),
+        max_age=max_age,
+        httponly=True,
+        samesite=samesite,
+        secure=secure,
+        path=COOKIE_PATH,
+    )
+    response.set_cookie(  # NOSONAR The client must read this CSRF token for double-submit.
+        config.csrf_cookie_name,
+        generate_csrf_token(session_id, config.signing_key),
+        max_age=max_age,
+        httponly=False,
+        samesite=samesite,
+        secure=secure,
+        path=COOKIE_PATH,
+    )
+
+
+def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
+    """Take both cookies back, so the browser stops carrying a dead session.
+
+    Each deletion repeats the attributes its cookie was set with, so a browser
+    that only lets a secure context overwrite a ``Secure`` cookie accepts it.
+    """
+    samesite = config.cookie_samesite
+    secure = config.cookie_secure
+    response.delete_cookie(
+        config.session_cookie_name,
+        path=COOKIE_PATH,
+        samesite=samesite,
+        secure=secure,
+        httponly=True,
+    )
+    response.delete_cookie(
+        config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite, secure=secure,
+    )
 
 
 @dataclass(frozen=True)
