@@ -21,14 +21,22 @@ from webauth.policies import (
     PathRules,
     PathShape,
     RateLimitBudget,
-    RateLimitClass,
     RateLimitPolicy,
+    RateLimitRule,
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
 
-_A_BUDGET = RateLimitBudget(max_requests=10, window_seconds=60)
-_EVERY_BUDGET = dict.fromkeys(RateLimitClass, _A_BUDGET)
+
+def _a_budget(name: str, max_requests: int = 10) -> RateLimitBudget:
+    return RateLimitBudget(name, max_requests=max_requests, window_seconds=60)
+
+
+_DEFAULT = _a_budget("default")
+_BULK = _a_budget("bulk")
+_UPLOAD = _a_budget("upload")
+_BULK_RULE = RateLimitRule(paths=PathRules(prefixes=("/bulk/",)), budget=_BULK)
+_UPLOAD_RULE = RateLimitRule(paths=PathRules(prefixes=("/bulk/up",)), budget=_UPLOAD)
 
 
 class TestPathRules:
@@ -71,34 +79,72 @@ class TestPathRules:
 class TestRateLimitPolicy:
     def _policy(self) -> RateLimitPolicy:
         return RateLimitPolicy(
-            budgets=_EVERY_BUDGET,
+            default=_DEFAULT,
+            rules=(
+                _BULK_RULE,
+                RateLimitRule(paths=PathRules(exact=frozenset({"/feed"})), budget=_UPLOAD),
+            ),
             exempt=PathRules(prefixes=("/static/",)),
-            media=PathRules(prefixes=("/audio/",)),
-            stream=PathRules(exact=frozenset({"/events"})),
         )
 
     @pytest.mark.parametrize(("path", "expected"), [
-        ("/audio/song.mp3", RateLimitClass.MEDIA),
-        ("/events", RateLimitClass.STREAM),
-        ("/api/songs", RateLimitClass.API),
-        ("/nothing-serves-this", RateLimitClass.API),
+        ("/bulk/item", _BULK),
+        ("/feed", _UPLOAD),
+        ("/api/items", _DEFAULT),
+        ("/nothing-serves-this", _DEFAULT),
+        ("/", _DEFAULT),
     ])
-    def test_every_path_spends_from_exactly_one_budget(
-        self, path: str, expected: RateLimitClass,
+    def test_a_path_spends_from_the_first_matching_rule_else_the_default(
+        self, path: str, expected: RateLimitBudget,
     ) -> None:
-        assert self._policy().classify(path) == expected
+        assert self._policy().budget_for(path) == expected
 
-    def test_an_exempt_path_spends_from_no_budget(self) -> None:
-        policy = self._policy()
+    @pytest.mark.parametrize(("rules", "expected"), [
+        ((_BULK_RULE, _UPLOAD_RULE), _BULK),
+        ((_UPLOAD_RULE, _BULK_RULE), _UPLOAD),
+    ], ids=["bulk-first", "upload-first"])
+    def test_the_earlier_of_two_overlapping_rules_decides(
+        self, rules: tuple[RateLimitRule, ...], expected: RateLimitBudget,
+    ) -> None:
+        policy = RateLimitPolicy(default=_DEFAULT, rules=rules)
 
-        assert policy.is_exempt("/static/app.js") is True
-        assert policy.is_exempt("/api/songs") is False
+        assert policy.budget_for("/bulk/upload") == expected
 
-    def test_a_class_without_a_budget_is_refused_at_build_time(self) -> None:
-        with pytest.raises(ValueError, match="MEDIA"):
-            RateLimitPolicy(budgets={
-                RateLimitClass.API: _A_BUDGET, RateLimitClass.STREAM: _A_BUDGET,
-            })
+    def test_a_policy_without_rules_spends_every_path_from_the_default(self) -> None:
+        policy = RateLimitPolicy(default=_DEFAULT)
+
+        assert policy.budget_for("/bulk/item") == _DEFAULT
+        assert policy.budget_for("/") == _DEFAULT
+
+    def test_an_exempt_path_stays_exempt_when_a_rule_claims_it(self) -> None:
+        policy = RateLimitPolicy(
+            default=_DEFAULT, rules=(_BULK_RULE,), exempt=PathRules(prefixes=("/bulk/",)),
+        )
+
+        assert policy.is_exempt("/bulk/item") is True
+        assert policy.is_exempt("/api/items") is False
+
+    @pytest.mark.parametrize("name", [
+        "", "API", "Media", "1a", "-a", "a:b", "a b", "a{b}", "a*", "a/b", "api\n", "ä",
+    ])
+    def test_a_budget_name_outside_the_grammar_is_refused(self, name: str) -> None:
+        with pytest.raises(ValueError, match=re.escape(repr(name))):
+            RateLimitBudget(name, max_requests=1, window_seconds=60)
+
+    @pytest.mark.parametrize("name", ["a", "api", "bulk-2", "up_load"])
+    def test_a_budget_name_inside_the_grammar_is_accepted(self, name: str) -> None:
+        assert RateLimitBudget(name, max_requests=1, window_seconds=60).name == name
+
+    @pytest.mark.parametrize(("default", "rules"), [
+        (_DEFAULT, (RateLimitRule(PathRules(), _BULK), RateLimitRule(PathRules(), _BULK))),
+        (_DEFAULT, (RateLimitRule(PathRules(), _a_budget("default", 99)),)),
+        (_DEFAULT, (RateLimitRule(PathRules(), _DEFAULT),)),
+    ], ids=["two-rules", "rule-and-default", "equal-limits"])
+    def test_a_repeated_budget_name_is_refused_and_named(
+        self, default: RateLimitBudget, rules: tuple[RateLimitRule, ...],
+    ) -> None:
+        with pytest.raises(ValueError, match=r"repeated: (bulk|default)\."):
+            RateLimitPolicy(default=default, rules=rules)
 
 
 class TestCsrfPolicy:

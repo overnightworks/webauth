@@ -9,13 +9,16 @@ import pytest
 from fastapi.testclient import TestClient
 from webauth_arrangement import (
     API_PATH,
+    BULK_BUDGET_NAME,
+    BULK_PATH,
+    DEFAULT_BUDGET_NAME,
     HTTPS_TEST_SERVER,
-    MEDIA_PATH,
     RATE_LIMITED_PATH,
-    a_class_split_rate_limited_client,
+    a_policy_rate_limited_client,
     a_rate_limited_client,
 )
 
+from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
 from webauth.rate_limit import PRUNE_INTERVAL_SECONDS, SingleProcessRateLimitBackend
 
 
@@ -107,6 +110,27 @@ class TestThreadSafety:
         assert sum(verdicts) == limit
 
 
+OTHER_PATH = "/other/thing"
+EXEMPT_PATH = "/health"
+THREE_PATHS = (API_PATH, BULK_PATH, OTHER_PATH)
+
+
+def _a_three_budget_policy() -> RateLimitPolicy:
+    return RateLimitPolicy(
+        default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests=1, window_seconds=60),
+        rules=(
+            RateLimitRule(
+                PathRules(prefixes=("/bulk/",)),
+                RateLimitBudget(BULK_BUDGET_NAME, max_requests=1, window_seconds=60),
+            ),
+            RateLimitRule(
+                PathRules(prefixes=("/other/",)),
+                RateLimitBudget("other", max_requests=1, window_seconds=60),
+            ),
+        ),
+    )
+
+
 class TestMiddlewareOverSingleProcessBackend:
     def test_allows_within_budget_then_blocks(self) -> None:
         client = a_rate_limited_client(SingleProcessRateLimitBackend(), max_requests=2)
@@ -136,15 +160,43 @@ class TestMiddlewareOverSingleProcessBackend:
         assert _from_peer(client, "203.0.113.8").get(RATE_LIMITED_PATH).status_code == 200
         assert _from_peer(client, "203.0.113.7").get(RATE_LIMITED_PATH).status_code == 429
 
-    def test_exhausting_the_api_budget_leaves_the_media_path_answering(self) -> None:
-        client = a_class_split_rate_limited_client(
-            SingleProcessRateLimitBackend(),
-            api_max_requests=1,
-            media_max_requests=5,
+    @pytest.mark.parametrize("exhausted_path", [API_PATH, BULK_PATH, OTHER_PATH])
+    def test_exhausting_one_budget_leaves_the_others_answering(self, exhausted_path: str) -> None:
+        client = a_policy_rate_limited_client(
+            SingleProcessRateLimitBackend(), _a_three_budget_policy(), paths=THREE_PATHS,
         )
+        assert client.get(exhausted_path).status_code == 200
+        assert client.get(exhausted_path).status_code == 429
+        for other_path in set(THREE_PATHS) - {exhausted_path}:
+            assert client.get(other_path).status_code == 200
+
+    def test_a_429_carries_the_retry_after_of_the_budget_the_path_spent(self) -> None:
+        policy = RateLimitPolicy(
+            default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests=1, window_seconds=60),
+            rules=(RateLimitRule(
+                PathRules(prefixes=("/bulk/",)),
+                RateLimitBudget(BULK_BUDGET_NAME, max_requests=1, window_seconds=30),
+            ),),
+        )
+        client = a_policy_rate_limited_client(
+            SingleProcessRateLimitBackend(), policy, paths=(API_PATH, BULK_PATH),
+        )
+        for path in (API_PATH, BULK_PATH):
+            client.get(path)
+
+        assert client.get(BULK_PATH).headers["Retry-After"] == "30"
+        assert client.get(API_PATH).headers["Retry-After"] == "60"
+
+    def test_an_exempt_path_is_never_limited_and_spends_no_default(self) -> None:
+        policy = RateLimitPolicy(
+            default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests=1, window_seconds=60),
+            exempt=PathRules(exact=frozenset({EXEMPT_PATH})),
+        )
+        client = a_policy_rate_limited_client(
+            SingleProcessRateLimitBackend(), policy, paths=(API_PATH, EXEMPT_PATH),
+        )
+        assert [client.get(EXEMPT_PATH).status_code for _ in range(3)] == [200, 200, 200]
         assert client.get(API_PATH).status_code == 200
-        assert client.get(API_PATH).status_code == 429
-        assert client.get(MEDIA_PATH).status_code == 200
 
 
 def _from_peer(client: TestClient, address: str) -> TestClient:

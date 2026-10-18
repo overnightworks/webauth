@@ -11,13 +11,19 @@ import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 from webauth_arrangement import (
+    API_PATH,
+    BULK_BUDGET_NAME,
+    BULK_PATH,
+    DEFAULT_BUDGET_NAME,
     HTTPS_TEST_SERVER,
     RATE_LIMITED_PATH,
     AlwaysFailingRateLimitBackend,
+    a_policy_rate_limited_client,
     a_rate_limited_client,
 )
 
 import webauth.rate_limit
+from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
 from webauth.rate_limit import RedisRateLimitBackend
 
 HOST_PREFIX = "host"
@@ -88,10 +94,10 @@ class TestRedisRateLimitBackend:
     def test_two_prefixes_over_one_redis_count_independently(self, fake_redis) -> None:
         host_a = RedisRateLimitBackend(fake_redis, "host-a")
         host_b = RedisRateLimitBackend(fake_redis, "host-b")
-        assert host_a.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is True
-        assert host_b.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is True
-        assert host_a.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is False
-        assert host_b.is_allowed("API:1.2.3.4", limit=1, window_seconds=60) is False
+        assert host_a.is_allowed("api:1.2.3.4", limit=1, window_seconds=60) is True
+        assert host_b.is_allowed("api:1.2.3.4", limit=1, window_seconds=60) is True
+        assert host_a.is_allowed("api:1.2.3.4", limit=1, window_seconds=60) is False
+        assert host_b.is_allowed("api:1.2.3.4", limit=1, window_seconds=60) is False
 
     def test_regains_budget_once_the_window_slides_on_the_server_clock(
         self, fake_redis, world_clock
@@ -182,3 +188,43 @@ class TestMiddlewareOverRedisBackend:
         rejected = client.get(RATE_LIMITED_PATH)
         assert rejected.status_code == 503
         assert rejected.headers["Retry-After"] == "5"
+
+
+class TestRedisKeysOfNamedBudgets:
+    @staticmethod
+    def a_client(redis_client, default_max_requests: int = 5) -> TestClient:
+        policy = RateLimitPolicy(
+            default=RateLimitBudget(DEFAULT_BUDGET_NAME, default_max_requests, WINDOW_SECONDS),
+            rules=(RateLimitRule(
+                PathRules(prefixes=("/bulk/",)),
+                RateLimitBudget(BULK_BUDGET_NAME, 5, WINDOW_SECONDS),
+            ),),
+        )
+        return a_policy_rate_limited_client(
+            RedisRateLimitBackend(redis_client, HOST_PREFIX), policy, paths=(API_PATH, BULK_PATH),
+        )
+
+    def test_keys_hold_the_budget_name_and_the_budget_address(self, fake_redis) -> None:
+        client = self.a_client(fake_redis)
+        for address in ("203.0.113.7", "2001:db8:1:2::1"):
+            peer = TestClient(client.app, base_url=HTTPS_TEST_SERVER, client=(address, 50000))
+            peer.get(BULK_PATH)
+            peer.get(API_PATH)
+
+        assert set(fake_redis.keys()) == {
+            "host:bulk:203.0.113.7",
+            "host:api:203.0.113.7",
+            "host:bulk:2001:db8:1:2::/64",
+            "host:api:2001:db8:1:2::/64",
+        }
+
+    def test_an_exhausted_key_of_the_fixed_classes_does_not_limit_the_new_default(
+        self, fake_redis,
+    ) -> None:
+        RedisRateLimitBackend(fake_redis, HOST_PREFIX).is_allowed(
+            "API:203.0.113.7", limit=1, window_seconds=WINDOW_SECONDS,
+        )
+        client = self.a_client(fake_redis, default_max_requests=1)
+        peer = TestClient(client.app, base_url=HTTPS_TEST_SERVER, client=("203.0.113.7", 50000))
+
+        assert peer.get(API_PATH).status_code == 200

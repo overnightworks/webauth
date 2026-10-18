@@ -642,6 +642,27 @@ thread-safe (both backends below are). A check holds its worker thread until the
 backend gives up, so give a Redis client short timeouts and few retries; the
 client defaults can hold a thread for a minute.
 
+The host names its budgets in a `webauth.policies.RateLimitPolicy`. Exempt
+paths spend nothing. The first `RateLimitRule` whose paths match decides which
+budget a request spends from, and every other path spends from `default`. A
+budget name starts with a lowercase letter, holds only lowercase letters,
+digits, `-` and `_`, and is unique in the policy. The limiter key is
+`<name>:<address>` inside the Redis `key_prefix`, so renaming a budget starts
+it fresh.
+
+```python
+RateLimitPolicy(
+    default=RateLimitBudget("api", max_requests=300, window_seconds=60),
+    rules=(
+        RateLimitRule(
+            paths=PathRules(prefixes=("/files/",)),
+            budget=RateLimitBudget("downloads", max_requests=1200, window_seconds=60),
+        ),
+    ),
+    exempt=PathRules(exact=frozenset({"/robots.txt"}), prefixes=("/static/",)),
+)
+```
+
 Two backends implement it:
 
 - `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
