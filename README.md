@@ -17,6 +17,28 @@ the `jwt` extra, which [Install](#install) names.
 The host names the issuer's authorization, token, key-set and end-session
 URLs itself; the library does no discovery.
 
+### What every app gets
+
+Every app that signs people in through Keycloak behaves the same way. The
+details are in the sections linked below.
+
+**Who gets in.** Only members of the app's `login_group`, such as
+`/apps/songmaker`, get in. Members of its `admin_group`, such as
+`/apps/songmaker/admin`, are admins. Both are decided again at every login, so
+a change in Keycloak takes effect at the person's next sign-in. See
+[Admitting an identity](#admitting-an-identity).
+
+**When Keycloak is down.** People who are already signed in keep working,
+because no request to the app calls Keycloak. A new sign-in fails at the
+callback, where the person sees the host's page, and the app has no local
+fallback login. See [The store decides every request](#the-store-decides-every-request).
+
+**Signing out.** Signing out of an app ends the person's Keycloak session in
+that browser too. Keycloak then tells every app to end that person's sessions,
+so they are signed out everywhere. Their other devices sign back in without
+asking for a password, through their own Keycloak session there. See
+[Logging out](#logging-out) and [Back-channel logout](#back-channel-logout).
+
 ### The host's start, callback and logout routes
 
 `webauth.oidc_login` carries the pending login for the host, so the host
