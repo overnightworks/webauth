@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -18,6 +20,7 @@ from webauth_arrangement import (
     a_rate_limited_client,
 )
 
+import webauth.rate_limit
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
 from webauth.rate_limit import PRUNE_INTERVAL_SECONDS, SingleProcessRateLimitBackend
 
@@ -187,16 +190,67 @@ class TestMiddlewareOverSingleProcessBackend:
         assert client.get(BULK_PATH).headers["Retry-After"] == "30"
         assert client.get(API_PATH).headers["Retry-After"] == "60"
 
-    def test_an_exempt_path_is_never_limited_and_spends_no_default(self) -> None:
+    def test_an_exempt_path_claimed_by_a_rule_spends_no_budget(self) -> None:
         policy = RateLimitPolicy(
             default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests=1, window_seconds=60),
+            rules=(RateLimitRule(
+                PathRules(exact=frozenset({EXEMPT_PATH, BULK_PATH})),
+                RateLimitBudget(BULK_BUDGET_NAME, max_requests=1, window_seconds=60),
+            ),),
             exempt=PathRules(exact=frozenset({EXEMPT_PATH})),
         )
         client = a_policy_rate_limited_client(
-            SingleProcessRateLimitBackend(), policy, paths=(API_PATH, EXEMPT_PATH),
+            SingleProcessRateLimitBackend(), policy, paths=(API_PATH, BULK_PATH, EXEMPT_PATH),
         )
         assert [client.get(EXEMPT_PATH).status_code for _ in range(3)] == [200, 200, 200]
+        assert client.get(BULK_PATH).status_code == 200
         assert client.get(API_PATH).status_code == 200
+
+    def test_each_budget_admits_its_own_limit_of_requests(self) -> None:
+        client = a_policy_rate_limited_client(
+            SingleProcessRateLimitBackend(), _a_budget_pair_policy(), paths=(API_PATH, BULK_PATH),
+        )
+        assert [client.get(API_PATH).status_code for _ in range(4)] == [200, 200, 200, 429]
+        assert [client.get(BULK_PATH).status_code for _ in range(2)] == [200, 429]
+
+    def test_each_budget_expires_after_its_own_window(self) -> None:
+        client = a_policy_rate_limited_client(
+            SingleProcessRateLimitBackend(), _a_budget_pair_policy(), paths=(API_PATH, BULK_PATH),
+        )
+        with _monotonic_clock_at(100.0) as clock:
+            for _ in range(3):
+                client.get(API_PATH)
+            client.get(BULK_PATH)
+
+            clock.now = 100.0 + SHORT_WINDOW_SECONDS + 1
+            assert client.get(BULK_PATH).status_code == 200
+            assert client.get(API_PATH).status_code == 429
+
+            clock.now = 100.0 + LONG_WINDOW_SECONDS + 1
+            assert client.get(API_PATH).status_code == 200
+
+
+SHORT_WINDOW_SECONDS = 30
+LONG_WINDOW_SECONDS = 60
+
+
+def _a_budget_pair_policy() -> RateLimitPolicy:
+    return RateLimitPolicy(
+        default=RateLimitBudget(DEFAULT_BUDGET_NAME, 3, LONG_WINDOW_SECONDS),
+        rules=(RateLimitRule(
+            PathRules(prefixes=("/bulk/",)),
+            RateLimitBudget(BULK_BUDGET_NAME, 1, SHORT_WINDOW_SECONDS),
+        ),),
+    )
+
+
+@contextmanager
+def _monotonic_clock_at(start: float):
+    """The limiter's clock alone, steered by the yielded object's ``now``."""
+    clock = SimpleNamespace(now=start)
+    steered_time = SimpleNamespace(monotonic=lambda: clock.now)
+    with patch.object(webauth.rate_limit, "time", steered_time):
+        yield clock
 
 
 def _from_peer(client: TestClient, address: str) -> TestClient:

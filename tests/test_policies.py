@@ -116,14 +116,6 @@ class TestRateLimitPolicy:
         assert policy.budget_for("/bulk/item") == _DEFAULT
         assert policy.budget_for("/") == _DEFAULT
 
-    def test_an_exempt_path_stays_exempt_when_a_rule_claims_it(self) -> None:
-        policy = RateLimitPolicy(
-            default=_DEFAULT, rules=(_BULK_RULE,), exempt=PathRules(prefixes=("/bulk/",)),
-        )
-
-        assert policy.is_exempt("/bulk/item") is True
-        assert policy.is_exempt("/api/items") is False
-
     @pytest.mark.parametrize("name", [
         "", "API", "Media", "1a", "-a", "a:b", "a b", "a{b}", "a*", "a/b", "api\n", "ä",
     ])
@@ -135,15 +127,15 @@ class TestRateLimitPolicy:
     def test_a_budget_name_inside_the_grammar_is_accepted(self, name: str) -> None:
         assert RateLimitBudget(name, max_requests=1, window_seconds=60).name == name
 
-    @pytest.mark.parametrize(("default", "rules"), [
-        (_DEFAULT, (RateLimitRule(PathRules(), _BULK), RateLimitRule(PathRules(), _BULK))),
-        (_DEFAULT, (RateLimitRule(PathRules(), _a_budget("default", 99)),)),
-        (_DEFAULT, (RateLimitRule(PathRules(), _DEFAULT),)),
+    @pytest.mark.parametrize(("default", "rules", "expected"), [
+        (_DEFAULT, (RateLimitRule(PathRules(), _BULK), RateLimitRule(PathRules(), _BULK)), "bulk"),
+        (_DEFAULT, (RateLimitRule(PathRules(), _a_budget("default", 99)),), "default"),
+        (_DEFAULT, (RateLimitRule(PathRules(), _DEFAULT),), "default"),
     ], ids=["two-rules", "rule-and-default", "equal-limits"])
     def test_a_repeated_budget_name_is_refused_and_named(
-        self, default: RateLimitBudget, rules: tuple[RateLimitRule, ...],
+        self, default: RateLimitBudget, rules: tuple[RateLimitRule, ...], expected: str,
     ) -> None:
-        with pytest.raises(ValueError, match=r"repeated: (bulk|default)\."):
+        with pytest.raises(ValueError, match=rf"repeated: {expected}\."):
             RateLimitPolicy(default=default, rules=rules)
 
 

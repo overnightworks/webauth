@@ -189,6 +189,16 @@ class TestMiddlewareOverRedisBackend:
         assert rejected.status_code == 503
         assert rejected.headers["Retry-After"] == "5"
 
+    def test_a_rule_path_is_rejected_closed_when_redis_is_unreachable(self) -> None:
+        server = fakeredis.FakeServer()
+        server.connected = False
+        unreachable = fakeredis.FakeRedis(server=server, decode_responses=True)
+        client = TestRedisKeysOfNamedBudgets.a_client(unreachable)
+        rejected = client.get(BULK_PATH)
+        assert rejected.status_code == 503
+        assert rejected.headers["Retry-After"] == "5"
+        assert rejected.json() == {"detail": "Rate limiter unavailable"}
+
 
 class TestRedisKeysOfNamedBudgets:
     @staticmethod
@@ -217,6 +227,30 @@ class TestRedisKeysOfNamedBudgets:
             "host:bulk:2001:db8:1:2::/64",
             "host:api:2001:db8:1:2::/64",
         }
+
+    def test_two_named_rules_over_one_redis_stay_independent(self, fake_redis) -> None:
+        policy = RateLimitPolicy(
+            default=RateLimitBudget(DEFAULT_BUDGET_NAME, 1, WINDOW_SECONDS),
+            rules=(
+                RateLimitRule(
+                    PathRules(prefixes=("/bulk/",)),
+                    RateLimitBudget(BULK_BUDGET_NAME, 1, WINDOW_SECONDS),
+                ),
+                RateLimitRule(
+                    PathRules(prefixes=("/other/",)),
+                    RateLimitBudget("other", 1, WINDOW_SECONDS),
+                ),
+            ),
+        )
+        client = a_policy_rate_limited_client(
+            RedisRateLimitBackend(fake_redis, HOST_PREFIX), policy,
+            paths=(API_PATH, BULK_PATH, "/other/thing"),
+        )
+        assert client.get(BULK_PATH).status_code == 200
+        assert client.get(BULK_PATH).status_code == 429
+        assert client.get("/other/thing").status_code == 200
+        assert client.get("/other/thing").status_code == 429
+        assert client.get(API_PATH).status_code == 200
 
     def test_an_exhausted_key_of_the_fixed_classes_does_not_limit_the_new_default(
         self, fake_redis,

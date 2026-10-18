@@ -651,6 +651,8 @@ digits, `-` and `_`, and is unique in the policy. The limiter key is
 it fresh.
 
 ```python
+from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
+
 RateLimitPolicy(
     default=RateLimitBudget("api", max_requests=300, window_seconds=60),
     rules=(
@@ -663,7 +665,7 @@ RateLimitPolicy(
 )
 ```
 
-Two backends implement it:
+Two backends implement `RateLimitBackend`:
 
 - `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
   process that reaches the same Redis. It needs the client library, so a host
