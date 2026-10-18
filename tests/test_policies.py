@@ -127,6 +127,10 @@ class TestRateLimitPolicy:
     def test_a_budget_name_inside_the_grammar_is_accepted(self, name: str) -> None:
         assert RateLimitBudget(name, max_requests=1, window_seconds=60).name == name
 
+    def test_a_budget_name_is_judged_before_its_numbers(self) -> None:
+        with pytest.raises(ValueError, match="Rate-limit budget name"):
+            RateLimitBudget("API", max_requests=1, window_seconds=0)
+
     @pytest.mark.parametrize("field", ["max_requests", "window_seconds"])
     @pytest.mark.parametrize("value", [0, -1, True, 1.5, "5", None], ids=[
         "zero", "negative", "bool", "float", "str", "none",
@@ -140,7 +144,7 @@ class TestRateLimitPolicy:
             ValueError,
             match=re.escape(f"RateLimitBudget 'api' {field} must be a positive whole number"),
         ):
-            RateLimitBudget("api", **fields)  # type: ignore[arg-type]
+            RateLimitBudget("api", **fields)
 
     @pytest.mark.parametrize(("max_requests", "window_seconds"), [(1, 1), (300, 3600)])
     def test_a_budget_with_positive_whole_numbers_is_accepted(
