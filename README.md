@@ -435,8 +435,8 @@ This writes `form-action 'self' https://id.example.test`. `form-action` takes `'
 scheme sources and host sources, as `frame-ancestors` does; nonces, hashes and other
 keywords are a `ValueError`.
 
-The HTML standard checks `form-action` again on every redirect of a form submission.
-Chromium and Safari enforce that; Firefox checks only the form's own target
+Browsers differ on redirects: MDN's compatibility data records that Chromium and Safari
+also check `form-action` on the redirect that answers a form submission, and Firefox does not
 ([MDN `form-action`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action),
 its compatibility table row `blocks_redirects`; [w3c/webappsec-csp#8](https://github.com/w3c/webappsec-csp/issues/8);
 [CSP3 `form-action`](https://w3c.github.io/webappsec-csp/#directive-form-action)).
