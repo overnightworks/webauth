@@ -19,25 +19,37 @@ URLs itself; the library does no discovery.
 
 ### What every app gets
 
-Every app that signs people in through Keycloak behaves the same way. The
-details are in the sections linked below.
+Every app that signs people in through Keycloak behaves the same way, unless it
+names `EverySubject` or `NoAdmins` under
+[Admitting an identity](#admitting-an-identity). The details are in the
+sections linked below.
 
 **Who gets in.** Only members of the app's `login_group`, such as
 `/apps/songmaker`, get in. Members of its `admin_group`, such as
-`/apps/songmaker/admin`, are admins. Both are decided again at every login, so
-a change in Keycloak takes effect at the person's next sign-in. See
+`/apps/songmaker/admin`, are admins. Both are decided again at every login, so a
+change in Keycloak takes effect at the person's next sign-in; an app session
+that is already open keeps its access until it ends. See
 [Admitting an identity](#admitting-an-identity).
 
-**When Keycloak is down.** People who are already signed in keep working,
-because no request to the app calls Keycloak. A new sign-in fails at the
-callback, where the person sees the host's page, and the app has no local
-fallback login. See [The store decides every request](#the-store-decides-every-request).
+**When Keycloak is down.** People who are already signed in keep working until
+their app session ends, because the app checks a session in its own store and
+never asks Keycloak. A new sign-in fails at Keycloak: the app sends the browser
+to Keycloak's sign-in page, which does not load, so the person sees the
+browser's or the proxy's error page, not the app's. Only when Keycloak fails
+during the sign-in, or the browser reaches Keycloak but the app does not, does
+the sign-in stop at the app's callback, on the host's refusal page. webauth
+offers no local fallback login. See
+[The store decides every request](#the-store-decides-every-request).
 
-**Signing out.** Signing out of an app ends the person's Keycloak session in
-that browser too. Keycloak then tells every app to end that person's sessions,
-so they are signed out everywhere. Their other devices sign back in without
-asking for a password, through their own Keycloak session there. See
-[Logging out](#logging-out) and [Back-channel logout](#back-channel-logout).
+**Signing out.** Signing out of an app ends its session in that browser at once
+and takes the browser to Keycloak, which asks once to confirm; confirming ends
+the person's Keycloak session in that browser. Keycloak then tells each app the
+person signed in to through that Keycloak session, and each of those apps ends
+all of the person's sessions, on every device. An app they used only on another
+device is not told and keeps them signed in there. On their other devices, the
+next sign-in asks for no password while that device's own Keycloak session
+lasts. See [Logging out](#logging-out) and
+[Back-channel logout](#back-channel-logout).
 
 ### The host's start, callback and logout routes
 
@@ -212,8 +224,9 @@ taken before the callback is stopped by the issuer refusing the spent code
 
 ### Back-channel logout
 
-When a person logs out of one app, Keycloak posts a Logout Token to every
-client's `backchannel.logout.url`. `receive_backchannel_logout(relying_party,
+When a person's Keycloak session ends, for example after they confirm a logout
+from one app, Keycloak posts a Logout Token to the `backchannel.logout.url` of
+every client that session signed in to. `receive_backchannel_logout(relying_party,
 logout_token, *, accounts, sessions, lock, audit)` verifies it and ends every
 session of its subject, in every browser, and answers
 `BackchannelLogoutResult.ACCEPTED` or `REFUSED`. The host's route is a POST of
