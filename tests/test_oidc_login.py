@@ -9,6 +9,7 @@ fake issuer that answers each code once.
 
 from __future__ import annotations
 
+import logging
 import secrets
 import threading
 import urllib.parse
@@ -20,6 +21,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
+import anyio.to_thread
 import pytest
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.testclient import TestClient
@@ -809,6 +811,13 @@ def an_oidc_host(
             ),
         }
 
+    def end_the_sessions_of(logout_token: str) -> BackchannelLogoutResult:
+        with sessions.transaction():
+            return receive_backchannel_logout(
+                relying_party, logout_token,
+                accounts=accounts, sessions=sessions, lock=lock, audit=audit,
+            )
+
     @app.post(BACKCHANNEL_LOGOUT_PATH)
     async def backchannel_logout(request: Request) -> Response:
         logout_token = the_logout_token_of(
@@ -816,11 +825,11 @@ def an_oidc_host(
         )
         if logout_token is None:
             return Response(status_code=400)
-        with sessions.transaction():
-            result = receive_backchannel_logout(
-                relying_party, logout_token,
-                accounts=accounts, sessions=sessions, lock=lock, audit=audit,
-            )
+        try:
+            result = await anyio.to_thread.run_sync(end_the_sessions_of, logout_token)
+        except Exception:
+            logging.getLogger(__name__).exception("back-channel logout failed")
+            return Response(status_code=400)
         return Response(
             status_code=200 if result is BackchannelLogoutResult.ACCEPTED else 400,
         )
@@ -1736,18 +1745,40 @@ def fails_with_the_store_down(*_arguments: object, **_keywords: object) -> NoRet
 @pytest.mark.parametrize("failing_part", [
     pytest.param("sessions.delete_for_user", id="deletion-fails"),
     pytest.param("audit.user_management_event", id="audit-fails-after-deletion"),
+    pytest.param("sessions.commit_failure", id="commit-fails"),
 ])
-def test_a_store_or_audit_failure_propagates_and_leaves_every_session_in_place(
+def test_a_store_audit_or_commit_failure_answers_400_and_leaves_every_session_in_place(
     failing_part: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     host = a_host_with_sessions(subject_sessions=2)
-    owner, _, method = failing_part.partition(".")
-    monkeypatch.setattr(getattr(host, owner), method, fails_with_the_store_down)
+    owner, _, part = failing_part.partition(".")
+    if part == "commit_failure":
+        host.sessions.commit_failure = ConnectionError("the commit failed")
+    else:
+        monkeypatch.setattr(getattr(host, owner), part, fails_with_the_store_down)
 
-    with pytest.raises(ConnectionError):
-        post_logout_token(host, a_logout_token_of_the_issuer())
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
 
-    assert sessions_of(host, SUBJECT) == 2
+    answer = (response.status_code, response.headers["cache-control"])
+    assert (answer, sessions_of(host, SUBJECT)) == ((400, "no-store"), 2)
+
+
+@pytest.mark.parametrize(("other_keys", "status", "sessions_left"), [
+    pytest.param(0, 200, 0, id="sole-key"),
+    pytest.param(1, 400, 1, id="several-keys"),
+])
+def test_a_logout_token_without_kid_is_verified_only_against_a_sole_issuer_key(
+    other_keys: int, status: int, sessions_left: int,
+) -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+    host.key_set.response = key_set_document(
+        public_jwk(rsa_key("issuer"), "issuer-key", kid=ABSENT),
+        *(public_jwk(rsa_key(f"other-{index}"), f"other-{index}") for index in range(other_keys)),
+    )
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer(header={"kid": ABSENT}))
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (status, sessions_left)
 
 
 def test_the_callback_bypasses_an_exhausted_address_budget() -> None:

@@ -198,26 +198,48 @@ session of its subject, in every browser, and answers
 a form with one `logout_token` field:
 
 ```python
+def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
+    media_type = (content_type or "").partition(";")[0].strip().lower()
+    if media_type != "application/x-www-form-urlencoded":
+        return None
+    try:
+        fields = urllib.parse.parse_qsl(
+            request_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
+        )
+    except ValueError:
+        return None
+    tokens = [value for name, value in fields if name == "logout_token"]
+    return tokens[0] if len(tokens) == 1 and tokens[0] else None
+
+
+def end_the_sessions_of(logout_token: str) -> BackchannelLogoutResult:
+    with the_hosts_transaction() as work:
+        return receive_backchannel_logout(
+            relying_party, logout_token,
+            accounts=work.accounts, sessions=work.sessions, lock=work.lock, audit=work.audit,
+        )
+
+
 @app.post("/auth/backchannel-logout")
 async def backchannel_logout(request: Request) -> Response:
-    logout_token = one_logout_token_of_the_form(request)
+    logout_token = the_logout_token_of(
+        await request.body(), request.headers.get("content-type"),
+    )
     if logout_token is None:
         return Response(status_code=400)
-    result = receive_backchannel_logout(
-        relying_party, logout_token,
-        accounts=accounts, sessions=sessions, lock=lock, audit=audit,
-    )
-    if result is BackchannelLogoutResult.REFUSED:
+    try:
+        result = await anyio.to_thread.run_sync(end_the_sessions_of, logout_token)
+    except Exception:
+        logger.exception("back-channel logout failed")
         return Response(status_code=400)
-    commit_the_hosts_transaction()
-    return Response(status_code=200)
+    return Response(status_code=200 if result is BackchannelLogoutResult.ACCEPTED else 400)
 ```
 
-`one_logout_token_of_the_form` is the host's: it accepts only the media type
-`application/x-www-form-urlencoded`, decodes the body as UTF-8 under strict
-query parsing, ignores unknown fields, and answers `None` for a missing,
-repeated or empty `logout_token`. A store or audit failure propagates: roll
-the transaction back and let the request fail.
+`the_hosts_transaction()` opens the host's stores on one connection and
+commits when the block ends. The verification, the lock and the stores are
+synchronous, so they run in a worker thread and create and use their stores
+there. The route answers 200 only after the commit; a refusal or a failure,
+the commit's included, leaves every session in place and answers 400.
 
 The function runs in this order. It verifies the token before it takes the
 lock, and a refusal does nothing more. Under `lock.hold()` it looks up

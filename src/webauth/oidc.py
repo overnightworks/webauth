@@ -98,7 +98,8 @@ PENDING_LOGIN_MAX_AGE_SECONDS = 600
 LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
 
 _LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105
-_BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"
+# An identifier fixed by OpenID Connect Back-Channel Logout 1.0 section 2.4, never fetched.
+_BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR(S5332)
 
 _OPENID_SCOPE = "openid"
 # RFC 6749 section 3.3: a scope token is one or more printable ASCII

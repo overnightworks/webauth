@@ -314,6 +314,7 @@ class SessionRecordsInMemory:
         )
         self._ids = count(1)
         self.max_age_seconds = max_age_seconds
+        self.commit_failure: Exception | None = None
 
     @property
     def record(self) -> FakeSessionRecord | None:
@@ -346,10 +347,13 @@ class SessionRecordsInMemory:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        """The host's transaction: leaving the block commits, an exception rolls back."""
+        """The host's transaction: leaving the block commits unless ``commit_failure``
+        is set, and an exception rolls back."""
         committed = dict(self._records)
         try:
             yield
+            if self.commit_failure is not None:
+                raise self.commit_failure
         except BaseException:
             self._records = committed
             raise
