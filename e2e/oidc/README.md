@@ -306,3 +306,16 @@ The pins are not watched by Dependabot; their freshness is owned by issue #74.
 | `https://demo.example.test` | lax | Signed in | yes | cross-site |
 
 The pull request that last changed this directory carries the full result table.
+
+## Last run: back-channel logout
+
+Exit status 0, evidence scan clean, the stack and the relay containers removed. Scenarios
+10 to 13 held at 390x844 and at 1280x800; scenario 5 is unchanged (`https://demo.example.test`
+with `strict` stays `FAILED-as-found`).
+
+| Scenario | What a person did | Held |
+|---|---|---|
+| 10 | two contexts signed in to app A; one logged out through Keycloak | the other session ended through one accepted callback |
+| 11 | one context in A and B, a second in B; a logout in A | both B sessions ended through B's callback |
+| 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
+| 13 | the account disabled, then the person's own logout in A | B untouched (no callback); the admin logout then ended both, and a fresh sign in was refused |
