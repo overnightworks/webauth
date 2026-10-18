@@ -58,6 +58,11 @@ def segment(value: dict[str, Any] | str) -> str:
     return base64.urlsafe_b64encode(text.encode()).rstrip(b"=").decode()
 
 
+def a_fake_id_token(label: str) -> str:
+    """A compact-JWS-shaped string that no issuer signed and no verifier would accept."""
+    return f"{segment({'typ': 'JWT'})}.{segment({'sub': label})}.{segment(label)}"
+
+
 def rs256(key: rsa.RSAPrivateKey) -> Callable[[bytes], bytes]:
     return lambda signing_input: key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
 

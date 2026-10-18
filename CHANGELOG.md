@@ -51,7 +51,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
     `webauth.oidc_login.log_out(relying_party, request, response, config, *,
     sessions, lock)` ends the session the request's cookie names, clears the
     session cookies and returns that URL, so an app's logout also ends the
-    browser's Keycloak session; Keycloak asks the person to confirm once. It
+    browser's Keycloak session; with the ID token hint (next entry) Keycloak
+    asks nothing, and without one it asks the person to confirm once. It
     ends only this browser's app session; ending the person's other sessions
     is the back-channel logout (under Added). Migration: register each app's
     post-logout redirect URI (`post.logout.redirect.uris`) on its Keycloak
@@ -59,6 +60,28 @@ Versions before 0.3.0 and releases without an entry here are described in the
     form adds the end-session endpoint's origin to `form-action`, and protects
     `/logout` with the origin check and a `token_exempt` rule (README,
     "Logging out").
+- Signing out asks nothing at Keycloak: the login's ID token travels as the
+  `id_token_hint`.
+  - `OidcClientConfig` requires the keyword field `logout_path`, the
+    browser-visible path of the host's logout route or a parent of all its
+    logout routes (such as `/logout`). It starts with `/` and holds only RFC
+    3986 path characters other than `;`; a malformed value is a `ValueError`
+    and a missing one a `TypeError`. `OidcRelyingParty.logout_path` exposes it.
+  - `OidcIdentity` gains the required field `id_token`, the verified ID token
+    as received (`repr=False`). A host or test that constructs an
+    `OidcIdentity` itself passes it.
+  - `finish_login` sets the cookie `__Secure-oidc_id_token_hint`
+    (`oidc_id_token_hint` with `cookie_secure=False`) on an admitted login,
+    `Path=logout_path`, `HttpOnly`, `SameSite=Strict`, and `log_out` sends it as
+    `id_token_hint` through `OidcRelyingParty.logout_url(*, id_token_hint=None)`
+    and clears it. The hint is never decoded, verified or accepted as a
+    credential; an unusable one is left out and Keycloak asks once. Because
+    the logout is a GET, the hint reaches the browser's history and the
+    TLS-terminating edge (README, "The ID token hint").
+  - Migration: add `logout_path` to the `OidcClientConfig`, and run
+    `finish_login` and `log_out` with the same config. A person signed in
+    before the upgrade has no hint cookie and is asked once at their next
+    logout.
 - `RateLimitClass` is gone, and `RateLimitPolicy` takes `default` and `rules`
   instead of `budgets`, `media` and `stream`. `RateLimitBudget` gains a
   leading `name` (lowercase letters, digits, `-` and `_`, starting with a

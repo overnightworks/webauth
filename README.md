@@ -42,13 +42,14 @@ offers no local fallback login. See
 [The store decides every request](#the-store-decides-every-request).
 
 **Signing out.** Signing out of an app ends its session in that browser at once
-and takes the browser to Keycloak, which asks once to confirm; confirming ends
-the person's Keycloak session in that browser. Keycloak then tells each app the
+and takes the browser to Keycloak, which ends the person's Keycloak session in
+that browser without asking anything. Keycloak then tells each app the
 person signed in to through that Keycloak session, and each of those apps ends
 all of the person's sessions, on every device. An app they used only on another
 device is not told and keeps them signed in there. On their other devices, the
 next sign-in asks for no password while that device's own Keycloak session
-lasts. See [Logging out](#logging-out) and
+lasts. If the browser no longer holds the login's ID token, Keycloak asks once to
+confirm instead. See [Logging out](#logging-out) and
 [Back-channel logout](#back-channel-logout).
 
 ### The host's start, callback and logout routes
@@ -113,11 +114,17 @@ would leave the pending cookie in the browser.
 the whole logout sequence in one call, so no host rebuilds its order: it ends
 the session the request's cookie names (when there is one) under the write
 lock, clears the session and CSRF cookies on `response` and returns the
-issuer's end-session URL. That URL carries only the client ID and the
-configured `post_logout_redirect_uri`; with no `id_token_hint`, Keycloak asks
-the person once to confirm, and the app stores no Keycloak token. `log_out`
-makes no outbound call and never commits, so an issuer that is down still
-leaves the person signed out of the app. A request with no usable session (a
+issuer's end-session URL. That URL carries the client ID, the configured
+`post_logout_redirect_uri` and the `id_token_hint` that `finish_login` handed
+the browser at sign-in (see [The ID token hint](#the-id-token-hint)), so
+Keycloak ends the session without asking the person to confirm. Without a
+usable hint the URL leaves it out and Keycloak asks once; the app stores no
+Keycloak token. The logout is a GET to Keycloak, so the hint lands in that
+device's browser history and is visible to a TLS-terminating edge; in the
+fetch shape it also reaches the page's own script. Once the session has
+ended, the hint has no logout power left. `log_out` makes no outbound call
+and never commits, so an issuer that is down still leaves the person signed
+out of the app. A request with no usable session (a
 missing, expired-and-deleted, forged, oversized or duplicated cookie) still
 gets the URL and the cookie clearing, so the issuer's session ends too. A
 forged or duplicated cookie ends no stored session: a duplicated cookie's
@@ -196,6 +203,35 @@ never overwrite each other:
   shape, the prefix and 16 lowercase hex characters, count; any other cookie
   whose name merely starts with the prefix is neither counted nor cleared.
 
+#### The ID token hint
+
+`finish_login` also hands the browser the login's ID token in a cookie of its
+own, so that `log_out` can pass it to Keycloak as `id_token_hint`:
+
+- **Name:** `__Secure-oidc_id_token_hint`, or the plain `oidc_id_token_hint`
+  with `cookie_secure=False`. It cannot be a `__Host-` cookie, because that
+  prefix demands `Path=/`.
+- **Flags:** `HttpOnly`, `SameSite=Strict` always, `Max-Age` as the session
+  cookie, `Secure` following `cookie_secure`, and `Path` set to the
+  `logout_path` of the `OidcClientConfig`. The browser sends it to the host's
+  logout route and to nothing else, so no other request carries it.
+- **Set only on an admitted login:** a refused callback sets none, and a new
+  login overwrites the old one. An ID token longer than
+  `MAX_ID_TOKEN_HINT_CHARS` (3072) is not kept and the old cookie is cleared
+  instead; the person is still signed in, and their logout asks.
+- **Never a credential:** the hint is not signed by webauth, and it is never
+  decoded, verified, logged or accepted as a session. Keycloak judges it. The
+  reader passes on only a sole cookie of that name that has the shape of a
+  compact JWS within the bound; anything else counts as missing.
+- **Cleared on every logout.** `log_out` clears the cookie whether or not it
+  could use the hint.
+- **`logout_path`** is the browser-visible path of the host's logout route, or
+  a parent of all its logout routes, such as `/logout` for `/logout` and
+  `/logout/fetch`. Behind a path-rewriting proxy it is the path the browser
+  sees. Changing it between deployments makes Keycloak ask once at the next
+  logout. After a realm signing key is deleted, an old hint gives Keycloak's
+  error page instead of a confirmation.
+
 `finish_login` reads the state from the callback, selects exactly the cookie
 that state names and clears it on every outcome — admitted or refused —
 while every other tab's cookie stays. A callback names a usable state when it
@@ -224,8 +260,8 @@ taken before the callback is stopped by the issuer refusing the spent code
 
 ### Back-channel logout
 
-When a person's Keycloak session ends, for example after they confirm a logout
-from one app, Keycloak posts a Logout Token to the `backchannel.logout.url` of
+When a person's Keycloak session ends, for example after they sign out of
+one app, Keycloak posts a Logout Token to the `backchannel.logout.url` of
 every client that session signed in to. `receive_backchannel_logout(relying_party,
 logout_token, *, accounts, sessions, lock, audit)` verifies it and ends every
 session of its subject, in every browser, and answers
@@ -360,7 +396,8 @@ answers the URL to send the browser to and a `PendingLogin` — its state,
 nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
 `complete_login(pending, callback_query)` takes that pending login and the
 callback's raw query string and answers an `OidcIdentity` (subject, issuer,
-full group paths, `sid`, `preferred_username`) or an `OidcRefusal` naming its
+full group paths, `sid`, `preferred_username`, and the verified `id_token`
+as received, which stays out of its repr) or an `OidcRefusal` naming its
 reason. The state is checked before anything else the callback says; then
 the pending login's age: one older than `PENDING_LOGIN_MAX_AGE_SECONDS`
 (600) or dated in the future is `PENDING_LOGIN_EXPIRED`, and no token
@@ -395,6 +432,7 @@ client_config = OidcClientConfig(
     client_secret=SecretStr(os.environ["OIDC_CLIENT_SECRET"]),
     redirect_uri="https://app.example.test/auth/callback",
     post_logout_redirect_uri="https://app.example.test/",
+    logout_path="/logout",
     leeway_seconds=30,
 )
 ```
@@ -600,6 +638,8 @@ The cookies' default names are the public constants `DEFAULT_SESSION_COOKIE_NAME
 `DEFAULT_CSRF_COOKIE_NAME` in `webauth.cookies` (the `__Host-` names) and
 `PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME` (the names with `cookie_secure=False`).
 A client that reads the CSRF cookie by name reads `config.csrf_cookie_name`.
+The OpenID Connect ID token hint cookie is described under
+[The ID token hint](#the-id-token-hint).
 A request that reaches the library in an app without `install_web_auth_config` raises
 `RuntimeError`.
 

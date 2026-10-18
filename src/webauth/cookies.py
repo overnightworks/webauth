@@ -1,9 +1,16 @@
-"""The cookies webauth signs: the session, the CSRF token bound to it, and a pending login.
+"""The cookies webauth sets: the session, the CSRF token bound to it, a pending login,
+and the ID token hint.
 
 A pending login is the OpenID Connect login a browser began and has not yet
 brought back. It travels in a cookie of its own, named after its state, so
 two tabs can each have one; the value is versioned, bounded field by field and
 signed under the session signing key with a prefix no other cookie uses.
+
+The ID token hint is the issuer's ID token from the last login, kept in a
+cookie of its own that only the logout path receives, so the issuer can end
+that login's session without asking the person. It is not signed, and it is
+never decoded, verified, logged or accepted as a credential: the issuer
+judges it, and the reader checks only its shape and size.
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ __all__ = [
     "COOKIE_PATH",
     "DEFAULT_CSRF_COOKIE_NAME",
     "DEFAULT_SESSION_COOKIE_NAME",
+    "MAX_ID_TOKEN_HINT_CHARS",
     "MAX_SESSION_COOKIE_CHARS",
     "PLAIN_CSRF_COOKIE_NAME",
     "PLAIN_SESSION_COOKIE_NAME",
@@ -43,11 +51,14 @@ SECURE_COOKIE_PREFIX: Final = "__Secure-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
+PLAIN_LOGOUT_HINT_COOKIE_NAME: Final = "oidc_id_token_hint"
 DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
 MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 256
 # A signed session cookie is an identifier plus a hex digest; anything much
 # longer was not issued here, so the reader rejects it before any HMAC is computed.
 MAX_SESSION_COOKIE_CHARS: Final = 200
+MAX_ID_TOKEN_HINT_CHARS: Final = 3072
+"""Characters of ID token the hint cookie carries; a longer token is not kept."""
 PENDING_SECRET_BYTES: Final = 32
 """Random bytes in each of a pending login's state, nonce and verifier,
 which are minted with ``secrets.token_urlsafe``."""
@@ -59,6 +70,8 @@ _CSRF_SIGNING_PREFIX: Final = b"csrf:"
 # The callback is a top-level navigation from the issuer's site, which a
 # Strict cookie would not accompany.
 _PENDING_LOGIN_SAMESITE: Final = "lax"
+_LOGOUT_HINT_SAMESITE: Final = "strict"
+_COMPACT_JWS: Final = re.compile(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 _COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
@@ -250,6 +263,59 @@ def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     response.delete_cookie(
         config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite, secure=secure,
     )
+
+
+def id_token_hint_cookie_name(*, secure: bool) -> str:
+    """``__Host-`` would demand ``Path=/``, so the hint takes ``__Secure-``."""
+    plain_name = PLAIN_LOGOUT_HINT_COOKIE_NAME
+    return f"{SECURE_COOKIE_PREFIX}{plain_name}" if secure else plain_name
+
+
+def issue_id_token_hint_cookie(
+    response: Response, id_token: str, *, logout_path: str, config: WebAuthConfig,
+) -> None:
+    """Hand the browser the ID token, for the logout path alone.
+
+    A token longer than ``MAX_ID_TOKEN_HINT_CHARS`` is not kept, and the hint
+    of an earlier login is cleared instead, so a logout never carries it.
+    """
+    if len(id_token) > MAX_ID_TOKEN_HINT_CHARS:
+        clear_id_token_hint_cookie(response, logout_path=logout_path, config=config)
+        return
+    response.set_cookie(
+        id_token_hint_cookie_name(secure=config.cookie_secure),
+        id_token,
+        max_age=config.cookie_max_age_seconds,
+        httponly=True,
+        samesite=_LOGOUT_HINT_SAMESITE,
+        secure=config.cookie_secure,
+        path=logout_path,
+    )
+
+
+def clear_id_token_hint_cookie(
+    response: Response, *, logout_path: str, config: WebAuthConfig,
+) -> None:
+    """Take the hint back, repeating the attributes it was set with."""
+    response.delete_cookie(
+        id_token_hint_cookie_name(secure=config.cookie_secure),
+        path=logout_path,
+        secure=config.cookie_secure,
+        httponly=True,
+        samesite=_LOGOUT_HINT_SAMESITE,
+    )
+
+
+def id_token_hint_from_request(request: Request, config: WebAuthConfig) -> str | None:
+    """The hint the request carries: its sole cookie of that name, when it has the
+    shape of a compact JWS within ``MAX_ID_TOKEN_HINT_CHARS``; otherwise ``None``."""
+    values = cookie_values(request, id_token_hint_cookie_name(secure=config.cookie_secure))
+    if len(values) != 1:
+        return None
+    hint = values[0]
+    if len(hint) > MAX_ID_TOKEN_HINT_CHARS or _COMPACT_JWS.fullmatch(hint) is None:
+        return None
+    return hint
 
 
 @dataclass(frozen=True)
