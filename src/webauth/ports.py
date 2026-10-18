@@ -27,8 +27,8 @@ __all__ = [
     "SessionRecord",
     "SessionRecordStore",
     "SubjectUserStore",
-    "UserManagementEvent",
-    "UserManagementEventKind",
+    "AccountEvent",
+    "AccountEventKind",
     "UserRecord",
     "UsernameTakenError",
     "WriteLock",
@@ -236,7 +236,7 @@ class SessionIdentityChanged:
     current: str
 
 
-class UserManagementEventKind(Enum):
+class AccountEventKind(Enum):
     USER_CREATED = "user_created"
     SESSION_REVOKED = "session_revoked"
     ROLE_CHANGED = "role_changed"
@@ -244,10 +244,10 @@ class UserManagementEventKind(Enum):
 
 
 @dataclass(frozen=True)
-class UserManagementEvent:
+class AccountEvent:
     """An account operation without credentials, usernames, or session tokens."""
 
-    kind: UserManagementEventKind
+    kind: AccountEventKind
     actor_id: str | None
     subject_id: str
     role: str | None = None
@@ -261,6 +261,6 @@ class AuditSink(Protocol):
         """Record that a live session began arriving from somewhere else."""
         ...
 
-    def user_management_event(self, event: UserManagementEvent) -> None:
+    def account_event(self, event: AccountEvent) -> None:
         """Map an account operation to the host's audit, optionally doing nothing."""
         ...

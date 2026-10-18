@@ -891,7 +891,7 @@ the helpers, including REQ-ADMIN-12 for listed references.
 
 ## Audit events
 
-Map `AuditSink.user_management_event(event)` to the host's audit system, or
+Map `AuditSink.account_event(event)` to the host's audit system, or
 explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 `subject_id`; optional fields default to `None`:
 

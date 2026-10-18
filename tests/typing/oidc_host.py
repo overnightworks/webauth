@@ -99,6 +99,8 @@ from webauth.policies import (
     default_content_security_policy,
 )
 from webauth.ports import (
+    AccountEvent,
+    AccountEventKind,
     AuditSink,
     RateLimitBackend,
     SessionAdministrationStore,
@@ -107,8 +109,6 @@ from webauth.ports import (
     SessionRecord,
     SessionRecordStore,
     SubjectUserStore,
-    UserManagementEvent,
-    UserManagementEventKind,
     UsernameTakenError,
     UserRecord,
     WriteLock,
@@ -198,7 +198,7 @@ class HostAudit:
     def session_identity_changed(self, event: SessionIdentityChanged) -> None:
         return None
 
-    def user_management_event(self, event: UserManagementEvent) -> None:
+    def account_event(self, event: AccountEvent) -> None:
         return None
 
 
@@ -363,7 +363,7 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore,
         SessionSummary, SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, UnknownSessionError, WebAuthError,
-        UserManagementEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
+        AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
         VerifiedClaims, VerifiedLogout, WallClock, end_user_sessions, install_web_auth_config,
         is_https_url, prune_sessions, session_id_from_request, session_reference,
         unauthenticated_response,
