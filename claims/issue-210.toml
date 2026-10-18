@@ -1,0 +1,8 @@
+claim_id = "ab6a5b9174984880877e159a7ced47cf"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "1dc1f2d7251b62dba667ab7966fcade0729947ef"
+branch = "claude/issue-210-host-named-rate-limit-budgets"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/middleware/rate_limit.py", "src/webauth/policies.py", "tests/test_body_size.py", "tests/test_middleware_stack.py", "tests/test_policies.py", "tests/test_redis_rate_limiter.py", "tests/test_single_process_rate_limiter.py", "tests/webauth_arrangement.py"]
+opened_commit = "57fa8ffc4ae13557ade1cad39f52ecf8497cbbee"
+whole_reason = "One public type is replaced: its definition, its one reader, its fixtures, the two limiter tests and the docs change together."
