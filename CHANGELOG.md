@@ -41,6 +41,19 @@ Versions before 0.3.0 and releases without an entry here are described in the
   non-`str`) raises `ValueError`, so
   `dataclasses.replace(config, session_cookie_name=None)` no longer resets the
   field to the default: leave the field out of `replace` instead.
+- `default_content_security_policy()` writes `base-uri 'self'` after
+  `default-src 'none'` and ends with `form-action 'self'`, so a `<base>` may
+  point only at this origin and a form may submit only to it. Neither directive
+  falls back to `default-src`, so both were unrestricted before. A host whose
+  form posts to, or is redirected to, another origin (such as an issuer's logout
+  endpoint) adds that origin to `CspDirective.FORM_ACTION`.
+
+**Added**
+
+- `CspDirective.FORM_ACTION`. A host's addition extends `'self'`. It accepts
+  `'self'`, scheme sources and host sources, as `frame-ancestors` does, and
+  refuses nonces, hashes and other keywords with a `ValueError`. `base-uri` is
+  fixed and not extendable.
 
 **Fixed**
 
