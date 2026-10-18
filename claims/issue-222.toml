@@ -1,0 +1,8 @@
+claim_id = "f526d6edd5bf400baff7e9fca99106d4"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "77e21610c7efe7a2f19d4b4ac59f688ecd46c135"
+branch = "claude/issue-222-account-event-names"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/session_administration.py", "tests/test_oidc_login.py", "tests/test_session_administration.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "de18708644efe04d2a134edb893e7877be2e7d9c"
+whole_reason = "One event contract renamed atomically: its types, its sink method, every producer and every test that records it."
