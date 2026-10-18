@@ -48,8 +48,8 @@ person signed in to through that Keycloak session, and each of those apps ends
 all of the person's sessions, on every device. An app they used only on another
 device is not told and keeps them signed in there. On their other devices, the
 next sign-in asks for no password while that device's own Keycloak session
-lasts. If the browser no longer holds the login's ID token, Keycloak asks once to
-confirm instead. See [Logging out](#logging-out) and
+lasts. If the browser holds no ID token from its latest Keycloak sign-in,
+Keycloak asks once to confirm instead. See [Logging out](#logging-out) and
 [Back-channel logout](#back-channel-logout).
 
 ### The host's start, callback and logout routes
@@ -213,12 +213,17 @@ own, so that `log_out` can pass it to Keycloak as `id_token_hint`:
   prefix demands `Path=/`.
 - **Flags:** `HttpOnly`, `SameSite=Strict` always, `Max-Age` as the session
   cookie, `Secure` following `cookie_secure`, and `Path` set to the
-  `logout_path` of the `OidcClientConfig`. The browser sends it to the host's
-  logout route and to nothing else, so no other request carries it.
+  `logout_path` of the `OidcClientConfig`. The browser sends it to every path
+  beneath that prefix, so set `logout_path` to the narrowest prefix that covers
+  the logout routes: with `/logout` only `/logout` and the paths under it carry
+  the hint, while `/` sends it with every request.
 - **Set only on an admitted login:** a refused callback sets none, and a new
   login overwrites the old one. An ID token longer than
   `MAX_ID_TOKEN_HINT_CHARS` (3072) is not kept and the old cookie is cleared
-  instead; the person is still signed in, and their logout asks.
+  instead; the person is still signed in, and their logout asks. Keycloak
+  asks once whenever the browser holds no ID token from its latest Keycloak
+  sign-in: a token over the bound, a sign-in from before the upgrade, or a
+  token of another Keycloak session.
 - **Never a credential:** the hint is not signed by webauth, and it is never
   decoded, verified, logged or accepted as a session. Keycloak judges it. The
   reader passes on only a sole cookie of that name that has the shape of a
@@ -228,8 +233,13 @@ own, so that `log_out` can pass it to Keycloak as `id_token_hint`:
 - **`logout_path`** is the browser-visible path of the host's logout route, or
   a parent of all its logout routes, such as `/logout` for `/logout` and
   `/logout/fetch`. Behind a path-rewriting proxy it is the path the browser
-  sees. Changing it between deployments makes Keycloak ask once at the next
-  logout. After a realm signing key is deleted, an old hint gives Keycloak's
+  sees. Changing it between deployments leaves the
+  cookie of the old path in the browser, and `log_out` clears only the new
+  path. Where the old path still matches the logout route, as `/` does for
+  `/logout`, a new login adds a second cookie of the same name; a logout that
+  finds two omits the hint, so Keycloak keeps asking until the old cookie
+  expires or the person removes it.
+  After a realm signing key is deleted, an old hint gives Keycloak's
   error page instead of a confirmation.
 
 `finish_login` reads the state from the callback, selects exactly the cookie
@@ -994,7 +1004,7 @@ It owns the machinery an application should not rebuild:
 | Module | Owns |
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
-| `webauth.cookies` | The signed session cookie, the CSRF token bound to it and the pending-login cookie, issued and cleared |
+| `webauth.cookies` | The signed session cookie, the CSRF token bound to it, the pending-login cookie and the ID token hint cookie, issued and cleared |
 | `webauth.dependencies` | Turning a signed cookie into the account that made the request |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |

@@ -44,6 +44,7 @@ from webauth_arrangement import (
     ADMIN_ROLE,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
+    DOCUMENTED_ID_TOKEN_HINT_BOUND,
     HTTPS_TEST_SERVER,
     MEMBER_ROLE,
     SESSION_MAX_AGE_SECONDS,
@@ -1401,7 +1402,7 @@ def is_the_issuers_logout_url(url: str, *, id_token_hint: str | None) -> bool:
 
 
 def the_hint_cookie_is_cleared_for_the_logout_path(response: HttpxResponse) -> bool:
-    return {"max-age=0", f"path={LOGOUT_PATH}"} <= set_cookies(response).get(
+    return {"max-age=0", f"path={LOGOUT_PATH}", "secure"} <= set_cookies(response).get(
         ID_TOKEN_HINT_COOKIE_NAME, set(),
     )
 
@@ -1523,6 +1524,11 @@ def test_a_same_origin_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
     assert host.sessions.count_active() == sessions_kept
 
 
+def _a_compact_jws_of_length(length: int) -> str:
+    segment_length = (length - 2) // 3
+    return ".".join(["A" * segment_length] * 2 + ["A" * (length - 2 - 2 * segment_length)])
+
+
 def _hint_cookies(*values: str) -> dict[str, str]:
     return {"cookie": "; ".join(f"{ID_TOKEN_HINT_COOKIE_NAME}={value}" for value in values)}
 
@@ -1532,7 +1538,10 @@ def _hint_cookies(*values: str) -> dict[str, str]:
     pytest.param(
         _hint_cookies(a_fake_id_token("first"), a_fake_id_token("second")), id="duplicated",
     ),
-    pytest.param(_hint_cookies(a_fake_id_token("x" * 3_100)), id="oversized"),
+    pytest.param(
+        _hint_cookies(_a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND + 1)),
+        id="one-character-over-the-bound",
+    ),
     pytest.param(_hint_cookies("not-a-jws"), id="not-compact-jws-shaped"),
     pytest.param(_hint_cookies("two.segments"), id="two-segments"),
     pytest.param(_hint_cookies("bad+char.in.token"), id="outside-the-base64url-alphabet"),
@@ -1545,6 +1554,24 @@ def test_a_logout_without_a_usable_hint_leaves_it_out_and_still_clears_the_cooki
     response = post_logout(host, {**SAME_ORIGIN_FORM, **unusable_hint_cookies})
 
     assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=None)
+    assert the_hint_cookie_is_cleared_for_the_logout_path(response)
+
+
+@pytest.mark.parametrize("hint", [
+    pytest.param("AAAA.AAAA.AAAA", id="segments-that-are-no-json"),
+    pytest.param("bm90LWpzb24.bm90LWpzb24.c2ln", id="segments-that-decode-to-text"),
+    pytest.param(
+        _a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND), id="exactly-the-bound",
+    ),
+])
+def test_a_logout_forwards_a_sole_hint_in_the_shape_of_a_jws_byte_for_byte_undecoded(
+    hint: str,
+) -> None:
+    host = an_oidc_host()
+
+    response = post_logout(host, {**SAME_ORIGIN_FORM, **_hint_cookies(hint)})
+
+    assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=hint)
     assert the_hint_cookie_is_cleared_for_the_logout_path(response)
 
 

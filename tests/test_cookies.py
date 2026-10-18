@@ -16,6 +16,7 @@ from httpx import Response as ClientResponse
 from starlette.requests import Request
 from starlette.responses import Response
 from webauth_arrangement import (
+    DOCUMENTED_ID_TOKEN_HINT_BOUND,
     SEVEN_DAYS_SECONDS,
     THIRTY_DAYS_SECONDS,
     a_web_auth_config,
@@ -33,6 +34,7 @@ from webauth.cookies import (
     default_cookie_name,
     generate_csrf_token,
     is_valid_cookie_name,
+    issue_id_token_hint_cookie,
     issue_session_cookies,
     pending_login_cookie_name,
     sign_pending_login,
@@ -111,6 +113,23 @@ def test_the_longest_session_id_that_fits_is_issued_and_read_back() -> None:
 def test_a_session_id_whose_cookie_the_reader_would_refuse_is_not_issued() -> None:
     with pytest.raises(ValueError, match="session cookie"):
         _session_id_read_back_after_issuing(LONGEST_SESSION_ID_THAT_FITS + "i")
+
+
+@pytest.mark.parametrize(("length", "kept"), [
+    pytest.param(DOCUMENTED_ID_TOKEN_HINT_BOUND, True, id="exactly-the-bound-is-kept"),
+    pytest.param(DOCUMENTED_ID_TOKEN_HINT_BOUND + 1, False, id="one-character-over-is-cleared"),
+])
+def test_an_id_token_hint_is_kept_up_to_the_bound_and_cleared_beyond_it(
+    *, length: int, kept: bool,
+) -> None:
+    response = Response()
+
+    issue_id_token_hint_cookie(
+        response, "A" * length, logout_path="/logout", config=a_web_auth_config(),
+    )
+
+    attributes = response.headers.getlist("set-cookie")[0].lower()
+    assert ("max-age=0" not in attributes) is kept
 
 
 def test_an_empty_session_id_is_not_issued() -> None:
