@@ -89,7 +89,7 @@ def test_REQ_ADMIN_12_listing_returns_only_public_fields_in_the_stores_page_orde
         "ip_address": record.ip_address,
         "user_agent": record.user_agent,
     } for record in page]
-    assert administration.sessions.count_active() == len(stored_sessions)
+    assert len(administration.sessions.list_active()) == len(stored_sessions)
     assert administration.audit.account_events == []
     evidence = repr(summaries) + caplog.text
     for secret in (record.id for record in stored_sessions):
@@ -100,7 +100,7 @@ def test_REQ_ADMIN_12_an_empty_store_has_no_session_summaries(
     empty_administration: SessionAdministration,
 ) -> None:
     assert empty_administration.list_sessions() == []
-    assert empty_administration.sessions.count_active() == 0
+    assert empty_administration.sessions.list_active() == []
 
 
 @pytest.mark.parametrize("session_index", [0, 1, 2])
@@ -116,7 +116,7 @@ def test_REQ_ADMIN_12_an_admin_revokes_one_listed_session_without_its_raw_token(
     for index, record in enumerate(stored_sessions):
         remains = index != session_index
         assert (administration.sessions.load(record.id) is not None) == remains
-    assert administration.sessions.count_active() == 2
+    assert len(administration.sessions.list_active()) == 2
     assert [asdict(event) for event in administration.audit.account_events] == [{
         "kind": AccountEventKind.SESSION_REVOKED,
         "actor_id": actor.id,

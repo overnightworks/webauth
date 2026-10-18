@@ -18,6 +18,8 @@ from typing import Protocol, runtime_checkable
 from webauth import WebAuthError
 
 __all__ = [
+    "AccountEvent",
+    "AccountEventKind",
     "AuditSink",
     "RateLimitBackend",
     "SessionAdministrationStore",
@@ -27,8 +29,6 @@ __all__ = [
     "SessionRecord",
     "SessionRecordStore",
     "SubjectUserStore",
-    "AccountEvent",
-    "AccountEventKind",
     "UserRecord",
     "UsernameTakenError",
     "WriteLock",
@@ -174,10 +174,6 @@ class SessionAdministrationStore(SessionRecordStore, Protocol):
         self, *, offset: int = 0, limit: int | None = None,
     ) -> list[SessionRecord]:
         """Read active sessions in store order without requiring a write lock."""
-        ...
-
-    def count_active(self) -> int:
-        """Count active sessions without requiring a write lock."""
         ...
 
 

@@ -185,9 +185,6 @@ class HostSessions:
     ) -> list[SessionRecord]:
         return []
 
-    def count_active(self) -> int:
-        return 0
-
 
 class HostLock:
     def hold(self) -> AbstractContextManager[None]:
