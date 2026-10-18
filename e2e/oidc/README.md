@@ -104,7 +104,7 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after each logout (15, 17, and 16 and 18 after confirming), A's page after the disable and before the admin logout in scenario 13, in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after the logout past the ID token's expiry (21), the app's page after each logout (15, 17, and 16 and 18 after confirming), A's page after the disable and before the admin logout in scenario 13, in
 scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
@@ -133,7 +133,13 @@ same on the cross-site origin `demo.example.test`) and `SCENARIO 19` (a hint of 
 3072-character bound reaches Keycloak, which answers neither 414 nor 431). A refused
 sign-in (scenario 7) leaves no hint cookie. `SCENARIO 20` (1280x800) replaces the hint with one whose
 signature segment is altered: Keycloak answers 400 with its error page ("Invalid parameter:
-id_token_hint"), neither the confirmation page nor a redirect home.
+id_token_hint"), neither the confirmation page nor a redirect home. `SCENARIO 21`
+(1280x800) gives app A's client `access.token.lifespan` 15 s through the admin API (the
+previous setting is restored afterwards), signs in, reads the `exp` of the hint cookie's ID
+token, waits until the clock is 2 s past it and logs out: the end-session request carries
+`id_token_hint`, Keycloak still answers with a redirect to the app, no `#kc-logout` page
+appears, the app shows "Signed out", and the next sign-in shows Keycloak's form. This is
+the production case: Keycloak's ID token lasts 5 minutes by default, the session cookie 12 hours.
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
 the app; enabled again, the same credentials sign in; an account the host
@@ -322,7 +328,7 @@ The pull request that last changed this directory carries the full result table.
 ## Last run: back-channel logout
 
 Exit status 0, evidence scan clean, the stack and the relay containers removed. Scenarios
-10 to 13 held at 390x844 and at 1280x800, scenarios 14 to 20 at 1280x800; scenario 5 is
+10 to 13 held at 390x844 and at 1280x800, scenarios 14 to 21 at 1280x800; scenario 5 is
 unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 
 | Scenario | What a person did | Held |
@@ -332,3 +338,4 @@ unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 | 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
 | 13 | the account disabled, then Keycloak's admin logout (204) | the disable alone ended nothing; then each app called back exactly once, `/me` 401, and a fresh sign in was refused |
 | 20 | the hint's signature altered, then logout | Keycloak's error page (400, `Invalid parameter: id_token_hint`) |
+| 21 | the ID token (15 s lifespan) past its `exp` by 2.1 s, then logout | the end-session request carried the hint; a redirect to the app, no confirmation page, "Signed out", Keycloak's form at the next sign-in |

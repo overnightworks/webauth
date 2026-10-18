@@ -72,14 +72,18 @@ Versions before 0.3.0 and releases without an entry here are described in the
     `OidcIdentity` itself passes it.
   - `finish_login` sets the cookie `__Secure-oidc_id_token_hint`
     (`oidc_id_token_hint` with `cookie_secure=False`) on an admitted login,
-    `Path=logout_path`, `HttpOnly`, `SameSite=Strict`, and `log_out` sends it as
-    `id_token_hint` through `OidcRelyingParty.logout_url(*, id_token_hint=None)`
-    and clears it. The hint is never decoded, verified or accepted as a
-    credential; an unusable one is left out and Keycloak asks once. Because
+    `Path=logout_path`, `HttpOnly`, `SameSite=Strict`, with the session
+    cookie's `Max-Age`; an ID token longer than the new
+    `webauth.cookies.MAX_ID_TOKEN_HINT_CHARS` (3072) is not kept, and an older
+    hint is cleared instead. `log_out` sends it as `id_token_hint` through
+    `OidcRelyingParty.logout_url(*, id_token_hint=None)` and clears it. The
+    hint is never decoded, verified or accepted as a credential; an unusable one is left out and Keycloak asks once. Because
     the logout is a GET, the hint reaches the browser's history and the
     TLS-terminating edge (README, "The ID token hint").
-  - Migration: add `logout_path` to the `OidcClientConfig`, and run
-    `finish_login` and `log_out` with the same config. A person signed in
+  - Migration: add `logout_path` to the `OidcClientConfig`; `finish_login` and
+    `log_out` take a relying party built from that one `OidcClientConfig` and
+    the same `WebAuthConfig`, or the logout finds no hint and Keycloak asks.
+    A person signed in
     before the upgrade has no hint cookie and is asked once at their next
     logout.
 - `RateLimitClass` is gone, and `RateLimitPolicy` takes `default` and `rules`

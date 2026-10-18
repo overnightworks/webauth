@@ -11,6 +11,7 @@ the one throwaway certificate key the browser is told to accept."""
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import json
 import re
@@ -105,6 +106,9 @@ ID_TOKEN_HINT_COOKIE_NAME = id_token_hint_cookie_name(secure=True)
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
 CALLBACK_WAIT_SECONDS = 15
 CALLBACK_POLL_SECONDS = 0.2
+SHORT_TOKEN_LIFESPAN_SECONDS = 15
+EXPIRY_MARGIN_SECONDS = 2
+LIFESPAN_ATTRIBUTE = "access.token.lifespan"
 
 
 @dataclass(frozen=True)
@@ -782,6 +786,73 @@ def hint_at_the_size_bound_reaches_keycloak(proof: Proof, width: Width) -> str:
     )
 
 
+def id_token_expiry(hint: Cookie) -> float:
+    payload = cookie_name_and_value(hint)[1].split(".")[1]
+    return float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
+
+
+@contextlib.contextmanager
+def short_lived_id_tokens(proof: Proof, seconds: int) -> Iterator[None]:
+    """App A's client issues tokens that live `seconds`; its previous setting returns afterwards."""
+    path = f"/{REALM}/clients/{proof.client_uuid}"
+    before = proof.fresh_admin().get(path)
+    previous = before["attributes"].get(LIFESPAN_ATTRIBUTE)
+    proof.fresh_admin().put(
+        path,
+        {**before, "attributes": {**before["attributes"], LIFESPAN_ATTRIBUTE: str(seconds)}},
+    )
+    try:
+        yield
+    finally:
+        admin = proof.fresh_admin()
+        current = admin.get(path)
+        attributes = {
+            name: value for name, value in current["attributes"].items()
+            if name != LIFESPAN_ATTRIBUTE
+        }
+        if previous is not None:
+            attributes[LIFESPAN_ATTRIBUTE] = previous
+        admin.put(path, {**current, "attributes": attributes})
+
+
+def wait_until_past(expiry: float) -> float:
+    """Waits until the clock is the margin past `expiry`; returns how far past it stands."""
+    deadline = time.time() + SHORT_TOKEN_LIFESPAN_SECONDS + 2 * EXPIRY_MARGIN_SECONDS
+    while time.time() < expiry + EXPIRY_MARGIN_SECONDS:
+        assert time.time() < deadline, "the clock did not pass the ID token's expiry in time"
+        time.sleep(CALLBACK_POLL_SECONDS)
+    return time.time() - expiry
+
+
+def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
+    scenario = f"21-{width.label}"
+    proof.reset_host()
+    with short_lived_id_tokens(proof, SHORT_TOKEN_LIFESPAN_SECONDS), proof.browsing(width) as page:
+        end_session_urls: list[str] = []
+        page.context.on(
+            "request",
+            lambda request: end_session_urls.extend(
+                [request.url] if is_end_session_request(request.url) else []
+            ),
+        )
+        hint = signed_in_with_a_hint(proof, page, scenario)
+        expiry = id_token_expiry(hint)
+        assert expiry - time.time() <= SHORT_TOKEN_LIFESPAN_SECONDS, "the ID token is long-lived"
+        past = wait_until_past(expiry)
+        log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
+        (end_session_url,) = end_session_urls
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(end_session_url).query)
+        assert "id_token_hint" in query, "the end-session request carried no id_token_hint"
+        assert not hints_anywhere(page), "an ID token hint remains after the logout"
+        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
+        again = second_sign_in(proof, page, scenario)
+    return (
+        f"with an ID token {SHORT_TOKEN_LIFESPAN_SECONDS} s long, logged out {past:.1f} s past "
+        f"its exp, the end-session request carried the hint and Keycloak answered with a redirect "
+        f"to the app with no confirmation page; a second Sign in {again}"
+    )
+
+
 def back_button_shows(proof: Proof, page: Page) -> str:
     page.go_back()
     page_text = page.inner_text("h1") if page.query_selector("h1") else "no page"
@@ -1317,6 +1388,7 @@ def run_hint_scenarios(proof: Proof) -> None:
         (15, APP_ORIGIN, second_login_and_logout_show_no_page),
         (17, SECOND_APP_ORIGIN, logout_on_the_cross_site_origin),
         (19, APP_ORIGIN, hint_at_the_size_bound_reaches_keycloak),
+        (21, APP_ORIGIN, logout_after_the_id_token_expired),
     ):
         proof.held_or_failed(
             f"SCENARIO {number} {DESKTOP.label} {origin}",
