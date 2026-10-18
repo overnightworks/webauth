@@ -407,9 +407,9 @@ Fields a host may leave out:
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
-| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
+| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty, spaces, `;`, `=`, `,`, quotes and non-ASCII are refused); must differ from the other cookie's name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
 | `csrf_header_name` | `"x-csrf-token"` | the request header that carries the CSRF token |
-| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
+| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty, spaces, `;`, `=`, `,`, quotes and non-ASCII are refused); must differ from the other cookie's name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
 | `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
 | `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
 | `max_user_agent_chars` | `500` | a positive `int`; zero, a negative number, or a `bool` is refused |
@@ -459,7 +459,8 @@ A request that reaches the library in an app without `install_web_auth_config` r
 
 `default_content_security_policy()` holds no host fact: `default-src 'none'` with
 `'self'` for scripts, styles, connections, fonts, manifests and workers, `data:` and
-`blob:` besides for images, `blob:` for media, and `frame-ancestors 'none'`. A host
+`blob:` besides for images, `blob:` for media, `base-uri 'self'`, `form-action 'self'` and
+`frame-ancestors 'none'`. A host
 adds its own sources to one directive through `added_sources`, without copying the
 string. A framework that writes style attributes, for example, needs inline style, and
 that is the host's choice, so the host names it:
@@ -476,9 +477,32 @@ Callers supply complete source expressions: keywords, nonces and hashes in their
 quotes, hosts and schemes bare. Only `script_hashes` takes bare `sha256-<base64>`
 values and quotes them. Every source is validated against the CSP grammar when the
 policy is built, and a malformed one is a `ValueError`. A non-empty addition to
-`frame-ancestors` replaces its `'none'`. Validation covers a declared subset of CSP Level 3: a
+`frame-ancestors` replaces its `'none'`, while an addition to `form-action` extends
+its `'self'`. `base-uri 'self'` is fixed and not extendable. Validation covers a declared subset of CSP Level 3: a
 well-formed keyword outside it, such as `'trusted-types-eval'`, is refused too, and a host that
 needs one writes the whole `SecurityHeadersPolicy` string itself.
+
+A form may submit only to this origin. A host whose form posts to another origin names
+it, for example an issuer such as Keycloak:
+
+```python
+default_content_security_policy(
+    added_sources={CspDirective.FORM_ACTION: ["https://id.example.test"]},
+)
+```
+
+This writes `form-action 'self' https://id.example.test`. `form-action` takes `'self'`,
+scheme sources and host sources, as `frame-ancestors` does; nonces, hashes and other
+keywords are a `ValueError`.
+
+Browsers differ on redirects: MDN's compatibility data records that Chromium and Safari
+also check `form-action` on the redirect that answers a form submission, and Firefox does not
+([MDN `form-action`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action),
+its compatibility table row `blocks_redirects`; [w3c/webappsec-csp#8](https://github.com/w3c/webappsec-csp/issues/8);
+[CSP3 `form-action`](https://w3c.github.io/webappsec-csp/#directive-form-action)).
+A host whose form POST is answered by a redirect to another origin, such as an issuer's
+logout endpoint, adds that origin. Add the origin, not a path: after a redirect the path
+is ignored ([CSP3, Paths and Redirects](https://w3c.github.io/webappsec-csp/#source-list-paths-and-redirects)).
 
 ## The store decides every request
 

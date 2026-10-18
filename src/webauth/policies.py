@@ -294,6 +294,7 @@ class CspDirective(StrEnum):
     MANIFEST_SRC = "manifest-src"
     WORKER_SRC = "worker-src"
     FRAME_ANCESTORS = "frame-ancestors"
+    FORM_ACTION = "form-action"
 
 
 _TEXT_LIKE: Final = (str, bytes, bytearray, memoryview)
@@ -310,6 +311,7 @@ _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
     CspDirective.MANIFEST_SRC: (_SELF_KEYWORD,),
     CspDirective.WORKER_SRC: (_SELF_KEYWORD,),
     CspDirective.FRAME_ANCESTORS: (_NONE_SOURCE,),
+    CspDirective.FORM_ACTION: (_SELF_KEYWORD,),
 }
 
 _BASE64_VALUE: Final = r"[A-Za-z0-9+/\-_]+={0,2}"
@@ -348,13 +350,15 @@ _SOURCE_GRAMMAR: Final = (
     _SCHEME_SOURCE,
     _HOST_SOURCE,
 )
-_ANCESTOR_GRAMMAR: Final = (_SELF_SOURCE, _SCHEME_SOURCE, _HOST_SOURCE)
+_NAVIGATION_GRAMMAR: Final = (_SELF_SOURCE, _SCHEME_SOURCE, _HOST_SOURCE)
 _SOURCE_SUBSET: Final = (
     "keyword sources "
     + ", ".join(f"'{keyword}'" for keyword in _KEYWORDS)
     + "; nonce and sha256, sha384, sha512 hash sources; scheme sources; host sources"
 )
-_ANCESTOR_SUBSET: Final = "'self', scheme sources and host sources"
+_NAVIGATION_SUBSET: Final = "'self', scheme sources and host sources"
+_NAVIGATION_DIRECTIVES: Final = frozenset({CspDirective.FRAME_ANCESTORS, CspDirective.FORM_ACTION})
+_FIXED_DIRECTIVES: Final = ("default-src 'none'", "base-uri 'self'")
 
 
 def _require_source_list(owner: str, sources: object) -> Sequence[str]:
@@ -378,9 +382,9 @@ def _validated_hash(script_hash: str) -> str:
 
 
 def _validated_source(directive: CspDirective, source: str) -> str:
-    is_ancestor = directive is CspDirective.FRAME_ANCESTORS
-    grammar = _ANCESTOR_GRAMMAR if is_ancestor else _SOURCE_GRAMMAR
-    subset = _ANCESTOR_SUBSET if is_ancestor else _SOURCE_SUBSET
+    is_navigation = directive in _NAVIGATION_DIRECTIVES
+    grammar = _NAVIGATION_GRAMMAR if is_navigation else _SOURCE_GRAMMAR
+    subset = _NAVIGATION_SUBSET if is_navigation else _SOURCE_SUBSET
     if not any(production.fullmatch(source) for production in grammar):
         raise ValueError(
             f"{directive}: {source!r} is not a source this library accepts; "
@@ -426,6 +430,8 @@ def default_content_security_policy(
 ) -> str:
     """Nothing loads unless this origin serves it, and no page may frame it.
 
+    Forms post only to this origin and a ``<base>`` may point only at it.
+
     The default holds no host fact. Inline scripts a build emits into its own
     document are admitted by bare hash (``sha256-<base64>``), which this function
     quotes. A host adds its own sources per directive in ``added_sources`` as
@@ -443,4 +449,4 @@ def default_content_security_policy(
         f"{directive} {_source_list(directive, quoted_hashes, additions.get(directive, ()))}"
         for directive in CspDirective
     )
-    return "; ".join(("default-src 'none'", *directives))
+    return "; ".join((*_FIXED_DIRECTIVES, *directives))

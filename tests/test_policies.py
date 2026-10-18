@@ -292,6 +292,7 @@ class TestSecurityHeadersPolicy:
 
 THE_DEFAULT_POLICY = (
     "default-src 'none'; "
+    "base-uri 'self'; "
     "script-src 'self'; "
     "style-src 'self'; "
     "connect-src 'self'; "
@@ -300,7 +301,8 @@ THE_DEFAULT_POLICY = (
     "font-src 'self'; "
     "manifest-src 'self'; "
     "worker-src 'self'; "
-    "frame-ancestors 'none'"
+    "frame-ancestors 'none'; "
+    "form-action 'self'"
 )
 A_DIGEST = "abc123+/-_"
 ALL_DIRECTIVES = list(CspDirective)
@@ -484,13 +486,42 @@ class TestDefaultContentSecurityPolicy:
 
     @pytest.mark.parametrize(
         "source",
-        ["'unsafe-inline'", "'nonce-x'", "'sha256-abc'", "example.test/%zz", "example.test//x"],
+        [
+            "'unsafe-inline'",
+            "'unsafe-allow-redirects'",
+            "'nonce-x'",
+            "'sha256-abc'",
+            "example.test/%zz",
+            "example.test//x",
+        ],
     )
-    def test_refuses_a_source_the_ancestor_grammar_lacks(self, source: str) -> None:
-        with pytest.raises(ValueError, match=r"frame-ancestors.*declared subset is 'self', scheme"):
-            default_content_security_policy(
-                added_sources={CspDirective.FRAME_ANCESTORS: [source]},
-            )
+    @pytest.mark.parametrize("directive", [CspDirective.FRAME_ANCESTORS, CspDirective.FORM_ACTION])
+    def test_refuses_a_source_the_navigation_grammar_lacks(
+        self,
+        directive: CspDirective,
+        source: str,
+    ) -> None:
+        with pytest.raises(ValueError, match=rf"{directive}.*declared subset is 'self', scheme"):
+            default_content_security_policy(added_sources={directive: [source]})
+
+    @pytest.mark.parametrize(
+        ("added", "expected"),
+        [
+            (["https://id.example.test"], "'self' https://id.example.test"),
+            (["https:"], "'self' https:"),
+            (["'self'"], "'self'"),
+        ],
+    )
+    def test_an_added_form_target_extends_self_in_form_action(
+        self,
+        added: list[str],
+        expected: str,
+    ) -> None:
+        policy = default_content_security_policy(
+            added_sources={CspDirective.FORM_ACTION: added},
+        )
+
+        assert policy == THE_DEFAULT_POLICY.replace("form-action 'self'", f"form-action {expected}")
 
     @pytest.mark.parametrize("directive", ALL_DIRECTIVES)
     def test_an_empty_addition_changes_nothing(self, directive: CspDirective) -> None:

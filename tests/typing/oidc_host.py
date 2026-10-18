@@ -299,7 +299,10 @@ def a_host_installs_the_middleware(app: FastAPI) -> None:
         app,
         security_headers=SecurityHeadersPolicy(
             content_security_policy=default_content_security_policy(
-                added_sources={CspDirective.STYLE_SRC: ["'unsafe-inline'"]},
+                added_sources={
+                    CspDirective.STYLE_SRC: ["'unsafe-inline'"],
+                    CspDirective.FORM_ACTION: ["https://issuer.example.test"],
+                },
             ),
         ),
         csrf_origin=CsrfPolicy(),
