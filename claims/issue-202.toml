@@ -1,8 +1,0 @@
-claim_id = "45d26579d34543d68c299decb02c00df"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "67edbb57c4ef2267734c019ff4b0286083feba43"
-branch = "claude/issue-202-refusal-proofs"
-scope = [".env", ".github/workflows/ci.yml", "quality/config.toml", "tests/test_gate_refusal_probe.py"]
-opened_commit = "266155910a783f365f886fd126e2540975bcbd70"
-whole_reason = "Six throwaway probe branches, one change each, closed unmerged; none of them ever reaches main."
