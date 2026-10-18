@@ -112,21 +112,21 @@ def test_every_module_imports_and_the_single_process_backend_counts_without_redi
 
 
 @pytest.mark.parametrize(
-    "error",
+    ("error", "failure"),
     [
-        UsernameTakenError("taken"),
-        NotAnAdminError("taken"),
-        UnknownSessionError("taken"),
-        KeySetFetchError("taken", ExchangeFailure.TIMED_OUT),
-        TokenEndpointError("taken", ExchangeFailure.TIMED_OUT),
+        (UsernameTakenError("taken"), None),
+        (NotAnAdminError("taken"), None),
+        (UnknownSessionError("taken"), None),
+        (KeySetFetchError("taken", ExchangeFailure.TIMED_OUT), ExchangeFailure.TIMED_OUT),
+        (TokenEndpointError("taken", ExchangeFailure.TIMED_OUT), ExchangeFailure.TIMED_OUT),
     ],
-    ids=lambda error: type(error).__name__,
+    ids=lambda value: type(value).__name__,
 )
 def test_every_public_operational_error_is_caught_as_web_auth_error_with_its_payload(
-    error: Exception,
+    error: Exception, failure: ExchangeFailure | None,
 ) -> None:
     with pytest.raises(WebAuthError) as caught:
         raise error
 
     assert str(caught.value) == "taken"
-    assert getattr(caught.value, "failure", ExchangeFailure.TIMED_OUT) is ExchangeFailure.TIMED_OUT
+    assert getattr(caught.value, "failure", None) is failure

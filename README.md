@@ -126,7 +126,7 @@ as a prefix, so no other route falls under it.
 
 A logout form redirects the browser to the issuer, and Chromium checks
 `form-action` on that redirect. A host whose logout is a form adds the
-issuer's origin to `form-action` in its policy (see
+end-session endpoint's origin to `form-action` in its policy (see
 [Content-Security-Policy](#content-security-policy)). A page that logs out
 through `fetch` is not subject to `form-action`.
 
@@ -824,7 +824,9 @@ budget name starts with a lowercase letter, holds only lowercase letters,
 digits, `-` and `_`, and is unique in the policy. The limiter key is
 `<name>:<address>` inside the Redis `key_prefix`, so renaming a budget starts
 it fresh. A budget whose `max_requests` or `window_seconds` is not a positive
-whole number is refused at construction.
+whole number is refused at construction. A backend of your own receives only
+such values: `limit` and `window_seconds` are positive integers, excluding
+booleans, and the caller validates them before invoking the backend.
 
 ```python
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
@@ -885,7 +887,7 @@ otherwise; the host guards `list_sessions` with its admin dependency. Public
 references come only from `webauth.cookies.session_reference(session_id)`:
 SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
 `SessionIdentityChanged` (its `session_ref`) expose no raw token; the host reads
-any timestamps from its own records. Refusals derive from `WebAuthError`.
+any timestamps from its own records. Refusals derive from `webauth.WebAuthError`.
 [The session administration tests](tests/test_session_administration.py) verify
 the helpers, including REQ-ADMIN-12 for listed references.
 

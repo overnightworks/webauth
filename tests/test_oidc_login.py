@@ -1433,8 +1433,9 @@ def test_a_same_origin_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
 def test_a_logout_without_a_session_takes_no_lock(shape: LogoutShape) -> None:
     host = an_oidc_host()
 
-    post_logout(host, SAME_ORIGIN_FORM, shape.path)
+    response = post_logout(host, SAME_ORIGIN_FORM, shape.path)
 
+    assert response.status_code == shape.status_code
     assert host.lock.times_taken == 0
 
 
