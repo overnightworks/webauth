@@ -399,7 +399,8 @@ A request that reaches the library in an app without `install_web_auth_config` r
 
 `default_content_security_policy()` holds no host fact: `default-src 'none'` with
 `'self'` for scripts, styles, connections, fonts, manifests and workers, `data:` and
-`blob:` besides for images, `blob:` for media, and `frame-ancestors 'none'`. A host
+`blob:` besides for images, `blob:` for media, `base-uri 'self'`, `form-action 'self'` and
+`frame-ancestors 'none'`. A host
 adds its own sources to one directive through `added_sources`, without copying the
 string. A framework that writes style attributes, for example, needs inline style, and
 that is the host's choice, so the host names it:
@@ -416,9 +417,32 @@ Callers supply complete source expressions: keywords, nonces and hashes in their
 quotes, hosts and schemes bare. Only `script_hashes` takes bare `sha256-<base64>`
 values and quotes them. Every source is validated against the CSP grammar when the
 policy is built, and a malformed one is a `ValueError`. A non-empty addition to
-`frame-ancestors` replaces its `'none'`. Validation covers a declared subset of CSP Level 3: a
+`frame-ancestors` replaces its `'none'`, while an addition to `form-action` extends
+its `'self'`. `base-uri 'self'` is fixed and not extendable. Validation covers a declared subset of CSP Level 3: a
 well-formed keyword outside it, such as `'trusted-types-eval'`, is refused too, and a host that
 needs one writes the whole `SecurityHeadersPolicy` string itself.
+
+A form may submit only to this origin. A host whose form posts to another origin names
+it, for example an issuer such as Keycloak:
+
+```python
+default_content_security_policy(
+    added_sources={CspDirective.FORM_ACTION: ["https://id.example.test"]},
+)
+```
+
+This writes `form-action 'self' https://id.example.test`. `form-action` takes `'self'`,
+scheme sources and host sources, as `frame-ancestors` does; nonces, hashes and other
+keywords are a `ValueError`.
+
+The HTML standard checks `form-action` again on every redirect of a form submission.
+Chromium and Safari enforce that; Firefox checks only the form's own target
+([MDN `form-action`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action),
+its compatibility table row `blocks_redirects`; [w3c/webappsec-csp#8](https://github.com/w3c/webappsec-csp/issues/8);
+[CSP3 `form-action`](https://w3c.github.io/webappsec-csp/#directive-form-action)).
+A host whose form POST is answered by a redirect to another origin, such as an issuer's
+logout endpoint, adds that origin. Add the origin, not a path: after a redirect the path
+is ignored ([CSP3, Paths and Redirects](https://w3c.github.io/webappsec-csp/#source-list-paths-and-redirects)).
 
 ## The store decides every request
 
