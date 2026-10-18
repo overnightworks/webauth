@@ -64,6 +64,7 @@ from webauth.middleware import (
     install_web_auth_middleware,
 )
 from webauth.oidc import (
+    LOGOUT_TOKEN_MAX_AGE_SECONDS,
     MAX_AUTHORIZATION_CODE_CHARS,
     MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
@@ -73,16 +74,19 @@ from webauth.oidc import (
     OidcRelyingParty,
     TokenEndpointError,
     TokenRequestPost,
+    VerifiedLogout,
 )
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
+    BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
     admit_identity,
     finish_login,
     log_out,
     post_token_request_over_https,
+    receive_backchannel_logout,
     start_login,
 )
 from webauth.policies import (
@@ -104,6 +108,7 @@ from webauth.ports import (
     SubjectUserStore,
     UserManagementError,
     UserManagementEvent,
+    UserManagementEventKind,
     UsernameTakenError,
     UserRecord,
     WriteLock,
@@ -261,6 +266,30 @@ def a_host_logs_out(
     return log_out(relying_party, request, response, config, sessions=sessions, lock=lock)
 
 
+def a_host_receives_a_backchannel_logout(
+    relying_party: OidcRelyingParty, logout_token: str,
+) -> BackchannelLogoutResult:
+    accounts: SubjectUserStore = HostAccounts()
+    sessions: SessionRecordStore = HostSessions()
+    lock: WriteLock = HostLock()
+    audit: AuditSink = HostAudit()
+    return receive_backchannel_logout(
+        relying_party, logout_token,
+        accounts=accounts, sessions=sessions, lock=lock, audit=audit,
+    )
+
+
+def a_host_verifies_a_logout_token(
+    relying_party: OidcRelyingParty, logout_token: str,
+) -> str | None:
+    verified = relying_party.verify_logout_token(logout_token)
+    return None if isinstance(verified, OidcRefusal) else verified.subject
+
+
+def a_host_verifies_a_typed_token(verifier: JwtVerifier, token: str) -> VerifiedClaims | Rejected:
+    return verifier.verify(token, expected_type="logout+jwt")
+
+
 def a_host_admits_an_identity(
     identity: OidcIdentity, config: WebAuthConfig,
 ) -> UserRecord | AdmissionRefusal:
@@ -328,12 +357,14 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
         MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
         MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock,
-        NotAnAdminError, OidcClientConfig, PENDING_LOGIN_MAX_AGE_SECONDS,
+        LOGOUT_TOKEN_MAX_AGE_SECONDS, NotAnAdminError, OidcClientConfig,
+        PENDING_LOGIN_MAX_AGE_SECONDS,
         PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore,
         SessionSummary, SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
-        TokenEndpointError, UnknownSessionError, UserManagementError, UsernameTakenError,
-        VerifiedClaims, WallClock, end_user_sessions, install_web_auth_config,
+        TokenEndpointError, UnknownSessionError, UserManagementError,
+        UserManagementEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
+        VerifiedClaims, VerifiedLogout, WallClock, end_user_sessions, install_web_auth_config,
         is_https_url, prune_sessions, session_id_from_request, session_reference,
         unauthenticated_response,
     )

@@ -19,9 +19,11 @@ from typing import Any
 import pytest
 from oidc_arrangement import (
     ABSENT,
+    BACKCHANNEL_LOGOUT_EVENT,
     FakeClock,
     FakeKeySetEndpoint,
     FakeTokenEndpoint,
+    a_logout_token,
     changed,
     jws,
     key_set_document,
@@ -36,6 +38,7 @@ from pydantic import SecretStr
 from webauth.cookies import PendingLogin
 from webauth.jwt_verification import RejectionReason
 from webauth.oidc import (
+    LOGOUT_TOKEN_MAX_AGE_SECONDS,
     MAX_AUTHORIZATION_CODE_CHARS,
     MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
@@ -46,6 +49,7 @@ from webauth.oidc import (
     OidcRelyingParty,
     TokenEndpointAnswer,
     TokenEndpointError,
+    VerifiedLogout,
 )
 
 _ISSUER = "https://login.example.org/realms/workshop"
@@ -763,3 +767,130 @@ def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
 
     with pytest.raises(TypeError, match=missing):
         OidcClientConfig(**arguments)
+
+
+def _logout_token(
+    claims: dict[str, Any] | None = None,
+    header: dict[str, Any] | None = None,
+    key_name: str = "current",
+) -> str:
+    return a_logout_token(
+        issuer=_ISSUER,
+        audience=_CLIENT_ID,
+        subject=_SUBJECT,
+        now=_NOW,
+        key_name=key_name,
+        claims=claims,
+        header=header,
+    )
+
+
+_EVENT = BACKCHANNEL_LOGOUT_EVENT
+_MAX_LOGOUT_AGE = LOGOUT_TOKEN_MAX_AGE_SECONDS + _LEEWAY_SECONDS
+
+
+def _a_logout_relying_party() -> OidcRelyingParty:
+    return LoginScenario(FakeTokenEndpoint()).relying_party
+
+
+@pytest.mark.parametrize(("claims", "header"), [
+    pytest.param({}, {}, id="the token as keycloak signs it"),
+    pytest.param({"sid": ABSENT}, {}, id="a subject without a session id"),
+    pytest.param({"sid": 7}, {}, id="a session id of any type is never read"),
+    pytest.param({"aud": [_CLIENT_ID]}, {}, id="a singleton audience array"),
+    pytest.param({"events": {_EVENT: {"reason": "admin"}}}, {}, id="an events object with data"),
+    pytest.param({"note": "other claims are ignored"}, {}, id="an unknown claim"),
+    pytest.param({"iat": _NOW + _LEEWAY_SECONDS}, {}, id="issued in the future within leeway"),
+    pytest.param({"iat": _NOW - _MAX_LOGOUT_AGE, "exp": _NOW + 1}, {}, id="issued at the limit"),
+    pytest.param({"exp": _NOW + _LEEWAY_SECONDS - 1, "iat": _NOW - 100}, {},
+                 id="one second before the deadline plus leeway"),
+])
+def test_a_logout_token_of_the_bound_issuer_yields_its_subject(
+    claims: dict[str, Any], header: dict[str, Any],
+) -> None:
+    outcome = _a_logout_relying_party().verify_logout_token(_logout_token(claims, header))
+
+    assert outcome == VerifiedLogout(subject=_SUBJECT)
+
+
+def _rejected(reason: RejectionReason) -> OidcRefusal:
+    return OidcRefusal(OidcRefusalReason.LOGOUT_TOKEN_REJECTED, token_rejection=reason)
+
+
+_INVALID_LOGOUT_CLAIM = OidcRefusal(OidcRefusalReason.INVALID_LOGOUT_CLAIM)
+_LOGOUT_REFUSALS = [
+    pytest.param(_logout_token(key_name="forger"), _rejected(RejectionReason.INVALID_SIGNATURE),
+                 id="forged-signature"),
+    pytest.param(_logout_token(header={"alg": "none"}),
+                 _rejected(RejectionReason.UNSUPPORTED_ALGORITHM), id="alg-none"),
+    pytest.param(_logout_token(header={"alg": "HS256"}),
+                 _rejected(RejectionReason.UNSUPPORTED_ALGORITHM), id="alg-hs256"),
+    pytest.param(_logout_token({"iss": _OTHER_REALM}),
+                 _rejected(RejectionReason.INVALID_ISSUER), id="wrong-issuer"),
+    pytest.param(_logout_token({"aud": "another-app"}),
+                 _rejected(RejectionReason.INVALID_AUDIENCE), id="wrong-audience"),
+    pytest.param(_logout_token({"aud": [_CLIENT_ID, "another-app"]}), _INVALID_LOGOUT_CLAIM,
+                 id="extra-audience"),
+    pytest.param(_logout_token({"events": ABSENT}), _INVALID_LOGOUT_CLAIM, id="events-missing"),
+    pytest.param(_logout_token({"events": {}}), _INVALID_LOGOUT_CLAIM, id="events-empty"),
+    pytest.param(_logout_token({"events": {_EVENT: {}, "urn:other": {}}}),
+                 _INVALID_LOGOUT_CLAIM, id="events-with-another-event"),
+    pytest.param(_logout_token({"events": {"urn:other": {}}}), _INVALID_LOGOUT_CLAIM,
+                 id="events-of-another-event"),
+    pytest.param(_logout_token({"events": {_EVENT: None}}), _INVALID_LOGOUT_CLAIM,
+                 id="event-value-null"),
+    pytest.param(_logout_token({"events": {_EVENT: []}}), _INVALID_LOGOUT_CLAIM,
+                 id="event-value-array"),
+    pytest.param(_logout_token({"events": [_EVENT]}), _INVALID_LOGOUT_CLAIM,
+                 id="events-an-array"),
+    pytest.param(_logout_token({"nonce": "n-0S6_WzA2Mj"}), _INVALID_LOGOUT_CLAIM, id="nonce"),
+    pytest.param(_logout_token({"nonce": None}), _INVALID_LOGOUT_CLAIM, id="nonce-null"),
+    pytest.param(_logout_token({"sub": ABSENT}), _INVALID_LOGOUT_CLAIM, id="sid-only"),
+    pytest.param(_logout_token({"sub": ""}), _rejected(RejectionReason.INVALID_CLAIM),
+                 id="sub-empty"),
+    pytest.param(_logout_token({"sub": 7}), _rejected(RejectionReason.INVALID_CLAIM),
+                 id="sub-not-a-string"),
+    pytest.param(_logout_token({"exp": ABSENT}), _rejected(RejectionReason.INVALID_CLAIM),
+                 id="exp-missing"),
+    pytest.param(_logout_token({"exp": "soon"}), _rejected(RejectionReason.INVALID_CLAIM),
+                 id="exp-malformed"),
+    pytest.param(_logout_token({"exp": _NOW - _LEEWAY_SECONDS, "iat": _NOW - 100}),
+                 _rejected(RejectionReason.EXPIRED), id="exp-at-the-deadline"),
+    pytest.param(_logout_token({"exp": _NOW - 10}), _INVALID_LOGOUT_CLAIM,
+                 id="exp-equal-to-iat"),
+    pytest.param(_logout_token({"exp": _NOW - 11}), _INVALID_LOGOUT_CLAIM,
+                 id="exp-before-iat"),
+    pytest.param(_logout_token({"iat": ABSENT}), _rejected(RejectionReason.INVALID_CLAIM),
+                 id="iat-missing"),
+    pytest.param(_logout_token({"iat": "now"}), _rejected(RejectionReason.INVALID_CLAIM),
+                 id="iat-malformed"),
+    pytest.param(_logout_token({"iat": float(_NOW - 10)}),
+                 _rejected(RejectionReason.INVALID_CLAIM), id="iat-not-an-integer"),
+    pytest.param(_logout_token({"iat": _NOW + _LEEWAY_SECONDS + 1}),
+                 _rejected(RejectionReason.ISSUED_IN_FUTURE), id="iat-past-the-leeway"),
+    pytest.param(_logout_token({"iat": _NOW - _MAX_LOGOUT_AGE - 1, "exp": _NOW + 1}),
+                 _INVALID_LOGOUT_CLAIM, id="iat-past-the-age-limit"),
+    pytest.param(_logout_token(header={"typ": ABSENT}),
+                 _rejected(RejectionReason.INVALID_TOKEN_TYPE), id="typ-missing"),
+    pytest.param(_logout_token(header={"typ": "JWT"}),
+                 _rejected(RejectionReason.INVALID_TOKEN_TYPE), id="typ-jwt"),
+    pytest.param(_logout_token(header={"typ": ["logout+jwt"]}),
+                 _rejected(RejectionReason.INVALID_TOKEN_TYPE), id="typ-not-a-string"),
+    pytest.param("not.a.token", _rejected(RejectionReason.MALFORMED_TOKEN), id="malformed"),
+]
+
+
+@pytest.mark.parametrize(("logout_token", "refusal"), _LOGOUT_REFUSALS)
+def test_a_logout_token_that_does_not_hold_is_refused_with_its_reason(
+    logout_token: str, refusal: OidcRefusal,
+) -> None:
+    assert _a_logout_relying_party().verify_logout_token(logout_token) == refusal
+
+
+def test_an_id_token_is_not_a_logout_token() -> None:
+    login = LoginScenario(FakeTokenEndpoint())
+    pending = login.relying_party.begin_login().pending
+
+    outcome = login.relying_party.verify_logout_token(login.id_token(pending, {}))
+
+    assert outcome == _rejected(RejectionReason.INVALID_TOKEN_TYPE)

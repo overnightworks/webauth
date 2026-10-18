@@ -344,6 +344,16 @@ class SessionRecordsInMemory:
         self._records[record.id] = record
         return record
 
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """The host's transaction: leaving the block commits, an exception rolls back."""
+        committed = dict(self._records)
+        try:
+            yield
+        except BaseException:
+            self._records = committed
+            raise
+
     def load(self, session_id: str) -> FakeSessionRecord | None:
         return self._records.get(session_id)
 

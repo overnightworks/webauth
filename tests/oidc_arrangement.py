@@ -97,6 +97,40 @@ def key_set_document(*jwks: object) -> bytes:
     return json.dumps({"keys": list(jwks)}).encode()
 
 
+BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"
+
+
+def a_logout_token(
+    *,
+    issuer: str,
+    audience: str,
+    subject: str,
+    now: int,
+    key_id: str = "current-key",
+    key_name: str = "current",
+    claims: dict[str, Any] | None = None,
+    header: dict[str, Any] | None = None,
+) -> str:
+    """A back-channel Logout Token as Keycloak signs it, issued ten seconds
+    before `now`; `claims` and `header` change or, with `ABSENT`, remove members."""
+    token_claims = {
+        "iss": issuer,
+        "aud": audience,
+        "sub": subject,
+        "iat": now - 10,
+        "exp": now + 50,
+        "jti": "logout-token-1",
+        "sid": "4c2a9f0e-session",
+        "events": {BACKCHANNEL_LOGOUT_EVENT: {}},
+    }
+    token_header = {"alg": "RS256", "kid": key_id, "typ": "logout+jwt"}
+    return jws(
+        changed(token_header, header or {}),
+        changed(token_claims, claims or {}),
+        rs256(rsa_key(key_name)),
+    )
+
+
 @dataclass
 class FakeClock:
     now: float

@@ -45,6 +45,15 @@ oversized or duplicated cookie counts as missing: it ends no stored session,
 which leaves a duplicated cookie's session until it expires, while the
 browser's own cookies are still cleared.
 
+``receive_backchannel_logout`` is the issuer's back-channel logout: it verifies
+the Logout Token before taking the lock, then, under the lock, ends every
+session of the account the token's subject names, an inactive account
+included, and records one ``BACKCHANNEL_LOGOUT`` event when a session ended.
+A subject without an account is accepted and provisions nothing. It never
+commits, clears a cookie or calls the issuer; a store or audit failure
+propagates so the host can roll back, and the host commits before it
+answers ``ACCEPTED``.
+
 ``post_token_request_over_https`` is the production ``TokenRequestPost`` the
 host gives its ``OidcRelyingParty``, beside ``fetch_key_set_over_https``; both
 send their request through ``webauth.https_client``.
@@ -83,7 +92,7 @@ from webauth.oidc import (
     callback_state,
 )
 from webauth.ports import UserManagementEvent, UserManagementEventKind, UsernameTakenError
-from webauth.session_ending import end_session
+from webauth.session_ending import end_session, end_user_sessions
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -97,12 +106,14 @@ if TYPE_CHECKING:
 __all__ = [
     "AdmissionConfig",
     "AdmissionRefusal",
+    "BackchannelLogoutResult",
     "EverySubject",
     "NoAdmins",
     "admit_identity",
     "finish_login",
     "log_out",
     "post_token_request_over_https",
+    "receive_backchannel_logout",
     "start_login",
 ]
 
@@ -275,6 +286,35 @@ def log_out(
             end_session(sessions, session_id=session_id)
     clear_session_cookies(response, config)
     return relying_party.logout_url()
+
+
+class BackchannelLogoutResult(Enum):
+    ACCEPTED = "accepted"
+    REFUSED = "refused"
+
+
+def receive_backchannel_logout(
+    relying_party: OidcRelyingParty,
+    logout_token: str,
+    *,
+    accounts: SubjectUserStore,
+    sessions: SessionRecordStore,
+    lock: WriteLock,
+    audit: AuditSink,
+) -> BackchannelLogoutResult:
+    """End every session of the subject a verified Logout Token names."""
+    logout = relying_party.verify_logout_token(logout_token)
+    if isinstance(logout, OidcRefusal):
+        return BackchannelLogoutResult.REFUSED
+    with lock.hold():
+        account = accounts.get(logout.subject)
+        if account is not None and end_user_sessions(sessions, account.id):
+            audit.user_management_event(UserManagementEvent(
+                kind=UserManagementEventKind.BACKCHANNEL_LOGOUT,
+                actor_id=None,
+                subject_id=account.id,
+            ))
+    return BackchannelLogoutResult.ACCEPTED
 
 
 def _sole_pending_login(

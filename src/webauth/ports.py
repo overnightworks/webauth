@@ -243,6 +243,7 @@ class UserManagementEventKind(Enum):
     USER_CREATED = "user_created"
     SESSION_REVOKED = "session_revoked"
     ROLE_CHANGED = "role_changed"
+    BACKCHANNEL_LOGOUT = "backchannel_logout"
 
 
 @dataclass(frozen=True)

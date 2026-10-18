@@ -18,15 +18,18 @@ from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 import pytest
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from oidc_arrangement import (
+    ABSENT,
     FakeClock,
     FakeIssuer,
     FakeKeySetEndpoint,
+    a_logout_token,
     jws,
     key_set_document,
     public_jwk,
@@ -74,14 +77,25 @@ from webauth.oidc_login import (
     MAX_PENDING_LOGINS,
     AdmissionConfig,
     AdmissionRefusal,
+    BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
     admit_identity,
     finish_login,
     log_out,
+    receive_backchannel_logout,
     start_login,
 )
-from webauth.policies import CsrfPolicy, PathRules, SecurityHeadersPolicy
+from webauth.policies import (
+    BodySizePolicy,
+    BodySizeRule,
+    CacheControlRule,
+    CsrfPolicy,
+    PathRules,
+    RateLimitBudget,
+    RateLimitPolicy,
+    SecurityHeadersPolicy,
+)
 from webauth.ports import SubjectUserStore, UserManagementEventKind, UserRecord
 
 BOUND_ISSUER = "https://id.example/realms/lab"
@@ -574,6 +588,9 @@ CALLBACK_PATH = "/auth/callback"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 FORM_LOGOUT_PATH = "/logout"
 FETCH_LOGOUT_PATH = "/logout/fetch"
+BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
+BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
+DEFAULT_MAX_BODY_BYTES = 1024
 
 
 def a_client_config() -> OidcClientConfig:
@@ -662,9 +679,41 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object) -> str:
     return jws(header, claims, rs256(rsa_key("issuer")))
 
 
+def a_logout_token_of_the_issuer(
+    *, claims: dict[str, object] | None = None, header: dict[str, object] | None = None,
+    key_name: str = "issuer",
+) -> str:
+    return a_logout_token(
+        issuer=BOUND_ISSUER,
+        audience=CLIENT_ID,
+        subject=SUBJECT,
+        now=NOW,
+        key_id="issuer-key",
+        key_name=key_name,
+        claims=claims,
+        header=header,
+    )
+
+
+def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
+    """The one non-empty ``logout_token`` a back-channel request's form carries, or ``None``."""
+    media_type = (content_type or "").partition(";")[0].strip().lower()
+    if media_type != "application/x-www-form-urlencoded":
+        return None
+    try:
+        fields = urllib.parse.parse_qsl(
+            request_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
+        )
+    except ValueError:
+        return None
+    tokens = [value for name, value in fields if name == "logout_token"]
+    return tokens[0] if len(tokens) == 1 and tokens[0] else None
+
+
 def an_oidc_host(
     *users: FakeUser, store_max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
     groups_claim: object = (LOGIN_GROUP,),
+    address_budget: int | None = None,
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
@@ -701,13 +750,27 @@ def an_oidc_host(
         issue_session_cookies(response, record.id, config)
         return {"username": account.username}
 
+    backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
     app = FastAPI()
     install_web_auth_config(app, config)
     install_web_auth_middleware(
         app,
-        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
-        csrf_origin=CsrfPolicy(),
+        security_headers=SecurityHeadersPolicy(
+            content_security_policy="default-src 'self'",
+            cache_control_rules=(CacheControlRule(paths=backchannel_path, value="no-store"),),
+        ),
+        body_size=BodySizePolicy(
+            default_max_bytes=DEFAULT_MAX_BODY_BYTES,
+            rules=(BodySizeRule(
+                paths=backchannel_path, max_bytes=BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
+            ),),
+        ),
+        rate_limit=None if address_budget is None else RateLimitPolicy(
+            default=RateLimitBudget("host", address_budget, 60), exempt=backchannel_path,
+        ),
+        csrf_origin=CsrfPolicy(exempt=backchannel_path),
         csrf_token=CsrfPolicy(
+            exempt=backchannel_path,
             token_exempt=PathRules(exact=frozenset({FORM_LOGOUT_PATH, FETCH_LOGOUT_PATH})),
         ),
     )
@@ -745,6 +808,22 @@ def an_oidc_host(
                 relying_party, request, response, config, sessions=sessions, lock=lock,
             ),
         }
+
+    @app.post(BACKCHANNEL_LOGOUT_PATH)
+    async def backchannel_logout(request: Request) -> Response:
+        logout_token = the_logout_token_of(
+            await request.body(), request.headers.get("content-type"),
+        )
+        if logout_token is None:
+            return Response(status_code=400)
+        with sessions.transaction():
+            result = receive_backchannel_logout(
+                relying_party, logout_token,
+                accounts=accounts, sessions=sessions, lock=lock, audit=audit,
+            )
+        return Response(
+            status_code=200 if result is BackchannelLogoutResult.ACCEPTED else 400,
+        )
 
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
@@ -1406,3 +1485,302 @@ def test_the_logout_url_ignores_any_target_the_request_names() -> None:
     )
 
     assert is_the_issuers_logout_url(response.headers["location"])
+
+
+OTHER_SUBJECT = "0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23"
+FORM = {"content-type": "application/x-www-form-urlencoded"}
+
+
+def a_host_with_sessions(
+    *, subject_sessions: int, other_sessions: int = 0, address_budget: int | None = None,
+) -> OidcHost:
+    host = an_oidc_host(
+        FakeUser(id=SUBJECT, username="lena"), FakeUser(id=OTHER_SUBJECT, username="omar"),
+        address_budget=address_budget,
+    )
+    open_sessions(host, SUBJECT, subject_sessions)
+    open_sessions(host, OTHER_SUBJECT, other_sessions)
+    return host
+
+
+def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
+    for _ in range(count):
+        host.sessions.create(
+            user_id,
+            datetime.now(UTC) + timedelta(seconds=host.sessions.max_age_seconds),
+            ip_address=CLIENT_ADDRESS,
+            user_agent=CLIENT_USER_AGENT,
+        )
+
+
+def sessions_of(host: OidcHost, user_id: str) -> int:
+    return sum(record.user_id == user_id for record in host.sessions.list_active())
+
+
+def post_backchannel_logout(
+    host: OidcHost, content: bytes | Iterator[bytes], headers: dict[str, str] = FORM,
+) -> HttpxResponse:
+    return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=content, headers=headers)
+
+
+def post_logout_token(host: OidcHost, logout_token: str, **other_fields: str) -> HttpxResponse:
+    form = urllib.parse.urlencode({"logout_token": logout_token, **other_fields})
+    return post_backchannel_logout(host, form.encode())
+
+
+def test_a_valid_logout_token_ends_every_session_of_its_subject_and_keeps_anothers() -> None:
+    host = a_host_with_sessions(subject_sessions=3, other_sessions=2)
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert response.status_code == 200
+    assert (sessions_of(host, SUBJECT), sessions_of(host, OTHER_SUBJECT)) == (0, 2)
+
+
+@pytest.mark.parametrize("claims", [
+    pytest.param({"sid": "4c2a9f0e-session"}, id="sub-and-sid"),
+    pytest.param({"sid": ABSENT}, id="sub-only"),
+    pytest.param({"events": {
+        "http://schemas.openid.net/event/backchannel-logout": {"reason": "admin"},
+    }}, id="events-with-contents"),
+    pytest.param({"aud": [CLIENT_ID]}, id="audience-array"),
+])
+def test_a_token_the_profile_admits_ends_every_session_of_its_subject(
+    claims: dict[str, object],
+) -> None:
+    host = a_host_with_sessions(subject_sessions=2)
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer(claims=claims))
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (200, 0)
+
+
+def test_a_logout_for_an_unknown_subject_is_accepted_without_provisioning_an_account() -> None:
+    host = an_oidc_host(FakeUser(id=OTHER_SUBJECT, username="omar"))
+    open_sessions(host, OTHER_SUBJECT, 1)
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert response.status_code == 200
+    assert [account.id for account in host.accounts.list()] == [OTHER_SUBJECT]
+    assert sessions_of(host, OTHER_SUBJECT) == 1
+    assert host.audit.user_management_events == []
+
+
+def test_a_logout_for_a_subject_without_sessions_is_accepted_and_audits_nothing() -> None:
+    host = a_host_with_sessions(subject_sessions=0, other_sessions=1)
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert (response.status_code, sessions_of(host, OTHER_SUBJECT)) == (200, 1)
+    assert host.audit.user_management_events == []
+
+
+def test_a_logout_ends_the_sessions_of_an_inactive_account() -> None:
+    host = an_oidc_host(FakeUser(id=SUBJECT, username="lena", is_active=False))
+    open_sessions(host, SUBJECT, 2)
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (200, 0)
+
+
+def test_a_logout_that_ended_sessions_audits_one_event_for_the_account_and_no_actor() -> None:
+    host = a_host_with_sessions(subject_sessions=3)
+
+    post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert [asdict(event) for event in host.audit.user_management_events] == [{
+        "kind": UserManagementEventKind.BACKCHANNEL_LOGOUT,
+        "actor_id": None,
+        "subject_id": SUBJECT,
+        "role": None,
+        "session_ref": None,
+        "previous_role": None,
+    }]
+
+
+def test_an_accepted_logout_takes_the_lock_once_and_calls_no_issuer_endpoint() -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+    exchanges_before = len(host.issuer.requests)
+
+    post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert host.lock.times_taken == 1
+    assert len(host.issuer.requests) == exchanges_before
+
+
+@pytest.mark.parametrize("logout_token", [
+    pytest.param(a_logout_token_of_the_issuer(key_name="forger"), id="forged-signature"),
+    pytest.param(a_logout_token_of_the_issuer(header={"alg": "none"}), id="alg-none"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"iss": FOREIGN_ISSUER}), id="wrong-issuer"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"aud": "other-app"}), id="wrong-audience"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"aud": [CLIENT_ID, "other-app"]}),
+                 id="extra-audience"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"events": ABSENT}), id="events-missing"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"events": {"urn:other": {}}}),
+                 id="events-of-another-event"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"nonce": "n"}), id="nonce"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"nonce": None}), id="nonce-null"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"sub": ABSENT}), id="sid-only"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"exp": ABSENT}), id="exp-missing"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"exp": NOW - 30, "iat": NOW - 100}),
+                 id="exp-at-the-deadline"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"iat": NOW + 31}), id="iat-in-the-future"),
+    pytest.param(a_logout_token_of_the_issuer(claims={"iat": NOW - 151}), id="iat-stale"),
+    pytest.param(a_logout_token_of_the_issuer(header={"typ": ABSENT}), id="typ-missing"),
+    pytest.param(a_logout_token_of_the_issuer(header={"typ": "JWT"}), id="typ-wrong"),
+    pytest.param("not-a-token", id="malformed"),
+])
+def test_a_logout_token_that_does_not_hold_is_refused_before_the_lock_and_ends_nothing(
+    logout_token: str,
+) -> None:
+    host = a_host_with_sessions(subject_sessions=2)
+
+    response = post_logout_token(host, logout_token)
+
+    assert (response.status_code, response.content) == (400, b"")
+    assert sessions_of(host, SUBJECT) == 2
+    assert host.lock.times_taken == 0
+    assert host.audit.user_management_events == []
+
+
+def test_an_id_token_posted_as_a_logout_token_ends_nothing() -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+
+    response = post_logout_token(host, an_id_token("nonce", host.wall_clock, [LOGIN_GROUP]))
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (400, 1)
+
+
+@pytest.mark.parametrize(("body", "headers"), [
+    pytest.param(b"", FORM, id="empty-body"),
+    pytest.param(b"other=1", FORM, id="token-missing"),
+    pytest.param(b"logout_token=", FORM, id="token-empty"),
+    pytest.param(b"logout_token", FORM, id="field-without-a-value"),
+    pytest.param(b"logout_token=%ff", FORM, id="undecodable-token"),
+    pytest.param(b"logout_token=a&logout_token=b", FORM, id="token-twice"),
+    pytest.param(b"\xff\xfe", FORM, id="body-not-utf-8"),
+    pytest.param(b"logout_token=a", {"content-type": "application/json"}, id="json-media-type"),
+    pytest.param(b"logout_token=a", {"content-type": "text/plain"}, id="text-media-type"),
+    pytest.param(b"logout_token=a", {}, id="no-media-type"),
+])
+def test_a_request_that_is_not_one_well_formed_logout_token_form_gets_an_empty_400(
+    body: bytes, headers: dict[str, str],
+) -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+
+    response = post_backchannel_logout(host, body, headers)
+
+    assert (response.status_code, response.content) == (400, b"")
+    assert (sessions_of(host, SUBJECT), host.lock.times_taken) == (1, 0)
+
+
+def test_two_logout_tokens_in_one_form_are_refused_even_when_one_is_valid() -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+    form = urllib.parse.urlencode([
+        ("logout_token", a_logout_token_of_the_issuer()), ("logout_token", "another"),
+    ])
+
+    response = post_backchannel_logout(host, form.encode())
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (400, 1)
+
+
+def test_an_unknown_form_field_beside_a_valid_token_is_ignored_past_the_default_limit() -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+
+    response = post_logout_token(
+        host, a_logout_token_of_the_issuer(), unknown="x" * (2 * DEFAULT_MAX_BODY_BYTES),
+    )
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (200, 0)
+
+
+def an_oversized_streamed_body() -> Iterator[bytes]:
+    for _ in range(BACKCHANNEL_LOGOUT_MAX_BODY_BYTES // 1024 + 1):
+        yield b"x" * 1024
+
+
+@pytest.mark.parametrize("body", [
+    pytest.param(b"x" * (BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1), id="declared"),
+    pytest.param(an_oversized_streamed_body(), id="streamed"),
+])
+def test_an_oversized_logout_body_is_refused_and_ends_nothing(
+    body: bytes | Iterator[bytes],
+) -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+
+    response = post_backchannel_logout(host, body)
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (413, 1)
+
+
+@pytest.mark.parametrize("path", [
+    pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}/", id="trailing-slash"),
+    pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}-other", id="longer-name"),
+    pytest.param(FORM_LOGOUT_PATH, id="the-browser-logout"),
+])
+def test_a_path_next_to_the_callback_stays_csrf_protected(path: str) -> None:
+    host = signed_in_host()
+
+    response = host.client.post(path, headers=FORM, content=b"logout_token=x")
+
+    assert (response.status_code, host.sessions.count_active()) == (403, 1)
+
+
+def fails_with_the_store_down(*_arguments: object, **_keywords: object) -> NoReturn:
+    raise ConnectionError("the store is down")
+
+
+@pytest.mark.parametrize("failing_part", [
+    pytest.param("sessions.delete_for_user", id="deletion-fails"),
+    pytest.param("audit.user_management_event", id="audit-fails-after-deletion"),
+])
+def test_a_store_or_audit_failure_propagates_and_leaves_every_session_in_place(
+    failing_part: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = a_host_with_sessions(subject_sessions=2)
+    owner, _, method = failing_part.partition(".")
+    monkeypatch.setattr(getattr(host, owner), method, fails_with_the_store_down)
+
+    with pytest.raises(ConnectionError):
+        post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert sessions_of(host, SUBJECT) == 2
+
+
+def test_the_callback_bypasses_an_exhausted_address_budget() -> None:
+    host = a_host_with_sessions(subject_sessions=1, address_budget=1)
+    host.client.get("/me")
+    assert host.client.get("/me").status_code == 429
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert (response.status_code, sessions_of(host, SUBJECT)) == (200, 0)
+
+
+@pytest.mark.parametrize(("body", "status"), [
+    pytest.param(None, 200, id="accepted"),
+    pytest.param(b"logout_token=x", 400, id="refused"),
+    pytest.param(b"x" * (BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1), 413, id="oversized"),
+])
+def test_every_answer_of_the_callback_carries_no_store(body: bytes | None, status: int) -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+    content = (
+        urllib.parse.urlencode({"logout_token": a_logout_token_of_the_issuer()}).encode()
+        if body is None else body
+    )
+
+    response = post_backchannel_logout(host, content)
+
+    assert (response.status_code, response.headers["cache-control"]) == (status, "no-store")
+
+
+def test_the_callback_needs_neither_an_origin_nor_a_cookie() -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+    assert not host.client.cookies
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert (response.status_code, "origin" in response.request.headers) == (200, False)

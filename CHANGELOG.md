@@ -8,6 +8,27 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 ## 0.16.0 - Unreleased
 
+**Added**
+
+- Back-channel logout. `OidcRelyingParty.verify_logout_token(logout_token)`
+  answers a `VerifiedLogout(subject)` or an `OidcRefusal` for a Logout Token
+  that is RS256, of the configured issuer, for exactly this client, issued
+  within `LOGOUT_TOKEN_MAX_AGE_SECONDS` (120) plus the leeway, with an `exp`
+  after its `iat`, the back-channel logout event, a `sub`, no `nonce` and the
+  `logout+jwt` type; its `sid` is never read. `OidcRefusalReason` gains
+  `LOGOUT_TOKEN_REJECTED` and `INVALID_LOGOUT_CLAIM`. The new
+  `webauth.oidc_login.receive_backchannel_logout(relying_party, logout_token,
+  *, accounts, sessions, lock, audit)` ends every session of the subject, an
+  inactive account's included, and emits one
+  `UserManagementEventKind.BACKCHANNEL_LOGOUT` event when a session ended. It
+  keeps no replay store and never commits (README, "Back-channel logout").
+  `JwtVerifier.verify` takes `expected_type`, and a missing or unequal header
+  `typ` is `RejectionReason.INVALID_TOKEN_TYPE`; callers that do not pass it
+  are unchanged. Migration: register `backchannel.logout.url` on each app's
+  Keycloak client, in edge's `realm.yaml`, by an internal name, never through
+  Cloudflare Access, and add the route with its CSRF and rate-limit
+  exemptions.
+
 **Breaking**
 
 - `OidcClientConfig` requires `end_session_endpoint` (after `jwks_url`) and
@@ -20,7 +41,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   session cookies and returns that URL, so an app's logout also ends the
   browser's Keycloak session; Keycloak asks the person to confirm once. It
   ends only this browser's app session; ending the person's other sessions
-  arrives with back-channel logout (#197).
+  is the back-channel logout above.
   `SessionRecordStore.delete` must treat an id the store does not hold as a
   no-op, never an error. Migration: register each app's post-logout redirect
   URI (`post.logout.redirect.uris`) on its Keycloak client, in edge's
