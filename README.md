@@ -17,6 +17,40 @@ the `jwt` extra, which [Install](#install) names.
 The host names the issuer's authorization, token, key-set and end-session
 URLs itself; the library does no discovery.
 
+### What every app gets
+
+Every app that signs people in through Keycloak behaves the same way, unless it
+names `EverySubject` or `NoAdmins` under
+[Admitting an identity](#admitting-an-identity). The details are in the
+sections linked below.
+
+**Who gets in.** Only members of the app's `login_group`, such as
+`/apps/songmaker`, get in. Members of its `admin_group`, such as
+`/apps/songmaker/admin`, are admins. Both are decided again at every login, so a
+change in Keycloak takes effect at the person's next sign-in; an app session
+that is already open keeps its access until it ends. See
+[Admitting an identity](#admitting-an-identity).
+
+**When Keycloak is down.** People who are already signed in keep working until
+their app session ends, because the app checks a session in its own store and
+never asks Keycloak. A new sign-in fails at Keycloak: the app sends the browser
+to Keycloak's sign-in page, which does not load, so the person sees the
+browser's or the proxy's error page, not the app's. Only when Keycloak fails
+during the sign-in, or the browser reaches Keycloak but the app does not, does
+the sign-in stop at the app's callback, on the host's refusal page. webauth
+offers no local fallback login. See
+[The store decides every request](#the-store-decides-every-request).
+
+**Signing out.** Signing out of an app ends its session in that browser at once
+and takes the browser to Keycloak, which asks once to confirm; confirming ends
+the person's Keycloak session in that browser. Keycloak then tells each app the
+person signed in to through that Keycloak session, and each of those apps ends
+all of the person's sessions, on every device. An app they used only on another
+device is not told and keeps them signed in there. On their other devices, the
+next sign-in asks for no password while that device's own Keycloak session
+lasts. See [Logging out](#logging-out) and
+[Back-channel logout](#back-channel-logout).
+
 ### The host's start, callback and logout routes
 
 `webauth.oidc_login` carries the pending login for the host, so the host
@@ -126,7 +160,7 @@ as a prefix, so no other route falls under it.
 
 A logout form redirects the browser to the issuer, and Chromium checks
 `form-action` on that redirect. A host whose logout is a form adds the
-issuer's origin to `form-action` in its policy (see
+end-session endpoint's origin to `form-action` in its policy (see
 [Content-Security-Policy](#content-security-policy)). A page that logs out
 through `fetch` is not subject to `form-action`.
 
@@ -190,8 +224,9 @@ taken before the callback is stopped by the issuer refusing the spent code
 
 ### Back-channel logout
 
-When a person logs out of one app, Keycloak posts a Logout Token to every
-client's `backchannel.logout.url`. `receive_backchannel_logout(relying_party,
+When a person's Keycloak session ends, for example after they confirm a logout
+from one app, Keycloak posts a Logout Token to the `backchannel.logout.url` of
+every client that session signed in to. `receive_backchannel_logout(relying_party,
 logout_token, *, accounts, sessions, lock, audit)` verifies it and ends every
 session of its subject, in every browser, and answers
 `BackchannelLogoutResult.ACCEPTED` or `REFUSED`. The host's route is a POST of
@@ -497,7 +532,7 @@ named, while every other request still gets 401. A dependency can only raise
 an `HTTPException`, so the 302 still carries FastAPI's default JSON body
 (`{"detail":"Found"}`) alongside its `Location` header.
 
-`webauth.dependencies.session_id_from_request(request, config)` is the one
+`webauth.dependencies.session_id_from_request(connection, config)` is the one
 reader of the session cookie: it parses the raw `Cookie` headers and returns
 the verified session identifier, or `None` when the cookie is missing, longer
 than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
@@ -508,6 +543,83 @@ subdomain can set a second cookie of the same name, so a request carrying two
 is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
 session cookie itself calls this function instead of `request.cookies`.
+
+## WebSocket handshakes
+
+A browser sends the session cookie on a cross-site WebSocket handshake too,
+and the webauth middlewares pass WebSocket scopes through untouched.
+`webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
+is the one check a host runs at the handshake. It answers the
+`AuthenticatedUser`, or a `WebSocketRefusal`:
+
+| Refusal | Value | When |
+|---|---|---|
+| `MISSING_ORIGIN` | `missing-origin` | no `Origin` header |
+| `FOREIGN_ORIGIN` | `foreign-origin` | an `Origin` that is empty, repeated, `null`, unparsable or not an allowed host |
+| `NO_SESSION` | `no-session` | the session cookie is missing, empty or longer than `MAX_SESSION_COOKIE_CHARS` |
+| `INVALID_SESSION` | `invalid-session` | the cookie is forged or present more than once |
+| `SESSION_ENDED_OR_EXPIRED` | `session-ended-or-expired` | the store does not know the session, the liveness policy refuses it, or `touch` answers `False` |
+| `ACCOUNT_DISABLED` | `account-disabled` | the account behind a live session is inactive |
+
+The `Origin` is decided first, before the store is touched, so a refused
+handshake neither renews a session nor writes an audit event. Exactly one
+`Origin` must name a host the configured allowlist admits (`allowed_hosts_exact`
+and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `localhost`
+and `127.0.0.1` when none is configured). There is no `Referer` fallback, and
+`Sec-Fetch-Site` does not decide: a client that is not a browser must send an
+allowed `Origin` too. The `Origin` keeps a foreign page from using a visitor's
+cookie; it is no credential.
+
+Then the session is decided exactly as `current_user_dependency` decides it
+for a request, from the same code: an admitted handshake renews the session
+and reports a changed address or agent. A failing store, or a `touch` that
+does not answer a `bool`, raises instead of refusing, and an exception never
+accepts the socket.
+
+```python
+from fastapi import WebSocket
+from starlette.concurrency import run_in_threadpool
+
+from webauth.dependencies import AuthenticatedUser, WebSocketRefusal, authenticate_websocket
+
+
+@app.websocket("/room")
+async def room(websocket: WebSocket) -> None:
+    def authenticate() -> AuthenticatedUser | WebSocketRefusal:
+        with the_hosts_unit_of_work() as unit:
+            return authenticate_websocket(websocket, sessions=unit.sessions, audit=unit.audit)
+
+    outcome = await run_in_threadpool(authenticate)
+    if isinstance(outcome, WebSocketRefusal):
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    ...
+```
+
+- Authenticate, and finish the transaction, before `accept` and before waiting
+  for a message. `load` holds the session against a concurrent deletion until
+  the transaction ends, so one kept open for the socket's life would block a
+  logout.
+- A refusal closes with code 1008 before `accept`. A real server answers the
+  handshake with HTTP 403; the browser does not receive a close frame.
+- A synchronous store runs in a worker, as above, not in the receive loop.
+- A host may wrap the plain function in its own dependency: FastAPI resolves a
+  parameter annotated `HTTPConnection` on a WebSocket route.
+- After a successful check, `session_id_from_request(websocket, config)` names
+  the session on the same handshake.
+
+A socket does not end when its session does: a logout, an administrator's
+revocation and `webauth.oidc_login.receive_backchannel_logout` delete the stored
+session and cannot signal an open socket. The host calls the same helper again, in a fresh
+transaction, before protected work and on its own schedule while a stream runs,
+and on a refusal closes the socket and stops the protected work. A successful
+re-check counts as activity like a request does: it renews the session, so a
+socket that keeps being re-checked stays signed in, and it stays signed in only
+until the absolute cap (`ExpiryColumnLiveness(absolute_max_age_seconds)` or
+`IdleWindowLiveness(..., absolute_max_age_seconds=...)`), which bounds a
+socket's life. A host without an absolute cap sets no end to a socket it keeps
+re-checking.
 
 ## Configuration
 
@@ -640,7 +752,10 @@ to the host's session store.
 
 - `WebAuthConfig.cookie_max_age_seconds` is required and is the browser cookie's
   `Max-Age`. The cookie is issued once at login and never reissued, so it bounds
-  the whole sign-in.
+  the whole sign-in of a client that sends a request at a time. An open
+  WebSocket captured the cookie at its handshake and runs on after the browser
+  drops it; the absolute cap and the host's re-checks bound a socket (see
+  "WebSocket handshakes").
 - The idle window — `IdleWindowLiveness`'s idle argument, or the host's
   `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
 - The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
@@ -657,8 +772,8 @@ set the worst-case delay before a removal from the group takes effect, because
 an open session is not re-checked. Every login checks the group again, and
 Keycloak's own SSO session (30 days, 7 days idle) turns that login into a
 redirect the person does not notice. A removal takes effect at once only with
-`edge lock` together with W5's back-channel logout; until that integration
-exists, an open app session stays valid until it expires.
+`edge lock` together with the back-channel logout ("Back-channel logout"
+above); without it, an open app session stays valid until it expires.
 
 ```python
 import re
@@ -824,7 +939,9 @@ budget name starts with a lowercase letter, holds only lowercase letters,
 digits, `-` and `_`, and is unique in the policy. The limiter key is
 `<name>:<address>` inside the Redis `key_prefix`, so renaming a budget starts
 it fresh. A budget whose `max_requests` or `window_seconds` is not a positive
-whole number is refused at construction.
+whole number is refused at construction. A backend of your own receives only
+such values: `limit` and `window_seconds` are positive integers, excluding
+booleans, and the caller validates them before invoking the backend.
 
 ```python
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
@@ -867,7 +984,7 @@ to list and end sessions without a user store. Construct
 `SessionAdministrationStore`, `AuditSink`, `WriteLock` and `WebAuthConfig`.
 
 - `SessionAdministrationStore`: extends `SessionRecordStore` with
-  `list_active(*, offset=0, limit=None)` and `count_active()`. The host selects
+  `list_active(*, offset=0, limit=None)`. The host selects
   active records using its liveness rules and owns their order. These reads
   need no write lock; `limit=None` returns all remaining records.
 - `WriteLock.hold()`: serializes checks and writes across the supplied stores
@@ -885,13 +1002,13 @@ otherwise; the host guards `list_sessions` with its admin dependency. Public
 references come only from `webauth.cookies.session_reference(session_id)`:
 SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
 `SessionIdentityChanged` (its `session_ref`) expose no raw token; the host reads
-any timestamps from its own records. Refusals derive from `UserManagementError`.
+any timestamps from its own records. Refusals derive from `webauth.WebAuthError`.
 [The session administration tests](tests/test_session_administration.py) verify
 the helpers, including REQ-ADMIN-12 for listed references.
 
 ## Audit events
 
-Map `AuditSink.user_management_event(event)` to the host's audit system, or
+Map `AuditSink.account_event(event)` to the host's audit system, or
 explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 `subject_id`; optional fields default to `None`:
 
@@ -918,7 +1035,7 @@ It owns the machinery an application should not rebuild:
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
 | `webauth.cookies` | The signed session cookie, the CSRF token bound to it and the pending-login cookie, issued and cleared |
-| `webauth.dependencies` | Turning a signed cookie into the account that made the request |
+| `webauth.dependencies` | Turning a signed cookie into the account that made the request or opened a WebSocket handshake (`authenticate_websocket`) |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
@@ -930,7 +1047,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `log_out`, which ends the browser's session and returns the issuer's end-session URL, `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
 It leaves the application everything that touches the application's own truth:
 

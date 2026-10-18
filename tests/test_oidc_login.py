@@ -98,7 +98,7 @@ from webauth.policies import (
     RateLimitPolicy,
     SecurityHeadersPolicy,
 )
-from webauth.ports import SubjectUserStore, UserManagementEventKind, UserRecord
+from webauth.ports import AccountEventKind, SubjectUserStore, UserRecord
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
@@ -176,8 +176,8 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
         SUBJECT, username, MEMBER_ROLE, True,
     )
     assert host.accounts.list() == [account]
-    assert [asdict(event) for event in host.audit.user_management_events] == [{
-        "kind": UserManagementEventKind.USER_CREATED,
+    assert [asdict(event) for event in host.audit.account_events] == [{
+        "kind": AccountEventKind.USER_CREATED,
         "actor_id": None,
         "subject_id": SUBJECT,
         "role": MEMBER_ROLE,
@@ -228,7 +228,7 @@ def test_a_person_taken_out_of_the_group_is_refused_and_back_in_returns_to_the_a
     assert host.accounts.list() == stored
 
     assert host.admit(LENA) is first
-    assert len(host.audit.user_management_events) == 1
+    assert len(host.audit.account_events) == 1
 
 
 class UntouchableAccounts(UsersInMemory):
@@ -268,7 +268,7 @@ def test_a_refusal_before_any_account_takes_no_lock_reads_no_account_and_audits_
     host = Host(UntouchableAccounts(), RecordingAuditSink(), UntouchableLock())
 
     assert host.admit(identity, admission) is refusal
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 def test_a_person_outside_the_group_is_refused_before_a_deactivated_account_is_read() -> None:
@@ -380,8 +380,8 @@ def test_a_stored_admin_outside_the_admin_group_is_demoted_and_audited_at_login(
 
     assert account is host.accounts.get(SUBJECT)
     assert (account.username, account.role) == ("lena.legacy", MEMBER_ROLE)
-    assert [asdict(event) for event in host.audit.user_management_events] == [{
-        "kind": UserManagementEventKind.ROLE_CHANGED,
+    assert [asdict(event) for event in host.audit.account_events] == [{
+        "kind": AccountEventKind.ROLE_CHANGED,
         "actor_id": None,
         "subject_id": SUBJECT,
         "role": MEMBER_ROLE,
@@ -442,9 +442,9 @@ def test_an_account_gets_the_role_its_groups_derive_at_every_login(case: RoleCas
     assert isinstance(account, FakeUser)
     assert account.role == case.role
     assert host.accounts.get(SUBJECT) is account
-    kinds = [event.kind for event in host.audit.user_management_events]
-    expected = [UserManagementEventKind.ROLE_CHANGED] if case.changed else (
-        [] if case.stored_role else [UserManagementEventKind.USER_CREATED]
+    kinds = [event.kind for event in host.audit.account_events]
+    expected = [AccountEventKind.ROLE_CHANGED] if case.changed else (
+        [] if case.stored_role else [AccountEventKind.USER_CREATED]
     )
     assert kinds == expected
 
@@ -454,7 +454,7 @@ def test_a_role_change_audit_event_carries_the_roles_and_no_username() -> None:
 
     host.admit(LENA_IN_THE_ADMIN_GROUP)
 
-    [event] = host.audit.user_management_events
+    [event] = host.audit.account_events
     assert (event.actor_id, event.subject_id, event.previous_role, event.role) == (
         None, SUBJECT, MEMBER_ROLE, ADMIN_ROLE,
     )
@@ -466,7 +466,7 @@ def test_a_deactivated_admin_is_refused_before_any_role_is_written() -> None:
 
     assert host.admit(LENA) is AdmissionRefusal.ACCOUNT_DEACTIVATED
     assert host.accounts.get(SUBJECT).role == ADMIN_ROLE
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 class UsersReplacingRecords(UsersInMemory):
@@ -516,7 +516,7 @@ def test_a_role_write_that_finds_no_row_fails_admission_and_audits_nothing() -> 
     with pytest.raises(LookupError):
         host.admit(LENA_IN_THE_ADMIN_GROUP)
 
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 def test_a_role_that_does_not_change_is_written_by_no_second_login() -> None:
@@ -525,8 +525,8 @@ def test_a_role_that_does_not_change_is_written_by_no_second_login() -> None:
 
     host.admit(LENA_IN_THE_ADMIN_GROUP)
 
-    assert [event.kind for event in host.audit.user_management_events] == [
-        UserManagementEventKind.USER_CREATED,
+    assert [event.kind for event in host.audit.account_events] == [
+        AccountEventKind.USER_CREATED,
     ]
 
 
@@ -539,7 +539,7 @@ def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed(
 
     assert again is first
     assert host.accounts.list() == stored
-    assert len(host.audit.user_management_events) == 1
+    assert len(host.audit.account_events) == 1
 
 
 @pytest.mark.parametrize(("identity", "stored", "refusal"), [
@@ -572,7 +572,7 @@ def test_a_refused_identity_changes_neither_the_store_nor_the_audit_log(
 
     assert host.admit(identity) is refusal
     assert host.accounts.list() == stored
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written() -> None:
@@ -581,7 +581,7 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
 
     assert host.admit(LENA) is AdmissionRefusal.USERNAME_TAKEN
     assert host.accounts.list() == stored
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 NOW = 1_800_000_000
@@ -1025,8 +1025,8 @@ def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
     assert host.sessions.count_active() == 1
     assert host.client.get("/me").json() == {"username": "lena.legacy"}
     assert host.client.get("/admin").status_code == 403
-    assert [event.kind for event in host.audit.user_management_events] == [
-        UserManagementEventKind.ROLE_CHANGED,
+    assert [event.kind for event in host.audit.account_events] == [
+        AccountEventKind.ROLE_CHANGED,
     ]
 
 
@@ -1037,7 +1037,7 @@ def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
 
     assert response.status_code == 200
     assert host.client.get("/admin").json() == {"username": "lena.legacy"}
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 @pytest.mark.parametrize(("before", "after", "status_before", "status_after"), [
@@ -1433,8 +1433,9 @@ def test_a_same_origin_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
 def test_a_logout_without_a_session_takes_no_lock(shape: LogoutShape) -> None:
     host = an_oidc_host()
 
-    post_logout(host, SAME_ORIGIN_FORM, shape.path)
+    response = post_logout(host, SAME_ORIGIN_FORM, shape.path)
 
+    assert response.status_code == shape.status_code
     assert host.lock.times_taken == 0
 
 
@@ -1573,7 +1574,7 @@ def test_a_logout_for_an_unknown_subject_is_accepted_without_provisioning_an_acc
     assert response.status_code == 200
     assert [account.id for account in host.accounts.list()] == [OTHER_SUBJECT]
     assert sessions_of(host, OTHER_SUBJECT) == 1
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 def test_a_logout_for_a_subject_without_sessions_is_accepted_and_audits_nothing() -> None:
@@ -1582,7 +1583,7 @@ def test_a_logout_for_a_subject_without_sessions_is_accepted_and_audits_nothing(
     response = post_logout_token(host, a_logout_token_of_the_issuer())
 
     assert (response.status_code, sessions_of(host, OTHER_SUBJECT)) == (200, 1)
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 def test_a_logout_ends_the_sessions_of_an_inactive_account() -> None:
@@ -1599,8 +1600,8 @@ def test_a_logout_that_ended_sessions_audits_one_event_for_the_account_and_no_ac
 
     post_logout_token(host, a_logout_token_of_the_issuer())
 
-    assert [asdict(event) for event in host.audit.user_management_events] == [{
-        "kind": UserManagementEventKind.BACKCHANNEL_LOGOUT,
+    assert [asdict(event) for event in host.audit.account_events] == [{
+        "kind": AccountEventKind.BACKCHANNEL_LOGOUT,
         "actor_id": None,
         "subject_id": SUBJECT,
         "role": None,
@@ -1651,7 +1652,7 @@ def test_a_logout_token_that_does_not_hold_is_refused_before_the_lock_and_ends_n
     assert (response.status_code, response.content) == (400, b"")
     assert sessions_of(host, SUBJECT) == 2
     assert host.lock.times_taken == 0
-    assert host.audit.user_management_events == []
+    assert host.audit.account_events == []
 
 
 def test_an_id_token_posted_as_a_logout_token_ends_nothing() -> None:
@@ -1744,7 +1745,7 @@ def fails_with_the_store_down(*_arguments: object, **_keywords: object) -> NoRet
 
 @pytest.mark.parametrize("failing_part", [
     pytest.param("sessions.delete_for_user", id="deletion-fails"),
-    pytest.param("audit.user_management_event", id="audit-fails-after-deletion"),
+    pytest.param("audit.account_event", id="audit-fails-after-deletion"),
     pytest.param("sessions.commit_failure", id="commit-fails"),
 ])
 def test_a_store_audit_or_commit_failure_answers_400_and_leaves_every_session_in_place(

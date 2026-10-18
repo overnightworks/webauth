@@ -20,11 +20,9 @@ from webauth_arrangement import (
 from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
+    AccountEventKind,
     AuditSink,
     SessionAdministrationStore,
-    UserManagementError,
-    UserManagementEventKind,
-    UsernameTakenError,
     WriteLock,
 )
 from webauth.session_administration import (
@@ -91,8 +89,8 @@ def test_REQ_ADMIN_12_listing_returns_only_public_fields_in_the_stores_page_orde
         "ip_address": record.ip_address,
         "user_agent": record.user_agent,
     } for record in page]
-    assert administration.sessions.count_active() == len(stored_sessions)
-    assert administration.audit.user_management_events == []
+    assert len(administration.sessions.list_active()) == len(stored_sessions)
+    assert administration.audit.account_events == []
     evidence = repr(summaries) + caplog.text
     for secret in (record.id for record in stored_sessions):
         assert secret not in evidence
@@ -102,7 +100,7 @@ def test_REQ_ADMIN_12_an_empty_store_has_no_session_summaries(
     empty_administration: SessionAdministration,
 ) -> None:
     assert empty_administration.list_sessions() == []
-    assert empty_administration.sessions.count_active() == 0
+    assert empty_administration.sessions.list_active() == []
 
 
 @pytest.mark.parametrize("session_index", [0, 1, 2])
@@ -118,16 +116,16 @@ def test_REQ_ADMIN_12_an_admin_revokes_one_listed_session_without_its_raw_token(
     for index, record in enumerate(stored_sessions):
         remains = index != session_index
         assert (administration.sessions.load(record.id) is not None) == remains
-    assert administration.sessions.count_active() == 2
-    assert [asdict(event) for event in administration.audit.user_management_events] == [{
-        "kind": UserManagementEventKind.SESSION_REVOKED,
+    assert len(administration.sessions.list_active()) == 2
+    assert [asdict(event) for event in administration.audit.account_events] == [{
+        "kind": AccountEventKind.SESSION_REVOKED,
         "actor_id": actor.id,
         "subject_id": summary.user_id,
         "role": None,
         "session_ref": summary.session_ref,
         "previous_role": None,
     }]
-    evidence = repr(administration.audit.user_management_events) + caplog.text
+    evidence = repr(administration.audit.account_events) + caplog.text
     for secret in (summary.username, *(record.id for record in stored_sessions)):
         assert secret not in evidence
 
@@ -143,7 +141,7 @@ def test_REQ_ADMIN_12_revoking_a_consumed_reference_is_refused_without_another_e
         administration.revoke_session(actor, summary.session_ref)
 
     assert administration.sessions.list_active() == stored_sessions[1:]
-    assert len(administration.audit.user_management_events) == 1
+    assert len(administration.audit.account_events) == 1
 
 
 @pytest.mark.parametrize("reference", ["unknown", "", "é", "session-1", "0" * 64])
@@ -158,7 +156,7 @@ def test_REQ_ADMIN_12_unknown_or_raw_session_references_preserve_every_session(
     assert administration.sessions.list_active() == stored_sessions
     for record in stored_sessions:
         assert record.id not in str(error.value) + caplog.text
-    assert administration.audit.user_management_events == []
+    assert administration.audit.account_events == []
 
 
 @pytest.mark.parametrize(("session_id", "reference"), [
@@ -194,7 +192,7 @@ def test_REQ_ADMIN_05_only_the_configured_admin_can_revoke_a_session(
         administration.revoke_session(non_admin, reference)
 
     assert administration.sessions.list_active() == stored_sessions
-    assert administration.audit.user_management_events == []
+    assert administration.audit.account_events == []
 
 
 def test_an_actor_without_the_configured_admin_role_cannot_revoke_a_session(
@@ -208,7 +206,7 @@ def test_an_actor_without_the_configured_admin_role_cannot_revoke_a_session(
         strict.revoke_session(actor, "unknown")
 
     assert strict.sessions.list_active() == stored_sessions
-    assert strict.audit.user_management_events == []
+    assert strict.audit.account_events == []
 
 
 def test_revoking_without_the_write_lock_is_refused_by_the_store(
@@ -222,7 +220,7 @@ def test_revoking_without_the_write_lock_is_refused_by_the_store(
         administration.revoke_session(actor, reference)
 
     assert administration.sessions.list_active() == stored_sessions
-    assert administration.audit.user_management_events == []
+    assert administration.audit.account_events == []
 
 
 def test_the_arrangement_supplies_the_administration_protocols(
@@ -231,11 +229,3 @@ def test_the_arrangement_supplies_the_administration_protocols(
     assert isinstance(administration.sessions, SessionAdministrationStore)
     assert isinstance(administration.audit, AuditSink)
     assert isinstance(administration.lock, WriteLock)
-
-
-@pytest.mark.parametrize("error_type", [UsernameTakenError, NotAnAdminError, UnknownSessionError])
-def test_hosts_can_catch_every_management_refusal_through_its_common_base(
-    error_type: type[UserManagementError],
-) -> None:
-    with pytest.raises(UserManagementError):
-        raise error_type()

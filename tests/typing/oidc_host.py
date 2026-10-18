@@ -13,9 +13,10 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
 
+from webauth import WebAuthError
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     DEFAULT_CSRF_COOKIE_NAME,
@@ -32,6 +33,8 @@ from webauth.dependencies import (
     AuthDependencies,
     AuthenticatedUser,
     LoginRedirect,
+    WebSocketRefusal,
+    authenticate_websocket,
     current_user_dependency,
     session_id_from_request,
     unauthenticated_response,
@@ -94,10 +97,16 @@ from webauth.policies import (
     BodySizePolicy,
     CspDirective,
     CsrfPolicy,
+    PathRules,
+    RateLimitBudget,
+    RateLimitPolicy,
+    RateLimitRule,
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
 from webauth.ports import (
+    AccountEvent,
+    AccountEventKind,
     AuditSink,
     RateLimitBackend,
     SessionAdministrationStore,
@@ -106,9 +115,6 @@ from webauth.ports import (
     SessionRecord,
     SessionRecordStore,
     SubjectUserStore,
-    UserManagementError,
-    UserManagementEvent,
-    UserManagementEventKind,
     UsernameTakenError,
     UserRecord,
     WriteLock,
@@ -185,9 +191,6 @@ class HostSessions:
     ) -> list[SessionRecord]:
         return []
 
-    def count_active(self) -> int:
-        return 0
-
 
 class HostLock:
     def hold(self) -> AbstractContextManager[None]:
@@ -198,7 +201,7 @@ class HostAudit:
     def session_identity_changed(self, event: SessionIdentityChanged) -> None:
         return None
 
-    def user_management_event(self, event: UserManagementEvent) -> None:
+    def account_event(self, event: AccountEvent) -> None:
         return None
 
 
@@ -323,6 +326,17 @@ def a_host_resolves_the_current_user(
     )
 
 
+async def a_host_accepts_a_websocket_only_for_a_signed_in_account(
+    websocket: WebSocket,
+) -> AuthenticatedUser | None:
+    outcome = authenticate_websocket(websocket, sessions=HostSessions(), audit=HostAudit())
+    if isinstance(outcome, WebSocketRefusal):
+        await websocket.close(code=1008)
+        return None
+    await websocket.accept()
+    return outcome
+
+
 def a_host_installs_the_middleware(app: FastAPI) -> None:
     install_web_auth_middleware(
         app,
@@ -332,6 +346,15 @@ def a_host_installs_the_middleware(app: FastAPI) -> None:
                     CspDirective.STYLE_SRC: ["'unsafe-inline'"],
                     CspDirective.FORM_ACTION: ["https://issuer.example.test"],
                 },
+            ),
+        ),
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget(name="default", max_requests=60, window_seconds=60),
+            rules=(
+                RateLimitRule(
+                    paths=PathRules(exact=frozenset({"/login"})),
+                    budget=RateLimitBudget(name="login", max_requests=10, window_seconds=60),
+                ),
             ),
         ),
         csrf_origin=CsrfPolicy(),
@@ -362,8 +385,8 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore,
         SessionSummary, SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
-        TokenEndpointError, UnknownSessionError, UserManagementError,
-        UserManagementEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
+        TokenEndpointError, UnknownSessionError, WebAuthError,
+        AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
         VerifiedClaims, VerifiedLogout, WallClock, end_user_sessions, install_web_auth_config,
         is_https_url, prune_sessions, session_id_from_request, session_reference,
         unauthenticated_response,

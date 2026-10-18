@@ -91,7 +91,7 @@ from webauth.oidc import (
     TokenEndpointError,
     callback_state,
 )
-from webauth.ports import UserManagementEvent, UserManagementEventKind, UsernameTakenError
+from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 from webauth.session_ending import end_session, end_user_sessions
 
 if TYPE_CHECKING:
@@ -309,8 +309,8 @@ def receive_backchannel_logout(
     with lock.hold():
         account = accounts.get(logout.subject)
         if account is not None and end_user_sessions(sessions, account.id):
-            audit.user_management_event(UserManagementEvent(
-                kind=UserManagementEventKind.BACKCHANNEL_LOGOUT,
+            audit.account_event(AccountEvent(
+                kind=AccountEventKind.BACKCHANNEL_LOGOUT,
                 actor_id=None,
                 subject_id=account.id,
             ))
@@ -400,8 +400,8 @@ def _with_role(
     if previous_role == role:
         return account
     updated = accounts.set_role(account.id, role)
-    audit.user_management_event(UserManagementEvent(
-        kind=UserManagementEventKind.ROLE_CHANGED,
+    audit.account_event(AccountEvent(
+        kind=AccountEventKind.ROLE_CHANGED,
         actor_id=None,
         subject_id=updated.id,
         role=role,
@@ -430,8 +430,8 @@ def _provision(
         account = accounts.create_for_subject(identity.subject, username, role)
     except UsernameTakenError:
         return AdmissionRefusal.USERNAME_TAKEN
-    audit.user_management_event(UserManagementEvent(
-        kind=UserManagementEventKind.USER_CREATED,
+    audit.account_event(AccountEvent(
+        kind=AccountEventKind.USER_CREATED,
         actor_id=None,
         subject_id=account.id,
         role=account.role,

@@ -15,7 +15,11 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Protocol, runtime_checkable
 
+from webauth import WebAuthError
+
 __all__ = [
+    "AccountEvent",
+    "AccountEventKind",
     "AuditSink",
     "RateLimitBackend",
     "SessionAdministrationStore",
@@ -25,9 +29,6 @@ __all__ = [
     "SessionRecord",
     "SessionRecordStore",
     "SubjectUserStore",
-    "UserManagementError",
-    "UserManagementEvent",
-    "UserManagementEventKind",
     "UserRecord",
     "UsernameTakenError",
     "WriteLock",
@@ -95,11 +96,7 @@ class SubjectUserStore(Protocol):
         ...
 
 
-class UserManagementError(Exception):
-    """A refused user-management operation, translated by the host."""
-
-
-class UsernameTakenError(UserManagementError):
+class UsernameTakenError(WebAuthError):
     """The store could not create an account because its username is taken."""
 
 
@@ -179,10 +176,6 @@ class SessionAdministrationStore(SessionRecordStore, Protocol):
         """Read active sessions in store order without requiring a write lock."""
         ...
 
-    def count_active(self) -> int:
-        """Count active sessions without requiring a write lock."""
-        ...
-
 
 class SessionLivenessPolicy[StoredSessionT](Protocol):
     """Whether a session still stands, decided without reading the wall clock.
@@ -207,7 +200,9 @@ class RateLimitBackend(Protocol):
         The caller owns the window and the limit, so the backend bakes in
         neither: each budget measures its own key, and a key is always checked
         with one window. The check counts the current event, so a caller told
-        yes has already spent one of the budget. A backend that cannot answer
+        yes has already spent one of the budget. ``limit`` and
+        ``window_seconds`` must be positive integers, excluding booleans, and
+        the caller validates them before invoking the backend. A backend that cannot answer
         raises rather than guessing, and the caller fails the request closed.
 
         The middleware calls this from a worker thread so a slow check does
@@ -239,7 +234,7 @@ class SessionIdentityChanged:
     current: str
 
 
-class UserManagementEventKind(Enum):
+class AccountEventKind(Enum):
     USER_CREATED = "user_created"
     SESSION_REVOKED = "session_revoked"
     ROLE_CHANGED = "role_changed"
@@ -247,10 +242,10 @@ class UserManagementEventKind(Enum):
 
 
 @dataclass(frozen=True)
-class UserManagementEvent:
+class AccountEvent:
     """An account operation without credentials, usernames, or session tokens."""
 
-    kind: UserManagementEventKind
+    kind: AccountEventKind
     actor_id: str | None
     subject_id: str
     role: str | None = None
@@ -264,6 +259,6 @@ class AuditSink(Protocol):
         """Record that a live session began arriving from somewhere else."""
         ...
 
-    def user_management_event(self, event: UserManagementEvent) -> None:
+    def account_event(self, event: AccountEvent) -> None:
         """Map an account operation to the host's audit, optionally doing nothing."""
         ...
