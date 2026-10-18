@@ -1,0 +1,8 @@
+claim_id = "7fd01f41f6054288824b3dccaa2a88e3"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "8642c57d05221cf30ebdab9387c37f5e1392d304"
+branch = "claude/issue-225-websocket-handshake-auth"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/_origins.py", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/middleware/csrf.py", "src/webauth/proxies.py", "tests/test_dependencies.py", "tests/test_websocket_auth.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "78ab6be944233e5415085c37bcc75e9dac2123e0"
+whole_reason = "One authentication decision on a new channel: the helper, its reuse of the two deciders, its tests and its recipe change together."
