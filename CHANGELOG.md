@@ -161,6 +161,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   window on the Redis server's clock. A server older than 5.0 refuses the
   script, and the middleware then answers every rate-limited request with 503.
 
+- `SingleProcessRateLimitBackend.is_allowed` reads its clock inside its lock.
+  Before, two concurrent checks of one key could file an older timestamp after a
+  newer one, and the periodic sweep, which reads the last timestamp as the
+  newest, could drop a key whose newest event was still inside its window and so
+  admit extra requests.
+
 ## 0.15.0
 
 **Breaking**
