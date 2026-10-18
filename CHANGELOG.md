@@ -121,9 +121,27 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `SessionRecordStore.delete` must treat an id the store does not hold as a
   no-op, never an error: `log_out` deletes whatever session the browser's
   cookie names.
+- The first parameter of `webauth.config.web_auth_config`,
+  `webauth.cookies.cookie_pairs` and `cookie_values`,
+  `webauth.proxies.resolve_client_ip` and `client_user_agent`, and
+  `webauth.dependencies.session_id_from_request` is renamed `request` ->
+  `connection` and accepts any Starlette `HTTPConnection` (a `Request` or a
+  `WebSocket`). A host that passes it by keyword renames the keyword;
+  positional calls are unchanged.
 
 **Added**
 
+- `webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
+  decides a WebSocket handshake: the `Origin` first (exactly one, naming an
+  allowed host; no `Referer` fallback, `Sec-Fetch-Site` ignored), then the
+  session by the code `current_user_dependency` runs, renewal and identity
+  audit included. It answers an `AuthenticatedUser` or a `WebSocketRefusal`
+  (`no-session`, `invalid-session`, `session-ended-or-expired`,
+  `account-disabled`, `missing-origin`, `foreign-origin`). `session_id_from_request`,
+  `web_auth_config`, `cookie_pairs`, `cookie_values`, `resolve_client_ip` and
+  `client_user_agent` accept any `HTTPConnection` (see Breaking for the renamed
+  parameter). A socket outlives its session unless the host re-checks in a
+  fresh transaction (README, "WebSocket handshakes").
 - `webauth.WebAuthError` is the common base of the public operational
   exceptions: `UsernameTakenError`, `NotAnAdminError`, `UnknownSessionError`,
   `KeySetFetchError` and `TokenEndpointError`.

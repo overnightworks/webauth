@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, get_args
 
-from starlette.requests import Request
+from starlette.requests import HTTPConnection
 
 from webauth.cookies import (
     DEFAULT_COOKIE_SAMESITE,
@@ -193,6 +193,6 @@ def installed_web_auth_config(app: Starlette) -> WebAuthConfig:
     return config
 
 
-def web_auth_config(request: Request) -> WebAuthConfig:
-    """The configuration installed on the application serving ``request``."""
-    return installed_web_auth_config(request.app)
+def web_auth_config(connection: HTTPConnection) -> WebAuthConfig:
+    """The configuration installed on the application serving ``connection``."""
+    return installed_web_auth_config(connection.app)

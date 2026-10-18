@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import count
@@ -20,22 +20,30 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any, Final
 
 import anyio
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, WebSocket
 from fastapi.testclient import TestClient
+from httpx import Headers as HttpxHeaders
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import HTTPConnection
 from starlette.responses import Response
+from starlette.websockets import WebSocketDisconnect
 
 from webauth.config import (
     MIN_SESSION_SECRET_CHARS,
     WebAuthConfig,
     install_web_auth_config,
+    web_auth_config,
 )
 from webauth.cookies import generate_csrf_token, sign_session_id
 from webauth.dependencies import (
     AuthenticatedUser,
     LoginRedirect,
+    WebSocketRefusal,
+    authenticate_websocket,
     current_user_dependency,
+    session_id_from_request,
     unauthenticated_response,
 )
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
@@ -55,6 +63,7 @@ from webauth.ports import (
     AccountEvent,
     RateLimitBackend,
     SessionIdentityChanged,
+    SessionRecordStore,
     UsernameTakenError,
 )
 from webauth.proxies import TrustedProxies
@@ -83,6 +92,7 @@ THIRTY_DAYS_SECONDS = 30 * 24 * 3600
 
 
 if TYPE_CHECKING:
+    from starlette.testclient import WebSocketTestSession
     from starlette.types import ASGIApp, Message, Scope
 
 DRIVE_DEADLINE_SECONDS: Final = 5
@@ -466,6 +476,26 @@ class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
         return record
 
 
+class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
+    """A store that fails the test on the first question put to it."""
+
+    def load(self, session_id: str) -> FakeSessionRecord | None:
+        raise AssertionError("the store was asked to load a session")
+
+    def touch(
+        self,
+        record: FakeSessionRecord,
+        *,
+        ip_address: str,
+        user_agent: str,
+        now: datetime,
+    ) -> bool:
+        raise AssertionError("the store was asked to touch a session")
+
+    def delete(self, session_id: str) -> None:
+        raise AssertionError("the store was asked to delete a session")
+
+
 class SessionsAnsweringTouch(SessionRecordsInMemory):
     """A store whose ``touch`` writes nothing and gives a fixed answer."""
 
@@ -506,6 +536,11 @@ def a_session_administration(*users: FakeUser, config: WebAuthConfig) -> Session
     )
 
 
+WEBSOCKET_PATH = "/ws"
+WEBSOCKET_DEPENDENCY_PATH = "/ws-dependency"
+POLICY_VIOLATION_CLOSE_CODE = 1008
+
+
 @dataclass
 class AuthApp:
     """A minimal application serving the routes the dependencies protect."""
@@ -514,6 +549,7 @@ class AuthApp:
     sessions: SessionRecordsInMemory
     audit: RecordingAuditSink
     authenticated: list[AuthenticatedUser]
+    websocket_outcomes: list[AuthenticatedUser | WebSocketRefusal]
     signing_key: bytes
 
     def get(
@@ -523,6 +559,22 @@ class AuthApp:
         if accept is not None:
             headers["accept"] = accept
         return self.client.get(path, headers=headers, follow_redirects=False)
+
+    def connect(
+        self,
+        path: str = WEBSOCKET_PATH,
+        *,
+        cookie: str | None = None,
+        origin: str | None = ALLOWED_ORIGIN,
+        headers: Sequence[tuple[str, str]] = (),
+    ) -> WebSocketTestSession:
+        """A WebSocket handshake; ``cookie`` and ``origin`` are left out when ``None``."""
+        sent = list(headers)
+        if cookie is not None:
+            sent.append(("cookie", f"{SESSION_COOKIE_NAME}={cookie}"))
+        if origin is not None:
+            sent.append(("origin", origin))
+        return self.client.websocket_connect(path, headers=HttpxHeaders(sent))
 
     def signed_cookie(self, session_id: str = SESSION_ID) -> str:
         return sign_session_id(session_id, self.signing_key)
@@ -550,23 +602,82 @@ def a_session(
 UNAUTHENTICATED_RESPONSE_PATH = "/unauthenticated-response"
 
 
+def _add_websocket_routes(
+    app: FastAPI,
+    sessions: SessionRecordStore,
+    audit: RecordingAuditSink,
+    outcomes: list[AuthenticatedUser | WebSocketRefusal],
+) -> None:
+    """The host recipe: authenticate in a worker and a finished transaction, then accept.
+
+    ``WEBSOCKET_PATH`` answers every message by authenticating again;
+    ``WEBSOCKET_DEPENDENCY_PATH`` wraps the helper in a dependency.
+    """
+    transaction = (
+        sessions.transaction if isinstance(sessions, SessionRecordsInMemory) else nullcontext
+    )
+
+    def authenticate(connection: HTTPConnection) -> AuthenticatedUser | WebSocketRefusal:
+        with transaction():
+            outcome = authenticate_websocket(connection, sessions=sessions, audit=audit)
+        outcomes.append(outcome)
+        return outcome
+
+    @app.websocket(WEBSOCKET_PATH)
+    async def watched(websocket: WebSocket) -> None:
+        outcome = await run_in_threadpool(authenticate, websocket)
+        if isinstance(outcome, WebSocketRefusal):
+            await websocket.close(code=POLICY_VIOLATION_CLOSE_CODE)
+            return
+        await websocket.accept()
+        session_id = session_id_from_request(websocket, web_auth_config(websocket))
+        await websocket.send_json({"username": outcome.username, "session_id": session_id})
+        try:
+            while True:
+                await websocket.receive_text()
+                outcome = await run_in_threadpool(authenticate, websocket)
+                if isinstance(outcome, WebSocketRefusal):
+                    await websocket.close(code=POLICY_VIOLATION_CLOSE_CODE)
+                    return
+                await websocket.send_json({"username": outcome.username})
+        except WebSocketDisconnect:
+            return
+
+    @app.websocket(WEBSOCKET_DEPENDENCY_PATH)
+    async def through_a_dependency(
+        websocket: WebSocket,
+        outcome: AuthenticatedUser | WebSocketRefusal = Depends(authenticate),
+    ) -> None:
+        if isinstance(outcome, WebSocketRefusal):
+            await websocket.close(code=POLICY_VIOLATION_CLOSE_CODE)
+            return
+        await websocket.accept()
+        await websocket.send_json({"username": outcome.username})
+        await websocket.close()
+
+
 def an_auth_app(
     record: FakeSessionRecord | None,
     *,
     login_redirect: LoginRedirect | None = None,
     sessions: SessionRecordsInMemory | None = None,
+    **config_overrides: object,
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route.
+
+    It also serves the two WebSocket routes of ``_add_websocket_routes``; a
+    keyword replaces the configuration field it names.
 
     ``UNAUTHENTICATED_RESPONSE_PATH`` answers with ``unauthenticated_response``
     called directly, over the same ``login_redirect``, so a test can compare
     it against a dependency-guarded route for the same request.
     """
-    config = a_web_auth_config(admin_role=ADMIN_ROLE)
+    config = a_web_auth_config(admin_role=ADMIN_ROLE, **config_overrides)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
+    websocket_outcomes: list[AuthenticatedUser | WebSocketRefusal] = []
 
     dependencies = current_user_dependency(
         session_store=lambda: sessions,
@@ -596,6 +707,8 @@ def an_auth_app(
     def unauthenticated(request: Request) -> Response:
         return unauthenticated_response(request, login_redirect)
 
+    _add_websocket_routes(app, sessions, audit, websocket_outcomes)
+
     return AuthApp(
         client=TestClient(
             app,
@@ -606,6 +719,7 @@ def an_auth_app(
         sessions=sessions,
         audit=audit,
         authenticated=authenticated,
+        websocket_outcomes=websocket_outcomes,
         signing_key=config.signing_key,
     )
 
@@ -626,6 +740,7 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
     sessions = IdleSessionsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
+    websocket_outcomes: list[AuthenticatedUser | WebSocketRefusal] = []
 
     dependencies = current_user_dependency(
         session_store=lambda: sessions,
@@ -640,6 +755,8 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
         return {"username": user.username, "role": user.role}
 
+    _add_websocket_routes(app, sessions, audit, websocket_outcomes)
+
     return AuthApp(
         client=TestClient(
             app,
@@ -650,6 +767,7 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
         sessions=sessions,
         audit=audit,
         authenticated=authenticated,
+        websocket_outcomes=websocket_outcomes,
         signing_key=config.signing_key,
     )
 
