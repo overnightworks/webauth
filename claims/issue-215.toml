@@ -1,7 +1,0 @@
-claim_id = "0a07ca35bc3c4a2fa8640015ba9dbb16"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "147b652c549b0487dabe7a7cda6d6c837c5ee426"
-branch = "claude/issue-215-limiter-clock-inside-lock"
-scope = ["src/webauth/rate_limit.py", "tests/test_single_process_rate_limiter.py"]
-opened_commit = "0b926c8b108b5bd9dcdd3731159c11c62371ecbe"
