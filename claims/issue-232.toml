@@ -1,7 +1,0 @@
-claim_id = "e74191382c60490186904ec5d2966ad8"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "53b7763d5b8e5f7f2fba46601c43369b2b638acb"
-branch = "claude/issue-232-readme-what-every-app-gets"
-scope = ["README.md"]
-opened_commit = "0e1745abe2dd7571b5f46c49d84cba1f87e2b1ff"
