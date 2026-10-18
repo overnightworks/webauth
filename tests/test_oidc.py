@@ -812,6 +812,8 @@ def test_a_logout_path_of_url_path_characters_is_accepted(logout_path: str) -> N
     pytest.param("/log\nout", id="newline"),
     pytest.param("/log\x00out", id="nul"),
     pytest.param("/log%zzout", id="bad-percent-encoding"),
+    pytest.param("/log%", id="trailing-percent"),
+    pytest.param("/log%2", id="percent-with-one-hex-digit"),
     pytest.param("/log\u00e9out", id="non-ascii"),
     pytest.param(None, id="not-a-string"),
 ])

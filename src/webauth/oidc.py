@@ -112,7 +112,8 @@ _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
 # fits, and nothing that could carry markup or a sentence does.
 _IDP_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 # RFC 3986 pchar and "/", without ";" which would end a cookie's Path attribute.
-_LOGOUT_PATH = re.compile(r"/(?:[A-Za-z0-9\-._~!$&'()*+,=:@/]|%[0-9A-Fa-f]{2})*")
+_LOGOUT_PATH_CHARACTERS = re.compile(r"/[A-Za-z0-9\-._~!$&'()*+,=:@/%]*")
+_UNFINISHED_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
 _URL_FIELDS = (
     "issuer",
@@ -160,7 +161,11 @@ class OidcClientConfig:
                     f"{name} must be an https URL naming a host, a valid port if any,"
                     " and no control character, space, credentials, query or fragment"
                 )
-        if not isinstance(self.logout_path, str) or not _LOGOUT_PATH.fullmatch(self.logout_path):
+        if (
+            not isinstance(self.logout_path, str)
+            or not _LOGOUT_PATH_CHARACTERS.fullmatch(self.logout_path)
+            or _UNFINISHED_PERCENT_ESCAPE.search(self.logout_path)
+        ):
             raise ValueError(
                 "logout_path must start with / and hold only URL path characters"
                 " other than ;"

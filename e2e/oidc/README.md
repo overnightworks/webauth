@@ -88,7 +88,7 @@ side accepts exactly `POST /auth/backchannel-logout`, at most 32 KiB, and forwar
 it to the app's loopback HTTPS endpoint, verifying the throwaway CA. Anything else
 (`/state`, `/reset`, `/deactivate`, another path) is answered 404 (an unknown method 501) and
 reaches nothing. Every answer carries `Connection: close`: Keycloak's HTTP client keeps
-connections in a pool and does not retry a POST on one the bridge already closed. every read waits at most 10 s, no body or header is logged, and the
+connections in a pool and does not retry a POST on one the bridge already closed. Every read waits at most 10 s, no body or header is logged, and the
 relay holds no secret (read-only, no capabilities, the caller's user id). The bridge
 is shut down, its container removed, before the held stack is released, and
 `edge-kc-probe` leftovers are listed at the end. The container's name stands in for
@@ -104,7 +104,7 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after each logout (15, 17, and 16 and 18 after confirming), A's page after the disable and before the admin logout in scenario 13, in
 scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.

@@ -99,6 +99,7 @@ OUTSIDER_NAME = "d1-outsider"
 ADMIN_NAME = "d1-admin"
 ADMIN_GROUP = f"{USER_GROUP}/admin"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
+KEYCLOAK_BAD_HINT_MESSAGE = "Invalid parameter: id_token_hint"
 KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
 ID_TOKEN_HINT_COOKIE_NAME = id_token_hint_cookie_name(secure=True)
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
@@ -723,6 +724,7 @@ def logout_stops_at_keycloaks_error_page(proof: Proof, page: Page, scenario: str
     shown = " ".join(page.inner_text("body").split())[:120]
     proof.shot(page, scenario, "result")
     assert answer.status == 400, f"Keycloak answered the end-session request {answer.status}"
+    assert KEYCLOAK_BAD_HINT_MESSAGE in page.inner_text("body"), "Keycloak did not name the hint"
     assert page.locator(KEYCLOAK_LOGOUT_CONFIRMATION).count() == 0, "Keycloak asked to confirm"
     assert not page.url.startswith(f"{APP_ORIGIN}/"), f"the browser went on to {page.url}"
     return f"the logout stopped at Keycloak's error page ({answer.status}, {shown!r})"
@@ -768,10 +770,12 @@ def hint_at_the_size_bound_reaches_keycloak(proof: Proof, width: Width) -> str:
         page.context.clear_cookies(name=ID_TOKEN_HINT_COOKIE_NAME)
         plant_hint(page, bound_sized, LOGOUT_PATH)
         answer = press_logout(proof, page)
-        shown = " ".join(page.inner_text("body").split())[:80]
+        body = page.inner_text("body")
+        shown = " ".join(body.split())[:80]
         proof.shot(page, scenario, "result")
     assert answer.status not in (414, 431), f"the request was refused as too large: {answer.status}"
     assert answer.status < 500, f"Keycloak answered {answer.status}"
+    assert KEYCLOAK_BAD_HINT_MESSAGE in body, "Keycloak did not name the hint"
     return (
         f"a {MAX_ID_TOKEN_HINT_CHARS}-character hint reached Keycloak, which answered "
         f"{answer.status} (not 414 or 431) and showed {shown!r}"
@@ -886,6 +890,7 @@ def log_out_through_keycloak(
         )
     page.wait_for_url(f"{origin}/")
     page.get_by_role("heading", name="Signed out").wait_for()
+    proof.shot(page, scenario, "logout-result")
     if not asks_for_confirmation:
         assert page.locator(KEYCLOAK_LOGOUT_CONFIRMATION).count() == 0, "Keycloak's page showed"
 
@@ -992,6 +997,7 @@ def disabled_account_is_logged_out_everywhere(proof: Proof, width: Width) -> str
             assert proof.headline(page) == f"Signed in as {DISABLED_USER_NAME}", (
                 "the disable alone ended the session in A"
             )
+            proof.shot(page, scenario, "still-signed-in-after-disable")
             for app in (app_a, app_b):
                 assert_callbacks(app, accepted=0, sessions=1)
             proof.log_out_user_everywhere(proof.disabled_user_id)
@@ -1306,14 +1312,14 @@ def run_default_scenarios(proof: Proof) -> bool:
 
 
 def run_hint_scenarios(proof: Proof) -> None:
-    for number, scenario in (
-        (14, hint_cookie_stays_at_the_logout_path),
-        (15, second_login_and_logout_show_no_page),
-        (17, logout_on_the_cross_site_origin),
-        (19, hint_at_the_size_bound_reaches_keycloak),
+    for number, origin, scenario in (
+        (14, APP_ORIGIN, hint_cookie_stays_at_the_logout_path),
+        (15, APP_ORIGIN, second_login_and_logout_show_no_page),
+        (17, SECOND_APP_ORIGIN, logout_on_the_cross_site_origin),
+        (19, APP_ORIGIN, hint_at_the_size_bound_reaches_keycloak),
     ):
         proof.held_or_failed(
-            f"SCENARIO {number} {DESKTOP.label} {APP_ORIGIN}",
+            f"SCENARIO {number} {DESKTOP.label} {origin}",
             lambda scenario=scenario: scenario(proof, DESKTOP),
         )
     for number, spoil, outcome in UNUSABLE_HINTS:

@@ -45,7 +45,7 @@ STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 WORKER_ENDS_SECONDS = 15
 HOST_STOPS_SECONDS = 15
 PAGE_TIMEOUT_MILLISECONDS = 30_000
-URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "nonce", "session_state", "state")
+URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "id_token_hint", "nonce", "session_state", "state")
 
 
 class Interrupted(BaseException):
