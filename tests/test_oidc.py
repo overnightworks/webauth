@@ -56,7 +56,9 @@ _JWKS_URL = f"{_ISSUER}/protocol/openid-connect/certs"
 _CLIENT_ID = "songmaker"
 # Canary whose recognisable text is the point
 _CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
+_END_SESSION_ENDPOINT = f"{_ISSUER}/protocol/openid-connect/logout"
 _REDIRECT_URI = "https://songmaker.example.org/auth/callback"
+_POST_LOGOUT_REDIRECT_URI = "https://songmaker.example.org/"
 _LEEWAY_SECONDS = 30
 _NOW = 1_800_000_000
 _CODE = "authorization-code-from-the-callback"
@@ -82,9 +84,11 @@ def _config(**changes: Any) -> OidcClientConfig:
         "authorization_endpoint": _AUTHORIZATION_ENDPOINT,
         "token_endpoint": _TOKEN_ENDPOINT,
         "jwks_url": _JWKS_URL,
+        "end_session_endpoint": _END_SESSION_ENDPOINT,
         "client_id": _CLIENT_ID,
         "client_secret": SecretStr(_CLIENT_SECRET),
         "redirect_uri": _REDIRECT_URI,
+        "post_logout_redirect_uri": _POST_LOGOUT_REDIRECT_URI,
         "scopes": ("openid", "profile"),
         "leeway_seconds": _LEEWAY_SECONDS,
     }
@@ -689,6 +693,18 @@ def _text_of(value: object) -> str:
             id="redirect-uri-with-a-c1-control-character",
         ),
         pytest.param("issuer", f"\n{_ISSUER}", id="issuer-led-by-a-newline"),
+        pytest.param(
+            "end_session_endpoint", f"{_END_SESSION_ENDPOINT}?client_id=x",
+            id="end-session-endpoint-with-a-query",
+        ),
+        pytest.param(
+            "post_logout_redirect_uri", "http://songmaker.example.org/",
+            id="post-logout-redirect-uri-over-http",
+        ),
+        pytest.param(
+            "post_logout_redirect_uri", f"{_POST_LOGOUT_REDIRECT_URI}#signed-out",
+            id="post-logout-redirect-uri-with-a-fragment",
+        ),
         pytest.param("jwks_url", f"{_JWKS_URL}\x00", id="jwks-url-with-a-nul"),
         pytest.param("token_endpoint", f"{_TOKEN_ENDPOINT} ", id="token-endpoint-with-a-space"),
         pytest.param("client_id", "", id="client-id-empty"),
@@ -707,3 +723,43 @@ def test_a_client_configuration_is_refused_by_the_field_it_breaks_never_its_valu
 
     text = _text_of(value)
     assert not text or text not in str(refusal.value)
+
+
+@pytest.mark.parametrize("client_id", [
+    pytest.param(_CLIENT_ID, id="plain-client-id"),
+    pytest.param("lab app&x=1/\u00e9", id="client-id-needing-encoding"),
+])
+def test_the_logout_url_carries_exactly_the_client_id_and_the_post_logout_redirect_uri(
+    client_id: str,
+) -> None:
+    scenario = LoginScenario(FakeTokenEndpoint(), config=_config(client_id=client_id))
+
+    parts = urllib.parse.urlsplit(scenario.relying_party.logout_url())
+
+    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == _END_SESSION_ENDPOINT
+    assert urllib.parse.parse_qs(parts.query) == {
+        "client_id": [client_id],
+        "post_logout_redirect_uri": [_POST_LOGOUT_REDIRECT_URI],
+    }
+
+
+@pytest.mark.parametrize("missing", ["end_session_endpoint", "post_logout_redirect_uri"])
+def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
+    missing: str,
+) -> None:
+    arguments = {
+        "issuer": _ISSUER,
+        "authorization_endpoint": _AUTHORIZATION_ENDPOINT,
+        "token_endpoint": _TOKEN_ENDPOINT,
+        "jwks_url": _JWKS_URL,
+        "end_session_endpoint": _END_SESSION_ENDPOINT,
+        "client_id": _CLIENT_ID,
+        "client_secret": SecretStr(_CLIENT_SECRET),
+        "redirect_uri": _REDIRECT_URI,
+        "post_logout_redirect_uri": _POST_LOGOUT_REDIRECT_URI,
+        "leeway_seconds": _LEEWAY_SECONDS,
+    }
+    del arguments[missing]
+
+    with pytest.raises(TypeError, match=missing):
+        OidcClientConfig(**arguments)

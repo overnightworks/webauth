@@ -277,6 +277,7 @@ def host_settings(
         login_group=EverySubject.OF_THE_BOUND_ISSUER.value,
         admin_group=NoAdmins.IN_THIS_APP.value,
         authorization_endpoint=f"{ISSUER}authorize",
+        end_session_endpoint=f"{ISSUER}logout",
         token_endpoint=f"{reached_through_shim}/token",
         jwks_url=f"{reached_through_shim}/jwks",
         userinfo_endpoint=f"{reached_through_shim}/userinfo",

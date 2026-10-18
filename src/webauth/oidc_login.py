@@ -1,4 +1,4 @@
-"""Signing a person in through an OpenID Connect issuer, from the host's two routes.
+"""Signing a person in through an OpenID Connect issuer, from the host's routes.
 
 ``start_login`` answers the URL the host's start route sends the browser to,
 and hands the browser the pending login in a signed cookie of its own, one
@@ -35,6 +35,16 @@ open; that lasts until the host's session lifetime runs out. The groups claim
 must carry full paths (Keycloak's group mapper with ``full.path`` on); a
 missing or empty claim means no membership.
 
+``log_out`` is the third route's whole sequence: it ends the session the
+request's cookie names, if any, clears the session cookies, and answers the
+issuer's end-session URL for the host to send the browser to, as a 303 for a
+form or as JSON for ``fetch``. It makes no outbound call and never commits,
+so the person is signed out of the app even when the issuer is down, and a
+request without a usable session still reaches the issuer. A forged,
+oversized or duplicated cookie counts as missing: it ends no stored session,
+which leaves a duplicated cookie's session until it expires, while the
+browser's own cookies are still cleared.
+
 ``post_token_request_over_https`` is the production ``TokenRequestPost`` the
 host gives its ``OidcRelyingParty``, beside ``fetch_key_set_over_https``; both
 send their request through ``webauth.https_client``.
@@ -49,6 +59,7 @@ from typing import TYPE_CHECKING, Final
 
 from webauth.cookies import (
     clear_pending_login_cookie,
+    clear_session_cookies,
     cookie_pairs,
     cookie_values,
     is_pending_login_cookie_name,
@@ -56,6 +67,7 @@ from webauth.cookies import (
     pending_login_cookie_name,
     verify_pending_login,
 )
+from webauth.dependencies import session_id_from_request
 from webauth.https_client import (
     TOKEN_EXCHANGE_DEADLINE_SECONDS,
     HttpsExchangeError,
@@ -71,6 +83,7 @@ from webauth.oidc import (
     callback_state,
 )
 from webauth.ports import UserManagementEvent, UserManagementEventKind, UsernameTakenError
+from webauth.session_ending import end_session
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -79,7 +92,7 @@ if TYPE_CHECKING:
     from webauth.config import WebAuthConfig
     from webauth.cookies import PendingLogin
     from webauth.oidc import OidcIdentity, OidcRelyingParty, TokenRequest
-    from webauth.ports import AuditSink, SubjectUserStore, UserRecord, WriteLock
+    from webauth.ports import AuditSink, SessionRecordStore, SubjectUserStore, UserRecord, WriteLock
 
 __all__ = [
     "AdmissionConfig",
@@ -88,6 +101,7 @@ __all__ = [
     "NoAdmins",
     "admit_identity",
     "finish_login",
+    "log_out",
     "post_token_request_over_https",
     "start_login",
 ]
@@ -239,6 +253,28 @@ def finish_login(
         audit=audit,
         config=config,
     )
+
+
+def log_out(
+    relying_party: OidcRelyingParty,
+    request: Request,
+    response: Response,
+    config: WebAuthConfig,
+    *,
+    sessions: SessionRecordStore,
+    lock: WriteLock,
+) -> str:
+    """End this browser's app session and return the issuer's end-session URL.
+
+    The session the request's cookie names is deleted under ``lock`` and the
+    session cookies are cleared on ``response`` in every case; the host then
+    commits and sends the browser to the returned URL."""
+    session_id = session_id_from_request(request, config)
+    if session_id is not None:
+        with lock.hold():
+            end_session(sessions, session_id=session_id)
+    clear_session_cookies(response, config)
+    return relying_party.logout_url()
 
 
 def _sole_pending_login(

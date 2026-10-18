@@ -25,6 +25,11 @@ is refused before its code is exchanged. The client secret enters only through
 `OidcClientConfig`; it, the code and the verifier stay out of every repr and
 message this module writes.
 
+`OidcRelyingParty.logout_url` answers the issuer's end-session URL, which
+carries only the client ID and the configured post-logout redirect URI: no ID
+token hint, so the issuer asks the person to confirm, and no target taken from
+a request. It makes no outbound call.
+
 Install the `jwt` extra to use this module.
 """
 
@@ -87,13 +92,24 @@ _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
 # fits, and nothing that could carry markup or a sentence does.
 _IDP_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
-_URL_FIELDS = ("issuer", "authorization_endpoint", "token_endpoint", "jwks_url", "redirect_uri")
+_URL_FIELDS = (
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "jwks_url",
+    "end_session_endpoint",
+    "redirect_uri",
+    "post_logout_redirect_uri",
+)
 
 
 @dataclass(frozen=True, kw_only=True)
 class OidcClientConfig:
     """One client registered at one issuer.
 
+    `end_session_endpoint` is the issuer's logout page and
+    `post_logout_redirect_uri` the app page it sends the browser back to; the
+    issuer checks the latter against the client's registered post-logout URIs.
     Every URL is https, names a host and carries no control character, space,
     credentials, query or fragment; `scopes` includes `openid`. `leeway_seconds`
     is checked by the `JwtVerifier` the relying party builds from it."""
@@ -102,9 +118,11 @@ class OidcClientConfig:
     authorization_endpoint: str
     token_endpoint: str
     jwks_url: str
+    end_session_endpoint: str
     client_id: str
     client_secret: SecretStr
     redirect_uri: str
+    post_logout_redirect_uri: str
     scopes: tuple[str, ...] = (_OPENID_SCOPE,)
     leeway_seconds: int
 
@@ -256,6 +274,15 @@ class OidcRelyingParty:
         return AuthorizationRequest(
             url=f"{self._config.authorization_endpoint}?{query}", pending=pending
         )
+
+    def logout_url(self) -> str:
+        query = urllib.parse.urlencode(
+            {
+                "client_id": self._config.client_id,
+                "post_logout_redirect_uri": self._config.post_logout_redirect_uri,
+            }
+        )
+        return f"{self._config.end_session_endpoint}?{query}"
 
     def complete_login(
         self, pending: PendingLogin, callback_query: str

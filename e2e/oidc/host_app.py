@@ -34,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
@@ -42,10 +43,11 @@ from fastapi.responses import HTMLResponse
 from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig, install_web_auth_config
-from webauth.cookies import clear_session_cookies, issue_session_cookies
+from webauth.cookies import issue_session_cookies
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
+from webauth.middleware.security_headers import SecurityHeadersMiddleware
 from webauth.oidc import (
     OidcClientConfig,
     OidcRefusal,
@@ -60,14 +62,21 @@ from webauth.oidc_login import (
     EverySubject,
     NoAdmins,
     finish_login,
+    log_out,
     post_token_request_over_https,
     start_login,
 )
-from webauth.policies import CsrfPolicy
-from webauth.session_ending import end_session
+from webauth.policies import (
+    CspDirective,
+    CsrfPolicy,
+    PathRules,
+    SecurityHeadersPolicy,
+    default_content_security_policy,
+)
 
 LOOPBACK = "127.0.0.1"
 CALLBACK_PATH = "/auth/callback"
+LOGOUT_PATH = "/logout"
 REPOSITORY = Path(__file__).resolve().parents[2]
 SCOPES = ("openid", "profile", "groups")
 LEEWAY_SECONDS = 30
@@ -82,15 +91,10 @@ PAGE = Template("""<!doctype html>
 <h1>$headline</h1>
 $body
 </body></html>""")
-LOGOUT_BUTTON = Template("""<button id="logout" type="button">Log out</button>
-<script>
-document.getElementById("logout").addEventListener("click", async () => {
-  const prefix = $csrf_cookie + "=";
-  const token = document.cookie.split("; ").find((c) => c.startsWith(prefix)).slice(prefix.length);
-  await fetch("/logout", {method: "POST", headers: {[$csrf_header]: token}});
-  location.assign("/");
-});
-</script>""")
+LOGOUT_BUTTON = (
+    f'<form method="post" action="{LOGOUT_PATH}">'
+    '<button id="logout" type="submit">Log out</button></form>'
+)
 
 
 @functools.cache
@@ -122,6 +126,7 @@ class HostSettings:
     authorization_endpoint: str
     token_endpoint: str
     jwks_url: str
+    end_session_endpoint: str
     client_id: str
     client_secret: str
     session_secret: str
@@ -171,7 +176,9 @@ class World:
         arrangement = _arrangement()
         self.token_requests = AccessTokenKept(post_token_request_over_https)
         self.relying_parties = {
-            origin: _relying_party(settings, f"{origin}{CALLBACK_PATH}", self.token_requests)
+            origin: _relying_party(
+                settings, f"{origin}{CALLBACK_PATH}", f"{origin}/", self.token_requests
+            )
             for origin in settings.app_origins
         }
         self.lock = arrangement.WriteLockInMemory()
@@ -237,7 +244,10 @@ class _Observation:
 
 
 def _relying_party(
-    settings: HostSettings, redirect_uri: str, post_token_request: TokenRequestPost
+    settings: HostSettings,
+    redirect_uri: str,
+    post_logout_redirect_uri: str,
+    post_token_request: TokenRequestPost,
 ) -> OidcRelyingParty:
     return OidcRelyingParty(
         OidcClientConfig(
@@ -245,9 +255,11 @@ def _relying_party(
             authorization_endpoint=settings.authorization_endpoint,
             token_endpoint=settings.token_endpoint,
             jwks_url=settings.jwks_url,
+            end_session_endpoint=settings.end_session_endpoint,
             client_id=settings.client_id,
             client_secret=SecretStr(settings.client_secret),
             redirect_uri=redirect_uri,
+            post_logout_redirect_uri=post_logout_redirect_uri,
             scopes=SCOPES,
             leeway_seconds=LEEWAY_SECONDS,
         ),
@@ -312,8 +324,21 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     install_web_auth_config(app, config)
-    app.add_middleware(CsrfTokenMiddleware, policy=CsrfPolicy())
+    app.add_middleware(
+        CsrfTokenMiddleware,
+        policy=CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGOUT_PATH}))),
+    )
     app.add_middleware(CsrfOriginMiddleware, policy=CsrfPolicy())
+    issuer = urlsplit(settings.end_session_endpoint)
+    issuer_origin = f"{issuer.scheme}://{issuer.netloc}"
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        policy=SecurityHeadersPolicy(
+            default_content_security_policy(
+                added_sources={CspDirective.FORM_ACTION: [issuer_origin]},
+            )
+        ),
+    )
 
     @app.middleware("http")
     async def count_callbacks(request: Request, call_next: Any) -> Response:
@@ -335,12 +360,8 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             return PAGE.substitute(
                 headline="Signed out", body='<a id="sign-in" href="/login/oidc">Sign in</a>'
             )
-        button = LOGOUT_BUTTON.substitute(
-            csrf_cookie=json.dumps(config.csrf_cookie_name),
-            csrf_header=json.dumps(config.csrf_header_name),
-        )
         return PAGE.substitute(
-            headline=f"Signed in as {html.escape(user.username)}", body=button
+            headline=f"Signed in as {html.escape(user.username)}", body=LOGOUT_BUTTON
         )
 
     @app.get("/login/oidc")
@@ -388,15 +409,15 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
 
-    @app.post("/logout", dependencies=[Depends(dependencies.current_user)])
-    def logout(
-        response: Response,
-        session_id: str = Depends(dependencies.verified_session_id),
-    ) -> dict[str, bool]:
-        with world["world"].lock.hold():
-            end_session(world["world"].sessions, session_id=session_id)
-        clear_session_cookies(response, config)
-        return {"signed_out": True}
+    @app.post(LOGOUT_PATH)
+    def logout(request: Request) -> Response:
+        current = world["world"]
+        response = Response(status_code=303)
+        response.headers["location"] = log_out(
+            relying_party_of(request), request, response, config,
+            sessions=current.sessions, lock=current.lock,
+        )
+        return response
 
     return app
 

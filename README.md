@@ -14,18 +14,18 @@ the `jwt` extra, which [Install](#install) names.
 
 ## OpenID Connect login
 
-The host names the issuer's authorization, token and key-set URLs itself; the
-library does no discovery.
+The host names the issuer's authorization, token, key-set and end-session
+URLs itself; the library does no discovery.
 
-### The host's start and callback routes
+### The host's start, callback and logout routes
 
 `webauth.oidc_login` carries the pending login for the host, so the host
 keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
-Connect. The host serves two routes over its one `OidcRelyingParty`. In the
-example, `config` is the `WebAuthConfig` built under
-[Session lifetime](#session-lifetime) and `relying_party` is built under
-[The relying party](#the-relying-party); see also
-[Admitting an identity](#admitting-an-identity).
+Connect. The host serves three routes over its one `OidcRelyingParty`:
+start, callback and logout. In the example, `config` is the
+`WebAuthConfig` built under [Session lifetime](#session-lifetime) and
+`relying_party` is built under [The relying party](#the-relying-party); see
+also [Admitting an identity](#admitting-an-identity).
 
 ```python
 from fastapi import Request, Response
@@ -72,6 +72,66 @@ copies an injected `response`'s headers only when the route returns a value
 that is not itself a `Response`; a returned `JSONResponse` is sent as-is and a
 raised `HTTPException` gets a new response, so neither carries them, which
 would leave the pending cookie in the browser.
+
+#### Logging out
+
+`log_out(relying_party, request, response, config, sessions=..., lock=...)` is
+the whole logout sequence in one call, so no host rebuilds its order: it ends
+the session the request's cookie names (when there is one) under the write
+lock, clears the session and CSRF cookies on `response` and returns the
+issuer's end-session URL. That URL carries only the client ID and the
+configured `post_logout_redirect_uri`; with no `id_token_hint`, Keycloak asks
+the person once to confirm, and the app stores no Keycloak token. `log_out`
+makes no outbound call and never commits, so an issuer that is down still
+leaves the person signed out of the app. A request with no usable session (a
+missing, expired-and-deleted, forged, oversized or duplicated cookie) still
+gets the URL and the cookie clearing, so the issuer's session ends too. A
+forged or duplicated cookie ends no stored session: a duplicated cookie's
+session lasts until it expires.
+
+A form logs out through a route that builds the `Response` itself and passes
+it in. Never return a `RedirectResponse` here: FastAPI sends a returned
+`Response` as is, so the cookie deletions on an injected `response` would be
+lost.
+
+```python
+from webauth.oidc_login import log_out
+
+
+@app.post("/logout")
+def logout(request: Request) -> Response:
+    response = Response(status_code=303)
+    response.headers["location"] = log_out(
+        relying_party, request, response, config, sessions=sessions, lock=lock,
+    )
+    commit_the_hosts_transaction()
+    return response
+```
+
+A page that logs out through `fetch` returns the URL as JSON through the
+injected `response` and navigates itself, because `fetch` would follow a
+cross-origin 303: `return {"logout_url": log_out(...)}`, then
+`location.assign(logout_url)`. Neither route uses `Depends(current_user)`.
+
+The logout is protected by the origin check, not by the CSRF token. The token
+is bound to the session, so it fails once the session has expired, and a plain
+form cannot send the token header. Install the stack with
+`csrf_origin=CsrfPolicy()` and
+`csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({"/logout"})))`.
+The host lists its own logout route's exact path, whichever shape it uses: a
+fetch logout at `/logout/fetch` lists `"/logout/fetch"` instead.
+Keep the route POST only, because the origin check runs only on mutating
+methods; name the path exactly in `token_exempt`, never in `exempt` and never
+as a prefix, so no other route falls under it.
+
+A logout form redirects the browser to the issuer, and Chromium checks
+`form-action` on that redirect. A host whose logout is a form adds the
+issuer's origin to `form-action` in its policy (see
+[Content-Security-Policy](#content-security-policy)). A page that logs out
+through `fetch` is not subject to `form-action`.
+
+Register each app's post-logout redirect URI at the issuer: Keycloak checks
+`post_logout_redirect_uri` against the client's `post.logout.redirect.uris`.
 
 An issuer on another registrable domain than the app needs
 `cookie_samesite="lax"`. With the default `"strict"` the browser withholds the
@@ -184,9 +244,11 @@ client_config = OidcClientConfig(
     authorization_endpoint=f"{realm}/protocol/openid-connect/auth",
     token_endpoint=f"{realm}/protocol/openid-connect/token",
     jwks_url=f"{realm}/protocol/openid-connect/certs",
+    end_session_endpoint=f"{realm}/protocol/openid-connect/logout",
     client_id=os.environ["OIDC_CLIENT_ID"],
     client_secret=SecretStr(os.environ["OIDC_CLIENT_SECRET"]),
     redirect_uri="https://app.example.test/auth/callback",
+    post_logout_redirect_uri="https://app.example.test/",
     leeway_seconds=30,
 )
 ```
@@ -513,8 +575,10 @@ config = WebAuthConfig(
 ## Ending a session
 
 `webauth.session_ending` is the one place a session ends in the host's store. A
-logout route calls `end_session(sessions, session_id=...)` rather than deleting
-from the store itself; `end_user_sessions(sessions, user_id)` ends every session
+host that signs in through OpenID Connect logs out with
+[`log_out`](#logging-out), which calls it; any other route calls
+`end_session(sessions, session_id=...)` rather than deleting from the store
+itself; `end_user_sessions(sessions, user_id)` ends every session
 of an account and returns the store's count, and
 `prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
 a cap after a login and returns their identifiers. The next request carrying an

@@ -80,16 +80,21 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenario 2, and, in
+clears the field), the result page (the refusal page in scenario 7), Keycloak's logout confirmation and the second sign-in of scenarios 2 and 9, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
 
 ## What it proves
 
 `SCENARIO 1` is the login (the plain member `d1-user` gets 403 from `/admin`),
-`SCENARIO 2` the logout. The logout ends the session
-in the app, not Keycloak's SSO session: a second "Sign in" re-logs in silently,
-and the table says so.
+`SCENARIO 2` the logout, at both widths: the host's `#logout` is a plain form
+POST that the origin check admits without a CSRF token; the browser reaches
+Keycloak's logout confirmation (`#kc-logout`), where the host already holds 0
+sessions and the browser no app cookie; after confirming, the app shows "Signed
+out", and a second "Sign in" shows Keycloak's form again (a silent sign-in is a
+failure). `SCENARIO 9` (1280x800) ends the app session in the host while the
+page still shows the button: the logout still reaches Keycloak's confirmation
+and the next sign-in shows Keycloak's form.
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
 the app; enabled again, the same credentials sign in; an account the host
@@ -104,8 +109,8 @@ admitted, `/admin` answers 200 (the host's `admin_group` is that subgroup),
 and the host holds 1 account. `CHECK outsider-groups-claim` records,
 as a count only, whether Keycloak sends the outsider a `groups` claim at all;
 Keycloak leaves the claim out for a person in no group (claim absent).
-Scenarios 1, 4, 6 and 7 run at 390x844 (mobile emulation, touch) and 1280x800;
-scenario 8 runs at 1280x800. The host's `login_group` is `/apps/songmaker` and its `admin_group`
+Scenarios 1, 2, 4, 6 and 7 run at 390x844 (mobile emulation, touch) and 1280x800;
+scenarios 8 and 9 run at 1280x800. The host's `login_group` is `/apps/songmaker` and its `admin_group`
 `/apps/songmaker/admin`; `conformance.py` states the value of
 `EverySubject.OF_THE_BOUND_ISSUER` and of `NoAdmins.IN_THIS_APP`, because the OIDF
 suite's tokens carry no `groups` claim. The demotion of a person taken out of the

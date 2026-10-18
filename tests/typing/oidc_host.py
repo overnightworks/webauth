@@ -81,6 +81,7 @@ from webauth.oidc_login import (
     NoAdmins,
     admit_identity,
     finish_login,
+    log_out,
     post_token_request_over_https,
     start_login,
 )
@@ -249,6 +250,15 @@ def a_host_finishes_a_keycloak_login(
         ),
         accounts=accounts, lock=lock, audit=audit,
     )
+
+
+def a_host_logs_out(
+    relying_party: OidcRelyingParty, request: Request, response: Response,
+    config: WebAuthConfig,
+) -> str:
+    sessions: SessionRecordStore = HostSessions()
+    lock: WriteLock = HostLock()
+    return log_out(relying_party, request, response, config, sessions=sessions, lock=lock)
 
 
 def a_host_admits_an_identity(
