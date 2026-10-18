@@ -191,6 +191,8 @@ def a_config_reached_by(
         pytest.param(True, None, id="omitted-secure"),
         pytest.param(False, None, id="omitted-not-secure"),
         pytest.param(True, "sid", id="plain-secure"),
+        pytest.param(True, "a-b.c_d!", id="punctuated-token-secure"),
+        pytest.param(False, "a-b.c_d!", id="punctuated-token-not-secure"),
         pytest.param(False, "sid", id="plain-not-secure"),
         pytest.param(True, "__Host-own", id="host-prefixed-secure"),
         pytest.param(True, "__Secure-own", id="secure-prefixed-secure"),
@@ -226,6 +228,31 @@ def test_a_cookie_name_the_configuration_cannot_honour_is_refused_however_it_is_
 ) -> None:
     with pytest.raises(ValueError, match=message.format(field=field)):
         a_config_reached_by(how, cookie_secure, **{field: given_name})
+
+
+@pytest.mark.parametrize("field", COOKIE_NAME_FIELDS)
+@pytest.mark.parametrize("how", ["construction", "replace"])
+@pytest.mark.parametrize("name", ["", "a b", "a;b"])
+def test_a_cookie_name_that_is_not_an_rfc_6265_token_is_refused_naming_its_field(
+    field: str, how: str, name: str,
+) -> None:
+    with pytest.raises(ValueError, match=f"{field} .* is not a valid cookie name"):
+        a_config_reached_by(how, True, **{field: name})
+
+
+def test_a_prefixed_name_that_is_not_a_token_is_refused_as_a_bad_name_first() -> None:
+    with pytest.raises(ValueError, match="is not a valid cookie name"):
+        a_web_auth_config(cookie_secure=False, session_cookie_name="__Host-a b")
+
+
+def test_equal_session_and_csrf_cookie_names_are_refused() -> None:
+    message = "session_cookie_name and csrf_cookie_name must differ"
+    with pytest.raises(ValueError, match=message):
+        a_web_auth_config(session_cookie_name="sid", csrf_cookie_name="sid")
+
+    config = a_web_auth_config(session_cookie_name="sid")
+    with pytest.raises(ValueError, match=message):
+        replace(config, csrf_cookie_name=config.session_cookie_name)
 
 
 @pytest.mark.parametrize("field", COOKIE_NAME_FIELDS)

@@ -60,6 +60,7 @@ _CSRF_SIGNING_PREFIX: Final = b"csrf:"
 # Strict cookie would not accompany.
 _PENDING_LOGIN_SAMESITE: Final = "lax"
 _STATE_DIGEST_HEX_CHARS: Final = 16
+_COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
 # characters, so a field of any other shape was not minted as a pending secret.
@@ -112,6 +113,11 @@ def is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
     if not name.startswith(prefix):
         return False
     return _STATE_DIGEST.fullmatch(name.removeprefix(prefix)) is not None
+
+
+def is_valid_cookie_name(name: str) -> bool:
+    """Whether ``name`` is an RFC 6265 ``cookie-name``, which browsers keep whole."""
+    return _COOKIE_NAME_TOKEN.fullmatch(name) is not None
 
 
 def is_host_only_cookie_name(name: str) -> bool:
