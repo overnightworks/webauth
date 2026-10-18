@@ -44,9 +44,10 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `WebAuthConfig` refuses a `session_cookie_name` or `csrf_cookie_name` that is
   not an RFC 6265 token (empty, or containing a space, a control character, a
   non-ASCII character or any of `( ) < > @ , ; : \ " / [ ] ? = { }`), and refuses
-  the two names being equal. A browser drops or splits such a cookie, and equal
-  names would make one cookie overwrite the other, so a host that set one now
-  fails at start instead of leaving nobody signed in.
+  the two names being equal. Starlette's `set_cookie` raised
+  `http.cookies.CookieError` for such a name, so the host failed at its first
+  sign-in, and equal names would make one cookie overwrite the other; a host
+  that set either now fails at start instead.
 - `default_content_security_policy()` writes `base-uri 'self'` after
   `default-src 'none'` and ends with `form-action 'self'`, so a `<base>` may
   point only at this origin and a form may submit only to it. Neither directive

@@ -245,13 +245,35 @@ def test_a_prefixed_name_that_is_not_a_token_is_refused_as_a_bad_name_first() ->
         a_web_auth_config(cookie_secure=False, session_cookie_name="__Host-a b")
 
 
-def test_equal_session_and_csrf_cookie_names_are_refused() -> None:
-    message = "session_cookie_name and csrf_cookie_name must differ"
-    with pytest.raises(ValueError, match=message):
-        a_web_auth_config(session_cookie_name="sid", csrf_cookie_name="sid")
+EQUAL_NAMES_MESSAGE = "session_cookie_name and csrf_cookie_name must differ"
 
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param(
+            {"session_cookie_name": "sid", "csrf_cookie_name": "sid"}, id="explicit",
+        ),
+        pytest.param(
+            {"cookie_secure": False, "csrf_cookie_name": "session_id"},
+            id="csrf-equals-session-default",
+        ),
+        pytest.param(
+            {"csrf_cookie_name": "__Host-session_id"},
+            id="csrf-equals-secure-session-default",
+        ),
+    ],
+)
+def test_equal_session_and_csrf_cookie_names_are_refused(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match=EQUAL_NAMES_MESSAGE):
+        a_web_auth_config(**overrides)
+
+
+def test_replacing_the_csrf_cookie_name_with_the_session_one_is_refused() -> None:
     config = a_web_auth_config(session_cookie_name="sid")
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match=EQUAL_NAMES_MESSAGE):
         replace(config, csrf_cookie_name=config.session_cookie_name)
 
 

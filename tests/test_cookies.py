@@ -576,7 +576,8 @@ def test_logging_out_takes_both_cookies_back(cookie_app: CookieApp) -> None:
             pytest.param(name, True, id=f"accepts-{name}")
             for name in (
                 "__Host-session_id", "__Host-csrf_token", "session_id", "csrf_token",
-                "sid", "a-b", "a_b", "a.b", "a!b", "A9",
+                "sid", "a-b", "a_b", "a.b", "A9",
+                *[f"a{char}b" for char in "!#$%&'*+^`|~"],
             )
         ],
         *[
@@ -584,6 +585,7 @@ def test_logging_out_takes_both_cookies_back(cookie_app: CookieApp) -> None:
             for name in (
                 "", "a b", "a\tb", "a;b", "a=b", "a,b", 'a"b',
                 "a\x01b", "a\x7fb", "a\n", "café",
+                *[f"a{char}b" for char in "()<>@:\\/[]?{}"],
             )
         ],
     ],

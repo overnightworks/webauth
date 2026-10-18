@@ -159,8 +159,8 @@ class WebAuthConfig:
         elif not is_valid_cookie_name(name):
             raise ValueError(
                 f"{field} {name!r} is not a valid cookie name; it must be an RFC 6265 "
-                "token (ASCII letters, digits and !#$%&'*+-.^_`|~), or browsers drop "
-                "or split the cookie and nobody could stay signed in",
+                "token (ASCII letters, digits and !#$%&'*+-.^_`|~), or the server cannot "
+                "set the cookie and nobody could stay signed in",
             )
         elif (
             is_host_only_cookie_name(name) or is_secure_prefixed_cookie_name(name)
