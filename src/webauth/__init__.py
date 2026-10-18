@@ -10,7 +10,7 @@ The library persists nothing itself: it holds no schema and no ORM, and the
 `.importlinter` contract keeps it that way.
 """
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 
 __all__ = ["WebAuthError", "__version__"]
 

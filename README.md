@@ -28,7 +28,8 @@ sections linked below.
 `/apps/songmaker`, get in. Members of its `admin_group`, such as
 `/apps/songmaker/admin`, are admins. Both are decided again at every login, so a
 change in Keycloak takes effect at the person's next sign-in; an app session
-that is already open keeps its access until it ends. See
+that is already open keeps its access until it ends; a changed admin role
+reaches every open session at the person's next sign-in. See
 [Admitting an identity](#admitting-an-identity).
 
 **When Keycloak is down.** People who are already signed in keep working until
