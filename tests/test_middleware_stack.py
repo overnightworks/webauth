@@ -50,7 +50,6 @@ from webauth.policies import (
     PathRules,
     PathShape,
     RateLimitBudget,
-    RateLimitClass,
     RateLimitPolicy,
     SecurityHeadersPolicy,
 )
@@ -93,8 +92,7 @@ DOWNSTREAM_MARK: ContextVar[str] = ContextVar("downstream_mark", default="unset"
 
 
 def a_rate_limit_policy(max_requests: int) -> RateLimitPolicy:
-    budget = RateLimitBudget(max_requests, 60)
-    return RateLimitPolicy(budgets=dict.fromkeys(RateLimitClass, budget))
+    return RateLimitPolicy(default=RateLimitBudget("api", max_requests, 60))
 
 
 def a_fresh_app(
@@ -275,7 +273,7 @@ class TestHostMiddlewarePlacement:
         assert seen_outside == [(403, "DENY")]
 
 
-class TestAgentPresentatorShape:
+class TestWebhookPrefixOriginExemptionWithExactTokenProtection:
     @staticmethod
     def a_client() -> TestClient:
         app = a_fresh_app()
@@ -385,7 +383,7 @@ class TestRefusedInstallation:
         client = TestClient(app)
         assert client.post(LOGIN_PATH, json={}, headers=FOREIGN).status_code == 403
 
-    def test_songmakers_token_exemptions_are_installed(self) -> None:
+    def test_exact_and_prefix_token_exemptions_under_a_protected_prefix_are_installed(self) -> None:
         app = a_fresh_app()
         install_web_auth_middleware(
             app,

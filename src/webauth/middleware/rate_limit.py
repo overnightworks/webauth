@@ -1,4 +1,4 @@
-"""Per-IP rate limiting: one budget class per request, one counter per class."""
+"""Per-IP rate limiting: one budget per request, one counter per budget."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
 from webauth.middleware._refusal import RefusalMiddleware
-from webauth.policies import RateLimitClass, RateLimitPolicy
+from webauth.policies import RateLimitBudget, RateLimitPolicy
 from webauth.proxies import budget_address, resolve_client_ip
 
 if TYPE_CHECKING:
@@ -27,13 +27,13 @@ log = logging.getLogger(__name__)
 LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
 
 
-def _rate_limit_key(rate_limit_class: RateLimitClass, budget_identity: str) -> str:
-    """One key space per class, so no budget spends another's counter."""
-    return f"{rate_limit_class.name}:{budget_identity}"
+def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
+    """One key space per budget; a name holds no ``:``, so the first one ends it."""
+    return f"{budget.name}:{budget_identity}"
 
 
 class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
-    """Spend one request of the client's budget for the class it falls into.
+    """Spend one request of the client's budget for the budget it falls into.
 
     The budget belongs to the client's address, or to its whole IPv6 network
     of the configured prefix -- see ``budget_address``.
@@ -45,13 +45,12 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
             return None
         config = web_auth_config(request)
         budget_identity = budget_address(resolve_client_ip(request), config.ipv6_budget_prefix)
-        rate_limit_class = self._policy.classify(path)
-        budget = self._policy.budget(rate_limit_class)
+        budget = self._policy.budget_for(path)
         try:
             allowed = await to_thread.run_sync(
                 partial(
                     config.rate_limits.is_allowed,
-                    _rate_limit_key(rate_limit_class, budget_identity),
+                    _rate_limit_key(budget, budget_identity),
                     limit=budget.max_requests,
                     window_seconds=budget.window_seconds,
                 )

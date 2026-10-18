@@ -30,7 +30,6 @@ from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
     RateLimitBudget,
-    RateLimitClass,
     RateLimitPolicy,
     SecurityHeadersPolicy,
     default_content_security_policy,
@@ -91,12 +90,11 @@ def a_body_limited_app(
 
     body_size = policy or BodySizePolicy(default_max_bytes=LIMIT)
     if full_stack:
-        budget = RateLimitBudget(100, 60)
         install_web_auth_middleware(
             app,
             security_headers=HEADERS_POLICY,
             body_size=body_size,
-            rate_limit=RateLimitPolicy(budgets=dict.fromkeys(RateLimitClass, budget)),
+            rate_limit=RateLimitPolicy(default=RateLimitBudget("api", 100, 60)),
             csrf_origin=CsrfPolicy(),
             csrf_token=CsrfPolicy(),
         )
