@@ -23,6 +23,7 @@ from oidc_arrangement import (
     FakeClock,
     FakeKeySetEndpoint,
     FakeTokenEndpoint,
+    a_fake_id_token,
     a_logout_token,
     changed,
     jws,
@@ -63,6 +64,7 @@ _CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
 _END_SESSION_ENDPOINT = f"{_ISSUER}/protocol/openid-connect/logout"
 _REDIRECT_URI = "https://songmaker.example.org/auth/callback"
 _POST_LOGOUT_REDIRECT_URI = "https://songmaker.example.org/"
+_LOGOUT_PATH = "/auth/logout"
 _LEEWAY_SECONDS = 30
 _NOW = 1_800_000_000
 _CODE = "authorization-code-from-the-callback"
@@ -75,6 +77,7 @@ _IDENTITY = OidcIdentity(
     groups=_GROUPS,
     session_id=_SESSION_ID,
     preferred_username="operator",
+    id_token=a_fake_id_token("the-identity-every-login-yields"),
 )
 _BASIC_AUTHORIZATION = (
     "Basic " + base64.b64encode(f"{_CLIENT_ID}:{_CLIENT_SECRET}".encode()).decode()
@@ -93,6 +96,7 @@ def _config(**changes: Any) -> OidcClientConfig:
         "client_secret": SecretStr(_CLIENT_SECRET),
         "redirect_uri": _REDIRECT_URI,
         "post_logout_redirect_uri": _POST_LOGOUT_REDIRECT_URI,
+        "logout_path": _LOGOUT_PATH,
         "scopes": ("openid", "profile"),
         "leeway_seconds": _LEEWAY_SECONDS,
     }
@@ -131,6 +135,7 @@ class LoginScenario:
     config: OidcClientConfig = field(default_factory=_config)
     wall_clock: FakeClock = field(default_factory=lambda: FakeClock(float(_NOW)))
     relying_party: OidcRelyingParty = field(init=False)
+    minted_id_tokens: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.relying_party = OidcRelyingParty(
@@ -156,11 +161,16 @@ class LoginScenario:
             "preferred_username": "operator",
             "groups": list(_GROUPS),
         }
-        return jws(
+        id_token = jws(
             {"alg": "RS256", "kid": "current-key", "typ": "JWT"},
             changed(claims, changes),
             rs256(rsa_key("current")),
         )
+        self.minted_id_tokens.append(id_token)
+        return id_token
+
+    def identity_with_the_minted_token(self, identity: OidcIdentity) -> OidcIdentity:
+        return dataclasses.replace(identity, id_token=self.minted_id_tokens[-1])
 
     def callback(self, pending: PendingLogin, changes: dict[str, Any]) -> str:
         parameters = {
@@ -193,7 +203,7 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
 
     outcome = login.relying_party.complete_login(request.pending, callback_query)
 
-    assert outcome == _IDENTITY
+    assert outcome == login.identity_with_the_minted_token(_IDENTITY)
 
 
 @pytest.mark.parametrize(
@@ -239,7 +249,7 @@ def test_a_login_the_issuer_vouched_for_yields_its_identity(
 ) -> None:
     _pending, outcome = login.attempt(attempt)
 
-    assert outcome == identity
+    assert outcome == login.identity_with_the_minted_token(identity)
 
 
 def _answered(
@@ -632,6 +642,17 @@ def test_two_logins_never_share_a_state_nonce_or_verifier(login: LoginScenario) 
     assert len(set(values)) == len(values)
 
 
+def test_the_identity_carries_the_id_token_the_issuer_gave_and_no_repr_shows_it(
+    login: LoginScenario,
+) -> None:
+    _pending, outcome = login.attempt(Attempt())
+
+    assert isinstance(outcome, OidcIdentity)
+    [minted] = login.minted_id_tokens
+    assert outcome.id_token == minted
+    assert minted not in repr(outcome)
+
+
 def test_no_repr_shows_the_client_secret_the_code_the_tokens_or_the_pending_login(
     login: LoginScenario,
 ) -> None:
@@ -747,7 +768,67 @@ def test_the_logout_url_carries_exactly_the_client_id_and_the_post_logout_redire
     }
 
 
-@pytest.mark.parametrize("missing", ["end_session_endpoint", "post_logout_redirect_uri"])
+@pytest.mark.parametrize("client_id", [
+    pytest.param(_CLIENT_ID, id="plain-client-id"),
+    pytest.param("lab app&x=1/\u00e9", id="client-id-needing-encoding"),
+])
+def test_the_logout_url_carries_the_id_token_hint_after_the_other_parameters(
+    client_id: str,
+) -> None:
+    scenario = LoginScenario(FakeTokenEndpoint(), config=_config(client_id=client_id))
+    hint = a_fake_id_token("the-hint")
+
+    parts = urllib.parse.urlsplit(scenario.relying_party.logout_url(id_token_hint=hint))
+
+    assert list(urllib.parse.parse_qsl(parts.query)) == [
+        ("client_id", client_id),
+        ("post_logout_redirect_uri", _POST_LOGOUT_REDIRECT_URI),
+        ("id_token_hint", hint),
+    ]
+
+
+def test_the_relying_party_exposes_the_configured_logout_path(login: LoginScenario) -> None:
+    assert login.relying_party.logout_path == _LOGOUT_PATH
+
+
+@pytest.mark.parametrize("logout_path", [
+    pytest.param("/", id="the-root"),
+    pytest.param("/logout", id="a-route"),
+    pytest.param("/app/log-out_1.2~x/", id="unreserved-characters-and-a-trailing-slash"),
+    pytest.param("/a%20b/c:d@e!$&'()*+,=", id="percent-encoding-and-sub-delimiters"),
+])
+def test_a_logout_path_of_url_path_characters_is_accepted(logout_path: str) -> None:
+    assert _config(logout_path=logout_path).logout_path == logout_path
+
+
+@pytest.mark.parametrize("logout_path", [
+    pytest.param("", id="empty"),
+    pytest.param("relative-route", id="not-absolute"),
+    pytest.param("https://songmaker.example.org/logout", id="a-url"),
+    pytest.param("/semi;colon", id="semicolon"),
+    pytest.param("/with?query=1", id="query"),
+    pytest.param("/with#fragment", id="fragment"),
+    pytest.param("/with space", id="space"),
+    pytest.param("/log\nout", id="newline"),
+    pytest.param("/log\x00out", id="nul"),
+    pytest.param("/log%zzout", id="bad-percent-encoding"),
+    pytest.param("/log%", id="trailing-percent"),
+    pytest.param("/log%2", id="percent-with-one-hex-digit"),
+    pytest.param("/log\u00e9out", id="non-ascii"),
+    pytest.param(None, id="not-a-string"),
+])
+def test_a_logout_path_that_is_not_a_url_path_is_refused_without_its_value(
+    logout_path: object,
+) -> None:
+    with pytest.raises(ValueError, match="^logout_path must ") as refusal:
+        _config(logout_path=logout_path)
+
+    assert not logout_path or str(logout_path) not in str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    "missing", ["end_session_endpoint", "post_logout_redirect_uri", "logout_path"],
+)
 def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
     missing: str,
 ) -> None:
@@ -761,6 +842,7 @@ def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
         "client_secret": SecretStr(_CLIENT_SECRET),
         "redirect_uri": _REDIRECT_URI,
         "post_logout_redirect_uri": _POST_LOGOUT_REDIRECT_URI,
+        "logout_path": _LOGOUT_PATH,
         "leeway_seconds": _LEEWAY_SECONDS,
     }
     del arguments[missing]

@@ -45,6 +45,15 @@ oversized or duplicated cookie counts as missing: it ends no stored session,
 which leaves a duplicated cookie's session until it expires, while the
 browser's own cookies are still cleared.
 
+``finish_login`` hands the browser the login's ID token in a cookie that only
+the logout path receives, and ``log_out`` passes it to the issuer as
+``id_token_hint`` and clears it, so the issuer ends its session without asking
+the person to confirm. The hint is never decoded or verified here and is no
+credential; without a usable one (missing, duplicated, oversized or not shaped
+like a compact JWS) the issuer asks. Because the logout is a GET to the
+issuer, the hint reaches the browser's history and any TLS-terminating edge;
+once the session has ended it has no power left.
+
 ``receive_backchannel_logout`` is the issuer's back-channel logout: it verifies
 the Logout Token before taking the lock, then, under the lock, ends every
 session of the account the token's subject names, an inactive account
@@ -67,11 +76,14 @@ from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
 from webauth.cookies import (
+    clear_id_token_hint_cookie,
     clear_pending_login_cookie,
     clear_session_cookies,
     cookie_pairs,
     cookie_values,
+    id_token_hint_from_request,
     is_pending_login_cookie_name,
+    issue_id_token_hint_cookie,
     issue_pending_login_cookie,
     pending_login_cookie_name,
     verify_pending_login,
@@ -242,7 +254,8 @@ def finish_login(
     cookie stays. A callback naming no state or naming it twice, or whose state
     names no single genuine cookie, is refused before any token request. On
     an account, the host opens its session and then calls
-    ``issue_session_cookies``.
+    ``issue_session_cookies``; ``response`` also carries the ID token hint
+    cookie for the logout path, replacing an older one (see ``log_out``).
     """
     callback_query = request.url.query
     state = callback_state(callback_query)
@@ -256,7 +269,7 @@ def finish_login(
     identity = relying_party.complete_login(pending, callback_query)
     if isinstance(identity, OidcRefusal):
         return identity
-    return admit_identity(
+    admitted = admit_identity(
         identity,
         admission=admission,
         accounts=accounts,
@@ -264,6 +277,14 @@ def finish_login(
         audit=audit,
         config=config,
     )
+    if not isinstance(admitted, AdmissionRefusal):
+        issue_id_token_hint_cookie(
+            response,
+            identity.id_token,
+            logout_path=relying_party.logout_path,
+            config=config,
+        )
+    return admitted
 
 
 def log_out(
@@ -279,13 +300,16 @@ def log_out(
 
     The session the request's cookie names is deleted under ``lock`` and the
     session cookies are cleared on ``response`` in every case; the host then
-    commits and sends the browser to the returned URL."""
+    commits and sends the browser to the returned URL. The ID token hint the
+    request carries goes into that URL, and its cookie is cleared in every case."""
     session_id = session_id_from_request(request, config)
     if session_id is not None:
         with lock.hold():
             end_session(sessions, session_id=session_id)
     clear_session_cookies(response, config)
-    return relying_party.logout_url()
+    id_token_hint = id_token_hint_from_request(request, config)
+    clear_id_token_hint_cookie(response, logout_path=relying_party.logout_path, config=config)
+    return relying_party.logout_url(id_token_hint=id_token_hint)
 
 
 class BackchannelLogoutResult(Enum):

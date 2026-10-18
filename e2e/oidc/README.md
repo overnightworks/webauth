@@ -86,9 +86,9 @@ labels and fails on an absent or ambiguous one): it listens on the container
 network and passes the bytes to a unix socket in a private directory, where the host
 side accepts exactly `POST /auth/backchannel-logout`, at most 32 KiB, and forwards
 it to the app's loopback HTTPS endpoint, verifying the throwaway CA. Anything else
-(`/state`, `/reset`, `/deactivate`, another path or method) is answered 404 and
+(`/state`, `/reset`, `/deactivate`, another path) is answered 404 (an unknown method 501) and
 reaches nothing. Every answer carries `Connection: close`: Keycloak's HTTP client keeps
-connections in a pool and does not retry a POST on one the bridge already closed. Every wait is bounded (10 s), no body or header is logged, and the
+connections in a pool and does not retry a POST on one the bridge already closed. Every read waits at most 10 s, no body or header is logged, and the
 relay holds no secret (read-only, no capabilities, the caller's user id). The bridge
 is shut down, its container removed, before the held stack is released, and
 `edge-kc-probe` leftovers are listed at the end. The container's name stands in for
@@ -104,7 +104,7 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), Keycloak's logout confirmation and the second sign-in of scenarios 2 and 9, in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after each logout (15, 17, and 16 and 18 after confirming), A's page after the disable and before the admin logout in scenario 13, in
 scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
@@ -114,12 +114,26 @@ digest of the login's state; the log keeps `__Host-oidc_pending_*`.
 `SCENARIO 1` is the login (the plain member `d1-user` gets 403 from `/admin`),
 `SCENARIO 2` the logout, at both widths: the host's `#logout` is a plain form
 POST that the origin check admits without a CSRF token; the browser reaches
-Keycloak's logout confirmation (`#kc-logout`), where the host already holds 0
-sessions and the browser no app cookie; after confirming, the app shows "Signed
-out", and a second "Sign in" shows Keycloak's form again (a silent sign-in is a
+Keycloak's end-session request, where the host already holds 0 sessions and the
+browser no app cookie; Keycloak answers with a redirect to the app's `/` and
+`#kc-logout` never attaches, because the host sent the login's ID token as
+`id_token_hint` (the hint cookie, stored for the `/logout` path, is gone afterwards,
+read through `cookies([origin, origin + /logout])`); the app shows "Signed out", and a second "Sign in" shows Keycloak's form again (a silent sign-in is a
 failure). `SCENARIO 9` (1280x800) ends the app session in the host while the
-page still shows the button: the logout still reaches Keycloak's confirmation
-and the next sign-in shows Keycloak's form.
+page still shows the button: the logout shows no page either, and the next sign-in
+shows Keycloak's form.
+
+The logout shows Keycloak's confirmation page only when the host cannot send a usable
+hint. `SCENARIO 16` deletes the hint cookie and `SCENARIO 18` plants a second one at
+`Path=/`; in both Keycloak asks "Do you want to log out?" and, after confirming, the
+app shows "Signed out". The other hint scenarios: `SCENARIO 14` (the cookie is stored
+for `Path=/logout`, HttpOnly, Secure, SameSite=Strict, and no request to `/` or `/me`
+carries it), `SCENARIO 15` (a second login and logout show no page), `SCENARIO 17` (the
+same on the cross-site origin `demo.example.test`) and `SCENARIO 19` (a hint of the
+3072-character bound reaches Keycloak, which answers neither 414 nor 431). A refused
+sign-in (scenario 7) leaves no hint cookie. `SCENARIO 20` (1280x800) replaces the hint with one whose
+signature segment is altered: Keycloak answers 400 with its error page ("Invalid parameter:
+id_token_hint"), neither the confirmation page nor a redirect home.
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
 the app; enabled again, the same credentials sign in; an account the host
@@ -158,21 +172,19 @@ its assertions. The evidence is counts, response outcomes and screenshots, never
 Token.
 
 - `SCENARIO 10`, subject-wide: two contexts sign in to app A as the same person. One
-  logs out through the host's button and Keycloak's confirmation; at the confirmation
-  the host still holds the other session and no callback. Then Keycloak's callback is
+  logs out through the host's button, with no confirmation page; when the request
+  reaches Keycloak the host still holds the other session and no callback. Then Keycloak's callback is
   accepted once, the host holds 0 sessions, and the other context's next `/me` is 401
   and its reloaded page says "Signed out".
 - `SCENARIO 11`, cross-app: one context signs in to A and B, a second context to B
   (2 sessions). A logout in A calls B back, and both B sessions end.
 - `SCENARIO 12`, admin logout: `POST /admin/realms/hallucinai/users/{id}/logout`
   answers 204; both apps are called back and answer `/me` with 401.
-- `SCENARIO 13`, disable, then logout: a person signs in to A and B and the account is
-  disabled; that alone ends nothing in either app. The person's own logout in A never
-  reaches Keycloak's confirmation (it sends the browser straight back) and calls no
-  app back: B still holds its session. Keycloak's admin logout
-  then calls both apps back and ends every session, and a fresh sign in is refused at
-  Keycloak's form. So the logout that ends a disabled account's sessions is the admin
-  one: `edge lock` must send it after the disable (#49).
+- `SCENARIO 13`, disable, then admin logout (the lock flow): a person signs in to A and
+  B and the account is disabled; that alone ends nothing: both apps still hold 1 session
+  with 0 callbacks and A's page still says signed in. Keycloak's admin logout (204) then
+  calls each app back exactly once, which also shows the disable sent none; each holds
+  0 sessions and answers `/me` with 401. A fresh sign in is refused at Keycloak's form.
 
 `SCENARIO 5` is the session cookie after the callback redirect. One host
 process per `cookie_samesite` serves both app origins; each cell uses a fresh
@@ -310,12 +322,13 @@ The pull request that last changed this directory carries the full result table.
 ## Last run: back-channel logout
 
 Exit status 0, evidence scan clean, the stack and the relay containers removed. Scenarios
-10 to 13 held at 390x844 and at 1280x800; scenario 5 is unchanged (`https://demo.example.test`
-with `strict` stays `FAILED-as-found`).
+10 to 13 held at 390x844 and at 1280x800, scenarios 14 to 20 at 1280x800; scenario 5 is
+unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 
 | Scenario | What a person did | Held |
 |---|---|---|
 | 10 | two contexts signed in to app A; one logged out through Keycloak | the other session ended through one accepted callback |
 | 11 | one context in A and B, a second in B; a logout in A | both B sessions ended through B's callback |
 | 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
-| 13 | the account disabled, then the person's own logout in A | B untouched (no callback); the admin logout then ended both, and a fresh sign in was refused |
+| 13 | the account disabled, then Keycloak's admin logout (204) | the disable alone ended nothing; then each app called back exactly once, `/me` 401, and a fresh sign in was refused |
+| 20 | the hint's signature altered, then logout | Keycloak's error page (400, `Invalid parameter: id_token_hint`) |

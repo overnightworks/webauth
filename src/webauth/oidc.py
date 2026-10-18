@@ -36,9 +36,11 @@ an `exp` after its `iat`, the back-channel logout event, a `sub` and no
 what limits a copy.
 
 `OidcRelyingParty.logout_url` answers the issuer's end-session URL, which
-carries only the client ID and the configured post-logout redirect URI: no ID
-token hint, so the issuer asks the person to confirm, and no target taken from
-a request. It makes no outbound call.
+carries the client ID, the configured post-logout redirect URI and, when the
+caller has one, the `id_token_hint` of the login being ended. With the hint
+the issuer ends the session without asking the person to confirm; without it
+the issuer asks. The hint is only passed along, never decoded or verified
+here, and no target is taken from a request. It makes no outbound call.
 
 Install the `jwt` extra to use this module.
 """
@@ -109,6 +111,9 @@ _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
 # A strict subset of RFC 6749's error code characters: every registered code
 # fits, and nothing that could carry markup or a sentence does.
 _IDP_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+# RFC 3986 pchar and "/", without ";" which would end a cookie's Path attribute.
+_LOGOUT_PATH_CHARACTERS = re.compile(r"/[A-Za-z0-9\-._~!$&'()*+,=:@/%]*")
+_UNFINISHED_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
 _URL_FIELDS = (
     "issuer",
@@ -128,6 +133,10 @@ class OidcClientConfig:
     `end_session_endpoint` is the issuer's logout page and
     `post_logout_redirect_uri` the app page it sends the browser back to; the
     issuer checks the latter against the client's registered post-logout URIs.
+    `logout_path` is the browser-visible path of the host's logout route, or a
+    parent of all its logout routes; the cookie that carries the ID token hint
+    is scoped to it. It starts with `/` and holds only RFC 3986 path characters
+    other than `;`.
     Every URL is https, names a host and carries no control character, space,
     credentials, query or fragment; `scopes` includes `openid`. `leeway_seconds`
     is checked by the `JwtVerifier` the relying party builds from it."""
@@ -141,6 +150,7 @@ class OidcClientConfig:
     client_secret: SecretStr
     redirect_uri: str
     post_logout_redirect_uri: str
+    logout_path: str
     scopes: tuple[str, ...] = (_OPENID_SCOPE,)
     leeway_seconds: int
 
@@ -151,6 +161,15 @@ class OidcClientConfig:
                     f"{name} must be an https URL naming a host, a valid port if any,"
                     " and no control character, space, credentials, query or fragment"
                 )
+        if (
+            not isinstance(self.logout_path, str)
+            or not _LOGOUT_PATH_CHARACTERS.fullmatch(self.logout_path)
+            or _UNFINISHED_PERCENT_ESCAPE.search(self.logout_path)
+        ):
+            raise ValueError(
+                "logout_path must start with / and hold only URL path characters"
+                " other than ;"
+            )
         if not isinstance(self.client_id, str) or not self.client_id:
             raise ValueError("client_id must be a non-empty string")
         if (
@@ -231,13 +250,16 @@ class OidcRefusal:
 @dataclass(frozen=True)
 class OidcIdentity:
     """The person the issuer vouched for. `groups` are the issuer's full group
-    paths, uninterpreted; `session_id` is the issuer's `sid`."""
+    paths, uninterpreted; `session_id` is the issuer's `sid`; `id_token` is the
+    verified ID token as received, which only ever goes back to the issuer as
+    the logout hint."""
 
     subject: str
     issuer: str
     groups: tuple[str, ...]
     session_id: str | None
     preferred_username: str | None
+    id_token: str = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -302,13 +324,18 @@ class OidcRelyingParty:
             url=f"{self._config.authorization_endpoint}?{query}", pending=pending
         )
 
-    def logout_url(self) -> str:
-        query = urllib.parse.urlencode(
-            {
-                "client_id": self._config.client_id,
-                "post_logout_redirect_uri": self._config.post_logout_redirect_uri,
-            }
-        )
+    @property
+    def logout_path(self) -> str:
+        return self._config.logout_path
+
+    def logout_url(self, *, id_token_hint: str | None = None) -> str:
+        parameters = {
+            "client_id": self._config.client_id,
+            "post_logout_redirect_uri": self._config.post_logout_redirect_uri,
+        }
+        if id_token_hint is not None:
+            parameters["id_token_hint"] = id_token_hint
+        query = urllib.parse.urlencode(parameters)
         return f"{self._config.end_session_endpoint}?{query}"
 
     def complete_login(
@@ -321,12 +348,13 @@ class OidcRelyingParty:
 
     def _identity(self, pending: PendingLogin, callback_query: str) -> OidcIdentity:
         code = self._authorization_code(pending, _callback_parameters(callback_query))
-        id_token = self._verified_id_token(self._exchanged_id_token(pending, code))
+        raw_id_token = self._exchanged_id_token(pending, code)
+        id_token = self._verified_id_token(raw_id_token)
         if not _is_same_secret(id_token.claims.get("nonce"), pending.nonce):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.NONCE_MISMATCH))
         if not self._is_authorized_party(id_token):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH))
-        return _identity_of(id_token)
+        return _identity_of(id_token, raw_id_token)
 
     def _authorization_code(self, pending: PendingLogin, callback: Mapping[str, str]) -> str:
         if not _is_same_secret(callback.get("state"), pending.state):
@@ -528,7 +556,7 @@ def _token_answer_document(body: bytes) -> Mapping[str, object]:
         return {}
 
 
-def _identity_of(id_token: VerifiedClaims) -> OidcIdentity:
+def _identity_of(id_token: VerifiedClaims, raw_id_token: str) -> OidcIdentity:
     if id_token.subject is None:
         raise _RefusalError(OidcRefusal(OidcRefusalReason.INVALID_IDENTITY_CLAIM))
     return OidcIdentity(
@@ -537,6 +565,7 @@ def _identity_of(id_token: VerifiedClaims) -> OidcIdentity:
         groups=_groups(id_token.claims),
         session_id=_optional_string_claim(id_token.claims, "sid"),
         preferred_username=_optional_string_claim(id_token.claims, "preferred_username"),
+        id_token=raw_id_token,
     )
 
 

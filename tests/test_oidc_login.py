@@ -31,6 +31,7 @@ from oidc_arrangement import (
     FakeClock,
     FakeIssuer,
     FakeKeySetEndpoint,
+    a_fake_id_token,
     a_logout_token,
     jws,
     key_set_document,
@@ -43,6 +44,7 @@ from webauth_arrangement import (
     ADMIN_ROLE,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
+    DOCUMENTED_ID_TOKEN_HINT_BOUND,
     HTTPS_TEST_SERVER,
     MEMBER_ROLE,
     SESSION_MAX_AGE_SECONDS,
@@ -113,6 +115,7 @@ LENA = OidcIdentity(
     groups=(LOGIN_GROUP,),
     session_id=None,
     preferred_username="lena",
+    id_token=a_fake_id_token("lena"),
 )
 
 
@@ -588,8 +591,10 @@ NOW = 1_800_000_000
 CLIENT_ID = "lab-app"
 CALLBACK_PATH = "/auth/callback"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
-FORM_LOGOUT_PATH = "/logout"
-FETCH_LOGOUT_PATH = "/logout/fetch"
+LOGOUT_PATH = "/logout"
+FORM_LOGOUT_PATH = LOGOUT_PATH
+FETCH_LOGOUT_PATH = f"{LOGOUT_PATH}/fetch"
+ID_TOKEN_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
@@ -606,6 +611,7 @@ def a_client_config() -> OidcClientConfig:
         client_secret=SecretStr("client-secret"),
         redirect_uri=f"{HTTPS_TEST_SERVER}{CALLBACK_PATH}",
         post_logout_redirect_uri=f"{HTTPS_TEST_SERVER}/",
+        logout_path=LOGOUT_PATH,
         leeway_seconds=30,
     )
 
@@ -635,6 +641,7 @@ class OidcHost:
     audit: RecordingAuditSink
     config: WebAuthConfig
     lock: CountingWriteLock
+    issued_id_tokens: list[str]
 
     def start(self) -> str:
         """Visit the start route; answer the authorization URL it sends the browser to."""
@@ -726,7 +733,13 @@ def an_oidc_host(
     )
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
-    issuer = FakeIssuer(mint_id_token=lambda nonce: an_id_token(nonce, wall_clock, groups_claim))
+    issued_id_tokens: list[str] = []
+
+    def mint_id_token(nonce: str) -> str:
+        issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
+        return issued_id_tokens[-1]
+
+    issuer = FakeIssuer(mint_id_token=mint_id_token)
     key_set = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("issuer"), "issuer-key")))
     relying_party = OidcRelyingParty(
         a_client_config(),
@@ -855,6 +868,7 @@ def an_oidc_host(
         audit=audit,
         config=config,
         lock=lock,
+        issued_id_tokens=issued_id_tokens,
     )
 
 
@@ -929,6 +943,62 @@ def test_an_admitted_callback_expires_the_session_by_the_stores_lifetime() -> No
     session_cookie = set_cookies(response)[host.config.session_cookie_name]
     assert f"max-age={host.config.cookie_max_age_seconds}" in session_cookie
     assert host.client.get("/me").json() == {"username": "lena"}
+
+
+@pytest.mark.parametrize(("cookie_secure", "name", "secure_attribute"), [
+    pytest.param(True, "__Secure-oidc_id_token_hint", {"secure"}, id="secure"),
+    pytest.param(False, "oidc_id_token_hint", set(), id="insecure-development"),
+])
+def test_an_admitted_callback_hands_the_id_token_to_the_logout_path_alone(
+    *, cookie_secure: bool, name: str, secure_attribute: set[str],
+) -> None:
+    host = an_oidc_host(cookie_secure=cookie_secure)
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert set_cookies(response)[name] == {
+        "httponly",
+        f"max-age={host.config.cookie_max_age_seconds}",
+        f"path={LOGOUT_PATH}",
+        "samesite=strict",
+        *secure_attribute,
+    }
+    assert host.client.cookies[name] == host.issued_id_tokens[-1]
+
+
+def test_a_second_login_replaces_the_hint_of_the_first() -> None:
+    host = an_oidc_host()
+    host.callback(host.sign_in_at_issuer())
+
+    host.callback(host.sign_in_at_issuer())
+
+    first, second = host.issued_id_tokens
+    assert first != second
+    assert host.client.cookies[ID_TOKEN_HINT_COOKIE_NAME] == second
+
+
+def test_an_oversized_id_token_clears_the_old_hint_and_still_signs_the_person_in() -> None:
+    host = an_oidc_host()
+    host.callback(host.sign_in_at_issuer())
+    padded_groups = [LOGIN_GROUP, *(f"/apps/padding-{number:04}" for number in range(120))]
+    host.issuer.mint_id_token = lambda nonce: an_id_token(nonce, host.wall_clock, padded_groups)
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert response.status_code == 200
+    assert is_cleared(response, ID_TOKEN_HINT_COOKIE_NAME)
+    assert ID_TOKEN_HINT_COOKIE_NAME not in host.client.cookies
+    assert host.client.get("/me").json() == {"username": "lena"}
+
+
+def test_a_request_carrying_only_the_hint_is_not_signed_in() -> None:
+    host = an_oidc_host()
+    host.client.cookies.clear()
+    hint = f"{ID_TOKEN_HINT_COOKIE_NAME}={a_fake_id_token('only-the-hint')}"
+
+    response = host.client.get("/me", headers={"cookie": hint})
+
+    assert response.status_code == 401
 
 
 @dataclass(frozen=True)
@@ -1010,6 +1080,7 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
 
     assert (response.status_code, response.json()) == (403, {"refusal": refused.refusal})
     assert host.config.session_cookie_name not in set_cookies(response)
+    assert ID_TOKEN_HINT_COOKIE_NAME not in set_cookies(response)
     assert host.sessions.count_active() == 0
     assert host.accounts.list() == list(refused.stored)
     assert is_cleared(response, host.pending_cookie_name(query))
@@ -1316,14 +1387,23 @@ def post_logout(
     return host.client.post(path, headers=headers, follow_redirects=False)
 
 
-def is_the_issuers_logout_url(url: str) -> bool:
+def is_the_issuers_logout_url(url: str, *, id_token_hint: str | None) -> bool:
     parts = urllib.parse.urlsplit(url)
+    expected = {
+        "client_id": [CLIENT_ID],
+        "post_logout_redirect_uri": [a_client_config().post_logout_redirect_uri],
+    }
+    if id_token_hint is not None:
+        expected["id_token_hint"] = [id_token_hint]
     return (
         f"{parts.scheme}://{parts.netloc}{parts.path}" == END_SESSION_ENDPOINT
-        and urllib.parse.parse_qs(parts.query, keep_blank_values=True) == {
-            "client_id": [CLIENT_ID],
-            "post_logout_redirect_uri": [a_client_config().post_logout_redirect_uri],
-        }
+        and urllib.parse.parse_qs(parts.query, keep_blank_values=True) == expected
+    )
+
+
+def the_hint_cookie_is_cleared_for_the_logout_path(response: HttpxResponse) -> bool:
+    return {"max-age=0", f"path={LOGOUT_PATH}", "secure"} <= set_cookies(response).get(
+        ID_TOKEN_HINT_COOKIE_NAME, set(),
     )
 
 
@@ -1359,8 +1439,9 @@ def test_a_logout_ends_the_session_clears_both_cookies_and_sends_the_browser_to_
 
     response, logout_url = log_out_through(host)
 
-    assert is_the_issuers_logout_url(logout_url)
+    assert is_the_issuers_logout_url(logout_url, id_token_hint=host.issued_id_tokens[-1])
     assert both_session_cookies_are_cleared(host, response)
+    assert the_hint_cookie_is_cleared_for_the_logout_path(response)
     assert host.sessions.count_active() == 0
 
 
@@ -1394,6 +1475,12 @@ def _forged_session_cookie(host: OidcHost) -> dict[str, str]:
     return {"cookie": forged}
 
 
+def _session_cookies_dropped(host: OidcHost) -> dict[str, str]:
+    host.client.cookies.delete(host.config.session_cookie_name)
+    host.client.cookies.delete(host.config.csrf_cookie_name)
+    return {}
+
+
 def _session_ended_in_the_store(host: OidcHost) -> dict[str, str]:
     host.sessions.delete_for_user(SUBJECT)
     return {}
@@ -1406,15 +1493,20 @@ def _session_expired_but_stored(host: OidcHost) -> dict[str, str]:
     return {}
 
 
-@pytest.mark.parametrize(("arrange", "sessions_kept"), [
-    pytest.param(_no_session, 0, id="no-session"),
-    pytest.param(_forged_session_cookie, 1, id="forged-cookie-ends-nothing"),
-    pytest.param(_session_ended_in_the_store, 0, id="session-already-ended"),
-    pytest.param(_session_expired_but_stored, 0, id="session-expired-but-stored"),
+@pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent"), [
+    pytest.param(_no_session, 0, False, id="no-session"),
+    pytest.param(_forged_session_cookie, 1, False, id="forged-cookie-ends-nothing"),
+    pytest.param(_session_cookies_dropped, 1, True, id="session-cookies-gone-hint-kept"),
+    pytest.param(_session_ended_in_the_store, 0, True, id="session-already-ended"),
+    pytest.param(_session_expired_but_stored, 0, True, id="session-expired-but-stored"),
 ])
 @pytest.mark.parametrize("shape", LOGOUT_SHAPES)
 def test_a_same_origin_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
-    shape: LogoutShape, arrange: Callable[[OidcHost], dict[str, str]], sessions_kept: int,
+    shape: LogoutShape,
+    arrange: Callable[[OidcHost], dict[str, str]],
+    sessions_kept: int,
+    *,
+    hint_sent: bool,
 ) -> None:
     host = an_oidc_host()
     if arrange is not _no_session:
@@ -1424,9 +1516,63 @@ def test_a_same_origin_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
     response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers}, shape.path)
 
     assert response.status_code == shape.status_code
-    assert is_the_issuers_logout_url(shape.url_of(response))
+    assert is_the_issuers_logout_url(
+        shape.url_of(response),
+        id_token_hint=host.issued_id_tokens[-1] if hint_sent else None,
+    )
     assert both_session_cookies_are_cleared(host, response)
     assert host.sessions.count_active() == sessions_kept
+
+
+def _a_compact_jws_of_length(length: int) -> str:
+    segment_length = (length - 2) // 3
+    return ".".join(["A" * segment_length] * 2 + ["A" * (length - 2 - 2 * segment_length)])
+
+
+def _hint_cookies(*values: str) -> dict[str, str]:
+    return {"cookie": "; ".join(f"{ID_TOKEN_HINT_COOKIE_NAME}={value}" for value in values)}
+
+
+@pytest.mark.parametrize("unusable_hint_cookies", [
+    pytest.param({}, id="missing"),
+    pytest.param(
+        _hint_cookies(a_fake_id_token("first"), a_fake_id_token("second")), id="duplicated",
+    ),
+    pytest.param(
+        _hint_cookies(_a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND + 1)),
+        id="one-character-over-the-bound",
+    ),
+    pytest.param(_hint_cookies("not-a-jws"), id="not-compact-jws-shaped"),
+    pytest.param(_hint_cookies("two.segments"), id="two-segments"),
+    pytest.param(_hint_cookies("bad+char.in.token"), id="outside-the-base64url-alphabet"),
+])
+def test_a_logout_without_a_usable_hint_leaves_it_out_and_still_clears_the_cookie(
+    unusable_hint_cookies: dict[str, str],
+) -> None:
+    host = an_oidc_host()
+
+    response = post_logout(host, {**SAME_ORIGIN_FORM, **unusable_hint_cookies})
+
+    assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=None)
+    assert the_hint_cookie_is_cleared_for_the_logout_path(response)
+
+
+@pytest.mark.parametrize("hint", [
+    pytest.param("AAAA.AAAA.AAAA", id="segments-that-are-no-json"),
+    pytest.param("bm90LWpzb24.bm90LWpzb24.c2ln", id="segments-that-decode-to-text"),
+    pytest.param(
+        _a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND), id="exactly-the-bound",
+    ),
+])
+def test_a_logout_forwards_a_sole_hint_in_the_shape_of_a_jws_byte_for_byte_undecoded(
+    hint: str,
+) -> None:
+    host = an_oidc_host()
+
+    response = post_logout(host, {**SAME_ORIGIN_FORM, **_hint_cookies(hint)})
+
+    assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=hint)
+    assert the_hint_cookie_is_cleared_for_the_logout_path(response)
 
 
 @pytest.mark.parametrize("shape", LOGOUT_SHAPES)
@@ -1472,7 +1618,7 @@ def test_a_logout_reaches_no_issuer_endpoint() -> None:
 
     response, logout_url = a_logout_by_form(host)
 
-    assert is_the_issuers_logout_url(logout_url)
+    assert is_the_issuers_logout_url(logout_url, id_token_hint=host.issued_id_tokens[-1])
     assert host.sessions.count_active() == 0
     assert len(host.issuer.requests) == exchanges_before
     assert len(host.key_set.fetched_urls) == fetches_before
@@ -1494,7 +1640,9 @@ def test_the_logout_url_ignores_any_target_the_request_names() -> None:
         follow_redirects=False,
     )
 
-    assert is_the_issuers_logout_url(response.headers["location"])
+    assert is_the_issuers_logout_url(
+        response.headers["location"], id_token_hint=host.issued_id_tokens[-1],
+    )
 
 
 OTHER_SUBJECT = "0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23"
