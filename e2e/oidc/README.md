@@ -104,7 +104,7 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), in
 scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
@@ -131,7 +131,9 @@ for `Path=/logout`, HttpOnly, Secure, SameSite=Strict, and no request to `/` or 
 carries it), `SCENARIO 15` (a second login and logout show no page), `SCENARIO 17` (the
 same on the cross-site origin `demo.example.test`) and `SCENARIO 19` (a hint of the
 3072-character bound reaches Keycloak, which answers neither 414 nor 431). A refused
-sign-in (scenario 7) leaves no hint cookie.
+sign-in (scenario 7) leaves no hint cookie. `SCENARIO 20` (1280x800) replaces the hint with one whose
+signature segment is altered: Keycloak answers 400 with its error page ("Invalid parameter:
+id_token_hint"), neither the confirmation page nor a redirect home.
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
 the app; enabled again, the same credentials sign in; an account the host
@@ -178,13 +180,11 @@ Token.
   (2 sessions). A logout in A calls B back, and both B sessions end.
 - `SCENARIO 12`, admin logout: `POST /admin/realms/hallucinai/users/{id}/logout`
   answers 204; both apps are called back and answer `/me` with 401.
-- `SCENARIO 13`, disable, then logout: a person signs in to A and B and the account is
-  disabled; that alone ends nothing in either app. The person's own logout in A shows
-  no page (the ID token hint is enough for Keycloak, disabled account or not) and now
-  ends the Keycloak session: Keycloak calls both apps back, each accepted once, and
-  each holds 0 sessions. Before the hint this logout stopped at Keycloak's confirmation
-  and the admin logout was the only one that reached the apps. A fresh sign in is
-  refused at Keycloak's form.
+- `SCENARIO 13`, disable, then admin logout (the lock flow): a person signs in to A and
+  B and the account is disabled; that alone ends nothing: both apps still hold 1 session
+  with 0 callbacks and A's page still says signed in. Keycloak's admin logout (204) then
+  calls each app back exactly once, which also shows the disable sent none; each holds
+  0 sessions and answers `/me` with 401. A fresh sign in is refused at Keycloak's form.
 
 `SCENARIO 5` is the session cookie after the callback redirect. One host
 process per `cookie_samesite` serves both app origins; each cell uses a fresh
@@ -322,12 +322,13 @@ The pull request that last changed this directory carries the full result table.
 ## Last run: back-channel logout
 
 Exit status 0, evidence scan clean, the stack and the relay containers removed. Scenarios
-10 to 13 held at 390x844 and at 1280x800; scenario 5 is unchanged (`https://demo.example.test`
-with `strict` stays `FAILED-as-found`).
+10 to 13 held at 390x844 and at 1280x800, scenarios 14 to 20 at 1280x800; scenario 5 is
+unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 
 | Scenario | What a person did | Held |
 |---|---|---|
 | 10 | two contexts signed in to app A; one logged out through Keycloak | the other session ended through one accepted callback |
 | 11 | one context in A and B, a second in B; a logout in A | both B sessions ended through B's callback |
 | 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
-| 13 | the account disabled, then the person's own logout in A | B untouched (no callback); the admin logout then ended both, and a fresh sign in was refused |
+| 13 | the account disabled, then Keycloak's admin logout (204) | the disable alone ended nothing; then each app called back exactly once, `/me` 401, and a fresh sign in was refused |
+| 20 | the hint's signature altered, then logout | Keycloak's error page (400, `Invalid parameter: id_token_hint`) |

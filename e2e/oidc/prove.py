@@ -680,38 +680,71 @@ def second_login_and_logout_show_no_page(proof: Proof, width: Width) -> str:
     return "after a logout and a second login, the second logout, with the new hint, showed no page"
 
 
-def delete_the_hint(page: Page) -> str:
+def delete_the_hint(proof: Proof, page: Page) -> str:
     page.context.clear_cookies(name=ID_TOKEN_HINT_COOKIE_NAME)
     assert not hints_anywhere(page), "the hint cookie was not deleted"
     return "with the hint cookie deleted"
 
 
-def duplicate_the_hint(page: Page) -> str:
+def duplicate_the_hint(proof: Proof, page: Page) -> str:
     (hint,) = hint_cookies(page)
     plant_hint(page, cookie_name_and_value(hint)[1], "/")
     assert len(hint_cookies(page)) == 2, "the planted duplicate is not sent with the logout"
     return "with a second hint cookie planted at Path=/"
 
 
-UNUSABLE_HINTS = ((16, delete_the_hint), (18, duplicate_the_hint))
+def alter_the_signature(proof: Proof, page: Page) -> str:
+    (hint,) = hint_cookies(page)
+    header, payload, signature = cookie_name_and_value(hint)[1].split(".")
+    altered = ("B" if signature[0] == "A" else "A") + signature[1:]
+    tampered = f"{header}.{payload}.{altered}"
+    assert len(tampered) <= MAX_ID_TOKEN_HINT_CHARS
+    proof.registry.add("tampered ID token hint", tampered)
+    page.context.clear_cookies(name=ID_TOKEN_HINT_COOKIE_NAME)
+    plant_hint(page, tampered, LOGOUT_PATH)
+    assert len(hint_cookies(page)) == 1, "the tampered hint is not the sole hint"
+    return "with the hint's signature altered"
 
 
-def logout_asks_when_the_hint_is_unusable(
-    proof: Proof, width: Width, number: int, spoil: Callable[[Page], str]
+def logout_is_confirmed_at_keycloak(proof: Proof, page: Page, scenario: str) -> str:
+    log_out_through_keycloak(proof, page, scenario, APP_ORIGIN, asks_for_confirmation=True)
+    assert proof.host_state()["sessions"] == 0, "the host still holds a session"
+    me_status = proof.status_of(page, "/me")
+    assert me_status == 401, f"/me answered {me_status}"
+    return (
+        "the logout led to Keycloak's confirmation page, and after confirming the app showed "
+        "Signed out and /me answered 401"
+    )
+
+
+def logout_stops_at_keycloaks_error_page(proof: Proof, page: Page, scenario: str) -> str:
+    answer = press_logout(proof, page)
+    page.wait_for_load_state()
+    shown = " ".join(page.inner_text("body").split())[:120]
+    proof.shot(page, scenario, "result")
+    assert answer.status == 400, f"Keycloak answered the end-session request {answer.status}"
+    assert page.locator(KEYCLOAK_LOGOUT_CONFIRMATION).count() == 0, "Keycloak asked to confirm"
+    assert not page.url.startswith(f"{APP_ORIGIN}/"), f"the browser went on to {page.url}"
+    return f"the logout stopped at Keycloak's error page ({answer.status}, {shown!r})"
+
+
+UNUSABLE_HINTS = (
+    (16, delete_the_hint, logout_is_confirmed_at_keycloak),
+    (18, duplicate_the_hint, logout_is_confirmed_at_keycloak),
+    (20, alter_the_signature, logout_stops_at_keycloaks_error_page),
+)
+
+
+def logout_with_an_unusable_hint(
+    proof: Proof, width: Width, number: int, spoil: Callable[[Proof, Page], str],
+    outcome: Callable[[Proof, Page, str], str],
 ) -> str:
     scenario = f"{number}-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
         signed_in_with_a_hint(proof, page, scenario)
-        spoiled = spoil(page)
-        log_out_through_keycloak(proof, page, scenario, APP_ORIGIN, asks_for_confirmation=True)
-        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-        me_status = proof.status_of(page, "/me")
-        assert me_status == 401, f"/me answered {me_status}"
-    return (
-        f"{spoiled}, the logout led to Keycloak's confirmation page, and after confirming the "
-        "app showed Signed out and /me answered 401"
-    )
+        spoiled = spoil(proof, page)
+        return f"{spoiled}, {outcome(proof, page, scenario)}"
 
 
 def logout_on_the_cross_site_origin(proof: Proof, width: Width) -> str:
@@ -956,13 +989,17 @@ def disabled_account_is_logged_out_everywhere(proof: Proof, width: Width) -> str
             sign_in_through_keycloaks_session(proof, page, app_b.origin, DISABLED_USER_NAME)
             proof.set_user_enabled(proof.disabled_user_id, False)
             page.goto(f"{app_a.origin}/")
-            log_out_through_keycloak(proof, page, scenario, app_a.origin)
-            proof.shot(page, scenario, "user-logout-result")
+            assert proof.headline(page) == f"Signed in as {DISABLED_USER_NAME}", (
+                "the disable alone ended the session in A"
+            )
+            for app in (app_a, app_b):
+                assert_callbacks(app, accepted=0, sessions=1)
+            proof.log_out_user_everywhere(proof.disabled_user_id)
             for app in (app_a, app_b):
                 wait_for_accepted_callbacks(app, 1)
                 assert_callbacks(app, accepted=1, sessions=0)
-            assert_signed_out(proof, page, app_b.origin)
-            proof.shot(page, scenario, "result")
+                assert_signed_out(proof, page, app.origin)
+                proof.shot(page, scenario, f"result-{app.configuration.client_id}")
 
         logins_before = app_a.state()["callbacks_received"]
         with proof.browsing(width) as fresh:
@@ -978,9 +1015,10 @@ def disabled_account_is_logged_out_everywhere(proof: Proof, width: Width) -> str
     finally:
         proof.set_user_enabled(proof.disabled_user_id, True)
     return (
-        "a person signed in to apps A and B, then the account was disabled at Keycloak; the "
-        "user's own logout in A showed no page, and Keycloak called both apps back (accepted 1, "
-        "refused 0 each): 0 sessions and /me 401 in each; a fresh sign in met "
+        "a person signed in to apps A and B, then the account was disabled at Keycloak: both apps "
+        "still held 1 session with 0 callbacks and A's page still said signed in; Keycloak's "
+        "admin logout (204) then called each app back exactly once (accepted 1, refused 0), "
+        "so the disable itself sent none: 0 sessions and /me 401 in each; a fresh sign in met "
         f"{KEYCLOAK_DISABLED_MESSAGE!r} at Keycloak and reached no app"
     )
 
@@ -1278,11 +1316,11 @@ def run_hint_scenarios(proof: Proof) -> None:
             f"SCENARIO {number} {DESKTOP.label} {APP_ORIGIN}",
             lambda scenario=scenario: scenario(proof, DESKTOP),
         )
-    for number, spoil in UNUSABLE_HINTS:
+    for number, spoil, outcome in UNUSABLE_HINTS:
         proof.held_or_failed(
             f"SCENARIO {number} {DESKTOP.label} {APP_ORIGIN}",
-            lambda number=number, spoil=spoil: logout_asks_when_the_hint_is_unusable(
-                proof, DESKTOP, number, spoil
+            lambda number=number, spoil=spoil, outcome=outcome: logout_with_an_unusable_hint(
+                proof, DESKTOP, number, spoil, outcome
             ),
         )
 
