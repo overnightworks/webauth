@@ -1,6 +1,6 @@
 """What the host application decides about its own requests.
 
-The library owns the mechanism — one budget class per request, one CSRF
+The library owns the mechanism — one rate-limit budget per request, one CSRF
 verdict, one body limit, one set of response headers — and knows nothing
 about which paths a particular deployment serves. Each policy below carries
 those answers as data: the application builds it at startup and hands it to
@@ -14,8 +14,10 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum, StrEnum, auto
+from enum import StrEnum
 from typing import Final
+
+from webauth.validation import require_positive_whole_number
 
 __all__ = [
     "DEFAULT_PERMISSIONS_POLICY",
@@ -27,8 +29,8 @@ __all__ = [
     "PathRules",
     "PathShape",
     "RateLimitBudget",
-    "RateLimitClass",
     "RateLimitPolicy",
+    "RateLimitRule",
     "SecurityHeadersPolicy",
     "default_content_security_policy",
 ]
@@ -63,65 +65,79 @@ class PathRules:
         )
 
 
-class RateLimitClass(Enum):
-    """The budget a request spends from, decided once per request."""
-
-    API = auto()
-    MEDIA = auto()
-    STREAM = auto()
+_BUDGET_NAME: Final = re.compile(r"[a-z][a-z0-9_-]*")
 
 
 @dataclass(frozen=True)
 class RateLimitBudget:
-    """How many requests one class grants an address within its window."""
+    """How many requests the budget ``name`` grants an address within its window.
 
+    The name is part of the limiter key, so it holds none of the characters a
+    key or a Redis pattern gives meaning to: ``:`` separates the name from the
+    address, ``{}`` form Redis Cluster hash tags, ``*?[]`` are glob characters.
+    ``max_requests`` and ``window_seconds`` are positive whole numbers; a window
+    of zero would make the limiter admit every request.
+    """
+
+    name: str
     max_requests: int
     window_seconds: int
+
+    def __post_init__(self) -> None:
+        if not _BUDGET_NAME.fullmatch(self.name):
+            raise ValueError(
+                f"Rate-limit budget name {self.name!r} must start with a lowercase letter "
+                "and hold only lowercase letters, digits, '-' and '_'.",
+            )
+        label = f"RateLimitBudget {self.name!r}"
+        require_positive_whole_number(f"{label} max_requests", self.max_requests, unit="requests")
+        require_positive_whole_number(
+            f"{label} window_seconds", self.window_seconds, unit="seconds",
+        )
+
+
+@dataclass(frozen=True)
+class RateLimitRule:
+    """The budget the paths it names spend from."""
+
+    paths: PathRules
+    budget: RateLimitBudget
 
 
 @dataclass(frozen=True)
 class RateLimitPolicy:
-    """Which paths belong to which budget class, and how large each budget is.
+    """Which budget each request spends from, and how large each budget is.
 
-    Separate classes exist so one traffic pattern cannot starve another
-    arriving from the same address: range-served media and stream openings
-    are ordinary use at rates that would look like abuse on an API budget.
+    A request spends from one budget. Separate budgets exist so one traffic
+    pattern cannot starve another arriving from the same address.
     """
 
-    budgets: Mapping[RateLimitClass, RateLimitBudget]
+    default: RateLimitBudget
+    rules: tuple[RateLimitRule, ...] = ()
     exempt: PathRules = PathRules()
-    media: PathRules = PathRules()
-    stream: PathRules = PathRules()
 
     def __post_init__(self) -> None:
-        unbudgeted = [
-            rate_limit_class.name
-            for rate_limit_class in RateLimitClass
-            if rate_limit_class not in self.budgets
-        ]
-        if unbudgeted:
+        names = [self.default.name, *(rule.budget.name for rule in self.rules)]
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
             raise ValueError(
-                "Every rate-limit class needs a budget, or a request classified "
-                f"into one would go unlimited; missing: {', '.join(unbudgeted)}.",
+                "Each rate-limit budget needs its own name, or one counter would carry "
+                f"two windows; repeated: {', '.join(repeated)}.",
             )
 
     def is_exempt(self, path: str) -> bool:
         return self.exempt.matches(path)
 
-    def classify(self, path: str) -> RateLimitClass:
-        """The one class ``path`` spends from.
+    def budget_for(self, path: str) -> RateLimitBudget:
+        """The one budget ``path`` spends from; the first matching rule decides.
 
-        A path no rule claims spends from the API budget — fail closed, so an
-        unrecognised route cannot slip through unlimited.
+        A path no rule claims spends from the default budget -- fail closed, so
+        an unrecognised route cannot slip through unlimited.
         """
-        if self.media.matches(path):
-            return RateLimitClass.MEDIA
-        if self.stream.matches(path):
-            return RateLimitClass.STREAM
-        return RateLimitClass.API
-
-    def budget(self, rate_limit_class: RateLimitClass) -> RateLimitBudget:
-        return self.budgets[rate_limit_class]
+        for rule in self.rules:
+            if rule.paths.matches(path):
+                return rule.budget
+        return self.default
 
 
 @dataclass(frozen=True)

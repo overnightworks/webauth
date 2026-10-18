@@ -27,6 +27,25 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `realm.yaml`, before upgrading; a host whose logout is a form adds the
   issuer's origin to `form-action`, and protects `/logout` with the origin
   check and a `token_exempt` rule (README, "Logging out").
+- `RateLimitBudget` refuses, with a `ValueError` naming the budget and the
+  field, a `max_requests` or `window_seconds` that is not a positive `int` (`0`,
+  a negative number, a `bool`, a `float`, a `str` or `None`). Before, a window
+  of `0` or less made both backends admit every request. A host that passed
+  such a value must now pass a positive whole number.
+- `RateLimitClass` is gone, and `RateLimitPolicy` takes `default` and `rules`
+  instead of `budgets`, `media` and `stream`. `RateLimitBudget` gains a
+  leading `name` (lowercase letters, digits, `-` and `_`, starting with a
+  letter); an invalid or repeated name is a `ValueError`. `RateLimitRule(paths,
+  budget)` is new, and the first matching rule decides. `classify` and
+  `budget` become `budget_for(path)`. The limiter keys are now
+  `<name>:<address>`, so budgets start fresh and the old `API:`, `MEDIA:` and
+  `STREAM:` keys expire within one window. Migrating the former three classes:
+  `default=RateLimitBudget("api", ip_limit, w)`,
+  `rules=(RateLimitRule(media_paths, RateLimitBudget("media", media_limit, w)),
+  RateLimitRule(stream_paths, RateLimitBudget("stream", stream_limit, w)))`,
+  media first as before; `policy.classify(p) is RateLimitClass.API` becomes
+  `policy.budget_for(p) is policy.default`, and
+  `policy.budget(RateLimitClass.API)` becomes `policy.default`.
 - `finish_login` and `admit_identity` take `admission: AdmissionConfig`
   instead of `bound_issuer: str`. `AdmissionConfig(bound_issuer=...,
   login_group=...)` requires the app's group path (or

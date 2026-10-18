@@ -47,9 +47,7 @@ from webauth.middleware.security_headers import (
     STRICT_TRANSPORT_SECURITY,
 )
 from webauth.policies import (
-    PathRules,
     RateLimitBudget,
-    RateLimitClass,
     RateLimitPolicy,
     SecurityHeadersPolicy,
 )
@@ -147,7 +145,9 @@ def session_cookie_header(*cookie_values: str) -> str:
 
 API_PATH = "/api/thing"
 RATE_LIMITED_PATH = API_PATH
-MEDIA_PATH = "/media/thing"
+BULK_PATH = "/bulk/thing"
+DEFAULT_BUDGET_NAME = "api"
+BULK_BUDGET_NAME = "bulk"
 DEFAULT_RATE_WINDOW_SECONDS = 60
 
 
@@ -158,12 +158,18 @@ class AlwaysFailingRateLimitBackend:
         raise ConnectionError("rate limiter down")
 
 
-def _rate_limited_client(
+def a_policy_rate_limited_client(
     rate_limits: RateLimitBackend,
     policy: RateLimitPolicy,
-    paths: tuple[str, ...],
-    config_overrides: dict[str, object],
+    *,
+    paths: tuple[str, ...] = (API_PATH,),
+    **config_overrides: object,
 ) -> TestClient:
+    """A client whose requests spend from ``policy`` over ``rate_limits``.
+
+    Every path in ``paths`` answers 200 when the limiter lets it through; a
+    keyword replaces the configuration field it names.
+    """
     app = FastAPI()
     install_web_auth_config(
         app, a_web_auth_config(rate_limits=rate_limits, **config_overrides),
@@ -181,40 +187,11 @@ def a_rate_limited_client(
     window_seconds: int = DEFAULT_RATE_WINDOW_SECONDS,
     **config_overrides: object,
 ) -> TestClient:
-    """A client whose every request spends one budget of ``rate_limits``.
-
-    Every class shares one budget so the test drives the limiter through the
-    real middleware regardless of how a path classifies; a keyword replaces the
-    configuration field it names.
-    """
-    budget = RateLimitBudget(max_requests, window_seconds)
+    """A client whose every request spends the one default budget of ``rate_limits``."""
     policy = RateLimitPolicy(
-        budgets={rate_limit_class: budget for rate_limit_class in RateLimitClass},
+        default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests, window_seconds),
     )
-    return _rate_limited_client(rate_limits, policy, (API_PATH,), config_overrides)
-
-
-def a_class_split_rate_limited_client(
-    rate_limits: RateLimitBackend,
-    *,
-    api_max_requests: int,
-    media_max_requests: int,
-    window_seconds: int = DEFAULT_RATE_WINDOW_SECONDS,
-) -> TestClient:
-    """A client whose API and media paths spend separate budgets.
-
-    ``MEDIA_PATH`` classifies as the media budget, ``API_PATH`` as the API one,
-    so a test can prove one class's exhaustion never spends another's.
-    """
-    policy = RateLimitPolicy(
-        budgets={
-            RateLimitClass.API: RateLimitBudget(api_max_requests, window_seconds),
-            RateLimitClass.MEDIA: RateLimitBudget(media_max_requests, window_seconds),
-            RateLimitClass.STREAM: RateLimitBudget(media_max_requests, window_seconds),
-        },
-        media=PathRules(prefixes=(MEDIA_PATH,)),
-    )
-    return _rate_limited_client(rate_limits, policy, (API_PATH, MEDIA_PATH), {})
+    return a_policy_rate_limited_client(rate_limits, policy, **config_overrides)
 
 
 @dataclass
@@ -628,7 +605,7 @@ def an_idle_session(
 
 
 def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
-    """The supported presentator config: idle-window liveness."""
+    """The supported idle-window liveness config."""
     config = a_web_auth_config(
         admin_role=ADMIN_ROLE, session_liveness=IdleWindowLiveness(IDLE_WINDOW_SECONDS),
     )

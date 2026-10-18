@@ -26,7 +26,7 @@ from webauth.cookies import (
     is_secure_prefixed_cookie_name,
     is_valid_cookie_name,
 )
-from webauth.liveness import require_positive_seconds
+from webauth.validation import require_positive_whole_number
 
 if TYPE_CHECKING:
     import re
@@ -114,7 +114,9 @@ class WebAuthConfig:
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
         self._require_distinct_cookie_names()
-        require_positive_seconds("cookie_max_age_seconds", self.cookie_max_age_seconds)
+        require_positive_whole_number(
+            "cookie_max_age_seconds", self.cookie_max_age_seconds, unit="seconds",
+        )
         if (
             type(self.ipv6_budget_prefix) is not int
             or self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE
