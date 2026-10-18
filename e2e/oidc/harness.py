@@ -111,9 +111,9 @@ def free_port() -> int:
 
 def start_host(run: RunRecord, runtime: Path, settings: HostSettings, ca_certificate: Path) -> Host:
     cookie_samesite = settings.cookie_samesite
-    settings_file = runtime / f"host-settings-{cookie_samesite}.json"
+    settings_file = runtime / f"host-settings-{settings.port}.json"
     settings.write(settings_file)
-    log_file = (runtime / f"host-{cookie_samesite}.log").open("wb")
+    log_file = (runtime / f"host-{settings.port}.log").open("wb")
     # Fixed command list
     process = subprocess.Popen(  # noqa: S603
         [sys.executable, str(Path(__file__).with_name("host_app.py")),

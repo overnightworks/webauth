@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
 
 from fastapi import Depends, HTTPException, Request
+from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, Response
 
+from webauth._origins import origin_is_allowed
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
@@ -40,6 +42,8 @@ __all__ = [
     "AuthDependencies",
     "AuthenticatedUser",
     "LoginRedirect",
+    "WebSocketRefusal",
+    "authenticate_websocket",
     "current_user_dependency",
     "session_id_from_request",
     "unauthenticated_response",
@@ -135,12 +139,9 @@ def current_user_dependency(
         sessions: SessionRecordStore = Depends(session_store),
         audit: AuditSink = Depends(audit_sink),
     ) -> AuthenticatedUser:
-        config = web_auth_config(request)
-        session_id = _session_id_from_cookie(request, config, login_redirect)
-
-        user = _authenticate_from_store(
-            request, sessions, audit, session_id, config, login_redirect,
-        )
+        user = _resolve_session(request, sessions, audit)
+        if isinstance(user, WebSocketRefusal):
+            raise _http_refusal(request, user, login_redirect)
         on_authenticated(user)
         return user
 
@@ -172,6 +173,39 @@ def current_user_dependency(
         admin_user=admin_user,
         verified_session_id=verified_session_id,
     )
+
+
+def authenticate_websocket(
+    connection: HTTPConnection, *, sessions: SessionRecordStore, audit: AuditSink,
+) -> AuthenticatedUser | WebSocketRefusal:
+    """The account behind a WebSocket handshake, or why the handshake is refused.
+
+    The Origin is decided first, so a refused Origin never touches the store
+    or the audit: a browser sends the session cookie on a cross-site
+    handshake, and only the Origin tells a foreign page from the application's
+    own. Exactly one Origin naming a host the application serves is admitted;
+    there is no ``Referer`` fallback and ``Sec-Fetch-Site`` does not decide.
+    Then the session is decided exactly as ``current_user`` decides it for an
+    HTTP request, renewal and identity audit included.
+
+    Nothing here commits, and a failing store raises rather than refusing: the
+    host finishes its transaction before ``accept`` and closes a refused
+    handshake with code 1008. A socket outlives its session unless the host
+    calls this again, in a fresh transaction, and closes on a refusal.
+    """
+    origin_refusal = _origin_refusal(connection)
+    if origin_refusal is not None:
+        return origin_refusal
+    return _resolve_session(connection, sessions, audit)
+
+
+def _origin_refusal(connection: HTTPConnection) -> WebSocketRefusal | None:
+    origins = connection.headers.getlist("origin")
+    if not origins:
+        return WebSocketRefusal.MISSING_ORIGIN
+    if len(origins) > 1 or not origin_is_allowed(origins[0], web_auth_config(connection)):
+        return WebSocketRefusal.FOREIGN_ORIGIN
+    return None
 
 
 def unauthenticated_response(
@@ -258,43 +292,71 @@ def _accepted_quality(accept_header: str, media_type: str) -> float:
     return wildcard_quality
 
 
-class _NoSessionCookie(Enum):
-    """Why a request carries no usable session cookie, as the refusal names it."""
+class WebSocketRefusal(Enum):
+    """Why a connection is refused, as a stable value a host can log or branch on.
 
-    ABSENT = AUTHENTICATION_REQUIRED_DETAIL
-    INVALID = INVALID_SESSION_DETAIL
+    The session members are the one taxonomy of why no live session was
+    found; the HTTP dependencies answer them with their own responses, so a
+    refusal reads the same on both channels. The origin members are decided
+    by ``authenticate_websocket`` alone.
+    """
+
+    NO_SESSION = "no-session"
+    INVALID_SESSION = "invalid-session"
+    SESSION_ENDED_OR_EXPIRED = "session-ended-or-expired"
+    ACCOUNT_DISABLED = "account-disabled"
+    MISSING_ORIGIN = "missing-origin"
+    FOREIGN_ORIGIN = "foreign-origin"
 
 
-def session_id_from_request(request: Request, config: WebAuthConfig) -> str | None:
-    """The session identifier the request's one signed session cookie names.
+def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -> str | None:
+    """The session identifier the connection's one signed session cookie names.
 
     ``None`` when the cookie is missing, longer than
     ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed,
     forged, or present more than once: a sibling subdomain can set a second cookie of the same
-    name, and choosing either would let it decide whose account the request
+    name, and choosing either would let it decide whose account the connection
     runs in.
     """
-    reading = _read_session_cookie(request, config)
-    return None if isinstance(reading, _NoSessionCookie) else reading
+    reading = _read_session_cookie(connection, config)
+    return None if isinstance(reading, WebSocketRefusal) else reading
 
 
 def _session_id_from_cookie(
     request: Request, config: WebAuthConfig, login_redirect: LoginRedirect | None,
 ) -> str:
     reading = _read_session_cookie(request, config)
-    if isinstance(reading, _NoSessionCookie):
-        raise _unauthenticated(request, reading.value, login_redirect)
+    if isinstance(reading, WebSocketRefusal):
+        raise _http_refusal(request, reading, login_redirect)
     return reading
 
 
-def _read_session_cookie(request: Request, config: WebAuthConfig) -> str | _NoSessionCookie:
-    values = cookie_values(request, config.session_cookie_name)
+def _read_session_cookie(
+    connection: HTTPConnection, config: WebAuthConfig,
+) -> str | WebSocketRefusal:
+    values = cookie_values(connection, config.session_cookie_name)
     if len(values) > 1:
-        return _NoSessionCookie.INVALID
+        return WebSocketRefusal.INVALID_SESSION
     if not values or not values[0] or len(values[0]) > MAX_SESSION_COOKIE_CHARS:
-        return _NoSessionCookie.ABSENT
+        return WebSocketRefusal.NO_SESSION
     session_id = verify_session_cookie(values[0], config.signing_key)
-    return _NoSessionCookie.INVALID if session_id is None else session_id
+    return WebSocketRefusal.INVALID_SESSION if session_id is None else session_id
+
+
+def _http_refusal(
+    request: Request, refusal: WebSocketRefusal, login_redirect: LoginRedirect | None,
+) -> HTTPException:
+    if refusal is WebSocketRefusal.ACCOUNT_DISABLED:
+        return HTTPException(403, ACCOUNT_DISABLED_DETAIL)
+    detail = _HTTP_DETAIL_OF_SESSION_REFUSAL[refusal]
+    return _unauthenticated(request, detail, login_redirect)
+
+
+_HTTP_DETAIL_OF_SESSION_REFUSAL: Final = {
+    WebSocketRefusal.NO_SESSION: AUTHENTICATION_REQUIRED_DETAIL,
+    WebSocketRefusal.INVALID_SESSION: INVALID_SESSION_DETAIL,
+    WebSocketRefusal.SESSION_ENDED_OR_EXPIRED: SESSION_EXPIRED_DETAIL,
+}
 
 
 def _record_identity_changes(
@@ -335,24 +397,30 @@ def _record_identity_changes(
         )
 
 
-def _authenticate_from_store(
-    request: Request,
-    sessions: SessionRecordStore,
-    audit: AuditSink,
-    session_id: str,
-    config: WebAuthConfig,
-    login_redirect: LoginRedirect | None,
-) -> AuthenticatedUser:
+def _resolve_session(
+    connection: HTTPConnection, sessions: SessionRecordStore, audit: AuditSink,
+) -> AuthenticatedUser | WebSocketRefusal:
+    """The one decision whom a connection's session cookie speaks for.
+
+    Cookie, signature, load, liveness, active account, renewal, identity
+    audit: HTTP and WebSocket both ask here and translate the refusal into
+    their own answer.
+    """
+    config = web_auth_config(connection)
+    session_id = _read_session_cookie(connection, config)
+    if isinstance(session_id, WebSocketRefusal):
+        return session_id
+
     record = sessions.load(session_id)
     now = datetime.now(UTC)
     if record is None or not config.session_liveness.admits_stored_session(record, now):
-        raise _unauthenticated(request, SESSION_EXPIRED_DETAIL, login_redirect)
+        return WebSocketRefusal.SESSION_ENDED_OR_EXPIRED
 
     if not record.user.is_active:
-        raise HTTPException(403, ACCOUNT_DISABLED_DETAIL)
+        return WebSocketRefusal.ACCOUNT_DISABLED
 
-    current_ip = resolve_client_ip(request)
-    current_user_agent = client_user_agent(request)
+    current_ip = resolve_client_ip(connection)
+    current_user_agent = client_user_agent(connection)
 
     stored_ip = record.ip_address
     stored_user_agent = record.user_agent
@@ -367,7 +435,7 @@ def _authenticate_from_store(
             f"SessionRecordStore.touch must return a bool, not {type(renewed).__name__}",
         )
     if not renewed:
-        raise _unauthenticated(request, SESSION_EXPIRED_DETAIL, login_redirect)
+        return WebSocketRefusal.SESSION_ENDED_OR_EXPIRED
 
     _record_identity_changes(
         audit,

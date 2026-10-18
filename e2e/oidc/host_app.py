@@ -1,11 +1,12 @@
-"""The host application of the proof: the README's start and callback routes
-over the library's own in-memory stores, served over TLS.
+"""The host application of the proof: the README's start, callback and back-channel
+logout routes over the library's own in-memory stores, served over TLS.
 
 One process serves one cookie configuration on every origin it is told. Beside
 it a plain-http listener on loopback, which no browser is ever pointed at, answers
 ``GET /state`` with counts only (among them the access tokens refused as unfit for a
-header), clears everything on ``POST /reset`` (the relying parties, with their key-set
-caches, are built again) and deactivates every known account on ``POST /deactivate``.
+header and the back-channel logouts accepted and refused), clears everything on
+``POST /reset`` (the relying parties, with their key-set caches, are built again) and
+deactivates every known account on ``POST /deactivate``.
 
 Where an issuer is told a ``userinfo_endpoint``, the host calls it once, with the
 access token of the token answer, after and only after a login was admitted: the
@@ -20,6 +21,7 @@ import functools
 import html
 import importlib.util
 import json
+import logging
 import os
 import re
 import signal
@@ -27,6 +29,7 @@ import ssl
 import sys
 import threading
 import time
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -36,6 +39,7 @@ from string import Template
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+import anyio.to_thread
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -46,8 +50,7 @@ from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import issue_session_cookies
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
 from webauth.https_client import fetch_key_set_over_https
-from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
-from webauth.middleware.security_headers import SecurityHeadersMiddleware
+from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     OidcClientConfig,
     OidcRefusal,
@@ -59,14 +62,19 @@ from webauth.oidc import (
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
+    BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
     finish_login,
     log_out,
     post_token_request_over_https,
+    receive_backchannel_logout,
     start_login,
 )
 from webauth.policies import (
+    BodySizePolicy,
+    BodySizeRule,
+    CacheControlRule,
     CspDirective,
     CsrfPolicy,
     PathRules,
@@ -74,9 +82,15 @@ from webauth.policies import (
     default_content_security_policy,
 )
 
+logger = logging.getLogger(__name__)
+
 LOOPBACK = "127.0.0.1"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
+BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
+BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
+DEFAULT_MAX_BODY_BYTES = 1024
+FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 REPOSITORY = Path(__file__).resolve().parents[2]
 SCOPES = ("openid", "profile", "groups")
 LEEWAY_SECONDS = 30
@@ -186,6 +200,8 @@ class World:
         self.sessions = arrangement.SessionRecordsInMemory(users=self.accounts, lock=self.lock)
         self.audit = arrangement.RecordingAuditSink()
         self.callbacks_received = 0
+        self.backchannel_accepted = 0
+        self.backchannel_refused = 0
         self.logins_admitted = 0
         self.last_refusal: str | None = None
         self.last_token_rejection: str | None = None
@@ -202,6 +218,8 @@ class World:
             "accounts": len(self.accounts.list()),
             "sessions": self.sessions.count_active(),
             "callbacks_received": self.callbacks_received,
+            "backchannel_accepted": self.backchannel_accepted,
+            "backchannel_refused": self.backchannel_refused,
             "last_refusal": self.last_refusal,
             "token_rejection": self.last_token_rejection,
             "logins_admitted": self.logins_admitted,
@@ -270,6 +288,20 @@ def _relying_party(
     )
 
 
+def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
+    media_type = (content_type or "").partition(";")[0].strip().lower()
+    if media_type != FORM_CONTENT_TYPE:
+        return None
+    try:
+        fields = urllib.parse.parse_qsl(
+            request_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
+        )
+    except ValueError:
+        return None
+    tokens = [value for name, value in fields if name == "logout_token"]
+    return tokens[0] if len(tokens) == 1 and tokens[0] else None
+
+
 def call_userinfo(settings: HostSettings, current: World) -> None:
     """The one UserInfo request of an admitted login, trusting what ``SSL_CERT_FILE`` names."""
     access_token = current.token_requests.access_token
@@ -324,19 +356,27 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     install_web_auth_config(app, config)
-    app.add_middleware(
-        CsrfTokenMiddleware,
-        policy=CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGOUT_PATH}))),
-    )
-    app.add_middleware(CsrfOriginMiddleware, policy=CsrfPolicy())
     issuer = urlsplit(settings.end_session_endpoint)
     issuer_origin = f"{issuer.scheme}://{issuer.netloc}"
-    app.add_middleware(
-        SecurityHeadersMiddleware,
-        policy=SecurityHeadersPolicy(
+    backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
+    install_web_auth_middleware(
+        app,
+        security_headers=SecurityHeadersPolicy(
             default_content_security_policy(
                 added_sources={CspDirective.FORM_ACTION: [issuer_origin]},
-            )
+            ),
+            cache_control_rules=(CacheControlRule(paths=backchannel_path, value="no-store"),),
+        ),
+        body_size=BodySizePolicy(
+            default_max_bytes=DEFAULT_MAX_BODY_BYTES,
+            rules=(BodySizeRule(
+                paths=backchannel_path, max_bytes=BACKCHANNEL_LOGOUT_MAX_BODY_BYTES
+            ),),
+        ),
+        csrf_origin=CsrfPolicy(exempt=backchannel_path),
+        csrf_token=CsrfPolicy(
+            exempt=backchannel_path,
+            token_exempt=PathRules(exact=frozenset({LOGOUT_PATH})),
         ),
     )
 
@@ -418,6 +458,33 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             sessions=current.sessions, lock=current.lock,
         )
         return response
+
+    def end_the_sessions_of(logout_token: str) -> BackchannelLogoutResult:
+        current = world["world"]
+        with current.sessions.transaction():
+            return receive_backchannel_logout(
+                next(iter(current.relying_parties.values())), logout_token,
+                accounts=current.accounts, sessions=current.sessions,
+                lock=current.lock, audit=current.audit,
+            )
+
+    @app.post(BACKCHANNEL_LOGOUT_PATH)
+    async def backchannel_logout(request: Request) -> Response:
+        logout_token = the_logout_token_of(
+            await request.body(), request.headers.get("content-type"),
+        )
+        current = world["world"]
+        result = BackchannelLogoutResult.REFUSED
+        if logout_token is not None:
+            try:
+                result = await anyio.to_thread.run_sync(end_the_sessions_of, logout_token)
+            except Exception:
+                logger.exception("back-channel logout failed")
+        if result is BackchannelLogoutResult.ACCEPTED:
+            current.backchannel_accepted += 1
+            return Response(status_code=200)
+        current.backchannel_refused += 1
+        return Response(status_code=400)
 
     return app
 
