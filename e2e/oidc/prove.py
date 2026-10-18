@@ -86,6 +86,7 @@ OUTSIDER_NAME = "d1-outsider"
 ADMIN_NAME = "d1-admin"
 ADMIN_GROUP = f"{USER_GROUP}/admin"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
+KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
 
 
@@ -469,10 +470,11 @@ def session_cookie_after_redirect(
     return observed
 
 
-def logout(proof: Proof) -> str:
+def logout(proof: Proof, width: Width) -> str:
+    scenario = f"2-{width.label}"
     proof.reset_host()
-    with proof.browsing() as page:
-        proof.sign_in(page, "2")
+    with proof.browsing(width) as page:
+        proof.sign_in(page, scenario)
         page.goto(f"{APP_ORIGIN}/")
         assert proof.headline(page) == f"Signed in as {USER_NAME}"
         cookies = page.context.cookies(APP_ORIGIN)
@@ -481,27 +483,58 @@ def logout(proof: Proof) -> str:
             c for c in cookies if cookie_name_and_value(c)[0] == DEFAULT_SESSION_COOKIE_NAME
         )
         proof.registry.add("session cookie", cookie_name_and_value(session)[1])
-        page.click("#logout")
-        page.get_by_role("heading", name="Signed out").wait_for()
-        page.reload()
-        assert proof.headline(page) == "Signed out", "a reload of '/' did not show Sign in"
-        proof.shot(page, "2", "result")
+        proof.press(page, "#logout")
+        confirm_at_keycloak(proof, page, scenario)
         left = held_names & {
             cookie_name_and_value(c)[0] for c in page.context.cookies(APP_ORIGIN)
         }
         assert not left, f"cookies survived: {sorted(left)}"
+        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
+        proof.press(page, KEYCLOAK_LOGOUT_CONFIRMATION)
+        page.wait_for_url(f"{APP_ORIGIN}/")
+        page.get_by_role("heading", name="Signed out").wait_for()
+        page.reload()
+        assert proof.headline(page) == "Signed out", "a reload of '/' did not show Sign in"
+        proof.shot(page, scenario, "result")
         me_status = proof.status_of(page, "/me")
         assert me_status == 401, f"/me answered {me_status}"
         back_shows = back_button_shows(proof, page)
         replay = replayed_session_status(proof, session)
         assert replay == 401, f"the old session cookie was answered {replay}"
-        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-        silent = second_sign_in(proof, page)
+        again = second_sign_in(proof, page, scenario)
     return (
-        f"after the button the cookies are gone, a reload shows Sign in and /me answers 401; "
+        f"the button led to Keycloak's confirmation with the host already at 0 sessions and "
+        f"no app cookie; after confirming, the app showed Signed out and /me answered 401; "
         f"the back button shows {back_shows!r} but the old session cookie replayed over HTTPS "
-        f"to /me is refused ({replay}); a second Sign in {silent} (Keycloak's SSO session "
-        f"is not ended by this logout)"
+        f"to /me is refused ({replay}); a second Sign in {again}"
+    )
+
+
+def confirm_at_keycloak(proof: Proof, page: Page, scenario: str) -> None:
+    page.locator(KEYCLOAK_LOGOUT_CONFIRMATION).wait_for()
+    proof.assert_fits(page, KEYCLOAK_LOGOUT_CONFIRMATION)
+    proof.shot(page, scenario, "keycloak-confirmation")
+
+
+def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
+    scenario = f"9-{width.label}"
+    proof.reset_host()
+    with proof.browsing(width) as page:
+        proof.sign_in(page, scenario)
+        page.goto(f"{APP_ORIGIN}/")
+        assert proof.headline(page) == f"Signed in as {USER_NAME}"
+        proof.reset_host()
+        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
+        proof.press(page, "#logout")
+        confirm_at_keycloak(proof, page, scenario)
+        proof.press(page, KEYCLOAK_LOGOUT_CONFIRMATION)
+        page.wait_for_url(f"{APP_ORIGIN}/")
+        page.get_by_role("heading", name="Signed out").wait_for()
+        proof.shot(page, scenario, "result")
+        again = second_sign_in(proof, page, scenario)
+    return (
+        f"with the app session already gone, the button still led to Keycloak's confirmation "
+        f"and back to the app, signed out; a second Sign in {again}"
     )
 
 
@@ -521,21 +554,16 @@ def replayed_session_status(proof: Proof, session: Cookie) -> int:
     ).status_code
 
 
-def second_sign_in(proof: Proof, page: Page) -> str:
+def second_sign_in(proof: Proof, page: Page, scenario: str) -> str:
     page.goto(f"{APP_ORIGIN}/")
-    page.click("#sign-in")
+    proof.press(page, "#sign-in")
     keycloak_form = page.locator("#username")
     signed_in = page.get_by_role("heading", name=f"Signed in as {USER_NAME}")
     keycloak_form.or_(signed_in).wait_for()
-    proof.shot(page, "2", "second-sign-in")
-    if keycloak_form.is_visible():
-        return "shows Keycloak's form again"
-    held = proof.host_state()
-    assert held["sessions"] == 1, f"the host holds {held}"
-    return (
-        f"signs in again without a form, through the live SSO session "
-        f"(host sessions: {held['sessions']})"
-    )
+    proof.shot(page, scenario, "second-sign-in")
+    if not keycloak_form.is_visible():
+        raise Finding("a second Sign in passed through Keycloak's live SSO session without a form")
+    return "shows Keycloak's form again"
 
 
 def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
@@ -565,6 +593,7 @@ def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
         "directAccessGrantsEnabled": False,
         "serviceAccountsEnabled": False,
         "frontchannelLogout": False,
+        "attributes": {"post.logout.redirect.uris": f"{APP_ORIGIN}/##{SECOND_APP_ORIGIN}/"},
         "redirectUris": [
             f"{APP_ORIGIN}{CALLBACK_PATH}", f"{SECOND_APP_ORIGIN}{CALLBACK_PATH}",
         ],
@@ -602,6 +631,7 @@ def host_settings(
         login_group=USER_GROUP,
         admin_group=ADMIN_GROUP,
         authorization_endpoint=f"{OIDC_PATH}/auth",
+        end_session_endpoint=f"{OIDC_PATH}/logout",
         token_endpoint=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/token",
         jwks_url=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/certs",
         client_id=CLIENT_ID,
@@ -688,7 +718,7 @@ def drive_browser(
 
 
 SCENARIOS_PER_WIDTH = (
-    (1, login), (4, disabled_user_is_refused), (6, pages_fit_the_window),
+    (1, login), (2, logout), (4, disabled_user_is_refused), (6, pages_fit_the_window),
     (7, outsider_is_refused),
 )
 
@@ -716,7 +746,10 @@ def run_default_scenarios(proof: Proof) -> bool:
         f"SCENARIO 8 {DESKTOP.label} {APP_ORIGIN}",
         lambda: subgroup_member_is_admitted(proof, DESKTOP),
     )
-    proof.held_or_failed(f"SCENARIO 2 {DESKTOP.label} {APP_ORIGIN}", lambda: logout(proof))
+    proof.held_or_failed(
+        f"SCENARIO 9 {DESKTOP.label} {APP_ORIGIN}",
+        lambda: logout_after_the_app_session_ended(proof, DESKTOP),
+    )
     return True
 
 

@@ -62,6 +62,7 @@ from webauth.cookies import (
     sign_pending_login,
 )
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
+from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcClientConfig,
@@ -77,8 +78,10 @@ from webauth.oidc_login import (
     NoAdmins,
     admit_identity,
     finish_login,
+    log_out,
     start_login,
 )
+from webauth.policies import CsrfPolicy, PathRules, SecurityHeadersPolicy
 from webauth.ports import SubjectUserStore, UserManagementEventKind, UserRecord
 
 BOUND_ISSUER = "https://id.example/realms/lab"
@@ -568,6 +571,9 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
 NOW = 1_800_000_000
 CLIENT_ID = "lab-app"
 CALLBACK_PATH = "/auth/callback"
+END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
+FORM_LOGOUT_PATH = "/logout"
+FETCH_LOGOUT_PATH = "/logout/fetch"
 
 
 def a_client_config() -> OidcClientConfig:
@@ -576,9 +582,11 @@ def a_client_config() -> OidcClientConfig:
         authorization_endpoint=f"{BOUND_ISSUER}/protocol/openid-connect/auth",
         token_endpoint=f"{BOUND_ISSUER}/protocol/openid-connect/token",
         jwks_url=f"{BOUND_ISSUER}/protocol/openid-connect/certs",
+        end_session_endpoint=END_SESSION_ENDPOINT,
         client_id=CLIENT_ID,
         client_secret=SecretStr("client-secret"),
         redirect_uri=f"{HTTPS_TEST_SERVER}{CALLBACK_PATH}",
+        post_logout_redirect_uri=f"{HTTPS_TEST_SERVER}/",
         leeway_seconds=30,
     )
 
@@ -589,6 +597,7 @@ class OidcHost:
 
     client: TestClient
     issuer: FakeIssuer
+    key_set: FakeKeySetEndpoint
     wall_clock: FakeClock
     accounts: UsersInMemory
     sessions: SessionRecordsInMemory
@@ -654,12 +663,11 @@ def an_oidc_host(
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
     issuer = FakeIssuer(mint_id_token=lambda nonce: an_id_token(nonce, wall_clock, groups_claim))
+    key_set = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("issuer"), "issuer-key")))
     relying_party = OidcRelyingParty(
         a_client_config(),
         post_token_request=issuer,
-        fetch_key_set=FakeKeySetEndpoint(
-            key_set_document(public_jwk(rsa_key("issuer"), "issuer-key"))
-        ),
+        fetch_key_set=key_set,
         wall_clock=wall_clock,
         monotonic_clock=FakeClock(5_000.0),
     )
@@ -682,6 +690,12 @@ def an_oidc_host(
 
     app = FastAPI()
     install_web_auth_config(app, config)
+    install_web_auth_middleware(
+        app,
+        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+        csrf_origin=CsrfPolicy(),
+        csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({FORM_LOGOUT_PATH}))),
+    )
 
     @app.get("/login/oidc")
     def start(request: Request, response: Response) -> dict[str, str]:
@@ -701,6 +715,22 @@ def an_oidc_host(
             return {"refusal": outcome.value}
         return open_session(outcome, response)
 
+    @app.post(FORM_LOGOUT_PATH)
+    def form_logout(request: Request) -> Response:
+        response = Response(status_code=303)
+        response.headers["location"] = log_out(
+            relying_party, request, response, config, sessions=sessions, lock=lock,
+        )
+        return response
+
+    @app.post(FETCH_LOGOUT_PATH)
+    def fetch_logout(request: Request, response: Response) -> dict[str, str]:
+        return {
+            "logout_url": log_out(
+                relying_party, request, response, config, sessions=sessions, lock=lock,
+            ),
+        }
+
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
@@ -715,6 +745,7 @@ def an_oidc_host(
             headers={"user-agent": CLIENT_USER_AGENT},
         ),
         issuer=issuer,
+        key_set=key_set,
         wall_clock=wall_clock,
         accounts=accounts,
         sessions=sessions,
@@ -1159,3 +1190,171 @@ def test_a_start_at_the_cap_leaves_a_prefixed_cookie_of_another_shape_alone() ->
         urllib.parse.urlsplit(response.json()["authorization_url"]).query
     )
     assert host.pending_cookie_names() == genuine | {stranger, newest}
+
+
+SAME_ORIGIN_FORM = {
+    "origin": HTTPS_TEST_SERVER,
+    "sec-fetch-site": "same-origin",
+    "content-type": "application/x-www-form-urlencoded",
+}
+
+
+def signed_in_host() -> OidcHost:
+    host = an_oidc_host()
+    host.callback(host.sign_in_at_issuer())
+    assert host.sessions.count_active() == 1
+    return host
+
+
+def post_logout(
+    host: OidcHost, headers: dict[str, str], path: str = FORM_LOGOUT_PATH,
+) -> HttpxResponse:
+    return host.client.post(path, headers=headers, follow_redirects=False)
+
+
+def is_the_issuers_logout_url(url: str) -> bool:
+    parts = urllib.parse.urlsplit(url)
+    return (
+        f"{parts.scheme}://{parts.netloc}{parts.path}" == END_SESSION_ENDPOINT
+        and urllib.parse.parse_qs(parts.query, keep_blank_values=True) == {
+            "client_id": [CLIENT_ID],
+            "post_logout_redirect_uri": [a_client_config().post_logout_redirect_uri],
+        }
+    )
+
+
+def both_session_cookies_are_cleared(host: OidcHost, response: HttpxResponse) -> bool:
+    return is_cleared(response, host.config.session_cookie_name) and is_cleared(
+        response, host.config.csrf_cookie_name,
+    )
+
+
+def a_logout_by_form(host: OidcHost) -> tuple[HttpxResponse, str]:
+    response = post_logout(host, SAME_ORIGIN_FORM)
+    assert response.status_code == 303
+    return response, response.headers["location"]
+
+
+def a_logout_by_fetch(host: OidcHost) -> tuple[HttpxResponse, str]:
+    token = host.client.cookies[host.config.csrf_cookie_name]
+    response = post_logout(
+        host, {**SAME_ORIGIN_FORM, host.config.csrf_header_name: token}, FETCH_LOGOUT_PATH,
+    )
+    assert response.status_code == 200
+    return response, response.json()["logout_url"]
+
+
+@pytest.mark.parametrize("log_out_through", [
+    pytest.param(a_logout_by_form, id="form-303"),
+    pytest.param(a_logout_by_fetch, id="fetch-json"),
+])
+def test_a_logout_ends_the_session_clears_both_cookies_and_sends_the_browser_to_the_issuer(
+    log_out_through: Callable[[OidcHost], tuple[HttpxResponse, str]],
+) -> None:
+    host = signed_in_host()
+
+    response, logout_url = log_out_through(host)
+
+    assert is_the_issuers_logout_url(logout_url)
+    assert both_session_cookies_are_cleared(host, response)
+    assert host.sessions.count_active() == 0
+
+
+def _no_session(_host: OidcHost) -> dict[str, str]:
+    return {}
+
+
+def _forged_session_cookie(host: OidcHost) -> dict[str, str]:
+    name = host.config.session_cookie_name
+    forged = f"{name}={host.client.cookies[name]}tampered"
+    host.client.cookies.clear()
+    return {"cookie": forged}
+
+
+def _session_ended_in_the_store(host: OidcHost) -> dict[str, str]:
+    host.sessions.delete_for_user(SUBJECT)
+    return {}
+
+
+def _session_expired_but_stored(host: OidcHost) -> dict[str, str]:
+    record = host.sessions.record
+    assert record is not None
+    record.expires_at = datetime.now(UTC) - timedelta(days=1)
+    return {}
+
+
+@pytest.mark.parametrize(("arrange", "sessions_kept"), [
+    pytest.param(_no_session, 0, id="no-session"),
+    pytest.param(_forged_session_cookie, 1, id="forged-cookie-ends-nothing"),
+    pytest.param(_session_ended_in_the_store, 0, id="session-already-ended"),
+    pytest.param(_session_expired_but_stored, 0, id="session-expired-but-stored"),
+])
+def test_a_same_origin_form_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
+    arrange: Callable[[OidcHost], dict[str, str]], sessions_kept: int,
+) -> None:
+    host = an_oidc_host()
+    if arrange is not _no_session:
+        host.callback(host.sign_in_at_issuer())
+    extra_headers = arrange(host)
+
+    response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers})
+
+    assert response.status_code == 303
+    assert is_the_issuers_logout_url(response.headers["location"])
+    assert both_session_cookies_are_cleared(host, response)
+    assert host.sessions.count_active() == sessions_kept
+
+
+@pytest.mark.parametrize("headers", [
+    pytest.param({"sec-fetch-site": "cross-site"}, id="cross-site-fetch-metadata"),
+    pytest.param({"origin": "https://evil.test"}, id="foreign-origin"),
+    pytest.param({}, id="form-with-neither-header"),
+])
+def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]) -> None:
+    host = signed_in_host()
+
+    response = post_logout(
+        host, {"content-type": "application/x-www-form-urlencoded", **headers},
+    )
+
+    assert response.status_code == 403
+    assert host.sessions.count_active() == 1
+    assert set_cookies(response) == {}
+
+
+def test_a_logout_reaches_no_issuer_endpoint() -> None:
+    host = signed_in_host()
+    exchanges_before = len(host.issuer.requests)
+    fetches_before = len(host.key_set.fetched_urls)
+
+    def unreachable() -> None:
+        raise OSError("the issuer is down")
+
+    host.issuer.before_exchange = unreachable
+    host.key_set.before_answer = unreachable
+
+    response, logout_url = a_logout_by_form(host)
+
+    assert is_the_issuers_logout_url(logout_url)
+    assert host.sessions.count_active() == 0
+    assert len(host.issuer.requests) == exchanges_before
+    assert len(host.key_set.fetched_urls) == fetches_before
+    assert both_session_cookies_are_cleared(host, response)
+
+
+def test_the_logout_url_ignores_any_target_the_request_names() -> None:
+    host = signed_in_host()
+    query = urllib.parse.urlencode({
+        "post_logout_redirect_uri": "https://evil.test/",
+        "redirect": "https://evil.test/",
+        "client_id": "someone-else",
+    })
+
+    response = host.client.post(
+        f"{FORM_LOGOUT_PATH}?{query}",
+        headers=SAME_ORIGIN_FORM,
+        content=query,
+        follow_redirects=False,
+    )
+
+    assert is_the_issuers_logout_url(response.headers["location"])

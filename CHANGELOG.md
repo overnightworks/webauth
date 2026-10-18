@@ -10,6 +10,21 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `OidcClientConfig` requires `end_session_endpoint` (after `jwks_url`) and
+  `post_logout_redirect_uri` (after `redirect_uri`); both are https URLs under
+  the same rules as the other endpoints, and a missing one is a `TypeError`.
+  A host that does not want the issuer's logout does not call `log_out`.
+  `OidcRelyingParty.logout_url()` answers the end-session URL, and the new
+  `webauth.oidc_login.log_out(relying_party, request, response, config, *,
+  sessions, lock)` ends the session the request's cookie names, clears the
+  session cookies and returns that URL, so an app's logout also ends the
+  browser's Keycloak session; Keycloak asks the person to confirm once.
+  `SessionRecordStore.delete` must treat an id the store does not hold as a
+  no-op, never an error. Migration: register each app's post-logout redirect
+  URI (`post.logout.redirect.uris`) on its Keycloak client, in edge's
+  `realm.yaml`, before upgrading; a host whose logout is a form adds the
+  issuer's origin to `form-action`, and protects `/logout` with the origin
+  check and a `token_exempt` rule (README, "Logging out").
 - `finish_login` and `admit_identity` take `admission: AdmissionConfig`
   instead of `bound_issuer: str`. `AdmissionConfig(bound_issuer=...,
   login_group=...)` requires the app's group path (or
