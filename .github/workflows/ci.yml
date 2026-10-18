@@ -91,5 +91,3 @@ jobs:
     uses: overnightworks/quality/.github/workflows/gate.yml@75467b7888ab8158dda370c770d3323dfc1f594e # v0.1.1
     with:
       coverage-artifact: coverage
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
