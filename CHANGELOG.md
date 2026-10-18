@@ -20,24 +20,28 @@ Versions before 0.3.0 and releases without an entry here are described in the
     is refused with the new `AdmissionRefusal.NOT_A_MEMBER` before any account
     is looked up or created. The README now recommends a 12-hour session
     instead of 30 days, since an open session is not re-checked.
-  - `AdmissionConfig` also requires `admin_group`: a group path strictly below
-    `login_group` (such as `/apps/songmaker/admin`), or `NoAdmins.IN_THIS_APP`
-    when the app has no admins. A missing `admin_group` is a `TypeError`; an
-    `admin_group` that is malformed or not below `login_group` is a
-    `ValueError`. Admission now sets the account's role at every login:
+  - `AdmissionConfig` also requires `admin_group`: a group path (such as
+    `/apps/songmaker/admin`), or `NoAdmins.IN_THIS_APP` when the app has no
+    admins. When `login_group` is a group path, `admin_group` must lie
+    strictly below it; under `EverySubject.OF_THE_BOUND_ISSUER` any valid
+    group path is allowed. A missing `admin_group` is a `TypeError`; an
+    `admin_group` that is malformed, or not below a `login_group` that is a
+    group path, is a `ValueError`. Admission now sets the account's role at every login:
     `admin_role` for a member of `admin_group`, otherwise `user_role`, so a
     stored role is overwritten (a stored role other than `admin_role` and
-    `user_role` becomes `user_role`), and each change on a returning account is
+    `user_role` becomes `admin_role` when the identity belongs to
+    `admin_group`, otherwise `user_role`), and each change on a returning account is
     audited as `AccountEventKind.ROLE_CHANGED` with `previous_role` (a new
     field on `AccountEvent`). `SubjectUserStore` gains `set_role(user_id, role)
     -> UserRecord`, which changes the role in the caller's transaction and
     never commits.
-  - Migration, before upgrading, or everyone is locked out or demoted: put
-    every person who signs in into the app's `login_group` (or a subgroup), or
-    they are refused as `NOT_A_MEMBER`; turn on `full.path` in the client's
-    group membership mapper, or the claim carries bare names and everyone is
-    refused; put the admins into `admin_group`, created per app at its cutover
-    (edge#50, edge#20 row 10), or a stored admin is demoted at their next
+  - Migration, before upgrading, or everyone is locked out or demoted: when
+    `login_group` is a group path, put every person who signs in into it (or a
+    subgroup), or they are refused as `NOT_A_MEMBER`, and turn on `full.path`
+    in the client's group membership mapper, or the claim carries bare names
+    and everyone is refused (under `EverySubject.OF_THE_BOUND_ISSUER`
+    identities without groups are admitted); put the admins into `admin_group`, created per app at its
+    cutover (edge#50, edge#20 row 10), or a stored admin is demoted at their next
     login.
   - `OidcClientConfig` requires the keyword fields `end_session_endpoint` and
     `post_logout_redirect_uri`; both are https URLs under the same rules as the
@@ -83,9 +87,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
   no floor. See Fixed.
 - `WebAuthConfig.session_cookie_name` and `csrf_cookie_name` are annotated
   `str`, with the library's default as their default, and are refused unless
-  they are an RFC 6265 token (empty, or containing a space, a control
-  character, a non-ASCII character or any of `( ) < > @ , ; : \ " / [ ] ? = { }`)
-  and distinct from each other. An explicit `None` (or any other non-`str`)
+  they are an RFC 6265 token and distinct from each other; a name that is empty,
+  or contains a space, a control character, a non-ASCII character or any of
+  `( ) < > @ , ; : \ " / [ ] ? = { }`, is not a token and is refused. An explicit `None` (or any other non-`str`)
   raises `ValueError`, so `dataclasses.replace(config,
   session_cookie_name=None)` no longer resets the field to the default: leave
   the field out of `replace` instead. Starlette's `set_cookie` raised
