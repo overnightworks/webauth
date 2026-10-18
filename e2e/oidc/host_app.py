@@ -34,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 import uvicorn
@@ -46,6 +47,7 @@ from webauth.cookies import issue_session_cookies
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
+from webauth.middleware.security_headers import SecurityHeadersMiddleware
 from webauth.oidc import (
     OidcClientConfig,
     OidcRefusal,
@@ -64,7 +66,13 @@ from webauth.oidc_login import (
     post_token_request_over_https,
     start_login,
 )
-from webauth.policies import CsrfPolicy, PathRules
+from webauth.policies import (
+    CspDirective,
+    CsrfPolicy,
+    PathRules,
+    SecurityHeadersPolicy,
+    default_content_security_policy,
+)
 
 LOOPBACK = "127.0.0.1"
 CALLBACK_PATH = "/auth/callback"
@@ -321,6 +329,16 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         policy=CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGOUT_PATH}))),
     )
     app.add_middleware(CsrfOriginMiddleware, policy=CsrfPolicy())
+    issuer = urlsplit(settings.end_session_endpoint)
+    issuer_origin = f"{issuer.scheme}://{issuer.netloc}"
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        policy=SecurityHeadersPolicy(
+            default_content_security_policy(
+                added_sources={CspDirective.FORM_ACTION: [issuer_origin]},
+            )
+        ),
+    )
 
     @app.middleware("http")
     async def count_callbacks(request: Request, call_next: Any) -> Response:

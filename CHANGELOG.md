@@ -18,7 +18,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `webauth.oidc_login.log_out(relying_party, request, response, config, *,
   sessions, lock)` ends the session the request's cookie names, clears the
   session cookies and returns that URL, so an app's logout also ends the
-  browser's Keycloak session; Keycloak asks the person to confirm once.
+  browser's Keycloak session; Keycloak asks the person to confirm once. It
+  ends only this browser's app session; ending the person's other sessions
+  arrives with back-channel logout (#197).
   `SessionRecordStore.delete` must treat an id the store does not hold as a
   no-op, never an error. Migration: register each app's post-logout redirect
   URI (`post.logout.redirect.uris`) on its Keycloak client, in edge's

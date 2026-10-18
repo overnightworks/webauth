@@ -12,9 +12,9 @@ from __future__ import annotations
 import secrets
 import threading
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -591,6 +591,18 @@ def a_client_config() -> OidcClientConfig:
     )
 
 
+class CountingWriteLock(WriteLockInMemory):
+    def __init__(self) -> None:
+        super().__init__()
+        self.times_taken = 0
+
+    @contextmanager
+    def hold(self) -> Iterator[None]:
+        self.times_taken += 1
+        with super().hold():
+            yield
+
+
 @dataclass
 class OidcHost:
     """A host application and the browser that visits it."""
@@ -603,6 +615,7 @@ class OidcHost:
     sessions: SessionRecordsInMemory
     audit: RecordingAuditSink
     config: WebAuthConfig
+    lock: CountingWriteLock
 
     def start(self) -> str:
         """Visit the start route; answer the authorization URL it sends the browser to."""
@@ -655,7 +668,7 @@ def an_oidc_host(
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
-    lock = WriteLockInMemory()
+    lock = CountingWriteLock()
     accounts = UsersInMemory(*users, lock=lock)
     sessions = SessionRecordsInMemory(
         max_age_seconds=store_max_age_seconds, users=accounts, lock=lock,
@@ -694,7 +707,9 @@ def an_oidc_host(
         app,
         security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
         csrf_origin=CsrfPolicy(),
-        csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({FORM_LOGOUT_PATH}))),
+        csrf_token=CsrfPolicy(
+            token_exempt=PathRules(exact=frozenset({FORM_LOGOUT_PATH, FETCH_LOGOUT_PATH})),
+        ),
     )
 
     @app.get("/login/oidc")
@@ -751,6 +766,7 @@ def an_oidc_host(
         sessions=sessions,
         audit=audit,
         config=config,
+        lock=lock,
     )
 
 
@@ -1260,6 +1276,25 @@ def test_a_logout_ends_the_session_clears_both_cookies_and_sends_the_browser_to_
     assert host.sessions.count_active() == 0
 
 
+@dataclass(frozen=True)
+class LogoutShape:
+    path: str
+    status_code: int
+    url_of: Callable[[HttpxResponse], str]
+
+
+LOGOUT_SHAPES = [
+    pytest.param(
+        LogoutShape(FORM_LOGOUT_PATH, 303, lambda response: response.headers["location"]),
+        id="form-303",
+    ),
+    pytest.param(
+        LogoutShape(FETCH_LOGOUT_PATH, 200, lambda response: response.json()["logout_url"]),
+        id="fetch-json",
+    ),
+]
+
+
 def _no_session(_host: OidcHost) -> dict[str, str]:
     return {}
 
@@ -1289,32 +1324,45 @@ def _session_expired_but_stored(host: OidcHost) -> dict[str, str]:
     pytest.param(_session_ended_in_the_store, 0, id="session-already-ended"),
     pytest.param(_session_expired_but_stored, 0, id="session-expired-but-stored"),
 ])
-def test_a_same_origin_form_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
-    arrange: Callable[[OidcHost], dict[str, str]], sessions_kept: int,
+@pytest.mark.parametrize("shape", LOGOUT_SHAPES)
+def test_a_same_origin_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
+    shape: LogoutShape, arrange: Callable[[OidcHost], dict[str, str]], sessions_kept: int,
 ) -> None:
     host = an_oidc_host()
     if arrange is not _no_session:
         host.callback(host.sign_in_at_issuer())
     extra_headers = arrange(host)
 
-    response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers})
+    response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers}, shape.path)
 
-    assert response.status_code == 303
-    assert is_the_issuers_logout_url(response.headers["location"])
+    assert response.status_code == shape.status_code
+    assert is_the_issuers_logout_url(shape.url_of(response))
     assert both_session_cookies_are_cleared(host, response)
     assert host.sessions.count_active() == sessions_kept
 
 
+@pytest.mark.parametrize("shape", LOGOUT_SHAPES)
+def test_a_logout_without_a_session_takes_no_lock(shape: LogoutShape) -> None:
+    host = an_oidc_host()
+
+    post_logout(host, SAME_ORIGIN_FORM, shape.path)
+
+    assert host.lock.times_taken == 0
+
+
+@pytest.mark.parametrize("shape", LOGOUT_SHAPES)
 @pytest.mark.parametrize("headers", [
     pytest.param({"sec-fetch-site": "cross-site"}, id="cross-site-fetch-metadata"),
     pytest.param({"origin": "https://evil.test"}, id="foreign-origin"),
     pytest.param({}, id="form-with-neither-header"),
 ])
-def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]) -> None:
+def test_a_cross_site_logout_is_refused_and_ends_nothing(
+    shape: LogoutShape, headers: dict[str, str],
+) -> None:
     host = signed_in_host()
 
     response = post_logout(
-        host, {"content-type": "application/x-www-form-urlencoded", **headers},
+        host, {"content-type": "application/x-www-form-urlencoded", **headers}, shape.path,
     )
 
     assert response.status_code == 403

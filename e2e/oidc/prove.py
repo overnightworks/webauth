@@ -513,7 +513,7 @@ def logout(proof: Proof, width: Width) -> str:
 def confirm_at_keycloak(proof: Proof, page: Page, scenario: str) -> None:
     page.locator(KEYCLOAK_LOGOUT_CONFIRMATION).wait_for()
     proof.assert_fits(page, KEYCLOAK_LOGOUT_CONFIRMATION)
-    proof.shot(page, scenario, "keycloak-confirmation")
+    proof.shot(page, scenario, "logout-confirmation")
 
 
 def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:

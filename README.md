@@ -14,18 +14,18 @@ the `jwt` extra, which [Install](#install) names.
 
 ## OpenID Connect login
 
-The host names the issuer's authorization, token, key-set and end-session URLs itself; the
-library does no discovery.
+The host names the issuer's authorization, token, key-set and end-session
+URLs itself; the library does no discovery.
 
 ### The host's start, callback and logout routes
 
 `webauth.oidc_login` carries the pending login for the host, so the host
 keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
-Connect. The host serves three routes over its one `OidcRelyingParty`: start, callback and logout. In the
-example, `config` is the `WebAuthConfig` built under
-[Session lifetime](#session-lifetime) and `relying_party` is built under
-[The relying party](#the-relying-party); see also
-[Admitting an identity](#admitting-an-identity).
+Connect. The host serves three routes over its one `OidcRelyingParty`:
+start, callback and logout. In the example, `config` is the
+`WebAuthConfig` built under [Session lifetime](#session-lifetime) and
+`relying_party` is built under [The relying party](#the-relying-party); see
+also [Admitting an identity](#admitting-an-identity).
 
 ```python
 from fastapi import Request, Response
@@ -118,6 +118,8 @@ is bound to the session, so it fails once the session has expired, and a plain
 form cannot send the token header. Install the stack with
 `csrf_origin=CsrfPolicy()` and
 `csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({"/logout"})))`.
+The host lists its own logout route's exact path, whichever shape it uses: a
+fetch logout at `/logout/fetch` lists `"/logout/fetch"` instead.
 Keep the route POST only, because the origin check runs only on mutating
 methods; name the path exactly in `token_exempt`, never in `exempt` and never
 as a prefix, so no other route falls under it.
