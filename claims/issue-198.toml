@@ -1,8 +1,0 @@
-claim_id = "63851dc93e5343ff983402d244824e63"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "a81538043ffcc2969b0ccb2e10ca12c15385c9e5"
-branch = "claude/issue-198-csp-base-uri-form-action"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/policies.py", "tests/test_policies.py", "tests/typing/oidc_host.py"]
-opened_commit = "612575b40abd1136440a3dd2e1be17a616a31792"
-whole_reason = "One default and its one extension point: the enum member, the default string, its tests, the typing host and the docs change together."
