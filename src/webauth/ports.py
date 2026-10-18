@@ -200,7 +200,9 @@ class RateLimitBackend(Protocol):
         The caller owns the window and the limit, so the backend bakes in
         neither: each budget measures its own key, and a key is always checked
         with one window. The check counts the current event, so a caller told
-        yes has already spent one of the budget. A backend that cannot answer
+        yes has already spent one of the budget. ``limit`` and
+        ``window_seconds`` must be positive integers, excluding booleans, and
+        the caller validates them before invoking the backend. A backend that cannot answer
         raises rather than guessing, and the caller fails the request closed.
 
         The middleware calls this from a worker thread so a slow check does

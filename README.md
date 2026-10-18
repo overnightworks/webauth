@@ -126,7 +126,7 @@ as a prefix, so no other route falls under it.
 
 A logout form redirects the browser to the issuer, and Chromium checks
 `form-action` on that redirect. A host whose logout is a form adds the
-issuer's origin to `form-action` in its policy (see
+end-session endpoint's origin to `form-action` in its policy (see
 [Content-Security-Policy](#content-security-policy)). A page that logs out
 through `fetch` is not subject to `form-action`.
 
@@ -737,8 +737,8 @@ set the worst-case delay before a removal from the group takes effect, because
 an open session is not re-checked. Every login checks the group again, and
 Keycloak's own SSO session (30 days, 7 days idle) turns that login into a
 redirect the person does not notice. A removal takes effect at once only with
-`edge lock` together with W5's back-channel logout; until that integration
-exists, an open app session stays valid until it expires.
+`edge lock` together with the back-channel logout ("Back-channel logout"
+above); without it, an open app session stays valid until it expires.
 
 ```python
 import re
@@ -904,7 +904,9 @@ budget name starts with a lowercase letter, holds only lowercase letters,
 digits, `-` and `_`, and is unique in the policy. The limiter key is
 `<name>:<address>` inside the Redis `key_prefix`, so renaming a budget starts
 it fresh. A budget whose `max_requests` or `window_seconds` is not a positive
-whole number is refused at construction.
+whole number is refused at construction. A backend of your own receives only
+such values: `limit` and `window_seconds` are positive integers, excluding
+booleans, and the caller validates them before invoking the backend.
 
 ```python
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
@@ -965,7 +967,7 @@ otherwise; the host guards `list_sessions` with its admin dependency. Public
 references come only from `webauth.cookies.session_reference(session_id)`:
 SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
 `SessionIdentityChanged` (its `session_ref`) expose no raw token; the host reads
-any timestamps from its own records. Refusals derive from `WebAuthError`.
+any timestamps from its own records. Refusals derive from `webauth.WebAuthError`.
 [The session administration tests](tests/test_session_administration.py) verify
 the helpers, including REQ-ADMIN-12 for listed references.
 
@@ -1010,7 +1012,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `log_out`, which ends the browser's session and returns the issuer's end-session URL, `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
 It leaves the application everything that touches the application's own truth:
 

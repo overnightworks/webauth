@@ -8,6 +8,120 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 ## 0.16.0 - Unreleased
 
+**Breaking**
+
+- Admission and logout through the OIDC relying party.
+  - `finish_login` and `admit_identity` take `admission: AdmissionConfig`
+    instead of `bound_issuer: str`. `AdmissionConfig(bound_issuer=...,
+    login_group=...)` requires the app's group path (or
+    `EverySubject.OF_THE_BOUND_ISSUER`, to admit every subject of the issuer on
+    purpose); a missing `login_group` is a `TypeError` and a malformed one a
+    `ValueError`. A person who is in neither `login_group` nor a subgroup of it
+    is refused with the new `AdmissionRefusal.NOT_A_MEMBER` before any account
+    is looked up or created. The README now recommends a 12-hour session
+    instead of 30 days, since an open session is not re-checked.
+  - `AdmissionConfig` also requires `admin_group`: a group path (such as
+    `/apps/songmaker/admin`), or `NoAdmins.IN_THIS_APP` when the app has no
+    admins. When `login_group` is a group path, `admin_group` must lie
+    strictly below it; under `EverySubject.OF_THE_BOUND_ISSUER` any valid
+    group path is allowed. A missing `admin_group` is a `TypeError`; an
+    `admin_group` that is malformed, or not below a `login_group` that is a
+    group path, is a `ValueError`. Admission now sets the account's role at every login:
+    `admin_role` for a member of `admin_group`, otherwise `user_role`, so a
+    stored role is overwritten (a stored role other than `admin_role` and
+    `user_role` becomes `admin_role` when the identity belongs to
+    `admin_group`, otherwise `user_role`), and each change on a returning account is
+    audited as `AccountEventKind.ROLE_CHANGED` with `previous_role` (a new
+    field on `AccountEvent`). `SubjectUserStore` gains `set_role(user_id, role)
+    -> UserRecord`, which changes the role in the caller's transaction and
+    never commits.
+  - Migration, before upgrading, or everyone is locked out or demoted: when
+    `login_group` is a group path, put every person who signs in into it (or a
+    subgroup), or they are refused as `NOT_A_MEMBER`, and turn on `full.path`
+    in the client's group membership mapper, or the claim carries bare names
+    and everyone is refused (under `EverySubject.OF_THE_BOUND_ISSUER`
+    identities without groups are admitted); put the admins into `admin_group`, created per app at its
+    cutover (edge#50, edge#20 row 10), or a stored admin is demoted at their next
+    login.
+  - `OidcClientConfig` requires the keyword fields `end_session_endpoint` and
+    `post_logout_redirect_uri`; both are https URLs under the same rules as the
+    other endpoints, and a missing one is a `TypeError`. A host that does not
+    want the issuer's logout does not call `log_out`.
+    `OidcRelyingParty.logout_url()` answers the end-session URL, and the new
+    `webauth.oidc_login.log_out(relying_party, request, response, config, *,
+    sessions, lock)` ends the session the request's cookie names, clears the
+    session cookies and returns that URL, so an app's logout also ends the
+    browser's Keycloak session; Keycloak asks the person to confirm once. It
+    ends only this browser's app session; ending the person's other sessions
+    is the back-channel logout (under Added). Migration: register each app's
+    post-logout redirect URI (`post.logout.redirect.uris`) on its Keycloak
+    client, in edge's `realm.yaml`, before upgrading; a host whose logout is a
+    form adds the end-session endpoint's origin to `form-action`, and protects
+    `/logout` with the origin check and a `token_exempt` rule (README,
+    "Logging out").
+- `RateLimitClass` is gone, and `RateLimitPolicy` takes `default` and `rules`
+  instead of `budgets`, `media` and `stream`. `RateLimitBudget` gains a
+  leading `name` (lowercase letters, digits, `-` and `_`, starting with a
+  letter); an invalid name string or a repeated name is a `ValueError`.
+  `RateLimitRule(paths, budget)` is new, and the first matching rule decides.
+  `classify` and `budget` become `budget_for(path)`. The limiter keys are now
+  `<name>:<address>`, so budgets start fresh and the old `API:`, `MEDIA:` and
+  `STREAM:` keys expire within one window. Migrating the former three classes:
+  `default=RateLimitBudget("api", ip_limit, w)`,
+  `rules=(RateLimitRule(media_paths, RateLimitBudget("media", media_limit, w)),
+  RateLimitRule(stream_paths, RateLimitBudget("stream", stream_limit, w)))`,
+  media first as before; `policy.classify(p) is RateLimitClass.API` becomes
+  `policy.budget_for(p) is policy.default`, and
+  `policy.budget(RateLimitClass.API)` becomes `policy.default`.
+- `RateLimitBudget` refuses, with a `ValueError` naming the budget and the
+  field, a `max_requests` or `window_seconds` that is not a positive `int` (`0`,
+  a negative number, a `bool`, a `float`, a `str` or `None`). Before, a window
+  of `0` or less made both backends admit every request. A host that passed
+  such a value must now pass a positive whole number.
+- `IpRateLimitMiddleware` calls `RateLimitBackend.is_allowed` from a worker
+  thread, so a slow limiter no longer stalls the event loop; a host's own
+  backend must be thread-safe (both library backends are). A check holds its
+  worker thread until the backend answers, so give a Redis client short
+  timeouts and few retries (README, "Rate limiting").
+- `RedisRateLimitBackend` needs Redis 5.0 or later, or Valkey; v0.15.0 stated
+  no floor. See Fixed.
+- `WebAuthConfig.session_cookie_name` and `csrf_cookie_name` are annotated
+  `str`, with the library's default as their default, and are refused unless
+  they are an RFC 6265 token and distinct from each other; a name that is empty,
+  or contains a space, a control character, a non-ASCII character or any of
+  `( ) < > @ , ; : \ " / [ ] ? = { }`, is not a token and is refused. An explicit `None` (or any other non-`str`)
+  raises `ValueError`, so `dataclasses.replace(config,
+  session_cookie_name=None)` no longer resets the field to the default: leave
+  the field out of `replace` instead. Starlette's `set_cookie` raised
+  `http.cookies.CookieError` for every invalid name except one containing `:`,
+  which RFC 6265 forbids as well, so the host failed at its first sign-in;
+  equal names would make one cookie overwrite the other. A host that set
+  either now fails at start instead.
+- `default_content_security_policy()` writes `base-uri 'self'` after
+  `default-src 'none'` and ends with `form-action 'self'`, so a `<base>` may
+  point only at this origin and a form may submit only to it. Neither directive
+  falls back to `default-src`, so both were unrestricted before. A host whose
+  form posts to, or is redirected to, another origin (such as an issuer's
+  authorization endpoint behind a sign-in form, or its end-session endpoint
+  behind a logout form) adds that origin to `CspDirective.FORM_ACTION`.
+- `UserManagementEvent`, `UserManagementEventKind` and
+  `AuditSink.user_management_event` are renamed `AccountEvent`,
+  `AccountEventKind` and `AuditSink.account_event`. Update the imports and
+  implement the sink as `account_event`; payloads and the serialized values of
+  the existing kinds are unchanged. `AccountEventKind` gains `ROLE_CHANGED`
+  (with `AccountEvent.previous_role`) and `BACKCHANNEL_LOGOUT`. A sink that
+  refuses an unknown kind must map both, because whatever it raises propagates
+  and the host rolls back.
+- `UserManagementError` is removed. Use `WebAuthError` for the wider catch, or
+  catch `(UsernameTakenError, NotAnAdminError, UnknownSessionError)` to keep
+  the previous catch set.
+- `SessionAdministrationStore` no longer declares `count_active`. A host may
+  keep its own; a caller that needs a total uses its concrete store or a
+  host-owned interface.
+- `SessionRecordStore.delete` must treat an id the store does not hold as a
+  no-op, never an error: `log_out` deletes whatever session the browser's
+  cookie names.
+
 **Added**
 
 - `webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
@@ -32,114 +146,20 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `logout+jwt` type; its `sid` is never read. `OidcRefusalReason` gains
   `LOGOUT_TOKEN_REJECTED` and `INVALID_LOGOUT_CLAIM`. The new
   `webauth.oidc_login.receive_backchannel_logout(relying_party, logout_token,
-  *, accounts, sessions, lock, audit)` ends every session of the subject, an
-  inactive account's included, and emits one
-  `AccountEventKind.BACKCHANNEL_LOGOUT` event when a session ended. It
-  keeps no replay store and never commits (README, "Back-channel logout").
-  `JwtVerifier.verify` takes `expected_type`, and a missing or unequal header
-  `typ` is `RejectionReason.INVALID_TOKEN_TYPE`; callers that do not pass it
-  are unchanged. Migration: register `backchannel.logout.url` on each app's
+  *, accounts, sessions, lock, audit)` answers `BackchannelLogoutResult.ACCEPTED`
+  or `REFUSED`. On `ACCEPTED` it has ended every session of the subject, an
+  inactive account's included, and emitted one
+  `AccountEventKind.BACKCHANNEL_LOGOUT` event when a session ended. It keeps no
+  replay store and never commits: the host commits before it answers 200 and
+  answers 400 otherwise (README, "Back-channel logout"). `JwtVerifier.verify`
+  takes `expected_type`, and a missing or unequal header `typ` is
+  `RejectionReason.INVALID_TOKEN_TYPE`; callers that do not pass it are
+  unchanged. To use it: register `backchannel.logout.url` on each app's
   Keycloak client, in edge's `realm.yaml`, by an internal name, never through
-  Cloudflare Access, and add the route with its CSRF and rate-limit
-  exemptions.
-
-**Breaking**
-
-- `UserManagementEvent`, `UserManagementEventKind` and
-  `AuditSink.user_management_event` are renamed `AccountEvent`,
-  `AccountEventKind` and `AuditSink.account_event`. Update the imports and
-  implement the sink as `account_event`; payloads and serialized values are
-  unchanged.
-- `UserManagementError` is removed. Use `WebAuthError` for the wider catch, or
-  catch `(UsernameTakenError, NotAnAdminError, UnknownSessionError)` to keep
-  the previous catch set.
-- `SessionAdministrationStore` no longer declares `count_active`. A host may
-  keep its own; a caller that needs a total uses its concrete store or a
-  host-owned interface.
-- `OidcClientConfig` requires `end_session_endpoint` (after `jwks_url`) and
-  `post_logout_redirect_uri` (after `redirect_uri`); both are https URLs under
-  the same rules as the other endpoints, and a missing one is a `TypeError`.
-  A host that does not want the issuer's logout does not call `log_out`.
-  `OidcRelyingParty.logout_url()` answers the end-session URL, and the new
-  `webauth.oidc_login.log_out(relying_party, request, response, config, *,
-  sessions, lock)` ends the session the request's cookie names, clears the
-  session cookies and returns that URL, so an app's logout also ends the
-  browser's Keycloak session; Keycloak asks the person to confirm once. It
-  ends only this browser's app session; ending the person's other sessions
-  is the back-channel logout above.
-  `SessionRecordStore.delete` must treat an id the store does not hold as a
-  no-op, never an error. Migration: register each app's post-logout redirect
-  URI (`post.logout.redirect.uris`) on its Keycloak client, in edge's
-  `realm.yaml`, before upgrading; a host whose logout is a form adds the
-  issuer's origin to `form-action`, and protects `/logout` with the origin
-  check and a `token_exempt` rule (README, "Logging out").
-- `RateLimitBudget` refuses, with a `ValueError` naming the budget and the
-  field, a `max_requests` or `window_seconds` that is not a positive `int` (`0`,
-  a negative number, a `bool`, a `float`, a `str` or `None`). Before, a window
-  of `0` or less made both backends admit every request. A host that passed
-  such a value must now pass a positive whole number.
-- `RateLimitClass` is gone, and `RateLimitPolicy` takes `default` and `rules`
-  instead of `budgets`, `media` and `stream`. `RateLimitBudget` gains a
-  leading `name` (lowercase letters, digits, `-` and `_`, starting with a
-  letter); an invalid or repeated name is a `ValueError`. `RateLimitRule(paths,
-  budget)` is new, and the first matching rule decides. `classify` and
-  `budget` become `budget_for(path)`. The limiter keys are now
-  `<name>:<address>`, so budgets start fresh and the old `API:`, `MEDIA:` and
-  `STREAM:` keys expire within one window. Migrating the former three classes:
-  `default=RateLimitBudget("api", ip_limit, w)`,
-  `rules=(RateLimitRule(media_paths, RateLimitBudget("media", media_limit, w)),
-  RateLimitRule(stream_paths, RateLimitBudget("stream", stream_limit, w)))`,
-  media first as before; `policy.classify(p) is RateLimitClass.API` becomes
-  `policy.budget_for(p) is policy.default`, and
-  `policy.budget(RateLimitClass.API)` becomes `policy.default`.
-- `finish_login` and `admit_identity` take `admission: AdmissionConfig`
-  instead of `bound_issuer: str`. `AdmissionConfig(bound_issuer=...,
-  login_group=...)` requires the app's group path (or
-  `EverySubject.OF_THE_BOUND_ISSUER`, to admit every subject of the issuer on
-  purpose); a missing `login_group` is a `TypeError` and a malformed one a
-  `ValueError`. A person who is in neither `login_group` nor a subgroup of it
-  is refused with the new `AdmissionRefusal.NOT_A_MEMBER` before any account
-  is looked up or created. The README now recommends a 12-hour session instead
-  of 30 days, since an open session is not re-checked. `AdmissionConfig` also
-  requires `admin_group`: a group path strictly below `login_group` (such as
-  `/apps/songmaker/admin`), or `NoAdmins.IN_THIS_APP` when the app has no
-  admins. A missing `admin_group` is a `TypeError`; an `admin_group` that is
-  malformed or not below `login_group` is a `ValueError`. Admission now sets
-  the account's role at every login: `admin_role` for a member of
-  `admin_group`, otherwise `user_role`, so a stored role is overwritten and
-  each change is audited as the returning
-  `AccountEventKind.ROLE_CHANGED` with `previous_role` (a new field on
-  `AccountEvent`). `SubjectUserStore` gains `set_role(user_id, role) ->
-  UserRecord`, which changes the role in the caller's transaction and never
-  commits. Migration: a stored admin is demoted at their next login unless
-  they are in `admin_group`, so a host puts its admins into its Keycloak admin
-  group, created per app at its cutover (edge#50, edge#20 row 10), before it
-  upgrades.
-- `IpRateLimitMiddleware` calls `RateLimitBackend.is_allowed` from a worker
-  thread, so a slow limiter no longer stalls the event loop; a host's own
-  backend must be thread-safe (both library backends are).
-- `WebAuthConfig.session_cookie_name` and `csrf_cookie_name` are annotated `str`,
-  with the library's default as their default. An explicit `None` (or any other
-  non-`str`) raises `ValueError`, so
-  `dataclasses.replace(config, session_cookie_name=None)` no longer resets the
-  field to the default: leave the field out of `replace` instead.
-- `WebAuthConfig` refuses a `session_cookie_name` or `csrf_cookie_name` that is
-  not an RFC 6265 token (empty, or containing a space, a control character, a
-  non-ASCII character or any of `( ) < > @ , ; : \ " / [ ] ? = { }`), and refuses
-  the two names being equal. Starlette's `set_cookie` raised
-  `http.cookies.CookieError` for every such name except one containing `:`,
-  which RFC 6265 forbids as well, so the host failed at its first sign-in; equal
-  names would make one cookie overwrite the other. A host that set either now
-  fails at start instead.
-- `default_content_security_policy()` writes `base-uri 'self'` after
-  `default-src 'none'` and ends with `form-action 'self'`, so a `<base>` may
-  point only at this origin and a form may submit only to it. Neither directive
-  falls back to `default-src`, so both were unrestricted before. A host whose
-  form posts to, or is redirected to, another origin (such as an issuer's logout
-  endpoint) adds that origin to `CspDirective.FORM_ACTION`.
-
-**Added**
-
+  Cloudflare Access, and set up the route as README "Back-channel logout"
+  does: the exact path in `exempt` of both `csrf_origin` and `csrf_token`, and
+  in `RateLimitPolicy.exempt`; a 32 KiB `BodySizeRule`; a `no-store`
+  `CacheControlRule`.
 - `CspDirective.FORM_ACTION`. A host's addition extends `'self'`. It accepts
   `'self'`, scheme sources and host sources, as `frame-ancestors` does, and
   refuses nonces, hashes and other keywords with a `ValueError`. `base-uri` is
@@ -149,8 +169,14 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 - Hosts sharing one Redis neither overspend nor deny each other's rate-limit
   budget when their clocks differ, because `RedisRateLimitBackend` measures the
-  window on the Redis server's clock. The supported server floor is Redis 5.0
-  or later, or Valkey.
+  window on the Redis server's clock. A server older than 5.0 refuses the
+  script, and the middleware then answers every rate-limited request with 503.
+
+- `SingleProcessRateLimitBackend.is_allowed` reads its clock inside its lock.
+  Before, two concurrent checks of one key could file an older timestamp after a
+  newer one, and the periodic sweep, which reads the last timestamp as the
+  newest, could drop a key whose newest event was still inside its window and so
+  admit extra requests.
 
 ## 0.15.0
 

@@ -97,6 +97,10 @@ from webauth.policies import (
     BodySizePolicy,
     CspDirective,
     CsrfPolicy,
+    PathRules,
+    RateLimitBudget,
+    RateLimitPolicy,
+    RateLimitRule,
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
@@ -342,6 +346,15 @@ def a_host_installs_the_middleware(app: FastAPI) -> None:
                     CspDirective.STYLE_SRC: ["'unsafe-inline'"],
                     CspDirective.FORM_ACTION: ["https://issuer.example.test"],
                 },
+            ),
+        ),
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget(name="default", max_requests=60, window_seconds=60),
+            rules=(
+                RateLimitRule(
+                    paths=PathRules(exact=frozenset({"/login"})),
+                    budget=RateLimitBudget(name="login", max_requests=10, window_seconds=60),
+                ),
             ),
         ),
         csrf_origin=CsrfPolicy(),
