@@ -6,6 +6,8 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import FastAPI
+from starlette.requests import HTTPConnection, Request
 from starlette.websockets import WebSocketDisconnect
 from webauth_arrangement import (
     ALLOWED_ORIGIN,
@@ -13,12 +15,14 @@ from webauth_arrangement import (
     CLIENT_USER_AGENT,
     MEMBER_ROLE,
     POLICY_VIOLATION_CLOSE_CODE,
+    SESSION_COOKIE_NAME,
     SESSION_ID,
     WEBSOCKET_DEPENDENCY_PATH,
     AuthApp,
     FakeSessionRecord,
     FakeUser,
     SessionsAnsweringTouch,
+    SessionsThatMustNotBeAsked,
     a_session,
     a_web_auth_config,
     an_auth_app,
@@ -27,15 +31,28 @@ from webauth_arrangement import (
     session_cookie_header,
 )
 
-from webauth.config import DEFAULT_MAX_USER_AGENT_CHARS
-from webauth.cookies import MAX_SESSION_COOKIE_CHARS, session_reference, sign_session_id
-from webauth.dependencies import AuthenticatedUser, WebSocketRefusal
+from webauth.config import (
+    DEFAULT_MAX_USER_AGENT_CHARS,
+    install_web_auth_config,
+    web_auth_config,
+)
+from webauth.cookies import (
+    MAX_SESSION_COOKIE_CHARS,
+    cookie_pairs,
+    cookie_values,
+    session_reference,
+    sign_session_id,
+)
+from webauth.dependencies import AuthenticatedUser, WebSocketRefusal, session_id_from_request
 from webauth.ports import SessionIdentityChange, SessionIdentityChanged
+from webauth.proxies import client_user_agent, resolve_client_ip
 from webauth.session_ending import end_session
 
-SIGNING_KEY = a_web_auth_config().signing_key
+CONFIG = a_web_auth_config()
+SIGNING_KEY = CONFIG.signing_key
 ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, is_active=True)
-NO_CONFIGURED_HOSTS = {"allowed_hosts_exact": frozenset(), "allowed_hosts_patterns": ()}
+NO_PATTERNS = {"allowed_hosts_patterns": ()}
+NO_CONFIGURED_HOSTS = {"allowed_hosts_exact": frozenset(), **NO_PATTERNS}
 
 
 @pytest.fixture
@@ -101,8 +118,8 @@ def test_an_admitted_handshake_renews_an_idle_window_session() -> None:
 @pytest.mark.parametrize(
     ("origin", "config_overrides"),
     [
-        pytest.param(ALLOWED_ORIGIN, {}, id="an exact host"),
-        pytest.param(f"{ALLOWED_ORIGIN}:8443", {}, id="an exact host on any port"),
+        pytest.param(ALLOWED_ORIGIN, NO_PATTERNS, id="an exact host"),
+        pytest.param(f"{ALLOWED_ORIGIN}:8443", NO_PATTERNS, id="an exact host on any port"),
         pytest.param("https://app.example", {}, id="a host matching a pattern"),
         pytest.param("http://localhost:3000", NO_CONFIGURED_HOSTS, id="localhost, nothing listed"),
     ],
@@ -264,6 +281,22 @@ def test_a_refused_origin_leaves_the_session_and_the_audit_untouched() -> None:
     assert app.audit.events == []
 
 
+@pytest.mark.parametrize(
+    ("origin", "refusal"),
+    [
+        pytest.param(None, WebSocketRefusal.MISSING_ORIGIN, id="no Origin"),
+        pytest.param("https://evil.test", WebSocketRefusal.FOREIGN_ORIGIN, id="a foreign Origin"),
+    ],
+)
+def test_a_refused_origin_never_asks_the_store(
+    origin: str | None, refusal: WebSocketRefusal,
+) -> None:
+    app = an_auth_app(None, sessions=SessionsThatMustNotBeAsked(a_session()))
+
+    assert the_refusal_of(app, cookie=app.signed_cookie(), origin=origin) is refusal
+    assert app.audit.events == []
+
+
 def test_a_touch_reporting_no_row_refuses_the_handshake_without_audit() -> None:
     record = a_session(ip_address="203.0.113.9")
     app = an_auth_app(None, sessions=SessionsAnsweringTouch(record, False))
@@ -419,3 +452,58 @@ def test_a_host_dependency_around_the_helper_refuses_as_the_plain_call_does(
     auth_app: AuthApp,
 ) -> None:
     assert the_refusal_of(auth_app, path=WEBSOCKET_DEPENDENCY_PATH) is WebSocketRefusal.NO_SESSION
+
+
+def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTPConnection:
+    app = FastAPI()
+    install_web_auth_config(app, CONFIG)
+    cookie = f"{SESSION_COOKIE_NAME}={sign_session_id(SESSION_ID, SIGNING_KEY)}"
+    return connection_type({
+        "type": scope_type,
+        "app": app,
+        "client": (CLIENT_ADDRESS, 50000),
+        "headers": [
+            (b"cookie", cookie.encode()),
+            (b"user-agent", CLIENT_USER_AGENT.encode()),
+        ],
+    })
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [a_connection(Request, "http"), a_connection(HTTPConnection, "websocket")],
+    ids=["an HTTP request", "a WebSocket connection"],
+)
+@pytest.mark.parametrize(
+    ("function", "extra_arguments", "answer"),
+    [
+        pytest.param(web_auth_config, {}, CONFIG, id="web_auth_config"),
+        pytest.param(
+            cookie_pairs,
+            {},
+            [(SESSION_COOKIE_NAME, sign_session_id(SESSION_ID, SIGNING_KEY))],
+            id="cookie_pairs",
+        ),
+        pytest.param(
+            cookie_values,
+            {"name": SESSION_COOKIE_NAME},
+            [sign_session_id(SESSION_ID, SIGNING_KEY)],
+            id="cookie_values",
+        ),
+        pytest.param(resolve_client_ip, {}, CLIENT_ADDRESS, id="resolve_client_ip"),
+        pytest.param(client_user_agent, {}, CLIENT_USER_AGENT, id="client_user_agent"),
+        pytest.param(
+            session_id_from_request,
+            {"config": CONFIG},
+            SESSION_ID,
+            id="session_id_from_request",
+        ),
+    ],
+)
+def test_a_widened_public_function_still_takes_its_connection_as_request(
+    function: Callable[..., object],
+    extra_arguments: dict[str, object],
+    answer: object,
+    connection: HTTPConnection,
+) -> None:
+    assert function(request=connection, **extra_arguments) == answer

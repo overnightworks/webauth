@@ -130,20 +130,20 @@ def is_secure_prefixed_cookie_name(name: str) -> bool:
     return name.lower().startswith(SECURE_COOKIE_PREFIX.lower())
 
 
-def cookie_pairs(connection: HTTPConnection) -> list[tuple[str, str]]:
+def cookie_pairs(request: HTTPConnection) -> list[tuple[str, str]]:
     """Every name and value the raw ``Cookie`` headers carry, in order.
 
     Starlette's cookie dict silently keeps one of several same-named
     cookies, so each pair is parsed on its own with Starlette's parser to keep
     its browser-compatible trimming and unquoting.
     """
-    pairs = "; ".join(connection.headers.getlist("cookie")).split(";")
+    pairs = "; ".join(request.headers.getlist("cookie")).split(";")
     return [item for pair in pairs for item in cookie_parser(pair).items()]
 
 
-def cookie_values(connection: HTTPConnection, name: str) -> list[str]:
-    """Every value the connection's cookies carry under ``name``, in order."""
-    return [value for key, value in cookie_pairs(connection) if key == name]
+def cookie_values(request: HTTPConnection, name: str) -> list[str]:
+    """Every value the request's cookies carry under ``name``, in order."""
+    return [value for key, value in cookie_pairs(request) if key == name]
 
 
 def session_reference(session_id: str) -> str:

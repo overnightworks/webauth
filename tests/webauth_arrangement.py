@@ -476,6 +476,26 @@ class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
         return record
 
 
+class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
+    """A store that fails the test on the first question put to it."""
+
+    def load(self, session_id: str) -> FakeSessionRecord | None:
+        raise AssertionError("the store was asked to load a session")
+
+    def touch(
+        self,
+        record: FakeSessionRecord,
+        *,
+        ip_address: str,
+        user_agent: str,
+        now: datetime,
+    ) -> bool:
+        raise AssertionError("the store was asked to touch a session")
+
+    def delete(self, session_id: str) -> None:
+        raise AssertionError("the store was asked to delete a session")
+
+
 class SessionsAnsweringTouch(SessionRecordsInMemory):
     """A store whose ``touch`` writes nothing and gives a fixed answer."""
 

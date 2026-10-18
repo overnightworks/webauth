@@ -575,8 +575,8 @@ async def room(websocket: WebSocket) -> None:
   the session on the same handshake.
 
 A socket does not end when its session does: a logout, an administrator's
-revocation and W5's back-channel logout delete the stored session and cannot
-signal an open socket. The host calls the same helper again, in a fresh
+revocation and `webauth.oidc_login.receive_backchannel_logout` delete the stored
+session and cannot signal an open socket. The host calls the same helper again, in a fresh
 transaction, before protected work and on its own schedule while a stream runs,
 and on a refusal closes the socket and stops the protected work. A successful
 re-check counts as activity like a request does: it renews the session, so a
@@ -1000,7 +1000,7 @@ It owns the machinery an application should not rebuild:
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
 | `webauth.cookies` | The signed session cookie, the CSRF token bound to it and the pending-login cookie, issued and cleared |
-| `webauth.dependencies` | Turning a signed cookie into the account that made the request |
+| `webauth.dependencies` | Turning a signed cookie into the account that made the request or opened a WebSocket handshake (`authenticate_websocket`) |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
