@@ -1,8 +1,0 @@
-claim_id = "6b69a6a45ded4da287e22a6beef8fc7b"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "a81538043ffcc2969b0ccb2e10ca12c15385c9e5"
-branch = "claude/issue-196-w9-abmelden-beendet-keycloak-sitzung"
-scope = ["CHANGELOG.md", "README.md", "e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_oidc.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py"]
-opened_commit = "7b8d146859bd8b3902d8545e76b1af2cd2167429"
-whole_reason = "One flow and its proof: the static endpoint, the logout URL, the host route order, the docs and the real-browser re-sign-in cannot land apart."
