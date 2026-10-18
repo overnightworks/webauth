@@ -60,7 +60,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   no-op, never an error. Migration: register each app's post-logout redirect
   URI (`post.logout.redirect.uris`) on its Keycloak client, in edge's
   `realm.yaml`, before upgrading; a host whose logout is a form adds the
-  issuer's origin to `form-action`, and protects `/logout` with the origin
+  end-session endpoint's origin to `form-action`, and protects `/logout` with the origin
   check and a `token_exempt` rule (README, "Logging out").
 - `RateLimitBudget` refuses, with a `ValueError` naming the budget and the
   field, a `max_requests` or `window_seconds` that is not a positive `int` (`0`,
