@@ -20,7 +20,7 @@ from webauth.config import web_auth_config
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from starlette.requests import Request
+    from starlette.requests import HTTPConnection, Request
 
 __all__ = [
     "TrustedProxies",
@@ -220,16 +220,16 @@ def get_client_ip(
     return _canonical_host(peer) if client is None else str(client)
 
 
-def _peer_host(request: Request) -> str:
-    return request.client.host if request.client else UNKNOWN_CLIENT_IP
+def _peer_host(connection: HTTPConnection) -> str:
+    return connection.client.host if connection.client else UNKNOWN_CLIENT_IP
 
 
-def resolve_client_ip(request: Request) -> str:
-    """The client identity of ``request`` -- the one owner of that decision."""
+def resolve_client_ip(connection: HTTPConnection) -> str:
+    """The client identity of ``connection`` -- the one owner of that decision."""
     return get_client_ip(
-        _peer_host(request),
-        request.headers.getlist(FORWARDED_FOR_HEADER),
-        web_auth_config(request).trusted_proxies,
+        _peer_host(connection),
+        connection.headers.getlist(FORWARDED_FOR_HEADER),
+        web_auth_config(connection).trusted_proxies,
     )
 
 
@@ -249,7 +249,7 @@ def request_is_https(request: Request) -> bool:
     return newest.lower() == HTTPS_SCHEME
 
 
-def client_user_agent(request: Request) -> str:
+def client_user_agent(connection: HTTPConnection) -> str:
     """The agent the client declares, cut to the length the deployment records."""
-    limit = web_auth_config(request).max_user_agent_chars
-    return (request.headers.get("user-agent") or "")[:limit]
+    limit = web_auth_config(connection).max_user_agent_chars
+    return (connection.headers.get("user-agent") or "")[:limit]
