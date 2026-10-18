@@ -224,12 +224,12 @@ def _peer_host(connection: HTTPConnection) -> str:
     return connection.client.host if connection.client else UNKNOWN_CLIENT_IP
 
 
-def resolve_client_ip(request: HTTPConnection) -> str:
-    """The client identity of ``request`` -- the one owner of that decision."""
+def resolve_client_ip(connection: HTTPConnection) -> str:
+    """The client identity of ``connection`` -- the one owner of that decision."""
     return get_client_ip(
-        _peer_host(request),
-        request.headers.getlist(FORWARDED_FOR_HEADER),
-        web_auth_config(request).trusted_proxies,
+        _peer_host(connection),
+        connection.headers.getlist(FORWARDED_FOR_HEADER),
+        web_auth_config(connection).trusted_proxies,
     )
 
 
@@ -249,7 +249,7 @@ def request_is_https(request: Request) -> bool:
     return newest.lower() == HTTPS_SCHEME
 
 
-def client_user_agent(request: HTTPConnection) -> str:
+def client_user_agent(connection: HTTPConnection) -> str:
     """The agent the client declares, cut to the length the deployment records."""
-    limit = web_auth_config(request).max_user_agent_chars
-    return (request.headers.get("user-agent") or "")[:limit]
+    limit = web_auth_config(connection).max_user_agent_chars
+    return (connection.headers.get("user-agent") or "")[:limit]

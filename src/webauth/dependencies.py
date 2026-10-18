@@ -309,16 +309,16 @@ class WebSocketRefusal(Enum):
     FOREIGN_ORIGIN = "foreign-origin"
 
 
-def session_id_from_request(request: HTTPConnection, config: WebAuthConfig) -> str | None:
-    """The session identifier the request's one signed session cookie names.
+def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -> str | None:
+    """The session identifier the connection's one signed session cookie names.
 
     ``None`` when the cookie is missing, longer than
     ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed,
     forged, or present more than once: a sibling subdomain can set a second cookie of the same
-    name, and choosing either would let it decide whose account the request
+    name, and choosing either would let it decide whose account the connection
     runs in.
     """
-    reading = _read_session_cookie(request, config)
+    reading = _read_session_cookie(connection, config)
     return None if isinstance(reading, WebSocketRefusal) else reading
 
 

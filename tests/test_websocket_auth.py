@@ -500,10 +500,11 @@ def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTP
         ),
     ],
 )
-def test_a_widened_public_function_still_takes_its_connection_as_request(
+def test_a_widened_public_function_takes_its_connection_by_keyword_and_by_position(
     function: Callable[..., object],
     extra_arguments: dict[str, object],
     answer: object,
     connection: HTTPConnection,
 ) -> None:
-    assert function(request=connection, **extra_arguments) == answer
+    assert function(connection=connection, **extra_arguments) == answer
+    assert function(connection, **extra_arguments) == answer
