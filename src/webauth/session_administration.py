@@ -15,10 +15,10 @@ from webauth.config import WebAuthConfig
 from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
+    AccountEvent,
+    AccountEventKind,
     AuditSink,
     SessionAdministrationStore,
-    UserManagementEvent,
-    UserManagementEventKind,
     WriteLock,
 )
 from webauth.session_ending import end_session
@@ -81,8 +81,8 @@ class SessionAdministration:
             for record in self.sessions.list_active(limit=None):
                 if hmac.compare_digest(session_reference(record.id).encode(), reference):
                     end_session(self.sessions, session_id=record.id)
-                    self.audit.user_management_event(UserManagementEvent(
-                        kind=UserManagementEventKind.SESSION_REVOKED,
+                    self.audit.account_event(AccountEvent(
+                        kind=AccountEventKind.SESSION_REVOKED,
                         actor_id=actor.id,
                         subject_id=record.user_id,
                         session_ref=session_ref,

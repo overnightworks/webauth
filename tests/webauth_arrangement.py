@@ -52,9 +52,9 @@ from webauth.policies import (
     SecurityHeadersPolicy,
 )
 from webauth.ports import (
+    AccountEvent,
     RateLimitBackend,
     SessionIdentityChanged,
-    UserManagementEvent,
     UsernameTakenError,
 )
 from webauth.proxies import TrustedProxies
@@ -487,13 +487,13 @@ class SessionsAnsweringTouch(SessionRecordsInMemory):
 @dataclass
 class RecordingAuditSink:
     events: list[SessionIdentityChanged] = field(default_factory=list)
-    user_management_events: list[UserManagementEvent] = field(default_factory=list)
+    account_events: list[AccountEvent] = field(default_factory=list)
 
     def session_identity_changed(self, event: SessionIdentityChanged) -> None:
         self.events.append(event)
 
-    def user_management_event(self, event: UserManagementEvent) -> None:
-        self.user_management_events.append(event)
+    def account_event(self, event: AccountEvent) -> None:
+        self.account_events.append(event)
 
 
 def a_session_administration(*users: FakeUser, config: WebAuthConfig) -> SessionAdministration:

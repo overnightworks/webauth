@@ -23,7 +23,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `webauth.oidc_login.receive_backchannel_logout(relying_party, logout_token,
   *, accounts, sessions, lock, audit)` ends every session of the subject, an
   inactive account's included, and emits one
-  `UserManagementEventKind.BACKCHANNEL_LOGOUT` event when a session ended. It
+  `AccountEventKind.BACKCHANNEL_LOGOUT` event when a session ended. It
   keeps no replay store and never commits (README, "Back-channel logout").
   `JwtVerifier.verify` takes `expected_type`, and a missing or unequal header
   `typ` is `RejectionReason.INVALID_TOKEN_TYPE`; callers that do not pass it
@@ -34,6 +34,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `UserManagementEvent`, `UserManagementEventKind` and
+  `AuditSink.user_management_event` are renamed `AccountEvent`,
+  `AccountEventKind` and `AuditSink.account_event`. Update the imports and
+  implement the sink as `account_event`; payloads and serialized values are
+  unchanged.
 - `UserManagementError` is removed. Use `WebAuthError` for the wider catch, or
   catch `(UsernameTakenError, NotAnAdminError, UnknownSessionError)` to keep
   the previous catch set.
@@ -89,8 +94,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   the account's role at every login: `admin_role` for a member of
   `admin_group`, otherwise `user_role`, so a stored role is overwritten and
   each change is audited as the returning
-  `UserManagementEventKind.ROLE_CHANGED` with `previous_role` (a new field on
-  `UserManagementEvent`). `SubjectUserStore` gains `set_role(user_id, role) ->
+  `AccountEventKind.ROLE_CHANGED` with `previous_role` (a new field on
+  `AccountEvent`). `SubjectUserStore` gains `set_role(user_id, role) ->
   UserRecord`, which changes the role in the caller's transaction and never
   commits. Migration: a stored admin is demoted at their next login unless
   they are in `admin_group`, so a host puts its admins into its Keycloak admin
