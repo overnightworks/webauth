@@ -127,6 +127,29 @@ class TestRateLimitPolicy:
     def test_a_budget_name_inside_the_grammar_is_accepted(self, name: str) -> None:
         assert RateLimitBudget(name, max_requests=1, window_seconds=60).name == name
 
+    @pytest.mark.parametrize("field", ["max_requests", "window_seconds"])
+    @pytest.mark.parametrize("value", [0, -1, True, 1.5, "5", None], ids=[
+        "zero", "negative", "bool", "float", "str", "none",
+    ])
+    def test_a_budget_field_that_is_not_a_positive_whole_number_is_refused_and_named(
+        self, field: str, value: object,
+    ) -> None:
+        fields = {"max_requests": 1, "window_seconds": 60, field: value}
+
+        with pytest.raises(
+            ValueError,
+            match=re.escape(f"RateLimitBudget 'api' {field} must be a positive whole number"),
+        ):
+            RateLimitBudget("api", **fields)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(("max_requests", "window_seconds"), [(1, 1), (300, 3600)])
+    def test_a_budget_with_positive_whole_numbers_is_accepted(
+        self, max_requests: int, window_seconds: int,
+    ) -> None:
+        budget = RateLimitBudget("api", max_requests, window_seconds)
+
+        assert (budget.max_requests, budget.window_seconds) == (max_requests, window_seconds)
+
     @pytest.mark.parametrize(("default", "rules", "expected"), [
         (_DEFAULT, (RateLimitRule(PathRules(), _BULK), RateLimitRule(PathRules(), _BULK)), "bulk"),
         (_DEFAULT, (RateLimitRule(PathRules(), _a_budget("default", 99)),), "default"),
