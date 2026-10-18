@@ -1,8 +1,0 @@
-claim_id = "398f1b5c20c44d4dbdf644b6eda9f212"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "8642c57d05221cf30ebdab9387c37f5e1392d304"
-branch = "claude/issue-227-pre-tag-follow-ups"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/ports.py", "tests/test_oidc_login.py", "tests/test_public_api.py", "tests/typing/oidc_host.py"]
-opened_commit = "c554899e1550de8b4c61896d32fb37b1d7f63693"
-whole_reason = "Four small reviewed follow-ups bundled as one lane: none changes runtime behaviour, and each touches files the others touch."
