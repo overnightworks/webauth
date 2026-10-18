@@ -28,7 +28,8 @@ sections linked below.
 `/apps/songmaker`, get in. Members of its `admin_group`, such as
 `/apps/songmaker/admin`, are admins. Both are decided again at every login, so a
 change in Keycloak takes effect at the person's next sign-in; an app session
-that is already open keeps its access until it ends. See
+that is already open keeps its access until it ends; a changed admin role
+reaches every open session at the person's next sign-in. See
 [Admitting an identity](#admitting-an-identity).
 
 **When Keycloak is down.** People who are already signed in keep working until
@@ -48,8 +49,10 @@ person signed in to through that Keycloak session, and each of those apps ends
 all of the person's sessions, on every device. An app they used only on another
 device is not told and keeps them signed in there. On their other devices, the
 next sign-in asks for no password while that device's own Keycloak session
-lasts. If the browser holds no ID token from its latest Keycloak sign-in,
-Keycloak asks once to confirm instead. See [Logging out](#logging-out) and
+lasts. If the app cannot send the ID token of the browser's latest Keycloak
+sign-in, Keycloak asks once to confirm instead; if the realm key that signed
+that token has been deleted since, Keycloak shows an error page instead. See
+[The ID token hint](#the-id-token-hint), [Logging out](#logging-out) and
 [Back-channel logout](#back-channel-logout).
 
 ### The host's start, callback and logout routes
@@ -118,7 +121,7 @@ issuer's end-session URL. That URL carries the client ID, the configured
 `post_logout_redirect_uri` and the `id_token_hint` that `finish_login` handed
 the browser at sign-in (see [The ID token hint](#the-id-token-hint)), so
 Keycloak ends the session without asking the person to confirm. Without a
-usable hint the URL leaves it out and Keycloak asks once; the app stores no
+usable hint the URL leaves it out and Keycloak asks once; the app's own store keeps no
 Keycloak token. The logout is a GET to Keycloak, so the hint lands in that
 device's browser history and is visible to a TLS-terminating edge; in the
 fetch shape it also reaches the page's own script. Once the session has
@@ -726,7 +729,10 @@ The cookies' default names are the public constants `DEFAULT_SESSION_COOKIE_NAME
 `PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME` (the names with `cookie_secure=False`).
 A client that reads the CSRF cookie by name reads `config.csrf_cookie_name`.
 The OpenID Connect ID token hint cookie is described under
-[The ID token hint](#the-id-token-hint).
+[The ID token hint](#the-id-token-hint). webauth also sets the pending-login cookies
+(names starting `__Host-oidc_pending_`, or `oidc_pending_` with `cookie_secure=False`) and
+the ID token hint cookie (`__Secure-oidc_id_token_hint`, or `oidc_id_token_hint`), so
+neither `session_cookie_name` nor `csrf_cookie_name` may be set to one of those names.
 A request that reaches the library in an app without `install_web_auth_config` raises
 `RuntimeError`.
 
