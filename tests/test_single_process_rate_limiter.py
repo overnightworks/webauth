@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -89,6 +90,20 @@ class TestIsolationAndBounds:
             assert backend.is_allowed("long-lived", limit=1, window_seconds=3_600) is False
 
 
+class _LockThatSignalsContention:
+    def __init__(self, on_contention: Callable[[], None]) -> None:
+        self._lock = threading.Lock()
+        self._on_contention = on_contention
+
+    def __enter__(self) -> None:
+        if not self._lock.acquire(blocking=False):
+            self._on_contention()
+            self._lock.acquire()
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._lock.release()
+
+
 class TestThreadSafety:
     def test_concurrent_events_never_exceed_the_limit(self) -> None:
         backend = SingleProcessRateLimitBackend()
@@ -113,22 +128,29 @@ class TestThreadSafety:
         assert sum(verdicts) == limit
 
     def test_a_check_that_waits_for_the_lock_cannot_file_an_older_timestamp(self) -> None:
-        backend = SingleProcessRateLimitBackend()
         first_has_read_clock = threading.Event()
-        second_has_read_clock = threading.Event()
+        second_is_settled = threading.Event()
         readings = iter((100.0, 130.0, 210.0))
 
         def scripted_monotonic() -> float:
             reading = next(readings)
             if reading == 100.0:
                 first_has_read_clock.set()
-                second_has_read_clock.wait(timeout=0.5)
-            elif reading == 130.0:
-                second_has_read_clock.set()
+                assert second_is_settled.wait(timeout=5)
             return reading
+
+        contention_signalling_threading = SimpleNamespace(
+            Lock=lambda: _LockThatSignalsContention(second_is_settled.set),
+        )
+        with patch.object(webauth.rate_limit, "threading", contention_signalling_threading):
+            backend = SingleProcessRateLimitBackend()
 
         def check() -> None:
             backend.is_allowed("addr", limit=2, window_seconds=100)
+
+        def second_check() -> None:
+            check()
+            second_is_settled.set()
 
         with patch.object(
             webauth.rate_limit, "time", SimpleNamespace(monotonic=scripted_monotonic),
@@ -136,7 +158,7 @@ class TestThreadSafety:
             first = threading.Thread(target=check)
             first.start()
             assert first_has_read_clock.wait(timeout=5)
-            second = threading.Thread(target=check)
+            second = threading.Thread(target=second_check)
             second.start()
             first.join(timeout=5)
             second.join(timeout=5)
