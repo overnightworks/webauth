@@ -1,8 +1,0 @@
-claim_id = "899fbc93ec074b1382ef7aa78b1a4f69"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "67edbb57c4ef2267734c019ff4b0286083feba43"
-branch = "claude/issue-201-cookie-name-rfc6265-token"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "src/webauth/cookies.py", "tests/test_cookies.py", "tests/test_web_auth_config.py"]
-opened_commit = "0a88adc96ac7559a105fbbbf60fef58e71a68797"
-whole_reason = "One validation rule, its owner, its tests and the two docs that state it change together."
