@@ -867,7 +867,7 @@ to list and end sessions without a user store. Construct
 `SessionAdministrationStore`, `AuditSink`, `WriteLock` and `WebAuthConfig`.
 
 - `SessionAdministrationStore`: extends `SessionRecordStore` with
-  `list_active(*, offset=0, limit=None)` and `count_active()`. The host selects
+  `list_active(*, offset=0, limit=None)`. The host selects
   active records using its liveness rules and owns their order. These reads
   need no write lock; `limit=None` returns all remaining records.
 - `WriteLock.hold()`: serializes checks and writes across the supplied stores
