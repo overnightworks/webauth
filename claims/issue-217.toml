@@ -1,8 +1,0 @@
-claim_id = "75000949026c43ef9407988b97c7191e"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "147b652c549b0487dabe7a7cda6d6c837c5ee426"
-branch = "claude/issue-217-w5a-backchannel-logout-receiver"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/jwt_verification.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/oidc_arrangement.py", "tests/test_jwt_verification.py", "tests/test_oidc.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "cf31d65d82d2e0252fe05ea743b5d5ac4bb91ec1"
-whole_reason = "One receiver: its token profile, its session ending, its route recipe, its tests and docs cannot land apart."
