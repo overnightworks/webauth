@@ -1,8 +1,0 @@
-claim_id = "b0bb43fad65e44c4bdbfa7986c555987"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "357b109d3d3774d75cc68fda3354a34eb024cdf5"
-branch = "claude/issue-224-drop-count-active"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/ports.py", "tests/test_session_administration.py", "tests/typing/oidc_host.py"]
-opened_commit = "21b4d494376f6b34ba88d504f5aaa9086720eed5"
-whole_reason = "One port obligation removed: the protocol, its typed witness, its tests and its migration line change together."
