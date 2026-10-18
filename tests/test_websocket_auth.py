@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import FastAPI
 from starlette.requests import HTTPConnection, Request
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 from webauth_arrangement import (
     ALLOWED_ORIGIN,
     CLIENT_ADDRESS,
@@ -71,7 +71,9 @@ def the_refusal_of(app: AuthApp, **handshake: object) -> WebSocketRefusal:
 
 
 def test_the_refusals_keep_their_stable_values() -> None:
-    assert {refusal.name: refusal.value for refusal in WebSocketRefusal} == {
+    values_by_name = {refusal.name: refusal.value for refusal in WebSocketRefusal}
+
+    assert values_by_name == {
         "NO_SESSION": "no-session",
         "INVALID_SESSION": "invalid-session",
         "SESSION_ENDED_OR_EXPIRED": "session-ended-or-expired",
@@ -277,7 +279,9 @@ def test_a_refused_origin_leaves_the_session_and_the_audit_untouched() -> None:
 
     the_refusal_of(app, cookie=app.signed_cookie(), origin="https://evil.test")
 
-    assert (record.expires_at, record.ip_address) == stored
+    after = (record.expires_at, record.ip_address)
+
+    assert after == stored
     assert app.audit.events == []
 
 
@@ -360,7 +364,9 @@ def test_a_forwarded_address_from_an_untrusted_peer_is_not_the_client_identity()
     ) as socket:
         socket.receive_json()
 
-    assert [event.current for event in app.audit.events] == [CLIENT_ADDRESS]
+    recorded = [event.current for event in app.audit.events]
+
+    assert recorded == [CLIENT_ADDRESS]
 
 
 def test_a_long_user_agent_is_reported_cut_to_the_recorded_length() -> None:
@@ -371,7 +377,9 @@ def test_a_long_user_agent_is_reported_cut_to_the_recorded_length() -> None:
     with app.connect(cookie=app.signed_cookie(), headers=[("user-agent", long_agent)]) as socket:
         socket.receive_json()
 
-    assert [event.current for event in app.audit.events] == ["u" * DEFAULT_MAX_USER_AGENT_CHARS]
+    recorded = [event.current for event in app.audit.events]
+
+    assert recorded == ["u" * DEFAULT_MAX_USER_AGENT_CHARS]
 
 
 def logged_out(app: AuthApp) -> None:
@@ -454,11 +462,19 @@ def test_a_host_dependency_around_the_helper_refuses_as_the_plain_call_does(
     assert the_refusal_of(auth_app, path=WEBSOCKET_DEPENDENCY_PATH) is WebSocketRefusal.NO_SESSION
 
 
+async def no_message() -> dict[str, object]:
+    return {}
+
+
+async def discard_message(message: dict[str, object]) -> None:
+    return None
+
+
 def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTPConnection:
     app = FastAPI()
     install_web_auth_config(app, CONFIG)
     cookie = f"{SESSION_COOKIE_NAME}={sign_session_id(SESSION_ID, SIGNING_KEY)}"
-    return connection_type({
+    scope = {
         "type": scope_type,
         "app": app,
         "client": (CLIENT_ADDRESS, 50000),
@@ -466,12 +482,15 @@ def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTP
             (b"cookie", cookie.encode()),
             (b"user-agent", CLIENT_USER_AGENT.encode()),
         ],
-    })
+    }
+    if connection_type is WebSocket:
+        return WebSocket(scope, no_message, discard_message)
+    return connection_type(scope)
 
 
 @pytest.mark.parametrize(
     "connection",
-    [a_connection(Request, "http"), a_connection(HTTPConnection, "websocket")],
+    [a_connection(Request, "http"), a_connection(WebSocket, "websocket")],
     ids=["an HTTP request", "a WebSocket connection"],
 )
 @pytest.mark.parametrize(
