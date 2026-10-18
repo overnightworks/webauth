@@ -18,9 +18,10 @@ import secrets
 import signal
 import ssl
 import sys
+import time
 import urllib.parse
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -55,8 +56,15 @@ from harness import (
     tell_host,
 )
 from host_app import HostSettings
-from playwright.sync_api import Browser, BrowserContext, Cookie, Page, sync_playwright
-from shim import TlsShim
+from playwright.sync_api import (
+    Browser,
+    BrowserContext,
+    Cookie,
+    Page,
+    Playwright,
+    sync_playwright,
+)
+from shim import CallbackBridge, TlsShim
 from stack import Admin, HeldStack, require_pinned_clean_edge
 
 from webauth.cookies import (
@@ -88,6 +96,8 @@ ADMIN_GROUP = f"{USER_GROUP}/admin"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
 KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
+CALLBACK_WAIT_SECONDS = 15
+CALLBACK_POLL_SECONDS = 0.2
 
 
 @dataclass(frozen=True)
@@ -111,6 +121,39 @@ class Width:
         }
 
 
+@dataclass(frozen=True)
+class AppConfiguration:
+    """What one back-channel app is told apart by: its origin, its client and its cookies."""
+
+    origin: str
+    client_id: str
+    cookie_samesite: CookieSameSite
+
+
+@dataclass(frozen=True)
+class App:
+    """A started app: one host process, with its own client, stores and signing secret."""
+
+    configuration: AppConfiguration
+    host: Host
+    client_secret: str
+
+    @property
+    def origin(self) -> str:
+        return self.configuration.origin
+
+    def state(self) -> dict[str, Any]:
+        return host_state(self.host)
+
+    def reset(self) -> None:
+        reset_host(self.host)
+
+
+BACKCHANNEL_APPS = (
+    AppConfiguration(APP_ORIGIN, "d1-app-a", DEFAULT_COOKIE_SAMESITE),
+    AppConfiguration(SECOND_APP_ORIGIN, "d1-app-b", "lax"),
+)
+
 PHONE = Width(390, 844, touch=True)
 DESKTOP = Width(1280, 800, touch=False)
 WIDTHS = (PHONE, DESKTOP)
@@ -128,6 +171,9 @@ class Proof(RunRecord):
     host: Host | None = None
     ca_certificate: Path | None = None
     session_secret: str = ""
+    app_session_secrets: list[str] = field(default_factory=list)
+    apps: tuple[App, ...] = ()
+    user_id: str = ""
     user_password: str = ""
     disabled_user_password: str = ""
     disabled_user_id: str = ""
@@ -180,7 +226,14 @@ class Proof(RunRecord):
         self.register_pending_logins(context)
 
     def _register_pending_login(self, cookie_value: str) -> None:
-        pending = verify_pending_login(cookie_value, self.session_secret.encode())
+        pending = next(
+            (
+                verified
+                for secret in (self.session_secret, *self.app_session_secrets)
+                if (verified := verify_pending_login(cookie_value, secret.encode()))
+            ),
+            None,
+        )
         if pending is None:
             raise AssertionError("a pending-login cookie did not verify; secrets unregistered")
         self.registry.add("pending login state", pending.state)
@@ -204,11 +257,17 @@ class Proof(RunRecord):
         assert self.host is not None
         tell_host(self.host, "deactivate")
 
-    def set_user_enabled(self, user_id: str, enabled: bool) -> None:
+    def fresh_admin(self) -> Admin:
         assert self.stack is not None
         admin = self.stack.admin()
         self.registry.add("admin token", admin.token)
-        admin.put(f"/{REALM}/users/{user_id}", {"enabled": enabled})
+        return admin
+
+    def set_user_enabled(self, user_id: str, enabled: bool) -> None:
+        self.fresh_admin().put(f"/{REALM}/users/{user_id}", {"enabled": enabled})
+
+    def log_out_user_everywhere(self, user_id: str) -> None:
+        self.fresh_admin().post(f"/{REALM}/users/{user_id}/logout")
 
     def press(self, page: Page, selector: str) -> None:
         if self.width.touch:
@@ -408,10 +467,7 @@ def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
 
 
 def outsiders_groups_claim_is_recorded(proof: Proof) -> str:
-    assert proof.stack is not None
-    admin = proof.stack.admin()
-    proof.registry.add("admin token", admin.token)
-    example = admin.get(
+    example = proof.fresh_admin().get(
         f"/{REALM}/clients/{proof.client_uuid}/evaluate-scopes/generate-example-id-token"
         f"?userId={proof.outsider_id}&scope=openid%20groups"
     )
@@ -566,6 +622,178 @@ def second_sign_in(proof: Proof, page: Page, scenario: str) -> str:
     return "shows Keycloak's form again"
 
 
+def sign_in_through_keycloaks_session(
+    proof: Proof, page: Page, origin: str, username: str = USER_NAME
+) -> None:
+    page.goto(f"{origin}/")
+    proof.press(page, "#sign-in")
+    page.get_by_role("heading", name=f"Signed in as {username}").wait_for()
+
+
+def wait_for_accepted_callbacks(app: App, accepted: int) -> None:
+    deadline = time.monotonic() + CALLBACK_WAIT_SECONDS
+    while app.state()["backchannel_accepted"] < accepted:
+        assert time.monotonic() < deadline, f"{app.origin} was not called back: {app.state()}"
+        time.sleep(CALLBACK_POLL_SECONDS)
+
+
+def assert_callbacks(app: App, accepted: int, sessions: int) -> None:
+    held = app.state()
+    assert (held["backchannel_accepted"], held["backchannel_refused"], held["sessions"]) == (
+        accepted, 0, sessions,
+    ), f"{app.origin} holds {held}"
+
+
+def assert_signed_out(proof: Proof, page: Page, origin: str) -> None:
+    page.goto(f"{origin}/")
+    assert proof.headline(page) == "Signed out", f"{origin} says {proof.headline(page)!r}"
+    me_status = proof.status_of(page, "/me")
+    assert me_status == 401, f"{origin} /me answered {me_status}"
+
+
+def log_out_through_keycloak(
+    proof: Proof, page: Page, scenario: str, origin: str, at_confirmation: Callable[[], None],
+) -> None:
+    """The W9 interaction: the button, Keycloak's confirmation, and back to the app."""
+    proof.press(page, "#logout")
+    confirm_at_keycloak(proof, page, scenario)
+    at_confirmation()
+    proof.press(page, KEYCLOAK_LOGOUT_CONFIRMATION)
+    page.wait_for_url(f"{origin}/")
+    page.get_by_role("heading", name="Signed out").wait_for()
+
+
+def logout_ends_every_session_of_the_subject(proof: Proof, width: Width) -> str:
+    scenario = f"10-{width.label}"
+    app, _ = proof.apps
+    app.reset()
+    with proof.browsing(width) as first, proof.browsing(width) as second:
+        proof.sign_in(first, scenario, app.origin)
+        proof.sign_in(second, None, app.origin)
+        assert proof.status_of(second, "/me") == 200, "the second context is not signed in"
+        assert app.state()["sessions"] == 2, f"the host holds {app.state()}"
+
+        def second_session_still_stands() -> None:
+            assert_callbacks(app, accepted=0, sessions=1)
+
+        log_out_through_keycloak(proof, first, scenario, app.origin, second_session_still_stands)
+        wait_for_accepted_callbacks(app, 1)
+        proof.shot(first, scenario, "result")
+        assert_callbacks(app, accepted=1, sessions=0)
+        assert_signed_out(proof, second, app.origin)
+        proof.shot(second, scenario, "other-context-result")
+    return (
+        "two contexts signed in to the app as one person; one logged out through Keycloak's "
+        "confirmation, with the other session still standing (sessions 1, callbacks 0); then "
+        "Keycloak's callback was accepted once (refused 0), the host holds 0 sessions and the "
+        "other context's page says Signed out with /me 401"
+    )
+
+
+def logout_in_one_app_ends_the_sessions_of_the_other(proof: Proof, width: Width) -> str:
+    scenario = f"11-{width.label}"
+    app_a, app_b = proof.apps
+    app_a.reset()
+    app_b.reset()
+    with proof.browsing(width) as first, proof.browsing(width) as second:
+        proof.sign_in(first, scenario, app_a.origin)
+        sign_in_through_keycloaks_session(proof, first, app_b.origin)
+        proof.sign_in(second, None, app_b.origin)
+        assert (app_a.state()["sessions"], app_b.state()["sessions"]) == (1, 2), "setup"
+        first.goto(f"{app_a.origin}/")
+
+        def both_apps_still_hold_their_sessions() -> None:
+            assert_callbacks(app_a, accepted=0, sessions=0)
+            assert_callbacks(app_b, accepted=0, sessions=2)
+
+        log_out_through_keycloak(
+            proof, first, scenario, app_a.origin, both_apps_still_hold_their_sessions
+        )
+        wait_for_accepted_callbacks(app_b, 1)
+        assert_callbacks(app_b, accepted=1, sessions=0)
+        assert_signed_out(proof, first, app_b.origin)
+        proof.shot(first, scenario, "result")
+        assert_signed_out(proof, second, app_b.origin)
+        proof.shot(second, scenario, "other-context-result")
+    return (
+        "a person signed in to app A and, through Keycloak's session, to app B, and a second "
+        "context signed in to B; a logout in A reached Keycloak's confirmation with B holding "
+        "2 sessions and 0 callbacks, then Keycloak called B back (accepted 1, refused 0): B "
+        "holds 0 sessions and both contexts' B pages say Signed out with /me 401"
+    )
+
+
+def admin_logout_ends_the_sessions_in_every_app(proof: Proof, width: Width) -> str:
+    scenario = f"12-{width.label}"
+    app_a, app_b = proof.apps
+    # Scenarios 10 and 11 leave their second contexts' sessions standing at Keycloak, and the
+    # admin logout would call the apps back for them too.
+    proof.log_out_user_everywhere(proof.user_id)
+    app_a.reset()
+    app_b.reset()
+    with proof.browsing(width) as page:
+        proof.sign_in(page, scenario, app_a.origin)
+        sign_in_through_keycloaks_session(proof, page, app_b.origin)
+        assert (app_a.state()["sessions"], app_b.state()["sessions"]) == (1, 1), "setup"
+        proof.log_out_user_everywhere(proof.user_id)
+        for app in (app_a, app_b):
+            wait_for_accepted_callbacks(app, 1)
+            assert_callbacks(app, accepted=1, sessions=0)
+            assert_signed_out(proof, page, app.origin)
+            proof.shot(page, scenario, f"result-{app.configuration.client_id}")
+    return (
+        "a person signed in to apps A and B; Keycloak's admin API ended the user's sessions "
+        "(204): each app was called back once (accepted 1, refused 0), holds 0 sessions, "
+        "and answers /me with 401"
+    )
+
+
+def disabled_account_is_logged_out_everywhere(proof: Proof, width: Width) -> str:
+    scenario = f"13-{width.label}"
+    app_a, app_b = proof.apps
+    app_a.reset()
+    app_b.reset()
+    try:
+        with proof.browsing(width) as page:
+            proof.sign_in(
+                page, scenario, app_a.origin, DISABLED_USER_NAME, proof.disabled_user_password
+            )
+            sign_in_through_keycloaks_session(proof, page, app_b.origin, DISABLED_USER_NAME)
+            proof.set_user_enabled(proof.disabled_user_id, False)
+            page.goto(f"{app_a.origin}/")
+            proof.press(page, "#logout")
+            page.get_by_role("heading", name="Signed out").wait_for()
+            assert_callbacks(app_a, accepted=0, sessions=0)
+            assert_callbacks(app_b, accepted=0, sessions=1)
+            proof.shot(page, scenario, "user-logout-result")
+            proof.log_out_user_everywhere(proof.disabled_user_id)
+            for app in (app_a, app_b):
+                wait_for_accepted_callbacks(app, 1)
+                assert_callbacks(app, accepted=1, sessions=0)
+            assert_signed_out(proof, page, app_b.origin)
+            proof.shot(page, scenario, "result")
+        logins_before = app_a.state()["callbacks_received"]
+        with proof.browsing(width) as fresh:
+            refused = f"{scenario}-fresh"
+            proof.start_sign_in(fresh, refused, app_a.origin)
+            proof.fill_keycloak_form(
+                fresh, refused, proof.disabled_user_password, DISABLED_USER_NAME
+            )
+            fresh.get_by_text(KEYCLOAK_DISABLED_MESSAGE).wait_for()
+            proof.shot(fresh, refused, "refused-result")
+        held = app_a.state()
+        assert (held["callbacks_received"], held["sessions"]) == (logins_before, 0), held
+    finally:
+        proof.set_user_enabled(proof.disabled_user_id, True)
+    return (
+        "a person signed in to apps A and B, then the account was disabled at Keycloak; the "
+        "user's own logout in A never reached Keycloak's confirmation and called no app back "
+        "(B still held its session: accepted 0, sessions 1); Keycloak's admin logout (204) then "
+        "called both apps back (accepted 1, refused 0): 0 sessions and /me 401 in each; a fresh "
+        f"sign in met {KEYCLOAK_DISABLED_MESSAGE!r} at Keycloak and reached no app"
+    )
+
+
 def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
     user_id = admin.create(f"/{REALM}/users", {
         "username": username,
@@ -582,9 +810,20 @@ def create_user(admin: Admin, username: str, password: str, groups: tuple[str, .
     return user_id
 
 
-def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
-    proof.client_uuid = admin.create(f"/{REALM}/clients", {
-        "clientId": CLIENT_ID,
+def client_representation(
+    client_id: str, client_secret: str, origins: tuple[str, ...],
+    backchannel_logout_url: str | None = None,
+) -> dict[str, Any]:
+    attributes = {"post.logout.redirect.uris": "##".join(f"{origin}/" for origin in origins)}
+    if backchannel_logout_url is not None:
+        attributes |= {
+            "backchannel.logout.url": backchannel_logout_url,
+            "backchannel.logout.session.required": "false",
+            "backchannel.logout.revoke.offline.tokens": "false",
+            "id.token.signed.response.alg": "RS256",
+        }
+    return {
+        "clientId": client_id,
         "enabled": True,
         "publicClient": False,
         "clientAuthenticatorType": "client-secret",
@@ -593,15 +832,20 @@ def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
         "directAccessGrantsEnabled": False,
         "serviceAccountsEnabled": False,
         "frontchannelLogout": False,
-        "attributes": {"post.logout.redirect.uris": f"{APP_ORIGIN}/##{SECOND_APP_ORIGIN}/"},
-        "redirectUris": [
-            f"{APP_ORIGIN}{CALLBACK_PATH}", f"{SECOND_APP_ORIGIN}{CALLBACK_PATH}",
-        ],
+        "attributes": attributes,
+        "redirectUris": [f"{origin}{CALLBACK_PATH}" for origin in origins],
         "defaultClientScopes": ["basic", "profile", "groups"],
-    })
+    }
+
+
+def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
+    proof.client_uuid = admin.create(
+        f"/{REALM}/clients",
+        client_representation(CLIENT_ID, client_secret, (APP_ORIGIN, SECOND_APP_ORIGIN)),
+    )
     songmaker = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")
     admin.create(f"/{REALM}/groups/{songmaker['id']}/children", {"name": "admin"})
-    create_user(admin, USER_NAME, proof.user_password, (USER_GROUP,))
+    proof.user_id = create_user(admin, USER_NAME, proof.user_password, (USER_GROUP,))
     proof.disabled_user_id = create_user(
         admin, DISABLED_USER_NAME, proof.disabled_user_password, (USER_GROUP,)
     )
@@ -619,10 +863,11 @@ def register_stack_secrets(stack: HeldStack, admin: Admin, registry: SecretRegis
 
 
 def host_settings(
-    proof: Proof, tls: ThrowawayTls, shim_port: int, cookie_samesite: CookieSameSite
+    tls: ThrowawayTls, shim_port: int, app_origins: tuple[str, ...], client_id: str,
+    client_secret: str, session_secret: str, cookie_samesite: CookieSameSite,
 ) -> HostSettings:
     return HostSettings(
-        app_origins=(APP_ORIGIN, SECOND_APP_ORIGIN),
+        app_origins=app_origins,
         port=free_port(),
         observe_port=free_port(),
         tls_certificate=str(tls.leaf_certificate),
@@ -634,11 +879,47 @@ def host_settings(
         end_session_endpoint=f"{OIDC_PATH}/logout",
         token_endpoint=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/token",
         jwks_url=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/certs",
-        client_id=CLIENT_ID,
-        client_secret=proof.client_secret,
-        session_secret=proof.session_secret,
+        client_id=client_id,
+        client_secret=client_secret,
+        session_secret=session_secret,
         cookie_samesite=cookie_samesite,
     )
+
+
+@contextlib.contextmanager
+def backchannel_apps(
+    proof: Proof, runtime: Path, tls: ThrowawayTls, shim_port: int
+) -> Iterator[tuple[App, ...]]:
+    """The apps of the back-channel phase, each behind its own bridge that Keycloak's client
+    names, all gone again before the stack is released."""
+    assert proof.stack is not None
+    network = proof.stack.keycloak_network()
+    with contextlib.ExitStack() as running:
+        apps: list[App] = []
+        for configuration in BACKCHANNEL_APPS:
+            client_secret = secrets.token_urlsafe(24)
+            session_secret = secrets.token_urlsafe(48)
+            proof.registry.add(f"{configuration.client_id} client secret", client_secret)
+            proof.registry.add(f"{configuration.client_id} session secret", session_secret)
+            proof.app_session_secrets.append(session_secret)
+            settings = host_settings(
+                tls, shim_port, (configuration.origin,), configuration.client_id,
+                client_secret, session_secret, configuration.cookie_samesite,
+            )
+            host = start_host(proof, runtime, settings, tls.ca_certificate)
+            running.callback(stop_host, host.process)
+            bridge = running.enter_context(
+                CallbackBridge(network, host.app_port, tls.ca_certificate)
+            )
+            proof.fresh_admin().create(
+                f"/{REALM}/clients",
+                client_representation(
+                    configuration.client_id, client_secret, (configuration.origin,),
+                    bridge.url,
+                ),
+            )
+            apps.append(App(configuration, host, client_secret))
+        yield tuple(apps)
 
 
 def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
@@ -670,14 +951,19 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
             proof.ca_certificate = tls.ca_certificate
             try:
                 for cookie_samesite in SAMESITE_VALUES:
-                    settings = host_settings(proof, tls, shim.port, cookie_samesite)
+                    settings = host_settings(
+                        tls, shim.port, (APP_ORIGIN, SECOND_APP_ORIGIN), CLIENT_ID,
+                        proof.client_secret, proof.session_secret, cookie_samesite,
+                    )
                     hosts.append(start_host(proof, runtime, settings, tls.ca_certificate))
-                drive_browser_off_the_main_thread(
-                    proof,
-                    lambda: drive_browser(
-                        proof, runtime, tls, shim.port, untrusted_shim.port, hosts
-                    ),
-                )
+                with backchannel_apps(proof, runtime, tls, shim.port) as apps:
+                    proof.apps = apps
+                    drive_browser_off_the_main_thread(
+                        proof,
+                        lambda: drive_browser(
+                            proof, runtime, tls, shim.port, untrusted_shim.port, hosts
+                        ),
+                    )
             finally:
                 proof.winding_down = True
                 for host in hosts:
@@ -715,6 +1001,42 @@ def drive_browser(
                     )
             finally:
                 proof.browser.close()
+        drive_backchannel_phase(proof, playwright, runtime, tls, shim_port, untrusted_port)
+
+
+BACKCHANNEL_SCENARIOS = (
+    (10, logout_ends_every_session_of_the_subject),
+    (11, logout_in_one_app_ends_the_sessions_of_the_other),
+    (12, admin_logout_ends_the_sessions_in_every_app),
+    (13, disabled_account_is_logged_out_everywhere),
+)
+
+
+def drive_backchannel_phase(
+    proof: Proof, playwright: Playwright, runtime: Path, tls: ThrowawayTls, shim_port: int,
+    untrusted_port: int,
+) -> None:
+    """The apps are two hosts; the browser reaches each on its own origin."""
+    app_a, app_b = proof.apps
+    proof.browser = launch_pinned_chromium(
+        playwright, runtime,
+        {
+            IDP_HOST: shim_port,
+            APP_HOST: app_a.host.app_port,
+            SECOND_APP_HOST: app_b.host.app_port,
+            UNTRUSTED_HOST: untrusted_port,
+        },
+        tls.leaf_spki_sha256_base64,
+    )
+    try:
+        for width in WIDTHS:
+            for number, scenario in BACKCHANNEL_SCENARIOS:
+                proof.held_or_failed(
+                    f"SCENARIO {number} {width.label} {app_a.origin} {app_b.origin}",
+                    lambda scenario=scenario, width=width: scenario(proof, width),
+                )
+    finally:
+        proof.browser.close()
 
 
 SCENARIOS_PER_WIDTH = (

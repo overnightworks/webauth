@@ -19,10 +19,13 @@ import httpx
 EDGE_SHA_FILE = Path(__file__).with_name("EDGE_SHA")
 PROBE_FILES = "compose.yaml keycloak probe/keycloak traefik.yml dynamic".split()
 REALM = "hallucinai"
+PROBE_PROJECT = "edge-kc-probe"
+KEYCLOAK_NETWORK = "keycloak"
 READY_MARK = "READY "
 HOLD_ENDED = "HOLD ENDED"
 STOP_WAIT_SECONDS = 180  # README: --kill-after must exceed the worst-case cleanup, 225 s
 ADMIN_TIMEOUT_SECONDS = 30
+DOCKER_TIMEOUT_SECONDS = 30
 
 
 class StackError(Exception):
@@ -37,6 +40,15 @@ def require_pinned_clean_edge(edge: Path) -> None:
     dirty = _git(edge, "status", "--porcelain", "--", *PROBE_FILES)
     if dirty.strip():
         raise StackError("edge has changes in files the probe consumes")
+
+
+def docker(*arguments: str) -> str:
+    # Fixed command list
+    return subprocess.run(  # noqa: S603
+        # The operator's own PATH by design
+        ["docker", *arguments], check=True, capture_output=True, text=True,  # noqa: S607
+        timeout=DOCKER_TIMEOUT_SECONDS,
+    ).stdout
 
 
 def _git(edge: Path, *arguments: str) -> str:
@@ -70,6 +82,11 @@ class Admin:
         answer = self._call("PUT", path, json=representation)
         if answer.status_code not in (200, 204):
             raise StackError(f"PUT {path} answered {answer.status_code}")
+
+    def post(self, path: str) -> None:
+        answer = self._call("POST", path)
+        if answer.status_code != 204:
+            raise StackError(f"POST {path} answered {answer.status_code}")
 
     def _call(self, method: str, path: str, **options: Any) -> httpx.Response:
         return httpx.request(
@@ -141,6 +158,17 @@ class HeldStack:
     @property
     def edge_url(self) -> str:
         return self.ready["edge_url"]
+
+    def keycloak_network(self) -> str:
+        """The name of the probe's ``keycloak`` network, the one Keycloak's container sits on."""
+        networks = docker(
+            "network", "ls", "--format", "{{.Name}}",
+            "--filter", f"label=com.docker.compose.project={PROBE_PROJECT}",
+            "--filter", f"label=com.docker.compose.network={KEYCLOAK_NETWORK}",
+        ).split()
+        if len(networks) != 1:
+            raise StackError(f"the {KEYCLOAK_NETWORK} network is absent or ambiguous: {networks}")
+        return networks[0]
 
     def admin(self) -> Admin:
         secret = Path(self.ready["admin_client_secret_file"]).read_text().strip()
