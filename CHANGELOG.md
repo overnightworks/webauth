@@ -10,6 +10,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Added**
 
+- `webauth.WebAuthError` is the common base of the public operational
+  exceptions: `UsernameTakenError`, `NotAnAdminError`, `UnknownSessionError`,
+  `KeySetFetchError` and `TokenEndpointError`.
 - Back-channel logout. `OidcRelyingParty.verify_logout_token(logout_token)`
   answers a `VerifiedLogout(subject)` or an `OidcRefusal` for a Logout Token
   that is RS256, of the configured issuer, for exactly this client, issued
@@ -31,6 +34,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `UserManagementError` is removed. Use `WebAuthError` for the wider catch, or
+  catch `(UsernameTakenError, NotAnAdminError, UnknownSessionError)` to keep
+  the previous catch set.
 - `OidcClientConfig` requires `end_session_endpoint` (after `jwks_url`) and
   `post_logout_redirect_uri` (after `redirect_uri`); both are https URLs under
   the same rules as the other endpoints, and a missing one is a `TypeError`.

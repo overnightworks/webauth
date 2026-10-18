@@ -59,6 +59,7 @@ from types import MappingProxyType
 
 from pydantic import SecretStr
 
+from webauth import WebAuthError
 from webauth.cookies import PENDING_SECRET_BYTES, PendingLogin
 from webauth.jwt_verification import (
     ExchangeFailure,
@@ -183,7 +184,7 @@ class TokenEndpointAnswer:
     body: bytes = field(repr=False)
 
 
-class TokenEndpointError(Exception):
+class TokenEndpointError(WebAuthError):
     """The token request did not reach an answer: refused, timed out, or broken off.
 
     `failure` names why, so a caller can tell a timeout from another transport

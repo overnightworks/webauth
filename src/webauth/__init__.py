@@ -12,4 +12,8 @@ The library persists nothing itself: it holds no schema and no ORM, and the
 
 __version__ = "0.15.0"
 
-__all__ = ["__version__"]
+__all__ = ["WebAuthError", "__version__"]
+
+
+class WebAuthError(Exception):
+    """The common base of the operational exceptions the library's public API raises."""

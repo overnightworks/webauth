@@ -54,6 +54,8 @@ from urllib3.exceptions import (
 from urllib3.util import create_urllib3_context
 from urllib3.util.connection import allowed_gai_family
 
+from webauth import WebAuthError
+
 KEY_SET_FETCH_TIMEOUT_SECONDS = 5
 KEY_SET_FETCH_DEADLINE_SECONDS = 10
 TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
@@ -73,7 +75,7 @@ _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 
 
-class KeySetFetchError(Exception):
+class KeySetFetchError(WebAuthError):
     """The key set could not be fetched: refused, timed out, redirected, or broken off.
 
     `failure` names why when the exchange itself failed; it is `None` when the

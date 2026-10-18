@@ -10,13 +10,13 @@ from __future__ import annotations
 import hmac
 from dataclasses import dataclass
 
+from webauth import WebAuthError
 from webauth.config import WebAuthConfig
 from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
     AuditSink,
     SessionAdministrationStore,
-    UserManagementError,
     UserManagementEvent,
     UserManagementEventKind,
     WriteLock,
@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 
-class NotAnAdminError(UserManagementError):
+class NotAnAdminError(WebAuthError):
     """The actor does not hold the configured administrator role."""
 
 
@@ -40,7 +40,7 @@ def require_admin(actor: AuthenticatedUser, config: WebAuthConfig) -> None:
         raise NotAnAdminError("Administrator access is required")
 
 
-class UnknownSessionError(UserManagementError):
+class UnknownSessionError(WebAuthError):
     """No active session matches the supplied reference."""
 
 
