@@ -735,7 +735,6 @@ def hint_at_the_size_bound_reaches_keycloak(proof: Proof, width: Width) -> str:
         page.context.clear_cookies(name=ID_TOKEN_HINT_COOKIE_NAME)
         plant_hint(page, bound_sized, LOGOUT_PATH)
         answer = press_logout(proof, page)
-        page.wait_for_load_state()
         shown = " ".join(page.inner_text("body").split())[:80]
         proof.shot(page, scenario, "result")
     assert answer.status not in (414, 431), f"the request was refused as too large: {answer.status}"
@@ -804,6 +803,9 @@ def assert_signed_out(proof: Proof, page: Page, origin: str) -> None:
     assert me_status == 401, f"{origin} /me answered {me_status}"
 
 
+END_SESSION_REQUESTS = f"{END_SESSION_ENDPOINT}?**"
+
+
 def is_end_session_request(url: str) -> bool:
     return url.startswith(f"{END_SESSION_ENDPOINT}?")
 
@@ -815,17 +817,19 @@ def press_logout(
     end-session request, before Keycloak has seen it; return Keycloak's answer to it."""
 
     def hold_end_session(route: Route) -> None:
-        if at_end_session is not None:
-            at_end_session()
+        assert at_end_session is not None
+        at_end_session()
         route.continue_()
 
-    page.route(is_end_session_request, hold_end_session)
+    if at_end_session is not None:
+        page.route(END_SESSION_REQUESTS, hold_end_session)
     try:
         with page.expect_response(lambda answer: is_end_session_request(answer.url)) as answer:
             proof.press(page, "#logout")
         return answer.value
     finally:
-        page.unroute(is_end_session_request, hold_end_session)
+        if at_end_session is not None:
+            page.unroute(END_SESSION_REQUESTS, hold_end_session)
 
 
 def log_out_through_keycloak(
@@ -953,15 +957,13 @@ def disabled_account_is_logged_out_everywhere(proof: Proof, width: Width) -> str
             proof.set_user_enabled(proof.disabled_user_id, False)
             page.goto(f"{app_a.origin}/")
             log_out_through_keycloak(proof, page, scenario, app_a.origin)
-            assert_callbacks(app_a, accepted=0, sessions=0)
-            assert_callbacks(app_b, accepted=0, sessions=1)
             proof.shot(page, scenario, "user-logout-result")
-            proof.log_out_user_everywhere(proof.disabled_user_id)
             for app in (app_a, app_b):
                 wait_for_accepted_callbacks(app, 1)
                 assert_callbacks(app, accepted=1, sessions=0)
             assert_signed_out(proof, page, app_b.origin)
             proof.shot(page, scenario, "result")
+
         logins_before = app_a.state()["callbacks_received"]
         with proof.browsing(width) as fresh:
             refused = f"{scenario}-fresh"
@@ -977,10 +979,9 @@ def disabled_account_is_logged_out_everywhere(proof: Proof, width: Width) -> str
         proof.set_user_enabled(proof.disabled_user_id, True)
     return (
         "a person signed in to apps A and B, then the account was disabled at Keycloak; the "
-        "user's own logout in A showed no page and called no app back "
-        "(B still held its session: accepted 0, sessions 1); Keycloak's admin logout (204) then "
-        "called both apps back (accepted 1, refused 0): 0 sessions and /me 401 in each; a fresh "
-        f"sign in met {KEYCLOAK_DISABLED_MESSAGE!r} at Keycloak and reached no app"
+        "user's own logout in A showed no page, and Keycloak called both apps back (accepted 1, "
+        "refused 0 each): 0 sessions and /me 401 in each; a fresh sign in met "
+        f"{KEYCLOAK_DISABLED_MESSAGE!r} at Keycloak and reached no app"
     )
 
 

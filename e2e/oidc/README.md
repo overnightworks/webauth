@@ -179,12 +179,12 @@ Token.
 - `SCENARIO 12`, admin logout: `POST /admin/realms/hallucinai/users/{id}/logout`
   answers 204; both apps are called back and answer `/me` with 401.
 - `SCENARIO 13`, disable, then logout: a person signs in to A and B and the account is
-  disabled; that alone ends nothing in either app. The person's own logout in A never
-  shows a page (it sends the browser straight back) and calls no
-  app back: B still holds its session. Keycloak's admin logout
-  then calls both apps back and ends every session, and a fresh sign in is refused at
-  Keycloak's form. So the logout that ends a disabled account's sessions is the admin
-  one: `edge lock` must send it after the disable (#49).
+  disabled; that alone ends nothing in either app. The person's own logout in A shows
+  no page (the ID token hint is enough for Keycloak, disabled account or not) and now
+  ends the Keycloak session: Keycloak calls both apps back, each accepted once, and
+  each holds 0 sessions. Before the hint this logout stopped at Keycloak's confirmation
+  and the admin logout was the only one that reached the apps. A fresh sign in is
+  refused at Keycloak's form.
 
 `SCENARIO 5` is the session cookie after the callback redirect. One host
 process per `cookie_samesite` serves both app origins; each cell uses a fresh
