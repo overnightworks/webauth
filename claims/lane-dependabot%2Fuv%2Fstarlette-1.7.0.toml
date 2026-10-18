@@ -1,0 +1,7 @@
+claim_id = "d022ef9da19b45b286b9123023c090b5"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "e01ed9aa20d212a32f119af2ee88584b66a6e821"
+branch = "dependabot/uv/starlette-1.7.0"
+scope = ["uv.lock"]
+opened_commit = "73d14735f60559b27b8ccbe945d0e273f87f21f9"
