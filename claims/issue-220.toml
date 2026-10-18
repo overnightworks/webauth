@@ -1,0 +1,8 @@
+claim_id = "72abe0ac5b7349919612fc49573753e3"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "b9b213b38be70f082a9c03ac4a9a06be26105cc5"
+branch = "claude/issue-220-webautherror-base"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/__init__.py", "src/webauth/https_client.py", "src/webauth/oidc.py", "src/webauth/ports.py", "src/webauth/session_administration.py", "tests/test_public_api.py", "tests/test_session_administration.py", "tests/typing/oidc_host.py"]
+opened_commit = "b4faac1f661563c7acbcad2f0dfc9e59c9f34f45"
+whole_reason = "One exception base: its definition, the five subclasses, the removed old base, its tests and the migration text change together."
