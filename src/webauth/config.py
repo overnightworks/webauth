@@ -24,6 +24,7 @@ from webauth.cookies import (
     default_cookie_name,
     is_host_only_cookie_name,
     is_secure_prefixed_cookie_name,
+    is_valid_cookie_name,
 )
 from webauth.liveness import require_positive_seconds
 
@@ -112,6 +113,7 @@ class WebAuthConfig:
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
+        self._require_distinct_cookie_names()
         require_positive_seconds("cookie_max_age_seconds", self.cookie_max_age_seconds)
         if (
             type(self.ipv6_budget_prefix) is not int
@@ -137,6 +139,13 @@ class WebAuthConfig:
                 "every new account an admin",
             )
 
+    def _require_distinct_cookie_names(self) -> None:
+        if self.session_cookie_name == self.csrf_cookie_name:
+            raise ValueError(
+                "session_cookie_name and csrf_cookie_name must differ; both cookies "
+                "share one path, so equal names would make one overwrite the other",
+            )
+
     def _resolve_cookie_name(self, field: str, plain_name: str) -> None:
         name = getattr(self, field)
         if isinstance(name, _DefaultCookieName):
@@ -146,6 +155,11 @@ class WebAuthConfig:
         elif not isinstance(name, str):
             raise ValueError(
                 f"{field} must be a cookie name; leave it out for the library's default",
+            )
+        elif not is_valid_cookie_name(name):
+            raise ValueError(
+                f"{field} {name!r} is not a valid cookie name; it must be an RFC 6265 "
+                "token (ASCII letters, digits and !#$%&'*+-.^_`|~)",
             )
         elif (
             is_host_only_cookie_name(name) or is_secure_prefixed_cookie_name(name)

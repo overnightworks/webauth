@@ -32,6 +32,7 @@ from webauth.cookies import (
     clear_session_cookies,
     default_cookie_name,
     generate_csrf_token,
+    is_valid_cookie_name,
     issue_session_cookies,
     pending_login_cookie_name,
     sign_pending_login,
@@ -566,3 +567,30 @@ def test_logging_out_takes_both_cookies_back(cookie_app: CookieApp) -> None:
 
     assert cookie_app.config.session_cookie_name not in cookie_app.client.cookies
     assert cookie_app.config.csrf_cookie_name not in cookie_app.client.cookies
+
+
+@pytest.mark.parametrize(
+    ("name", "valid"),
+    [
+        *[
+            pytest.param(name, True, id=f"accepts-{name}")
+            for name in (
+                "__Host-session_id", "__Host-csrf_token", "session_id", "csrf_token",
+                "sid", "a-b", "a_b", "a.b", "A9",
+                *[f"a{char}b" for char in "!#$%&'*+^`|~"],
+            )
+        ],
+        *[
+            pytest.param(name, False, id=f"refuses-{name!r}")
+            for name in (
+                "", "a b", "a\tb", "a;b", "a=b", "a,b", 'a"b',
+                "a\x01b", "a\x7fb", "a\n", "café",
+                *[f"a{char}b" for char in "()<>@:\\/[]?{}"],
+            )
+        ],
+    ],
+)
+def test_a_cookie_name_is_valid_only_when_it_is_an_rfc_6265_token(
+    name: str, valid: bool,
+) -> None:
+    assert is_valid_cookie_name(name) is valid

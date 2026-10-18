@@ -347,9 +347,9 @@ Fields a host may leave out:
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
-| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
+| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty, spaces, `;`, `=`, `,`, quotes and non-ASCII are refused); must differ from the other cookie's name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
 | `csrf_header_name` | `"x-csrf-token"` | the request header that carries the CSRF token |
-| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | any cookie name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
+| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty, spaces, `;`, `=`, `,`, quotes and non-ASCII are refused); must differ from the other cookie's name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
 | `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
 | `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
 | `max_user_agent_chars` | `500` | a positive `int`; zero, a negative number, or a `bool` is refused |
