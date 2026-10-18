@@ -1,0 +1,8 @@
+claim_id = "edb5d3fbb1ee498c9a83c08d2294efe2"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "b9b213b38be70f082a9c03ac4a9a06be26105cc5"
+branch = "claude/issue-219-w5b-backchannel-d1-proof"
+scope = ["e2e/oidc/README.md", "e2e/oidc/evidence.py", "e2e/oidc/harness.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "e2e/oidc/shim.py", "e2e/oidc/stack.py"]
+opened_commit = "9d1b56bf3152ac274c382ea715027ce38dbbf853"
+whole_reason = "One proof harness: the callback bridge, the second host, the client attributes and the scenarios only prove anything together."
