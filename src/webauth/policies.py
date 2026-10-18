@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from webauth.validation import require_positive_whole_number
+
 __all__ = [
     "DEFAULT_PERMISSIONS_POLICY",
     "BodySizePolicy",
@@ -73,6 +75,8 @@ class RateLimitBudget:
     The name is part of the limiter key, so it holds none of the characters a
     key or a Redis pattern gives meaning to: ``:`` separates the name from the
     address, ``{}`` form Redis Cluster hash tags, ``*?[]`` are glob characters.
+    ``max_requests`` and ``window_seconds`` are positive whole numbers; a window
+    of zero would make the limiter admit every request.
     """
 
     name: str
@@ -85,6 +89,11 @@ class RateLimitBudget:
                 f"Rate-limit budget name {self.name!r} must start with a lowercase letter "
                 "and hold only lowercase letters, digits, '-' and '_'.",
             )
+        label = f"RateLimitBudget {self.name!r}"
+        require_positive_whole_number(f"{label} max_requests", self.max_requests, unit="requests")
+        require_positive_whole_number(
+            f"{label} window_seconds", self.window_seconds, unit="seconds",
+        )
 
 
 @dataclass(frozen=True)

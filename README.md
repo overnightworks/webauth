@@ -648,7 +648,8 @@ budget a request spends from, and every other path spends from `default`. A
 budget name starts with a lowercase letter, holds only lowercase letters,
 digits, `-` and `_`, and is unique in the policy. The limiter key is
 `<name>:<address>` inside the Redis `key_prefix`, so renaming a budget starts
-it fresh.
+it fresh. A budget whose `max_requests` or `window_seconds` is not a positive
+whole number is refused at construction.
 
 ```python
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule

@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import UTC
 from typing import TYPE_CHECKING, Protocol
 
+from webauth.validation import require_positive_whole_number
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -17,16 +19,6 @@ __all__ = [
     "ExpiryColumnLiveness",
     "IdleWindowLiveness",
 ]
-
-
-def require_positive_seconds(field: str, value: object) -> None:
-    """Refuse a lifetime that is not a positive whole number of seconds.
-
-    A zero, negative or fractional lifetime would not fail loudly later: it
-    would expire every session at once and leave its users in a login loop.
-    """
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{field} must be a positive whole number of seconds, not {value!r}")
 
 
 class _ExpiryColumnRecord(Protocol):
@@ -46,7 +38,9 @@ class ExpiryColumnLiveness:
     """
 
     def __init__(self, absolute_max_age_seconds: int) -> None:
-        require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
+        require_positive_whole_number(
+            "absolute_max_age_seconds", absolute_max_age_seconds, unit="seconds",
+        )
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
@@ -71,9 +65,11 @@ class IdleWindowLiveness:
     def __init__(
         self, idle_window_seconds: int, absolute_max_age_seconds: int | None = None,
     ) -> None:
-        require_positive_seconds("idle_window_seconds", idle_window_seconds)
+        require_positive_whole_number("idle_window_seconds", idle_window_seconds, unit="seconds")
         if absolute_max_age_seconds is not None:
-            require_positive_seconds("absolute_max_age_seconds", absolute_max_age_seconds)
+            require_positive_whole_number(
+                "absolute_max_age_seconds", absolute_max_age_seconds, unit="seconds",
+            )
         self._idle_window_seconds = idle_window_seconds
         self._absolute_max_age_seconds = absolute_max_age_seconds
 

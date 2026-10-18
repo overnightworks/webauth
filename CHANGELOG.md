@@ -10,6 +10,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `RateLimitBudget` refuses, with a `ValueError` naming the budget and the
+  field, a `max_requests` or `window_seconds` that is not a positive `int` (`0`,
+  a negative number, a `bool`, a `float`, a `str` or `None`). Before, a window
+  of `0` or less made both backends admit every request. A host that passed
+  such a value must now pass a positive whole number.
 - `RateLimitClass` is gone, and `RateLimitPolicy` takes `default` and `rules`
   instead of `budgets`, `media` and `stream`. `RateLimitBudget` gains a
   leading `name` (lowercase letters, digits, `-` and `_`, starting with a
