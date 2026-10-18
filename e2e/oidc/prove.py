@@ -797,11 +797,11 @@ def short_lived_id_tokens(proof: Proof, seconds: int) -> Iterator[None]:
     path = f"/{REALM}/clients/{proof.client_uuid}"
     before = proof.fresh_admin().get(path)
     previous = before["attributes"].get(LIFESPAN_ATTRIBUTE)
-    proof.fresh_admin().put(
-        path,
-        {**before, "attributes": {**before["attributes"], LIFESPAN_ATTRIBUTE: str(seconds)}},
-    )
     try:
+        proof.fresh_admin().put(
+            path,
+            {**before, "attributes": {**before["attributes"], LIFESPAN_ATTRIBUTE: str(seconds)}},
+        )
         yield
     finally:
         admin = proof.fresh_admin()
@@ -815,11 +815,16 @@ def short_lived_id_tokens(proof: Proof, seconds: int) -> Iterator[None]:
         admin.put(path, {**current, "attributes": attributes})
 
 
+def end_session_hint_is(end_session_url: str, token: str) -> bool:
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(end_session_url).query)
+    return query.get("id_token_hint") == [token]
+
+
 def wait_until_past(expiry: float) -> float:
     """Waits until the clock is the margin past `expiry`; returns how far past it stands."""
-    deadline = time.time() + SHORT_TOKEN_LIFESPAN_SECONDS + 2 * EXPIRY_MARGIN_SECONDS
+    deadline = time.monotonic() + SHORT_TOKEN_LIFESPAN_SECONDS + 2 * EXPIRY_MARGIN_SECONDS
     while time.time() < expiry + EXPIRY_MARGIN_SECONDS:
-        assert time.time() < deadline, "the clock did not pass the ID token's expiry in time"
+        assert time.monotonic() < deadline, "the clock did not pass the ID token's expiry in time"
         time.sleep(CALLBACK_POLL_SECONDS)
     return time.time() - expiry
 
@@ -836,13 +841,15 @@ def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
             ),
         )
         hint = signed_in_with_a_hint(proof, page, scenario)
+        token = cookie_name_and_value(hint)[1]
         expiry = id_token_expiry(hint)
         assert expiry - time.time() <= SHORT_TOKEN_LIFESPAN_SECONDS, "the ID token is long-lived"
         past = wait_until_past(expiry)
         log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
         (end_session_url,) = end_session_urls
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(end_session_url).query)
-        assert "id_token_hint" in query, "the end-session request carried no id_token_hint"
+        assert end_session_hint_is(
+            end_session_url, token
+        ), "the end-session request did not carry the ID token whose expiry was measured"
         assert not hints_anywhere(page), "an ID token hint remains after the logout"
         assert proof.host_state()["sessions"] == 0, "the host still holds a session"
         again = second_sign_in(proof, page, scenario)
