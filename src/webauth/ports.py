@@ -15,6 +15,8 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Protocol, runtime_checkable
 
+from webauth import WebAuthError
+
 __all__ = [
     "AuditSink",
     "RateLimitBackend",
@@ -25,7 +27,6 @@ __all__ = [
     "SessionRecord",
     "SessionRecordStore",
     "SubjectUserStore",
-    "UserManagementError",
     "UserManagementEvent",
     "UserManagementEventKind",
     "UserRecord",
@@ -95,11 +96,7 @@ class SubjectUserStore(Protocol):
         ...
 
 
-class UserManagementError(Exception):
-    """A refused user-management operation, translated by the host."""
-
-
-class UsernameTakenError(UserManagementError):
+class UsernameTakenError(WebAuthError):
     """The store could not create an account because its username is taken."""
 
 

@@ -885,7 +885,7 @@ otherwise; the host guards `list_sessions` with its admin dependency. Public
 references come only from `webauth.cookies.session_reference(session_id)`:
 SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
 `SessionIdentityChanged` (its `session_ref`) expose no raw token; the host reads
-any timestamps from its own records. Refusals derive from `UserManagementError`.
+any timestamps from its own records. Refusals derive from `WebAuthError`.
 [The session administration tests](tests/test_session_administration.py) verify
 the helpers, including REQ-ADMIN-12 for listed references.
 

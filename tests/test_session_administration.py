@@ -22,9 +22,7 @@ from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
     AuditSink,
     SessionAdministrationStore,
-    UserManagementError,
     UserManagementEventKind,
-    UsernameTakenError,
     WriteLock,
 )
 from webauth.session_administration import (
@@ -231,11 +229,3 @@ def test_the_arrangement_supplies_the_administration_protocols(
     assert isinstance(administration.sessions, SessionAdministrationStore)
     assert isinstance(administration.audit, AuditSink)
     assert isinstance(administration.lock, WriteLock)
-
-
-@pytest.mark.parametrize("error_type", [UsernameTakenError, NotAnAdminError, UnknownSessionError])
-def test_hosts_can_catch_every_management_refusal_through_its_common_base(
-    error_type: type[UserManagementError],
-) -> None:
-    with pytest.raises(UserManagementError):
-        raise error_type()

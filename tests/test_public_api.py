@@ -12,6 +12,12 @@ from pathlib import Path
 import pytest
 
 import webauth
+from webauth import WebAuthError
+from webauth.https_client import KeySetFetchError
+from webauth.jwt_verification import ExchangeFailure
+from webauth.oidc import TokenEndpointError
+from webauth.ports import UsernameTakenError
+from webauth.session_administration import NotAnAdminError, UnknownSessionError
 
 TYPING_HOST = Path(__file__).parent / "typing" / "oidc_host.py"
 WEBAUTH_MODULES = [
@@ -103,3 +109,24 @@ def test_every_module_imports_and_the_single_process_backend_counts_without_redi
 
     assert backend.is_allowed("address", limit=1, window_seconds=60)
     assert not backend.is_allowed("address", limit=1, window_seconds=60)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        UsernameTakenError("taken"),
+        NotAnAdminError("taken"),
+        UnknownSessionError("taken"),
+        KeySetFetchError("taken", ExchangeFailure.TIMED_OUT),
+        TokenEndpointError("taken", ExchangeFailure.TIMED_OUT),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+def test_every_public_operational_error_is_caught_as_web_auth_error_with_its_payload(
+    error: Exception,
+) -> None:
+    with pytest.raises(WebAuthError) as caught:
+        raise error
+
+    assert str(caught.value) == "taken"
+    assert getattr(caught.value, "failure", ExchangeFailure.TIMED_OUT) is ExchangeFailure.TIMED_OUT
