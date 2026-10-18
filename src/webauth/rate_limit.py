@@ -109,8 +109,8 @@ class SingleProcessRateLimitBackend:
         self._next_prune_at = 0.0
 
     def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
-        now = time.monotonic()
         with self._lock:
+            now = time.monotonic()
             self._sweep_expired_when_due(now)
             entry = self._events.get(key)
             if entry is None:
