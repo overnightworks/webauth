@@ -112,6 +112,38 @@ class TestThreadSafety:
 
         assert sum(verdicts) == limit
 
+    def test_a_check_that_waits_for_the_lock_cannot_file_an_older_timestamp(self) -> None:
+        backend = SingleProcessRateLimitBackend()
+        first_has_read_clock = threading.Event()
+        second_has_read_clock = threading.Event()
+        readings = iter((100.0, 130.0, 210.0))
+
+        def scripted_monotonic() -> float:
+            reading = next(readings)
+            if reading == 100.0:
+                first_has_read_clock.set()
+                second_has_read_clock.wait(timeout=0.5)
+            elif reading == 130.0:
+                second_has_read_clock.set()
+            return reading
+
+        def check() -> None:
+            backend.is_allowed("addr", limit=2, window_seconds=100)
+
+        with patch.object(
+            webauth.rate_limit, "time", SimpleNamespace(monotonic=scripted_monotonic),
+        ):
+            first = threading.Thread(target=check)
+            first.start()
+            assert first_has_read_clock.wait(timeout=5)
+            second = threading.Thread(target=check)
+            second.start()
+            first.join(timeout=5)
+            second.join(timeout=5)
+            backend.is_allowed("other", limit=1, window_seconds=100)
+
+        assert backend.active_key_count() == 2
+
 
 OTHER_PATH = "/other/thing"
 EXEMPT_PATH = "/health"
