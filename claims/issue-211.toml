@@ -1,7 +1,0 @@
-claim_id = "7a79593d63d94273aa05ca6f3875fa41"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "2d0925225c3a8c93bc7240865325bf8af4fca682"
-branch = "claude/issue-211-codeql-own-workflow"
-scope = [".aco/board.toml", ".github/workflows/codeql.yml"]
-opened_commit = "67a3e1f8491f852a90807771db2d9cdd276a5741"
