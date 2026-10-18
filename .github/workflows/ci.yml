@@ -92,4 +92,4 @@ jobs:
     with:
       coverage-artifact: coverage
     secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.WEBAUTH_PROBE_UNSET }}
