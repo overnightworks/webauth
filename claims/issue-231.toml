@@ -3,5 +3,6 @@ agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
 role = "builder"
 base = "8da21afd68f5b791b7b85093b9bf07ff7d002c82"
 branch = "claude/issue-231-release-0-16-0"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/__init__.py"]
+scope = ["CHANGELOG.md", "README.md", "e2e/oidc/README.md", "e2e/oidc/prove.py", "src/webauth/__init__.py"]
 opened_commit = "1c594773e56c6ee85a2186e87fe2f8f2e44a6d2b"
+whole_reason = "The release's delta audit must prove on D1 that Keycloak accepts an expired ID token as the hint before the tag; the proof, the CHANGELOG, README and version land together."
