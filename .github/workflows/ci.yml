@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   checks:
-    name: checks
+    name: checks-renamed
     runs-on: ubuntu-latest
     permissions:
       contents: read

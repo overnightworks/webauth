@@ -1,5 +1,5 @@
 [gate]
-mandatory_jobs = ["checks"]
+mandatory_jobs = ["checks-renamed"]
 
 [secrets]
 allow = [
