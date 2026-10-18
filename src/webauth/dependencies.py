@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException, Request
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, Response
 
+from webauth._origins import origin_is_allowed
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
@@ -42,6 +43,7 @@ __all__ = [
     "AuthenticatedUser",
     "LoginRedirect",
     "WebSocketRefusal",
+    "authenticate_websocket",
     "current_user_dependency",
     "session_id_from_request",
     "unauthenticated_response",
@@ -171,6 +173,39 @@ def current_user_dependency(
         admin_user=admin_user,
         verified_session_id=verified_session_id,
     )
+
+
+def authenticate_websocket(
+    connection: HTTPConnection, *, sessions: SessionRecordStore, audit: AuditSink,
+) -> AuthenticatedUser | WebSocketRefusal:
+    """The account behind a WebSocket handshake, or why the handshake is refused.
+
+    The Origin is decided first, so a refused Origin never touches the store
+    or the audit: a browser sends the session cookie on a cross-site
+    handshake, and only the Origin tells a foreign page from the application's
+    own. Exactly one Origin naming a host the application serves is admitted;
+    there is no ``Referer`` fallback and ``Sec-Fetch-Site`` does not decide.
+    Then the session is decided exactly as ``current_user`` decides it for an
+    HTTP request, renewal and identity audit included.
+
+    Nothing here commits, and a failing store raises rather than refusing: the
+    host finishes its transaction before ``accept`` and closes a refused
+    handshake with code 1008. A socket outlives its session unless the host
+    calls this again, in a fresh transaction, and closes on a refusal.
+    """
+    origin_refusal = _origin_refusal(connection)
+    if origin_refusal is not None:
+        return origin_refusal
+    return _resolve_session(connection, sessions, audit)
+
+
+def _origin_refusal(connection: HTTPConnection) -> WebSocketRefusal | None:
+    origins = connection.headers.getlist("origin")
+    if not origins:
+        return WebSocketRefusal.MISSING_ORIGIN
+    if len(origins) > 1 or not origin_is_allowed(origins[0], web_auth_config(connection)):
+        return WebSocketRefusal.FOREIGN_ORIGIN
+    return None
 
 
 def unauthenticated_response(
