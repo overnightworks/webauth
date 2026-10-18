@@ -497,7 +497,7 @@ named, while every other request still gets 401. A dependency can only raise
 an `HTTPException`, so the 302 still carries FastAPI's default JSON body
 (`{"detail":"Found"}`) alongside its `Location` header.
 
-`webauth.dependencies.session_id_from_request(request, config)` is the one
+`webauth.dependencies.session_id_from_request(connection, config)` is the one
 reader of the session cookie: it parses the raw `Cookie` headers and returns
 the verified session identifier, or `None` when the cookie is missing, longer
 than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
@@ -508,6 +508,83 @@ subdomain can set a second cookie of the same name, so a request carrying two
 is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
 session cookie itself calls this function instead of `request.cookies`.
+
+## WebSocket handshakes
+
+A browser sends the session cookie on a cross-site WebSocket handshake too,
+and the webauth middlewares pass WebSocket scopes through untouched.
+`webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
+is the one check a host runs at the handshake. It answers the
+`AuthenticatedUser`, or a `WebSocketRefusal`:
+
+| Refusal | Value | When |
+|---|---|---|
+| `MISSING_ORIGIN` | `missing-origin` | no `Origin` header |
+| `FOREIGN_ORIGIN` | `foreign-origin` | an `Origin` that is empty, repeated, `null`, unparsable or not an allowed host |
+| `NO_SESSION` | `no-session` | the session cookie is missing, empty or longer than `MAX_SESSION_COOKIE_CHARS` |
+| `INVALID_SESSION` | `invalid-session` | the cookie is forged or present more than once |
+| `SESSION_ENDED_OR_EXPIRED` | `session-ended-or-expired` | the store does not know the session, the liveness policy refuses it, or `touch` answers `False` |
+| `ACCOUNT_DISABLED` | `account-disabled` | the account behind a live session is inactive |
+
+The `Origin` is decided first, before the store is touched, so a refused
+handshake neither renews a session nor writes an audit event. Exactly one
+`Origin` must name a host the configured allowlist admits (`allowed_hosts_exact`
+and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `localhost`
+and `127.0.0.1` when none is configured). There is no `Referer` fallback, and
+`Sec-Fetch-Site` does not decide: a client that is not a browser must send an
+allowed `Origin` too. The `Origin` keeps a foreign page from using a visitor's
+cookie; it is no credential.
+
+Then the session is decided exactly as `current_user_dependency` decides it
+for a request, from the same code: an admitted handshake renews the session
+and reports a changed address or agent. A failing store, or a `touch` that
+does not answer a `bool`, raises instead of refusing, and an exception never
+accepts the socket.
+
+```python
+from fastapi import WebSocket
+from starlette.concurrency import run_in_threadpool
+
+from webauth.dependencies import AuthenticatedUser, WebSocketRefusal, authenticate_websocket
+
+
+@app.websocket("/room")
+async def room(websocket: WebSocket) -> None:
+    def authenticate() -> AuthenticatedUser | WebSocketRefusal:
+        with the_hosts_unit_of_work() as unit:
+            return authenticate_websocket(websocket, sessions=unit.sessions, audit=unit.audit)
+
+    outcome = await run_in_threadpool(authenticate)
+    if isinstance(outcome, WebSocketRefusal):
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    ...
+```
+
+- Authenticate, and finish the transaction, before `accept` and before waiting
+  for a message. `load` holds the session against a concurrent deletion until
+  the transaction ends, so one kept open for the socket's life would block a
+  logout.
+- A refusal closes with code 1008 before `accept`. A real server answers the
+  handshake with HTTP 403; the browser does not receive a close frame.
+- A synchronous store runs in a worker, as above, not in the receive loop.
+- A host may wrap the plain function in its own dependency: FastAPI resolves a
+  parameter annotated `HTTPConnection` on a WebSocket route.
+- After a successful check, `session_id_from_request(websocket, config)` names
+  the session on the same handshake.
+
+A socket does not end when its session does: a logout, an administrator's
+revocation and W5's back-channel logout delete the stored session and cannot
+signal an open socket. The host calls the same helper again, in a fresh
+transaction, before protected work and on its own schedule while a stream runs,
+and on a refusal closes the socket and stops the protected work. A successful
+re-check counts as activity like a request does: it renews the session, so a
+socket that keeps being re-checked stays signed in, and it stays signed in only
+until the absolute cap (`ExpiryColumnLiveness(absolute_max_age_seconds)` or
+`IdleWindowLiveness(..., absolute_max_age_seconds=...)`), which bounds a
+socket's life. A host without an absolute cap sets no end to a socket it keeps
+re-checking.
 
 ## Configuration
 
@@ -640,7 +717,10 @@ to the host's session store.
 
 - `WebAuthConfig.cookie_max_age_seconds` is required and is the browser cookie's
   `Max-Age`. The cookie is issued once at login and never reissued, so it bounds
-  the whole sign-in.
+  the whole sign-in of a client that sends a request at a time. An open
+  WebSocket captured the cookie at its handshake and runs on after the browser
+  drops it; the absolute cap and the host's re-checks bound a socket (see
+  "WebSocket handshakes").
 - The idle window — `IdleWindowLiveness`'s idle argument, or the host's
   `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
 - The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or

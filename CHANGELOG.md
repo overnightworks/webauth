@@ -10,6 +10,17 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Added**
 
+- `webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
+  decides a WebSocket handshake: the `Origin` first (exactly one, naming an
+  allowed host; no `Referer` fallback, `Sec-Fetch-Site` ignored), then the
+  session by the code `current_user_dependency` runs, renewal and identity
+  audit included. It answers an `AuthenticatedUser` or a `WebSocketRefusal`
+  (`no-session`, `invalid-session`, `session-ended-or-expired`,
+  `account-disabled`, `missing-origin`, `foreign-origin`). `session_id_from_request`,
+  `web_auth_config`, `cookie_pairs`, `cookie_values`, `resolve_client_ip` and
+  `client_user_agent` accept any `HTTPConnection`. A socket outlives its
+  session unless the host re-checks in a fresh transaction (README, "WebSocket
+  handshakes").
 - `webauth.WebAuthError` is the common base of the public operational
   exceptions: `UsernameTakenError`, `NotAnAdminError`, `UnknownSessionError`,
   `KeySetFetchError` and `TokenEndpointError`.

@@ -13,7 +13,7 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
 
 from webauth import WebAuthError
@@ -33,6 +33,8 @@ from webauth.dependencies import (
     AuthDependencies,
     AuthenticatedUser,
     LoginRedirect,
+    WebSocketRefusal,
+    authenticate_websocket,
     current_user_dependency,
     session_id_from_request,
     unauthenticated_response,
@@ -318,6 +320,17 @@ def a_host_resolves_the_current_user(
         audit_sink=HostAudit,
         on_authenticated=on_authenticated,
     )
+
+
+async def a_host_accepts_a_websocket_only_for_a_signed_in_account(
+    websocket: WebSocket,
+) -> AuthenticatedUser | None:
+    outcome = authenticate_websocket(websocket, sessions=HostSessions(), audit=HostAudit())
+    if isinstance(outcome, WebSocketRefusal):
+        await websocket.close(code=1008)
+        return None
+    await websocket.accept()
+    return outcome
 
 
 def a_host_installs_the_middleware(app: FastAPI) -> None:
