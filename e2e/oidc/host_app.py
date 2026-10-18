@@ -278,6 +278,7 @@ def _relying_party(
             client_secret=SecretStr(settings.client_secret),
             redirect_uri=redirect_uri,
             post_logout_redirect_uri=post_logout_redirect_uri,
+            logout_path=LOGOUT_PATH,
             scopes=SCOPES,
             leeway_seconds=LEEWAY_SECONDS,
         ),

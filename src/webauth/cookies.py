@@ -306,10 +306,10 @@ def clear_id_token_hint_cookie(
     )
 
 
-def id_token_hint_from_request(request: Request, config: WebAuthConfig) -> str | None:
+def id_token_hint_from_request(connection: HTTPConnection, config: WebAuthConfig) -> str | None:
     """The hint the request carries: its sole cookie of that name, when it has the
     shape of a compact JWS within ``MAX_ID_TOKEN_HINT_CHARS``; otherwise ``None``."""
-    values = cookie_values(request, id_token_hint_cookie_name(secure=config.cookie_secure))
+    values = cookie_values(connection, id_token_hint_cookie_name(secure=config.cookie_secure))
     if len(values) != 1:
         return None
     hint = values[0]
