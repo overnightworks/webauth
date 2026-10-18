@@ -25,6 +25,16 @@ is refused before its code is exchanged. The client secret enters only through
 `OidcClientConfig`; it, the code and the verifier stay out of every repr and
 message this module writes.
 
+`OidcRelyingParty.verify_logout_token` judges the back-channel Logout Token the
+issuer posts (OpenID Connect Back-Channel Logout 1.0, section 2.6) with the
+same verifier and key cache, and answers the `VerifiedLogout` naming the
+subject whose sessions end, or an `OidcRefusal`. The token must be an RS256
+`logout+jwt` of the configured issuer whose one audience is the client ID,
+issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway ago, with
+an `exp` after its `iat`, the back-channel logout event, a `sub` and no
+`nonce`. Its `sid` is never read. There is no replay store: the age bound is
+what limits a copy.
+
 `OidcRelyingParty.logout_url` answers the issuer's end-session URL, which
 carries only the client ID and the configured post-logout redirect URI: no ID
 token hint, so the issuer asks the person to confirm, and no target taken from
@@ -67,6 +77,7 @@ from webauth.jwt_verification import (
 __all__ = [
     "MAX_AUTHORIZATION_CODE_CHARS",
     "MAX_TOKEN_RESPONSE_BYTES",
+    "LOGOUT_TOKEN_MAX_AGE_SECONDS",
     "PENDING_LOGIN_MAX_AGE_SECONDS",
     "AuthorizationRequest",
     "OidcClientConfig",
@@ -78,11 +89,17 @@ __all__ = [
     "TokenEndpointError",
     "TokenRequest",
     "TokenRequestPost",
+    "VerifiedLogout",
 ]
 
 MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
 MAX_AUTHORIZATION_CODE_CHARS = 2048
 PENDING_LOGIN_MAX_AGE_SECONDS = 600
+LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
+
+_LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105
+# An identifier fixed by OpenID Connect Back-Channel Logout 1.0 section 2.4, never fetched.
+_BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR(S5332)
 
 _OPENID_SCOPE = "openid"
 # RFC 6749 section 3.3: a scope token is one or more printable ASCII
@@ -195,13 +212,15 @@ class OidcRefusalReason(StrEnum):
     NONCE_MISMATCH = "nonce-mismatch"
     AUTHORIZED_PARTY_MISMATCH = "authorized-party-mismatch"
     INVALID_IDENTITY_CLAIM = "invalid-identity-claim"
+    LOGOUT_TOKEN_REJECTED = "logout-token-rejected"  # noqa: S105
+    INVALID_LOGOUT_CLAIM = "invalid-logout-claim"
 
 
 @dataclass(frozen=True)
 class OidcRefusal:
-    """Why a login does not stand. `idp_error` is the IdP's error code when it
-    named a well-formed one; `token_rejection` is the verifier's reason when
-    the ID token was rejected."""
+    """Why a login or logout token does not stand. `idp_error` is the IdP's
+    error code when it named a well-formed one; `token_rejection` is the
+    verifier's reason when the ID token or logout token was rejected."""
 
     reason: OidcRefusalReason
     idp_error: str | None = None
@@ -218,6 +237,13 @@ class OidcIdentity:
     groups: tuple[str, ...]
     session_id: str | None
     preferred_username: str | None
+
+
+@dataclass(frozen=True)
+class VerifiedLogout:
+    """A Logout Token that held: the issuer's `subject` whose sessions end."""
+
+    subject: str
 
 
 class _RefusalError(Exception):
@@ -242,7 +268,7 @@ class OidcRelyingParty:
         self._post_token_request = post_token_request
         self._wall_clock = wall_clock
         self._client_authorization = _basic_authorization(config.client_id, config.client_secret)
-        self._id_token_verifier = JwtVerifier(
+        self._jwt_verifier = JwtVerifier(
             issuer=config.issuer,
             audiences=[config.client_id],
             jwks_url=config.jwks_url,
@@ -357,8 +383,28 @@ class OidcRelyingParty:
             )
         raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
 
+    def verify_logout_token(self, logout_token: str) -> VerifiedLogout | OidcRefusal:
+        outcome = self._jwt_verifier.verify(logout_token, expected_type=_LOGOUT_TOKEN_TYPE)
+        if isinstance(outcome, Rejected):
+            return OidcRefusal(
+                OidcRefusalReason.LOGOUT_TOKEN_REJECTED, token_rejection=outcome.reason
+            )
+        if not self._is_logout_profile(outcome) or outcome.subject is None:
+            return OidcRefusal(OidcRefusalReason.INVALID_LOGOUT_CLAIM)
+        return VerifiedLogout(subject=outcome.subject)
+
+    def _is_logout_profile(self, token: VerifiedClaims) -> bool:
+        age_seconds = self._wall_clock() - token.issued_at
+        return (
+            token.audiences == (self._config.client_id,)
+            and age_seconds <= LOGOUT_TOKEN_MAX_AGE_SECONDS + self._config.leeway_seconds
+            and token.expires_at > token.issued_at
+            and "nonce" not in token.claims
+            and _is_backchannel_logout_events(token.claims.get("events"))
+        )
+
     def _verified_id_token(self, id_token: str) -> VerifiedClaims:
-        outcome = self._id_token_verifier.verify(id_token)
+        outcome = self._jwt_verifier.verify(id_token)
         if isinstance(outcome, Rejected):
             raise _RefusalError(
                 OidcRefusal(OidcRefusalReason.ID_TOKEN_REJECTED, token_rejection=outcome.reason)
@@ -394,6 +440,14 @@ def callback_state(callback_query: str) -> str | OidcRefusal:
     except _RefusalError as refusal:
         return refusal.refusal
     return OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
+
+
+def _is_backchannel_logout_events(events: object) -> bool:
+    return (
+        isinstance(events, dict)
+        and events.keys() == {_BACKCHANNEL_LOGOUT_EVENT}
+        and isinstance(events[_BACKCHANNEL_LOGOUT_EVENT], dict)
+    )
 
 
 def _is_utf8(text: str) -> bool:

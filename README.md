@@ -188,6 +188,117 @@ code once. webauth keeps no server-side replay store: a copy of the cookie
 taken before the callback is stopped by the issuer refusing the spent code
 (`TOKEN_REQUEST_REFUSED`), not by webauth remembering it.
 
+### Back-channel logout
+
+When a person logs out of one app, Keycloak posts a Logout Token to every
+client's `backchannel.logout.url`. `receive_backchannel_logout(relying_party,
+logout_token, *, accounts, sessions, lock, audit)` verifies it and ends every
+session of its subject, in every browser, and answers
+`BackchannelLogoutResult.ACCEPTED` or `REFUSED`. The host's route is a POST of
+a form with one `logout_token` field:
+
+```python
+import logging
+import urllib.parse
+
+import anyio.to_thread
+from fastapi import Request, Response
+
+from webauth.oidc_login import BackchannelLogoutResult, receive_backchannel_logout
+
+logger = logging.getLogger(__name__)
+
+
+def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
+    media_type = (content_type or "").partition(";")[0].strip().lower()
+    if media_type != "application/x-www-form-urlencoded":
+        return None
+    try:
+        fields = urllib.parse.parse_qsl(
+            request_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
+        )
+    except ValueError:
+        return None
+    tokens = [value for name, value in fields if name == "logout_token"]
+    return tokens[0] if len(tokens) == 1 and tokens[0] else None
+
+
+def end_the_sessions_of(logout_token: str) -> BackchannelLogoutResult:
+    with the_hosts_transaction() as work:
+        return receive_backchannel_logout(
+            relying_party, logout_token,
+            accounts=work.accounts, sessions=work.sessions, lock=work.lock, audit=work.audit,
+        )
+
+
+@app.post("/auth/backchannel-logout")
+async def backchannel_logout(request: Request) -> Response:
+    logout_token = the_logout_token_of(
+        await request.body(), request.headers.get("content-type"),
+    )
+    if logout_token is None:
+        return Response(status_code=400)
+    try:
+        result = await anyio.to_thread.run_sync(end_the_sessions_of, logout_token)
+    except Exception:
+        logger.exception("back-channel logout failed")
+        return Response(status_code=400)
+    return Response(status_code=200 if result is BackchannelLogoutResult.ACCEPTED else 400)
+```
+
+`the_hosts_transaction()` opens the host's stores on one connection and
+commits when the block ends. The verification, the lock and the stores are
+synchronous, so they run in a worker thread and create and use their stores
+there. The route answers 200 only after the commit; a refusal or a failure,
+the commit's included, leaves every session in place and answers 400.
+
+The function runs in this order. It verifies the token before it takes the
+lock, and a refusal does nothing more. Under `lock.hold()` it looks up
+`accounts.get(subject)`. An unknown subject is accepted and creates no
+account. A known subject, an inactive account included, loses every session
+through `end_user_sessions`, and one `backchannel_logout` audit event with
+`actor_id=None` is emitted when at least one session ended. It never commits,
+clears a cookie or calls Keycloak.
+
+`OidcRelyingParty.verify_logout_token(logout_token)` answers a
+`VerifiedLogout(subject)` or an `OidcRefusal`. It is stricter than the OpenID
+Connect Back-Channel Logout profile asks, and it never returns the token, its
+claims or its `sid`, so no session id is stored. The token must be:
+
+- RS256, signed by a key of the configured issuer, with the JOSE header
+  `typ` exactly `logout+jwt` (`JwtVerifier.verify(token, expected_type=...)`);
+- for exactly this client: `aud` is the client ID, as a string or an array of
+  one;
+- issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS` (120) plus the
+  configured leeway ago, and not in the future beyond the leeway, with an
+  integer `iat`;
+- unexpired, with an `exp` after its `iat`;
+- carrying `events` with exactly the key
+  `http://schemas.openid.net/event/backchannel-logout`, whose value is an
+  object;
+- carrying a non-empty `sub`, so a token naming only a `sid` is refused, and
+  no `nonce`, not even `null`.
+
+There is no replay store: a copy of a valid token ends the subject's sessions
+again, as the first did, for at most those two minutes plus the leeway. A
+person who signed in again in that time is signed out once more.
+
+Set the route up so that only the issuer can reach it:
+
+- **Body.** A `BodySizeRule` of 32 KiB for the exact path in `body_size`,
+  under a smaller default.
+- **Headers.** A `CacheControlRule` for the exact path with `no-store`, so
+  every answer, 400 and 413 included, carries it.
+- **CSRF.** Keycloak sends neither an Origin nor a cookie: list the exact path
+  in `exempt` of both `csrf_origin` and `csrf_token`. Never a prefix, and
+  `/logout` stays `token_exempt` only.
+- **Rate limit.** List the exact path in `RateLimitPolicy.exempt`, because
+  Keycloak posts from shared server addresses and one budget would otherwise
+  refuse a real logout.
+- **Reachability.** Register `backchannel.logout.url` on the client by an
+  internal name, never through the public hostname or a Cloudflare Access
+  application.
+
 ### The host's duties at login
 
 The library never writes, so these belong to the host's OIDC
@@ -789,6 +900,7 @@ explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 | `user_created` | `role` |
 | `session_revoked` | `session_ref` |
 | `role_changed` | `previous_role`, `role` |
+| `backchannel_logout` | none; `subject_id` is the account whose sessions the issuer ended |
 
 Events contain no raw session identifiers or usernames. An admission event
 with `actor_id=None` means the issuer's groups decided, not a person.

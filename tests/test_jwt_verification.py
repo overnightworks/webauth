@@ -202,6 +202,39 @@ def test_a_token_for_any_one_of_the_accepted_audiences_verifies(
     assert outcome == issuer.verified({"aud": "agent-board"})
 
 
+def test_a_token_whose_type_header_equals_the_expected_type_verifies(
+    issuer: IssuerScenario,
+) -> None:
+    token = issuer.token(header={"typ": "logout+jwt"})
+
+    assert issuer.verifier.verify(token, expected_type="logout+jwt") == issuer.verified()
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        pytest.param({"typ": ABSENT}, id="type-missing"),
+        pytest.param({"typ": "JWT"}, id="type-another"),
+        pytest.param({"typ": "LOGOUT+JWT"}, id="type-in-another-case"),
+        pytest.param({"typ": ["logout+jwt"]}, id="type-not-a-string"),
+        pytest.param({"typ": None}, id="type-null"),
+    ],
+)
+def test_a_token_without_the_expected_type_is_rejected_as_an_invalid_token_type(
+    issuer: IssuerScenario, header: dict[str, Any]
+) -> None:
+    outcome = issuer.verifier.verify(issuer.token(header=header), expected_type="logout+jwt")
+
+    assert outcome == Rejected(RejectionReason.INVALID_TOKEN_TYPE)
+
+
+@pytest.mark.parametrize("header", [{"typ": ABSENT}, {"typ": "logout+jwt"}, {"typ": 7}])
+def test_a_verifier_asked_for_no_type_ignores_the_type_header(
+    issuer: IssuerScenario, header: dict[str, Any]
+) -> None:
+    assert issuer.verifier.verify(issuer.token(header=header)) == issuer.verified()
+
+
 _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
 
 

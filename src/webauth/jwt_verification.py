@@ -119,6 +119,7 @@ class RejectionReason(StrEnum):
     FORBIDDEN_HEADER = "forbidden-header"
     UNSUPPORTED_ALGORITHM = "unsupported-algorithm"
     INVALID_KEY_ID = "invalid-key-id"
+    INVALID_TOKEN_TYPE = "invalid-token-type"  # noqa: S105
     UNKNOWN_KEY_ID = "unknown-key-id"
     KEY_SET_UNAVAILABLE = "key-set-unavailable"
     INVALID_SIGNATURE = "invalid-signature"
@@ -186,6 +187,7 @@ class _InvalidKeySetError(Exception):
 @dataclass(frozen=True)
 class _ParsedToken:
     key_id: str | None
+    token_type: object
     claims: Mapping[str, object]
 
 
@@ -243,14 +245,18 @@ class JwtVerifier:
         self._last_refresh_failed = False
         self._refresh_lock = threading.Lock()
 
-    def verify(self, token: str) -> VerifiedClaims | Rejected:
+    def verify(self, token: str, *, expected_type: str | None = None) -> VerifiedClaims | Rejected:
+        """Verify ``token``; when ``expected_type`` is given, its header's
+        ``typ`` must equal it exactly."""
         try:
-            return self._verified_claims(token)
+            return self._verified_claims(token, expected_type)
         except VerificationRefusal as refusal:
             return Rejected(refusal.reason)
 
-    def _verified_claims(self, token: str) -> VerifiedClaims:
+    def _verified_claims(self, token: str, expected_type: str | None) -> VerifiedClaims:
         parsed = _parse_token(token)
+        if expected_type is not None and parsed.token_type != expected_type:
+            raise VerificationRefusal(RejectionReason.INVALID_TOKEN_TYPE)
         self._verify_signature_audience_and_issuer(token, self._signing_key(parsed.key_id))
         claims = parsed.claims
         expires_at, issued_at = self._checked_time_claims(claims)
@@ -386,7 +392,11 @@ def _parse_token(token: str) -> _ParsedToken:
         raise VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
     header = strict_json_object(header_bytes)
     claims = strict_json_object(claims_bytes)
-    return _ParsedToken(key_id=_header_key_id(header), claims=MappingProxyType(claims))
+    return _ParsedToken(
+        key_id=_header_key_id(header),
+        token_type=header.get("typ"),
+        claims=MappingProxyType(claims),
+    )
 
 
 def _header_key_id(header: Mapping[str, object]) -> str | None:
