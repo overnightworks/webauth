@@ -198,6 +198,17 @@ session of its subject, in every browser, and answers
 a form with one `logout_token` field:
 
 ```python
+import logging
+import urllib.parse
+
+import anyio.to_thread
+from fastapi import Request, Response
+
+from webauth.oidc_login import BackchannelLogoutResult, receive_backchannel_logout
+
+logger = logging.getLogger(__name__)
+
+
 def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
     media_type = (content_type or "").partition(";")[0].strip().lower()
     if media_type != "application/x-www-form-urlencoded":
