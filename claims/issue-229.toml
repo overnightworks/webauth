@@ -1,7 +1,0 @@
-claim_id = "4dea7272214a4f4484c9637525f20cdb"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "51e6fc198f223a6a2a451cc2de7533c9db96d541"
-branch = "claude/issue-229-changelog-0-16-corrections"
-scope = ["CHANGELOG.md", "README.md"]
-opened_commit = "d0da6ded56661b63c52812d735f8840c139a3a34"
