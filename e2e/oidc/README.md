@@ -24,6 +24,8 @@ Playwright browser, and takes minutes. CI only lints `e2e/`.
   `dynamic`). The script refuses to run otherwise.
 - Playwright's Chromium for the pinned version (`uv run --group e2e playwright
   install chromium` if `~/.cache/ms-playwright` lacks it).
+- The relay image of the back-channel phase, `RELAY_IMAGE` in `shim.py` (a pinned
+  `python:3.12-slim`); Docker pulls it on first use, so pull it first, outside the lock.
 
 ## Run
 
@@ -71,6 +73,28 @@ The browser keeps the canonical URLs (`https://auth.hallucinai.de`,
 - The host app process trusts the throwaway CA through `SSL_CERT_FILE`, for its
   own calls to the token and key-set endpoints.
 
+## How Keycloak reaches the apps
+
+Keycloak's back-channel logout is a request from its container to the app, and the
+apps bind loopback, which the browser's host mapping reaches but a container does not.
+The machine's firewall also drops a container's TCP to the host, including the
+`keycloak` network's gateway on every port (measured with a listener bound to the
+gateway and a container on a network of the same shape), so a listener on the host
+would never be called. `CallbackBridge` (`shim.py`) therefore puts a relay
+container on the stack's `keycloak` network (`stack.py` finds it by the compose
+labels and fails on an absent or ambiguous one): it listens on the container
+network and passes the bytes to a unix socket in a private directory, where the host
+side accepts exactly `POST /auth/backchannel-logout`, at most 32 KiB, and forwards
+it to the app's loopback HTTPS endpoint, verifying the throwaway CA. Anything else
+(`/state`, `/reset`, `/deactivate`, another path or method) is answered 404 and
+reaches nothing. Every answer carries `Connection: close`: Keycloak's HTTP client keeps
+connections in a pool and does not retry a POST on one the bridge already closed. Every wait is bounded (10 s), no body or header is logged, and the
+relay holds no secret (read-only, no capabilities, the caller's user id). The bridge
+is shut down, its container removed, before the held stack is released, and
+`edge-kc-probe` leftovers are listed at the end. The container's name stands in for
+production's internal DNS name of the app: it shows that the route works behind an
+internal name, not that production's name resolves.
+
 ## Evidence rules
 
 The network log is built from allowlisted fields (URL without query values,
@@ -80,7 +104,8 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), Keycloak's logout confirmation and the second sign-in of scenarios 2 and 9, and, in
+clears the field), the result page (the refusal page in scenario 7), Keycloak's logout confirmation and the second sign-in of scenarios 2 and 9, in
+scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
 
@@ -116,6 +141,38 @@ scenarios 8 and 9 run at 1280x800. The host's `login_group` is `/apps/songmaker`
 suite's tokens carry no `groups` claim. The demotion of a person taken out of the
 admin group is proven at the `finish_login` layer, not here: a D1 step would need
 an `Admin.delete` in `stack.py`. The run stays inside its 900 s budget.
+
+`SCENARIO 10` to `13` are the back-channel phase, each at 390x844 and 1280x800. They
+run against two further hosts, app A on `https://demo.hallucinai.de` and app B on
+`https://demo.example.test` (cookie `lax`), each configured independently: its own
+Keycloak client (`d1-app-a`, `d1-app-b`), its own session and account stores and its
+own signing secret, and each with the README's `/auth/backchannel-logout` route (the
+body-size, cache-control and CSRF exemptions the route recipe lists; no rate limit in
+this host). Each client carries `frontchannelLogout: false`, `backchannel.logout.url`
+(its bridge), `backchannel.logout.session.required: "false"`,
+`backchannel.logout.revoke.offline.tokens: "false"`, `id.token.signed.response.alg:
+"RS256"` and its `post.logout.redirect.uris`. The `d1-host` client of the scenarios
+above has no callback URL, so they are unchanged. The host counts accepted and refused
+callbacks beside its sessions, and no scenario calls `/reset` between its sign-in and
+its assertions. The evidence is counts, response outcomes and screenshots, never a Logout
+Token.
+
+- `SCENARIO 10`, subject-wide: two contexts sign in to app A as the same person. One
+  logs out through the host's button and Keycloak's confirmation; at the confirmation
+  the host still holds the other session and no callback. Then Keycloak's callback is
+  accepted once, the host holds 0 sessions, and the other context's next `/me` is 401
+  and its reloaded page says "Signed out".
+- `SCENARIO 11`, cross-app: one context signs in to A and B, a second context to B
+  (2 sessions). A logout in A calls B back, and both B sessions end.
+- `SCENARIO 12`, admin logout: `POST /admin/realms/hallucinai/users/{id}/logout`
+  answers 204; both apps are called back and answer `/me` with 401.
+- `SCENARIO 13`, disable, then logout: a person signs in to A and B and the account is
+  disabled; that alone ends nothing in either app. The person's own logout in A never
+  reaches Keycloak's confirmation (it sends the browser straight back) and calls no
+  app back: B still holds its session. Keycloak's admin logout
+  then calls both apps back and ends every session, and a fresh sign in is refused at
+  Keycloak's form. So the logout that ends a disabled account's sessions is the admin
+  one: `edge lock` must send it after the disable (#49).
 
 `SCENARIO 5` is the session cookie after the callback redirect. One host
 process per `cookie_samesite` serves both app origins; each cell uses a fresh
