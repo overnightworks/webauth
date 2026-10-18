@@ -1,8 +1,0 @@
-claim_id = "c1a75b6cd7b646a0bb3d1a3b9e53f0e0"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "97327d242efb0fe5a495ef9776b11549534ee416"
-branch = "claude/issue-213-zero-rate-limit-budget-refused"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "src/webauth/liveness.py", "src/webauth/policies.py", "src/webauth/validation.py", "tests/test_policies.py"]
-opened_commit = "98c28c3650de8fd2447d2e4961fdf86594b1e279"
-whole_reason = "One validator gets one owner: the new leaf module, its two existing callers and the budget that now uses it change together."
