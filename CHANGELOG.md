@@ -15,7 +15,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `UnknownSessionError`), `webauth.ports.SessionAdministrationStore` and
   `AccountEventKind.SESSION_REVOKED` (`session_revoked`) and
   `AccountEvent.session_ref` no longer exist, so
-  importing them fails. Logout, the session cap, back-channel logout and a
+  importing or reading them fails; an `AuditSink` that read `event.session_ref`
+  drops it. Logout, the session cap, back-channel logout and a
   session the store ended are unchanged. Migration: a host that listed or
   revoked sessions does it in Keycloak, or with its own store query.
 - Names outside a module's `__all__` start with an underscore, so importing one

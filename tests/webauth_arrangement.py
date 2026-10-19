@@ -404,11 +404,8 @@ class SessionRecordsInMemory:
             self._remove_record(session_id)
         return len(session_ids)
 
-    def list_active(
-        self, *, offset: int = 0, limit: int | None = None,
-    ) -> list[FakeSessionRecord]:
-        records = list(self._records.values())
-        return records[offset:None if limit is None else offset + limit]
+    def list_active(self) -> list[FakeSessionRecord]:
+        return list(self._records.values())
 
     def count_active(self) -> int:
         return len(self._records)

@@ -729,8 +729,8 @@ async def room(websocket: WebSocket) -> None:
 - After a successful check, `session_id_from_request(websocket, config)` names
   the session on the same handshake.
 
-A socket does not end when its session does: a logout, an administrator's
-revocation and `webauth.oidc_login.receive_backchannel_logout` delete the stored
+A socket does not end when its session does: a logout, a host's own revocation
+through its store or `end_session`, and `webauth.oidc_login.receive_backchannel_logout` delete the stored
 session and cannot signal an open socket. The host calls the same helper again, in a fresh
 transaction, before protected work and on its own schedule while a stream runs,
 and on a refusal closes the socket and stops the protected work. A successful
