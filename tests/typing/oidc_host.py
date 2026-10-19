@@ -89,10 +89,10 @@ from webauth.oidc_login import (
     finish_login,
     log_out,
     open_session,
-    post_token_request_over_https,
     receive_backchannel_logout,
     start_login,
 )
+from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     DEFAULT_PERMISSIONS_POLICY,
     BodySizePolicy,

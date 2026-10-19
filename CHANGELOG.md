@@ -31,6 +31,13 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `SecurityHeadersPolicy.strict_transport_security` renders the header. Its
   default value is unchanged.
 
+- `post_token_request_over_https` moved from `webauth.oidc_login` to the new
+  `webauth.oidc_transport`, and `webauth.jwt_verification` no longer
+  re-exports `ExchangeFailure`, which `webauth.https_client` owns. Migration:
+  `from webauth.oidc_transport import post_token_request_over_https` and
+  `from webauth.https_client import ExchangeFailure`. The old imports fail with
+  `ImportError` when they execute.
+
 **Added**
 
 - `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of

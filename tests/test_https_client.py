@@ -45,7 +45,7 @@ from webauth.https_client import (
     post_form_over_https,
 )
 from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequest
-from webauth.oidc_login import post_token_request_over_https
+from webauth.oidc_transport import post_token_request_over_https
 
 _CLIENT_ID = "songmaker"
 # Canary whose recognisable text is the point
