@@ -435,7 +435,7 @@ The function runs in this order. It verifies the token before it takes the
 lock, and a refusal does nothing more. Under `lock.hold()` it looks up
 `accounts.get(subject)`. An unknown subject is accepted and creates no
 account. A known subject loses every session
-through `end_user_sessions`, and one `backchannel_logout` audit event with
+through the store's `delete_for_user`, and one `backchannel_logout` audit event with
 `actor_id=None` is emitted when at least one session ended. It never commits,
 clears a cookie or calls Keycloak.
 
@@ -695,7 +695,7 @@ A browser sends the session cookie on a cross-site WebSocket handshake too,
 and the webauth middlewares pass WebSocket scopes through untouched.
 `webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
 is the one check a host runs at the handshake. It answers the
-`webauth.ports.AuthenticatedUser`, or a `WebSocketRefusal`:
+`webauth.ports.AuthenticatedUser`, or a `ConnectionRefusal`:
 
 | Refusal | Value | When |
 |---|---|---|
@@ -725,18 +725,18 @@ accepts the socket.
 from fastapi import WebSocket
 from starlette.concurrency import run_in_threadpool
 
-from webauth.dependencies import WebSocketRefusal, authenticate_websocket
+from webauth.dependencies import ConnectionRefusal, authenticate_websocket
 from webauth.ports import AuthenticatedUser
 
 
 @app.websocket("/room")
 async def room(websocket: WebSocket) -> None:
-    def authenticate() -> AuthenticatedUser | WebSocketRefusal:
+    def authenticate() -> AuthenticatedUser | ConnectionRefusal:
         with the_hosts_unit_of_work() as unit:
             return authenticate_websocket(websocket, sessions=unit.sessions, audit=unit.audit)
 
     outcome = await run_in_threadpool(authenticate)
-    if isinstance(outcome, WebSocketRefusal):
+    if isinstance(outcome, ConnectionRefusal):
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -756,7 +756,7 @@ async def room(websocket: WebSocket) -> None:
   the session on the same handshake.
 
 A socket does not end when its session does: a logout, a host's own revocation
-through its store or `end_session`, and `webauth.oidc_login.receive_backchannel_logout` delete the stored
+through its store, and `webauth.oidc_login.receive_backchannel_logout` delete the stored
 session and cannot signal an open socket. The host calls the same helper again, in a fresh
 transaction, before protected work and on its own schedule while a stream runs,
 and on a refusal closes the socket and stops the protected work. A successful
@@ -972,16 +972,13 @@ config = WebAuthConfig(
 
 ## Ending a session
 
-`webauth.session_ending` is the one place a session ends in the host's store. A
-host that signs in through OpenID Connect logs out with
-[`log_out`](#logging-out), which calls it; any other route calls
-`end_session(sessions, session_id=...)` rather than deleting from the store
-itself; `end_user_sessions(sessions, user_id)` ends every session
-of an account and returns the store's count, and
-`prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
-a cap and returns their identifiers; [`open_session`](#opening-a-session) calls
-it after a login. The next request carrying an
-ended session's cookie is refused.
+Ending a session is a call on the host's store: `delete(session_id)`,
+`delete_for_user(user_id)` or `prune_overflow(user_id, max_sessions)`. The
+library makes that call in three places only: [`log_out`](#logging-out),
+[`open_session`](#opening-a-session) (the session an incoming cookie replaced,
+and the oldest above the cap) and back-channel logout. A host that signs in
+through OpenID Connect ends a session with `log_out`. The next request carrying
+an ended session's cookie is refused.
 
 ## Middleware order
 
@@ -1185,7 +1182,6 @@ It owns the machinery an application should not rebuild:
 | `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
-| `webauth.session_ending` | The one place a session ends in the host's store |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. |

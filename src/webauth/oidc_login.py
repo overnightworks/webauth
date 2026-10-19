@@ -104,7 +104,6 @@ from webauth.oidc import (
 )
 from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 from webauth.proxies import client_user_agent, resolve_client_ip
-from webauth.session_ending import end_session, end_user_sessions, prune_sessions
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -352,7 +351,7 @@ def open_session(
     replaced_session_id = session_id_from_request(request, config)
     with lock.hold():
         if replaced_session_id is not None:
-            end_session(sessions, session_id=replaced_session_id)
+            sessions.delete(replaced_session_id)
         session = sessions.create(
             account.id,
             expires_at,
@@ -360,12 +359,12 @@ def open_session(
             user_agent=client_user_agent(request),
         )
         if session.id == replaced_session_id:
-            end_session(sessions, session_id=session.id)
+            sessions.delete(session.id)
             raise RuntimeError(
                 "SessionRecordStore.create returned the id of the session it replaced",
             )
-        if max_sessions is not None and session.id in prune_sessions(
-            sessions, account.id, max_sessions,
+        if max_sessions is not None and session.id in sessions.prune_overflow(
+            account.id, max_sessions,
         ):
             raise RuntimeError(
                 "SessionRecordStore.prune_overflow ended the new session: "
@@ -392,7 +391,7 @@ def log_out(
     session_id = session_id_from_request(request, config)
     if session_id is not None:
         with lock.hold():
-            end_session(sessions, session_id=session_id)
+            sessions.delete(session_id)
     clear_session_cookies(response, config)
     id_token_hint = _id_token_hint_from_request(request, config)
     _clear_id_token_hint_cookie(response, logout_path=relying_party.logout_path, config=config)
@@ -419,7 +418,7 @@ def receive_backchannel_logout(
         return BackchannelLogoutResult.REFUSED
     with lock.hold():
         account = accounts.get(logout.subject)
-        if account is not None and end_user_sessions(sessions, account.id):
+        if account is not None and sessions.delete_for_user(account.id):
             audit.account_event(AccountEvent(
                 kind=AccountEventKind.BACKCHANNEL_LOGOUT,
                 actor_id=None,

@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AuthDependencies",
     "LoginRedirect",
-    "WebSocketRefusal",
+    "ConnectionRefusal",
     "authenticate_websocket",
     "current_user_dependency",
     "session_id_from_request",
@@ -118,7 +118,7 @@ def current_user_dependency(
         audit: AuditSink = Depends(audit_sink),
     ) -> ports.AuthenticatedUser:
         user = _resolve_session(request, sessions, audit)
-        if isinstance(user, WebSocketRefusal):
+        if isinstance(user, ConnectionRefusal):
             raise _http_refusal(request, user, login_redirect)
         on_authenticated(user)
         return user
@@ -141,8 +141,8 @@ def current_user_dependency(
         authenticated, and ``AuthenticatedUser`` deliberately does not carry
         one. Resolving ``current_user`` first is what makes the answer
         trustworthy: an expired or unknown session never reaches
-        this line, so a route can delete what it names here without checking
-        anything again.
+        this line. A route ends the session through ``log_out``, never by
+        deleting from the store itself.
         """
         return _session_id_from_cookie(request, web_auth_config(request), login_redirect)
 
@@ -155,7 +155,7 @@ def current_user_dependency(
 
 def authenticate_websocket(
     connection: HTTPConnection, *, sessions: SessionRecordStore, audit: AuditSink,
-) -> ports.AuthenticatedUser | WebSocketRefusal:
+) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The account behind a WebSocket handshake, or why the handshake is refused.
 
     The Origin is decided first, so a refused Origin never touches the store
@@ -177,12 +177,12 @@ def authenticate_websocket(
     return _resolve_session(connection, sessions, audit)
 
 
-def _origin_refusal(connection: HTTPConnection) -> WebSocketRefusal | None:
+def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
     origins = connection.headers.getlist("origin")
     if not origins:
-        return WebSocketRefusal.MISSING_ORIGIN
+        return ConnectionRefusal.MISSING_ORIGIN
     if len(origins) > 1 or not origin_is_allowed(origins[0], web_auth_config(connection)):
-        return WebSocketRefusal.FOREIGN_ORIGIN
+        return ConnectionRefusal.FOREIGN_ORIGIN
     return None
 
 
@@ -228,7 +228,7 @@ def _asked_for_address(request: Request) -> str:
     return same_app_path(request, requested_address(request)) or "/"
 
 
-class WebSocketRefusal(Enum):
+class ConnectionRefusal(Enum):
     """Why a connection is refused, as a stable value a host can log or branch on.
 
     The session members are the one taxonomy of why no live session was
@@ -254,41 +254,41 @@ def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -
     runs in.
     """
     reading = _read_session_cookie(connection, config)
-    return None if isinstance(reading, WebSocketRefusal) else reading
+    return None if isinstance(reading, ConnectionRefusal) else reading
 
 
 def _session_id_from_cookie(
     request: Request, config: WebAuthConfig, login_redirect: LoginRedirect | None,
 ) -> str:
     reading = _read_session_cookie(request, config)
-    if isinstance(reading, WebSocketRefusal):
+    if isinstance(reading, ConnectionRefusal):
         raise _http_refusal(request, reading, login_redirect)
     return reading
 
 
 def _read_session_cookie(
     connection: HTTPConnection, config: WebAuthConfig,
-) -> str | WebSocketRefusal:
+) -> str | ConnectionRefusal:
     values = _cookie_values(connection, config.session_cookie_name)
     if len(values) > 1:
-        return WebSocketRefusal.INVALID_SESSION
+        return ConnectionRefusal.INVALID_SESSION
     if not values or not values[0] or len(values[0]) > MAX_SESSION_COOKIE_CHARS:
-        return WebSocketRefusal.NO_SESSION
+        return ConnectionRefusal.NO_SESSION
     session_id = _verify_session_cookie(values[0], config.signing_key)
-    return WebSocketRefusal.INVALID_SESSION if session_id is None else session_id
+    return ConnectionRefusal.INVALID_SESSION if session_id is None else session_id
 
 
 def _http_refusal(
-    request: Request, refusal: WebSocketRefusal, login_redirect: LoginRedirect | None,
+    request: Request, refusal: ConnectionRefusal, login_redirect: LoginRedirect | None,
 ) -> HTTPException:
     detail = _HTTP_DETAIL_OF_SESSION_REFUSAL[refusal]
     return _unauthenticated(request, detail, login_redirect)
 
 
 _HTTP_DETAIL_OF_SESSION_REFUSAL: Final = {
-    WebSocketRefusal.NO_SESSION: _AUTHENTICATION_REQUIRED_DETAIL,
-    WebSocketRefusal.INVALID_SESSION: _INVALID_SESSION_DETAIL,
-    WebSocketRefusal.SESSION_ENDED_OR_EXPIRED: _SESSION_EXPIRED_DETAIL,
+    ConnectionRefusal.NO_SESSION: _AUTHENTICATION_REQUIRED_DETAIL,
+    ConnectionRefusal.INVALID_SESSION: _INVALID_SESSION_DETAIL,
+    ConnectionRefusal.SESSION_ENDED_OR_EXPIRED: _SESSION_EXPIRED_DETAIL,
 }
 
 
@@ -332,7 +332,7 @@ def _record_identity_changes(
 
 def _resolve_session(
     connection: HTTPConnection, sessions: SessionRecordStore, audit: AuditSink,
-) -> ports.AuthenticatedUser | WebSocketRefusal:
+) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The one decision whom a connection's session cookie speaks for.
 
     Cookie, signature, load, liveness, renewal, identity
@@ -341,13 +341,13 @@ def _resolve_session(
     """
     config = web_auth_config(connection)
     session_id = _read_session_cookie(connection, config)
-    if isinstance(session_id, WebSocketRefusal):
+    if isinstance(session_id, ConnectionRefusal):
         return session_id
 
     record = sessions.load(session_id)
     now = datetime.fromtimestamp(config.wall_clock(), UTC)
     if record is None or not config.session_liveness.admits_stored_session(record, now):
-        return WebSocketRefusal.SESSION_ENDED_OR_EXPIRED
+        return ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
 
     current_ip = resolve_client_ip(connection)
     current_user_agent = client_user_agent(connection)
@@ -365,7 +365,7 @@ def _resolve_session(
             f"SessionRecordStore.touch must return a bool, not {type(renewed).__name__}",
         )
     if not renewed:
-        return WebSocketRefusal.SESSION_ENDED_OR_EXPIRED
+        return ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
 
     _record_identity_changes(
         audit,
