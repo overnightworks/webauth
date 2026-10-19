@@ -152,9 +152,97 @@ def test_REQ_ADMIN_12_the_revocation_event_carries_the_computed_reference_not_th
 SESSION_REFERENCE = "SessionReference"
 
 
+def is_name(node: ast.AST, expected: str) -> bool:
+    return isinstance(node, ast.Name) and node.id == expected
+
+
+def nodes_without_code(root: ast.AST) -> list[ast.AST]:
+    """The nodes of a type expression, leaving out every call and lambda in it."""
+    pending, kept = [root], []
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, ast.Call | ast.Lambda):
+            kept.append(node)
+            pending.extend(ast.iter_child_nodes(node))
+    return kept
+
+
+def nodes_of_the_function_itself(function: ast.FunctionDef) -> list[ast.AST]:
+    pending, nodes = list(function.body), []
+    while pending:
+        node = pending.pop()
+        nodes.append(node)
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+            pending.extend(ast.iter_child_nodes(node))
+    return nodes
+
+
+def newtype_definition_mentions(statement: ast.stmt) -> list[ast.AST]:
+    if not (
+        isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and is_name(statement.targets[0], SESSION_REFERENCE)
+        and isinstance(statement.value, ast.Call)
+        and is_name(statement.value.func, "NewType")
+    ):
+        return []
+    call = statement.value
+    named = call.args[:1] or [keyword.value for keyword in call.keywords if keyword.arg == "name"]
+    if not any(isinstance(arg, ast.Constant) and arg.value == SESSION_REFERENCE for arg in named):
+        return []
+    return [statement.targets[0], *named]
+
+
+def dunder_all_entries(statement: ast.stmt) -> list[ast.AST]:
+    targets = statement.targets if isinstance(statement, ast.Assign) else []
+    if isinstance(statement, ast.AnnAssign):
+        targets = [statement.target]
+    value = getattr(statement, "value", None)
+    if len(targets) != 1 or not is_name(targets[0], "__all__"):
+        return []
+    if not isinstance(value, ast.List | ast.Tuple):
+        return []
+    return [
+        entry
+        for entry in value.elts
+        if isinstance(entry, ast.Constant) and isinstance(entry.value, str)
+    ]
+
+
+def maker_constructor_name(statement: ast.stmt) -> list[ast.AST]:
+    if not (isinstance(statement, ast.FunctionDef) and statement.name == "session_reference"):
+        return []
+    constructions = [
+        node.func
+        for node in nodes_of_the_function_itself(statement)
+        if isinstance(node, ast.Call) and is_name(node.func, SESSION_REFERENCE)
+    ]
+    return constructions if len(constructions) == 1 else []
+
+
+def allowed_mentions(tree: ast.Module, module: str) -> set[int]:
+    """The ids of the nodes that may mention SessionReference: annotations without
+    code, docstrings, string entries of a module ``__all__``, its NewType definition
+    in ports.py and the one construction inside the maker in cookies.py."""
+    allowed: list[ast.AST] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            if ast.get_docstring(node, clean=False) is not None:
+                allowed += ast.walk(node.body[0])
+        if isinstance(node, ast.arg | ast.AnnAssign) and node.annotation:
+            allowed += nodes_without_code(node.annotation)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns:
+            allowed += nodes_without_code(node.returns)
+    for statement in tree.body:
+        allowed += dunder_all_entries(statement)
+        if module == "ports.py":
+            allowed += newtype_definition_mentions(statement)
+        if module == "cookies.py":
+            allowed += maker_constructor_name(statement)
+    return {id(node) for node in allowed}
+
+
 def session_reference_mentions_outside_the_allowed_places(source: str, module: str) -> list[str]:
-    """Locate every mention of SessionReference that is not an annotation, import,
-    ``__all__`` entry, its definition in ports.py or the maker in cookies.py."""
     tree = ast.parse(source)
     names = {SESSION_REFERENCE} | {
         alias.asname
@@ -163,52 +251,7 @@ def session_reference_mentions_outside_the_allowed_places(source: str, module: s
         for alias in node.names
         if alias.asname and alias.name.split(".")[-1] == SESSION_REFERENCE
     }
-    allowed: list[ast.AST] = []
-
-    def is_name(node: ast.AST, expected: str) -> bool:
-        return isinstance(node, ast.Name) and node.id == expected
-
-    def calls_of_the_function_itself(function: ast.FunctionDef) -> list[ast.Call]:
-        pending, calls = list(function.body), []
-        while pending:
-            node = pending.pop()
-            if isinstance(node, ast.Call):
-                calls.append(node)
-            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
-                pending.extend(ast.iter_child_nodes(node))
-        return calls
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
-            if ast.get_docstring(node, clean=False) is not None:
-                allowed.append(node.body[0])
-        if isinstance(node, ast.arg | ast.AnnAssign) and node.annotation:
-            allowed.append(node.annotation)
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns:
-            allowed.append(node.returns)
-        if isinstance(node, ast.Assign | ast.AnnAssign) and node.value:
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            if any(is_name(target, "__all__") for target in targets):
-                allowed.append(node.value)
-    for statement in tree.body:
-        if (
-            module == "ports.py"
-            and isinstance(statement, ast.Assign)
-            and [is_name(target, SESSION_REFERENCE) for target in statement.targets] == [True]
-            and isinstance(statement.value, ast.Call)
-            and is_name(statement.value.func, "NewType")
-            and isinstance(statement.value.args[0], ast.Constant)
-            and statement.value.args[0].value == SESSION_REFERENCE
-        ):
-            allowed.append(statement)
-        if module == "cookies.py" and isinstance(statement, ast.FunctionDef):
-            if statement.name == "session_reference":
-                allowed += [
-                    call.func
-                    for call in calls_of_the_function_itself(statement)
-                    if is_name(call.func, SESSION_REFERENCE)
-                ]
-    excused = {id(inner) for root in allowed for inner in ast.walk(root)}
+    excused = allowed_mentions(tree, module)
     mention = re.compile(rf"\b({'|'.join(map(re.escape, names))})\b")
     return sorted(
         f"{module}:{node.lineno}"
@@ -284,7 +327,62 @@ MAKER = [
             ["def f(x):", "    'SessionReference'", "    return 'SessionReference'"],
             ["a.py:3"],
         ),
+        ("a.py", ["ref = __all__ = SessionReference(raw)"], ["a.py:1"]),
+        (
+            "a.py",
+            ["def f(raw):", "    __all__ = SessionReference(raw)", "    return __all__"],
+            ["a.py:2"],
+        ),
+        ("a.py", ["__all__ = [str(SessionReference(raw))]"], ["a.py:1"]),
+        ("a.py", ["__all__: list[str] = [SessionReference(raw)]"], ["a.py:1"]),
+        ("a.py", ["__all__ = build(SessionReference)"], ["a.py:1"]),
+        ("a.py", ["def f(x: SessionReference('raw')): ..."], ["a.py:1"]),
+        ("a.py", ["def f() -> cast(SessionReference, raw): ..."], ["a.py:1"]),
+        ("a.py", ["x: SessionReference('raw')"], ["a.py:1"]),
+        (
+            "a.py",
+            [
+                "def endpoint(",
+                "    ref: Annotated[str, Depends(lambda r: SessionReference(r.cookies['sid']))],",
+                "): ...",
+            ],
+            ["a.py:2"],
+        ),
+        (
+            "cookies.py",
+            [
+                "def session_reference(raw):",
+                "    class C:",
+                "        ref = SessionReference(raw)",
+                "    return C.ref",
+            ],
+            ["cookies.py:3"],
+        ),
+        (
+            "cookies.py",
+            [
+                "def session_reference(raw):",
+                "    if raw:",
+                "        return SessionReference(raw)",
+                "    return SessionReference('')",
+            ],
+            ["cookies.py:3", "cookies.py:4"],
+        ),
+        (
+            "ports.py",
+            ["SessionReference = NewType('SessionReference', type(SessionReference('raw')))"],
+            ["ports.py:1"],
+        ),
+        (
+            "ports.py",
+            ["SessionReference = NewType(name='SessionReference', tp=SessionReference)"],
+            ["ports.py:1"],
+        ),
         ("a.py", ["def f(x):", "    return str(x)"], []),
+        ("a.py", ["__all__ = ('SessionReference',)"], []),
+        ("a.py", ["__all__: list[str] = ['SessionReference']"], []),
+        ("a.py", ["def f(x: Annotated[str, 'SessionReference']): ..."], []),
+        ("ports.py", ["SessionReference = NewType(name='SessionReference', tp=str)"], []),
         ("a.py", ["def f(x):", "    'Names SessionReference.'"], []),
         ("a.py", ["'Names SessionReference.'"], []),
         ("a.py", ["class C:", "    'Names SessionReference.'"], []),
