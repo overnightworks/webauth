@@ -156,14 +156,30 @@ def is_name(node: ast.AST, expected: str) -> bool:
     return isinstance(node, ast.Name) and node.id == expected
 
 
+CODE_NODES = ast.Call | ast.Lambda | ast.NamedExpr
+
+
+def quoted_without_code(node: ast.Constant) -> bool:
+    if not isinstance(node.value, str):
+        return True
+    try:
+        quoted = ast.parse(node.value, mode="eval")
+    except SyntaxError:
+        return True
+    return len(nodes_without_code(quoted)) == len(list(ast.walk(quoted)))
+
+
 def nodes_without_code(root: ast.AST) -> list[ast.AST]:
-    """The nodes of a type expression, leaving out every call and lambda in it."""
+    """The nodes of a type expression, leaving out every call, lambda, walrus and
+    quoted expression that holds one, since FastAPI and typing evaluate them."""
     pending, kept = [root], []
     while pending:
         node = pending.pop()
-        if not isinstance(node, ast.Call | ast.Lambda):
-            kept.append(node)
-            pending.extend(ast.iter_child_nodes(node))
+        quoted_code = isinstance(node, ast.Constant) and not quoted_without_code(node)
+        if isinstance(node, CODE_NODES) or quoted_code:
+            continue
+        kept.append(node)
+        pending.extend(ast.iter_child_nodes(node))
     return kept
 
 
@@ -339,6 +355,21 @@ MAKER = [
         ("a.py", ["def f(x: SessionReference('raw')): ..."], ["a.py:1"]),
         ("a.py", ["def f() -> cast(SessionReference, raw): ..."], ["a.py:1"]),
         ("a.py", ["x: SessionReference('raw')"], ["a.py:1"]),
+        (
+            "a.py",
+            [
+                "def endpoint(",
+                "    ref: \"Annotated[str, Depends(lambda r: SessionReference(r))]\",",
+                "): ...",
+            ],
+            ["a.py:2"],
+        ),
+        (
+            "a.py",
+            ["def f(x: \"Annotated[str, 'Depends(lambda r: SessionReference(r))']\"): ..."],
+            ["a.py:1"],
+        ),
+        ("a.py", ["def f(x: (Ref := SessionReference)): ...", "Ref(raw)"], ["a.py:1"]),
         (
             "a.py",
             [
