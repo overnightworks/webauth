@@ -107,7 +107,7 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after the logout past the ID token's expiry (21), the app's page after each logout (15, 17, and 16 and 18 after confirming), the cross-site page and the app's answer to it in scenario 22, Keycloak's confirmation page in scenario 23, A's page after the disable and before the admin logout in scenario 13, in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after the logout past the ID token's expiry (21), the app's page after each logout (15, 17, 22 and 23, and 16 and 18 after confirming), the cross-site page and the app's answer to it in scenario 22, Keycloak's confirmation page in scenario 23, A's page after the disable and before the admin logout in scenario 13, in
 scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
@@ -333,9 +333,7 @@ anything), and `rm -rf SCRATCH/runtime`.
 
 ## Refreshing the pins
 
-Dependabot ignores the pins that only a probe run can vouch for: the `==` pins of
-`playwright` and `uvicorn` in the `e2e` dependency group, and the image digests
-(`RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`). `EDGE_SHA` is
+Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` dependency group, and does not watch the image digests (it has no docker ecosystem here): `RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`. Only a probe run vouches for them. `EDGE_SHA` is
 a hand-set pin as well. A bump of any of them can break what only a real browser, a real
 Keycloak or the OIDF suite shows, and CI does not run those.
 
@@ -368,6 +366,6 @@ unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 | 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
 | 13 | the account disabled, then Keycloak's admin logout (204) | the disable alone ended nothing; then each app called back exactly once, `/me` 401, and a fresh sign in was refused |
 | 20 | the hint's signature altered, then logout | Keycloak's error page (400, `Invalid parameter: id_token_hint`) |
+| 21 | the ID token (15 s lifespan) past its `exp` by 2.1 s, then logout | the end-session request carried the hint; a redirect to the app, no confirmation page, "Signed out", Keycloak's form at the next sign-in |
 | 22 | a form on `https://demo.example.test` posted to app A's `/logout` | 403 `Cross-origin request rejected`; the session and the hint cookie stood |
 | 23 | A's session ended by Keycloak's admin logout, B signed in, then A's logout with the first session's ID token | Keycloak asked to confirm; after confirming B was called back |
-| 21 | the ID token (15 s lifespan) past its `exp` by 2.1 s, then logout | the end-session request carried the hint; a redirect to the app, no confirmation page, "Signed out", Keycloak's form at the next sign-in |

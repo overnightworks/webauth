@@ -529,6 +529,12 @@ def pages_fit_the_window(proof: Proof, width: Width) -> str:
     )
 
 
+def raw_header(request: Any, name: str) -> str:
+    return next(
+        (h["value"] for h in request.headers_array() if h["name"].lower() == name), "(none)"
+    )
+
+
 def session_cookie_after_redirect(
     proof: Proof, origin: str, cookie_samesite: CookieSameSite
 ) -> str:
@@ -546,10 +552,7 @@ def session_cookie_after_redirect(
             for name in cookie_names(callback.headers_array())
         ), "the callback carried no pending-login cookie; request cookies are not measured"
         names = [recorded_cookie_name(name) for name in cookie_names(landing.headers_array())]
-        site = next(
-            (h["value"] for h in landing.headers_array() if h["name"].lower() == "sec-fetch-site"),
-            "(none)",
-        )
+        site = raw_header(landing, "sec-fetch-site")
         headline = proof.headline(page)
         proof.shot(page, scenario, "first-page")
     observed = f"first page showed {headline!r}; cookie names sent {names}; Sec-Fetch-Site {site}"
@@ -1351,14 +1354,17 @@ def logout_from_a_page_of_another_site_is_refused(proof: Proof, width: Width) ->
             ),
         )
         page.goto(f"{app_b.origin}{CROSS_SITE_LOGOUT_PATH}")
+        page.unroute_all()
         proof.shot(page, scenario, "cross-site-page")
         logout_url = f"{app_a.origin}{LOGOUT_PATH}"
         with page.expect_response(lambda answer: answer.url == logout_url) as answer:
             proof.press(page, "#logout")
-        page.wait_for_load_state()
+        page.wait_for_url(logout_url)
         refusal = page.inner_text("body")
         proof.shot(page, scenario, "refused-result")
         assert answer.value.status == 403, f"the logout was answered {answer.value.status}"
+        site = raw_header(answer.value.request, "sec-fetch-site")
+        assert site == "cross-site", f"the logout carried Sec-Fetch-Site {site!r}"
         assert CROSS_ORIGIN_REFUSAL in refusal, f"the refusal is {refusal!r}"
         page.goto(f"{app_a.origin}/")
         assert proof.headline(page) == f"Signed in as {USER_NAME}", "the session did not stand"
@@ -1371,8 +1377,9 @@ def logout_from_a_page_of_another_site_is_refused(proof: Proof, width: Width) ->
         wait_for_accepted_callbacks(app_a, 1)
     return (
         f"a form on {app_b.origin} posting to {app_a.origin}{LOGOUT_PATH} was answered 403 "
-        f"({CROSS_ORIGIN_REFUSAL!r}); the session stood (/me 200, host at 1 session) and the "
-        "ID token hint cookie was not cleared, so the person's own logout then showed no page"
+        f"({CROSS_ORIGIN_REFUSAL!r}) with Sec-Fetch-Site {site}; the session stood (/me 200, "
+        "host at 1 session) and the ID token hint cookie was not cleared, so the person's own "
+        "logout then showed no page"
     )
 
 
@@ -1382,6 +1389,13 @@ def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width)
     app_a.reset()
     app_b.reset()
     with proof.browsing(width) as page_a:
+        end_session_urls: list[str] = []
+        page_a.context.on(
+            "request",
+            lambda request: end_session_urls.extend(
+                [request.url] if is_end_session_request(request.url) else []
+            ),
+        )
         hint_of_first_session = signed_in_with_a_hint(proof, page_a, scenario, app_a.origin)
         proof.log_out_user_everywhere(proof.user_id)
         wait_for_accepted_callbacks(app_a, 1)
@@ -1395,13 +1409,18 @@ def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width)
         log_out_through_keycloak(
             proof, page_a, scenario, app_a.origin, asks_for_confirmation=True
         )
+        (end_session_url,) = end_session_urls
+        sent_hint = cookie_name_and_value(hint_of_first_session)[1]
+        assert end_session_hint_is(
+            end_session_url, sent_hint
+        ), "A's logout did not send the first session's ID token"
         wait_for_accepted_callbacks(app_b, 1)
         assert_signed_out(proof, page_b, app_b.origin)
     return (
         "A's session was ended through Keycloak's admin logout (A's hint cookie stayed), a sign-in "
         "to B opened a second Keycloak session, and A's logout, sending the first session's ID "
-        "token, led to Keycloak's confirmation page; after confirming, Keycloak called B back and "
-        "B says Signed out"
+        f"token (hint ending ...{sent_hint[-8:]}), led to Keycloak's confirmation page; after "
+        "confirming, Keycloak called B back and B says Signed out"
     )
 
 
