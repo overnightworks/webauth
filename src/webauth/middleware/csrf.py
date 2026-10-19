@@ -29,6 +29,7 @@ _FORM_CONTENT_TYPES: Final = frozenset({
     "text/plain",
 })
 
+_CSRF_REFUSAL_DETAIL: Final = "CSRF token missing or invalid"
 _SEC_FETCH_SITE: Final = "sec-fetch-site"
 _SAME_ORIGIN: Final = "same-origin"
 _SAME_SITE: Final = "same-site"
@@ -46,14 +47,14 @@ class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
             header_token = request.headers.get(config.csrf_header_name)
             if not header_token:
                 return JSONResponse(
-                    {"detail": "CSRF token missing or invalid"}, status_code=403,
+                    {"detail": _CSRF_REFUSAL_DETAIL}, status_code=403,
                 )
             session_id = session_id_from_request(request, config)
             if session_id is None or not verify_csrf_token(
                 header_token, session_id, config.signing_key,
             ):
                 return JSONResponse(
-                    {"detail": "CSRF token missing or invalid"}, status_code=403,
+                    {"detail": _CSRF_REFUSAL_DETAIL}, status_code=403,
                 )
         return None
 
