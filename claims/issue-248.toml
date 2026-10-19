@@ -3,6 +3,6 @@ agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
 role = "builder"
 base = "ee3f786101af2097c8945a1128894bb3f8ecfdb8"
 branch = "claude/issue-248-session-reference-type"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/ports.py", "src/webauth/session_administration.py", "tests/test_session_administration.py", "tests/typing/oidc_host.py", "tests/typing/session_reference_refusal.py"]
+scope = ["CHANGELOG.md", "README.md", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/ports.py", "src/webauth/session_administration.py", "tests/test_session_administration.py", "tests/typing/check_against_wheel.sh", "tests/typing/oidc_host.py", "tests/typing/session_reference_refusal.py"]
 opened_commit = "6387edb96ac746b58c6478155fc0c633004c918a"
 whole_reason = "One type, its single maker, the three fields that carry it, and the proofs that a raw id cannot take its place land together."
