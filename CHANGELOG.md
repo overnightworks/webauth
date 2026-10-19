@@ -23,6 +23,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   including an already-hashed reference, fails type checking. Migration:
   construct them with `webauth.cookies.session_reference(raw_session_id)`.
   Hosts that only read the fields are unaffected.
+- `post_token_request_over_https` moved from `webauth.oidc_login` to the new
+  `webauth.oidc_transport`, and `webauth.jwt_verification` no longer
+  re-exports `ExchangeFailure`, which `webauth.https_client` owns. Migration:
+  `from webauth.oidc_transport import post_token_request_over_https` and
+  `from webauth.https_client import ExchangeFailure`. The old imports fail with
+  `ImportError` when they execute.
 
 **Added**
 

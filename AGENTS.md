@@ -43,9 +43,9 @@ CI, which only lints it.
   `webauth.jwt_verification` imports, and urllib3, which only
   `webauth.https_client` imports — the one owner of outbound HTTPS. Only
   `webauth.oidc` imports `webauth.jwt_verification`; only
-  `webauth.jwt_verification` and `webauth.oidc_login` import
-  `webauth.https_client`. Four `protected` import-linter contracts enforce
-  this. A fifth confines `redis` to `webauth.rate_limit`, and
+  `webauth.jwt_verification`, `webauth.oidc` and `webauth.oidc_transport`
+  import `webauth.https_client`. Four `protected` import-linter contracts
+  enforce this. A fifth confines `redis` to `webauth.rate_limit`, and
   `tests/test_public_api.py` imports every module with `redis` blocked, so the
   in-process backend never needs the extra.
 - The user model, schema, configured role names, transaction boundaries and
