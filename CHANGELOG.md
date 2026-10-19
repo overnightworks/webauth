@@ -6,6 +6,24 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.18.0 - Unreleased
+
+**Breaking**
+
+- `WebAuthConfig` refuses a `session_cookie_name` or `csrf_cookie_name` that is
+  one of webauth's own cookies, in either variant: the ID token hint cookie
+  (`__Secure-oidc_id_token_hint`, `oidc_id_token_hint`) or a name starting with
+  the pending-login prefix (`__Host-oidc_pending_`, `oidc_pending_`). Such a
+  name made the browser send two same-name cookies at logout, and the logout
+  ended no stored session. Migration: choose another name; no known host sets
+  one.
+
+**Changed**
+
+- `max_user_agent_chars` is validated like the other positive quantities: its
+  refusal reads `max_user_agent_chars must be a positive whole number of
+  characters, not ...`.
+
 ## 0.17.0
 
 **Added**
@@ -56,9 +74,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
     subgroup), or they are refused as `NOT_A_MEMBER`, and turn on `full.path`
     in the client's group membership mapper, or the claim carries bare names
     and everyone is refused (under `EverySubject.OF_THE_BOUND_ISSUER`
-    identities without groups are admitted); put the admins into `admin_group`, created per app at its
-    cutover (edge#50, edge#20 row 10), or a stored admin is demoted at their next
-    login.
+    identities without groups are admitted); put the admins into `admin_group`,
+    created per app at its cutover (edge#50, edge#20 row 10), or a stored admin
+    is demoted at their next login.
   - `OidcClientConfig` requires the keyword fields `end_session_endpoint` and
     `post_logout_redirect_uri`; both are https URLs under the same rules as the
     other endpoints, and a missing one is a `TypeError`. A host that does not
@@ -93,9 +111,10 @@ Versions before 0.3.0 and releases without an entry here are described in the
     `webauth.cookies.MAX_ID_TOKEN_HINT_CHARS` (3072) is not kept, and an older
     hint is cleared instead. `log_out` sends it as `id_token_hint` through
     `OidcRelyingParty.logout_url(*, id_token_hint=None)` and clears it. The
-    hint is never decoded, verified or accepted as a credential; an unusable one is left out and Keycloak asks once. Because
-    the logout is a GET, the hint reaches the browser's history and the
-    TLS-terminating edge (README, "The ID token hint").
+    hint is never decoded, verified or accepted as a credential; an unusable one
+    is left out and Keycloak asks once. Because the logout is a GET, the hint
+    reaches the browser's history and the TLS-terminating edge (README, "The
+    ID token hint").
   - Migration: add `logout_path` to the `OidcClientConfig`; `finish_login` and
     `log_out` take a relying party built from that one `OidcClientConfig` and
     the same `WebAuthConfig`, or the logout finds no hint and Keycloak asks.
@@ -132,8 +151,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `str`, with the library's default as their default, and are refused unless
   they are an RFC 6265 token and distinct from each other; a name that is empty,
   or contains a space, a control character, a non-ASCII character or any of
-  `( ) < > @ , ; : \ " / [ ] ? = { }`, is not a token and is refused. An explicit `None` (or any other non-`str`)
-  raises `ValueError`, so `dataclasses.replace(config,
+  `( ) < > @ , ; : \ " / [ ] ? = { }`, is not a token and is refused. An
+  explicit `None` (or any other non-`str`) raises `ValueError`,
+  so `dataclasses.replace(config,
   session_cookie_name=None)` no longer resets the field to the default: leave
   the field out of `replace` instead. Starlette's `set_cookie` raised
   `http.cookies.CookieError` for every invalid name except one containing `:`,
@@ -181,8 +201,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   (`no-session`, `invalid-session`, `session-ended-or-expired`,
   `account-disabled`, `missing-origin`, `foreign-origin`). `session_id_from_request`,
   `web_auth_config`, `resolve_client_ip` and `client_user_agent` accept any
-  `HTTPConnection` (see Breaking). A socket outlives its session unless the host re-checks in a
-  fresh transaction (README, "WebSocket handshakes").
+  `HTTPConnection` (see Breaking). A socket outlives its session unless the host
+  re-checks in a fresh transaction (README, "WebSocket handshakes").
 - `webauth.WebAuthError` is the common base of the public operational
   exceptions: `UsernameTakenError`, `NotAnAdminError`, `UnknownSessionError`,
   `KeySetFetchError` and `TokenEndpointError`.

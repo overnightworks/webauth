@@ -128,6 +128,19 @@ def is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
     return _STATE_DIGEST.fullmatch(name.removeprefix(prefix)) is not None
 
 
+def is_reserved_cookie_name(name: str) -> bool:
+    """Whether ``name`` is one webauth's own cookies use, in either variant.
+
+    A session or CSRF cookie under such a name would meet the cookie webauth
+    sets there, and the browser would send both.
+    """
+    return any(
+        name == id_token_hint_cookie_name(secure=secure)
+        or name.startswith(pending_login_cookie_prefix(secure=secure))
+        for secure in (True, False)
+    )
+
+
 def is_valid_cookie_name(name: str) -> bool:
     """Whether ``name`` is an RFC 6265 ``cookie-name``; Starlette refuses most other names."""
     return _COOKIE_NAME_TOKEN.fullmatch(name) is not None

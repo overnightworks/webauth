@@ -202,8 +202,9 @@ class RateLimitBackend(Protocol):
         with one window. The check counts the current event, so a caller told
         yes has already spent one of the budget. ``limit`` and
         ``window_seconds`` must be positive integers, excluding booleans, and
-        the caller validates them before invoking the backend. A backend that cannot answer
-        raises rather than guessing, and the caller fails the request closed.
+        the caller validates them before invoking the backend. A backend that
+        cannot answer raises rather than guessing, and the caller fails the
+        request closed.
 
         The middleware calls this from a worker thread so a slow check does
         not stall the event loop, and calls may run concurrently: an
