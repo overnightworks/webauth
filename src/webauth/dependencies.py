@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException, Request
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, Response
 
+from webauth._content_negotiation import prefers_html
 from webauth._origins import origin_is_allowed
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import (
@@ -235,7 +236,7 @@ def _unauthenticated(
     an API call, a fetch — keeps the 401 even when the host named a
     ``login_redirect``, because it cannot follow one.
     """
-    if login_redirect is not None and _prefers_html(request):
+    if login_redirect is not None and prefers_html(request):
         query = urlencode({login_redirect.redirect_query_param: _asked_for_address(request)})
         return HTTPException(302, headers={"Location": f"{login_redirect.path}?{query}"})
     return HTTPException(401, detail)
@@ -249,47 +250,6 @@ def _asked_for_address(request: Request) -> str:
     """
     path = "/" if _reads_as_another_host(request.url.path) else request.url.path
     return f"{path}?{request.url.query}" if request.url.query else path
-
-
-def _prefers_html(request: Request) -> bool:
-    accept = request.headers.get("accept", "")
-    if not accept:
-        return False
-    return _accepted_quality(accept, "text/html") > _accepted_quality(accept, "application/json")
-
-
-def _media_range_and_quality(entry: str) -> tuple[str, float]:
-    type_part, *params = entry.split(";")
-    quality = 1.0
-    for param in params:
-        name, _, value = param.strip().partition("=")
-        if name.strip() == "q":
-            try:
-                quality = float(value.strip())
-            except ValueError:
-                quality = 1.0
-    return type_part.strip(), quality
-
-
-def _accepted_quality(accept_header: str, media_type: str) -> float:
-    """The quality ``accept_header`` assigns ``media_type``: exact, wildcard, or 0.
-
-    An entry naming ``media_type`` exactly wins outright; a type or ``*/*``
-    wildcard sets the floor everything unnamed falls back to; a ``media_type``
-    neither named nor covered by a wildcard is not accepted at all.
-    """
-    main_type, _, _ = media_type.partition("/")
-    wildcard_quality = 0.0
-    for raw_entry in accept_header.split(","):
-        entry = raw_entry.strip()
-        if not entry:
-            continue
-        type_part, quality = _media_range_and_quality(entry)
-        if type_part == media_type:
-            return quality
-        if type_part in (f"{main_type}/*", "*/*"):
-            wildcard_quality = max(wildcard_quality, quality)
-    return wildcard_quality
 
 
 class WebSocketRefusal(Enum):

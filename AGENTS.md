@@ -48,8 +48,10 @@ CI, which only lints it.
   this. A fifth confines `redis` to `webauth.rate_limit`, and
   `tests/test_public_api.py` imports every module with `redis` blocked, so the
   in-process backend never needs the extra.
-- The user model, schema, configured role names, transaction boundaries, and
-  HTTP routes and responses belong to the host. Session administration
+- The user model, schema, configured role names, transaction boundaries and
+  HTTP routes belong to the host. The library writes no response except its
+  own refusals and the 500 of an unhandled exception; README.md lists them
+  under "What it owns, and what it leaves to the host". Session administration
   is a library helper in `webauth.session_administration` over host-supplied
   ports and a write lock; the host commits or rolls back its work.
 
