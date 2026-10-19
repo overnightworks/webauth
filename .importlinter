@@ -45,14 +45,19 @@ protected_modules =
 allowed_importers =
     webauth.https_client
 
-[importlinter:contract:only-key-set-and-token-transport-import-the-https-client]
-name = webauth.https_client is imported only by jwt_verification and oidc_login
+# Two transports send through the HTTPS client: the verifier's key-set fetch
+# and webauth.oidc_transport's token request. webauth.oidc imports only the
+# client's vocabulary (ExchangeFailure, is_https_url) and sends nothing
+# itself: its token request and key-set fetch arrive injected.
+[importlinter:contract:only-the-transports-and-the-relying-party-import-the-https-client]
+name = webauth.https_client is imported only by jwt_verification, oidc_transport and oidc
 type = protected
 protected_modules =
     webauth.https_client
 allowed_importers =
     webauth.jwt_verification
-    webauth.oidc_login
+    webauth.oidc_transport
+    webauth.oidc
 
 # redis is the optional `[redis]` extra; only the Redis backend's module may reach it.
 [importlinter:contract:only-the-rate-limit-module-imports-redis]

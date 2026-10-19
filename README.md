@@ -525,7 +525,7 @@ import time
 
 from webauth.https_client import fetch_key_set_over_https
 from webauth.oidc import OidcRelyingParty
-from webauth.oidc_login import post_token_request_over_https
+from webauth.oidc_transport import post_token_request_over_https
 
 relying_party = OidcRelyingParty(
     client_config,
@@ -1184,9 +1184,10 @@ It owns the machinery an application should not rebuild:
 | `webauth.session_ending` | The one place a session ends in the host's store |
 | `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
-| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
+| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, creates the new one and prunes the account to a cap, `log_out`, which ends the browser's session and returns the issuer's end-session URL, `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, creates the new one and prunes the account to a cap, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+| `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client`. Needs `overnightworks-webauth[jwt]` |
 
 It leaves the application everything that touches the application's own truth:
 
