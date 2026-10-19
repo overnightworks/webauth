@@ -1,8 +1,0 @@
-claim_id = "a7ff07af1d18417ba06be6fa6610399e"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "04cc361664ab9c0b199c282bc7eb9565281d1fb4"
-branch = "claude/issue-279-no-username-lookup-no-local-lock"
-scope = ["CHANGELOG.md", "README.md", "e2e/oidc/README.md", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "src/webauth/dependencies.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_dependencies.py", "tests/test_oidc_login.py", "tests/test_websocket_auth.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "4078177491aabacf3f7baf154577f2a2f3e2678c"
-whole_reason = "Two removals of the same kind (a local account decision the issuer now owns) through the same port, decision and test files; split, each would re-edit the other's hunks."
