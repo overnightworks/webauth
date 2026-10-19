@@ -38,7 +38,6 @@ from webauth.config import (
 )
 from webauth.cookies import generate_csrf_token, sign_session_id
 from webauth.dependencies import (
-    AuthenticatedUser,
     LoginRedirect,
     WebSocketRefusal,
     authenticate_websocket,
@@ -60,6 +59,7 @@ from webauth.policies import (
 )
 from webauth.ports import (
     AccountEvent,
+    AuthenticatedUser,
     RateLimitBackend,
     SessionIdentityChanged,
     SessionRecordStore,
@@ -89,6 +89,8 @@ IDLE_WINDOW_SECONDS = 1800
 DOCUMENTED_ID_TOKEN_HINT_BOUND = 3_072
 SEVEN_DAYS_SECONDS = 7 * 24 * 3600
 THIRTY_DAYS_SECONDS = 30 * 24 * 3600
+FIXED_INSTANT = datetime(2030, 1, 1, 12, tzinfo=UTC)
+FIXED_WALL_CLOCK = FIXED_INSTANT.timestamp
 
 
 if TYPE_CHECKING:
@@ -617,8 +619,9 @@ def a_session(
     user: FakeUser | None = None,
     ip_address: str = CLIENT_ADDRESS,
     user_agent: str = CLIENT_USER_AGENT,
+    now: datetime | None = None,
 ) -> FakeSessionRecord:
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
     return FakeSessionRecord(
         id=SESSION_ID,
         user=user or FakeUser(),

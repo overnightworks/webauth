@@ -13,11 +13,11 @@ from dataclasses import dataclass
 from webauth import WebAuthError
 from webauth.config import WebAuthConfig
 from webauth.cookies import session_reference
-from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
     AccountEvent,
     AccountEventKind,
     AuditSink,
+    AuthenticatedUser,
     SessionAdministrationStore,
     SessionReference,
     WriteLock,

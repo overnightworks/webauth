@@ -31,7 +31,6 @@ from webauth.cookies import (
 )
 from webauth.dependencies import (
     AuthDependencies,
-    AuthenticatedUser,
     LoginRedirect,
     WebSocketRefusal,
     authenticate_websocket,
@@ -55,7 +54,6 @@ from webauth.jwt_verification import (
     MonotonicClock,
     Rejected,
     VerifiedClaims,
-    WallClock,
 )
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import (
@@ -109,6 +107,7 @@ from webauth.ports import (
     AccountEvent,
     AccountEventKind,
     AuditSink,
+    AuthenticatedUser,
     RateLimitBackend,
     SessionAdministrationStore,
     SessionIdentityChanged,
@@ -118,6 +117,7 @@ from webauth.ports import (
     SubjectUserStore,
     UsernameTakenError,
     UserRecord,
+    WallClock,
     WriteLock,
 )
 from webauth.proxies import TrustedProxies

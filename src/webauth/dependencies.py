@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException, Request
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, Response
 
+from webauth import ports
 from webauth._content_negotiation import prefers_html
 from webauth._origins import origin_is_allowed
 from webauth.config import WebAuthConfig, web_auth_config
@@ -41,7 +42,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AuthDependencies",
-    "AuthenticatedUser",
     "LoginRedirect",
     "WebSocketRefusal",
     "authenticate_websocket",
@@ -56,16 +56,6 @@ INVALID_SESSION_DETAIL: Final = "Invalid session"
 SESSION_EXPIRED_DETAIL: Final = "Session expired"
 ACCOUNT_DISABLED_DETAIL: Final = "Account disabled"
 ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
-
-
-@dataclass(frozen=True)
-class AuthenticatedUser:
-    """The account behind the current request."""
-
-    id: str
-    username: str
-    role: str
-    is_active: bool
 
 
 _BROWSER_STRIPPED_CHARACTERS = str.maketrans("", "", "\t\r\n")
@@ -112,8 +102,8 @@ class AuthDependencies:
     identity behind all three.
     """
 
-    current_user: Callable[..., AuthenticatedUser]
-    admin_user: Callable[..., AuthenticatedUser]
+    current_user: Callable[..., ports.AuthenticatedUser]
+    admin_user: Callable[..., ports.AuthenticatedUser]
     verified_session_id: Callable[..., str]
 
 
@@ -121,7 +111,7 @@ def current_user_dependency(
     *,
     session_store: Callable[..., SessionRecordStore],
     audit_sink: Callable[..., AuditSink],
-    on_authenticated: Callable[[AuthenticatedUser], None],
+    on_authenticated: Callable[[ports.AuthenticatedUser], None],
     login_redirect: LoginRedirect | None = None,
 ) -> AuthDependencies:
     """Bind the auth dependencies to one application's stores.
@@ -139,7 +129,7 @@ def current_user_dependency(
         request: Request,
         sessions: SessionRecordStore = Depends(session_store),
         audit: AuditSink = Depends(audit_sink),
-    ) -> AuthenticatedUser:
+    ) -> ports.AuthenticatedUser:
         user = _resolve_session(request, sessions, audit)
         if isinstance(user, WebSocketRefusal):
             raise _http_refusal(request, user, login_redirect)
@@ -148,15 +138,15 @@ def current_user_dependency(
 
     def admin_user(
         request: Request,
-        user: AuthenticatedUser = Depends(current_user),
-    ) -> AuthenticatedUser:
+        user: ports.AuthenticatedUser = Depends(current_user),
+    ) -> ports.AuthenticatedUser:
         if user.role != web_auth_config(request).admin_role:
             raise HTTPException(403, ADMIN_REQUIRED_DETAIL)
         return user
 
     def verified_session_id(
         request: Request,
-        _account: AuthenticatedUser = Depends(current_user),
+        _account: ports.AuthenticatedUser = Depends(current_user),
     ) -> str:
         """The session this request proved it holds.
 
@@ -178,7 +168,7 @@ def current_user_dependency(
 
 def authenticate_websocket(
     connection: HTTPConnection, *, sessions: SessionRecordStore, audit: AuditSink,
-) -> AuthenticatedUser | WebSocketRefusal:
+) -> ports.AuthenticatedUser | WebSocketRefusal:
     """The account behind a WebSocket handshake, or why the handshake is refused.
 
     The Origin is decided first, so a refused Origin never touches the store
@@ -359,7 +349,7 @@ def _record_identity_changes(
 
 def _resolve_session(
     connection: HTTPConnection, sessions: SessionRecordStore, audit: AuditSink,
-) -> AuthenticatedUser | WebSocketRefusal:
+) -> ports.AuthenticatedUser | WebSocketRefusal:
     """The one decision whom a connection's session cookie speaks for.
 
     Cookie, signature, load, liveness, active account, renewal, identity
@@ -372,7 +362,7 @@ def _resolve_session(
         return session_id
 
     record = sessions.load(session_id)
-    now = datetime.now(UTC)
+    now = datetime.fromtimestamp(config.wall_clock(), UTC)
     if record is None or not config.session_liveness.admits_stored_session(record, now):
         return WebSocketRefusal.SESSION_ENDED_OR_EXPIRED
 
@@ -407,7 +397,7 @@ def _resolve_session(
         current_user_agent=current_user_agent,
     )
 
-    return AuthenticatedUser(
+    return ports.AuthenticatedUser(
         id=record.user.id,
         username=record.user.username,
         role=record.user.role,

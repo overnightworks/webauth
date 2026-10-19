@@ -48,7 +48,7 @@ from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import issue_session_cookies
-from webauth.dependencies import AuthenticatedUser, current_user_dependency
+from webauth.dependencies import current_user_dependency
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
@@ -82,6 +82,7 @@ from webauth.policies import (
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
+from webauth.ports import AuthenticatedUser
 
 logger = logging.getLogger(__name__)
 

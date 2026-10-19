@@ -13,10 +13,13 @@ from webauth_arrangement import (
     ALLOWED_ORIGIN,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
+    FIXED_INSTANT,
+    FIXED_WALL_CLOCK,
     MEMBER_ROLE,
     POLICY_VIOLATION_CLOSE_CODE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
+    SESSION_MAX_AGE_SECONDS,
     WEBSOCKET_DEPENDENCY_PATH,
     AuthApp,
     FakeSessionRecord,
@@ -43,8 +46,8 @@ from webauth.cookies import (
     session_reference,
     sign_session_id,
 )
-from webauth.dependencies import AuthenticatedUser, WebSocketRefusal, session_id_from_request
-from webauth.ports import SessionIdentityChange, SessionIdentityChanged
+from webauth.dependencies import WebSocketRefusal, session_id_from_request
+from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
 from webauth.proxies import client_user_agent, resolve_client_ip
 from webauth.session_ending import end_session
 
@@ -107,6 +110,24 @@ def test_an_admitted_handshake_renews_its_session_in_place(auth_app: AuthApp) ->
         socket.receive_json()
 
     assert auth_app.sessions.record.expires_at > before
+
+
+def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> None:
+    expired = a_session(now=FIXED_INSTANT, remaining=timedelta(seconds=-1))
+    expired_app = an_auth_app(expired, wall_clock=FIXED_WALL_CLOCK)
+    admitted = a_session(now=FIXED_INSTANT, remaining=timedelta(seconds=1))
+    admitted_app = an_auth_app(admitted, wall_clock=FIXED_WALL_CLOCK)
+
+    with pytest.raises(WebSocketDisconnect), expired_app.connect(
+        cookie=expired_app.signed_cookie(),
+    ):
+        pass
+    with admitted_app.connect(cookie=admitted_app.signed_cookie()) as socket:
+        socket.receive_json()
+
+    assert expired_app.websocket_outcomes == [WebSocketRefusal.SESSION_ENDED_OR_EXPIRED]
+    assert expired.expires_at == FIXED_INSTANT - timedelta(seconds=1)
+    assert admitted.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
 
 
 def test_an_admitted_handshake_renews_an_idle_window_session() -> None:

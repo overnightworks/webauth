@@ -53,7 +53,7 @@ from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import NoReturn, TypeGuard, cast
+from typing import TYPE_CHECKING, NoReturn, TypeGuard, cast
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
@@ -64,6 +64,9 @@ from webauth.https_client import (
     KeySetFetchError,
     is_https_url,
 )
+
+if TYPE_CHECKING:
+    from webauth.ports import WallClock
 
 log = logging.getLogger(__name__)
 
@@ -85,8 +88,6 @@ _FORBIDDEN_HEADER_MEMBERS = frozenset({"crit", "jwk", "jku", "x5u", "x5c", "b64"
 # has leaked a secret and is not trusted for any of its keys.
 _SECRET_KEY_MEMBERS = frozenset({"d", "p", "q", "dp", "dq", "qi", "oth", "k"})
 
-WallClock = Callable[[], float]
-"""Seconds since the epoch, compared with the token's `exp`, `iat` and `nbf`."""
 MonotonicClock = Callable[[], float]
 """Seconds on a clock that never jumps; ages the key set and its cooldown."""
 KeySetFetch = Callable[[str], bytes]
@@ -102,7 +103,6 @@ __all__ = [
     "Rejected",
     "RejectionReason",
     "VerifiedClaims",
-    "WallClock",
 ]
 
 

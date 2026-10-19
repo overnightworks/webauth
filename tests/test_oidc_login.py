@@ -74,7 +74,7 @@ from webauth.cookies import (
     sign_pending_login,
     sign_session_id,
 )
-from webauth.dependencies import AuthenticatedUser, current_user_dependency
+from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
@@ -107,7 +107,13 @@ from webauth.policies import (
     RateLimitPolicy,
     SecurityHeadersPolicy,
 )
-from webauth.ports import AccountEventKind, SessionRecord, SubjectUserStore, UserRecord
+from webauth.ports import (
+    AccountEventKind,
+    AuthenticatedUser,
+    SessionRecord,
+    SubjectUserStore,
+    UserRecord,
+)
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"

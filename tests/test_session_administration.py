@@ -21,10 +21,10 @@ from webauth_arrangement import (
 
 import webauth
 from webauth.cookies import session_reference
-from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
     AccountEventKind,
     AuditSink,
+    AuthenticatedUser,
     SessionAdministrationStore,
     WriteLock,
 )
@@ -150,6 +150,17 @@ def test_REQ_ADMIN_12_the_revocation_event_carries_the_computed_reference_not_th
 
 
 SESSION_REFERENCE = "SessionReference"
+
+
+def test_session_administration_imports_nothing_from_the_fastapi_bound_dependencies() -> None:
+    source = Path(webauth.session_administration.__file__).read_text()
+    imported_modules = {
+        node.module
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+
+    assert "webauth.dependencies" not in imported_modules
 
 
 def is_name(node: ast.AST, expected: str) -> bool:

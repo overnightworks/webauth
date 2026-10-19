@@ -30,16 +30,22 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `webauth.middleware.security_headers.STRICT_TRANSPORT_SECURITY` is removed;
   `SecurityHeadersPolicy.strict_transport_security` renders the header. Its
   default value is unchanged.
-
 - `post_token_request_over_https` moved from `webauth.oidc_login` to the new
   `webauth.oidc_transport`, and `webauth.jwt_verification` no longer
   re-exports `ExchangeFailure`, which `webauth.https_client` owns. Migration:
   `from webauth.oidc_transport import post_token_request_over_https` and
   `from webauth.https_client import ExchangeFailure`. The old imports fail with
   `ImportError` when they execute.
+- `AuthenticatedUser` moved from `webauth.dependencies` to `webauth.ports`, and
+  `WallClock` from `webauth.jwt_verification` to `webauth.ports`. Migration:
+  `from webauth.ports import AuthenticatedUser, WallClock`. The old imports fail
+  with `ImportError`.
 
 **Added**
 
+- `WebAuthConfig.wall_clock` (default `time.time`, a `webauth.ports.WallClock`)
+  is the one reading of now behind the session decision: HTTP and WebSocket
+  judge liveness at it and pass it to `SessionRecordStore.touch` as `now`.
 - `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of
   `SessionIdentityChanged.session_ref`, `AccountEvent.session_ref` and
   `SessionSummary.session_ref`, and `webauth.cookies.session_reference` returns
