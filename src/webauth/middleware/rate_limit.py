@@ -22,9 +22,9 @@ __all__ = [
     "IpRateLimitMiddleware",
 ]
 
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
-LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
+_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
 
 
 def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
@@ -58,10 +58,10 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
         except Exception:
             # The worker call is shielded: a cancellation arriving during it is delivered only here.
             await checkpoint_if_cancelled()
-            log.exception("IP rate limiter unavailable -- rejecting request")
+            _log.exception("IP rate limiter unavailable -- rejecting request")
             return JSONResponse(
                 {"detail": "Rate limiter unavailable"}, status_code=503,
-                headers={"Retry-After": str(LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
+                headers={"Retry-After": str(_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
             )
         await checkpoint_if_cancelled()
         if not allowed:

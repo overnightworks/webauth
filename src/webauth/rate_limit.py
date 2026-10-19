@@ -73,7 +73,7 @@ class RedisRateLimitBackend:
         return count <= limit
 
 
-PRUNE_INTERVAL_SECONDS: Final = 60
+_PRUNE_INTERVAL_SECONDS: Final = 60
 
 
 @dataclass
@@ -98,7 +98,7 @@ class SingleProcessRateLimitBackend:
 
     The key it is checked with is trimmed to its window on every check; the
     whole store is swept for keys aged out of their window only every
-    ``PRUNE_INTERVAL_SECONDS``, so a many-address flood cannot turn each request
+    ``_PRUNE_INTERVAL_SECONDS``, so a many-address flood cannot turn each request
     into a full scan while the store still stays bounded by the addresses
     currently active rather than by every address ever seen.
     """
@@ -136,7 +136,7 @@ class SingleProcessRateLimitBackend:
     def _sweep_expired_when_due(self, now: float) -> None:
         if now < self._next_prune_at:
             return
-        self._next_prune_at = now + PRUNE_INTERVAL_SECONDS
+        self._next_prune_at = now + _PRUNE_INTERVAL_SECONDS
         expired = [
             key
             for key, entry in self._events.items()
