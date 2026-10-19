@@ -27,8 +27,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `webauth.oidc_transport`, and `webauth.jwt_verification` no longer
   re-exports `ExchangeFailure`, which `webauth.https_client` owns. Migration:
   `from webauth.oidc_transport import post_token_request_over_https` and
-  `from webauth.https_client import ExchangeFailure`. The old imports raise
-  `ImportError`, so a host fails at start-up, not at its first sign-in.
+  `from webauth.https_client import ExchangeFailure`. The old imports fail with
+  `ImportError` when they execute.
 
 **Added**
 

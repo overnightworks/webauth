@@ -45,11 +45,12 @@ protected_modules =
 allowed_importers =
     webauth.https_client
 
-# Two transports send through the HTTPS client: the verifier's key-set fetch
-# and webauth.oidc_transport's token request. webauth.oidc imports only the
-# client's vocabulary (ExchangeFailure, is_https_url) and sends nothing
-# itself: its token request and key-set fetch arrive injected.
-[importlinter:contract:only-the-transports-and-the-relying-party-import-the-https-client]
+# webauth.oidc_transport's token request is the one caller that sends through
+# the HTTPS client; the key-set fetch is the client's own
+# fetch_key_set_over_https, injected by the host. webauth.jwt_verification
+# and webauth.oidc import only the client's vocabulary and send nothing
+# themselves: their key-set fetch and token request arrive injected.
+[importlinter:contract:only-the-verifier-the-relying-party-and-the-token-transport-import-the-https-client]
 name = webauth.https_client is imported only by jwt_verification, oidc_transport and oidc
 type = protected
 protected_modules =
