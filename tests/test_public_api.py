@@ -6,7 +6,9 @@ import ast
 import functools
 import importlib
 import pkgutil
+import runpy
 import sys
+import types
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,8 +101,20 @@ def _is_literal_all_assignment(statement: ast.stmt) -> bool:
     )
 
 
+def _bound_names(target: ast.expr) -> Iterator[str]:
+    match target:
+        case ast.Name(id=name):
+            yield name
+        case ast.Tuple(elts=elements) | ast.List(elts=elements):
+            for element in elements:
+                yield from _bound_names(element)
+        case ast.Starred(value=value):
+            yield from _bound_names(value)
+
+
 @dataclass(frozen=True)
 class ModuleSurface:
+    declares_all: bool
     public: dict[str, int]
     defined_callables: dict[str, int]
     defined_values: dict[str, int]
@@ -114,6 +128,10 @@ class ModuleSurface:
 def _surface_of(dotted_name: str) -> ModuleSurface:
     file = _module_file(dotted_name)
     assert file is not None, dotted_name
+    return _surface_of_source(file.read_text())
+
+
+def _surface_of_source(source: str) -> ModuleSurface:
     public: dict[str, int] = {}
     callables: dict[str, int] = {}
     values: dict[str, int] = {}
@@ -122,7 +140,7 @@ def _surface_of(dotted_name: str) -> ModuleSurface:
     irregular_all_lines: list[int] = []
     unreadable_lines: list[int] = []
     all_declared = False
-    for statement in ast.parse(file.read_text()).body:
+    for statement in ast.parse(source).body:
         if _mentions_all(statement):
             if all_declared or not _is_literal_all_assignment(statement):
                 irregular_all_lines.append(statement.lineno)
@@ -142,9 +160,8 @@ def _surface_of(dotted_name: str) -> ModuleSurface:
                     statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 )
                 for target in assigned:
-                    for node in ast.walk(target):
-                        if isinstance(node, ast.Name):
-                            values[node.id] = statement.lineno
+                    for name in _bound_names(target):
+                        values[name] = statement.lineno
             case ast.Import() | ast.ImportFrom():
                 imported.update(_imported_names(statement))
                 redundant.update(_redundant_reexports(statement))
@@ -153,13 +170,14 @@ def _surface_of(dotted_name: str) -> ModuleSurface:
                     if isinstance(inner, ast.Import | ast.ImportFrom):
                         imported.update(_imported_names(inner))
                         redundant.update(_redundant_reexports(inner))
+                    else:
+                        unreadable_lines.append(inner.lineno)
             case ast.Expr():
                 pass
             case _:
                 unreadable_lines.append(statement.lineno)
-    if not all_declared:
-        irregular_all_lines.append(1)
     return ModuleSurface(
+        all_declared,
         public,
         callables,
         values,
@@ -193,6 +211,29 @@ def test_every_name_a_module_lists_in_all_is_defined_there(module_name: str) -> 
     assert offences == []
 
 
+def _names_bound_outside_the_statements_the_guard_reads(
+    module: types.ModuleType, surface: ModuleSurface
+) -> list[str]:
+    seen = {
+        *surface.public,
+        *surface.defined_callables,
+        *surface.defined_values,
+        *surface.imported_from,
+    }
+    hidden = [
+        name
+        for name, value in vars(module).items()
+        if name not in seen
+        and not name.startswith("_")
+        and not (
+            isinstance(value, types.ModuleType) and value.__name__.startswith(f"{module.__name__}.")
+        )
+    ]
+    if "__getattr__" in vars(module):
+        hidden.append("__getattr__")
+    return hidden
+
+
 PUBLIC_MODULES = [
     name
     for name in WEBAUTH_MODULES
@@ -204,11 +245,14 @@ PUBLIC_MODULES = [
 def test_every_module_declares_all_as_one_literal_assignment(module_name: str) -> None:
     file = _module_file(module_name)
     assert file is not None
+    surface = _surface_of(module_name)
     offences = [
         f"{_relative_id(file)}:{line}: {module_name}.__all__: "
         "must be one literal assignment, never extended or built"
-        for line in _surface_of(module_name).irregular_all_lines
+        for line in surface.irregular_all_lines
     ]
+    if not surface.declares_all:
+        offences.append(f"{_relative_id(file)}: {module_name} declares no __all__")
 
     assert offences == []
 
@@ -225,6 +269,74 @@ def test_every_module_level_statement_is_one_the_surface_guards_can_read(
     ]
 
     assert offences == []
+
+
+def _module_executed_from(source: str, directory: Path) -> types.ModuleType:
+    file = directory / "probe.py"
+    file.write_text(source)
+    module = types.ModuleType("probe")
+    module.__dict__.update(runpy.run_path(str(file), run_name="probe"))
+    return module
+
+
+@pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
+def test_a_module_binds_no_name_the_surface_guards_cannot_see(module_name: str) -> None:
+    hidden = _names_bound_outside_the_statements_the_guard_reads(
+        importlib.import_module(module_name), _surface_of(module_name)
+    )
+
+    assert hidden == []
+
+
+@pytest.mark.parametrize(
+    ("statement", "hidden"),
+    [
+        ("(x := 1)", ["x"]),
+        ("y = (x := 1)", ["x"]),
+        ("def f(a=(x := 1)): ...", ["x"]),
+        ("[(x := i) for i in range(3)]", ["x"]),
+        ("def __getattr__(name): ...", ["__getattr__"]),
+        ("import logging\nlogging.raiseExceptions = False", []),
+        ("first, *rest = [1, 2]", []),
+    ],
+    ids=[
+        "bare walrus",
+        "walrus inside an assignment",
+        "walrus as a default argument",
+        "walrus in a comprehension",
+        "module-level __getattr__",
+        "attribute assignment binds no module name",
+        "unpacking targets are read",
+    ],
+)
+def test_the_runtime_cross_check_names_what_the_syntax_reading_misses(
+    statement: str, hidden: list[str], tmp_path: Path
+) -> None:
+    source = f"__all__ = []\n{statement}\n"
+
+    assert (
+        _names_bound_outside_the_statements_the_guard_reads(
+            _module_executed_from(source, tmp_path), _surface_of_source(source)
+        )
+        == hidden
+    )
+
+
+@pytest.mark.parametrize(
+    "inner",
+    ["def f(): ...", "class C: ...", "X = 1", "X: int = 1"],
+    ids=["function", "class", "value", "annotated value"],
+)
+def test_only_imports_are_readable_inside_a_type_checking_guard(inner: str) -> None:
+    source = f"from typing import TYPE_CHECKING\n__all__ = []\nif TYPE_CHECKING:\n    {inner}\n"
+
+    assert _surface_of_source(source).unreadable_lines == (4,)
+
+
+def test_a_module_without_all_is_reported_as_declaring_none() -> None:
+    surface = _surface_of_source("X = 1\n")
+
+    assert (surface.declares_all, surface.irregular_all_lines) == (False, ())
 
 
 @pytest.mark.parametrize("module_name", PUBLIC_MODULES)

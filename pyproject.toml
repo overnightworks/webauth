@@ -64,9 +64,6 @@ version = {attr = "webauth.__version__"}
 where = ["src"]
 include = ["webauth*"]
 
-[tool.setuptools.package-data]
-webauth = ["py.typed"]
-
 [tool.ruff]
 target-version = "py312"
 line-length = 100

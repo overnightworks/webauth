@@ -86,7 +86,7 @@ jobs:
 
   quality:
     name: quality
-    needs: [checks]
+    needs: [checks, lowest-direct]
     if: always()
     permissions:
       contents: read
