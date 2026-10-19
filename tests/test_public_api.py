@@ -20,7 +20,6 @@ from webauth import WebAuthError, ports
 from webauth.https_client import ExchangeFailure, KeySetFetchError
 from webauth.oidc import TokenEndpointError
 from webauth.ports import UsernameTakenError
-from webauth.session_administration import NotAnAdminError, UnknownSessionError
 
 TESTS = Path(__file__).resolve().parent
 REPOSITORY = TESTS.parent
@@ -493,8 +492,6 @@ def test_every_module_imports_and_the_single_process_backend_counts_without_redi
     ("error", "failure"),
     [
         pytest.param(UsernameTakenError("taken"), None, id="UsernameTakenError"),
-        pytest.param(NotAnAdminError("taken"), None, id="NotAnAdminError"),
-        pytest.param(UnknownSessionError("taken"), None, id="UnknownSessionError"),
         pytest.param(
             KeySetFetchError("taken", ExchangeFailure.TIMED_OUT),
             ExchangeFailure.TIMED_OUT,

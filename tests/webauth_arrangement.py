@@ -66,7 +66,6 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
-from webauth.session_administration import SessionAdministration
 from webauth.session_ending import end_session
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
@@ -405,11 +404,8 @@ class SessionRecordsInMemory:
             self._remove_record(session_id)
         return len(session_ids)
 
-    def list_active(
-        self, *, offset: int = 0, limit: int | None = None,
-    ) -> list[FakeSessionRecord]:
-        records = list(self._records.values())
-        return records[offset:None if limit is None else offset + limit]
+    def list_active(self) -> list[FakeSessionRecord]:
+        return list(self._records.values())
 
     def count_active(self) -> int:
         return len(self._records)
@@ -545,16 +541,6 @@ class RecordingAuditSink:
 
     def account_event(self, event: AccountEvent) -> None:
         self.account_events.append(event)
-
-
-def a_session_administration(*users: FakeUser, config: WebAuthConfig) -> SessionAdministration:
-    lock = WriteLockInMemory()
-    return SessionAdministration(
-        sessions=SessionRecordsInMemory(users=UsersInMemory(*users, lock=lock), lock=lock),
-        audit=RecordingAuditSink(),
-        lock=lock,
-        config=config,
-    )
 
 
 WEBSOCKET_PATH = "/ws"

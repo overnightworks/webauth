@@ -109,7 +109,6 @@ from webauth.ports import (
     AuditSink,
     AuthenticatedUser,
     RateLimitBackend,
-    SessionAdministrationStore,
     SessionIdentityChanged,
     SessionLivenessPolicy,
     SessionRecord,
@@ -122,12 +121,6 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
-from webauth.session_administration import (
-    NotAnAdminError,
-    SessionAdministration,
-    SessionSummary,
-    UnknownSessionError,
-)
 from webauth.session_ending import end_session, end_user_sessions, prune_sessions
 
 
@@ -187,11 +180,6 @@ class HostSessions:
     def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
         return []
 
-    def list_active(
-        self, *, offset: int = 0, limit: int | None = None,
-    ) -> list[SessionRecord]:
-        return []
-
 
 class HostLock:
     def hold(self) -> AbstractContextManager[None]:
@@ -204,8 +192,7 @@ class HostAudit:
         assert reference_read_as_text
 
     def account_event(self, event: AccountEvent) -> None:
-        reference_read_as_text: str | None = event.session_ref
-        assert reference_read_as_text is None or reference_read_as_text
+        assert event.kind
 
 
 class HostRateLimits:
@@ -228,13 +215,6 @@ def a_host_configures_without_local_credentials() -> WebAuthConfig:
         allowed_hosts_patterns=(re.compile(r".*\.example"),),
         cookie_max_age_seconds=3600,
         session_liveness=liveness,
-    )
-
-
-def a_host_administers_sessions(config: WebAuthConfig) -> SessionAdministration:
-    sessions: SessionAdministrationStore = HostSessions()
-    return SessionAdministration(
-        sessions=sessions, audit=HostAudit(), lock=HostLock(), config=config,
     )
 
 
@@ -394,12 +374,12 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
         MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
         MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock,
-        LOGOUT_TOKEN_MAX_AGE_SECONDS, NotAnAdminError, OidcClientConfig,
+        LOGOUT_TOKEN_MAX_AGE_SECONDS, OidcClientConfig,
         PENDING_LOGIN_MAX_AGE_SECONDS,
         PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore,
-        SessionSummary, SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
-        TokenEndpointError, UnknownSessionError, WebAuthError,
+        SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
+        TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
         VerifiedClaims, VerifiedLogout, WallClock, end_user_sessions, install_web_auth_config,
         is_https_url, prune_sessions, session_id_from_request, session_reference,
