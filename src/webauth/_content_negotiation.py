@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from starlette.requests import Request
 
+__all__ = []
+
 
 def prefers_html(request: Request) -> bool:
     accept = request.headers.get("accept", "")
