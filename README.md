@@ -9,8 +9,8 @@ double-submit, admin checks, per-address rate limits, and the audit events they
 raise. The client is a confidential client: it authenticates at the token
 endpoint with HTTP Basic and sends PKCE with the `S256` method.
 
-Distribution `overnightworks-webauth`, import package `webauth`. The login needs
-the `jwt` extra, which [Install](#install) names.
+Distribution `overnightworks-webauth`, import package `webauth`. [Install](#install) names
+where the wheel comes from.
 
 ## OpenID Connect login
 
@@ -292,7 +292,7 @@ own, so that `log_out` can pass it to Keycloak as `id_token_hint`:
   `MAX_ID_TOKEN_HINT_CHARS` (3072) is not kept and the old cookie is cleared
   instead; the person is still signed in, and their logout asks. Keycloak
   asks once whenever the browser holds no ID token from its latest Keycloak
-  sign-in: a token over the bound, a sign-in from before the upgrade, or a
+  sign-in: a token over the bound, a sign-in that stored no token, or a
   token of another Keycloak session.
 - **Never a credential:** the hint is not signed by webauth, and it is never
   decoded, verified, logged or accepted as a session. Keycloak judges it. The
@@ -764,7 +764,7 @@ Fields a host may leave out:
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
 are set and when they are cleared — and whether `SecurityHeadersMiddleware`
-sends HSTS. The request's scheme no longer decides it, so a deployment behind
+sends HSTS. The request's scheme does not decide it, so a deployment behind
 a TLS proxy it has not listed in `trusted_proxies` still gets both. A browser
 does not send a `Secure` cookie back over plain http, so local development
 over http works only with `cookie_secure=False` in that environment's
@@ -916,9 +916,9 @@ The recommended policy for a host that admits by `login_group` is a 12-hour
 cookie and cap, with the idle window left to the host. The cookie and the cap
 set the worst-case delay before a removal from the group takes effect, because
 an open session is not re-checked. Every login checks the group again, and
-Keycloak's own SSO session (30 days, 7 days idle) turns that login into a
-redirect the person does not notice. A removal takes effect at once only with
-`edge lock` together with the back-channel logout ("Back-channel logout"
+the issuer's SSO session turns that login into a
+redirect the person does not notice. A removal takes effect at once only by disabling
+the user at the issuer together with the back-channel logout ("Back-channel logout"
 above); without it, an open app session stays valid until it expires.
 
 ```python
@@ -1042,7 +1042,7 @@ The library sends a response's start whole: a cancellation inside the app waits 
 `CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
 request: the header overrides the Origin allowlist for `same-origin`
 (passes) and `cross-site` (refused), while `same-site` is decided by the
-allowlist; when the header is absent the allowlist is applied as before.
+allowlist; when the header is absent the allowlist decides.
 When both are absent, a form POST is refused — a JSON POST with neither
 header still passes. An `Origin` or `Referer` that is `null`, empty, has no
 host, carries userinfo or a non-numeric port, or cannot be parsed is refused
@@ -1054,8 +1054,8 @@ so anchor it and allow the port, e.g. `app\.example(:\d+)?`.
 `CsrfPolicy` defaults to fail-closed: with `protected` left unset, every
 state-changing request is checked, and `exempt` names the path prefixes that
 carry no session and therefore no token — a sessionless payment-provider
-webhook, say. A deployment that already lists every mutating route in
-`protected` keeps that exact fail-open shape unchanged. It must leave
+webhook, say. A deployment that lists every mutating route in
+`protected` has exactly those routes checked and must leave
 `exempt` empty: combining an explicit `protected` list with any exemption is
 refused at startup, because the exemption cannot change that list.
 
@@ -1121,7 +1121,7 @@ Two backends implement `RateLimitBackend`:
   deployment uses the Redis backend instead.
 
 Redis is therefore an optional dependency: a deployment that supplies the
-in-process backend installs plain `webauth`.
+in-process backend installs `overnightworks-webauth` without the `redis` extra.
 
 ## Session administration
 
@@ -1192,11 +1192,11 @@ It owns the machinery an application should not rebuild:
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.session_ending` | The one place a session ends in the host's store |
 | `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
-| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
-| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, creates the new one and prunes the account to a cap, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
-| `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client`. Needs `overnightworks-webauth[jwt]` |
+| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
+| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. |
+| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, creates the new one and prunes the account to a cap, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names. Takes its identity from `webauth.oidc` |
+| `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client`. |
 
 It leaves the application everything that touches the application's own truth:
 
@@ -1223,19 +1223,20 @@ It leaves the application everything that touches the application's own truth:
 
 ## Install
 
-The wheel is published as an asset on each tag's release; take the version
+`overnightworks-webauth` is not on PyPI: it installs only from the wheel
+published as an asset on each tag's release. Take the version
 from the [Releases page](https://github.com/overnightworks/webauth/releases)
 and put it in place of `X.Y.Z`:
 
 ```bash
-uv pip install "overnightworks-webauth[jwt] @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl"
+uv pip install "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl"
 ```
 
 In a `pyproject.toml`:
 
 ```toml
 dependencies = [
-    "overnightworks-webauth[jwt] @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
+    "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
 ]
 ```
 
@@ -1257,14 +1258,8 @@ release.
 
 ## Development
 
-```bash
-uv sync --extra dev
-uv run pytest tests -q
-uv run ruff check src tests e2e
-uv run lint-imports
-uv run --group e2e pyright
-tests/typing/check_against_wheel.sh
-```
+The checks a change must pass, and the commands that run them, are in
+[AGENTS.md](AGENTS.md) under "Checks".
 
 ## Licence
 

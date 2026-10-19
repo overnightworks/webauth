@@ -1,7 +1,7 @@
 [project]
 name = "overnightworks-webauth"
 dynamic = ["version"]
-description = "Web authentication for FastAPI applications: sessions, cookies, CSRF, rate limits, audit ports"
+description = "OpenID Connect login for FastAPI applications, with sessions, CSRF and rate limits"
 authors = [{ name = "Flex0r (Felix Hummert)", email = "felix.hummert@gmail.com" }]
 readme = "README.md"
 license = "MIT"
@@ -20,18 +20,17 @@ dependencies = [
     "starlette>=0.46,<2",
     "anyio>=4.0,<5",
     "pydantic>=2.6,<3",
-]
-
-[project.optional-dependencies]
-redis = ["redis>=5.0,<9"]
-jwt = [
     "cryptography>=50.0.2,<51",
     "pyjwt[crypto]>=2.15.1,<3",
     # https_client overrides HTTPSConnection._new_conn and reads self._dns_host, both private.
     "urllib3>=2.6.3,<3",
 ]
+
+[project.optional-dependencies]
+redis = ["redis>=5.0,<9"]
+
+[dependency-groups]
 dev = [
-    "overnightworks-webauth[jwt]",
     "pytest>=7,<10",
     "pytest-cov>=7,<8",
     "fakeredis[lua]>=2.20,<3",
@@ -41,8 +40,6 @@ dev = [
     "pyright>=1.1.414,<2",
     "deptry==0.25.1",
 ]
-
-[dependency-groups]
 e2e = [
     "playwright==1.62.0",
     "uvicorn[standard]==0.41.0",
@@ -84,9 +81,6 @@ extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[tool.deptry]
-optional_dependencies_dev_groups = ["dev"]
 
 [tool.deptry.per_rule_ignores]
 # rate_limit imports redis only under TYPE_CHECKING, which deptry does not count as use

@@ -20,8 +20,6 @@ fill with what it was sent.
 `fetch_key_set_over_https` is the production `KeySetFetch` of
 `webauth.jwt_verification`; `_post_form_over_https` is the transport under the
 production `TokenRequestPost`, which `webauth.oidc_transport` fits to that port.
-
-Install the `jwt` extra to use this module.
 """
 
 from __future__ import annotations

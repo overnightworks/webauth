@@ -37,8 +37,6 @@ without `kid` triggers no refresh of its own, so a rotation of a sole key, or a
 change between one and several keys, can stay unseen until the key set
 expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh
 (OIDC Core 10.1.1: an unfamiliar `kid` is the rotation signal).
-
-Install the `jwt` extra to use this module.
 """
 
 from __future__ import annotations

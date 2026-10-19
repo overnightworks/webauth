@@ -2,8 +2,8 @@
 
 ## Project
 
-Session authentication for FastAPI applications: sessions the store decides
-on every request, HMAC-signed cookies, CSRF double-submit, admin checks,
+OpenID Connect login for FastAPI applications, with sessions, CSRF and rate limits: sessions the store
+decides on every request, HMAC-signed cookies, CSRF double-submit, admin checks,
 per-address rate limits, audit ports. Distribution `overnightworks-webauth`,
 import package `webauth`.
 

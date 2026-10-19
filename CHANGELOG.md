@@ -43,6 +43,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `WallClock` from `webauth.jwt_verification` to `webauth.ports`. Migration:
   `from webauth.ports import AuthenticatedUser, WallClock`. The old imports fail
   with `ImportError`.
+- The `jwt` extra is gone and the `dev` extra with it: PyJWT, cryptography and
+  urllib3 are core dependencies, so a plain install carries OpenID Connect login,
+  and the development tools are the `dev` dependency group. Migration: drop
+  `[jwt]` from the install line, so `overnightworks-webauth[jwt] @ ...` becomes
+  `overnightworks-webauth @ ...`; `[redis]` stays the one optional extra.
+  `pip install ".[jwt]"` now warns that the extra does not exist.
 
 **Added**
 
@@ -74,6 +80,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Changed**
 
+- The package description leads with OpenID Connect login: "OpenID Connect login for
+  FastAPI applications, with sessions, CSRF and rate limits".
 - `max_user_agent_chars` is validated like the other positive quantities: its
   refusal reads `max_user_agent_chars must be a positive whole number of
   characters, not ...`.
