@@ -56,9 +56,6 @@ from webauth.https_client import (
 )
 from webauth.jwt_verification import (
     KEY_SET_REFRESH_COOLDOWN_SECONDS,
-    KEY_SET_TTL_SECONDS,
-    MAX_JSON_NESTING_DEPTH,
-    MAX_KEY_ID_CHARACTERS,
     MAX_KEY_SET_KEYS,
     MAX_TOKEN_CHARACTERS,
     JwtVerifier,
@@ -66,6 +63,10 @@ from webauth.jwt_verification import (
     RejectionReason,
     VerifiedClaims,
 )
+
+KEY_SET_TTL_SECONDS = 60 * 60
+MAX_JSON_NESTING_DEPTH = 8
+MAX_KEY_ID_CHARACTERS = 128
 
 
 def _hs256_with_public_key(key: rsa.RSAPrivateKey) -> Callable[[bytes], bytes]:

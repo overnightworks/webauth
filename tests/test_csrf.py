@@ -311,8 +311,7 @@ def test_the_exact_host_with_a_port_is_allowed() -> None:
     assert response.status_code == 200
 
 
-def test_a_json_post_without_either_header_is_unchanged() -> None:
-    """A TestClient post: JSON, no Sec-Fetch-Site, no Origin."""
+def test_a_json_post_without_either_header_is_allowed() -> None:
     response = _call("POST", {})
 
     assert response.status_code == 200

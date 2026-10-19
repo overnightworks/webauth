@@ -745,7 +745,8 @@ re-checking.
 
 The host builds one `WebAuthConfig` by keyword and installs it. It must state
 `cookie_max_age_seconds`, the browser cookie's
-`Max-Age`; [Session lifetime](#session-lifetime) states the rule.
+`Max-Age`; [Session lifetime](#session-lifetime) states the rule. The
+`session_secret` must be at least 32 characters; a shorter one is refused.
 Fields a host may leave out:
 
 | Field | Default | Values |

@@ -65,7 +65,6 @@ from webauth_arrangement import (
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
-    MAX_PENDING_LOGIN_COOKIE_CHARS,
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
     issue_session_cookies,
@@ -84,7 +83,6 @@ from webauth.oidc import (
     OidcRelyingParty,
 )
 from webauth.oidc_login import (
-    MAX_PENDING_LOGINS,
     AdmissionConfig,
     AdmissionRefusal,
     BackchannelLogoutResult,
@@ -114,6 +112,9 @@ from webauth.ports import (
     SubjectUserStore,
     UserRecord,
 )
+
+MAX_PENDING_LOGIN_COOKIE_CHARS = 256
+MAX_PENDING_LOGINS = 5
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"

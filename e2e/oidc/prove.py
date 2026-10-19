@@ -22,9 +22,9 @@ import sys
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from certificates import ThrowawayTls, issue_throwaway_tls
@@ -71,14 +71,23 @@ from playwright.sync_api import (
 from shim import CallbackBridge, TlsShim
 from stack import Admin, HeldStack, require_pinned_clean_edge
 
+from webauth.config import WebAuthConfig
 from webauth.cookies import (
-    DEFAULT_COOKIE_SAMESITE,
     DEFAULT_SESSION_COOKIE_NAME,
     MAX_ID_TOKEN_HINT_CHARS,
     CookieSameSite,
     id_token_hint_cookie_name,
     is_pending_login_cookie_name,
     verify_pending_login,
+)
+
+SHIPPED_COOKIE_SAMESITE = cast(
+    CookieSameSite,
+    next(
+        config_field.default
+        for config_field in fields(WebAuthConfig)
+        if config_field.name == "cookie_samesite"
+    ),
 )
 
 IDP_HOST = "auth.hallucinai.de"
@@ -162,7 +171,7 @@ class App:
 
 
 BACKCHANNEL_APPS = (
-    AppConfiguration(APP_ORIGIN, "d1-app-a", DEFAULT_COOKIE_SAMESITE),
+    AppConfiguration(APP_ORIGIN, "d1-app-a", SHIPPED_COOKIE_SAMESITE),
     AppConfiguration(SECOND_APP_ORIGIN, "d1-app-b", "lax"),
 )
 
@@ -1308,7 +1317,7 @@ def drive_browser(
                 tls.leaf_spki_sha256_base64,
             )
             try:
-                shipped_default = host.cookie_samesite == DEFAULT_COOKIE_SAMESITE
+                shipped_default = host.cookie_samesite == SHIPPED_COOKIE_SAMESITE
                 if shipped_default and not run_default_scenarios(proof):
                     return
                 for origin in (APP_ORIGIN, SECOND_APP_ORIGIN):

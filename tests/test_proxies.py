@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 
 import pytest
@@ -12,12 +13,13 @@ from webauth_arrangement import a_web_auth_config
 from webauth import proxies
 from webauth.config import install_web_auth_config
 from webauth.proxies import (
-    MAX_ADDRESS_CHARS,
-    MAX_FORWARDED_FOR_HOPS,
     TrustedProxies,
     budget_address,
     get_client_ip,
 )
+
+MAX_ADDRESS_CHARS = 45
+MAX_FORWARDED_FOR_HOPS = 16
 
 # -- Trusted proxies ---------------------------------------------------------
 
@@ -198,9 +200,9 @@ def test_an_entry_too_long_to_be_an_address_is_never_parsed(
     nobody either way — but handing it to ipaddress would cut it into thousands
     of pieces along its dots, the very cost the bounded scan avoids."""
     parsed_hosts: list[str] = []
-    parse_address = proxies.ip_address
+    parse_address = ipaddress.ip_address
 
-    def record_parse(host: str) -> proxies.IpAddress:
+    def record_parse(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
         parsed_hosts.append(host)
         return parse_address(host)
 

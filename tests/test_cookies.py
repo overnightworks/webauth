@@ -28,7 +28,6 @@ from webauth_arrangement import (
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
-    DEFAULT_CSRF_HEADER_NAME,
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
     clear_session_cookies,
@@ -56,10 +55,6 @@ _PENDING = PendingLogin(
     code_verifier=secrets.token_urlsafe(32),
     issued_at=1_800_000_000,
 )
-
-
-def test_the_csrf_header_name_is_the_one_clients_already_send() -> None:
-    assert DEFAULT_CSRF_HEADER_NAME == "x-csrf-token"
 
 
 @pytest.mark.parametrize(

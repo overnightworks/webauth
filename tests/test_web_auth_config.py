@@ -14,13 +14,13 @@ from pydantic import SecretStr
 from webauth_arrangement import (
     HTTPS_TEST_SERVER,
     IDLE_WINDOW_SECONDS,
+    MIN_SESSION_SECRET_CHARS,
     SESSION_MAX_AGE_SECONDS,
     a_web_auth_config,
     web_auth_config_arguments,
 )
 
 from webauth.config import (
-    MIN_SESSION_SECRET_CHARS,
     WebAuthConfig,
     install_web_auth_config,
     web_auth_config,
