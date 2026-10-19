@@ -57,17 +57,19 @@ that token has been deleted since, Keycloak shows an error page instead. See
 
 #### Signed out and refused
 
-Every app shows signed-out and refused people the same way. The operator
-ruled this on 19.10.2026. It is host behaviour that every app follows; the
-library does not enforce it.
+Every app shows signed-out and refused people the same way. This is the rule
+every app follows; the library does not enforce it.
 
 - **A page without a session** sends the browser straight to the app's start
-  route, which calls `start_login`, with `next` naming the page, so the
-  person lands there after signing in. An API call without a session gets
+  route, with `next` naming the page, so the person lands there after signing
+  in. The host carries `next` through the login, because `start_login` takes
+  none. An API call without a session gets
   401, and the app's UI then navigates to its start route. See
   [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes)
   and, for the rule `next` must pass,
-  [The host's duties at login](#the-hosts-duties-at-login).
+  [The host's duties at login](#the-hosts-duties-at-login). For a
+  server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
+  [Reading the session](#reading-the-session).
 - **Public paths** are the exception. Each app names its own, and they need
   no session and do not redirect.
 - **The page after signing out** is the app's `post_logout_redirect_uri`. It
@@ -79,7 +81,8 @@ library does not enforce it.
   [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes).
   A refusal carries no identity, so the page shows no name. A
   `NOT_A_MEMBER` login sets no ID token hint, so signing out from "no
-  access" makes Keycloak ask once (see
+  access" makes Keycloak ask once, unless the browser still holds a hint from
+  an earlier sign-in (see
   [The ID token hint](#the-id-token-hint)).
 - **Look.** Structure and wording are identical in every app. The colours
   come from each app's own tokens.
