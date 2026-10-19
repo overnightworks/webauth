@@ -136,7 +136,7 @@ __all__ = [
     "start_login",
 ]
 
-MAX_PENDING_LOGINS: Final = 5
+_MAX_PENDING_LOGINS: Final = 5
 """Pending-login cookies a browser keeps at once. A start beyond them
 evicts the oldest, so repeated starts never crowd out the session cookies."""
 
@@ -412,7 +412,7 @@ def _sole_pending_login(
 
 def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> list[str]:
     """The names to clear so the new pending login is one of at most
-    ``MAX_PENDING_LOGINS``, oldest first."""
+    ``_MAX_PENDING_LOGINS``, oldest first."""
     issued_at_by_name: dict[str, int] = {}
     for name, value in _cookie_pairs(request):
         if _is_pending_login_cookie_name(name, secure=config.cookie_secure):
@@ -420,7 +420,7 @@ def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> 
                 _UNRANKED if name in issued_at_by_name else _issued_at(value, config)
             )
     oldest_first = sorted(issued_at_by_name, key=issued_at_by_name.__getitem__)
-    return oldest_first[: max(0, len(oldest_first) - MAX_PENDING_LOGINS + 1)]
+    return oldest_first[: max(0, len(oldest_first) - _MAX_PENDING_LOGINS + 1)]
 
 
 def _issued_at(cookie_value: str, config: WebAuthConfig) -> int:

@@ -51,11 +51,11 @@ __all__ = [
 ]
 
 
-AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
-INVALID_SESSION_DETAIL: Final = "Invalid session"
-SESSION_EXPIRED_DETAIL: Final = "Session expired"
-ACCOUNT_DISABLED_DETAIL: Final = "Account disabled"
-ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
+_AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
+_INVALID_SESSION_DETAIL: Final = "Invalid session"
+_SESSION_EXPIRED_DETAIL: Final = "Session expired"
+_ACCOUNT_DISABLED_DETAIL: Final = "Account disabled"
+_ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
 
 
 _BROWSER_STRIPPED_CHARACTERS = str.maketrans("", "", "\t\r\n")
@@ -141,7 +141,7 @@ def current_user_dependency(
         user: ports.AuthenticatedUser = Depends(current_user),
     ) -> ports.AuthenticatedUser:
         if user.role != web_auth_config(request).admin_role:
-            raise HTTPException(403, ADMIN_REQUIRED_DETAIL)
+            raise HTTPException(403, _ADMIN_REQUIRED_DETAIL)
         return user
 
     def verified_session_id(
@@ -212,7 +212,7 @@ def unauthenticated_response(
     identical status, headers and body as an ``HTTPException`` so FastAPI's
     own handler reaches it byte-for-byte.
     """
-    exc = _unauthenticated(request, AUTHENTICATION_REQUIRED_DETAIL, login_redirect)
+    exc = _unauthenticated(request, _AUTHENTICATION_REQUIRED_DETAIL, login_redirect)
     return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
 
 
@@ -297,15 +297,15 @@ def _http_refusal(
     request: Request, refusal: WebSocketRefusal, login_redirect: LoginRedirect | None,
 ) -> HTTPException:
     if refusal is WebSocketRefusal.ACCOUNT_DISABLED:
-        return HTTPException(403, ACCOUNT_DISABLED_DETAIL)
+        return HTTPException(403, _ACCOUNT_DISABLED_DETAIL)
     detail = _HTTP_DETAIL_OF_SESSION_REFUSAL[refusal]
     return _unauthenticated(request, detail, login_redirect)
 
 
 _HTTP_DETAIL_OF_SESSION_REFUSAL: Final = {
-    WebSocketRefusal.NO_SESSION: AUTHENTICATION_REQUIRED_DETAIL,
-    WebSocketRefusal.INVALID_SESSION: INVALID_SESSION_DETAIL,
-    WebSocketRefusal.SESSION_ENDED_OR_EXPIRED: SESSION_EXPIRED_DETAIL,
+    WebSocketRefusal.NO_SESSION: _AUTHENTICATION_REQUIRED_DETAIL,
+    WebSocketRefusal.INVALID_SESSION: _INVALID_SESSION_DETAIL,
+    WebSocketRefusal.SESSION_ENDED_OR_EXPIRED: _SESSION_EXPIRED_DETAIL,
 }
 
 

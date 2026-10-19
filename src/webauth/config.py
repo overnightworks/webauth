@@ -50,16 +50,16 @@ __all__ = [
     "web_auth_config",
 ]
 
-MIN_SESSION_SECRET_CHARS: Final = 32
-DEFAULT_MAX_USER_AGENT_CHARS: Final = 500
-DEFAULT_IPV6_BUDGET_PREFIX: Final = 64
+_MIN_SESSION_SECRET_CHARS: Final = 32
+_DEFAULT_MAX_USER_AGENT_CHARS: Final = 500
+_DEFAULT_IPV6_BUDGET_PREFIX: Final = 64
 # Shorter than /32 would pool whole providers into one budget; longer than /128
 # is not an IPv6 prefix at all.
-IPV6_BUDGET_PREFIX_RANGE: Final = range(32, 129)
-DEFAULT_ADMIN_ROLE: Final = "admin"
-DEFAULT_USER_ROLE: Final = "user"
+_IPV6_BUDGET_PREFIX_RANGE: Final = range(32, 129)
+_DEFAULT_ADMIN_ROLE: Final = "admin"
+_DEFAULT_USER_ROLE: Final = "user"
 
-WEB_AUTH_STATE_ATTRIBUTE: Final = "webauth"
+_WEB_AUTH_STATE_ATTRIBUTE: Final = "webauth"
 
 
 class _DefaultCookieName(str):
@@ -88,17 +88,17 @@ class WebAuthConfig:
     csrf_header_name: str = _DEFAULT_CSRF_HEADER_NAME
     cookie_samesite: CookieSameSite = _DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
-    max_user_agent_chars: int = DEFAULT_MAX_USER_AGENT_CHARS
-    ipv6_budget_prefix: int = DEFAULT_IPV6_BUDGET_PREFIX
-    admin_role: str = DEFAULT_ADMIN_ROLE
-    user_role: str = DEFAULT_USER_ROLE
+    max_user_agent_chars: int = _DEFAULT_MAX_USER_AGENT_CHARS
+    ipv6_budget_prefix: int = _DEFAULT_IPV6_BUDGET_PREFIX
+    admin_role: str = _DEFAULT_ADMIN_ROLE
+    user_role: str = _DEFAULT_USER_ROLE
     wall_clock: WallClock = time.time
 
     def __post_init__(self) -> None:
-        if len(self.session_secret.get_secret_value()) < MIN_SESSION_SECRET_CHARS:
+        if len(self.session_secret.get_secret_value()) < _MIN_SESSION_SECRET_CHARS:
             raise ValueError(
                 "The session secret is too short — it signs every session cookie and "
-                f"must be at least {MIN_SESSION_SECRET_CHARS} characters.",
+                f"must be at least {_MIN_SESSION_SECRET_CHARS} characters.",
             )
         if self.cookie_samesite not in get_args(CookieSameSite):
             raise ValueError(
@@ -125,12 +125,12 @@ class WebAuthConfig:
         )
         if (
             type(self.ipv6_budget_prefix) is not int
-            or self.ipv6_budget_prefix not in IPV6_BUDGET_PREFIX_RANGE
+            or self.ipv6_budget_prefix not in _IPV6_BUDGET_PREFIX_RANGE
         ):
             raise ValueError(
                 "ipv6_budget_prefix must be an integer between "
-                f"{IPV6_BUDGET_PREFIX_RANGE.start} "
-                f"and {IPV6_BUDGET_PREFIX_RANGE.stop - 1}; it is the network size "
+                f"{_IPV6_BUDGET_PREFIX_RANGE.start} "
+                f"and {_IPV6_BUDGET_PREFIX_RANGE.stop - 1}; it is the network size "
                 "whose addresses share one rate-limit budget",
             )
         self._require_distinct_roles()
@@ -192,12 +192,12 @@ class WebAuthConfig:
 
 def install_web_auth_config(app: Starlette, config: WebAuthConfig) -> None:
     """Publish ``config`` on ``app`` so every request can reach it."""
-    setattr(app.state, WEB_AUTH_STATE_ATTRIBUTE, config)
+    setattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, config)
 
 
 def installed_web_auth_config(app: Starlette) -> WebAuthConfig:
     """The configuration ``app`` was started with."""
-    config = getattr(app.state, WEB_AUTH_STATE_ATTRIBUTE, None)
+    config = getattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, None)
     if config is None:
         raise RuntimeError(
             "This application serves auth-protected requests without a "
