@@ -63,6 +63,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `max_user_agent_chars` is validated like the other positive quantities: its
   refusal reads `max_user_agent_chars must be a positive whole number of
   characters, not ...`.
+- The `anyio` floor is `>=4.0`, the lowest release `webauth` works with, instead of
+  `>=4.12`: a host that pins an older `anyio` can now install it.
 
 ## 0.17.0
 

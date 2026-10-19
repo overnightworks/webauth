@@ -19,8 +19,8 @@ updates:
     cooldown:
       default-days: 7
     versioning-strategy: lockfile-only
-    # The dependency ceilings have no watcher yet; #74 finding 5 owns it.
-    # The e2e pins need a probe run CI does not make; #110 owns their freshness.
+    # Ceilings are watched by .github/workflows/dependency-ceilings.yml, not by this entry.
+    # The e2e pins need a probe run CI does not make; e2e/oidc/README.md, "Refreshing the pins", owns their freshness.
     ignore:
       - dependency-name: playwright
       - dependency-name: uvicorn

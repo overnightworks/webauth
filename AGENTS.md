@@ -35,7 +35,8 @@ CI, which only lints it.
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
 - No host application is a dependency. `webauth` depends on FastAPI (with
   Starlette and anyio, which `src` imports) and Pydantic at
-  runtime, and on nothing else. Redis is optional — install
+  runtime, and on nothing else; `deptry src` proves in CI that `src` imports
+  nothing undeclared. Redis is optional — install
   `overnightworks-webauth[redis]` for the Redis rate-limit backend; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
   JWT verification and OpenID Connect login are optional too —
@@ -62,6 +63,7 @@ uv sync --extra dev
 uv run pytest tests -q
 uv run ruff check src tests e2e
 uv run lint-imports
+uv run --locked deptry src
 uv run --group e2e pyright
 tests/typing/check_against_wheel.sh
 ```
