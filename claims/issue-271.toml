@@ -1,0 +1,7 @@
+claim_id = "8ba2ac8f304f4d74bd43ee0e810b85be"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "50b4a45ce2f0442436d6bc670c0a639c2f3fe231"
+branch = "claude/issue-271-liveness-offset"
+scope = ["CHANGELOG.md", "src/webauth/liveness.py", "tests/test_liveness.py"]
+opened_commit = "94249d857874e9c9abb2a80cf0bf20e1f8b8aa92"
