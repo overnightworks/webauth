@@ -47,7 +47,7 @@ from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import issue_session_cookies
-from webauth.dependencies import current_user_dependency
+from webauth.dependencies import LoginRedirect, current_user_dependency
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
@@ -349,6 +349,12 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         audit_sink=lambda: world["world"].audit,
         on_authenticated=lambda user: None,
     )
+    redirecting_dependencies = current_user_dependency(
+        session_store=lambda: world["world"].sessions,
+        audit_sink=lambda: world["world"].audit,
+        on_authenticated=lambda user: None,
+        login_redirect=LoginRedirect(path="/login/oidc", redirect_query_param="next"),
+    )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     install_web_auth_config(app, config)
     issuer = urlsplit(settings.end_session_endpoint)
@@ -399,11 +405,18 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             headline=f"Signed in as {html.escape(user.username)}", body=LOGOUT_BUTTON
         )
 
+    @app.get("/albums/{album_id}", response_class=HTMLResponse)
+    def album(
+        album_id: str,
+        user: AuthenticatedUser = Depends(redirecting_dependencies.current_user),
+    ) -> str:
+        return PAGE.substitute(headline=f"Album {html.escape(album_id)}", body=LOGOUT_BUTTON)
+
     @app.get("/login/oidc")
-    def start(request: Request) -> Response:
+    def start(request: Request, next: str | None = None) -> Response:  # noqa: A002
         response = Response(status_code=303)
         response.headers["location"] = start_login(
-            relying_party_of(request), request, response, config
+            relying_party_of(request), request, response, config, return_to=next
         )
         return response
 
@@ -426,14 +439,14 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         call_userinfo(settings, current)
         with current.sessions.transaction():
             session = open_session(
-                request, config, outcome,
+                request, config, outcome.account,
                 sessions=current.sessions, lock=current.lock,
                 expires_at=datetime.now(UTC) + timedelta(seconds=current.sessions.max_age_seconds),
                 max_sessions=None,
             )
         issue_session_cookies(response, session.id, config)
         response.status_code = 303
-        response.headers["location"] = "/"
+        response.headers["location"] = outcome.return_to or "/"
         return ""
 
     @app.get("/me")

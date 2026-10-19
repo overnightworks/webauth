@@ -162,6 +162,9 @@ apps below. They prove two sentences of the README:
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
 the app; enabled again, the same credentials sign in.
+`SCENARIO 24` (1280x800) is the deep link: a browser without a session opens
+`/albums/42?page=2`, is sent to Keycloak, signs in and lands on
+`/albums/42?page=2`, which says "Album 42".
 `SCENARIO 6` asserts by bounding boxes that the forms and pages lie inside the
 window. `SCENARIO 7` is the outsider: `d1-outsider` is in no group, signs in at
 Keycloak, reaches the callback and sees "Sign-in refused" with `not-a-member`;

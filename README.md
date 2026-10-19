@@ -62,12 +62,12 @@ every app follows; the library does not enforce it.
 
 - **A page without a session** sends the browser straight to the app's start
   route, with `next` naming the page, so the person lands there after signing
-  in. The host carries `next` through the login, because `start_login` takes
-  none. An API call without a session gets
+  in. The host passes `next` to `start_login` as `return_to`, and
+  `finish_login` hands back the same-origin path or `None`. An API call without a session gets
   401, and the app's UI then navigates to its start route. See
   [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes)
-  and, for the rule `next` must pass,
-  [The host's duties at login](#the-hosts-duties-at-login). For a
+  and, for the rule `return_to` must pass,
+  [The return path](#the-return-path). For a
   server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
   [Reading the session](#reading-the-session).
 - **Public paths** are the exception. Each app names its own, and they need
@@ -118,9 +118,11 @@ admission = AdmissionConfig(
 
 
 @app.get("/login/oidc")
-def start(request: Request) -> Response:
+def start(request: Request, next: str | None = None) -> Response:
     response = Response(status_code=303)
-    response.headers["location"] = start_login(relying_party, request, response, config)
+    response.headers["location"] = start_login(
+        relying_party, request, response, config, return_to=next,
+    )
     return response
 
 
@@ -134,20 +136,25 @@ def callback(request: Request, response: Response) -> dict[str, str]:
         response.status_code = 403
         return describe_the_hosts_refusal(outcome)
     session = open_session(
-        request, config, outcome,
+        request, config, outcome.account,
         sessions=sessions, lock=lock,
         expires_at=the_hosts_session_expiry(),
         max_sessions=3,
     )
     commit_the_hosts_transaction()
     issue_session_cookies(response, session.id, config)
+    response.status_code = 303
+    response.headers["location"] = outcome.return_to or "/"
     ...
 ```
 
-`start_login(relying_party, request, response, config)` begins a login, sets
-its pending-login cookie on `response` and returns the authorization URL.
-`finish_login(...)` answers the `UserRecord` to open a session for, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
-on an account the host calls [`open_session`](#opening-a-session), commits, and
+`start_login(relying_party, request, response, config, *, return_to)` begins a
+login, sets its pending-login cookie on `response` and returns the
+authorization URL. The keyword is required, so a host cannot forget it; pass
+`None` for none.
+`finish_login(...)` answers an `AdmittedLogin` (the `account` to open a session
+for and the `return_to` path or `None`), or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
+on an `AdmittedLogin` the host calls [`open_session`](#opening-a-session), commits, and
 only then issues the cookies. `finish_login`
 sets the header that clears the pending-login cookie on `response`, so the
 host answers with that response on every outcome, refusals included: FastAPI
@@ -155,6 +162,26 @@ copies an injected `response`'s headers only when the route returns a value
 that is not itself a `Response`; a returned `JSONResponse` is sent as-is and a
 raised `HTTPException` gets a new response, so neither carries them, which
 would leave the pending cookie in the browser.
+
+#### The return path
+
+`return_to` is the raw path and raw query as the app sees them, `root_path`
+included, never the percent-decoded `request.url.path`; `LoginRedirect` builds
+its `next` the same way. The library keeps it in the pending-login cookie and
+returns it from `finish_login`, after judging it again. It is a same-origin
+path of this app, ASCII only (non-ASCII characters are percent-encoded) and at
+most 512 bytes, or `None`; `None` means the host's default page, and the login
+still succeeds. These never come back: a path a browser reads as another host
+(`//x`, `/\x`, tab, CR or LF between the slashes), an absolute URL, a bare
+host, any control character, the empty string, anything over 512 bytes, and,
+under a `root_path`, a path outside it. A `root_path` with a character other
+than ASCII letters, digits, `-._~` and `/` keeps no return path. A `.` or `..` segment (also as `%2e`)
+is refused too, because a browser resolves it before sending a request, and so
+is a literal `#`, which a request never carries. The
+library prepends `root_path` to the address unless the raw path already starts
+with it at a segment boundary, as Starlette's router reads it. A login route
+inside a mounted sub-app is judged against that mount's `root_path`. The
+fragment is lost, because browsers never send it.
 
 #### Opening a session
 
@@ -261,10 +288,11 @@ never overwrite each other:
   `cookie_secure`. It is always `SameSite=Lax`, whatever `cookie_samesite`
   says: the callback is a top-level navigation from the issuer's site, which a
   `Strict` cookie would not accompany.
-- **Value:** `v1.` followed by the state, nonce, verifier and `issued_at`,
-  each bounded to the exact shape `begin_login` mints, and an HMAC-SHA256
+- **Value:** `v2.` followed by the state, nonce, verifier, `issued_at` and the
+  base64url-encoded return path (empty when there is none), each bounded to the
+  exact shape `begin_login` mints or `return_to` allows, and an HMAC-SHA256
   signature under the session signing key with an `oidc-pending:` prefix no
-  other cookie uses; the whole value is at most 256 characters, and the
+  other cookie uses; the whole value is at most 896 characters, and the
   signature is compared in constant time.
 - **Cap:** a browser holds at most five pending-login cookies. A start beyond
   them clears the oldest by `issued_at` — a cookie that does not verify, or
@@ -455,10 +483,9 @@ Set the route up so that only the issuer can reach it:
 The library never commits, so these belong to the host's OIDC
 callback route, around [`open_session`](#opening-a-session):
 
-- **`next`:** validate the final decoded value against the rule
-  `LoginRedirect.path` enforces: one leading `/`; never `//` or a backslash
-  form after browsers strip tab, CR and LF; no scheme. Otherwise fall back to
-  a fixed local path.
+- **Return path:** redirect to `admitted.return_to`, or to a fixed local path
+  when it is `None`. The library has already judged it (see
+  [The return path](#the-return-path)).
 - **Commit before cookies:** commit the transaction `open_session` wrote
   into, then call `issue_session_cookies`.
 - **Second hold:** the `WriteLock` must allow a second hold in the same
@@ -645,7 +672,7 @@ dead session by default. A server-rendered host instead passes
 `path` must be a same-origin absolute path, never a scheme or `//` address, nor a backslash or tab/CR/LF form a browser reads as one —
 and a browser navigation (`Accept` rating `text/html` above
 `application/json` by q-value) with no live session then answers 302 to that
-path, with the asked-for address and query string under the query key it
+path, with the raw path and query string it asked for under the query key it
 named, while every other request still gets 401. A dependency can only raise
 an `HTTPException`, so the 302 still carries FastAPI's default JSON body
 (`{"detail":"Found"}`) alongside its `Location` header.

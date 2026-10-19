@@ -80,6 +80,7 @@ from webauth.oidc import (
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
+    AdmittedLogin,
     BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
@@ -216,15 +217,15 @@ def a_host_configures_without_local_credentials() -> WebAuthConfig:
 
 def a_host_starts_a_keycloak_login(
     relying_party: OidcRelyingParty, request: Request, response: Response,
-    config: WebAuthConfig,
+    config: WebAuthConfig, return_to: str | None,
 ) -> str:
-    return start_login(relying_party, request, response, config)
+    return start_login(relying_party, request, response, config, return_to=return_to)
 
 
 def a_host_finishes_a_keycloak_login(
     relying_party: OidcRelyingParty, request: Request, response: Response,
     config: WebAuthConfig,
-) -> UserRecord | OidcRefusal | AdmissionRefusal:
+) -> AdmittedLogin | OidcRefusal | AdmissionRefusal:
     accounts: SubjectUserStore = HostAccounts()
     lock: WriteLock = HostLock()
     audit: AuditSink = HostAudit()
@@ -237,6 +238,10 @@ def a_host_finishes_a_keycloak_login(
         ),
         accounts=accounts, lock=lock, audit=audit,
     )
+
+
+def a_host_sends_the_browser_back(admitted: AdmittedLogin) -> tuple[UserRecord, str]:
+    return admitted.account, admitted.return_to or "/"
 
 
 def a_host_opens_a_session(

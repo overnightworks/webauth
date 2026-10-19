@@ -601,12 +601,19 @@ def a_guarded_catch_all_app() -> FastAPI:
 @pytest.mark.parametrize(
     ("asked_for", "carried"),
     [
-        pytest.param("/%5Cevil.example/x", "/", id="a backslash after the slash"),
-        pytest.param("/%09/evil.example/x", "/", id="a tab the browser strips"),
+        pytest.param(
+            "/%5Cevil.example/x", "/%5Cevil.example/x", id="an encoded backslash stays inert",
+        ),
+        pytest.param(
+            "/%09/evil.example/x", "/%09/evil.example/x", id="an encoded tab stays inert",
+        ),
+        pytest.param(
+            "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="the raw path is not decoded",
+        ),
         pytest.param("/songs/1?x=2", "/songs/1?x=2", id="an ordinary path keeps its query"),
     ],
 )
-def test_the_redirect_never_carries_a_path_a_browser_reads_as_another_host(
+def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
     asked_for: str, carried: str,
 ) -> None:
     response = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER).get(
@@ -617,7 +624,7 @@ def test_the_redirect_never_carries_a_path_a_browser_reads_as_another_host(
     assert response.headers["location"] == f"/login?{urlencode({'next': carried})}"
 
 
-def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
+def test_the_redirect_falls_back_for_a_literal_backslash_in_the_raw_path() -> None:
     sent: list[dict] = []
     scope = {
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
@@ -635,9 +642,73 @@ def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
     asyncio.run(a_guarded_catch_all_app()(scope, receive, send))
 
     start = next(message for message in sent if message["type"] == "http.response.start")
-    location = dict(start["headers"])[b"location"].decode()
     assert start["status"] == 302
-    assert location == f"/login?{urlencode({'next': '/'})}"
+    assert dict(start["headers"])[b"location"].decode() == f"/login?{urlencode({'next': '/'})}"
+
+
+def a_redirect_location(client: TestClient, asked_for: str) -> str:
+    response = client.get(asked_for, headers={"accept": "text/html"}, follow_redirects=False)
+    assert response.status_code == 302
+    return response.headers["location"]
+
+
+@pytest.mark.parametrize(
+    ("root_path", "asked_for", "carried"),
+    [
+        pytest.param(
+            "/app", "/app/albums/42", "/app/albums/42",
+            id="a path the server left prefixed",
+        ),
+        pytest.param(
+            "/app", "/albums/42", "/app/albums/42",
+            id="a path a proxy stripped of the prefix",
+        ),
+        pytest.param("/app", "/app/%FF", "/app/%FF", id="invalid UTF-8 below the prefix"),
+        pytest.param(
+            "/app", "/app/app/x", "/app/app/x",
+            id="a prefix repeated by the host's own route",
+        ),
+        pytest.param(
+            "/app", "/application", "/app/application",
+            id="a sibling of the prefix's name",
+        ),
+        pytest.param(
+            "/café", "/caf%C3%A9/albums/42", "/",
+            id="a non-ASCII root the server left prefixed falls back",
+        ),
+        pytest.param(
+            "/café", "/albums/42", "/",
+            id="a non-ASCII root a proxy stripped falls back",
+        ),
+        pytest.param(
+            "/my-app", "/my-app/albums/42", "/my-app/albums/42",
+            id="a hyphenated root the server left prefixed",
+        ),
+        pytest.param(
+            "/my-app", "/albums/42", "/my-app/albums/42",
+            id="a hyphenated root a proxy stripped",
+        ),
+    ],
+)
+def test_the_redirect_carries_the_path_below_the_root_path_prefixed_once(
+    root_path: str, asked_for: str, carried: str,
+) -> None:
+    client = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER, root_path=root_path)
+
+    location = a_redirect_location(client, asked_for)
+
+    assert location == f"/login?{urlencode({'next': carried})}"
+
+
+def test_the_redirect_of_a_mounted_app_carries_the_mount_prefix() -> None:
+    host = FastAPI()
+    host.mount("/sub", a_guarded_catch_all_app())
+
+    location = a_redirect_location(
+        TestClient(host, base_url=HTTPS_TEST_SERVER), "/sub/albums/42",
+    )
+
+    assert location == f"/login?{urlencode({'next': '/sub/albums/42'})}"
 
 
 @pytest.mark.parametrize(

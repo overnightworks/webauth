@@ -4,7 +4,8 @@
 and hands the browser the pending login in a signed cookie of its own, one
 per login, so two tabs never overwrite each other. ``finish_login`` takes the
 callback the browser brings back, consumes exactly the cookie its state
-names, and answers the account to open a session for, or why there is none.
+names, and answers the account to open a session for and the path to return to,
+or why there is none.
 The cookie is cleared on every outcome; together with the issuer's one-time
 code, that makes a pending login single-use. There is no server-side store,
 so this is not a replay store: a copy of the cookie taken before the callback
@@ -79,6 +80,7 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
+from webauth._paths import same_app_path
 from webauth._validation import require_positive_whole_number
 from webauth.cookies import (
     _clear_id_token_hint_cookie,
@@ -125,6 +127,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AdmissionConfig",
     "AdmissionRefusal",
+    "AdmittedLogin",
     "BackchannelLogoutResult",
     "EverySubject",
     "NoAdmins",
@@ -221,17 +224,37 @@ class AdmissionRefusal(StrEnum):
     USERNAME_TAKEN = "username-taken"
 
 
+@dataclass(frozen=True)
+class AdmittedLogin:
+    """An admitted account and the path of this app to send the browser to, or
+    ``None`` for the host's default page."""
+
+    account: UserRecord
+    return_to: str | None
+
+
 def start_login(
-    relying_party: OidcRelyingParty, request: Request, response: Response, config: WebAuthConfig,
+    relying_party: OidcRelyingParty,
+    request: Request,
+    response: Response,
+    config: WebAuthConfig,
+    *,
+    return_to: str | None,
 ) -> str:
     """Begin a login: set its pending-login cookie on ``response`` and return
-    the authorization URL the host redirects the browser to."""
+    the authorization URL the host redirects the browser to.
+
+    ``return_to`` is the raw path and query, ``root_path`` included, that
+    ``finish_login`` hands back after the login. A value that is not a path of
+    this app is dropped and the login lands on the host's default page.
+    """
     authorization = relying_party.begin_login()
+    pending = authorization.pending.returning_to(same_app_path(request, return_to))
     for name in _pending_login_cookies_to_evict(request, config):
         _clear_pending_login_cookie(response, name, config)
     _issue_pending_login_cookie(
         response,
-        authorization.pending,
+        pending,
         max_age_seconds=PENDING_LOGIN_MAX_AGE_SECONDS,
         config=config,
     )
@@ -248,7 +271,7 @@ def finish_login(
     accounts: SubjectUserStore,
     lock: WriteLock,
     audit: AuditSink,
-) -> UserRecord | OidcRefusal | AdmissionRefusal:
+) -> AdmittedLogin | OidcRefusal | AdmissionRefusal:
     """Complete the login the callback ``request`` returns from.
 
     The callback's state selects exactly one pending-login cookie, which is
@@ -256,9 +279,11 @@ def finish_login(
     ``response`` on every outcome, refusals included; every other tab's
     cookie stays. A callback naming no state or naming it twice, or whose state
     names no single genuine cookie, is refused before any token request. On
-    an account, the host opens its session with ``open_session``, commits, and
-    then calls ``issue_session_cookies``; ``response`` also carries the ID token hint
-    cookie for the logout path, replacing an older one (see ``log_out``).
+    an admitted login, the host opens its session for ``account`` with
+    ``open_session``, commits, calls ``issue_session_cookies`` and sends the
+    browser to ``return_to``, or to its default page when that is ``None``;
+    ``response`` also carries the ID token hint cookie for the logout path,
+    replacing an older one (see ``log_out``).
     """
     callback_query = request.url.query
     state = _callback_state(callback_query)
@@ -280,14 +305,17 @@ def finish_login(
         audit=audit,
         config=config,
     )
-    if not isinstance(admitted, AdmissionRefusal):
-        _issue_id_token_hint_cookie(
-            response,
-            identity.id_token,
-            logout_path=relying_party.logout_path,
-            config=config,
-        )
-    return admitted
+    if isinstance(admitted, AdmissionRefusal):
+        return admitted
+    _issue_id_token_hint_cookie(
+        response,
+        identity.id_token,
+        logout_path=relying_party.logout_path,
+        config=config,
+    )
+    return AdmittedLogin(
+        account=admitted, return_to=same_app_path(request, pending.return_to),
+    )
 
 
 def open_session(

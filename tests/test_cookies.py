@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 import dataclasses
 import hashlib
 import re
@@ -54,6 +55,7 @@ from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import SecurityHeadersPolicy, default_content_security_policy
 
 _TEST_SECRET = b"a" * 64
+MAX_PENDING_LOGIN_COOKIE_CHARS = 896
 _PENDING = PendingLogin(
     state=secrets.token_urlsafe(32),
     nonce=secrets.token_urlsafe(32),
@@ -227,8 +229,43 @@ def test_a_pending_login_cookie_is_named_after_a_digest_of_its_state(
 def test_a_signed_pending_login_verifies_to_the_same_pending_login() -> None:
     signed = _sign_pending_login(_PENDING, _TEST_SECRET)
 
-    assert signed.startswith("v1.")
+    assert signed.startswith("v2.")
     assert _verify_pending_login(signed, _TEST_SECRET) == _PENDING
+
+
+@pytest.mark.parametrize("return_to", [
+    pytest.param("/albums/42?x=1", id="a deep link"),
+    pytest.param("/lieder/%C3%BC%3Fx?y=1", id="an encoded deep link"),
+    pytest.param("/" + "a" * 511, id="the longest return path"),
+])
+def test_a_signed_pending_login_carries_its_return_path_within_the_cookie_cap(
+    return_to: str,
+) -> None:
+    signed = _sign_pending_login(
+        dataclasses.replace(_PENDING, return_to=return_to), _TEST_SECRET,
+    )
+
+    assert len(signed) <= MAX_PENDING_LOGIN_COOKIE_CHARS
+    assert _verify_pending_login(signed, _TEST_SECRET) == dataclasses.replace(
+        _PENDING, return_to=return_to,
+    )
+
+
+def test_a_pending_login_cookie_with_another_return_path_than_signed_does_not_verify() -> None:
+    signed = _sign_pending_login(
+        dataclasses.replace(_PENDING, return_to="/albums/42"), _TEST_SECRET,
+    )
+    *fields, return_path, signature = signed.split(".")
+    other_path = base64.urlsafe_b64encode(b"/albums/43").decode().rstrip("=")
+
+    assert return_path != other_path
+    assert _verify_pending_login(".".join([*fields, other_path, signature]), _TEST_SECRET) is None
+
+
+def test_a_pending_login_cookie_of_the_version_before_return_paths_does_not_verify() -> None:
+    signed = _sign_pending_login(_PENDING, _TEST_SECRET)
+
+    assert _verify_pending_login(signed.replace("v2.", "v1.", 1), _TEST_SECRET) is None
 
 
 _MINTED_SECRET = _PENDING.state
@@ -248,6 +285,7 @@ _MINTED_SECRET = _PENDING.state
         pytest.param({"code_verifier": "/" + _MINTED_SECRET[1:]}, id="verifier-outside-base64url"),
         pytest.param({"issued_at": -1}, id="issued-before-the-epoch"),
         pytest.param({"issued_at": 10**12}, id="issued-at-beyond-twelve-digits"),
+        pytest.param({"return_to": "/" + "a" * 512}, id="return-path-over-the-cap"),
     ],
 )
 def test_a_pending_login_oidc_cannot_have_begun_is_refused_a_cookie(
