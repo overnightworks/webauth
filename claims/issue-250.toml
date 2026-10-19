@@ -1,0 +1,8 @@
+claim_id = "8b137abf8dcf466396f1293bf45a14b7"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "a6889406d7b3e12a75efa9e0e1aa85315324dacc"
+branch = "claude/issue-250-dependencies-negotiation"
+scope = ["AGENTS.md", "src/webauth/_content_negotiation.py", "src/webauth/dependencies.py", "src/webauth/middleware/csrf.py"]
+opened_commit = "2337e0523395018b5b23cfec541ed12612496391"
+whole_reason = "A refactor and two text corrections for #74 findings 15 and 18; the AGENTS.md sentence must name the refusals the refactor keeps."
