@@ -99,14 +99,17 @@ def a_fresh_app(
     *,
     rate_limits: RateLimitBackend | None = None,
     cookie_secure: bool = True,
-    config_installed: bool = True,
 ) -> FastAPI:
-    app = FastAPI()
+    app = an_app_without_config()
     config = a_web_auth_config(cookie_secure=cookie_secure)
     if rate_limits is not None:
         config = replace(config, rate_limits=rate_limits)
-    if config_installed:
-        install_web_auth_config(app, config)
+    install_web_auth_config(app, config)
+    return app
+
+
+def an_app_without_config() -> FastAPI:
+    app = FastAPI()
     app.state.background_ran = []
     for path in (API_PATH, PROTECTED_PATH, WEBHOOK_PATH):
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET", "POST"])
@@ -485,8 +488,10 @@ class TestBudgetSemantics:
         assert refused_request(client).status_code == refusal_status
         assert get_api(client).status_code == next_status
 
-    def test_missing_config_500_spends_nothing(self) -> None:
-        app = a_fresh_app(config_installed=False)
+    def test_a_request_before_the_config_is_installed_answers_500_and_the_next_one_is_served(
+        self,
+    ) -> None:
+        app = an_app_without_config()
         install_full_stack(app, max_requests=1)
         client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
         assert get_api(client).status_code == 500

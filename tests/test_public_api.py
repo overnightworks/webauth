@@ -35,6 +35,10 @@ OTHER_CONSUMERS = sorted(
 )
 
 
+def _relative_id(path: Path) -> str:
+    return str(path.relative_to(REPOSITORY))
+
+
 def _is_webauth_module(name: str | None) -> bool:
     return name is not None and name.split(".")[0] == "webauth"
 
@@ -45,9 +49,16 @@ def _module_file(dotted_name: str) -> Path | None:
     return next((file for file in candidates if file.is_file()), None)
 
 
+def _bound_module(alias: ast.alias) -> tuple[str, str]:
+    if alias.asname:
+        return alias.asname, alias.name
+    root = alias.name.split(".")[0]
+    return root, root
+
+
 def _imported_names(statement: ast.Import | ast.ImportFrom) -> dict[str, str]:
     if isinstance(statement, ast.Import):
-        return {alias.asname or alias.name.split(".")[0]: alias.name for alias in statement.names}
+        return dict(_bound_module(alias) for alias in statement.names)
     return {alias.asname or alias.name: str(statement.module) for alias in statement.names}
 
 
@@ -108,7 +119,7 @@ def test_every_name_a_module_lists_in_all_is_defined_there(module_name: str) -> 
     file = _module_file(module_name)
     assert file is not None
     offences = [
-        f"{file.relative_to(REPOSITORY)}:{line}: {name}: listed in __all__ but not defined here"
+        f"{_relative_id(file)}:{line}: {name}: listed in __all__ but not defined here"
         for name, line in _surface_of(module_name).public.items()
         if not _is_defined_or_forwarded_from_own_submodule(module_name, name)
     ]
@@ -143,10 +154,11 @@ def _name_taken_by_chain(
 
 
 def _names_taken_from_webauth(path: Path) -> list[NameTaken]:
-    tree = ast.parse(path.read_text())
     module_aliases: dict[str, str] = {}
     taken: list[NameTaken] = []
-    for node in ast.walk(tree):
+    attribute_chains: list[ast.Attribute] = []
+    inner_links: set[int] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
         if isinstance(node, ast.ImportFrom) and not node.level and _is_webauth_module(node.module):
             for alias in node.names:
                 dotted = f"{node.module}.{alias.name}"
@@ -156,14 +168,13 @@ def _names_taken_from_webauth(path: Path) -> list[NameTaken]:
                     taken.append(NameTaken(path, alias.lineno, str(node.module), alias.name))
         elif isinstance(node, ast.Import):
             for alias in (a for a in node.names if _is_webauth_module(a.name)):
-                if alias.asname:
-                    module_aliases[alias.asname] = alias.name
-                else:
-                    module_aliases["webauth"] = "webauth"
-    inner_links = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and id(node) not in inner_links:
-            taken.extend(_name_taken_by_chain(path, node, module_aliases))
+                name, module = _bound_module(alias)
+                module_aliases[name] = module
+        elif isinstance(node, ast.Attribute):
+            attribute_chains.append(node)
+            inner_links.add(id(node.value))
+    for chain in (c for c in attribute_chains if id(c) not in inner_links):
+        taken.extend(_name_taken_by_chain(path, chain, module_aliases))
     return taken
 
 
@@ -184,14 +195,10 @@ def _rule_broken_by(taken: NameTaken, *, only_public: bool) -> str | None:
 
 def _offences_of(path: Path, *, only_public: bool) -> list[str]:
     return [
-        f"{path.relative_to(REPOSITORY)}:{taken.line}: {taken.module}.{taken.name}: {rule}"
+        f"{_relative_id(path)}:{taken.line}: {taken.module}.{taken.name}: {rule}"
         for taken in _names_taken_from_webauth(path)
         if (rule := _rule_broken_by(taken, only_public=only_public))
     ]
-
-
-def _relative_id(path: Path) -> str:
-    return str(path.relative_to(REPOSITORY))
 
 
 @pytest.mark.parametrize("consumer", OTHER_CONSUMERS, ids=_relative_id)
