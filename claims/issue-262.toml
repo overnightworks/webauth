@@ -1,0 +1,8 @@
+claim_id = "c5d268cd93e345398cccd0a3173fcb13"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "bb6eecb41fb7946da296437bb6a31f9cec00bde6"
+branch = "claude/issue-262-neutral-names-whole-number"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/jwt_verification.py", "src/webauth/oidc_login.py", "tests/test_cookies.py", "tests/test_csrf.py", "tests/test_https_client.py", "tests/test_jwt_verification.py", "tests/test_oidc.py", "tests/test_policies.py", "tests/test_websocket_auth.py", "tests/webauth_arrangement.py"]
+opened_commit = "aab7ba8fb84a30090f62c8d4a6e88755b14f894a"
+whole_reason = "One rename of example names across docs and the shared fixtures; splitting it per file would leave the fixtures disagreeing about the allowed host."
