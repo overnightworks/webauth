@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import FrozenInstanceError, asdict, replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from webauth_arrangement import (
@@ -16,6 +17,7 @@ from webauth_arrangement import (
     seeded_session,
 )
 
+import webauth
 from webauth.cookies import session_reference
 from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
@@ -125,6 +127,39 @@ def test_REQ_ADMIN_12_an_admin_revokes_one_listed_session_without_its_raw_token(
     evidence = repr(administration.audit.account_events) + caplog.text
     for secret in (summary.username, *(record.id for record in stored_sessions)):
         assert secret not in evidence
+
+
+class HostText(str):
+    """The host's own string object, equal to a reference but not the same value."""
+
+
+def test_REQ_ADMIN_12_the_revocation_event_carries_the_computed_reference_not_the_hosts_input(
+    administration: SessionAdministration, actor: AuthenticatedUser,
+    stored_sessions: list[FakeSessionRecord],
+) -> None:
+    hosts_input = HostText(session_reference(stored_sessions[0].id))
+
+    administration.revoke_session(actor, hosts_input)
+
+    [event] = administration.audit.account_events
+    assert event.session_ref == session_reference(stored_sessions[0].id)
+    assert event.session_ref is not hosts_input
+    assert type(event.session_ref) is str
+
+
+def test_only_session_reference_constructs_a_session_reference_in_the_library() -> None:
+    library = Path(webauth.__file__).parent
+    constructing = sorted(
+        (path.name, number)
+        for path in library.glob("*.py")
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        if "SessionReference(" in line
+    )
+
+    assert [name for name, _ in constructing] == ["cookies.py"]
+    cookies_source = (library / "cookies.py").read_text()
+    assert cookies_source.count("SessionReference(") == 1
+    assert "return SessionReference(" in cookies_source
 
 
 def test_REQ_ADMIN_12_revoking_a_consumed_reference_is_refused_without_another_event(

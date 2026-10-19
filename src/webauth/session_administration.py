@@ -19,6 +19,7 @@ from webauth.ports import (
     AccountEventKind,
     AuditSink,
     SessionAdministrationStore,
+    SessionReference,
     WriteLock,
 )
 from webauth.session_ending import end_session
@@ -46,7 +47,7 @@ class UnknownSessionError(WebAuthError):
 
 @dataclass(frozen=True)
 class SessionSummary:
-    session_ref: str
+    session_ref: SessionReference
     user_id: str
     username: str
     ip_address: str
@@ -85,7 +86,7 @@ class SessionAdministration:
                         kind=AccountEventKind.SESSION_REVOKED,
                         actor_id=actor.id,
                         subject_id=record.user_id,
-                        session_ref=session_ref,
+                        session_ref=session_reference(record.id),
                     ))
                     return
             raise UnknownSessionError("Active session does not exist")

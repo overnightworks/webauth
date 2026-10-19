@@ -8,6 +8,15 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 ## 0.18.0 - Unreleased
 
+**Added**
+
+- `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of
+  `SessionIdentityChanged.session_ref`, `AccountEvent.session_ref` and
+  `SessionSummary.session_ref`, and `webauth.cookies.session_reference` returns
+  it. A type checker now refuses a raw session id where an audit event wants a
+  reference. Hosts that read these fields as `str` are unaffected, at run time
+  and in their own types.
+
 **Breaking**
 
 - `WebAuthConfig` refuses a `session_cookie_name` or `csrf_cookie_name` that is

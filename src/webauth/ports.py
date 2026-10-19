@@ -13,7 +13,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
-from typing import Protocol, runtime_checkable
+from typing import NewType, Protocol, runtime_checkable
 
 from webauth import WebAuthError
 
@@ -28,11 +28,14 @@ __all__ = [
     "SessionLivenessPolicy",
     "SessionRecord",
     "SessionRecordStore",
+    "SessionReference",
     "SubjectUserStore",
     "UserRecord",
     "UsernameTakenError",
     "WriteLock",
 ]
+
+SessionReference = NewType("SessionReference", str)
 
 
 class UserRecord(Protocol):
@@ -225,12 +228,14 @@ class SessionIdentityChanged:
     """A session's origin changed; ``session_ref`` is the SHA-256 hex of its id.
 
     The raw session identifier never reaches an audit event: it is a bearer
-    secret, and ``session_ref`` matches the reference of ``revoke_session``.
+    secret, so the field is a ``SessionReference``, which only
+    ``webauth.cookies.session_reference`` makes. It matches the reference of
+    ``revoke_session``.
     """
 
     change: SessionIdentityChange
     user_id: str
-    session_ref: str
+    session_ref: SessionReference
     previous: str
     current: str
 
@@ -250,7 +255,7 @@ class AccountEvent:
     actor_id: str | None
     subject_id: str
     role: str | None = None
-    session_ref: str | None = None
+    session_ref: SessionReference | None = None
     previous_role: str | None = None
 
 

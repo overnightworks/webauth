@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from starlette.requests import cookie_parser
 
+from webauth.ports import SessionReference
+
 if TYPE_CHECKING:
     from starlette.requests import HTTPConnection
     from starlette.responses import Response
@@ -172,9 +174,9 @@ def cookie_values(connection: HTTPConnection, name: str) -> list[str]:
     return [value for key, value in cookie_pairs(connection) if key == name]
 
 
-def session_reference(session_id: str) -> str:
+def session_reference(session_id: str) -> SessionReference:
     """Return the public SHA-256 hex reference for a raw session identifier."""
-    return hashlib.sha256(session_id.encode()).hexdigest()
+    return SessionReference(hashlib.sha256(session_id.encode()).hexdigest())
 
 
 def _session_signature(session_id: str, secret: bytes) -> str:
