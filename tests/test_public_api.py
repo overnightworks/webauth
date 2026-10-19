@@ -62,12 +62,43 @@ def _imported_names(statement: ast.Import | ast.ImportFrom) -> dict[str, str]:
     return {alias.asname or alias.name: str(statement.module) for alias in statement.names}
 
 
+def _redundant_reexports(statement: ast.Import | ast.ImportFrom) -> dict[str, int]:
+    if isinstance(statement, ast.Import):
+        return {
+            alias.asname: alias.lineno
+            for alias in statement.names
+            if alias.asname and alias.asname == alias.name.split(".")[-1]
+        }
+    if statement.module is None:
+        return {alias.asname or alias.name: alias.lineno for alias in statement.names}
+    return {
+        alias.asname: alias.lineno for alias in statement.names if alias.asname == alias.name
+    }
+
+
+def _mentions_all(statement: ast.stmt) -> bool:
+    return any(isinstance(node, ast.Name) and node.id == "__all__" for node in ast.walk(statement))
+
+
+def _is_literal_all_assignment(statement: ast.stmt) -> bool:
+    if isinstance(statement, ast.AnnAssign):
+        return isinstance(statement.target, ast.Name) and isinstance(statement.value, ast.List)
+    return (
+        isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+        and isinstance(statement.value, ast.List)
+    )
+
+
 @dataclass(frozen=True)
 class ModuleSurface:
     public: dict[str, int]
-    defined_callables: frozenset[str]
-    defined_values: frozenset[str]
+    defined_callables: dict[str, int]
+    defined_values: dict[str, int]
     imported_from: dict[str, str]
+    redundant_reexports: dict[str, int]
+    irregular_all_lines: tuple[int, ...]
 
 
 @functools.cache
@@ -75,33 +106,44 @@ def _surface_of(dotted_name: str) -> ModuleSurface:
     file = _module_file(dotted_name)
     assert file is not None, dotted_name
     public: dict[str, int] = {}
-    callables: set[str] = set()
-    values: set[str] = set()
+    callables: dict[str, int] = {}
+    values: dict[str, int] = {}
     imported: dict[str, str] = {}
+    redundant: dict[str, int] = {}
+    irregular_all_lines: list[int] = []
+    all_declared = False
     for statement in ast.parse(file.read_text()).body:
+        if _mentions_all(statement):
+            if all_declared or not _is_literal_all_assignment(statement):
+                irregular_all_lines.append(statement.lineno)
+            else:
+                all_declared = True
+                public = {element.value: element.lineno for element in statement.value.elts}
+            continue
         match statement:
             case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name):
-                callables.add(name)
+                callables[name] = statement.lineno
             case ast.ClassDef(name=name):
-                callables.add(name)
+                callables[name] = statement.lineno
             case ast.TypeAlias():
-                values.add(statement.name.id)
+                values[statement.name.id] = statement.lineno
             case ast.Assign() | ast.AnnAssign():
                 assigned = (
                     statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 )
                 for target in (t for t in assigned if isinstance(t, ast.Name)):
-                    if target.id == "__all__":
-                        public = {element.value: element.lineno for element in statement.value.elts}
-                    else:
-                        values.add(target.id)
+                    values[target.id] = statement.lineno
             case ast.Import() | ast.ImportFrom():
                 imported.update(_imported_names(statement))
+                redundant.update(_redundant_reexports(statement))
             case ast.If():
                 for inner in statement.body:
                     if isinstance(inner, ast.Import | ast.ImportFrom):
                         imported.update(_imported_names(inner))
-    return ModuleSurface(public, frozenset(callables), frozenset(values), imported)
+                        redundant.update(_redundant_reexports(inner))
+    return ModuleSurface(
+        public, callables, values, imported, redundant, tuple(irregular_all_lines),
+    )
 
 
 def _is_defined_or_forwarded_from_own_submodule(dotted_name: str, name: str) -> bool:
@@ -122,6 +164,47 @@ def test_every_name_a_module_lists_in_all_is_defined_there(module_name: str) -> 
         f"{_relative_id(file)}:{line}: {name}: listed in __all__ but not defined here"
         for name, line in _surface_of(module_name).public.items()
         if not _is_defined_or_forwarded_from_own_submodule(module_name, name)
+    ]
+
+    assert offences == []
+
+
+PUBLIC_MODULES = [
+    name
+    for name in WEBAUTH_MODULES
+    if not any(part.startswith("_") for part in name.split("."))
+]
+
+
+@pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
+def test_every_module_declares_all_as_one_literal_assignment(module_name: str) -> None:
+    file = _module_file(module_name)
+    assert file is not None
+    offences = [
+        f"{_relative_id(file)}:{line}: {module_name}.__all__: "
+        "must be one literal assignment, never extended or built"
+        for line in _surface_of(module_name).irregular_all_lines
+    ]
+
+    assert offences == []
+
+
+@pytest.mark.parametrize("module_name", PUBLIC_MODULES)
+def test_a_public_module_defines_only_underscored_names_outside_all(module_name: str) -> None:
+    file = _module_file(module_name)
+    assert file is not None
+    surface = _surface_of(module_name)
+    defined = {**surface.defined_values, **surface.defined_callables}
+    offences = [
+        f"{_relative_id(file)}:{line}: {module_name}.{name}: "
+        "defined here but neither in __all__ nor underscored"
+        for name, line in defined.items()
+        if name not in surface.public and not name.startswith("_")
+    ] + [
+        f"{_relative_id(file)}:{line}: {module_name}.{name}: "
+        "re-exported by an import that __all__ does not list"
+        for name, line in surface.redundant_reexports.items()
+        if name not in surface.public and not name.startswith("_")
     ]
 
     assert offences == []
