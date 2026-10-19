@@ -1,0 +1,8 @@
+claim_id = "d01dab397f894a3a985208fd9eec4fd7"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "e6c132e186e2800bea45e4e6f0036415b003d282"
+branch = "claude/issue-252-oidc-transport"
+scope = [".importlinter", "AGENTS.md", "CHANGELOG.md", "README.md", "e2e/oidc/host_app.py", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/oidc_transport.py", "tests/test_https_client.py", "tests/test_public_api.py", "tests/typing/oidc_host.py"]
+opened_commit = "225cf9feec58682418cd177710b3aa7a0b3fc9fa"
+whole_reason = "One moved function, its contract, the relay removal and the boundary sentence cannot land apart without a broken import, a cycle or a false AGENTS.md."
