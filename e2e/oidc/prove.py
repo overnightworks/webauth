@@ -1325,6 +1325,92 @@ BACKCHANNEL_SCENARIOS = (
 )
 
 
+CROSS_SITE_LOGOUT_PATH = "/cross-site-logout"
+CROSS_ORIGIN_REFUSAL = "Cross-origin request rejected"
+
+
+def cross_site_logout_page(target_origin: str) -> str:
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>another site</title></head>"
+        "<body><h1>Another site</h1>"
+        f'<form method="post" action="{target_origin}{LOGOUT_PATH}">'
+        '<button id="logout" type="submit">Log out</button></form></body></html>'
+    )
+
+
+def logout_from_a_page_of_another_site_is_refused(proof: Proof, width: Width) -> str:
+    scenario = f"22-{width.label}"
+    app_a, app_b = proof.apps
+    app_a.reset()
+    with proof.browsing(width) as page:
+        hint = signed_in_with_a_hint(proof, page, scenario, app_a.origin)
+        page.route(
+            f"{app_b.origin}{CROSS_SITE_LOGOUT_PATH}",
+            lambda route: route.fulfill(
+                body=cross_site_logout_page(app_a.origin), content_type="text/html"
+            ),
+        )
+        page.goto(f"{app_b.origin}{CROSS_SITE_LOGOUT_PATH}")
+        proof.shot(page, scenario, "cross-site-page")
+        logout_url = f"{app_a.origin}{LOGOUT_PATH}"
+        with page.expect_response(lambda answer: answer.url == logout_url) as answer:
+            proof.press(page, "#logout")
+        page.wait_for_load_state()
+        refusal = page.inner_text("body")
+        proof.shot(page, scenario, "refused-result")
+        assert answer.value.status == 403, f"the logout was answered {answer.value.status}"
+        assert CROSS_ORIGIN_REFUSAL in refusal, f"the refusal is {refusal!r}"
+        page.goto(f"{app_a.origin}/")
+        assert proof.headline(page) == f"Signed in as {USER_NAME}", "the session did not stand"
+        proof.shot(page, scenario, "result")
+        me_status = proof.status_of(page, "/me")
+        assert me_status == 200, f"/me answered {me_status}"
+        assert hint_cookies(page, app_a.origin) == [hint], "the ID token hint cookie changed"
+        assert_callbacks(app_a, accepted=0, sessions=1)
+        log_out_through_keycloak(proof, page, scenario, app_a.origin)
+        wait_for_accepted_callbacks(app_a, 1)
+    return (
+        f"a form on {app_b.origin} posting to {app_a.origin}{LOGOUT_PATH} was answered 403 "
+        f"({CROSS_ORIGIN_REFUSAL!r}); the session stood (/me 200, host at 1 session) and the "
+        "ID token hint cookie was not cleared, so the person's own logout then showed no page"
+    )
+
+
+def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width) -> str:
+    scenario = f"23-{width.label}"
+    app_a, app_b = proof.apps
+    app_a.reset()
+    app_b.reset()
+    with proof.browsing(width) as page_a:
+        hint_of_first_session = signed_in_with_a_hint(proof, page_a, scenario, app_a.origin)
+        proof.log_out_user_everywhere(proof.user_id)
+        wait_for_accepted_callbacks(app_a, 1)
+        assert_callbacks(app_a, accepted=1, sessions=0)
+        page_b = page_a.context.new_page()
+        hint_of_second_session = signed_in_with_a_hint(proof, page_b, f"{scenario}-b", app_b.origin)
+        assert cookie_name_and_value(hint_of_second_session)[1] != cookie_name_and_value(
+            hint_of_first_session
+        )[1], "the second Keycloak session issued the first session's ID token"
+        assert hint_cookies(page_a, app_a.origin) == [hint_of_first_session], "A's hint changed"
+        log_out_through_keycloak(
+            proof, page_a, scenario, app_a.origin, asks_for_confirmation=True
+        )
+        wait_for_accepted_callbacks(app_b, 1)
+        assert_signed_out(proof, page_b, app_b.origin)
+    return (
+        "A's session was ended through Keycloak's admin logout (A's hint cookie stayed), a sign-in "
+        "to B opened a second Keycloak session, and A's logout, sending the first session's ID "
+        "token, led to Keycloak's confirmation page; after confirming, Keycloak called B back and "
+        "B says Signed out"
+    )
+
+
+BACKCHANNEL_DESKTOP_SCENARIOS = (
+    (22, logout_from_a_page_of_another_site_is_refused),
+    (23, logout_with_the_hint_of_another_keycloak_session),
+)
+
+
 def drive_backchannel_phase(
     proof: Proof, playwright: Playwright, runtime: Path, tls: ThrowawayTls, shim_port: int,
     untrusted_port: int,
@@ -1348,6 +1434,11 @@ def drive_backchannel_phase(
                     f"SCENARIO {number} {width.label} {app_a.origin} {app_b.origin}",
                     lambda scenario=scenario, width=width: scenario(proof, width),
                 )
+        for number, scenario in BACKCHANNEL_DESKTOP_SCENARIOS:
+            proof.held_or_failed(
+                f"SCENARIO {number} {DESKTOP.label} {app_a.origin} {app_b.origin}",
+                lambda scenario=scenario: scenario(proof, DESKTOP),
+            )
     finally:
         proof.browser.close()
 

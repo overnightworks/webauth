@@ -14,7 +14,7 @@ port, one leaf certificate trusted by its public-key hash) and the recording con
 registered).
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
-Playwright browser, and takes minutes. CI only lints `e2e/`.
+Playwright browser, and takes a few minutes. CI only lints `e2e/`.
 
 ## Prerequisites
 
@@ -30,6 +30,9 @@ Playwright browser, and takes minutes. CI only lints `e2e/`.
 ## Run
 
 Read the 1-minute load average first; above 18 on a 12-core machine, wait.
+
+The cap is 900 s (`timeout 900`). The full run measured 136 s and 153 s wall time
+(19.10.2026, load 3 to 4), so the cap leaves a factor of about 6 of room.
 
     flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
         uv run --extra dev --group e2e python e2e/oidc/prove.py \
@@ -104,7 +107,7 @@ registered, and `evidence/` is scanned for each in raw, URL-encoded and
 form-encoded form before the script ends; a hit deletes the file and fails the
 run. Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after the logout past the ID token's expiry (21), the app's page after each logout (15, 17, and 16 and 18 after confirming), A's page after the disable and before the admin logout in scenario 13, in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after the logout past the ID token's expiry (21), the app's page after each logout (15, 17, and 16 and 18 after confirming), the cross-site page and the app's answer to it in scenario 22, Keycloak's confirmation page in scenario 23, A's page after the disable and before the admin logout in scenario 13, in
 scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
 digest of the login's state; the log keeps `__Host-oidc_pending_*`.
@@ -140,6 +143,22 @@ token, waits until the clock is 2 s past it and logs out: the end-session reques
 `id_token_hint`, Keycloak still answers with a redirect to the app, no `#kc-logout` page
 appears, the app shows "Signed out", and the next sign-in shows Keycloak's form. This is
 the production case: Keycloak's ID token lasts 5 minutes by default, the session cookie 12 hours.
+
+`SCENARIO 22` and `SCENARIO 23` run in the back-channel phase at 1280x800, with the two
+apps below. They prove two sentences of the README:
+
+- `SCENARIO 22`, a logout from another site: the browser holds a signed-in session at app A
+  (`https://demo.hallucinai.de`). A page on `https://demo.example.test`, which the harness
+  fulfils in the browser (the hosts' policies would not let a served page post across origins),
+  submits a form to A's `/logout`. A answers 403 `Cross-origin request rejected` from the
+  origin check; `/` still says signed in, `/me` answers 200, the host holds 1 session and the
+  hint cookie is unchanged. The person's own logout then ends the session with no page.
+- `SCENARIO 23`, the hint of another Keycloak session: a person signs in to A (hint T1,
+  Keycloak session S1), Keycloak's admin logout ends S1 (A's back-channel call ends A's session,
+  its hint cookie stays), a sign-in to B in the same browser opens S2, and A's page, still
+  showing its button, posts the logout, which sends T1. Keycloak asks "Do you want to log
+  out?" (status 200 and `#kc-logout`), as the README says; after confirming, it ends S2 and
+  calls B back.
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
 the app; enabled again, the same credentials sign in; an account the host
@@ -312,7 +331,18 @@ with `docker ps -a --filter name=d2-suite`, then `docker compose -p NAME -f
 e2e/oidc/suite-compose.yaml down -v --remove-orphans` (with `SUITE_HOST` set to
 anything), and `rm -rf SCRATCH/runtime`.
 
-The pins are not watched by Dependabot; their freshness is owned by issue #74.
+## Refreshing the pins
+
+Dependabot ignores the pins that only a probe run can vouch for: the `==` pins of
+`playwright` and `uvicorn` in the `e2e` dependency group, and the image digests
+(`RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`). `EDGE_SHA` is
+a hand-set pin as well. A bump of any of them can break what only a real browser, a real
+Keycloak or the OIDF suite shows, and CI does not run those.
+
+By hand: bump the pin, then one D1 run (`prove.py`) and one conformance run
+(`conformance.py`), each under `/tmp/probe-stack.lock` as above, and land the bump only
+when both exit 0 with a clean evidence scan. A new image digest is pulled first, outside
+the lock.
 
 ## Last run: session cookie after the redirect
 
@@ -328,7 +358,7 @@ The pull request that last changed this directory carries the full result table.
 ## Last run: back-channel logout
 
 Exit status 0, evidence scan clean, the stack and the relay containers removed. Scenarios
-10 to 13 held at 390x844 and at 1280x800, scenarios 14 to 21 at 1280x800; scenario 5 is
+10 to 13 held at 390x844 and at 1280x800, scenarios 14 to 23 at 1280x800; scenario 5 is
 unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 
 | Scenario | What a person did | Held |
@@ -338,4 +368,6 @@ unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 | 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
 | 13 | the account disabled, then Keycloak's admin logout (204) | the disable alone ended nothing; then each app called back exactly once, `/me` 401, and a fresh sign in was refused |
 | 20 | the hint's signature altered, then logout | Keycloak's error page (400, `Invalid parameter: id_token_hint`) |
+| 22 | a form on `https://demo.example.test` posted to app A's `/logout` | 403 `Cross-origin request rejected`; the session and the hint cookie stood |
+| 23 | A's session ended by Keycloak's admin logout, B signed in, then A's logout with the first session's ID token | Keycloak asked to confirm; after confirming B was called back |
 | 21 | the ID token (15 s lifespan) past its `exp` by 2.1 s, then logout | the end-session request carried the hint; a redirect to the app, no confirmation page, "Signed out", Keycloak's form at the next sign-in |
