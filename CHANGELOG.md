@@ -6,7 +6,7 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
-## 0.17.0 - Unreleased
+## 0.17.0
 
 **Added**
 
@@ -19,8 +19,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   the store returns the replaced session's id or `prune_overflow` would end the
   new session. When the store returns the replaced session's id, it ends that
   session before it raises, so no session stays under the id the incoming
-  cookie named even without a rollback. It never commits and sets no cookie: the host commits, then
-  issues the cookies.
+  cookie named even without a rollback. It never commits and sets no cookie:
+  the host commits, then issues the cookies.
 
 ## 0.16.0
 
