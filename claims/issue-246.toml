@@ -1,0 +1,7 @@
+claim_id = "b2b615157b0b45b1ac936a4c50fd4b5f"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "fd0a5587afd54eee8d2972140243dc16a85325af"
+branch = "claude/issue-246-sign-in-boundaries"
+scope = ["README.md"]
+opened_commit = "4b0cb0f3d2d2a93dd94c610b5cc4fe0ea011a09f"
