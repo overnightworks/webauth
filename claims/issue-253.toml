@@ -1,0 +1,8 @@
+claim_id = "1f50e7cb47b6490486e4420edb8e57fd"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "89e28ef2beac4d5de18014ee6eaff0aec121872f"
+branch = "claude/issue-253-wall-clock-ports"
+scope = ["CHANGELOG.md", "README.md", "e2e/oidc/host_app.py", "src/webauth/config.py", "src/webauth/dependencies.py", "src/webauth/jwt_verification.py", "src/webauth/liveness.py", "src/webauth/oidc.py", "src/webauth/ports.py", "src/webauth/session_administration.py", "tests/test_dependencies.py", "tests/test_oidc_login.py", "tests/test_session_administration.py", "tests/test_web_auth_config.py", "tests/test_websocket_auth.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "8131b65a491c7c8cdf879ee20d85dda35849d7a2"
+whole_reason = "The clock type, its config field and AuthenticatedUser's move all change ports.py's public surface and the same importers; landing them apart doubles the host migration."
