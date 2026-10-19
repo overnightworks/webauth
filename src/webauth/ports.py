@@ -261,7 +261,6 @@ class AccountEvent:
     actor_id: str | None
     subject_id: str
     role: str | None = None
-    session_ref: SessionReference | None = None
     previous_role: str | None = None
 
 

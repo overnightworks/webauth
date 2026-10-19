@@ -192,8 +192,7 @@ class HostAudit:
         assert reference_read_as_text
 
     def account_event(self, event: AccountEvent) -> None:
-        reference_read_as_text: str | None = event.session_ref
-        assert reference_read_as_text is None or reference_read_as_text
+        assert event.kind
 
 
 class HostRateLimits:

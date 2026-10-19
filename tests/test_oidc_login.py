@@ -198,7 +198,6 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
         "actor_id": None,
         "subject_id": SUBJECT,
         "role": MEMBER_ROLE,
-        "session_ref": None,
         "previous_role": None,
     }]
 
@@ -402,7 +401,6 @@ def test_a_stored_admin_outside_the_admin_group_is_demoted_and_audited_at_login(
         "actor_id": None,
         "subject_id": SUBJECT,
         "role": MEMBER_ROLE,
-        "session_ref": None,
         "previous_role": ADMIN_ROLE,
     }]
 
@@ -1769,7 +1767,6 @@ def test_a_logout_that_ended_sessions_audits_one_event_for_the_account_and_no_ac
         "actor_id": None,
         "subject_id": SUBJECT,
         "role": None,
-        "session_ref": None,
         "previous_role": None,
     }]
 

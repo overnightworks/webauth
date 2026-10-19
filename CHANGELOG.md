@@ -13,7 +13,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - Session administration is removed: `webauth.session_administration`
   (`SessionAdministration`, `SessionSummary`, `NotAnAdminError`,
   `UnknownSessionError`), `webauth.ports.SessionAdministrationStore` and
-  `AccountEventKind.SESSION_REVOKED` (`session_revoked`) no longer exist, so
+  `AccountEventKind.SESSION_REVOKED` (`session_revoked`) and
+  `AccountEvent.session_ref` no longer exist, so
   importing them fails. Logout, the session cap, back-channel logout and a
   session the store ended are unchanged. Migration: a host that listed or
   revoked sessions does it in Keycloak, or with its own store query.
@@ -27,11 +28,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   name made the browser send two same-name cookies at logout, and the logout
   ended no stored session. Migration: choose another name; no known host sets
   one.
-- `SessionIdentityChanged.session_ref` and `AccountEvent.session_ref` are typed
-  `webauth.ports.SessionReference`, no longer `str`: host code that constructs these dataclasses with a plain `str`,
+- `SessionIdentityChanged.session_ref` is typed `webauth.ports.SessionReference`,
+  no longer `str`: host code that constructs this dataclass with a plain `str`,
   including an already-hashed reference, fails type checking. Migration:
-  construct them with `webauth.cookies.session_reference(raw_session_id)`.
-  Hosts that only read the fields are unaffected.
+  construct it with `webauth.cookies.session_reference(raw_session_id)`.
+  Hosts that only read the field are unaffected.
 - `WebAuthConfig` refuses an empty `allowed_hosts_exact` together with an empty
   `allowed_hosts_patterns`; the silent fallback to `localhost` and `127.0.0.1`
   is gone. Migration: `allowed_hosts_exact={"localhost", "127.0.0.1"}` admits
@@ -56,9 +57,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
   is the one reading of now behind the session decision: HTTP and WebSocket
   judge liveness at it and pass it to `SessionRecordStore.touch` as `now`.
 - `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of
-  `SessionIdentityChanged.session_ref` and `AccountEvent.session_ref`, and
-  `webauth.cookies.session_reference` returns it. A type checker now refuses a raw session id when an audit event is
-  constructed or assigned with one. Hosts that read these fields as `str` are
+  `SessionIdentityChanged.session_ref`, and `webauth.cookies.session_reference`
+  returns it. A type checker now refuses a raw session id when the audit event
+  is constructed or assigned with one. Hosts that read the field as `str` are
   unaffected, at run time and in their own types.
 - `SecurityHeadersPolicy.hsts_max_age_seconds` (default
   `DEFAULT_HSTS_MAX_AGE_SECONDS`, 31536000, a whole number
