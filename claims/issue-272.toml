@@ -1,0 +1,8 @@
+claim_id = "0b5c76185d2d487fbc1cc55b2c661a8c"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "50b4a45ce2f0442436d6bc670c0a639c2f3fe231"
+branch = "claude/issue-272-gates-say-what-they-check"
+scope = [".github/workflows/ci.yml", ".github/workflows/release.yml", "AGENTS.md", "pyproject.toml", "quality/config.toml", "src/webauth/ports.py", "tests/test_public_api.py", "tests/typing/check_against_wheel.sh"]
+opened_commit = "12a8a8cd3ffa29a41ebea9e914c65e667abaad14"
+whole_reason = "Five small guard repairs of one audit lens, each a few lines; one lane amortizes the claim, review and landing they would otherwise pay five times."
