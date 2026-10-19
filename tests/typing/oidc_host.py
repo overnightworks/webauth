@@ -200,10 +200,12 @@ class HostLock:
 
 class HostAudit:
     def session_identity_changed(self, event: SessionIdentityChanged) -> None:
-        return None
+        reference_read_as_text: str = event.session_ref
+        assert reference_read_as_text
 
     def account_event(self, event: AccountEvent) -> None:
-        return None
+        reference_read_as_text: str | None = event.session_ref
+        assert reference_read_as_text is None or reference_read_as_text
 
 
 class HostRateLimits:

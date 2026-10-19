@@ -1137,7 +1137,8 @@ to list and end sessions without a user store. Construct
 
 `revoke_session` requires `config.admin_role` and raises `NotAnAdminError`
 otherwise; the host guards `list_sessions` with its admin dependency. Public
-references come only from `webauth.cookies.session_reference(session_id)`:
+references are `webauth.ports.SessionReference` values (a `str` for the host)
+and come only from `webauth.cookies.session_reference(session_id)`:
 SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
 `SessionIdentityChanged` (its `session_ref`) expose no raw token; the host reads
 any timestamps from its own records. Refusals derive from `webauth.WebAuthError`.
