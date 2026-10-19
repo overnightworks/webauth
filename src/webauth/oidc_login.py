@@ -97,7 +97,7 @@ from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcRefusal,
     OidcRefusalReason,
-    callback_state,
+    _callback_state,
 )
 from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 from webauth.proxies import client_user_agent, resolve_client_ip
@@ -262,7 +262,7 @@ def finish_login(
     cookie for the logout path, replacing an older one (see ``log_out``).
     """
     callback_query = request.url.query
-    state = callback_state(callback_query)
+    state = _callback_state(callback_query)
     if isinstance(state, OidcRefusal):
         return state
     cookie_name = _pending_login_cookie_name(state, secure=config.cookie_secure)
