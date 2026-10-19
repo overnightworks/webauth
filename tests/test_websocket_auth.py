@@ -52,7 +52,10 @@ CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
 ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, is_active=True)
 NO_PATTERNS = {"allowed_hosts_patterns": ()}
-NO_CONFIGURED_HOSTS = {"allowed_hosts_exact": frozenset(), **NO_PATTERNS}
+LOCAL_DEVELOPMENT_HOSTS = {
+    "allowed_hosts_exact": frozenset({"localhost", "127.0.0.1"}),
+    **NO_PATTERNS,
+}
 
 
 @pytest.fixture
@@ -123,7 +126,8 @@ def test_an_admitted_handshake_renews_an_idle_window_session() -> None:
         pytest.param(ALLOWED_ORIGIN, NO_PATTERNS, id="an exact host"),
         pytest.param(f"{ALLOWED_ORIGIN}:8443", NO_PATTERNS, id="an exact host on any port"),
         pytest.param("https://app.example", {}, id="a host matching a pattern"),
-        pytest.param("http://localhost:3000", NO_CONFIGURED_HOSTS, id="localhost, nothing listed"),
+        pytest.param("http://localhost:8000", LOCAL_DEVELOPMENT_HOSTS, id="localhost, listed"),
+        pytest.param("http://127.0.0.1:5173", LOCAL_DEVELOPMENT_HOSTS, id="127.0.0.1, listed"),
     ],
 )
 def test_an_origin_from_the_configured_hosts_is_admitted(

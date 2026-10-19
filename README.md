@@ -682,8 +682,9 @@ is the one check a host runs at the handshake. It answers the
 The `Origin` is decided first, before the store is touched, so a refused
 handshake neither renews a session nor writes an audit event. Exactly one
 `Origin` must name a host the configured allowlist admits (`allowed_hosts_exact`
-and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `localhost`
-and `127.0.0.1` when none is configured). There is no `Referer` fallback, and
+and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `WebAuthConfig`
+refuses both empty, so local development lists
+`allowed_hosts_exact={"localhost", "127.0.0.1"}`). There is no `Referer` fallback, and
 `Sec-Fetch-Site` does not decide: a client that is not a browser must send an
 allowed `Origin` too. The `Origin` keeps a foreign page from using a visitor's
 cookie; it is no credential.

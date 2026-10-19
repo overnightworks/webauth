@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from decimal import Decimal
@@ -18,6 +19,7 @@ from webauth_arrangement import (
     web_auth_config_arguments,
 )
 
+from webauth._origins import origin_is_allowed
 from webauth.config import (
     MIN_SESSION_SECRET_CHARS,
     WebAuthConfig,
@@ -497,3 +499,30 @@ def test_the_configuration_cannot_be_changed_after_it_is_installed() -> None:
         config.cookie_max_age_seconds = 1
 
     assert replace(config, cookie_max_age_seconds=1).cookie_max_age_seconds == 1
+
+
+def test_both_host_lists_empty_are_refused_naming_the_fields_and_the_localhost_migration() -> None:
+    with pytest.raises(ValueError) as refusal:
+        a_web_auth_config(allowed_hosts_exact=frozenset(), allowed_hosts_patterns=())
+
+    message = str(refusal.value)
+    assert "allowed_hosts_exact" in message
+    assert "allowed_hosts_patterns" in message
+    assert 'allowed_hosts_exact={"localhost", "127.0.0.1"}' in message
+
+
+def test_patterns_alone_are_enough_for_a_host_list() -> None:
+    config = a_web_auth_config(
+        allowed_hosts_exact=frozenset(), allowed_hosts_patterns=(re.compile(r"^app\.example$"),),
+    )
+
+    assert origin_is_allowed("https://app.example", config)
+
+
+@pytest.mark.parametrize("origin", ["http://localhost:8000", "http://127.0.0.1:5173"])
+def test_listing_localhost_and_loopback_admits_their_origins_on_any_port(origin: str) -> None:
+    config = a_web_auth_config(
+        allowed_hosts_exact=frozenset({"localhost", "127.0.0.1"}), allowed_hosts_patterns=(),
+    )
+
+    assert origin_is_allowed(origin, config)
