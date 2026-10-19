@@ -17,9 +17,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from webauth.validation import require_positive_whole_number
+from webauth.validation import require_non_negative_whole_number, require_positive_whole_number
 
 __all__ = [
+    "DEFAULT_HSTS_MAX_AGE_SECONDS",
     "DEFAULT_PERMISSIONS_POLICY",
     "BodySizePolicy",
     "BodySizeRule",
@@ -273,6 +274,7 @@ class CacheControlRule:
 
 
 DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
+DEFAULT_HSTS_MAX_AGE_SECONDS: Final = 365 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -282,13 +284,26 @@ class SecurityHeadersPolicy:
     content_security_policy: str
     cache_control_rules: tuple[CacheControlRule, ...] = ()
     permissions_policy: str = DEFAULT_PERMISSIONS_POLICY
+    hsts_max_age_seconds: int = DEFAULT_HSTS_MAX_AGE_SECONDS
+    hsts_include_subdomains: bool = True
 
     def __post_init__(self) -> None:
+        require_non_negative_whole_number(
+            "hsts_max_age_seconds", self.hsts_max_age_seconds, unit="seconds",
+        )
+        if not isinstance(self.hsts_include_subdomains, bool):
+            raise ValueError("hsts_include_subdomains must be True or False")
         if "\r" in self.permissions_policy or "\n" in self.permissions_policy:
             raise ValueError(
                 "permissions_policy cannot contain CR or LF: a header value with "
                 "a line break breaks every response it is sent on.",
             )
+
+    @property
+    def strict_transport_security(self) -> str:
+        """The HSTS value sent when ``cookie_secure`` is on; max-age 0 rolls a pin back."""
+        value = f"max-age={self.hsts_max_age_seconds}"
+        return f"{value}; includeSubDomains" if self.hsts_include_subdomains else value
 
     def cache_control(self, path: str) -> str | None:
         """What this path may be cached as; the first matching rule wins."""
@@ -406,6 +421,8 @@ def _validated_source(directive: CspDirective, source: str) -> str:
             f"{directive}: {source!r} is not a source this library accepts; "
             f"the declared subset is {subset}.",
         )
+    if _KEYWORD_SOURCE.fullmatch(source):
+        return source.lower()
     return source
 
 

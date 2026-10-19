@@ -107,6 +107,13 @@ class WebAuthConfig:
                 "cookie_secure must be True or False; it alone decides whether the "
                 "cookies carry Secure and responses carry HSTS",
             )
+        if not self.allowed_hosts_exact and not self.allowed_hosts_patterns:
+            raise ValueError(
+                "allowed_hosts_exact and allowed_hosts_patterns are both empty, so no "
+                "Origin would be admitted; list the hosts this application serves. "
+                'To admit local development as before, use allowed_hosts_exact={"localhost", '
+                '"127.0.0.1"}',
+            )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
         self._require_distinct_cookie_names()
