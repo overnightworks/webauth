@@ -1,8 +1,0 @@
-claim_id = "4f84d1e2be7644c383d8c3d7e70e5f56"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "e6c132e186e2800bea45e4e6f0036415b003d282"
-branch = "claude/issue-254-d1-crosssite-othersession"
-scope = ["README.md", "e2e/oidc/README.md", "e2e/oidc/host_app.py", "e2e/oidc/prove.py"]
-opened_commit = "b49c413a3e8e52a9fc9b26a92aaa53ae2a715eff"
-whole_reason = "Two D1 scenarios and the e2e README's budget and pin procedure; README only if scenario 23 corrects its sentence."
