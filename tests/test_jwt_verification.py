@@ -195,11 +195,11 @@ def test_a_token_signed_by_a_key_of_the_fake_key_set_verifies_as_its_claims(
 def test_a_token_for_any_one_of_the_accepted_audiences_verifies(
     issuer: IssuerScenario,
 ) -> None:
-    verifier = issuer.verifier_with(audiences=["notes-app", "agent-board"])
+    verifier = issuer.verifier_with(audiences=["notes-app", "notes-api"])
 
-    outcome = verifier.verify(issuer.token({"aud": "agent-board"}))
+    outcome = verifier.verify(issuer.token({"aud": "notes-api"}))
 
-    assert outcome == issuer.verified({"aud": "agent-board"})
+    assert outcome == issuer.verified({"aud": "notes-api"})
 
 
 def test_a_token_whose_type_header_equals_the_expected_type_verifies(
