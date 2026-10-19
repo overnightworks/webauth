@@ -54,7 +54,6 @@ from harness import (
     start_host,
     stop_host,
     stop_on_first_signal,
-    tell_host,
 )
 from host_app import LOGOUT_PATH, HostSettings
 from playwright.sync_api import (
@@ -293,10 +292,6 @@ class Proof(RunRecord):
         assert self.host is not None
         reset_host(self.host)
 
-    def deactivate_host_accounts(self) -> None:
-        assert self.host is not None
-        tell_host(self.host, "deactivate")
-
     def fresh_admin(self) -> Admin:
         assert self.stack is not None
         admin = self.stack.admin()
@@ -444,25 +439,9 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
             f"the page says {proof.headline(page)!r}"
         )
         proof.shot(page, f"{scenario}-enabled", "result")
-    proof.deactivate_host_accounts()
-    sessions_before = proof.host_state()["sessions"]
-    with proof.browsing(width) as page:
-        proof.sign_in(
-            page, f"{scenario}-deactivated", username=DISABLED_USER_NAME,
-            password=proof.disabled_user_password,
-        )
-        assert proof.headline(page) == "Sign-in refused", f"the page says {proof.headline(page)!r}"
-        proof.shot(page, f"{scenario}-deactivated", "result")
-        carried = {cookie_name_and_value(c)[0] for c in page.context.cookies(APP_ORIGIN)}
-        assert DEFAULT_SESSION_COOKIE_NAME not in carried, "a session cookie was issued"
-    held = proof.host_state()
-    assert held["last_refusal"] == "account-deactivated", f"the host refused {held}"
-    assert held["sessions"] == sessions_before, f"the host holds {held}"
     return (
         f"Keycloak answered {KEYCLOAK_DISABLED_MESSAGE!r} and no callback reached the app "
-        f"(callbacks 0, sessions 0); the same credentials signed in once the user was enabled; "
-        f"a host account with is_active false reached the callback and was refused with "
-        f"'account-deactivated', no session"
+        f"(callbacks 0, sessions 0); the same credentials signed in once the user was enabled"
     )
 
 

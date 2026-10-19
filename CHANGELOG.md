@@ -10,6 +10,20 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- Admission looks no username up and no local flag locks an account.
+  `SubjectUserStore.get_by_username`, `UserRecord.is_active`,
+  `AuthenticatedUser.is_active`, `WebSocketRefusal.ACCOUNT_DISABLED` (its HTTP
+  403 "Account disabled" included) and `AdmissionRefusal.ACCOUNT_DEACTIVATED`
+  no longer exist. A store without a unique username admits a second subject
+  whose `preferred_username` another account holds; `USERNAME_TAKEN` remains
+  only for a store that raises `UsernameTakenError` from `create_for_subject`.
+  A session or login of an account the host would have held inactive is admitted.
+  Migration: stop relying on `is_active` and `get_by_username` (a host record
+  may keep the field; the library ignores it), disable a person at the issuer,
+  and have a store with a unique username index translate its violation into
+  `UsernameTakenError`, otherwise it surfaces as a store error. A consumer that maps
+  `ACCOUNT_DEACTIVATED` to "No access" (ui-console#6's default) loses that
+  source; "No access" stays the state for a person outside `login_group`.
 - Session administration is removed: `webauth.session_administration`
   (`SessionAdministration`, `SessionSummary`, `NotAnAdminError`,
   `UnknownSessionError`), `webauth.ports.SessionAdministrationStore` and

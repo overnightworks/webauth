@@ -24,7 +24,6 @@ from webauth_arrangement import (
     WEBSOCKET_DEPENDENCY_PATH,
     AuthApp,
     FakeSessionRecord,
-    FakeUser,
     SessionsAnsweringTouch,
     SessionsThatMustNotBeAsked,
     a_session,
@@ -55,7 +54,7 @@ DEFAULT_MAX_USER_AGENT_CHARS = 500
 
 CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
-ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, is_active=True)
+ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
 NO_PATTERNS = {"allowed_hosts_patterns": ()}
 LOCAL_DEVELOPMENT_HOSTS = {
     "allowed_hosts_exact": frozenset({"localhost", "127.0.0.1"}),
@@ -85,7 +84,6 @@ def test_the_refusals_keep_their_stable_values() -> None:
         "NO_SESSION": "no-session",
         "INVALID_SESSION": "invalid-session",
         "SESSION_ENDED_OR_EXPIRED": "session-ended-or-expired",
-        "ACCOUNT_DISABLED": "account-disabled",
         "MISSING_ORIGIN": "missing-origin",
         "FOREIGN_ORIGIN": "foreign-origin",
     }
@@ -225,11 +223,6 @@ def test_a_handshake_without_one_valid_session_cookie_is_refused(
             a_session(age=timedelta(days=2)),
             WebSocketRefusal.SESSION_ENDED_OR_EXPIRED,
             id="a session past the absolute limit",
-        ),
-        pytest.param(
-            a_session(user=FakeUser(is_active=False)),
-            WebSocketRefusal.ACCOUNT_DISABLED,
-            id="a deactivated account",
         ),
     ],
 )
@@ -417,10 +410,6 @@ def expired(app: AuthApp) -> None:
     app.sessions.record.expires_at = datetime.now(UTC) - timedelta(seconds=1)
 
 
-def deactivated(app: AuthApp) -> None:
-    app.sessions.record.user.is_active = False
-
-
 def past_the_absolute_limit(app: AuthApp) -> None:
     app.sessions.record.created_at = datetime.now(UTC) - timedelta(days=2)
 
@@ -430,7 +419,6 @@ def past_the_absolute_limit(app: AuthApp) -> None:
     [
         pytest.param(logged_out, WebSocketRefusal.SESSION_ENDED_OR_EXPIRED, id="a logout"),
         pytest.param(expired, WebSocketRefusal.SESSION_ENDED_OR_EXPIRED, id="an expiry"),
-        pytest.param(deactivated, WebSocketRefusal.ACCOUNT_DISABLED, id="a deactivation"),
         pytest.param(
             past_the_absolute_limit,
             WebSocketRefusal.SESSION_ENDED_OR_EXPIRED,

@@ -406,7 +406,7 @@ the commit's included, leaves every session in place and answers 400.
 The function runs in this order. It verifies the token before it takes the
 lock, and a refusal does nothing more. Under `lock.hold()` it looks up
 `accounts.get(subject)`. An unknown subject is accepted and creates no
-account. A known subject, an inactive account included, loses every session
+account. A known subject loses every session
 through `end_user_sessions`, and one `backchannel_logout` audit event with
 `actor_id=None` is emitted when at least one session ended. It never commits,
 clears a cookie or calls Keycloak.
@@ -572,7 +572,7 @@ that leaves it out gets a `TypeError`; one whose value is not a group path (no
 leading `/`, a trailing `/`, an empty segment, whitespace around a segment, a
 control, format or line-separator character) gets a `ValueError`, both at startup. Whether the group
 exists in Keycloak is not checked here. `accounts` is a `SubjectUserStore`
-(`get`, `get_by_username`, `create_for_subject(subject, username, role)`,
+(`get`, `create_for_subject(subject, username, role)`,
 which adds an account whose `id` is the subject, so a back-channel logout names
 the account directly, and `set_role(user_id, role)`, which changes an account's
 role in the caller's transaction, never commits, and returns the record). Any
@@ -603,7 +603,9 @@ After that, admission holds `lock.hold()` and never commits:
   (or `admin_role`, for a member of `admin_group`), and the audit sink hears
   `user_created` with `actor_id=None`.
 - A known subject reuses its account, even when its suggested username
-  changed. A deactivated account is refused before any role is written.
+  changed. No username is looked up, so a second subject whose
+  `preferred_username` another account holds is admitted by a store without a
+  unique username; disabling a person is done at the issuer.
 - The role comes from `admin_group`, a required setting: a group path strictly
   below `login_group`, such as `/apps/notes/admin`, or
   `NoAdmins.IN_THIS_APP` when the app has no admins. A missing `admin_group`
@@ -623,10 +625,8 @@ After that, admission holds `lock.hold()` and never commits:
   into the admin group first, or they are demoted at their next login.
 - Otherwise it answers an `AdmissionRefusal` and writes nothing:
   `FOREIGN_ISSUER` for an identity from another issuer, `NOT_A_MEMBER` for a
-  person outside `login_group`, `ACCOUNT_DEACTIVATED`, and
-  `USERNAME_TAKEN` when a new subject's username belongs to another account
-  — including when the store's own uniqueness is stricter than its lookup
-  and `create_for_subject` raises `UsernameTakenError`.
+  person outside `login_group`, and `USERNAME_TAKEN` when a store that enforces
+  a unique username raises `UsernameTakenError` from `create_for_subject`.
 
 `login_group` may instead be `EverySubject.OF_THE_BOUND_ISSUER`, which admits
 without looking at groups. It admits every subject of the realm, the users of
@@ -677,7 +677,6 @@ is the one check a host runs at the handshake. It answers the
 | `NO_SESSION` | `no-session` | the session cookie is missing, empty or longer than `MAX_SESSION_COOKIE_CHARS` |
 | `INVALID_SESSION` | `invalid-session` | the cookie is forged or present more than once |
 | `SESSION_ENDED_OR_EXPIRED` | `session-ended-or-expired` | the store does not know the session, the liveness policy refuses it, or `touch` answers `False` |
-| `ACCOUNT_DISABLED` | `account-disabled` | the account behind a live session is inactive |
 
 The `Origin` is decided first, before the store is touched, so a refused
 handshake neither renews a session nor writes an audit event. Exactly one

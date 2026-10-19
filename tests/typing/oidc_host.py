@@ -129,7 +129,6 @@ class HostAccount:
     id: str
     username: str
     role: str
-    is_active: bool
 
 
 @dataclass
@@ -144,23 +143,20 @@ class HostSession:
 
 class HostAccounts:
     def get(self, user_id: str) -> UserRecord | None:
-        return HostAccount(user_id, "someone", "user", True)
-
-    def get_by_username(self, username: str) -> UserRecord | None:
-        return HostAccount("subject", username, "user", True)
+        return HostAccount(user_id, "someone", "user")
 
     def create_for_subject(self, subject: str, username: str, role: str) -> UserRecord:
-        return HostAccount(subject, username, role, True)
+        return HostAccount(subject, username, role)
 
     def set_role(self, user_id: str, role: str) -> UserRecord:
-        return HostAccount(user_id, "someone", role, True)
+        return HostAccount(user_id, "someone", role)
 
 
 class HostSessions:
     def create(
         self, user_id: str, expires_at: datetime, *, ip_address: str, user_agent: str,
     ) -> SessionRecord:
-        user = HostAccount(user_id, "someone", "user", True)
+        user = HostAccount(user_id, "someone", "user")
         return HostSession("id", user_id, ip_address, user_agent, user, expires_at)
 
     def load(self, session_id: str) -> SessionRecord | None:

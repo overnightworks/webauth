@@ -54,6 +54,7 @@ from webauth_arrangement import (
     SessionsReusingEndedIds,
     UsersInMemory,
     UsersWithCaseInsensitiveUsernames,
+    UsersWithoutUniqueUsernames,
     WriteLockInMemory,
     _require_held_lock,
     a_web_auth_config,
@@ -141,8 +142,16 @@ class LegacyPasswordUser(FakeUser):
     password_hash: str = "legacy-hash"  # noqa: S105
 
 
+@dataclass
+class InactiveFlaggedUser(FakeUser):
+    """A host record whose own flag says inactive, which the library never reads."""
+
+    is_active: bool = False
+
+
 LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(ADMIN_GROUP,))
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
+LENA_FLAGGED_INACTIVE = InactiveFlaggedUser(id=SUBJECT, username="lena")
 LEGACY_ADMIN_WITH_PASSWORD_FIELD = LegacyPasswordUser(
     id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE,
 )
@@ -189,8 +198,8 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
 
     account = host.admit(replace(LENA, preferred_username=preferred_username))
 
-    assert (account.id, account.username, account.role, account.is_active) == (
-        SUBJECT, username, MEMBER_ROLE, True,
+    assert (account.id, account.username, account.role) == (
+        SUBJECT, username, MEMBER_ROLE,
     )
     assert host.accounts.list() == [account]
     assert [asdict(event) for event in host.audit.account_events] == [{
@@ -251,9 +260,6 @@ class UntouchableAccounts(UsersInMemory):
     def get(self, user_id: str) -> FakeUser | None:
         raise AssertionError("a refusal must not read an account")
 
-    def get_by_username(self, username: str) -> FakeUser | None:
-        raise AssertionError("a refusal must not read an account")
-
 
 class UntouchableLock(WriteLockInMemory):
     def hold(self) -> AbstractContextManager[None]:
@@ -285,12 +291,6 @@ def test_a_refusal_before_any_account_takes_no_lock_reads_no_account_and_audits_
 
     assert host.admit(identity, admission) is refusal
     assert host.audit.account_events == []
-
-
-def test_a_person_outside_the_group_is_refused_before_a_deactivated_account_is_read() -> None:
-    host = a_host(FakeUser(id=SUBJECT, username="lena", is_active=False))
-
-    assert host.admit(replace(LENA, groups=())) is AdmissionRefusal.NOT_A_MEMBER
 
 
 @pytest.mark.parametrize(("login_group", "admin_group"), [
@@ -476,14 +476,6 @@ def test_a_role_change_audit_event_carries_the_roles_and_no_username() -> None:
     assert "lena.private" not in repr(event)
 
 
-def test_a_deactivated_admin_is_refused_before_any_role_is_written() -> None:
-    host = a_host(FakeUser(id=SUBJECT, username="lena", role=ADMIN_ROLE, is_active=False))
-
-    assert host.admit(LENA) is AdmissionRefusal.ACCOUNT_DEACTIVATED
-    assert host.accounts.get(SUBJECT).role == ADMIN_ROLE
-    assert host.audit.account_events == []
-
-
 class UsersReplacingRecords(UsersInMemory):
     """A store whose records are frozen: a role write returns a new record."""
 
@@ -565,16 +557,6 @@ def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed(
         id="another issuer's identity whose subject names a legacy admin",
     ),
     pytest.param(
-        LENA, [FakeUser(id=SUBJECT, username="lena", is_active=False)],
-        AdmissionRefusal.ACCOUNT_DEACTIVATED,
-        id="a deactivated account",
-    ),
-    pytest.param(
-        LENA, [replace(LEGACY_ADMIN_WITH_PASSWORD_FIELD, is_active=False)],
-        AdmissionRefusal.ACCOUNT_DEACTIVATED,
-        id="a deactivated account whose model carries a password field",
-    ),
-    pytest.param(
         LENA, [FakeUser(id="user-7", username="lena")],
         AdmissionRefusal.USERNAME_TAKEN,
         id="a new subject whose username another account holds",
@@ -597,6 +579,17 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
     assert host.admit(LENA) is AdmissionRefusal.USERNAME_TAKEN
     assert host.accounts.list() == stored
     assert host.audit.account_events == []
+
+
+def test_a_store_without_unique_usernames_admits_two_subjects_sharing_one() -> None:
+    host = a_host(store=UsersWithoutUniqueUsernames)
+    other_lena = replace(LENA, subject="0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23")
+
+    first = host.admit(LENA)
+    second = host.admit(other_lena)
+
+    assert (first.id, second.id) == (LENA.subject, other_lena.subject)
+    assert (first.username, second.username) == ("lena", "lena")
 
 
 NOW = 1_800_000_000
@@ -1016,11 +1009,10 @@ def test_a_request_carrying_only_the_hint_is_not_signed_in() -> None:
 
 @dataclass(frozen=True)
 class RefusedCallback:
-    """A callback that does not sign in: the accounts the host holds, and
-    the callback query the browser brings back given the issuer's."""
+    """A callback that does not sign in: the callback query the browser brings
+    back given the issuer's."""
 
     refusal: str
-    stored: tuple[FakeUser, ...] = ()
     groups_claim: object = (LOGIN_GROUP,)
     returned_query: Callable[[OidcHost, str], str] = lambda _host, query: query
 
@@ -1060,13 +1052,6 @@ _REFUSED_CALLBACKS = [
         id="its one state beside an undecodable parameter",
     ),
     pytest.param(
-        RefusedCallback(
-            "account-deactivated",
-            stored=(replace(LEGACY_ADMIN_WITH_PASSWORD_FIELD, is_active=False),),
-        ),
-        id="an identity whose legacy account is deactivated",
-    ),
-    pytest.param(
         RefusedCallback("not-a-member", groups_claim=["/apps/other"]),
         id="a person in another app's group only",
     ),
@@ -1085,7 +1070,7 @@ _REFUSED_CALLBACKS = [
 def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its_cookie(
     refused: RefusedCallback,
 ) -> None:
-    host = an_oidc_host(*deepcopy(refused.stored), groups_claim=refused.groups_claim)
+    host = an_oidc_host(groups_claim=refused.groups_claim)
     other_tab = host.sign_in_at_issuer()
     query = host.sign_in_at_issuer()
 
@@ -1095,7 +1080,7 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.config.session_cookie_name not in set_cookies(response)
     assert ID_TOKEN_HINT_COOKIE_NAME not in set_cookies(response)
     assert host.sessions.count_active() == 0
-    assert host.accounts.list() == list(refused.stored)
+    assert host.accounts.list() == []
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
 
@@ -1112,6 +1097,15 @@ def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
     assert [event.kind for event in host.audit.account_events] == [
         AccountEventKind.ROLE_CHANGED,
     ]
+
+
+def test_an_account_whose_host_record_says_inactive_is_still_admitted_and_served() -> None:
+    host = an_oidc_host(deepcopy(LENA_FLAGGED_INACTIVE))
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert (response.status_code, response.json()) == (200, {"username": "lena"})
+    assert host.client.get("/me").json() == {"username": "lena"}
 
 
 def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
@@ -1746,15 +1740,6 @@ def test_a_logout_for_a_subject_without_sessions_is_accepted_and_audits_nothing(
 
     assert (response.status_code, sessions_of(host, OTHER_SUBJECT)) == (200, 1)
     assert host.audit.account_events == []
-
-
-def test_a_logout_ends_the_sessions_of_an_inactive_account() -> None:
-    host = an_oidc_host(FakeUser(id=SUBJECT, username="lena", is_active=False))
-    open_sessions(host, SUBJECT, 2)
-
-    response = post_logout_token(host, a_logout_token_of_the_issuer())
-
-    assert (response.status_code, sessions_of(host, SUBJECT)) == (200, 0)
 
 
 def test_a_logout_that_ended_sessions_audits_one_event_for_the_account_and_no_actor() -> None:

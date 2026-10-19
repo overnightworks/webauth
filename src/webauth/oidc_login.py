@@ -61,9 +61,9 @@ once the session has ended it has no power left.
 
 ``receive_backchannel_logout`` is the issuer's back-channel logout: it verifies
 the Logout Token before taking the lock, then, under the lock, ends every
-session of the account the token's subject names, an inactive account
-included, and records one ``BACKCHANNEL_LOGOUT`` event when a session ended.
-A subject without an account is accepted and provisions nothing. It never
+session of the account the token's subject names, and records one
+``BACKCHANNEL_LOGOUT`` event when a session ended. A subject without an account
+is accepted and provisions nothing. It never
 commits, clears a cookie or calls the issuer; a store or audit failure
 propagates so the host can roll back, and the host commits before it
 answers ``ACCEPTED``.
@@ -218,7 +218,6 @@ class AdmissionRefusal(StrEnum):
 
     FOREIGN_ISSUER = "foreign-issuer"
     NOT_A_MEMBER = "not-a-member"
-    ACCOUNT_DEACTIVATED = "account-deactivated"
     USERNAME_TAKEN = "username-taken"
 
 
@@ -451,9 +450,9 @@ def admit_identity(
 
     The order of refusals is ``FOREIGN_ISSUER``, then ``NOT_A_MEMBER`` (the
     identity's groups hold no path of ``admission.login_group``, or are
-    missing or empty), then the account's own state. The first two write
-    nothing and look up no account; a deactivated account is refused before
-    any role is written.
+    missing or empty), then ``USERNAME_TAKEN`` when the store refuses a new
+    account's username. The first two write nothing and look up no account.
+    No username is looked up and no local flag locks an account.
     """
     if identity.issuer != admission.bound_issuer:
         return AdmissionRefusal.FOREIGN_ISSUER
@@ -464,8 +463,6 @@ def admit_identity(
         account = accounts.get(identity.subject)
         if account is None:
             return _provision(identity, role, accounts=accounts, audit=audit)
-        if not account.is_active:
-            return AdmissionRefusal.ACCOUNT_DEACTIVATED
         return _with_role(account, role, accounts=accounts, audit=audit)
 
 
@@ -508,8 +505,6 @@ def _provision(
     audit: AuditSink,
 ) -> UserRecord | AdmissionRefusal:
     username = _username_for(identity)
-    if accounts.get_by_username(username) is not None:
-        return AdmissionRefusal.USERNAME_TAKEN
     try:
         account = accounts.create_for_subject(identity.subject, username, role)
     except UsernameTakenError:
