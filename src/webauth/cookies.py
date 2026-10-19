@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Final, Literal
 
 from starlette.requests import cookie_parser
@@ -348,6 +348,9 @@ class PendingLogin:
     code_verifier: str = field(repr=False)
     issued_at: int
     return_to: str | None = None
+
+    def returning_to(self, return_to: str | None) -> PendingLogin:
+        return replace(self, return_to=return_to)
 
 
 def _issue_pending_login_cookie(

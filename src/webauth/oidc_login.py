@@ -76,7 +76,7 @@ module's.
 from __future__ import annotations
 
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
@@ -249,9 +249,7 @@ def start_login(
     this app is dropped and the login lands on the host's default page.
     """
     authorization = relying_party.begin_login()
-    pending = replace(
-        authorization.pending, return_to=same_app_path(request, return_to),
-    )
+    pending = authorization.pending.returning_to(same_app_path(request, return_to))
     for name in _pending_login_cookies_to_evict(request, config):
         _clear_pending_login_cookie(response, name, config)
     _issue_pending_login_cookie(
