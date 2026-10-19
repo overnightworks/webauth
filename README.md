@@ -718,9 +718,9 @@ Fields a host may leave out:
 |---|---|---|
 | `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
 | `cookie_secure` | `True` | `True` or `False`; any other value is refused |
-| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty, spaces, `;`, `=`, `,`, quotes and non-ASCII are refused); must differ from the other cookie's name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
+| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | a cookie name that obeys [the cookie-name rule](#the-cookie-name-rule) |
 | `csrf_header_name` | `"x-csrf-token"` | the request header that carries the CSRF token |
-| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty, spaces, `;`, `=`, `,`, quotes and non-ASCII are refused); must differ from the other cookie's name; a `__Host-` or `__Secure-` name with `cookie_secure=False` is refused; `None` is refused |
+| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | a cookie name that obeys [the cookie-name rule](#the-cookie-name-rule) |
 | `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
 | `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
 | `max_user_agent_chars` | `500` | a positive `int`; zero, a negative number, or a `bool` is refused |
@@ -763,13 +763,27 @@ The cookies' default names are the public constants `DEFAULT_SESSION_COOKIE_NAME
 `DEFAULT_CSRF_COOKIE_NAME` in `webauth.cookies` (the `__Host-` names) and
 `PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME` (the names with `cookie_secure=False`).
 A client that reads the CSRF cookie by name reads `config.csrf_cookie_name`.
-The OpenID Connect ID token hint cookie is described under
-[The ID token hint](#the-id-token-hint). webauth also sets the pending-login cookies
-(names starting `__Host-oidc_pending_`, or `oidc_pending_` with `cookie_secure=False`) and
-the ID token hint cookie (`__Secure-oidc_id_token_hint`, or `oidc_id_token_hint`), so
-neither `session_cookie_name` nor `csrf_cookie_name` may be set to one of those names.
 A request that reaches the library in an app without `install_web_auth_config` raises
 `RuntimeError`.
+
+### The cookie-name rule
+
+`session_cookie_name` and `csrf_cookie_name` are refused at construction unless
+each is:
+
+- an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty,
+  spaces, `;`, `=`, `,`, quotes and non-ASCII are refused);
+- different from the other cookie's name;
+- not a `__Host-` or `__Secure-` name with `cookie_secure=False`;
+- not a name webauth's own cookies use: the pending-login cookies (names
+  starting `__Host-oidc_pending_`, or `oidc_pending_` with
+  `cookie_secure=False`) and the ID token hint cookie
+  (`__Secure-oidc_id_token_hint`, or `oidc_id_token_hint`), in both variants
+  whatever `cookie_secure` is;
+- not `None`.
+
+The OpenID Connect ID token hint cookie is described under
+[The ID token hint](#the-id-token-hint).
 
 ### Content-Security-Policy
 

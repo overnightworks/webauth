@@ -23,6 +23,7 @@ from webauth.cookies import (
     CookieSameSite,
     default_cookie_name,
     is_host_only_cookie_name,
+    is_reserved_cookie_name,
     is_secure_prefixed_cookie_name,
     is_valid_cookie_name,
 )
@@ -69,11 +70,6 @@ class _DefaultCookieName(str):
     """
 
     __slots__ = ()
-
-
-def _require_positive_count(name: str, value: object) -> None:
-    if type(value) is not int or value <= 0:
-        raise ValueError(f"{name} must be a positive int, not {value!r}")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -128,7 +124,9 @@ class WebAuthConfig:
                 "whose addresses share one rate-limit budget",
             )
         self._require_distinct_roles()
-        _require_positive_count("max_user_agent_chars", self.max_user_agent_chars)
+        require_positive_whole_number(
+            "max_user_agent_chars", self.max_user_agent_chars, unit="characters",
+        )
 
     def _require_distinct_roles(self) -> None:
         for field in ("admin_role", "user_role"):
@@ -162,6 +160,11 @@ class WebAuthConfig:
             raise ValueError(
                 f"{field} {name!r} is not a valid cookie name; it must be an RFC 6265 "
                 "token (ASCII letters, digits and !#$%&'*+-.^_`|~)",
+            )
+        elif is_reserved_cookie_name(name):
+            raise ValueError(
+                f"{field} {name!r} is a name webauth's own cookies use; choose "
+                "another, or the browser would send two cookies of that name",
             )
         elif (
             is_host_only_cookie_name(name) or is_secure_prefixed_cookie_name(name)

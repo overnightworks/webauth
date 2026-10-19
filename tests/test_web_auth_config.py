@@ -29,6 +29,8 @@ from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
     PLAIN_CSRF_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
+    id_token_hint_cookie_name,
+    pending_login_cookie_name,
 )
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 
@@ -240,6 +242,48 @@ def test_a_cookie_name_that_is_not_an_rfc_6265_token_is_refused_naming_its_field
         a_config_reached_by(how, True, **{field: name})
 
 
+RESERVED_COOKIE_NAMES = [
+    pytest.param(id_token_hint_cookie_name(secure=True), id="secure id token hint"),
+    pytest.param(id_token_hint_cookie_name(secure=False), id="plain id token hint"),
+    pytest.param(pending_login_cookie_name("state", secure=True), id="secure pending login"),
+    pytest.param(pending_login_cookie_name("state", secure=False), id="plain pending login"),
+    pytest.param("__Host-oidc_pending_", id="secure pending prefix alone"),
+    pytest.param("oidc_pending_anything", id="plain pending prefix"),
+]
+
+
+@pytest.mark.parametrize("field", COOKIE_NAME_FIELDS)
+@pytest.mark.parametrize("how", ["construction", "replace"])
+@pytest.mark.parametrize("cookie_secure", [True, False])
+@pytest.mark.parametrize("name", RESERVED_COOKIE_NAMES)
+def test_a_name_webauths_own_cookies_use_is_refused_naming_its_field(
+    field: str, how: str, cookie_secure: bool, name: str,
+) -> None:
+    with pytest.raises(ValueError, match=f"{field} .* webauth's own cookies use"):
+        a_config_reached_by(how, cookie_secure, **{field: name})
+
+
+@pytest.mark.parametrize("field", COOKIE_NAME_FIELDS)
+@pytest.mark.parametrize(
+    "name",
+    [
+        "my_oidc_pending_x",
+        "oidc_pending",
+        "oidc_pendin_x",
+        "__Host-oidc_pending",
+        "oidc_id_token_hin",
+        "oidc_id_token_hint2",
+        "x__Secure-oidc_id_token_hint",
+    ],
+)
+def test_a_name_that_only_resembles_one_of_webauths_own_cookies_is_accepted(
+    field: str, name: str,
+) -> None:
+    config = a_web_auth_config(**{field: name})
+
+    assert getattr(config, field) == name
+
+
 def test_a_prefixed_name_that_is_not_a_token_is_refused_as_a_bad_name_first() -> None:
     with pytest.raises(ValueError, match="is not a valid cookie name"):
         a_web_auth_config(cookie_secure=False, session_cookie_name="__Host-a b")
@@ -352,6 +396,13 @@ def test_replacing_a_field_sets_or_keeps_the_cookie_lifetime(
     assert config.cookie_max_age_seconds == cookie_max_age_seconds
 
 
+class AnIntegerSubclass(int):
+    pass
+
+
+USER_AGENT_LIMIT_MESSAGE = "max_user_agent_chars must be a positive whole number of characters"
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
@@ -364,16 +415,23 @@ def test_replacing_a_field_sets_or_keeps_the_cookie_lifetime(
         pytest.param({"admin_role": None}, "admin_role must name a role", id="no admin role"),
         pytest.param({"user_role": 5}, "user_role must name a role", id="a numeric user role"),
         pytest.param(
-            {"max_user_agent_chars": -1}, "max_user_agent_chars must be a positive int",
+            {"max_user_agent_chars": -1}, USER_AGENT_LIMIT_MESSAGE,
             id="negative user-agent limit",
         ),
         pytest.param(
-            {"max_user_agent_chars": 0}, "max_user_agent_chars must be a positive int",
-            id="zero user-agent limit",
+            {"max_user_agent_chars": 0}, USER_AGENT_LIMIT_MESSAGE, id="zero user-agent limit",
         ),
         pytest.param(
-            {"max_user_agent_chars": True}, "max_user_agent_chars must be a positive int",
+            {"max_user_agent_chars": True}, USER_AGENT_LIMIT_MESSAGE,
             id="boolean user-agent limit",
+        ),
+        pytest.param(
+            {"max_user_agent_chars": "2"}, USER_AGENT_LIMIT_MESSAGE,
+            id="text user-agent limit",
+        ),
+        pytest.param(
+            {"max_user_agent_chars": 2.0}, USER_AGENT_LIMIT_MESSAGE,
+            id="float user-agent limit",
         ),
     ],
 )
@@ -390,6 +448,7 @@ def test_a_role_or_user_agent_limit_that_cannot_work_is_refused_at_configuration
         pytest.param({}, id="the defaults"),
         pytest.param({"admin_role": "operator", "user_role": "member"}, id="custom roles"),
         pytest.param({"max_user_agent_chars": 500}, id="a limit of 500"),
+        pytest.param({"max_user_agent_chars": AnIntegerSubclass(500)}, id="an int subclass"),
     ],
 )
 def test_distinct_roles_and_a_positive_user_agent_limit_are_accepted(

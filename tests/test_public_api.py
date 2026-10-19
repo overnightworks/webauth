@@ -114,13 +114,20 @@ def test_every_module_imports_and_the_single_process_backend_counts_without_redi
 @pytest.mark.parametrize(
     ("error", "failure"),
     [
-        (UsernameTakenError("taken"), None),
-        (NotAnAdminError("taken"), None),
-        (UnknownSessionError("taken"), None),
-        (KeySetFetchError("taken", ExchangeFailure.TIMED_OUT), ExchangeFailure.TIMED_OUT),
-        (TokenEndpointError("taken", ExchangeFailure.TIMED_OUT), ExchangeFailure.TIMED_OUT),
+        pytest.param(UsernameTakenError("taken"), None, id="UsernameTakenError"),
+        pytest.param(NotAnAdminError("taken"), None, id="NotAnAdminError"),
+        pytest.param(UnknownSessionError("taken"), None, id="UnknownSessionError"),
+        pytest.param(
+            KeySetFetchError("taken", ExchangeFailure.TIMED_OUT),
+            ExchangeFailure.TIMED_OUT,
+            id="KeySetFetchError",
+        ),
+        pytest.param(
+            TokenEndpointError("taken", ExchangeFailure.TIMED_OUT),
+            ExchangeFailure.TIMED_OUT,
+            id="TokenEndpointError",
+        ),
     ],
-    ids=lambda value: type(value).__name__,
 )
 def test_every_public_operational_error_is_caught_as_web_auth_error_with_its_payload(
     error: Exception, failure: ExchangeFailure | None,
