@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from starlette.requests import HTTPConnection, Request
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from webauth_arrangement import (
+    ALLOWED_HOST,
     ALLOWED_ORIGIN,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
@@ -259,7 +260,7 @@ def test_a_session_that_no_longer_stands_is_refused(
         pytest.param("", [], WebSocketRefusal.FOREIGN_ORIGIN, id="an empty Origin"),
         pytest.param("http://[::1", [], WebSocketRefusal.FOREIGN_ORIGIN, id="an unparsable Origin"),
         pytest.param(
-            "https://user@songmaker.example",
+            f"https://user@{ALLOWED_HOST}",
             [],
             WebSocketRefusal.FOREIGN_ORIGIN,
             id="an Origin carrying credentials",
@@ -290,7 +291,7 @@ def test_a_sibling_host_the_application_does_not_list_is_refused_even_as_same_si
     refusal = the_refusal_of(
         app,
         cookie=app.signed_cookie(),
-        origin="https://sibling.songmaker.example",
+        origin=f"https://sibling.{ALLOWED_HOST}",
         headers=[("sec-fetch-site", "same-site")],
     )
 

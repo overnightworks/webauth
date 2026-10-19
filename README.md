@@ -25,8 +25,8 @@ names `EverySubject` or `NoAdmins` under
 sections linked below.
 
 **Who gets in.** Only members of the app's `login_group`, such as
-`/apps/songmaker`, get in. Members of its `admin_group`, such as
-`/apps/songmaker/admin`, are admins. Both are decided again at every login, so a
+`/apps/notes`, get in. Members of its `admin_group`, such as
+`/apps/notes/admin`, are admins. Both are decided again at every login, so a
 change in Keycloak takes effect at the person's next sign-in; an app session
 that is already open keeps its access until it ends; a changed admin role
 reaches every open session at the person's next sign-in. See
@@ -112,8 +112,8 @@ from webauth.oidc_login import (
 
 admission = AdmissionConfig(
     bound_issuer=client_config.issuer,
-    login_group="/apps/songmaker",
-    admin_group="/apps/songmaker/admin",
+    login_group="/apps/notes",
+    admin_group="/apps/notes/admin",
 )
 
 
@@ -567,7 +567,7 @@ audit, config)` turns that identity into the account it signs in as, and
 startup. The host binds its store to one issuer — the `issuer` of its
 `OidcClientConfig` — and passes it as `bound_issuer`; changing the issuer is a
 migration of the host's accounts, never a configuration change. `login_group`
-is required: the app's Keycloak group path, such as `/apps/songmaker`. A host
+is required: the app's Keycloak group path, such as `/apps/notes`. A host
 that leaves it out gets a `TypeError`; one whose value is not a group path (no
 leading `/`, a trailing `/`, an empty segment, whitespace around a segment, a
 control, format or line-separator character) gets a `ValueError`, both at startup. Whether the group
@@ -585,8 +585,8 @@ the bound issuer. After the issuer, membership is checked, before any lock or ac
 
 - A person is a member when one of the identity's groups is `login_group` or
   below it, compared character for character and by path segment:
-  `/apps/songmaker/admin` counts for `/apps/songmaker`, `/apps/songmaker2` and
-  a bare `songmaker` do not. A missing or empty `groups` claim means no
+  `/apps/notes/admin` counts for `/apps/notes`, `/apps/notes2` and
+  a bare `notes` do not. A missing or empty `groups` claim means no
   membership; a malformed one is refused as `INVALID_IDENTITY_CLAIM`. The
   check runs on every login, after `FOREIGN_ISSUER` and before any account is
   looked up or created, so a refusal writes nothing and sets no session
@@ -605,7 +605,7 @@ After that, admission holds `lock.hold()` and never commits:
 - A known subject reuses its account, even when its suggested username
   changed. A deactivated account is refused before any role is written.
 - The role comes from `admin_group`, a required setting: a group path strictly
-  below `login_group`, such as `/apps/songmaker/admin`, or
+  below `login_group`, such as `/apps/notes/admin`, or
   `NoAdmins.IN_THIS_APP` when the app has no admins. A missing `admin_group`
   is a `TypeError`; a malformed path, or one not below `login_group`,
   is a `ValueError`, both at startup (under `EverySubject`, any group path is

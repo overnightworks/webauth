@@ -47,7 +47,7 @@ from webauth.https_client import (
 from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequest
 from webauth.oidc_transport import post_token_request_over_https
 
-_CLIENT_ID = "songmaker"
+_CLIENT_ID = "notes-app"
 # Canary whose recognisable text is the point
 _CLIENT_SECRET = "canary-client-secret"  # noqa: S105
 _CODE = "canary-authorization-code"
@@ -56,7 +56,7 @@ _URL_QUERY = "session=canary-url-query"
 _FORM = {
     "grant_type": "authorization_code",
     "code": _CODE,
-    "redirect_uri": "https://songmaker.example.org/auth/callback",
+    "redirect_uri": "https://notes.example.org/auth/callback",
     "code_verifier": _CODE_VERIFIER,
 }
 _BASIC_CREDENTIALS = base64.b64encode(f"{_CLIENT_ID}:{_CLIENT_SECRET}".encode()).decode()

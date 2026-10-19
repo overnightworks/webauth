@@ -58,12 +58,12 @@ _OTHER_REALM = "https://login.example.org/realms/elsewhere"
 _AUTHORIZATION_ENDPOINT = f"{_ISSUER}/protocol/openid-connect/auth"
 _TOKEN_ENDPOINT = f"{_ISSUER}/protocol/openid-connect/token"
 _JWKS_URL = f"{_ISSUER}/protocol/openid-connect/certs"
-_CLIENT_ID = "songmaker"
+_CLIENT_ID = "notes-app"
 # Canary whose recognisable text is the point
 _CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
 _END_SESSION_ENDPOINT = f"{_ISSUER}/protocol/openid-connect/logout"
-_REDIRECT_URI = "https://songmaker.example.org/auth/callback"
-_POST_LOGOUT_REDIRECT_URI = "https://songmaker.example.org/"
+_REDIRECT_URI = "https://notes.example.org/auth/callback"
+_POST_LOGOUT_REDIRECT_URI = "https://notes.example.org/"
 _LOGOUT_PATH = "/auth/logout"
 _LEEWAY_SECONDS = 30
 _NOW = 1_800_000_000
@@ -595,7 +595,7 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
         pytest.param(
             _CLIENT_ID,
             "se:cr+et %",
-            "Basic c29uZ21ha2VyOnNlJTNBY3IlMkJldCslMjU=",
+            "Basic bm90ZXMtYXBwOnNlJTNBY3IlMkJldCslMjU=",
             id="secret-form-encoded-before-basic-encoding",
         ),
         pytest.param(
@@ -694,12 +694,12 @@ def _text_of(value: object) -> str:
         pytest.param("redirect_uri", "http://localhost:8000/auth/callback", id="redirect-uri-http"),
         pytest.param(
             "redirect_uri",
-            "https://user:pass@songmaker.example.org/auth/callback",
+            "https://user:pass@notes.example.org/auth/callback",
             id="redirect-uri-with-credentials",
         ),
         pytest.param(
             "redirect_uri",
-            "https://songmaker.example.org:99999/auth/callback",
+            "https://notes.example.org:99999/auth/callback",
             id="redirect-uri-with-invalid-port",
         ),
         pytest.param(
@@ -709,12 +709,12 @@ def _text_of(value: object) -> str:
         ),
         pytest.param(
             "redirect_uri",
-            "https://songmaker.example.org/auth/call\rback",
+            "https://notes.example.org/auth/call\rback",
             id="redirect-uri-with-a-carriage-return-in-its-path",
         ),
         pytest.param(
             "redirect_uri",
-            "https://songmaker.example.org/auth/call\x85back",
+            "https://notes.example.org/auth/call\x85back",
             id="redirect-uri-with-a-c1-control-character",
         ),
         pytest.param("issuer", f"\n{_ISSUER}", id="issuer-led-by-a-newline"),
@@ -723,7 +723,7 @@ def _text_of(value: object) -> str:
             id="end-session-endpoint-with-a-query",
         ),
         pytest.param(
-            "post_logout_redirect_uri", "http://songmaker.example.org/",
+            "post_logout_redirect_uri", "http://notes.example.org/",
             id="post-logout-redirect-uri-over-http",
         ),
         pytest.param(
@@ -804,7 +804,7 @@ def test_a_logout_path_of_url_path_characters_is_accepted(logout_path: str) -> N
 @pytest.mark.parametrize("logout_path", [
     pytest.param("", id="empty"),
     pytest.param("relative-route", id="not-absolute"),
-    pytest.param("https://songmaker.example.org/logout", id="a-url"),
+    pytest.param("https://notes.example.org/logout", id="a-url"),
     pytest.param("/semi;colon", id="semicolon"),
     pytest.param("/with?query=1", id="query"),
     pytest.param("/with#fragment", id="fragment"),

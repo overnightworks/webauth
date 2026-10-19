@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
 from webauth_arrangement import (
+    ALLOWED_HOST,
     ALLOWED_ORIGIN,
     API_PATH,
     SESSION_COOKIE_NAME,
@@ -221,7 +222,7 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
         ),
         pytest.param({"origin": "https://[::1]:evil"}, id="an IPv6 origin with a non-numeric port"),
         pytest.param(
-            {"referer": "https://songmaker.example:password@evil.test/"},
+            {"referer": f"https://{ALLOWED_HOST}:password@evil.test/"},
             id="a referer whose userinfo spells the allowed host",
         ),
     ],
@@ -310,8 +311,8 @@ def test_the_exact_host_with_a_port_is_allowed() -> None:
     assert response.status_code == 200
 
 
-def test_songmakers_json_post_without_either_header_is_unchanged() -> None:
-    """Songmaker's TestClient path: JSON, no Sec-Fetch-Site, no Origin."""
+def test_a_json_post_without_either_header_is_unchanged() -> None:
+    """A TestClient post: JSON, no Sec-Fetch-Site, no Origin."""
     response = _call("POST", {})
 
     assert response.status_code == 200

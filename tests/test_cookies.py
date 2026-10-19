@@ -16,6 +16,7 @@ from httpx import Response as ClientResponse
 from starlette.requests import Request
 from starlette.responses import Response
 from webauth_arrangement import (
+    ALLOWED_HOST,
     DOCUMENTED_ID_TOKEN_HINT_BOUND,
     SEVEN_DAYS_SECONDS,
     THIRTY_DAYS_SECONDS,
@@ -259,8 +260,8 @@ def test_a_pending_login_oidc_cannot_have_begun_is_refused_a_cookie(
 
 
 SESSION_ID = "session-1"
-PLAIN_HTTP = "http://songmaker.example"
-OVER_HTTPS = "https://songmaker.example"
+PLAIN_HTTP = f"http://{ALLOWED_HOST}"
+OVER_HTTPS = f"https://{ALLOWED_HOST}"
 DEFAULT_SESSION_SET_COOKIE = (
     "__Host-session_id="
     "session-1.3052044bf3b276887bd8a25118374c1f96ff3567d5ab5568d6c393505b2e891d; "
