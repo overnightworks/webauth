@@ -15,6 +15,7 @@ judges it, and the reader checks only its shape and size.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import math
@@ -24,6 +25,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from starlette.requests import cookie_parser
 
+from webauth._paths import MAX_RETURN_PATH_BYTES
 from webauth.ports import SessionReference
 
 if TYPE_CHECKING:
@@ -55,7 +57,7 @@ PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 _PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
 _PLAIN_LOGOUT_HINT_COOKIE_NAME: Final = "oidc_id_token_hint"
 _DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
-_MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 256
+_MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 896
 # A signed session cookie is an identifier plus a hex digest; anything much
 # longer was not issued here, so the reader rejects it before any HMAC is computed.
 MAX_SESSION_COOKIE_CHARS: Final = 200
@@ -65,7 +67,7 @@ _PENDING_SECRET_BYTES: Final = 32
 """Random bytes in each of a pending login's state, nonce and verifier,
 which are minted with ``secrets.token_urlsafe``."""
 
-_PENDING_LOGIN_VERSION: Final = "v1"
+_PENDING_LOGIN_VERSION: Final = "v2"
 _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
 _SESSION_SIGNING_PREFIX: Final = b"session:"
 _CSRF_SIGNING_PREFIX: Final = b"csrf:"
@@ -80,12 +82,14 @@ _COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
 # characters, so a field of any other shape was not minted as a pending secret.
 _PENDING_SECRET: Final = rf"[A-Za-z0-9_-]{{{math.ceil(4 * _PENDING_SECRET_BYTES / 3)}}}"
+_RETURN_PATH_FIELD_CHARS: Final = math.ceil(4 * MAX_RETURN_PATH_BYTES / 3)
 _PENDING_LOGIN_VALUE: Final = re.compile(
     rf"{_PENDING_LOGIN_VERSION}"
     rf"\.(?P<state>{_PENDING_SECRET})"
     rf"\.(?P<nonce>{_PENDING_SECRET})"
     rf"\.(?P<code_verifier>{_PENDING_SECRET})"
     r"\.(?P<issued_at>0|[1-9][0-9]{0,11})"
+    rf"\.(?P<return_to>[A-Za-z0-9_-]{{0,{_RETURN_PATH_FIELD_CHARS}}})"
 )
 _PENDING_LOGIN_SIGNATURE: Final = re.compile(r"[0-9a-f]{64}")
 
@@ -336,12 +340,14 @@ def _id_token_hint_from_request(connection: HTTPConnection, config: WebAuthConfi
 @dataclass(frozen=True)
 class PendingLogin:
     """What the browser carries between being sent to the issuer and its return:
-    the login's secrets and the wall-clock second it began."""
+    the login's secrets, the wall-clock second it began and the path of the
+    app to return to, if any."""
 
     state: str = field(repr=False)
     nonce: str = field(repr=False)
     code_verifier: str = field(repr=False)
     issued_at: int
+    return_to: str | None = None
 
 
 def _issue_pending_login_cookie(
@@ -382,6 +388,7 @@ def _sign_pending_login(pending: PendingLogin, secret: bytes) -> str:
         pending.nonce,
         pending.code_verifier,
         str(pending.issued_at),
+        _encoded_return_to(pending.return_to),
     ))
     if not _PENDING_LOGIN_VALUE.fullmatch(payload):
         raise ValueError("the pending login does not fit the pending-login cookie")
@@ -399,12 +406,29 @@ def _verify_pending_login(cookie_value: str, secret: bytes) -> PendingLogin | No
         return None
     if not hmac.compare_digest(signature, _pending_login_signature(payload, secret)):
         return None
+    try:
+        return_to = _decoded_return_to(fields["return_to"])
+    except ValueError:
+        return None
     return PendingLogin(
         state=fields["state"],
         nonce=fields["nonce"],
         code_verifier=fields["code_verifier"],
         issued_at=int(fields["issued_at"]),
+        return_to=return_to,
     )
+
+
+def _encoded_return_to(return_to: str | None) -> str:
+    if return_to is None:
+        return ""
+    return base64.urlsafe_b64encode(return_to.encode()).decode().rstrip("=")
+
+
+def _decoded_return_to(field: str) -> str | None:
+    if not field:
+        return None
+    return base64.urlsafe_b64decode(field + "=" * (-len(field) % 4)).decode()
 
 
 def _pending_login_signature(payload: str, secret: bytes) -> str:

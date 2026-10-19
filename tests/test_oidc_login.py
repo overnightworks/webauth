@@ -9,6 +9,7 @@ fake issuer that answers each code once.
 
 from __future__ import annotations
 
+import base64
 import logging
 import secrets
 import threading
@@ -71,6 +72,7 @@ from webauth.cookies import (
     _pending_login_cookie_name,
     _pending_login_cookie_prefix,
     _sign_pending_login,
+    _verify_pending_login,
     issue_session_cookies,
     sign_session_id,
 )
@@ -114,7 +116,7 @@ from webauth.ports import (
     UserRecord,
 )
 
-MAX_PENDING_LOGIN_COOKIE_CHARS = 256
+MAX_PENDING_LOGIN_COOKIE_CHARS = 896
 MAX_PENDING_LOGINS = 5
 
 BOUND_ISSUER = "https://id.example/realms/lab"
@@ -650,14 +652,16 @@ class OidcHost:
     config: WebAuthConfig
     lock: CountingWriteLock
     issued_id_tokens: list[str]
+    returned_to: list[str | None]
 
-    def start(self) -> str:
+    def start(self, *, return_to: str | None = None) -> str:
         """Visit the start route; answer the authorization URL it sends the browser to."""
-        return self.client.get("/login/oidc").json()["authorization_url"]
+        params = {} if return_to is None else {"next": return_to}
+        return self.client.get("/login/oidc", params=params).json()["authorization_url"]
 
-    def sign_in_at_issuer(self) -> str:
+    def sign_in_at_issuer(self, *, return_to: str | None = None) -> str:
         """Start a login and sign in at the issuer; answer the callback query."""
-        return self.issuer.authorize(self.start())
+        return self.issuer.authorize(self.start(return_to=return_to))
 
     def callback(self, query: str, *, cookie: str | None = None) -> HttpxResponse:
         """Return to the callback route, with the browser's cookies or only ``cookie``."""
@@ -731,6 +735,7 @@ def an_oidc_host(
     *users: FakeUser, store_max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
     groups_claim: object = (LOGIN_GROUP,),
     address_budget: int | None = None,
+    root_path: str = "",
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
@@ -742,6 +747,7 @@ def an_oidc_host(
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
     issued_id_tokens: list[str] = []
+    returned_to: list[str | None] = []
 
     def mint_id_token(nonce: str) -> str:
         issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
@@ -789,8 +795,12 @@ def an_oidc_host(
     )
 
     @app.get("/login/oidc")
-    def start(request: Request, response: Response) -> dict[str, str]:
-        return {"authorization_url": start_login(relying_party, request, response, config)}
+    def start(
+        request: Request, response: Response, next: str | None = None,  # noqa: A002
+    ) -> dict[str, str]:
+        return {"authorization_url": start_login(
+            relying_party, request, response, config, return_to=next,
+        )}
 
     @app.get(CALLBACK_PATH)
     def callback(request: Request, response: Response) -> dict[str, str]:
@@ -804,15 +814,16 @@ def an_oidc_host(
         if isinstance(outcome, AdmissionRefusal):
             response.status_code = 403
             return {"refusal": outcome.value}
+        returned_to.append(outcome.return_to)
         with sessions.transaction():
             session = open_session(
-                request, config, outcome,
+                request, config, outcome.account,
                 sessions=sessions, lock=lock,
                 expires_at=datetime.now(UTC) + timedelta(seconds=sessions.max_age_seconds),
                 max_sessions=None,
             )
         issue_session_cookies(response, session.id, config)
-        return {"username": outcome.username}
+        return {"username": outcome.account.username}
 
     @app.post(FORM_LOGOUT_PATH)
     def form_logout(request: Request) -> Response:
@@ -863,7 +874,7 @@ def an_oidc_host(
 
     return OidcHost(
         client=TestClient(
-            app, base_url=HTTPS_TEST_SERVER, cookies={},
+            app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=root_path,
             headers={"user-agent": CLIENT_USER_AGENT},
         ),
         issuer=issuer,
@@ -875,6 +886,7 @@ def an_oidc_host(
         config=config,
         lock=lock,
         issued_id_tokens=issued_id_tokens,
+        returned_to=returned_to,
     )
 
 
@@ -1145,6 +1157,86 @@ def test_the_password_account_refusal_is_no_longer_an_admission_refusal() -> Non
         AdmissionRefusal("subject-held-by-password-account")
 
 
+_A_LONG_PATH = "/" + "a" * 511
+_RETURN_TO_CASES = [
+    pytest.param("", "/albums/42", "/albums/42", id="a deep link"),
+    pytest.param("", "/albums/42?x=1", "/albums/42?x=1", id="a deep link with its query"),
+    pytest.param("", "/%2F%2Fevil.example", "/%2F%2Fevil.example", id="an encoded path"),
+    pytest.param(
+        "", "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="encoded characters stay raw",
+    ),
+    pytest.param("", "/lieder/\u00fc", "/lieder/%C3%BC", id="a non-ASCII path is encoded"),
+    pytest.param("", "/", "/", id="the root"),
+    pytest.param("", _A_LONG_PATH, _A_LONG_PATH, id="the longest path"),
+    pytest.param("/app", "/app", "/app", id="the app root"),
+    pytest.param("/app", "/app/", "/app/", id="the app root with a slash"),
+    pytest.param("/app", "/app/albums/42", "/app/albums/42", id="a deep link below the app"),
+    pytest.param("", "//evil.example", None, id="two slashes"),
+    pytest.param("", "/\\evil.example", None, id="slash backslash"),
+    pytest.param("", "\\\\evil.example", None, id="two backslashes"),
+    pytest.param("", "\\/evil.example", None, id="backslash slash"),
+    pytest.param("", "/\t/evil.example", None, id="a tab between the slashes"),
+    pytest.param("", "/\r/evil.example", None, id="a CR between the slashes"),
+    pytest.param("", "/\n/evil.example", None, id="an LF between the slashes"),
+    pytest.param("", "https://evil.example", None, id="an absolute URL"),
+    pytest.param("", "https:/evil.example", None, id="a scheme with one slash"),
+    pytest.param("", "javascript:alert(1)", None, id="a script URL"),
+    pytest.param("", "evil.example", None, id="a bare host"),
+    pytest.param("", "/albums/\x01", None, id="a C0 control"),
+    pytest.param("", "/albums/\x7f", None, id="DEL"),
+    pytest.param("", "", None, id="the empty string"),
+    pytest.param("", _A_LONG_PATH + "a", None, id="one byte over the cap"),
+    pytest.param("", "/\u00fc" * 74, None, id="an encoded form over the cap"),
+    pytest.param("/app", "/", None, id="the root outside the app"),
+    pytest.param("/app", "/other", None, id="another path outside the app"),
+    pytest.param("/app", "/application", None, id="a sibling of the app's name"),
+]
+
+
+@pytest.mark.parametrize(("root_path", "asked_for", "returned"), _RETURN_TO_CASES)
+def test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_default_page(
+    root_path: str, asked_for: str, returned: str | None,
+) -> None:
+    host = an_oidc_host(root_path=root_path)
+
+    response = host.callback(host.sign_in_at_issuer(return_to=asked_for))
+
+    assert response.status_code == 200
+    assert host.returned_to == [returned]
+
+
+def test_a_login_started_without_a_return_path_lands_on_the_default_page() -> None:
+    host = an_oidc_host()
+
+    host.callback(host.sign_in_at_issuer())
+
+    assert host.returned_to == [None]
+
+
+def test_a_return_path_signed_by_another_build_is_judged_again_at_the_callback() -> None:
+    host = an_oidc_host()
+    query = host.sign_in_at_issuer()
+    name = host.pending_cookie_name(query)
+    pending = _verify_pending_login(host.client.cookies[name], host.config.signing_key)
+    assert pending is not None
+    resigned = _sign_pending_login(
+        replace(pending, return_to="//evil.example"), host.config.signing_key,
+    )
+
+    response = host.callback(query, cookie=f"{name}={resigned}")
+
+    assert response.status_code == 200
+    assert host.returned_to == [None]
+
+
+def test_the_return_path_of_a_refused_login_is_not_handed_out() -> None:
+    host = an_oidc_host(groups_claim=())
+
+    response = host.callback(host.sign_in_at_issuer(return_to="/albums/42"))
+
+    assert (response.status_code, host.returned_to) == (403, [])
+
+
 def test_an_admitted_callback_consumes_its_cookie_and_keeps_the_other_tabs() -> None:
     host = an_oidc_host()
     other_tab = host.sign_in_at_issuer()
@@ -1177,7 +1269,18 @@ def _oversized(host: OidcHost, query: str) -> str:
 
 
 def _of_another_version(host: OidcHost, query: str) -> str:
-    return host.pending_cookie(query).replace("=v1.", "=v2.", 1)
+    return host.pending_cookie(query).replace("=v2.", "=v3.", 1)
+
+
+def _of_the_version_before_return_paths(host: OidcHost, query: str) -> str:
+    return host.pending_cookie(query).replace("=v2.", "=v1.", 1)
+
+
+def _with_a_return_path_added_after_signing(host: OidcHost, query: str) -> str:
+    name, _, value = host.pending_cookie(query).partition("=")
+    *signed_fields, _return_path, signature = value.split(".")
+    altered_path = base64.urlsafe_b64encode(b"/albums/42").decode().rstrip("=")
+    return f"{name}={'.'.join([*signed_fields, altered_path, signature])}"
 
 
 def _twice(host: OidcHost, query: str) -> str:
@@ -1214,6 +1317,14 @@ def _forged(host: OidcHost, query: str, issued_at: int, *, secret: bytes | None 
     pytest.param(_signed_as_a_session, "state-mismatch", id="signed as a session cookie"),
     pytest.param(_oversized, "state-mismatch", id="oversized"),
     pytest.param(_of_another_version, "state-mismatch", id="another version"),
+    pytest.param(
+        _of_the_version_before_return_paths, "state-mismatch",
+        id="a login in flight at the upgrade",
+    ),
+    pytest.param(
+        _with_a_return_path_added_after_signing, "state-mismatch",
+        id="a return path altered after signing",
+    ),
     pytest.param(_twice, "state-mismatch", id="the genuine cookie twice"),
     pytest.param(
         _another_logins_under_this_name, "state-mismatch",
@@ -1334,7 +1445,7 @@ def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_sess
 
 def _a_forged_pending_cookie(host: OidcHost) -> str:
     name = f"{_pending_login_cookie_prefix(secure=True)}{'f' * 16}"
-    host.client.cookies.set(name, "v1.forged", domain="testserver.local", path="/")
+    host.client.cookies.set(name, "v2.forged", domain="testserver.local", path="/")
     return name
 
 

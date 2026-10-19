@@ -601,12 +601,19 @@ def a_guarded_catch_all_app() -> FastAPI:
 @pytest.mark.parametrize(
     ("asked_for", "carried"),
     [
-        pytest.param("/%5Cevil.example/x", "/", id="a backslash after the slash"),
-        pytest.param("/%09/evil.example/x", "/", id="a tab the browser strips"),
+        pytest.param(
+            "/%5Cevil.example/x", "/%5Cevil.example/x", id="an encoded backslash stays inert",
+        ),
+        pytest.param(
+            "/%09/evil.example/x", "/%09/evil.example/x", id="an encoded tab stays inert",
+        ),
+        pytest.param(
+            "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="the raw path is not decoded",
+        ),
         pytest.param("/songs/1?x=2", "/songs/1?x=2", id="an ordinary path keeps its query"),
     ],
 )
-def test_the_redirect_never_carries_a_path_a_browser_reads_as_another_host(
+def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
     asked_for: str, carried: str,
 ) -> None:
     response = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER).get(
@@ -617,12 +624,29 @@ def test_the_redirect_never_carries_a_path_a_browser_reads_as_another_host(
     assert response.headers["location"] == f"/login?{urlencode({'next': carried})}"
 
 
-def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
+@pytest.mark.parametrize(
+    ("root_path", "path", "raw_path", "carried"),
+    [
+        pytest.param("", "/\\evil.example/x", b"/\\evil.example/x", "/", id="a literal backslash"),
+        pytest.param(
+            "/app", "/app/albums/42", b"/app/albums/42", "/app/albums/42",
+            id="a raw path that carries the root path",
+        ),
+        pytest.param(
+            "/app", "/app/albums/42", b"/albums/42", "/app/albums/42",
+            id="a raw path the server stripped of the root path",
+        ),
+        pytest.param("/app", "/app/x", b"/app/x", "/app/x", id="a path under the app"),
+    ],
+)
+def test_the_redirect_carries_the_path_as_the_app_sees_it_or_the_root(
+    root_path: str, path: str, raw_path: bytes, carried: str,
+) -> None:
     sent: list[dict] = []
     scope = {
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
         "scheme": "https", "server": ("testserver", 443), "client": ("127.0.0.1", 1),
-        "root_path": "", "path": "/\\evil.example/x", "raw_path": b"/\\evil.example/x",
+        "root_path": root_path, "path": path, "raw_path": raw_path,
         "query_string": b"", "headers": [(b"host", b"testserver"), (b"accept", b"text/html")],
     }
 
@@ -637,7 +661,7 @@ def test_the_redirect_never_carries_a_literal_backslash_path() -> None:
     start = next(message for message in sent if message["type"] == "http.response.start")
     location = dict(start["headers"])[b"location"].decode()
     assert start["status"] == 302
-    assert location == f"/login?{urlencode({'next': '/'})}"
+    assert location == f"/login?{urlencode({'next': carried})}"
 
 
 @pytest.mark.parametrize(

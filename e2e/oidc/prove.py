@@ -487,6 +487,28 @@ def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
     )
 
 
+def deep_link_survives_the_login(proof: Proof, width: Width) -> str:
+    scenario = f"24-{width.label}"
+    deep_link = "/albums/42?page=2"
+    proof.reset_host()
+    with proof.browsing(width) as page:
+        page.goto(f"{APP_ORIGIN}{deep_link}")
+        page.wait_for_selector("#username")
+        proof.capture_cookies(page.context)
+        proof.fill_keycloak_form(page, scenario, proof.user_password)
+        page.wait_for_url(re.compile(f"^{re.escape(APP_ORIGIN)}/"))
+        proof.capture_cookies(page.context)
+        landed = page.url.removeprefix(APP_ORIGIN)
+        assert landed == deep_link, f"the browser landed on {landed!r}"
+        headline = proof.headline(page)
+        assert headline == "Album 42", f"the page says {headline!r}"
+        proof.shot(page, scenario, "result")
+    return (
+        f"a browser without a session opened {deep_link}, signed in at Keycloak "
+        f"and landed on {deep_link}"
+    )
+
+
 def outsiders_groups_claim_is_recorded(proof: Proof) -> str:
     example = proof.fresh_admin().get(
         f"/{REALM}/clients/{proof.client_uuid}/evaluate-scopes/generate-example-id-token"
@@ -1486,6 +1508,10 @@ def run_default_scenarios(proof: Proof) -> bool:
     proof.held_or_failed(
         f"SCENARIO 9 {DESKTOP.label} {APP_ORIGIN}",
         lambda: logout_after_the_app_session_ended(proof, DESKTOP),
+    )
+    proof.held_or_failed(
+        f"SCENARIO 24 {DESKTOP.label} {APP_ORIGIN}",
+        lambda: deep_link_survives_the_login(proof, DESKTOP),
     )
     run_hint_scenarios(proof)
     return True

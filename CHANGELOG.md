@@ -24,6 +24,18 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `UsernameTakenError`, otherwise it surfaces as a store error. A consumer that maps
   `ACCOUNT_DEACTIVATED` to "No access" (ui-console#6's default) loses that
   source; "No access" stays the state for a person outside `login_group`.
+- A deep link survives the Keycloak login. `start_login(relying_party, request,
+  response, config, *, return_to)` takes a required `return_to`, the raw path and
+  query of this app (`None` for none), and `finish_login` returns an
+  `AdmittedLogin(account, return_to)` instead of a bare `UserRecord`. The path is
+  kept in the pending-login cookie, now `v2.` with a base64url return-path field
+  and at most 896 characters, and judged again at the callback; a value that is not
+  a same-origin ASCII path of at most 512 bytes under `root_path` comes back as
+  `None`. A login in flight at the upgrade carries a `v1.` cookie and fails once
+  with `STATE_MISMATCH`. `LoginRedirect` now carries the raw, percent-encoded path
+  instead of the decoded one. Migration: pass `return_to` from your login route's
+  query, open the session for `admitted.account`, and redirect to
+  `admitted.return_to or <default>`.
 - Session administration is removed: `webauth.session_administration`
   (`SessionAdministration`, `SessionSummary`, `NotAnAdminError`,
   `UnknownSessionError`), `webauth.ports.SessionAdministrationStore` and

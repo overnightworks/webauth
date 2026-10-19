@@ -22,6 +22,7 @@ from starlette.responses import JSONResponse, Response
 from webauth import ports
 from webauth._content_negotiation import prefers_html
 from webauth._origins import origin_is_allowed
+from webauth._paths import reads_as_another_host, requested_address, same_app_path
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
@@ -57,19 +58,6 @@ _SESSION_EXPIRED_DETAIL: Final = "Session expired"
 _ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
 
 
-_BROWSER_STRIPPED_CHARACTERS = str.maketrans("", "", "\t\r\n")
-_ANOTHER_HOST_PREFIXES = ("//", "/\\", "\\/", "\\\\")
-
-
-def _reads_as_another_host(path: str) -> bool:
-    """Whether a browser reads ``path`` as an address on another host.
-
-    Browsers drop tab, CR and LF and treat a backslash as a slash, so ``/\\x``
-    and ``/<tab>/x`` lead off the site exactly as ``//x`` does.
-    """
-    return path.translate(_BROWSER_STRIPPED_CHARACTERS).startswith(_ANOTHER_HOST_PREFIXES)
-
-
 @dataclass(frozen=True)
 class LoginRedirect:
     """Where a server-rendered host sends a browser holding no live session.
@@ -85,7 +73,7 @@ class LoginRedirect:
     redirect_query_param: str
 
     def __post_init__(self) -> None:
-        if not self.path.startswith("/") or _reads_as_another_host(self.path):
+        if not self.path.startswith("/") or reads_as_another_host(self.path):
             raise ValueError(
                 "login_redirect.path must be a same-origin absolute path: "
                 "one leading '/', never '//' or a backslash form of it, and no scheme",
@@ -232,13 +220,13 @@ def _unauthenticated(
 
 
 def _asked_for_address(request: Request) -> str:
-    """The path and query the guarded request named, safe to echo back.
+    """The raw path and query the guarded request named, safe to echo back.
 
-    A path a browser reads as another host's address collapses to ``/``
-    before it is ever carried in a redirect.
+    An address that is not a path of this app collapses to ``/`` before it is
+    ever carried in a redirect.
     """
-    path = "/" if _reads_as_another_host(request.url.path) else request.url.path
-    return f"{path}?{request.url.query}" if request.url.query else path
+    root_path = request.scope.get("root_path", "")
+    return same_app_path(requested_address(request), root_path=root_path) or "/"
 
 
 class WebSocketRefusal(Enum):
