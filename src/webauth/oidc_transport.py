@@ -4,8 +4,6 @@
 ``OidcRelyingParty`` as ``post_token_request``, beside ``fetch_key_set_over_https``
 as its ``fetch_key_set``. It sends the request through ``webauth.https_client``;
 the key-set transport stays there.
-
-Install the ``jwt`` extra to use this module.
 """
 
 from __future__ import annotations

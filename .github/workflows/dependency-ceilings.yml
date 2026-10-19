@@ -34,15 +34,8 @@ jobs:
           from packaging.version import Version
 
           project = tomllib.load(open("pyproject.toml", "rb"))["project"]
-          runtime_extras = {
-              name: requirements
-              for name, requirements in project["optional-dependencies"].items()
-              if name != "dev"
-          }
-          declared = [
-              Requirement(text)
-              for text in [*project["dependencies"], *sum(runtime_extras.values(), [])]
-          ]
+          optional = sum(project["optional-dependencies"].values(), [])
+          declared = [Requirement(text) for text in [*project["dependencies"], *optional]]
 
 
           def newest_release(name: str) -> Version:

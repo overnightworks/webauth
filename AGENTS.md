@@ -34,15 +34,15 @@ CI, which only lints it.
   application implements over the persistence it already owns. `.importlinter`
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
 - No host application is a dependency. `webauth` depends on FastAPI (with
-  Starlette and anyio, which `src` imports) and Pydantic at
-  runtime, and on nothing else; `deptry src` proves in CI that `src` imports
+  Starlette and anyio, which `src` imports), Pydantic and the OpenID Connect
+  stack below at runtime, and on nothing else; `deptry src` proves in CI that `src` imports
   nothing undeclared. Redis is optional — install
   `overnightworks-webauth[redis]` for the Redis rate-limit backend; a single-node
   host that supplies the in-process rate-limit backend needs no Redis at all.
-  JWT verification and OpenID Connect login are optional too —
-  `overnightworks-webauth[jwt]` adds PyJWT and cryptography, which only
-  `webauth.jwt_verification` imports, and urllib3, which only
-  `webauth.https_client` imports — the one owner of outbound HTTPS. Only
+  JWT verification and OpenID Connect login are part of the plain install:
+  PyJWT and cryptography, which only `webauth.jwt_verification` imports, and
+  urllib3, which only `webauth.https_client` imports — the one owner of
+  outbound HTTPS — are core dependencies. Only
   `webauth.oidc` imports `webauth.jwt_verification`; only
   `webauth.jwt_verification`, `webauth.oidc` and `webauth.oidc_transport`
   import `webauth.https_client`. Four `protected` import-linter contracts
@@ -66,7 +66,7 @@ CI, which only lints it.
 ## Checks
 
 ```bash
-uv sync --extra dev
+uv sync --group dev
 uv run pytest tests -q
 uv run ruff check src tests e2e
 uv run lint-imports
@@ -75,7 +75,7 @@ uv run --group e2e pyright
 tests/typing/check_against_wheel.sh
 ```
 
-`tests/typing/` holds a static OIDC-only host. The script type-checks it with
+`tests/typing/` holds the static typing hosts. The script type-checks it with
 the pinned pyright against the built wheel, from a directory without `src`, so
 a port change or an export a host cannot import fails here.
 
