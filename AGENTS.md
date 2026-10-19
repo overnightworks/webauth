@@ -82,9 +82,9 @@ a port change or an export a host cannot import fails here.
 CI runs these in the `checks` job and re-runs the suite at the lowest declared
 versions in `lowest-direct`. The shared quality gate
 (`overnightworks/quality`, pinned by SHA in `ci.yml`) is the `quality` job; it
-needs only `checks`, not `lowest-direct`. The
-quality gate's required check is `quality / verdict`; allowances for known
-secret false positives live only in `quality/config.toml`.
+needs `checks` and `lowest-direct`, and lists both as mandatory in
+`quality/config.toml`. The quality gate's required check is `quality / verdict`;
+allowances for known secret false positives live only in `quality/config.toml`.
 
 The suite is fast and needs no service: Redis is faked in-process. Run it
 whole.

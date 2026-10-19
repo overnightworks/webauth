@@ -248,8 +248,8 @@ class SessionIdentityChanged:
     """A session's origin changed; ``session_ref`` is the SHA-256 hex of its id.
 
     The raw session identifier never reaches an audit event: it is a bearer
-    secret, so the field is a ``SessionReference``, which only
-    ``webauth.cookies.session_reference`` makes. It matches the reference of
+    secret, so the field is a ``SessionReference``; a host makes one with
+    ``webauth.cookies.session_reference``. It matches the reference of
     ``revoke_session``.
     """
 

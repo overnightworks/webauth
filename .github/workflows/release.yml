@@ -50,6 +50,9 @@ jobs:
             fail "$(tr '\n' ';' < failures.txt)"
           fi
 
+          echo "Accepted CI run ${run_id}: $(jq -r .html_url <<<"$run")"
+          echo "Green jobs: $(jq -r 'join(", ")' <<<"$REQUIRED_JOBS")"
+
   build:
     name: build
     needs: [verify]
@@ -60,6 +63,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - name: The changelog has a heading for the tagged version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -qxF "## ${version}" CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## ${version}' heading for tag ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
         with:
