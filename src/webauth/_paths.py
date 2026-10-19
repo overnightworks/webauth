@@ -48,18 +48,16 @@ def same_app_path(connection: HTTPConnection, candidate: str | None) -> str | No
     literal ``#``, which a browser reads as the start of a fragment before it
     resolves those segments and which a request never carries.
     """
-    root_path = connection.scope.get("root_path", "")
     if not candidate or not candidate.startswith("/") or _CONTROL_CHARACTER.search(candidate):
         return None
-    if _FRAGMENT_MARK in candidate:
-        return None
-    if reads_as_another_host(candidate) or not _is_under(root_path, candidate):
-        return None
-    if _has_dot_segment(candidate):
+    if _FRAGMENT_MARK in candidate or reads_as_another_host(candidate):
         return None
     try:
-        encoded = quote_from_bytes(candidate.encode("utf-8"), safe=_ALREADY_ASCII_SAFE)
+        encoded = _ascii(candidate)
+        encoded_root = _ascii(connection.scope.get("root_path", ""))
     except UnicodeEncodeError:
+        return None
+    if not _is_under(encoded_root, encoded) or _has_dot_segment(encoded):
         return None
     return encoded if len(encoded) <= MAX_RETURN_PATH_BYTES else None
 
@@ -68,12 +66,16 @@ def requested_address(connection: HTTPConnection) -> str:
     """The raw path and raw query the app was asked for, ``root_path`` included."""
     scope = connection.scope
     raw_path = scope.get("raw_path") or quote(scope["path"]).encode()
-    encoded_root = quote(scope.get("root_path", "")).encode()
+    encoded_root = _ascii(scope.get("root_path", "")).encode()
     if not _carries_root(raw_path, encoded_root):
         raw_path = encoded_root + raw_path
     address = raw_path.decode("utf-8", errors="surrogateescape")
     query = scope.get("query_string", b"").decode("utf-8", errors="surrogateescape")
     return f"{address}?{query}" if query else address
+
+
+def _ascii(path: str) -> str:
+    return quote_from_bytes(path.encode("utf-8"), safe=_ALREADY_ASCII_SAFE)
 
 
 def _carries_root(raw_path: bytes, encoded_root: bytes) -> bool:

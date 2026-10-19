@@ -631,19 +631,39 @@ def a_redirect_location(client: TestClient, asked_for: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("asked_for", "carried"),
+    ("root_path", "asked_for", "carried"),
     [
-        pytest.param("/app/albums/42", "/app/albums/42", id="a path the server left prefixed"),
-        pytest.param("/albums/42", "/app/albums/42", id="a path a proxy stripped of the prefix"),
-        pytest.param("/app/%FF", "/app/%FF", id="invalid UTF-8 below the prefix"),
-        pytest.param("/app/app/x", "/app/app/x", id="a prefix repeated by the host's own route"),
-        pytest.param("/application", "/app/application", id="a sibling of the prefix's name"),
+        pytest.param(
+            "/app", "/app/albums/42", "/app/albums/42",
+            id="a path the server left prefixed",
+        ),
+        pytest.param(
+            "/app", "/albums/42", "/app/albums/42",
+            id="a path a proxy stripped of the prefix",
+        ),
+        pytest.param("/app", "/app/%FF", "/app/%FF", id="invalid UTF-8 below the prefix"),
+        pytest.param(
+            "/app", "/app/app/x", "/app/app/x",
+            id="a prefix repeated by the host's own route",
+        ),
+        pytest.param(
+            "/app", "/application", "/app/application",
+            id="a sibling of the prefix's name",
+        ),
+        pytest.param(
+            "/café", "/caf%C3%A9/albums/42", "/caf%C3%A9/albums/42",
+            id="a non-ASCII root the server left prefixed",
+        ),
+        pytest.param(
+            "/café", "/albums/42", "/caf%C3%A9/albums/42",
+            id="a non-ASCII root a proxy stripped",
+        ),
     ],
 )
 def test_the_redirect_carries_the_path_below_the_root_path_prefixed_once(
-    asked_for: str, carried: str,
+    root_path: str, asked_for: str, carried: str,
 ) -> None:
-    client = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER, root_path="/app")
+    client = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER, root_path=root_path)
 
     location = a_redirect_location(client, asked_for)
 

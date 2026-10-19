@@ -1190,6 +1190,16 @@ _RETURN_TO_CASES = [
     pytest.param("/app", "/", None, id="the root outside the app"),
     pytest.param("/app", "/other", None, id="another path outside the app"),
     pytest.param("/app", "/application", None, id="a sibling of the app's name"),
+    pytest.param(
+        "/café", "/caf%C3%A9/albums/42", "/caf%C3%A9/albums/42",
+        id="an encoded non-ASCII root",
+    ),
+    pytest.param(
+        "/café", "/café/albums/42", "/caf%C3%A9/albums/42",
+        id="a non-ASCII root is encoded",
+    ),
+    pytest.param("/café", "/cafe/x", None, id="a sibling of a non-ASCII root"),
+    pytest.param("/café", "/", None, id="the root outside a non-ASCII root"),
     pytest.param("", "/albums/..x", "/albums/..x", id="dots inside a segment"),
     pytest.param("", "/albums/x.", "/albums/x.", id="a trailing dot in a segment"),
     pytest.param("/app", "/app/../other", None, id="a dot-dot segment leaving the app"),
