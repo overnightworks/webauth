@@ -1,0 +1,8 @@
+claim_id = "4f33dde18edb4029b9c41073fc992525"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "fd0a5587afd54eee8d2972140243dc16a85325af"
+branch = "claude/issue-244-config-reserved-names"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/ports.py", "tests/test_public_api.py", "tests/test_web_auth_config.py"]
+opened_commit = "423532407bea7716428e3f6ef21568f744836362"
+whole_reason = "Four small findings of #74 share config.py, README.md and CHANGELOG.md; landing them apart would conflict three times for one-line edits."
