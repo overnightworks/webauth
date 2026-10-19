@@ -1,0 +1,8 @@
+claim_id = "b02452556b3947038e855425ea6873ea"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "728f7fb5e92a9e2b872f2c6c70e55237682462fe"
+branch = "claude/issue-275-session-administration-leaves"
+scope = [".importlinter", "AGENTS.md", "CHANGELOG.md", "README.md", "src/webauth/__init__.py", "src/webauth/ports.py", "src/webauth/session_administration.py", "tests/test_oidc_login.py", "tests/test_public_api.py", "tests/test_session_administration.py", "tests/test_session_ending.py", "tests/typing/oidc_host.py", "tests/typing/session_reference_refusal.py", "tests/webauth_arrangement.py"]
+opened_commit = "d108a9af27bc2e2e26ebf042f3a91ee94cfa5b90"
+whole_reason = "One removal: the module, its port, its event kind, its contract, its tests and its docs go together or the guards and pyright fail."
