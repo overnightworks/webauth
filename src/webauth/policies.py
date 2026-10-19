@@ -421,7 +421,7 @@ def _validated_source(directive: CspDirective, source: str) -> str:
             f"{directive}: {source!r} is not a source this library accepts; "
             f"the declared subset is {subset}.",
         )
-    if _KEYWORD_SOURCE.fullmatch(source) or (is_navigation and _SELF_SOURCE.fullmatch(source)):
+    if _KEYWORD_SOURCE.fullmatch(source):
         return source.lower()
     return source
 

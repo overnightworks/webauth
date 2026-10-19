@@ -39,7 +39,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   it. A type checker now refuses a raw session id when an audit event is
   constructed or assigned with one. Hosts that read these fields as `str` are
   unaffected, at run time and in their own types.
-- `SecurityHeadersPolicy.hsts_max_age_seconds` (default 31536000, a whole number
+- `SecurityHeadersPolicy.hsts_max_age_seconds` (default
+  `DEFAULT_HSTS_MAX_AGE_SECONDS`, 31536000, a whole number
   from 0 up; 0 sends `max-age=0`, which rolls a pin back) and
   `hsts_include_subdomains` (default `True`). The defaults send today's header;
   `cookie_secure` still decides whether HSTS is sent at all.

@@ -768,6 +768,11 @@ over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
+`SecurityHeadersPolicy.hsts_max_age_seconds` sets the HSTS `max-age`; it
+defaults to `DEFAULT_HSTS_MAX_AGE_SECONDS` (31536000, one year) and takes a
+whole number of seconds from 0 up. `0` sends `max-age=0`, which rolls a pin
+back. `hsts_include_subdomains` (default `True`) adds `includeSubDomains`.
+
 `SecurityHeadersMiddleware` sends the `Permissions-Policy` its
 `SecurityHeadersPolicy` names in `permissions_policy`. The field defaults to
 `DEFAULT_PERMISSIONS_POLICY` (`"camera=(), microphone=(), geolocation=()"`),

@@ -279,6 +279,25 @@ def test_a_pattern_without_a_port_refuses_the_host_with_a_port() -> None:
     assert response.status_code == 403
 
 
+def test_a_pattern_alone_admits_its_origin() -> None:
+    client = a_client_allowing_only_pattern(r"^app\.example$")
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": "https://app.example"})
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("origin", ["http://localhost:8000", "http://127.0.0.1:5173"])
+def test_listing_localhost_and_loopback_admits_their_origins_on_any_port(origin: str) -> None:
+    client = an_origin_guarded_client(a_web_auth_config(
+        allowed_hosts_exact=frozenset({"localhost", "127.0.0.1"}), allowed_hosts_patterns=(),
+    ))
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": origin})
+
+    assert response.status_code == 200
+
+
 def test_same_origin_fetch_site_passes_despite_a_null_origin() -> None:
     response = _call("POST", {"sec-fetch-site": "same-origin", "origin": "null"})
 
