@@ -64,6 +64,7 @@ from webauth.https_client import (
     KeySetFetchError,
     is_https_url,
 )
+from webauth.validation import _is_whole_number, require_non_negative_whole_number
 
 if TYPE_CHECKING:
     from webauth.ports import WallClock
@@ -225,10 +226,7 @@ class JwtVerifier:
                 "the key set URL must be an https URL naming a host, a valid port if any,"
                 " and no control character, space or credentials"
             )
-        if isinstance(leeway_seconds, bool) or not isinstance(leeway_seconds, int):
-            raise ValueError("the leeway must be a whole number of seconds")
-        if leeway_seconds < 0:
-            raise ValueError("the leeway must not be negative")
+        require_non_negative_whole_number("leeway_seconds", leeway_seconds, unit="seconds")
         self._issuer = issuer
         self._audiences = sorted(audiences)
         self._jwks_url = jwks_url
@@ -414,7 +412,7 @@ def _is_key_id(value: object) -> TypeGuard[str]:
 
 def _integer_claim(claims: Mapping[str, object], name: str) -> int:
     value = claims.get(name)
-    if isinstance(value, bool) or not isinstance(value, int):
+    if not _is_whole_number(value):
         raise VerificationRefusal(RejectionReason.INVALID_CLAIM)
     return value
 
