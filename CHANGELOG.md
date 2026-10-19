@@ -68,7 +68,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   hashes keep their case.
 - `ExpiryColumnLiveness` compares a stored `expires_at` or `created_at` that
   carries a UTC offset as the instant it names, so a session whose timestamp
-  came back as `14:00+02:00` is no longer admitted two hours past its expiry.
+  came back as `14:00+02:00` is no longer admitted two hours past its expiry, and one stored west of
+  UTC is no longer refused hours early.
   A timestamp without an offset is still read as UTC.
 
 **Changed**

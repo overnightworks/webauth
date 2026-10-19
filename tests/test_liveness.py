@@ -119,6 +119,29 @@ def test_the_expiry_column_policy_compares_a_stored_timestamp_as_the_instant_it_
     assert EXPIRY_POLICY.admits_stored_session(record, A_TIME_FAR_FROM_REAL_NOW) is admitted
 
 
+@pytest.mark.parametrize(
+    ("expires_at", "admitted"),
+    [
+        pytest.param(
+            datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone(timedelta(hours=-1))),
+            True,
+            id="latest representable instant west of UTC",
+        ),
+        pytest.param(
+            datetime(1, 1, 1, 0, 0, tzinfo=timezone(timedelta(hours=1))),
+            False,
+            id="earliest representable instant east of UTC",
+        ),
+    ],
+)
+def test_the_expiry_column_policy_judges_an_expiry_at_the_edge_of_the_calendar(
+    expires_at: datetime, admitted: bool,
+) -> None:
+    record = _ExpiryRecord(created_at=A_TIME_FAR_FROM_REAL_NOW, expires_at=expires_at)
+
+    assert EXPIRY_POLICY.admits_stored_session(record, A_TIME_FAR_FROM_REAL_NOW) is admitted
+
+
 def test_the_expiry_column_policy_follows_the_injected_clock_not_the_real_one() -> None:
     record = _ExpiryRecord(
         created_at=A_TIME_FAR_FROM_REAL_NOW - timedelta(minutes=5),

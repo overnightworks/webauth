@@ -46,10 +46,10 @@ class ExpiryColumnLiveness:
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
-        if _as_utc(record.expires_at) < now:
+        if _aware(record.expires_at) < now:
             return False
         return _within_absolute_cap(
-            _as_utc(record.created_at), now, self._absolute_max_age_seconds,
+            _aware(record.created_at), now, self._absolute_max_age_seconds,
         )
 
 
@@ -112,10 +112,10 @@ def _created_at_of_capped(record: _IdleWindowRecord) -> datetime:
     return created_at
 
 
-def _as_utc(stored: datetime) -> datetime:
+def _aware(stored: datetime) -> datetime:
     if stored.utcoffset() is None:
         return stored.replace(tzinfo=UTC)
-    return stored.astimezone(UTC)
+    return stored
 
 
 def _within_absolute_cap(
