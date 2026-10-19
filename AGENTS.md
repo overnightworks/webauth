@@ -54,7 +54,9 @@ CI, which only lints it.
   own refusals and the 500 of an unhandled exception; README.md lists them
   under "What it owns, and what it leaves to the host". Session administration
   is a library helper in `webauth.session_administration` over host-supplied
-  ports and a write lock; the host commits or rolls back its work.
+  ports and a write lock; the host commits or rolls back its work. A `forbidden`
+  contract keeps `webauth.session_administration` from importing
+  `webauth.dependencies`, so the use case does not depend on the request layer.
 
 ## Checks
 
