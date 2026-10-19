@@ -11,8 +11,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 **Breaking**
 
 - Names outside a module's `__all__` start with an underscore, so importing one
-  raises `ImportError`; 0.15.0 already declared them internal and named each
-  one's replacement.
+  raises `ImportError`, and `webauth.validation` is now `webauth._validation`;
+  0.15.0 declared them internal, and names added since were never in `__all__`.
 - `WebAuthConfig` refuses a `session_cookie_name` or `csrf_cookie_name` that is
   one of webauth's own cookies, in either variant: the ID token hint cookie
   (`__Secure-oidc_id_token_hint`, `oidc_id_token_hint`) or a name starting with

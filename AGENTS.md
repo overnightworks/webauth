@@ -57,6 +57,11 @@ CI, which only lints it.
   ports and a write lock; the host commits or rolls back its work. A `forbidden`
   contract keeps `webauth.session_administration` from importing
   `webauth.dependencies`, so the use case does not depend on the request layer.
+- A name is private when it, or a module on its path, starts with `_`. Tests
+  and e2e take public names, or the functions and classes a module defines,
+  never its private values or the names it only imports, because a value is
+  pinned while a function is a unit under test. `tests/test_public_api.py`
+  enforces it.
 
 ## Checks
 
