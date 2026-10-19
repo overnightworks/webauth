@@ -18,7 +18,6 @@ from webauth_arrangement import (
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     HTTPS_TEST_SERVER,
-    IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
@@ -34,8 +33,6 @@ from webauth_arrangement import (
     a_session,
     a_web_auth_config,
     an_auth_app,
-    an_idle_auth_app,
-    an_idle_session,
     session_cookie_header,
     signed_like_release_0_14,
     signed_without_bound,
@@ -481,26 +478,6 @@ def test_no_session_is_named_where_no_account_would_be_admitted(
 
     assert response.status_code == status
     assert response.json()["detail"] == detail
-
-
-def test_an_idle_window_host_authenticates_from_its_store() -> None:
-    app = an_idle_auth_app(an_idle_session())
-
-    response = app.get("/me", cookie=app.signed_cookie())
-
-    assert response.status_code == 200
-    assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
-
-
-def test_an_idle_window_host_refuses_a_session_past_its_window() -> None:
-    app = an_idle_auth_app(
-        an_idle_session(seen_ago=timedelta(seconds=IDLE_WINDOW_SECONDS + 1)),
-    )
-
-    response = app.get("/me", cookie=app.signed_cookie())
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == SESSION_EXPIRED_DETAIL
 
 
 def test_a_missing_cookie_401_stays_byte_identical_without_a_login_redirect(

@@ -13,14 +13,15 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from webauth_arrangement import (
     HTTPS_TEST_SERVER,
-    IDLE_WINDOW_SECONDS,
     MIN_SESSION_SECRET_CHARS,
+    SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_MAX_AGE_SECONDS,
     a_web_auth_config,
     web_auth_config_arguments,
 )
 
 from webauth.config import (
+    SessionLifetime,
     WebAuthConfig,
     install_web_auth_config,
     web_auth_config,
@@ -33,7 +34,6 @@ from webauth.cookies import (
     _id_token_hint_cookie_name,
     _pending_login_cookie_name,
 )
-from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 
 
 def test_a_secret_shorter_than_the_floor_is_refused() -> None:
@@ -123,11 +123,8 @@ def test_the_ipv6_budget_prefix_defaults_to_one_subscriber_network() -> None:
 
 LIFETIMES: dict[str, Callable[[object], object]] = {
     "cookie_max_age_seconds": lambda seconds: a_web_auth_config(cookie_max_age_seconds=seconds),
-    "absolute_max_age_seconds": ExpiryColumnLiveness,
-    "idle_window_seconds": IdleWindowLiveness,
-    "idle-window absolute_max_age_seconds": lambda seconds: IdleWindowLiveness(
-        IDLE_WINDOW_SECONDS, absolute_max_age_seconds=seconds,
-    ),
+    "idle_seconds": lambda seconds: SessionLifetime(seconds, SESSION_ABSOLUTE_MAX_AGE_SECONDS),
+    "absolute_max_age_seconds": lambda seconds: SessionLifetime(1, seconds),
 }
 
 
@@ -144,6 +141,15 @@ def test_a_lifetime_other_than_a_positive_whole_number_of_seconds_is_refused_at_
 @pytest.mark.parametrize("lifetime", LIFETIMES)
 def test_a_lifetime_of_one_second_is_accepted(lifetime: str) -> None:
     LIFETIMES[lifetime](1)
+
+
+def test_a_lifetime_idling_as_long_as_its_cap_is_accepted() -> None:
+    SessionLifetime(43200, 43200)
+
+
+def test_a_lifetime_idling_longer_than_its_cap_is_refused() -> None:
+    with pytest.raises(ValueError, match="idle_seconds must not exceed"):
+        SessionLifetime(3600, 1800)
 
 
 @pytest.mark.parametrize("prefix", [32, 128])

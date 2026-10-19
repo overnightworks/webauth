@@ -38,12 +38,12 @@ if TYPE_CHECKING:
 
     from webauth.ports import (
         RateLimitBackend,
-        SessionLivenessPolicy,
         WallClock,
     )
     from webauth.proxies import TrustedProxies
 
 __all__ = [
+    "SessionLifetime",
     "WebAuthConfig",
     "install_web_auth_config",
     "installed_web_auth_config",
@@ -74,6 +74,25 @@ class _DefaultCookieName(str):
     __slots__ = ()
 
 
+@dataclass(frozen=True)
+class SessionLifetime:
+    """How long a session stands: idle between requests, and at most from creation."""
+
+    idle_seconds: int
+    absolute_max_age_seconds: int
+
+    def __post_init__(self) -> None:
+        require_positive_whole_number("idle_seconds", self.idle_seconds, unit="seconds")
+        require_positive_whole_number(
+            "absolute_max_age_seconds", self.absolute_max_age_seconds, unit="seconds",
+        )
+        if self.idle_seconds > self.absolute_max_age_seconds:
+            raise ValueError(
+                "idle_seconds must not exceed absolute_max_age_seconds; "
+                "a session cannot idle longer than it may live",
+            )
+
+
 @dataclass(frozen=True, kw_only=True)
 class WebAuthConfig:
     session_secret: SecretStr
@@ -82,7 +101,7 @@ class WebAuthConfig:
     allowed_hosts_exact: frozenset[str]
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
     cookie_max_age_seconds: int
-    session_liveness: SessionLivenessPolicy
+    session_lifetime: SessionLifetime
     session_cookie_name: str = _DefaultCookieName(DEFAULT_SESSION_COOKIE_NAME)
     csrf_cookie_name: str = _DefaultCookieName(DEFAULT_CSRF_COOKIE_NAME)
     csrf_header_name: str = _DEFAULT_CSRF_HEADER_NAME

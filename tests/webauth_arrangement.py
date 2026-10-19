@@ -31,6 +31,7 @@ from starlette.responses import Response
 from starlette.websockets import WebSocketDisconnect
 
 from webauth.config import (
+    SessionLifetime,
     WebAuthConfig,
     install_web_auth_config,
     web_auth_config,
@@ -44,7 +45,6 @@ from webauth.dependencies import (
     session_id_from_request,
     unauthenticated_response,
 )
-from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import IpRateLimitMiddleware
 from webauth.middleware.security_headers import (
     CONTENT_TYPE_OPTIONS,
@@ -83,7 +83,6 @@ SPEC_WITH_CONCURRENT_READER = "2.3"
 SPEC_WITHOUT_CONCURRENT_READER = "2.4"
 SESSION_MAX_AGE_SECONDS = 3600
 SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
-IDLE_WINDOW_SECONDS = 1800
 DOCUMENTED_ID_TOKEN_HINT_BOUND = 3_072
 SEVEN_DAYS_SECONDS = 7 * 24 * 3600
 THIRTY_DAYS_SECONDS = 30 * 24 * 3600
@@ -108,7 +107,10 @@ def web_auth_config_arguments() -> dict[str, object]:
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "cookie_max_age_seconds": SESSION_MAX_AGE_SECONDS,
-        "session_liveness": ExpiryColumnLiveness(SESSION_ABSOLUTE_MAX_AGE_SECONDS),
+        "session_lifetime": SessionLifetime(
+            idle_seconds=SESSION_MAX_AGE_SECONDS,
+            absolute_max_age_seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS,
+        ),
     }
 
 
@@ -311,8 +313,8 @@ class FakeSessionRecord:
 class SessionRecordsInMemory:
     """Stored sessions, renewed in place and never committed.
 
-    The expiry-column store owns its max age and computes the new expiry from
-    the ``now`` the caller passes, so no clock is read outside ``dependencies``.
+    ``touch`` writes the ``expires_at`` it is given; the max age only dates a
+    created session back to its ``created_at``.
     """
 
     def __init__(
@@ -380,19 +382,19 @@ class SessionRecordsInMemory:
 
     def touch(
         self,
-        record: FakeSessionRecord,
+        session_id: str,
         *,
+        expires_at: datetime,
         ip_address: str,
         user_agent: str,
-        now: datetime,
     ) -> bool:
-        if record.id not in self._records:
+        record = self._records.get(session_id)
+        if record is None:
             return False
         record.ip_address = ip_address
         record.user_agent = user_agent
-        record.expires_at = now + timedelta(seconds=self.max_age_seconds)
+        record.expires_at = expires_at
         return True
-
 
     def delete(self, session_id: str) -> None:
         _require_held_lock(self._lock)
@@ -426,49 +428,6 @@ class SessionRecordsInMemory:
         for session_id in removed:
             self._remove_record(session_id)
         return removed
-
-
-@dataclass
-class IdleSessionRecord:
-    """A session an idle-window store keeps: identity, origin, and when last seen.
-
-    It has no ``created_at``/``expires_at``; liveness is ``last_seen`` alone.
-    """
-
-    id: str
-    user: FakeUser
-    last_seen: datetime
-    ip_address: str = CLIENT_ADDRESS
-    user_agent: str = CLIENT_USER_AGENT
-
-    @property
-    def user_id(self) -> str:
-        return self.user.id
-
-
-@dataclass
-class IdleSessionsInMemory:
-    """The one idle-window session; a touch puts ``last_seen`` at ``now``."""
-
-    record: IdleSessionRecord | None
-
-    def load(self, session_id: str) -> IdleSessionRecord | None:
-        if self.record is None or self.record.id != session_id:
-            return None
-        return self.record
-
-    def touch(
-        self,
-        record: IdleSessionRecord,
-        *,
-        ip_address: str,
-        user_agent: str,
-        now: datetime,
-    ) -> bool:
-        if self.record is None or self.record.id != record.id:
-            return False
-        record.last_seen = now
-        return True
 
 
 class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
@@ -506,11 +465,11 @@ class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
 
     def touch(
         self,
-        record: FakeSessionRecord,
+        session_id: str,
         *,
+        expires_at: datetime,
         ip_address: str,
         user_agent: str,
-        now: datetime,
     ) -> bool:
         raise AssertionError("the store was asked to touch a session")
 
@@ -527,11 +486,11 @@ class SessionsAnsweringTouch(SessionRecordsInMemory):
 
     def touch(
         self,
-        record: FakeSessionRecord,
+        session_id: str,
         *,
+        expires_at: datetime,
         ip_address: str,
         user_agent: str,
-        now: datetime,
     ) -> bool:
         return self.touch_answer
 
@@ -730,54 +689,6 @@ def an_auth_app(
     @app.get(UNAUTHENTICATED_RESPONSE_PATH)
     def unauthenticated(request: Request) -> Response:
         return unauthenticated_response(request, login_redirect)
-
-    _add_websocket_routes(app, sessions, audit, websocket_outcomes)
-
-    return AuthApp(
-        client=TestClient(
-            app,
-            base_url=HTTPS_TEST_SERVER,
-            cookies={},
-            headers={"user-agent": CLIENT_USER_AGENT},
-        ),
-        sessions=sessions,
-        audit=audit,
-        authenticated=authenticated,
-        websocket_outcomes=websocket_outcomes,
-        signing_key=config.signing_key,
-    )
-
-
-def an_idle_session(
-    *, seen_ago: timedelta = timedelta(minutes=5), user: FakeUser | None = None,
-) -> IdleSessionRecord:
-    return IdleSessionRecord(
-        id=SESSION_ID, user=user or FakeUser(), last_seen=datetime.now(UTC) - seen_ago,
-    )
-
-
-def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
-    """The supported idle-window liveness config."""
-    config = a_web_auth_config(
-        admin_role=ADMIN_ROLE, session_liveness=IdleWindowLiveness(IDLE_WINDOW_SECONDS),
-    )
-    sessions = IdleSessionsInMemory(record)
-    audit = RecordingAuditSink()
-    authenticated: list[AuthenticatedUser] = []
-    websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal] = []
-
-    dependencies = current_user_dependency(
-        session_store=lambda: sessions,
-        audit_sink=lambda: audit,
-        on_authenticated=authenticated.append,
-    )
-
-    app = FastAPI()
-    install_web_auth_config(app, config)
-
-    @app.get("/me")
-    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
-        return {"username": user.username, "role": user.role}
 
     _add_websocket_routes(app, sessions, audit, websocket_outcomes)
 

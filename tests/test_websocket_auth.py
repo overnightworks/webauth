@@ -29,8 +29,6 @@ from webauth_arrangement import (
     a_session,
     a_web_auth_config,
     an_auth_app,
-    an_idle_auth_app,
-    an_idle_session,
     session_cookie_header,
 )
 
@@ -127,17 +125,6 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
     assert expired_app.websocket_outcomes == [ConnectionRefusal.SESSION_ENDED_OR_EXPIRED]
     assert expired.expires_at == FIXED_INSTANT - timedelta(seconds=1)
     assert admitted.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
-
-
-def test_an_admitted_handshake_renews_an_idle_window_session() -> None:
-    record = an_idle_session(seen_ago=timedelta(minutes=20))
-    seen_before = record.last_seen
-    app = an_idle_auth_app(record)
-
-    with app.connect(cookie=app.signed_cookie(), origin="https://app.example") as socket:
-        socket.receive_json()
-
-    assert record.last_seen > seen_before
 
 
 @pytest.mark.parametrize(

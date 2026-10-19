@@ -10,6 +10,19 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- The library owns one session lifetime. `WebAuthConfig.session_liveness`,
+  `webauth.ports.SessionLivenessPolicy` and the module `webauth.liveness`
+  (`ExpiryColumnLiveness`, `IdleWindowLiveness`) no longer exist; the required
+  `WebAuthConfig.session_lifetime` is a `webauth.config.SessionLifetime(idle_seconds,
+  absolute_max_age_seconds)`. `SessionRecord` gains read-only `created_at` and
+  `expires_at`, and `SessionRecordStore.touch` is now
+  `touch(session_id, *, expires_at, ip_address, user_agent)`: the store writes the
+  expiry it is given and computes none of its own. A loaded session is admitted
+  only when `now <= expires_at <= min(now + idle + 60 s, created_at + cap)`, and an
+  admitted one is renewed to `min(now + idle, created_at + cap)`, so a session
+  never outlives its cap. Migration: songmaker sets `SessionLifetime(idle, cap)`,
+  and its store writes the given `expires_at` and drops its own arithmetic;
+  presentator removes its `webauth.liveness` import and its `IdleWindow` adapter.
 - The library keeps no session wrappers, and its refusal names both channels.
   `webauth.session_ending` and its `end_session`, `end_user_sessions` and
   `prune_sessions` no longer exist, and `dependencies.WebSocketRefusal` is
@@ -99,7 +112,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 - `WebAuthConfig.wall_clock` (default `time.time`, a `webauth.ports.WallClock`)
   is the one reading of now behind the session decision: HTTP and WebSocket
-  judge liveness at it and pass it to `SessionRecordStore.touch` as `now`.
+  read it once per request, as whole seconds, to judge the session against
+  `WebAuthConfig.session_lifetime` and to compute the `expires_at` passed to
+  `SessionRecordStore.touch`.
 - `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of
   `SessionIdentityChanged.session_ref`, and `webauth.cookies.session_reference`
   returns it. A type checker now refuses a raw session id when the audit event
