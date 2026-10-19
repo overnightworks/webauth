@@ -1,0 +1,8 @@
+claim_id = "001f5415d10645df8bb49280a96dab22"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "2126bfc84760364f3ae44295f9e0ecac6a9ccfeb"
+branch = "claude/issue-264-public-surface-guard"
+scope = ["AGENTS.md", "README.md", "e2e/oidc/prove.py", "tests/test_cookies.py", "tests/test_csrf.py", "tests/test_dependencies.py", "tests/test_jwt_verification.py", "tests/test_middleware_stack.py", "tests/test_oidc_login.py", "tests/test_proxies.py", "tests/test_public_api.py", "tests/test_single_process_rate_limiter.py", "tests/test_web_auth_config.py", "tests/test_websocket_auth.py", "tests/webauth_arrangement.py"]
+opened_commit = "1f4dae1537a4c9de451c7e6f20c82c3c396d0cb2"
+whole_reason = "The guard and the test switches must land together: G-c fails on today's tests until every value import is switched."
