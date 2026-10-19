@@ -250,7 +250,7 @@ def start_login(
     """
     authorization = relying_party.begin_login()
     pending = replace(
-        authorization.pending, return_to=_same_app_path_of(request, return_to),
+        authorization.pending, return_to=same_app_path(request, return_to),
     )
     for name in _pending_login_cookies_to_evict(request, config):
         _clear_pending_login_cookie(response, name, config)
@@ -316,12 +316,8 @@ def finish_login(
         config=config,
     )
     return AdmittedLogin(
-        account=admitted, return_to=_same_app_path_of(request, pending.return_to),
+        account=admitted, return_to=same_app_path(request, pending.return_to),
     )
-
-
-def _same_app_path_of(request: Request, return_to: str | None) -> str | None:
-    return same_app_path(return_to, root_path=request.scope.get("root_path", ""))
 
 
 def open_session(

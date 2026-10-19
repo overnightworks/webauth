@@ -225,8 +225,7 @@ def _asked_for_address(request: Request) -> str:
     An address that is not a path of this app collapses to ``/`` before it is
     ever carried in a redirect.
     """
-    root_path = request.scope.get("root_path", "")
-    return same_app_path(requested_address(request), root_path=root_path) or "/"
+    return same_app_path(request, requested_address(request)) or "/"
 
 
 class WebSocketRefusal(Enum):

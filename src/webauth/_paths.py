@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Final
-from urllib.parse import quote, quote_from_bytes, unquote_to_bytes
+from urllib.parse import quote, quote_from_bytes
 
 if TYPE_CHECKING:
     from starlette.requests import HTTPConnection
@@ -23,6 +23,8 @@ _ANOTHER_HOST_PREFIXES = ("//", "/\\", "\\/", "\\\\")
 _CONTROL_CHARACTER: Final = re.compile(r"[\x00-\x1f\x7f]")
 _ALREADY_ASCII_SAFE: Final = "".join(chr(code) for code in range(0x21, 0x7F))
 _PATH_ENDS: Final = ("/", "?")
+_SEGMENT_SEPARATORS: Final = re.compile(r"[/\\]")
+_DOT_SEGMENT: Final = re.compile(r"(?:\.|%2e){1,2}", re.IGNORECASE)
 
 
 def reads_as_another_host(path: str) -> bool:
@@ -34,15 +36,21 @@ def reads_as_another_host(path: str) -> bool:
     return path.translate(_BROWSER_STRIPPED_CHARACTERS).startswith(_ANOTHER_HOST_PREFIXES)
 
 
-def same_app_path(candidate: str | None, *, root_path: str) -> str | None:
-    """``candidate`` as an ASCII path of this app, or ``None`` when it is anything else.
+def same_app_path(connection: HTTPConnection, candidate: str | None) -> str | None:
+    """``candidate`` as an ASCII path of the app serving ``connection``, or ``None``.
 
-    Non-ASCII characters are percent-encoded; the cap on length applies to that
-    encoded form.
+    The app is the one running the connection's route, so a login inside a
+    mounted sub-app judges against that mount's ``root_path``. Non-ASCII
+    characters are percent-encoded; the cap on length applies to that encoded
+    form. A browser resolves ``.`` and ``..`` segments before it sends a
+    request, so a path carrying one is not a deep link and is refused.
     """
+    root_path = connection.scope.get("root_path", "")
     if not candidate or not candidate.startswith("/") or _CONTROL_CHARACTER.search(candidate):
         return None
     if reads_as_another_host(candidate) or not _is_under(root_path, candidate):
+        return None
+    if _has_dot_segment(candidate):
         return None
     try:
         encoded = quote_from_bytes(candidate.encode("utf-8"), safe=_ALREADY_ASCII_SAFE)
@@ -54,13 +62,24 @@ def same_app_path(candidate: str | None, *, root_path: str) -> str | None:
 def requested_address(connection: HTTPConnection) -> str:
     """The raw path and raw query the app was asked for, ``root_path`` included."""
     scope = connection.scope
-    root_path = scope.get("root_path", "")
     raw_path = scope.get("raw_path") or quote(scope["path"]).encode()
-    if root_path and unquote_to_bytes(raw_path) != scope["path"].encode():
-        raw_path = quote(root_path).encode() + raw_path
+    encoded_root = quote(scope.get("root_path", "")).encode()
+    if not _carries_root(raw_path, encoded_root):
+        raw_path = encoded_root + raw_path
     address = raw_path.decode("utf-8", errors="surrogateescape")
     query = scope.get("query_string", b"").decode("utf-8", errors="surrogateescape")
     return f"{address}?{query}" if query else address
+
+
+def _carries_root(raw_path: bytes, encoded_root: bytes) -> bool:
+    if not encoded_root or not raw_path.startswith(encoded_root):
+        return not encoded_root
+    return raw_path[len(encoded_root):len(encoded_root) + 1] in (b"", b"/")
+
+
+def _has_dot_segment(path: str) -> bool:
+    segments = _SEGMENT_SEPARATORS.split(path.partition("?")[0])
+    return any(_DOT_SEGMENT.fullmatch(segment) for segment in segments)
 
 
 def _is_under(root_path: str, path: str) -> bool:

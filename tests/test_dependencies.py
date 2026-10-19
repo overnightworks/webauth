@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
@@ -611,6 +610,7 @@ def a_guarded_catch_all_app() -> FastAPI:
             "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="the raw path is not decoded",
         ),
         pytest.param("/songs/1?x=2", "/songs/1?x=2", id="an ordinary path keeps its query"),
+        pytest.param("/\\evil.example/x", "/", id="a literal backslash"),
     ],
 )
 def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
@@ -624,44 +624,41 @@ def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
     assert response.headers["location"] == f"/login?{urlencode({'next': carried})}"
 
 
+def a_redirect_location(client: TestClient, asked_for: str) -> str:
+    response = client.get(asked_for, headers={"accept": "text/html"}, follow_redirects=False)
+    assert response.status_code == 302
+    return response.headers["location"]
+
+
 @pytest.mark.parametrize(
-    ("root_path", "path", "raw_path", "carried"),
+    ("asked_for", "carried"),
     [
-        pytest.param("", "/\\evil.example/x", b"/\\evil.example/x", "/", id="a literal backslash"),
-        pytest.param(
-            "/app", "/app/albums/42", b"/app/albums/42", "/app/albums/42",
-            id="a raw path that carries the root path",
-        ),
-        pytest.param(
-            "/app", "/app/albums/42", b"/albums/42", "/app/albums/42",
-            id="a raw path the server stripped of the root path",
-        ),
-        pytest.param("/app", "/app/x", b"/app/x", "/app/x", id="a path under the app"),
+        pytest.param("/app/albums/42", "/app/albums/42", id="a path the server left prefixed"),
+        pytest.param("/albums/42", "/app/albums/42", id="a path a proxy stripped of the prefix"),
+        pytest.param("/app/%FF", "/app/%FF", id="invalid UTF-8 below the prefix"),
+        pytest.param("/app/app/x", "/app/app/x", id="a prefix repeated by the host's own route"),
+        pytest.param("/application", "/app/application", id="a sibling of the prefix's name"),
     ],
 )
-def test_the_redirect_carries_the_path_as_the_app_sees_it_or_the_root(
-    root_path: str, path: str, raw_path: bytes, carried: str,
+def test_the_redirect_carries_the_path_below_the_root_path_prefixed_once(
+    asked_for: str, carried: str,
 ) -> None:
-    sent: list[dict] = []
-    scope = {
-        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
-        "scheme": "https", "server": ("testserver", 443), "client": ("127.0.0.1", 1),
-        "root_path": root_path, "path": path, "raw_path": raw_path,
-        "query_string": b"", "headers": [(b"host", b"testserver"), (b"accept", b"text/html")],
-    }
+    client = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER, root_path="/app")
 
-    async def receive() -> dict:
-        return {"type": "http.request", "body": b"", "more_body": False}
+    location = a_redirect_location(client, asked_for)
 
-    async def send(message: dict) -> None:
-        sent.append(message)
-
-    asyncio.run(a_guarded_catch_all_app()(scope, receive, send))
-
-    start = next(message for message in sent if message["type"] == "http.response.start")
-    location = dict(start["headers"])[b"location"].decode()
-    assert start["status"] == 302
     assert location == f"/login?{urlencode({'next': carried})}"
+
+
+def test_the_redirect_of_a_mounted_app_carries_the_mount_prefix() -> None:
+    host = FastAPI()
+    host.mount("/sub", a_guarded_catch_all_app())
+
+    location = a_redirect_location(
+        TestClient(host, base_url=HTTPS_TEST_SERVER), "/sub/albums/42",
+    )
+
+    assert location == f"/login?{urlencode({'next': '/sub/albums/42'})}"
 
 
 @pytest.mark.parametrize(

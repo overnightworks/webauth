@@ -174,8 +174,12 @@ most 512 bytes, or `None`; `None` means the host's default page, and the login
 still succeeds. These never come back: a path a browser reads as another host
 (`//x`, `/\x`, tab, CR or LF between the slashes), an absolute URL, a bare
 host, any control character, the empty string, anything over 512 bytes, and,
-under a `root_path`, a path outside it. The fragment is lost, because browsers
-never send it.
+under a `root_path`, a path outside it. A `.` or `..` segment (also as `%2e`)
+is refused too, because a browser resolves it before sending a request. The
+library prepends `root_path` to the address unless the raw path already starts
+with it at a segment boundary, as Starlette's router reads it. A login route
+inside a mounted sub-app is judged against that mount's `root_path`. The
+fragment is lost, because browsers never send it.
 
 #### Opening a session
 

@@ -1190,6 +1190,16 @@ _RETURN_TO_CASES = [
     pytest.param("/app", "/", None, id="the root outside the app"),
     pytest.param("/app", "/other", None, id="another path outside the app"),
     pytest.param("/app", "/application", None, id="a sibling of the app's name"),
+    pytest.param("", "/albums/..x", "/albums/..x", id="dots inside a segment"),
+    pytest.param("", "/albums/x.", "/albums/x.", id="a trailing dot in a segment"),
+    pytest.param("/app", "/app/../other", None, id="a dot-dot segment leaving the app"),
+    pytest.param("/app", "/app/%2e%2e/other", None, id="an encoded dot-dot segment"),
+    pytest.param("/app", "/app/%2E%2e//evil.example", None, id="a mixed-case encoded dot-dot"),
+    pytest.param("/app", "/app/..\\other", None, id="a dot-dot segment before a backslash"),
+    pytest.param("", "/albums/./42", None, id="a dot segment"),
+    pytest.param("", "/albums/.%2e/x", None, id="a half-encoded dot-dot segment"),
+    pytest.param("", "/albums/x/..?next=1", None, id="a dot-dot segment before the query"),
+    pytest.param("", "/albums?back=../x", "/albums?back=../x", id="dots in the query"),
 ]
 
 
