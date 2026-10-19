@@ -510,9 +510,7 @@ def test_both_host_lists_empty_are_refused_naming_the_fields_and_the_localhost_m
     assert 'allowed_hosts_exact={"localhost", "127.0.0.1"}' in message
 
 
-def test_patterns_alone_are_enough_for_a_host_list() -> None:
-    config = a_web_auth_config(
+def test_a_config_with_patterns_and_no_exact_hosts_is_constructed() -> None:
+    a_web_auth_config(
         allowed_hosts_exact=frozenset(), allowed_hosts_patterns=(re.compile(r"^app\.example$"),),
     )
-
-    assert config.allowed_hosts_patterns

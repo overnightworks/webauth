@@ -21,10 +21,10 @@ from webauth_arrangement import (
 
 import webauth
 from webauth.cookies import session_reference
-from webauth.dependencies import AuthenticatedUser
 from webauth.ports import (
     AccountEventKind,
     AuditSink,
+    AuthenticatedUser,
     SessionAdministrationStore,
     WriteLock,
 )

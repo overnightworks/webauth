@@ -668,7 +668,7 @@ A browser sends the session cookie on a cross-site WebSocket handshake too,
 and the webauth middlewares pass WebSocket scopes through untouched.
 `webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
 is the one check a host runs at the handshake. It answers the
-`AuthenticatedUser`, or a `WebSocketRefusal`:
+`webauth.ports.AuthenticatedUser`, or a `WebSocketRefusal`:
 
 | Refusal | Value | When |
 |---|---|---|
@@ -699,7 +699,8 @@ accepts the socket.
 from fastapi import WebSocket
 from starlette.concurrency import run_in_threadpool
 
-from webauth.dependencies import AuthenticatedUser, WebSocketRefusal, authenticate_websocket
+from webauth.dependencies import WebSocketRefusal, authenticate_websocket
+from webauth.ports import AuthenticatedUser
 
 
 @app.websocket("/room")
@@ -756,6 +757,7 @@ Fields a host may leave out:
 | `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | a cookie name that obeys [the cookie-name rule](#the-cookie-name-rule) |
 | `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
 | `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
+| `wall_clock` | `time.time` | a `webauth.ports.WallClock`, seconds since the epoch; the one reading of now behind every HTTP and WebSocket session decision, so a test fixes it |
 | `max_user_agent_chars` | `500` | a positive `int`; zero, a negative number, or a `bool` is refused |
 | `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
 
@@ -879,7 +881,7 @@ The library caches no sessions. Every authenticated request costs one
 refused on its next request, with 401 or the login redirect. Whether a loaded
 session still stands is decided by `WebAuthConfig.session_liveness`, a
 `webauth.ports.SessionLivenessPolicy`, and `webauth.dependencies` alone reads
-the wall clock and passes the instant in. `webauth.liveness` ships two:
+`WebAuthConfig.wall_clock` and passes the instant in. `webauth.liveness` ships two:
 `ExpiryColumnLiveness`, for a store with `created_at`/`expires_at` columns, and
 `IdleWindowLiveness`, for one that keeps `last_seen` (and `created_at` when it
 is given an absolute cap).
@@ -1184,7 +1186,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols: the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
+| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.session_ending` | The one place a session ends in the host's store |

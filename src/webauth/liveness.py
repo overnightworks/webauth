@@ -1,8 +1,9 @@
 """The two liveness policies: an expiry-column store's, and an idle-window store's.
 
-`dependencies` owns the wall clock and passes ``now`` in; nothing here calls
-``datetime.now()``. Each policy reads only the fields its own store keeps — the
-`webauth.ports.SessionLivenessPolicy` port forces neither shape on the other.
+`dependencies` reads the host's ``WebAuthConfig.wall_clock`` and passes ``now``
+in; nothing here calls ``datetime.now()``. Each policy reads only the fields its
+own store keeps — the `webauth.ports.SessionLivenessPolicy` port forces neither
+shape on the other.
 """
 
 from __future__ import annotations

@@ -8,6 +8,7 @@ environment variable, a settings singleton, or the application's own context.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, get_args
 
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from webauth.ports import (
         RateLimitBackend,
         SessionLivenessPolicy,
+        WallClock,
     )
     from webauth.proxies import TrustedProxies
 
@@ -90,6 +92,7 @@ class WebAuthConfig:
     ipv6_budget_prefix: int = DEFAULT_IPV6_BUDGET_PREFIX
     admin_role: str = DEFAULT_ADMIN_ROLE
     user_role: str = DEFAULT_USER_ROLE
+    wall_clock: WallClock = time.time
 
     def __post_init__(self) -> None:
         if len(self.session_secret.get_secret_value()) < MIN_SESSION_SECRET_CHARS:

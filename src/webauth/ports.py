@@ -5,10 +5,15 @@ already owns, so the library needs no schema and no ORM of its own. None of
 them commits: the caller owns the transaction boundary, so a request that
 fails leaves nothing behind that the auth machinery wrote — except the
 rate-limit budget, which counts attempts whether or not the request succeeds.
+
+It also holds the records the library hands out and the clock type the host
+supplies, so a module that needs only those need not import the FastAPI-bound
+`dependencies`.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +26,7 @@ __all__ = [
     "AccountEvent",
     "AccountEventKind",
     "AuditSink",
+    "AuthenticatedUser",
     "RateLimitBackend",
     "SessionAdministrationStore",
     "SessionIdentityChange",
@@ -32,10 +38,24 @@ __all__ = [
     "SubjectUserStore",
     "UserRecord",
     "UsernameTakenError",
+    "WallClock",
     "WriteLock",
 ]
 
 SessionReference = NewType("SessionReference", str)
+
+WallClock = Callable[[], float]
+"""Seconds since the epoch: the host's reading of now."""
+
+
+@dataclass(frozen=True)
+class AuthenticatedUser:
+    """The account behind the current request."""
+
+    id: str
+    username: str
+    role: str
+    is_active: bool
 
 
 class UserRecord(Protocol):
@@ -152,8 +172,8 @@ class SessionRecordStore(Protocol):
         ``TypeError``: answer ``rowcount == 1``, not ``rowcount``.
 
         The store computes its own new expiry from the max age it was built
-        with; the caller passes only ``now``, so no code outside
-        ``dependencies`` reads the clock.
+        with; the caller passes only ``now``, read from the host's
+        ``WebAuthConfig.wall_clock``.
         """
         ...
 
@@ -183,9 +203,9 @@ class SessionAdministrationStore(SessionRecordStore, Protocol):
 class SessionLivenessPolicy[StoredSessionT](Protocol):
     """Whether a session still stands, decided without reading the wall clock.
 
-    ``now`` is passed in by ``dependencies`` — the one place that reads the
-    clock — so a policy is a pure function of a session and that instant. The
-    session loaded from the store is judged whole.
+    ``now`` is passed in by ``dependencies`` from the host's
+    ``WebAuthConfig.wall_clock``, so a policy is a pure function of a session
+    and that instant. The session loaded from the store is judged whole.
     """
 
     def admits_stored_session(self, record: StoredSessionT, now: datetime) -> bool:

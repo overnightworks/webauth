@@ -58,6 +58,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from http import HTTPStatus
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from pydantic import SecretStr
 
@@ -72,9 +73,11 @@ from webauth.jwt_verification import (
     RejectionReason,
     VerificationRefusal,
     VerifiedClaims,
-    WallClock,
     strict_json_object,
 )
+
+if TYPE_CHECKING:
+    from webauth.ports import WallClock
 
 __all__ = [
     "MAX_AUTHORIZATION_CODE_CHARS",

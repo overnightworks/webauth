@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
@@ -15,11 +16,14 @@ from webauth_arrangement import (
     ADMIN_ROLE,
     CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
+    FIXED_INSTANT,
+    FIXED_WALL_CLOCK,
     HTTPS_TEST_SERVER,
     IDLE_WINDOW_SECONDS,
     MEMBER_ROLE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
+    SESSION_MAX_AGE_SECONDS,
     UNAUTHENTICATED_RESPONSE_PATH,
     AuthApp,
     FakeSessionRecord,
@@ -38,6 +42,7 @@ from webauth_arrangement import (
     signed_without_bound,
 )
 
+from webauth import ports
 from webauth.config import install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
@@ -51,12 +56,11 @@ from webauth.dependencies import (
     AUTHENTICATION_REQUIRED_DETAIL,
     INVALID_SESSION_DETAIL,
     SESSION_EXPIRED_DETAIL,
-    AuthenticatedUser,
     LoginRedirect,
     current_user_dependency,
     session_id_from_request,
 )
-from webauth.ports import SessionIdentityChange, SessionIdentityChanged
+from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
 
 A_LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 A_CONFIGURED_LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="return_to")
@@ -299,6 +303,40 @@ def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None
     auth_app.get("/me", cookie=auth_app.signed_cookie())
 
     assert auth_app.sessions.record.expires_at > before
+
+
+def test_a_session_one_second_past_the_configured_clock_is_refused_and_not_renewed() -> None:
+    record = a_session(now=FIXED_INSTANT, remaining=timedelta(seconds=-1))
+    app = an_auth_app(record, wall_clock=FIXED_WALL_CLOCK)
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 401
+    assert record.expires_at == FIXED_INSTANT - timedelta(seconds=1)
+
+
+def test_a_session_a_second_before_expiry_on_the_configured_clock_is_renewed_from_it() -> None:
+    record = a_session(now=FIXED_INSTANT, remaining=timedelta(seconds=1))
+    app = an_auth_app(record, wall_clock=FIXED_WALL_CLOCK)
+
+    response = app.get("/me", cookie=app.signed_cookie())
+
+    assert response.status_code == 200
+    assert record.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
+
+
+@pytest.mark.parametrize(
+    ("module", "name"),
+    [
+        ("webauth.dependencies", "AuthenticatedUser"),
+        ("webauth.jwt_verification", "WallClock"),
+    ],
+)
+def test_a_name_moved_to_ports_is_gone_from_its_old_module(
+    module: str, name: str,
+) -> None:
+    assert hasattr(ports, name)
+    assert not hasattr(importlib.import_module(module), name)
 
 
 def test_a_session_ended_between_load_and_touch_is_refused_without_audit() -> None:
