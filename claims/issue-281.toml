@@ -1,8 +1,0 @@
-claim_id = "af006bd65fca4cd38d7a7e585c893d6b"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "ac77cd8ee2d98f7a655c3be5b8c2207210a7a69e"
-branch = "claude/issue-281-deep-link-survives-login"
-scope = ["CHANGELOG.md", "README.md", "e2e/oidc/README.md", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "src/webauth/_paths.py", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/oidc_login.py", "tests/test_cookies.py", "tests/test_dependencies.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py"]
-opened_commit = "246c8d60aeb49dd5d1b1229b59b295e41d89422b"
-whole_reason = "One contract carried end to end: start writes the path into the pending cookie, finish reads it back, and the one decider guards both ends; split, each half would ship an unusable signature."
