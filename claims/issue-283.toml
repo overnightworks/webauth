@@ -1,0 +1,8 @@
+claim_id = "2cd2bd3f2b6648ad9e8c79a9355be2ad"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "5ad306b28eaa77e0a2e8a479d7977fb8303ce075"
+branch = "claude/issue-283-no-session-wrappers"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/dependencies.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/session_ending.py", "tests/test_oidc_login.py", "tests/test_session_ending.py", "tests/test_websocket_auth.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "87e457c5691fb1faa426b2901c403f88220b519c"
+whole_reason = "One removal of wrapper machinery and one rename that touch the same session-ending call sites and refusal type; split, each half would re-edit the other's hunks."
