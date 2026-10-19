@@ -80,17 +80,17 @@ from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
 from webauth.cookies import (
-    clear_id_token_hint_cookie,
-    clear_pending_login_cookie,
+    _clear_id_token_hint_cookie,
+    _clear_pending_login_cookie,
+    _cookie_pairs,
+    _cookie_values,
+    _id_token_hint_from_request,
+    _is_pending_login_cookie_name,
+    _issue_id_token_hint_cookie,
+    _issue_pending_login_cookie,
+    _pending_login_cookie_name,
+    _verify_pending_login,
     clear_session_cookies,
-    cookie_pairs,
-    cookie_values,
-    id_token_hint_from_request,
-    is_pending_login_cookie_name,
-    issue_id_token_hint_cookie,
-    issue_pending_login_cookie,
-    pending_login_cookie_name,
-    verify_pending_login,
 )
 from webauth.dependencies import session_id_from_request
 from webauth.oidc import (
@@ -229,8 +229,8 @@ def start_login(
     the authorization URL the host redirects the browser to."""
     authorization = relying_party.begin_login()
     for name in _pending_login_cookies_to_evict(request, config):
-        clear_pending_login_cookie(response, name, config)
-    issue_pending_login_cookie(
+        _clear_pending_login_cookie(response, name, config)
+    _issue_pending_login_cookie(
         response,
         authorization.pending,
         max_age_seconds=PENDING_LOGIN_MAX_AGE_SECONDS,
@@ -265,8 +265,8 @@ def finish_login(
     state = callback_state(callback_query)
     if isinstance(state, OidcRefusal):
         return state
-    cookie_name = pending_login_cookie_name(state, secure=config.cookie_secure)
-    clear_pending_login_cookie(response, cookie_name, config)
+    cookie_name = _pending_login_cookie_name(state, secure=config.cookie_secure)
+    _clear_pending_login_cookie(response, cookie_name, config)
     pending = _sole_pending_login(request, cookie_name, config)
     if pending is None:
         return OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
@@ -282,7 +282,7 @@ def finish_login(
         config=config,
     )
     if not isinstance(admitted, AdmissionRefusal):
-        issue_id_token_hint_cookie(
+        _issue_id_token_hint_cookie(
             response,
             identity.id_token,
             logout_path=relying_party.logout_path,
@@ -367,8 +367,8 @@ def log_out(
         with lock.hold():
             end_session(sessions, session_id=session_id)
     clear_session_cookies(response, config)
-    id_token_hint = id_token_hint_from_request(request, config)
-    clear_id_token_hint_cookie(response, logout_path=relying_party.logout_path, config=config)
+    id_token_hint = _id_token_hint_from_request(request, config)
+    _clear_id_token_hint_cookie(response, logout_path=relying_party.logout_path, config=config)
     return relying_party.logout_url(id_token_hint=id_token_hint)
 
 
@@ -404,18 +404,18 @@ def receive_backchannel_logout(
 def _sole_pending_login(
     request: Request, cookie_name: str, config: WebAuthConfig,
 ) -> PendingLogin | None:
-    values = cookie_values(request, cookie_name)
+    values = _cookie_values(request, cookie_name)
     if len(values) != 1:
         return None
-    return verify_pending_login(values[0], config.signing_key)
+    return _verify_pending_login(values[0], config.signing_key)
 
 
 def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> list[str]:
     """The names to clear so the new pending login is one of at most
     ``MAX_PENDING_LOGINS``, oldest first."""
     issued_at_by_name: dict[str, int] = {}
-    for name, value in cookie_pairs(request):
-        if is_pending_login_cookie_name(name, secure=config.cookie_secure):
+    for name, value in _cookie_pairs(request):
+        if _is_pending_login_cookie_name(name, secure=config.cookie_secure):
             issued_at_by_name[name] = (
                 _UNRANKED if name in issued_at_by_name else _issued_at(value, config)
             )
@@ -424,7 +424,7 @@ def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> 
 
 
 def _issued_at(cookie_value: str, config: WebAuthConfig) -> int:
-    pending = verify_pending_login(cookie_value, config.signing_key)
+    pending = _verify_pending_login(cookie_value, config.signing_key)
     return _UNRANKED if pending is None else pending.issued_at
 
 

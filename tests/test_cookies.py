@@ -30,18 +30,18 @@ from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
+    _default_cookie_name,
+    _generate_csrf_token,
+    _is_valid_cookie_name,
+    _issue_id_token_hint_cookie,
+    _pending_login_cookie_name,
+    _sign_pending_login,
+    _verify_csrf_token,
+    _verify_pending_login,
+    _verify_session_cookie,
     clear_session_cookies,
-    default_cookie_name,
-    generate_csrf_token,
-    is_valid_cookie_name,
-    issue_id_token_hint_cookie,
     issue_session_cookies,
-    pending_login_cookie_name,
-    sign_pending_login,
     sign_session_id,
-    verify_csrf_token,
-    verify_pending_login,
-    verify_session_cookie,
 )
 from webauth.dependencies import session_id_from_request
 from webauth.liveness import IdleWindowLiveness
@@ -73,13 +73,13 @@ def test_default_cookie_name_prefixes_any_name_only_when_secure(
     secure: bool,
     expected: str,
 ) -> None:
-    assert default_cookie_name(plain_name, secure=secure) == expected
+    assert _default_cookie_name(plain_name, secure=secure) == expected
 
 
 def test_sign_and_verify_session() -> None:
     signed = sign_session_id("my-session-token", _TEST_SECRET)
     assert "." in signed
-    assert verify_session_cookie(signed, _TEST_SECRET) == "my-session-token"
+    assert _verify_session_cookie(signed, _TEST_SECRET) == "my-session-token"
 
 
 LONGEST_SESSION_ID_THAT_FITS = "i" * (MAX_SESSION_COOKIE_CHARS - len(".") - 64)
@@ -120,7 +120,7 @@ def test_an_id_token_hint_is_kept_up_to_the_bound_and_cleared_beyond_it(
 ) -> None:
     response = Response()
 
-    issue_id_token_hint_cookie(
+    _issue_id_token_hint_cookie(
         response, "A" * length, logout_path="/logout", config=a_web_auth_config(),
     )
 
@@ -136,38 +136,38 @@ def test_an_empty_session_id_is_not_issued() -> None:
 def test_a_cookie_signed_without_the_length_bound_is_accepted_at_normal_length() -> None:
     cookie = signed_without_bound("my-session-token", _TEST_SECRET)
 
-    assert verify_session_cookie(cookie, _TEST_SECRET) == "my-session-token"
+    assert _verify_session_cookie(cookie, _TEST_SECRET) == "my-session-token"
 
 
 def test_verify_rejects_tampered_signature() -> None:
     signed = sign_session_id("my-session-token", _TEST_SECRET)
     tampered = signed[:-4] + "XXXX"
-    assert verify_session_cookie(tampered, _TEST_SECRET) is None
+    assert _verify_session_cookie(tampered, _TEST_SECRET) is None
 
 
 def test_verify_rejects_no_dot() -> None:
-    assert verify_session_cookie("no-dot-here", _TEST_SECRET) is None
+    assert _verify_session_cookie("no-dot-here", _TEST_SECRET) is None
 
 
 def test_verify_rejects_empty_parts() -> None:
-    assert verify_session_cookie(".abc", _TEST_SECRET) is None
-    assert verify_session_cookie("abc.", _TEST_SECRET) is None
+    assert _verify_session_cookie(".abc", _TEST_SECRET) is None
+    assert _verify_session_cookie("abc.", _TEST_SECRET) is None
 
 
 def test_verify_rejects_another_secret() -> None:
     signed = sign_session_id("my-session-token", _TEST_SECRET)
-    assert verify_session_cookie(signed, b"b" * 64) is None
+    assert _verify_session_cookie(signed, b"b" * 64) is None
 
 
 @pytest.mark.parametrize(
     "borrowed_cookie",
     [
         pytest.param(
-            f"csrf:my-session-token.{generate_csrf_token('my-session-token', _TEST_SECRET)}",
+            f"csrf:my-session-token.{_generate_csrf_token('my-session-token', _TEST_SECRET)}",
             id="a CSRF token appended to its signing input",
         ),
         pytest.param(
-            f"oidc-pending:{sign_pending_login(_PENDING, _TEST_SECRET)}",
+            f"oidc-pending:{_sign_pending_login(_PENDING, _TEST_SECRET)}",
             id="a pending-login signature appended to its signing input",
         ),
         pytest.param(
@@ -179,33 +179,33 @@ def test_verify_rejects_another_secret() -> None:
 def test_a_signature_made_for_another_purpose_is_no_session_cookie(
     borrowed_cookie: str,
 ) -> None:
-    assert verify_session_cookie(borrowed_cookie, _TEST_SECRET) is None
+    assert _verify_session_cookie(borrowed_cookie, _TEST_SECRET) is None
 
 
 def test_generate_csrf_token_deterministic() -> None:
-    t1 = generate_csrf_token("session-abc", _TEST_SECRET)
-    t2 = generate_csrf_token("session-abc", _TEST_SECRET)
+    t1 = _generate_csrf_token("session-abc", _TEST_SECRET)
+    t2 = _generate_csrf_token("session-abc", _TEST_SECRET)
     assert t1 == t2
 
 
 def test_generate_csrf_token_differs_per_session() -> None:
-    t1 = generate_csrf_token("session-1", _TEST_SECRET)
-    t2 = generate_csrf_token("session-2", _TEST_SECRET)
+    t1 = _generate_csrf_token("session-1", _TEST_SECRET)
+    t2 = _generate_csrf_token("session-2", _TEST_SECRET)
     assert t1 != t2
 
 
 def test_verify_csrf_token_valid() -> None:
-    token = generate_csrf_token("my-session", _TEST_SECRET)
-    assert verify_csrf_token(token, "my-session", _TEST_SECRET) is True
+    token = _generate_csrf_token("my-session", _TEST_SECRET)
+    assert _verify_csrf_token(token, "my-session", _TEST_SECRET) is True
 
 
 def test_verify_csrf_token_wrong_session() -> None:
-    token = generate_csrf_token("session-a", _TEST_SECRET)
-    assert verify_csrf_token(token, "session-b", _TEST_SECRET) is False
+    token = _generate_csrf_token("session-a", _TEST_SECRET)
+    assert _verify_csrf_token(token, "session-b", _TEST_SECRET) is False
 
 
 def test_verify_csrf_token_forged() -> None:
-    assert verify_csrf_token("forged-token", "session-a", _TEST_SECRET) is False
+    assert _verify_csrf_token("forged-token", "session-a", _TEST_SECRET) is False
 
 
 @pytest.mark.parametrize(
@@ -216,14 +216,14 @@ def test_a_pending_login_cookie_is_named_after_a_digest_of_its_state(
 ) -> None:
     digest = hashlib.sha256(_PENDING.state.encode()).hexdigest()[:16]
 
-    assert pending_login_cookie_name(_PENDING.state, secure=secure) == f"{prefix}{digest}"
+    assert _pending_login_cookie_name(_PENDING.state, secure=secure) == f"{prefix}{digest}"
 
 
 def test_a_signed_pending_login_verifies_to_the_same_pending_login() -> None:
-    signed = sign_pending_login(_PENDING, _TEST_SECRET)
+    signed = _sign_pending_login(_PENDING, _TEST_SECRET)
 
     assert signed.startswith("v1.")
-    assert verify_pending_login(signed, _TEST_SECRET) == _PENDING
+    assert _verify_pending_login(signed, _TEST_SECRET) == _PENDING
 
 
 _MINTED_SECRET = _PENDING.state
@@ -251,7 +251,7 @@ def test_a_pending_login_oidc_cannot_have_begun_is_refused_a_cookie(
     pending = dataclasses.replace(_PENDING, **changes)
 
     with pytest.raises(ValueError, match="does not fit"):
-        sign_pending_login(pending, _TEST_SECRET)
+        _sign_pending_login(pending, _TEST_SECRET)
 
 
 SESSION_ID = "session-1"
@@ -342,7 +342,7 @@ def a_cookie_app(
     @app.get("/session")
     def signed_in_session(request: Request) -> dict[str, str | None]:
         cookie = request.cookies.get(config.session_cookie_name, "")
-        return {"session_id": verify_session_cookie(cookie, config.signing_key)}
+        return {"session_id": _verify_session_cookie(cookie, config.signing_key)}
 
     @app.delete("/session")
     def clear(response: Response) -> dict[str, str]:
@@ -375,7 +375,7 @@ def test_the_issued_cookie_carries_a_session_this_deployment_signed(
     response = cookie_app.issue()
 
     cookie = response.cookies[cookie_app.config.session_cookie_name]
-    assert verify_session_cookie(cookie, cookie_app.config.signing_key) == SESSION_ID
+    assert _verify_session_cookie(cookie, cookie_app.config.signing_key) == SESSION_ID
 
 
 def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
@@ -494,7 +494,7 @@ def test_the_csrf_token_is_readable_by_the_client_and_bound_to_the_session(
     header = cookie_app.set_cookie_header(response, cookie_app.config.csrf_cookie_name)
     assert "HttpOnly" not in header
     token = response.cookies[cookie_app.config.csrf_cookie_name]
-    assert verify_csrf_token(token, SESSION_ID, cookie_app.config.signing_key)
+    assert _verify_csrf_token(token, SESSION_ID, cookie_app.config.signing_key)
 
 
 @pytest.mark.parametrize(("base_url", "peer", "headers"), [
@@ -608,4 +608,4 @@ def test_logging_out_takes_both_cookies_back(cookie_app: CookieApp) -> None:
 def test_a_cookie_name_is_valid_only_when_it_is_an_rfc_6265_token(
     name: str, valid: bool,
 ) -> None:
-    assert is_valid_cookie_name(name) is valid
+    assert _is_valid_cookie_name(name) is valid

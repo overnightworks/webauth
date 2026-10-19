@@ -15,18 +15,18 @@ from typing import TYPE_CHECKING, Final, get_args
 from starlette.requests import HTTPConnection
 
 from webauth.cookies import (
-    DEFAULT_COOKIE_SAMESITE,
+    _DEFAULT_COOKIE_SAMESITE,
+    _DEFAULT_CSRF_HEADER_NAME,
     DEFAULT_CSRF_COOKIE_NAME,
-    DEFAULT_CSRF_HEADER_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
     PLAIN_CSRF_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
     CookieSameSite,
-    default_cookie_name,
-    is_host_only_cookie_name,
-    is_reserved_cookie_name,
-    is_secure_prefixed_cookie_name,
-    is_valid_cookie_name,
+    _default_cookie_name,
+    _is_host_only_cookie_name,
+    _is_reserved_cookie_name,
+    _is_secure_prefixed_cookie_name,
+    _is_valid_cookie_name,
 )
 from webauth.validation import require_positive_whole_number
 
@@ -85,8 +85,8 @@ class WebAuthConfig:
     session_liveness: SessionLivenessPolicy
     session_cookie_name: str = _DefaultCookieName(DEFAULT_SESSION_COOKIE_NAME)
     csrf_cookie_name: str = _DefaultCookieName(DEFAULT_CSRF_COOKIE_NAME)
-    csrf_header_name: str = DEFAULT_CSRF_HEADER_NAME
-    cookie_samesite: CookieSameSite = DEFAULT_COOKIE_SAMESITE
+    csrf_header_name: str = _DEFAULT_CSRF_HEADER_NAME
+    cookie_samesite: CookieSameSite = _DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
     max_user_agent_chars: int = DEFAULT_MAX_USER_AGENT_CHARS
     ipv6_budget_prefix: int = DEFAULT_IPV6_BUDGET_PREFIX
@@ -160,24 +160,24 @@ class WebAuthConfig:
         name = getattr(self, field)
         if isinstance(name, _DefaultCookieName):
             # The dataclass is frozen; resolving a default is part of construction.
-            resolved = default_cookie_name(plain_name, secure=self.cookie_secure)
+            resolved = _default_cookie_name(plain_name, secure=self.cookie_secure)
             object.__setattr__(self, field, _DefaultCookieName(resolved))
         elif not isinstance(name, str):
             raise ValueError(
                 f"{field} must be a cookie name; leave it out for the library's default",
             )
-        elif not is_valid_cookie_name(name):
+        elif not _is_valid_cookie_name(name):
             raise ValueError(
                 f"{field} {name!r} is not a valid cookie name; it must be an RFC 6265 "
                 "token (ASCII letters, digits and !#$%&'*+-.^_`|~)",
             )
-        elif is_reserved_cookie_name(name):
+        elif _is_reserved_cookie_name(name):
             raise ValueError(
                 f"{field} {name!r} is a name webauth's own cookies use; choose "
                 "another, or the browser would send two cookies of that name",
             )
         elif (
-            is_host_only_cookie_name(name) or is_secure_prefixed_cookie_name(name)
+            _is_host_only_cookie_name(name) or _is_secure_prefixed_cookie_name(name)
         ) and not self.cookie_secure:
             raise ValueError(
                 f"{field} {name!r} needs cookie_secure=True; browsers drop a __Host- "

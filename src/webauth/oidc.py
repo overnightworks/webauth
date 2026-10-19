@@ -17,7 +17,7 @@ is verified by a `JwtVerifier` of `webauth.jwt_verification` whose one
 accepted audience is the client ID; its nonce and authorized party are
 checked here, as OpenID Connect Core asks of the relying party.
 
-The state, nonce and verifier are each `PENDING_SECRET_BYTES` random bytes,
+The state, nonce and verifier are each `_PENDING_SECRET_BYTES` random bytes,
 and the received state and nonce are compared in constant time. A pending
 login is stamped with the wall clock when it begins and stands for
 `PENDING_LOGIN_MAX_AGE_SECONDS`; one older than that, or dated in the future,
@@ -63,7 +63,7 @@ from typing import TYPE_CHECKING
 from pydantic import SecretStr
 
 from webauth import WebAuthError
-from webauth.cookies import PENDING_SECRET_BYTES, PendingLogin
+from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.https_client import ExchangeFailure, is_https_url
 from webauth.jwt_verification import (
     JwtVerifier,
@@ -305,9 +305,9 @@ class OidcRelyingParty:
 
     def begin_login(self) -> AuthorizationRequest:
         pending = PendingLogin(
-            state=secrets.token_urlsafe(PENDING_SECRET_BYTES),
-            nonce=secrets.token_urlsafe(PENDING_SECRET_BYTES),
-            code_verifier=secrets.token_urlsafe(PENDING_SECRET_BYTES),
+            state=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
+            nonce=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
+            code_verifier=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             issued_at=int(self._wall_clock()),
         )
         query = urllib.parse.urlencode(

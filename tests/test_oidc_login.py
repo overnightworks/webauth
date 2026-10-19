@@ -67,10 +67,10 @@ from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
+    _pending_login_cookie_name,
+    _pending_login_cookie_prefix,
+    _sign_pending_login,
     issue_session_cookies,
-    pending_login_cookie_name,
-    pending_login_cookie_prefix,
-    sign_pending_login,
     sign_session_id,
 )
 from webauth.dependencies import current_user_dependency
@@ -676,12 +676,12 @@ class OidcHost:
         return self.client.get(f"{CALLBACK_PATH}?{query}", headers=headers)
 
     def pending_cookie_names(self) -> set[str]:
-        prefix = pending_login_cookie_prefix(secure=self.config.cookie_secure)
+        prefix = _pending_login_cookie_prefix(secure=self.config.cookie_secure)
         return {name for name in self.client.cookies if name.startswith(prefix)}
 
     def pending_cookie_name(self, query: str) -> str:
         [state] = urllib.parse.parse_qs(query)["state"]
-        return pending_login_cookie_name(state, secure=self.config.cookie_secure)
+        return _pending_login_cookie_name(state, secure=self.config.cookie_secure)
 
     def pending_cookie(self, query: str) -> str:
         """The ``name=value`` the browser holds for the login of ``query``."""
@@ -1211,7 +1211,7 @@ def _forged(host: OidcHost, query: str, issued_at: int, *, secret: bytes | None 
         code_verifier=secrets.token_urlsafe(32),
         issued_at=issued_at,
     )
-    value = sign_pending_login(pending, secret or host.config.signing_key)
+    value = _sign_pending_login(pending, secret or host.config.signing_key)
     return f"{host.pending_cookie_name(query)}={value}"
 
 
@@ -1341,7 +1341,7 @@ def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_sess
 
 
 def _a_forged_pending_cookie(host: OidcHost) -> str:
-    name = f"{pending_login_cookie_prefix(secure=True)}{'f' * 16}"
+    name = f"{_pending_login_cookie_prefix(secure=True)}{'f' * 16}"
     host.client.cookies.set(name, "v1.forged", domain="testserver.local", path="/")
     return name
 
@@ -1374,7 +1374,7 @@ def test_a_start_at_the_cap_evicts_an_unranked_pending_cookie_before_any_genuine
 def test_a_start_at_the_cap_leaves_a_prefixed_cookie_of_another_shape_alone() -> None:
     host = an_oidc_host()
     genuine = {host.pending_cookie_name(host.sign_in_at_issuer()) for _ in range(4)}
-    stranger = f"{pending_login_cookie_prefix(secure=True)}a@b"
+    stranger = f"{_pending_login_cookie_prefix(secure=True)}a@b"
     host.client.cookies.set(stranger, "x", domain="testserver.local", path="/")
 
     response = host.client.get("/login/oidc")

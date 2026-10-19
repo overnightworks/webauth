@@ -25,9 +25,9 @@ from webauth._origins import origin_is_allowed
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
-    cookie_values,
+    _cookie_values,
+    _verify_session_cookie,
     session_reference,
-    verify_session_cookie,
 )
 from webauth.ports import (
     AuditSink,
@@ -284,12 +284,12 @@ def _session_id_from_cookie(
 def _read_session_cookie(
     connection: HTTPConnection, config: WebAuthConfig,
 ) -> str | WebSocketRefusal:
-    values = cookie_values(connection, config.session_cookie_name)
+    values = _cookie_values(connection, config.session_cookie_name)
     if len(values) > 1:
         return WebSocketRefusal.INVALID_SESSION
     if not values or not values[0] or len(values[0]) > MAX_SESSION_COOKIE_CHARS:
         return WebSocketRefusal.NO_SESSION
-    session_id = verify_session_cookie(values[0], config.signing_key)
+    session_id = _verify_session_cookie(values[0], config.signing_key)
     return WebSocketRefusal.INVALID_SESSION if session_id is None else session_id
 
 

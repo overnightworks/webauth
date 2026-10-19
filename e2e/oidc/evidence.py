@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
-from webauth.cookies import is_pending_login_cookie_name, pending_login_cookie_prefix
+from webauth.cookies import _is_pending_login_cookie_name, _pending_login_cookie_prefix
 
 MIN_REGISTERED_VALUE_CHARS = 8
 KEPT_HEADER_VALUES = frozenset({
@@ -148,8 +148,8 @@ def sanitized_url(url: str) -> tuple[str, list[str]]:
 def recorded_cookie_name(name: str) -> str:
     """A pending-login cookie's name ends in a digest of the login's state;
     the log keeps the shape only."""
-    if is_pending_login_cookie_name(name, secure=True):
-        return f"{pending_login_cookie_prefix(secure=True)}*"
+    if _is_pending_login_cookie_name(name, secure=True):
+        return f"{_pending_login_cookie_prefix(secure=True)}*"
     return name
 
 

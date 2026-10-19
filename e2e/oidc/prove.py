@@ -76,9 +76,9 @@ from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
     MAX_ID_TOKEN_HINT_CHARS,
     CookieSameSite,
-    id_token_hint_cookie_name,
-    is_pending_login_cookie_name,
-    verify_pending_login,
+    _id_token_hint_cookie_name,
+    _is_pending_login_cookie_name,
+    _verify_pending_login,
 )
 
 SHIPPED_COOKIE_SAMESITE = cast(
@@ -112,7 +112,7 @@ ADMIN_GROUP = f"{USER_GROUP}/admin"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
 KEYCLOAK_BAD_HINT_MESSAGE = "Invalid parameter: id_token_hint"
 KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
-ID_TOKEN_HINT_COOKIE_NAME = id_token_hint_cookie_name(secure=True)
+ID_TOKEN_HINT_COOKIE_NAME = _id_token_hint_cookie_name(secure=True)
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
 CALLBACK_WAIT_SECONDS = 15
 CALLBACK_POLL_SECONDS = 0.2
@@ -258,7 +258,7 @@ class Proof(RunRecord):
     def register_pending_logins(self, context: BrowserContext) -> None:
         for cookie in context.cookies():
             name, value = cookie_name_and_value(cookie)
-            if is_pending_login_cookie_name(name, secure=True):
+            if _is_pending_login_cookie_name(name, secure=True):
                 self._register_pending_login(value)
 
     def capture_cookies(self, context: BrowserContext) -> None:
@@ -270,7 +270,7 @@ class Proof(RunRecord):
             (
                 verified
                 for secret in (self.session_secret, *self.app_session_secrets)
-                if (verified := verify_pending_login(cookie_value, secret.encode()))
+                if (verified := _verify_pending_login(cookie_value, secret.encode()))
             ),
             None,
         )
@@ -558,7 +558,7 @@ def session_cookie_after_redirect(
         callback = next(r for r in requests if r.url.startswith(f"{origin}{CALLBACK_PATH}"))
         landing = next(r for r in requests if r.redirected_from is callback)
         assert any(
-            is_pending_login_cookie_name(name, secure=True)
+            _is_pending_login_cookie_name(name, secure=True)
             for name in cookie_names(callback.headers_array())
         ), "the callback carried no pending-login cookie; request cookies are not measured"
         names = [recorded_cookie_name(name) for name in cookie_names(landing.headers_array())]

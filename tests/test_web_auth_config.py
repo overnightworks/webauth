@@ -30,8 +30,8 @@ from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
     PLAIN_CSRF_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
-    id_token_hint_cookie_name,
-    pending_login_cookie_name,
+    _id_token_hint_cookie_name,
+    _pending_login_cookie_name,
 )
 from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 
@@ -244,10 +244,10 @@ def test_a_cookie_name_that_is_not_an_rfc_6265_token_is_refused_naming_its_field
 
 
 RESERVED_COOKIE_NAMES = [
-    pytest.param(id_token_hint_cookie_name(secure=True), id="secure id token hint"),
-    pytest.param(id_token_hint_cookie_name(secure=False), id="plain id token hint"),
-    pytest.param(pending_login_cookie_name("state", secure=True), id="secure pending login"),
-    pytest.param(pending_login_cookie_name("state", secure=False), id="plain pending login"),
+    pytest.param(_id_token_hint_cookie_name(secure=True), id="secure id token hint"),
+    pytest.param(_id_token_hint_cookie_name(secure=False), id="plain id token hint"),
+    pytest.param(_pending_login_cookie_name("state", secure=True), id="secure pending login"),
+    pytest.param(_pending_login_cookie_name("state", secure=False), id="plain pending login"),
     pytest.param("__Host-oidc_pending_", id="secure pending prefix alone"),
     pytest.param("oidc_pending_anything", id="plain pending prefix"),
 ]
