@@ -1,8 +1,0 @@
-claim_id = "713870588fa3422abe14f238d6f4f148"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "c4dff33c2eb8b37ccd5bfead6dbf0e4c1b97be6e"
-branch = "claude/issue-268-private-names-rest"
-scope = ["AGENTS.md", "CHANGELOG.md", "README.md", "e2e/oidc/conformance.py", "src/webauth/_validation.py", "src/webauth/config.py", "src/webauth/dependencies.py", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "src/webauth/liveness.py", "src/webauth/middleware/rate_limit.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/oidc_transport.py", "src/webauth/policies.py", "src/webauth/proxies.py", "src/webauth/rate_limit.py", "src/webauth/session_administration.py", "src/webauth/validation.py", "tests/test_https_client.py", "tests/test_proxies.py", "tests/test_public_api.py"]
-opened_commit = "b6df01306236763e2dd5975e7d915afb5ed43f06"
-whole_reason = "G-a can only land when every rename it judges is done; splitting the renames further adds landings without making any one smaller to review."
