@@ -63,6 +63,7 @@ from playwright.sync_api import (
     Cookie,
     Page,
     Playwright,
+    Request,
     Response,
     Route,
     sync_playwright,
@@ -529,7 +530,7 @@ def pages_fit_the_window(proof: Proof, width: Width) -> str:
     )
 
 
-def raw_header(request: Any, name: str) -> str:
+def raw_header(request: Request, name: str) -> str:
     return next(
         (h["value"] for h in request.headers_array() if h["name"].lower() == name), "(none)"
     )
@@ -654,7 +655,9 @@ def hint_cookie_stays_at_the_logout_path(proof: Proof, width: Width) -> str:
         attributes = (
             hint.get("path"), hint.get("httpOnly"), hint.get("secure"), hint.get("sameSite")
         )
-        assert attributes == (LOGOUT_PATH, True, True, "Strict"), f"the hint is stored as {hint}"
+        assert attributes == (LOGOUT_PATH, True, True, "Strict"), (
+            f"the hint is stored as {attributes}"
+        )
         assert hint.get("expires", 0) > time.time(), "the hint is a session cookie or expired"
         ordinary = [
             cookie_names(r.headers_array()) for r in requests
@@ -1386,6 +1389,7 @@ def logout_from_a_page_of_another_site_is_refused(proof: Proof, width: Width) ->
 def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width) -> str:
     scenario = f"23-{width.label}"
     app_a, app_b = proof.apps
+    proof.log_out_user_everywhere(proof.user_id)
     app_a.reset()
     app_b.reset()
     with proof.browsing(width) as page_a:
@@ -1419,7 +1423,7 @@ def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width)
     return (
         "A's session was ended through Keycloak's admin logout (A's hint cookie stayed), a sign-in "
         "to B opened a second Keycloak session, and A's logout, sending the first session's ID "
-        f"token (hint ending ...{sent_hint[-8:]}), led to Keycloak's confirmation page; after "
+        "token (asserted in the end-session request), led to Keycloak's confirmation page; after "
         "confirming, Keycloak called B back and B says Signed out"
     )
 
