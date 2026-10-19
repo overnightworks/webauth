@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 
 import pytest
 from webauth_arrangement import (
@@ -74,6 +74,49 @@ def test_the_expiry_column_policy_admits_a_stored_session_within_both_limits(
     record = _ExpiryRecord(created_at=now - age, expires_at=now + idle_offset)
 
     assert EXPIRY_POLICY.admits_stored_session(record, now) is admitted
+
+
+@pytest.mark.parametrize(
+    "stored_zone",
+    [
+        pytest.param(None, id="naive, read as UTC"),
+        pytest.param(timezone(timedelta(hours=2)), id="+02:00"),
+        pytest.param(timezone(timedelta(hours=-5)), id="-05:00"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("expires_in", "age", "admitted"),
+    [
+        pytest.param(timedelta(0), timedelta(minutes=5), True, id="at the expiry instant"),
+        pytest.param(-timedelta(seconds=1), timedelta(minutes=5), False, id="just past expiry"),
+        pytest.param(
+            timedelta(minutes=30),
+            timedelta(seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS),
+            True,
+            id="at the absolute cap",
+        ),
+        pytest.param(
+            timedelta(minutes=30),
+            timedelta(seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS + 1),
+            False,
+            id="just past the absolute cap",
+        ),
+    ],
+)
+def test_the_expiry_column_policy_compares_a_stored_timestamp_as_the_instant_it_names(
+    stored_zone: tzinfo | None, expires_in: timedelta, age: timedelta, admitted: bool,
+) -> None:
+    def stored(instant: datetime) -> datetime:
+        if stored_zone is None:
+            return instant.replace(tzinfo=None)
+        return instant.astimezone(stored_zone)
+
+    record = _ExpiryRecord(
+        created_at=stored(A_TIME_FAR_FROM_REAL_NOW - age),
+        expires_at=stored(A_TIME_FAR_FROM_REAL_NOW + expires_in),
+    )
+
+    assert EXPIRY_POLICY.admits_stored_session(record, A_TIME_FAR_FROM_REAL_NOW) is admitted
 
 
 def test_the_expiry_column_policy_follows_the_injected_clock_not_the_real_one() -> None:

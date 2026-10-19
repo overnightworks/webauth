@@ -66,6 +66,10 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - A keyword source added to a Content-Security-Policy (`'SELF'`) is lowercased,
   so it no longer repeats the default `'self'`. Host sources, paths, nonces and
   hashes keep their case.
+- `ExpiryColumnLiveness` compares a stored `expires_at` or `created_at` that
+  carries a UTC offset as the instant it names, so a session whose timestamp
+  came back as `14:00+02:00` is no longer admitted two hours past its expiry.
+  A timestamp without an offset is still read as UTC.
 
 **Changed**
 

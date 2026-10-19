@@ -35,7 +35,8 @@ class ExpiryColumnLiveness:
     """A stored row carrying ``created_at`` and ``expires_at``.
 
     Idle expiry is the ``expires_at`` column; the absolute cap is measured from
-    ``created_at``. A stored row is read as UTC unconditionally.
+    ``created_at``. A timestamp with a UTC offset is compared as the instant it
+    names; one without an offset is read as UTC.
     """
 
     def __init__(self, absolute_max_age_seconds: int) -> None:
@@ -45,10 +46,10 @@ class ExpiryColumnLiveness:
         self._absolute_max_age_seconds = absolute_max_age_seconds
 
     def admits_stored_session(self, record: _ExpiryColumnRecord, now: datetime) -> bool:
-        if record.expires_at.replace(tzinfo=UTC) < now:
+        if _as_utc(record.expires_at) < now:
             return False
         return _within_absolute_cap(
-            record.created_at.replace(tzinfo=UTC), now, self._absolute_max_age_seconds,
+            _as_utc(record.created_at), now, self._absolute_max_age_seconds,
         )
 
 
@@ -109,6 +110,12 @@ def _created_at_of_capped(record: _IdleWindowRecord) -> datetime:
             "timezone-aware created_at; a naive one cannot be measured against now",
         )
     return created_at
+
+
+def _as_utc(stored: datetime) -> datetime:
+    if stored.utcoffset() is None:
+        return stored.replace(tzinfo=UTC)
+    return stored.astimezone(UTC)
 
 
 def _within_absolute_cap(
