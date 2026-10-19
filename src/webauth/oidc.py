@@ -41,8 +41,6 @@ caller has one, the `id_token_hint` of the login being ended. With the hint
 the issuer ends the session without asking the person to confirm; without it
 the issuer asks. The hint is only passed along, never decoded or verified
 here, and no target is taken from a request. It makes no outbound call.
-
-Install the `jwt` extra to use this module.
 """
 
 from __future__ import annotations

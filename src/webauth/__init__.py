@@ -1,4 +1,4 @@
-"""Authentication machinery a FastAPI application should not rebuild.
+"""OpenID Connect login for FastAPI applications, with sessions, CSRF and rate limits.
 
 Owns sessions the store decides on every request, HMAC-signed cookies, CSRF, admin
 checks, rate limits, and the audit events they raise, all through the host

@@ -35,7 +35,7 @@ The cap is 900 s (`timeout 900`). The full run measured 136 s and 153 s wall tim
 (19.10.2026, load 3 to 4), so the cap leaves a factor of about 6 of room.
 
     flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
-        uv run --extra dev --group e2e python e2e/oidc/prove.py \
+        uv run --group dev --group e2e python e2e/oidc/prove.py \
         --edge ~/git/edge --scratch EMPTY_DIR
 
 Stopping it: send SIGTERM to `timeout` or to the `prove.py` python process.
@@ -315,7 +315,7 @@ Pull the images first, outside the lock:
 Then, with the 1-minute load average at or below 18:
 
     flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
-        uv run --extra dev --group e2e python e2e/oidc/conformance.py --scratch EMPTY_DIR
+        uv run --group dev --group e2e python e2e/oidc/conformance.py --scratch EMPTY_DIR
 
 Stopping works as above (SIGTERM to `timeout` or to the python process; exit
 status 1). On every exit path the suite project is taken down with its volumes

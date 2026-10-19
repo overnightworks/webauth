@@ -14,7 +14,7 @@ The host's store is bound to one issuer — the ``issuer`` of its
 ``OidcClientConfig`` — and an account it provisions has the issuer's subject
 as its ``id``. Moving to another issuer is therefore a migration of the
 host's accounts, never a configuration change. This module builds on
-``webauth.oidc``, so a host using it installs the ``jwt`` extra.
+``webauth.oidc``.
 
 Admission holds the host's write lock and never commits: the host commits or
 rolls back, and a refusal writes nothing. An ``AdmissionConfig`` states who

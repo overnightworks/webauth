@@ -17,8 +17,7 @@ forbidden_modules =
 
 # The JWT verifier is reached only through the OpenID Connect relying party,
 # the cryptographic stack only through the verifier, and urllib3 only through
-# the one HTTPS client, so the `jwt` extra stays one narrow edge a
-# host that does not sign in through OpenID Connect never imports, and every
+# the one HTTPS client, so each of them has one owner, and every
 # outbound request holds one bounded posture.
 [importlinter:contract:only-oidc-imports-jwt-verification]
 name = only webauth.oidc imports webauth.jwt_verification
