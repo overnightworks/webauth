@@ -80,6 +80,14 @@ def _mentions_all(statement: ast.stmt) -> bool:
     return any(isinstance(node, ast.Name) and node.id == "__all__" for node in ast.walk(statement))
 
 
+def _is_type_checking_guard(statement: ast.If) -> bool:
+    test = statement.test
+    return not statement.orelse and (
+        (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING")
+        or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING")
+    )
+
+
 def _is_literal_all_assignment(statement: ast.stmt) -> bool:
     if isinstance(statement, ast.AnnAssign):
         return isinstance(statement.target, ast.Name) and isinstance(statement.value, ast.List)
@@ -99,6 +107,7 @@ class ModuleSurface:
     imported_from: dict[str, str]
     redundant_reexports: dict[str, int]
     irregular_all_lines: tuple[int, ...]
+    unreadable_lines: tuple[int, ...]
 
 
 @functools.cache
@@ -111,6 +120,7 @@ def _surface_of(dotted_name: str) -> ModuleSurface:
     imported: dict[str, str] = {}
     redundant: dict[str, int] = {}
     irregular_all_lines: list[int] = []
+    unreadable_lines: list[int] = []
     all_declared = False
     for statement in ast.parse(file.read_text()).body:
         if _mentions_all(statement):
@@ -131,18 +141,32 @@ def _surface_of(dotted_name: str) -> ModuleSurface:
                 assigned = (
                     statement.targets if isinstance(statement, ast.Assign) else [statement.target]
                 )
-                for target in (t for t in assigned if isinstance(t, ast.Name)):
-                    values[target.id] = statement.lineno
+                for target in assigned:
+                    for node in ast.walk(target):
+                        if isinstance(node, ast.Name):
+                            values[node.id] = statement.lineno
             case ast.Import() | ast.ImportFrom():
                 imported.update(_imported_names(statement))
                 redundant.update(_redundant_reexports(statement))
-            case ast.If():
+            case ast.If() if _is_type_checking_guard(statement):
                 for inner in statement.body:
                     if isinstance(inner, ast.Import | ast.ImportFrom):
                         imported.update(_imported_names(inner))
                         redundant.update(_redundant_reexports(inner))
+            case ast.Expr():
+                pass
+            case _:
+                unreadable_lines.append(statement.lineno)
+    if not all_declared:
+        irregular_all_lines.append(1)
     return ModuleSurface(
-        public, callables, values, imported, redundant, tuple(irregular_all_lines),
+        public,
+        callables,
+        values,
+        imported,
+        redundant,
+        tuple(irregular_all_lines),
+        tuple(unreadable_lines),
     )
 
 
@@ -184,6 +208,20 @@ def test_every_module_declares_all_as_one_literal_assignment(module_name: str) -
         f"{_relative_id(file)}:{line}: {module_name}.__all__: "
         "must be one literal assignment, never extended or built"
         for line in _surface_of(module_name).irregular_all_lines
+    ]
+
+    assert offences == []
+
+
+@pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
+def test_every_module_level_statement_is_one_the_surface_guards_can_read(
+    module_name: str,
+) -> None:
+    file = _module_file(module_name)
+    assert file is not None
+    offences = [
+        f"{_relative_id(file)}:{line}: a module-level statement the guard cannot read"
+        for line in _surface_of(module_name).unreadable_lines
     ]
 
     assert offences == []
@@ -295,11 +333,6 @@ def test_a_test_takes_only_public_names_and_functions_or_classes_a_module_define
 def test_a_typing_host_takes_only_public_names(host: Path) -> None:
     assert _names_taken_from_webauth(host)
     assert _offences_of(host, only_public=True) == []
-
-
-@pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
-def test_every_module_declares_its_public_names(module_name: str) -> None:
-    assert isinstance(getattr(importlib.import_module(module_name), "__all__", None), list)
 
 
 @pytest.mark.parametrize(
