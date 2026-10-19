@@ -21,6 +21,7 @@ MAX_RETURN_PATH_BYTES: Final = 512
 _BROWSER_STRIPPED_CHARACTERS = str.maketrans("", "", "\t\r\n")
 _ANOTHER_HOST_PREFIXES = ("//", "/\\", "\\/", "\\\\")
 _CONTROL_CHARACTER: Final = re.compile(r"[\x00-\x1f\x7f]")
+_FRAGMENT_MARK: Final = "#"
 _ALREADY_ASCII_SAFE: Final = "".join(chr(code) for code in range(0x21, 0x7F))
 _PATH_ENDS: Final = ("/", "?")
 _SEGMENT_SEPARATORS: Final = re.compile(r"[/\\]")
@@ -43,10 +44,14 @@ def same_app_path(connection: HTTPConnection, candidate: str | None) -> str | No
     mounted sub-app judges against that mount's ``root_path``. Non-ASCII
     characters are percent-encoded; the cap on length applies to that encoded
     form. A browser resolves ``.`` and ``..`` segments before it sends a
-    request, so a path carrying one is not a deep link and is refused.
+    request, so a path carrying one is not a deep link and is refused; so is a
+    literal ``#``, which a browser reads as the start of a fragment before it
+    resolves those segments and which a request never carries.
     """
     root_path = connection.scope.get("root_path", "")
     if not candidate or not candidate.startswith("/") or _CONTROL_CHARACTER.search(candidate):
+        return None
+    if _FRAGMENT_MARK in candidate:
         return None
     if reads_as_another_host(candidate) or not _is_under(root_path, candidate):
         return None

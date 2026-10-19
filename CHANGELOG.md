@@ -31,7 +31,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   kept in the pending-login cookie, now `v2.` with a base64url return-path field
   and at most 896 characters, and judged again at the callback; a value that is not
   a same-origin ASCII path of at most 512 bytes under `root_path` and free of `.`/`..`
-  segments comes back as `None`; `root_path` is prepended unless the raw path
+  segments or a literal `#` comes back as `None`; `root_path` is prepended unless the raw path
   already starts with it at a segment boundary. A login in flight at the upgrade carries a `v1.` cookie and fails once
   with `STATE_MISMATCH`. `LoginRedirect` now carries the raw, percent-encoded path
   instead of the decoded one. Migration: pass `return_to` from your login route's

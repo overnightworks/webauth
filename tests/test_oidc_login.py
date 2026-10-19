@@ -1200,6 +1200,10 @@ _RETURN_TO_CASES = [
     pytest.param("", "/albums/.%2e/x", None, id="a half-encoded dot-dot segment"),
     pytest.param("", "/albums/x/..?next=1", None, id="a dot-dot segment before the query"),
     pytest.param("", "/albums?back=../x", "/albums?back=../x", id="dots in the query"),
+    pytest.param("/app", "/app/..#x", None, id="a dot-dot segment before a fragment mark"),
+    pytest.param("/app", "/app/%2E%2E#x", None, id="an encoded dot-dot before a fragment mark"),
+    pytest.param("", "/albums/42#top", None, id="a literal fragment mark"),
+    pytest.param("", "/albums/42?q=%23x", "/albums/42?q=%23x", id="an encoded fragment mark"),
 ]
 
 
@@ -1223,14 +1227,17 @@ def test_a_login_started_without_a_return_path_lands_on_the_default_page() -> No
     assert host.returned_to == [None]
 
 
-def test_a_return_path_signed_by_another_build_is_judged_again_at_the_callback() -> None:
+@pytest.mark.parametrize("signed", ["//evil.example", "/albums/42#top"])
+def test_a_return_path_signed_by_another_build_is_judged_again_at_the_callback(
+    signed: str,
+) -> None:
     host = an_oidc_host()
     query = host.sign_in_at_issuer()
     name = host.pending_cookie_name(query)
     pending = _verify_pending_login(host.client.cookies[name], host.config.signing_key)
     assert pending is not None
     resigned = _sign_pending_login(
-        replace(pending, return_to="//evil.example"), host.config.signing_key,
+        replace(pending, return_to=signed), host.config.signing_key,
     )
 
     response = host.callback(query, cookie=f"{name}={resigned}")
