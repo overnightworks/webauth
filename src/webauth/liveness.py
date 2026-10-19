@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC
 from typing import TYPE_CHECKING, Protocol
 
-from webauth.validation import require_positive_whole_number
+from webauth._validation import require_positive_whole_number
 
 if TYPE_CHECKING:
     from datetime import datetime

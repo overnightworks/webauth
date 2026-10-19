@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Final, get_args
 
 from starlette.requests import HTTPConnection
 
+from webauth._validation import require_positive_whole_number
 from webauth.cookies import (
     _DEFAULT_COOKIE_SAMESITE,
     _DEFAULT_CSRF_HEADER_NAME,
@@ -28,7 +29,6 @@ from webauth.cookies import (
     _is_secure_prefixed_cookie_name,
     _is_valid_cookie_name,
 )
-from webauth.validation import require_positive_whole_number
 
 if TYPE_CHECKING:
     import re

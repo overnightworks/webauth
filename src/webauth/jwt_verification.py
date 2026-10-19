@@ -59,12 +59,12 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
 
+from webauth._validation import _is_whole_number, require_non_negative_whole_number
 from webauth.https_client import (
     MAX_KEY_SET_BYTES,
     KeySetFetchError,
     is_https_url,
 )
-from webauth.validation import _is_whole_number, require_non_negative_whole_number
 
 if TYPE_CHECKING:
     from webauth.ports import WallClock

@@ -79,6 +79,7 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
+from webauth._validation import require_positive_whole_number
 from webauth.cookies import (
     _clear_id_token_hint_cookie,
     _clear_pending_login_cookie,
@@ -102,7 +103,6 @@ from webauth.oidc import (
 from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 from webauth.proxies import client_user_agent, resolve_client_ip
 from webauth.session_ending import end_session, end_user_sessions, prune_sessions
-from webauth.validation import require_positive_whole_number
 
 if TYPE_CHECKING:
     from datetime import datetime
