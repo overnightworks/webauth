@@ -6,6 +6,20 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.17.0 - Unreleased
+
+**Added**
+
+- `webauth.oidc_login.open_session(request, config, account, *, sessions, lock,
+  expires_at, max_sessions)` opens an admitted account's session in one call
+  under the host's lock: it ends the session the request's verified cookie
+  names, creates the new one, and with a cap ends the account's oldest sessions
+  last. `max_sessions` is required (`None` states no cap) and must otherwise be
+  a positive whole number. It raises `RuntimeError`, so the host rolls back, when
+  the store returns the replaced session's id or `prune_overflow` would end the
+  new session. It never commits and sets no cookie: the host commits, then
+  issues the cookies.
+
 ## 0.16.0
 
 **Breaking**

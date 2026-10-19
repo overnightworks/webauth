@@ -51,22 +51,27 @@ from webauth_arrangement import (
     FakeUser,
     RecordingAuditSink,
     SessionRecordsInMemory,
+    SessionsReusingEndedIds,
     UsersInMemory,
     UsersWithCaseInsensitiveUsernames,
     WriteLockInMemory,
     _require_held_lock,
     a_web_auth_config,
+    an_http_scope,
+    session_cookie_header,
     signed_without_bound,
 )
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     MAX_PENDING_LOGIN_COOKIE_CHARS,
+    MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
     issue_session_cookies,
     pending_login_cookie_name,
     pending_login_cookie_prefix,
     sign_pending_login,
+    sign_session_id,
 )
 from webauth.dependencies import AuthenticatedUser, current_user_dependency
 from webauth.middleware import install_web_auth_middleware
@@ -87,6 +92,7 @@ from webauth.oidc_login import (
     admit_identity,
     finish_login,
     log_out,
+    open_session,
     receive_backchannel_logout,
     start_login,
 )
@@ -100,7 +106,7 @@ from webauth.policies import (
     RateLimitPolicy,
     SecurityHeadersPolicy,
 )
-from webauth.ports import AccountEventKind, SubjectUserStore, UserRecord
+from webauth.ports import AccountEventKind, SessionRecord, SubjectUserStore, UserRecord
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
@@ -624,8 +630,11 @@ class CountingWriteLock(WriteLockInMemory):
     @contextmanager
     def hold(self) -> Iterator[None]:
         self.times_taken += 1
-        with super().hold():
+        with self.hold_uncounted():
             yield
+
+    def hold_uncounted(self) -> AbstractContextManager[None]:
+        return super().hold()
 
 
 @dataclass
@@ -755,16 +764,6 @@ def an_oidc_host(
         on_authenticated=authenticated.append,
     )
 
-    def open_session(account: UserRecord, response: Response) -> dict[str, str]:
-        record = sessions.create(
-            account.id,
-            datetime.now(UTC) + timedelta(seconds=sessions.max_age_seconds),
-            ip_address=CLIENT_ADDRESS,
-            user_agent=CLIENT_USER_AGENT,
-        )
-        issue_session_cookies(response, record.id, config)
-        return {"username": account.username}
-
     backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
     app = FastAPI()
     install_web_auth_config(app, config)
@@ -806,7 +805,15 @@ def an_oidc_host(
         if isinstance(outcome, AdmissionRefusal):
             response.status_code = 403
             return {"refusal": outcome.value}
-        return open_session(outcome, response)
+        with sessions.transaction():
+            session = open_session(
+                request, config, outcome,
+                sessions=sessions, lock=lock,
+                expires_at=datetime.now(UTC) + timedelta(seconds=sessions.max_age_seconds),
+                max_sessions=None,
+            )
+        issue_session_cookies(response, session.id, config)
+        return {"username": outcome.username}
 
     @app.post(FORM_LOGOUT_PATH)
     def form_logout(request: Request) -> Response:
@@ -1125,6 +1132,7 @@ def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
     assert host.client.get("/admin").status_code == status_before
 
     groups[:] = after
+    host.client.cookies.clear()
     host.callback(host.sign_in_at_issuer())
     host.client.cookies.clear()
     host.client.cookies.set(host.config.session_cookie_name, session_cookie)
@@ -1292,7 +1300,9 @@ def test_a_concurrent_replay_of_one_callback_signs_in_exactly_once() -> None:
 
 
 @pytest.mark.parametrize("second_returns_first", [False, True], ids=["in order", "reversed"])
-def test_two_tabs_both_sign_in_whichever_returns_first(*, second_returns_first: bool) -> None:
+def test_two_tabs_both_sign_in_and_the_later_session_replaces_the_earlier(
+    *, second_returns_first: bool,
+) -> None:
     host = an_oidc_host()
     tabs = [host.sign_in_at_issuer(), host.sign_in_at_issuer()]
     if second_returns_first:
@@ -1302,7 +1312,7 @@ def test_two_tabs_both_sign_in_whichever_returns_first(*, second_returns_first: 
 
     assert first.json() == {"username": "lena"}
     assert second.json() == {"username": "lena"}
-    assert host.sessions.count_active() == 2
+    assert host.sessions.count_active() == 1
     assert host.pending_cookie_names() == set()
 
 
@@ -1663,12 +1673,13 @@ def a_host_with_sessions(
 
 def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
     for _ in range(count):
-        host.sessions.create(
-            user_id,
-            datetime.now(UTC) + timedelta(seconds=host.sessions.max_age_seconds),
-            ip_address=CLIENT_ADDRESS,
-            user_agent=CLIENT_USER_AGENT,
-        )
+        with host.lock.hold_uncounted():
+            host.sessions.create(
+                user_id,
+                datetime.now(UTC) + timedelta(seconds=host.sessions.max_age_seconds),
+                ip_address=CLIENT_ADDRESS,
+                user_agent=CLIENT_USER_AGENT,
+            )
 
 
 def sessions_of(host: OidcHost, user_id: str) -> int:
@@ -1964,3 +1975,221 @@ def test_the_callback_needs_neither_an_origin_nor_a_cookie() -> None:
     response = post_logout_token(host, a_logout_token_of_the_issuer())
 
     assert (response.status_code, "origin" in response.request.headers) == (200, False)
+
+
+ACCOUNT = FakeUser(id=SUBJECT, username="lena")
+BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
+FIRST_EXPIRY = datetime(2030, 1, 1, tzinfo=UTC)
+LATER_EXPIRY = FIRST_EXPIRY + timedelta(days=1)
+OPENING_CONFIG = a_web_auth_config()
+
+
+class StoreDown(Exception):
+    pass
+
+
+@dataclass
+class OpeningStore:
+    """Sessions of ``ACCOUNT`` and ``BYSTANDER`` the way a host's store holds them."""
+
+    sessions: SessionRecordsInMemory
+    lock: WriteLockInMemory
+
+    @classmethod
+    def holding(
+        cls, *owners: FakeUser,
+        store_type: type[SessionRecordsInMemory] = SessionRecordsInMemory,
+    ) -> OpeningStore:
+        """One session per owner, each created a minute after the one before."""
+        lock = WriteLockInMemory()
+        sessions = store_type(users=UsersInMemory(ACCOUNT, BYSTANDER, lock=lock), lock=lock)
+        store = cls(sessions, lock)
+        for minute, owner in enumerate(owners):
+            store.create_for(owner, FIRST_EXPIRY + timedelta(minutes=minute))
+        return store
+
+    def create_for(self, owner: FakeUser, expires_at: datetime) -> str:
+        with self.lock.hold():
+            return self.sessions.create(
+                owner.id, expires_at, ip_address=CLIENT_ADDRESS, user_agent=CLIENT_USER_AGENT,
+            ).id
+
+    def ids(self) -> list[str]:
+        return [record.id for record in self.sessions.list_active()]
+
+    def open_session(
+        self, *cookie_values: str,
+        expires_at: datetime = LATER_EXPIRY, max_sessions: int | None = None,
+    ) -> SessionRecord:
+        app = FastAPI()
+        install_web_auth_config(app, OPENING_CONFIG)
+        headers = [(b"user-agent", CLIENT_USER_AGENT.encode())]
+        if cookie_values:
+            headers.append((b"cookie", session_cookie_header(*cookie_values).encode()))
+        return open_session(
+            Request(an_http_scope(app, headers=headers)), OPENING_CONFIG, ACCOUNT,
+            sessions=self.sessions, lock=self.lock,
+            expires_at=expires_at, max_sessions=max_sessions,
+        )
+
+
+def signed(session_id: str) -> str:
+    return sign_session_id(session_id, OPENING_CONFIG.signing_key)
+
+
+def oversized_cookie_of(session_id: str) -> str:
+    return signed_without_bound(
+        session_id + "x" * MAX_SESSION_COOKIE_CHARS, OPENING_CONFIG.signing_key,
+    )
+
+
+def test_a_new_session_has_a_fresh_id_and_the_clients_address_and_agent() -> None:
+    store = OpeningStore.holding(ACCOUNT)
+    [replaced] = store.ids()
+
+    session = store.open_session(signed(replaced))
+
+    assert session.id != replaced
+    assert store.ids() == [session.id]
+    assert (session.user_id, session.expires_at) == (ACCOUNT.id, LATER_EXPIRY)
+    assert (session.ip_address, session.user_agent) == ("203.0.113.7", CLIENT_USER_AGENT)
+
+
+@pytest.mark.parametrize(("cookie_values_of", "ended"), [
+    pytest.param(lambda ids: [signed(ids[0])], [0], id="verified-same-account"),
+    pytest.param(lambda ids: [signed(ids[1])], [1], id="verified-other-account"),
+    pytest.param(lambda ids: [f"{ids[0]}.{'0' * 64}"], [], id="forged"),
+    pytest.param(lambda ids: [ids[0]], [], id="unsigned"),
+    pytest.param(lambda ids: [signed(ids[0]), signed(ids[0])], [], id="duplicated"),
+    pytest.param(lambda ids: [oversized_cookie_of(ids[0])], [], id="oversized"),
+])
+def test_only_the_session_a_verified_cookie_names_is_ended_whoever_it_belongs_to(
+    cookie_values_of: Callable[[list[str]], list[str]], ended: list[int],
+) -> None:
+    store = OpeningStore.holding(ACCOUNT, BYSTANDER)
+    before = store.ids()
+
+    session = store.open_session(*cookie_values_of(before))
+
+    assert store.ids() == [
+        *(session_id for index, session_id in enumerate(before) if index not in ended),
+        session.id,
+    ]
+
+
+@pytest.mark.parametrize(("existing", "cookie", "max_sessions", "surviving"), [
+    pytest.param(2, 1, 2, [0], id="the-replaced-session-never-counts-against-the-cap"),
+    pytest.param(3, None, 2, [2], id="the-oldest-above-the-cap-are-ended"),
+    pytest.param(2, None, 1, [], id="a-cap-of-one-keeps-only-the-new-session"),
+    pytest.param(3, None, None, [0, 1, 2], id="no-cap-prunes-nothing"),
+])
+def test_the_account_holds_at_most_its_cap_afterwards_with_the_oldest_ended(
+    existing: int, cookie: int | None, max_sessions: int | None, surviving: list[int],
+) -> None:
+    store = OpeningStore.holding(*[ACCOUNT] * existing)
+    bystander = store.create_for(BYSTANDER, FIRST_EXPIRY)
+    before = store.ids()
+    cookie_values = [] if cookie is None else [signed(before[cookie])]
+
+    session = store.open_session(*cookie_values, max_sessions=max_sessions)
+
+    assert sorted(store.ids()) == sorted(
+        [*(before[index] for index in surviving), bystander, session.id],
+    )
+
+
+@pytest.mark.parametrize("max_sessions", [
+    pytest.param(0, id="zero"),
+    pytest.param(-1, id="negative"),
+    pytest.param(True, id="bool"),
+    pytest.param("2", id="text"),
+    pytest.param(2.0, id="float"),
+])
+def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_anything_is_written(
+    max_sessions: object,
+) -> None:
+    store = OpeningStore.holding(ACCOUNT)
+    before = store.ids()
+
+    with pytest.raises(ValueError, match="max_sessions"):
+        store.open_session(signed(before[0]), max_sessions=max_sessions)  # type: ignore[arg-type]
+
+    assert store.ids() == before
+
+
+def test_a_failed_host_commit_after_open_session_keeps_the_replaced_session_only() -> None:
+    store = OpeningStore.holding(ACCOUNT)
+    before = store.ids()
+    store.sessions.commit_failure = StoreDown()
+
+    with pytest.raises(StoreDown), store.sessions.transaction():
+        store.open_session(signed(before[0]))
+
+    assert store.ids() == before
+
+
+def test_a_create_that_raises_after_the_delete_leaves_the_replaced_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = OpeningStore.holding(ACCOUNT)
+    before = store.ids()
+
+    def store_down(*_: object, **__: object) -> NoReturn:
+        raise StoreDown
+
+    monkeypatch.setattr(store.sessions, "create", store_down)
+
+    with pytest.raises(StoreDown), store.sessions.transaction():
+        store.open_session(signed(before[0]))
+
+    assert store.ids() == before
+
+
+def test_a_tie_on_created_at_that_would_prune_the_new_session_raises_and_rolls_back() -> None:
+    store = OpeningStore.holding(ACCOUNT)
+    before = store.ids()
+
+    with (
+        pytest.raises(RuntimeError, match=r"SessionRecordStore\.prune_overflow"),
+        store.sessions.transaction(),
+    ):
+        store.open_session(expires_at=FIRST_EXPIRY, max_sessions=1)
+
+    assert store.ids() == before
+
+
+def test_a_store_that_hands_back_the_replaced_id_raises_and_rolls_back() -> None:
+    store = OpeningStore.holding(ACCOUNT, store_type=SessionsReusingEndedIds)
+    before = store.ids()
+
+    with (
+        pytest.raises(RuntimeError, match=r"SessionRecordStore\.create"),
+        store.sessions.transaction(),
+    ):
+        store.open_session(signed(before[0]))
+
+    assert store.ids() == before
+
+
+def test_a_second_login_in_the_same_browser_replaces_the_first_session() -> None:
+    host = signed_in_host()
+    [first] = [record.id for record in host.sessions.list_active()]
+
+    host.callback(host.sign_in_at_issuer())
+
+    assert [record.id for record in host.sessions.list_active()] != [first]
+    assert host.sessions.count_active() == 1
+
+
+def test_a_failed_commit_after_the_login_issues_no_cookie_and_keeps_the_replaced_session() -> None:
+    host = signed_in_host()
+    before = [record.id for record in host.sessions.list_active()]
+    cookie_before = host.client.cookies[host.config.session_cookie_name]
+    host.sessions.commit_failure = StoreDown()
+    query = host.sign_in_at_issuer()
+
+    with pytest.raises(StoreDown):
+        host.callback(query)
+
+    assert [record.id for record in host.sessions.list_active()] == before
+    assert host.client.cookies[host.config.session_cookie_name] == cookie_before
