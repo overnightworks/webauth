@@ -18,7 +18,7 @@ quote the URL, and a malformed answer's header text, which the origin can
 fill with what it was sent.
 
 `fetch_key_set_over_https` is the production `KeySetFetch` of
-`webauth.jwt_verification`; `post_form_over_https` is the transport under the
+`webauth.jwt_verification`; `_post_form_over_https` is the transport under the
 production `TokenRequestPost`, which `webauth.oidc_transport` fits to that port.
 
 Install the `jwt` extra to use this module.
@@ -56,7 +56,7 @@ from urllib3.util.connection import allowed_gai_family
 
 from webauth import WebAuthError
 
-KEY_SET_FETCH_TIMEOUT_SECONDS = 5
+_KEY_SET_FETCH_TIMEOUT_SECONDS = 5
 KEY_SET_FETCH_DEADLINE_SECONDS = 10
 TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
 MAX_KEY_SET_BYTES = 64 * 1024
@@ -102,7 +102,7 @@ class ExchangeFailure(StrEnum):
     TOO_LARGE = "the origin's answer exceeds its size limit"
 
 
-class HttpsExchangeError(Exception):
+class _HttpsExchangeError(Exception):
     """An HTTPS exchange that brought back no usable answer; its message is
     the `failure`'s."""
 
@@ -112,7 +112,7 @@ class HttpsExchangeError(Exception):
 
 
 @dataclass(frozen=True)
-class HttpsAnswer:
+class _HttpsAnswer:
     status: int
     body: bytes = field(repr=False)
 
@@ -127,7 +127,7 @@ class _RefusedStatus:
 def fetch_key_set_over_https(
     url: str,
     *,
-    timeout_seconds: float = KEY_SET_FETCH_TIMEOUT_SECONDS,
+    timeout_seconds: float = _KEY_SET_FETCH_TIMEOUT_SECONDS,
     deadline_seconds: float = KEY_SET_FETCH_DEADLINE_SECONDS,
 ) -> bytes:
     """The production `KeySetFetch`. At most one byte past `MAX_KEY_SET_BYTES`
@@ -157,7 +157,7 @@ def fetch_key_set_over_https(
             deadline_seconds=deadline_seconds,
             max_body_bytes=MAX_KEY_SET_BYTES,
         )
-    except HttpsExchangeError as refusal:
+    except _HttpsExchangeError as refusal:
         reason = (
             refusal.failure.value
             if refusal.failure is ExchangeFailure.TIMED_OUT
@@ -172,7 +172,7 @@ def fetch_key_set_over_https(
     raise failed
 
 
-def post_form_over_https(
+def _post_form_over_https(
     url: str,
     form: Mapping[str, str],
     *,
@@ -180,18 +180,18 @@ def post_form_over_https(
     max_body_bytes: int,
     timeout_seconds: float,
     deadline_seconds: float = TOKEN_EXCHANGE_DEADLINE_SECONDS,
-) -> HttpsAnswer:
+) -> _HttpsAnswer:
     """POSTs `form` URL-encoded, sending `authorization` as the whole
     `Authorization` header and asking for JSON, and answers the status and
     body of any answer that is not a redirect.
 
-    Raises `HttpsExchangeError` for a URL that is not well-formed https, an
+    Raises `_HttpsExchangeError` for a URL that is not well-formed https, an
     origin that cannot be reached, a failed TLS handshake, a timeout or the
     total `deadline_seconds` passing, a broken exchange, a redirect, and a
     body past `max_body_bytes`. A `timeout_seconds` or `deadline_seconds` of
     zero or less raises `ValueError`."""
     if not is_https_url(url):
-        raise HttpsExchangeError(ExchangeFailure.NOT_AN_HTTPS_URL)
+        raise _HttpsExchangeError(ExchangeFailure.NOT_AN_HTTPS_URL)
     answer = _exchange(
         "POST",
         url,
@@ -207,9 +207,9 @@ def post_form_over_https(
         body=urllib.parse.urlencode(form),
     )
     if isinstance(answer, _RefusedStatus):
-        raise HttpsExchangeError(ExchangeFailure.REDIRECTED)
+        raise _HttpsExchangeError(ExchangeFailure.REDIRECTED)
     if len(answer.body) > max_body_bytes:
-        raise HttpsExchangeError(ExchangeFailure.TOO_LARGE)
+        raise _HttpsExchangeError(ExchangeFailure.TOO_LARGE)
     return answer
 
 
@@ -249,7 +249,7 @@ def _exchange(
     max_body_bytes: int,
     headers: Mapping[str, str] | None = None,
     body: str | None = None,
-) -> HttpsAnswer | _RefusedStatus:
+) -> _HttpsAnswer | _RefusedStatus:
     """One request under the bounded posture. The answer's body is read, at
     most one byte past `max_body_bytes` of it, only for a status the caller
     `accepts_status`; any other status comes back as `_RefusedStatus`, so an
@@ -287,7 +287,7 @@ def _exchange(
             try:
                 if not accepts_status(response.status):
                     return _RefusedStatus(response.status)
-                return HttpsAnswer(response.status, response.read(max_body_bytes + 1))
+                return _HttpsAnswer(response.status, response.read(max_body_bytes + 1))
             finally:
                 response.close()
     except urllib3.exceptions.SSLError:
@@ -302,7 +302,7 @@ def _exchange(
     if deadline.has_passed():
         failure = ExchangeFailure.TIMED_OUT
     # Raised outside the handler so urllib3's error is not even its context.
-    raise HttpsExchangeError(failure)
+    raise _HttpsExchangeError(failure)
 
 
 @dataclass(frozen=True)

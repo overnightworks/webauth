@@ -14,8 +14,8 @@ from typing import Final
 
 from webauth.https_client import (
     TOKEN_EXCHANGE_DEADLINE_SECONDS,
-    HttpsExchangeError,
-    post_form_over_https,
+    _HttpsExchangeError,
+    _post_form_over_https,
 )
 from webauth.oidc import (
     MAX_TOKEN_RESPONSE_BYTES,
@@ -57,7 +57,7 @@ def post_token_request_over_https(
             f" deadline_seconds ({deadline_seconds})"
         )
     try:
-        answer = post_form_over_https(
+        answer = _post_form_over_https(
             request.url,
             request.form,
             authorization=request.authorization,
@@ -65,7 +65,7 @@ def post_token_request_over_https(
             timeout_seconds=timeout_seconds,
             deadline_seconds=deadline_seconds,
         )
-    except HttpsExchangeError as refusal:
+    except _HttpsExchangeError as refusal:
         failure = refusal.failure
     else:
         return TokenEndpointAnswer(answer.status, answer.body)
