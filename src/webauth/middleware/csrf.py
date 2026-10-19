@@ -8,7 +8,7 @@ from starlette.responses import JSONResponse
 
 from webauth._origins import origin_is_allowed
 from webauth.config import web_auth_config
-from webauth.cookies import verify_csrf_token
+from webauth.cookies import _verify_csrf_token
 from webauth.dependencies import session_id_from_request
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.policies import CsrfPolicy
@@ -50,7 +50,7 @@ class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
                     {"detail": _CSRF_REFUSAL_DETAIL}, status_code=403,
                 )
             session_id = session_id_from_request(request, config)
-            if session_id is None or not verify_csrf_token(
+            if session_id is None or not _verify_csrf_token(
                 header_token, session_id, config.signing_key,
             ):
                 return JSONResponse(

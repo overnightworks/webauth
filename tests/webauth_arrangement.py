@@ -35,7 +35,7 @@ from webauth.config import (
     install_web_auth_config,
     web_auth_config,
 )
-from webauth.cookies import generate_csrf_token, sign_session_id
+from webauth.cookies import _generate_csrf_token, sign_session_id
 from webauth.dependencies import (
     LoginRedirect,
     WebSocketRefusal,
@@ -894,7 +894,7 @@ async def _until_excess_is_handled(excess_handed: anyio.Event) -> None:
 
 def a_csrf_passing_request_headers(config: WebAuthConfig) -> list[tuple[bytes, bytes]]:
     cookie = f"{config.session_cookie_name}={sign_session_id(SESSION_ID, config.signing_key)}"
-    token = generate_csrf_token(SESSION_ID, config.signing_key)
+    token = _generate_csrf_token(SESSION_ID, config.signing_key)
     return [
         (b"sec-fetch-site", b"same-origin"),
         (b"cookie", cookie.encode()),

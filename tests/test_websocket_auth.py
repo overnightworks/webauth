@@ -41,8 +41,8 @@ from webauth.config import (
 )
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
-    cookie_pairs,
-    cookie_values,
+    _cookie_pairs,
+    _cookie_values,
     session_reference,
     sign_session_id,
 )
@@ -525,13 +525,13 @@ def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTP
     [
         pytest.param(web_auth_config, {}, CONFIG, id="web_auth_config"),
         pytest.param(
-            cookie_pairs,
+            _cookie_pairs,
             {},
             [(SESSION_COOKIE_NAME, sign_session_id(SESSION_ID, SIGNING_KEY))],
             id="cookie_pairs",
         ),
         pytest.param(
-            cookie_values,
+            _cookie_values,
             {"name": SESSION_COOKIE_NAME},
             [sign_session_id(SESSION_ID, SIGNING_KEY)],
             id="cookie_values",

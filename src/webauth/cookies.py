@@ -48,20 +48,20 @@ __all__ = [
     "sign_session_id",
 ]
 
-HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
-SECURE_COOKIE_PREFIX: Final = "__Secure-"
+_HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
+_SECURE_COOKIE_PREFIX: Final = "__Secure-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
-PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
-PLAIN_LOGOUT_HINT_COOKIE_NAME: Final = "oidc_id_token_hint"
-DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
-MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 256
+_PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
+_PLAIN_LOGOUT_HINT_COOKIE_NAME: Final = "oidc_id_token_hint"
+_DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
+_MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 256
 # A signed session cookie is an identifier plus a hex digest; anything much
 # longer was not issued here, so the reader rejects it before any HMAC is computed.
 MAX_SESSION_COOKIE_CHARS: Final = 200
 MAX_ID_TOKEN_HINT_CHARS: Final = 3072
 """Characters of ID token the hint cookie carries; a longer token is not kept."""
-PENDING_SECRET_BYTES: Final = 32
+_PENDING_SECRET_BYTES: Final = 32
 """Random bytes in each of a pending login's state, nonce and verifier,
 which are minted with ``secrets.token_urlsafe``."""
 
@@ -79,7 +79,7 @@ _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 _COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
 # characters, so a field of any other shape was not minted as a pending secret.
-_PENDING_SECRET: Final = rf"[A-Za-z0-9_-]{{{math.ceil(4 * PENDING_SECRET_BYTES / 3)}}}"
+_PENDING_SECRET: Final = rf"[A-Za-z0-9_-]{{{math.ceil(4 * _PENDING_SECRET_BYTES / 3)}}}"
 _PENDING_LOGIN_VALUE: Final = re.compile(
     rf"{_PENDING_LOGIN_VERSION}"
     rf"\.(?P<state>{_PENDING_SECRET})"
@@ -90,11 +90,11 @@ _PENDING_LOGIN_VALUE: Final = re.compile(
 _PENDING_LOGIN_SIGNATURE: Final = re.compile(r"[0-9a-f]{64}")
 
 CookieSameSite = Literal["strict", "lax"]
-DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
+_DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
 COOKIE_PATH: Final = "/"
 
 
-def default_cookie_name(plain_name: str, *, secure: bool) -> str:
+def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
     """Return the name a cookie gets when the host names none.
 
     A ``__Host-`` cookie can be set only by this exact host, so a sibling
@@ -102,63 +102,63 @@ def default_cookie_name(plain_name: str, *, secure: bool) -> str:
     prefix only on a ``Secure`` cookie, so without ``Secure`` the plain name
     is the one that still works.
     """
-    return f"{HOST_ONLY_COOKIE_PREFIX}{plain_name}" if secure else plain_name
+    return f"{_HOST_ONLY_COOKIE_PREFIX}{plain_name}" if secure else plain_name
 
 
-DEFAULT_SESSION_COOKIE_NAME: Final = default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=True)
-DEFAULT_CSRF_COOKIE_NAME: Final = default_cookie_name(PLAIN_CSRF_COOKIE_NAME, secure=True)
+DEFAULT_SESSION_COOKIE_NAME: Final = _default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=True)
+DEFAULT_CSRF_COOKIE_NAME: Final = _default_cookie_name(PLAIN_CSRF_COOKIE_NAME, secure=True)
 
 
-def pending_login_cookie_prefix(*, secure: bool) -> str:
+def _pending_login_cookie_prefix(*, secure: bool) -> str:
     """The part every pending-login cookie's name starts with."""
-    return f"{default_cookie_name(PLAIN_PENDING_LOGIN_COOKIE_NAME, secure=secure)}_"
+    return f"{_default_cookie_name(_PLAIN_PENDING_LOGIN_COOKIE_NAME, secure=secure)}_"
 
 
-def pending_login_cookie_name(state: str, *, secure: bool) -> str:
+def _pending_login_cookie_name(state: str, *, secure: bool) -> str:
     """The name of the cookie that carries the pending login of ``state``."""
     state_digest = hashlib.sha256(state.encode()).hexdigest()[:_STATE_DIGEST_HEX_CHARS]
-    return f"{pending_login_cookie_prefix(secure=secure)}{state_digest}"
+    return f"{_pending_login_cookie_prefix(secure=secure)}{state_digest}"
 
 
-def is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
-    """Whether ``name`` has the shape ``pending_login_cookie_name`` gives every
+def _is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
+    """Whether ``name`` has the shape ``_pending_login_cookie_name`` gives every
     pending-login cookie, so webauth may clear it; a name of any other shape
     was not set by webauth, and may not even be a legal cookie name."""
-    prefix = pending_login_cookie_prefix(secure=secure)
+    prefix = _pending_login_cookie_prefix(secure=secure)
     if not name.startswith(prefix):
         return False
     return _STATE_DIGEST.fullmatch(name.removeprefix(prefix)) is not None
 
 
-def is_reserved_cookie_name(name: str) -> bool:
+def _is_reserved_cookie_name(name: str) -> bool:
     """Whether ``name`` is one webauth's own cookies use, in either variant.
 
     A session or CSRF cookie under such a name would meet the cookie webauth
     sets there, and the browser would send both.
     """
     return any(
-        name == id_token_hint_cookie_name(secure=secure)
-        or name.startswith(pending_login_cookie_prefix(secure=secure))
+        name == _id_token_hint_cookie_name(secure=secure)
+        or name.startswith(_pending_login_cookie_prefix(secure=secure))
         for secure in (True, False)
     )
 
 
-def is_valid_cookie_name(name: str) -> bool:
+def _is_valid_cookie_name(name: str) -> bool:
     """Whether ``name`` is an RFC 6265 ``cookie-name``; Starlette refuses most other names."""
     return _COOKIE_NAME_TOKEN.fullmatch(name) is not None
 
 
-def is_host_only_cookie_name(name: str) -> bool:
+def _is_host_only_cookie_name(name: str) -> bool:
     """Whether a browser treats ``name`` as a ``__Host-`` cookie (case-insensitively)."""
-    return name.lower().startswith(HOST_ONLY_COOKIE_PREFIX.lower())
+    return name.lower().startswith(_HOST_ONLY_COOKIE_PREFIX.lower())
 
 
-def is_secure_prefixed_cookie_name(name: str) -> bool:
+def _is_secure_prefixed_cookie_name(name: str) -> bool:
     """Whether a browser treats ``name`` as a ``__Secure-`` cookie (case-insensitively)."""
-    return name.lower().startswith(SECURE_COOKIE_PREFIX.lower())
+    return name.lower().startswith(_SECURE_COOKIE_PREFIX.lower())
 
 
-def cookie_pairs(connection: HTTPConnection) -> list[tuple[str, str]]:
+def _cookie_pairs(connection: HTTPConnection) -> list[tuple[str, str]]:
     """Every name and value the raw ``Cookie`` headers carry, in order.
 
     Starlette's cookie dict silently keeps one of several same-named
@@ -169,9 +169,9 @@ def cookie_pairs(connection: HTTPConnection) -> list[tuple[str, str]]:
     return [item for pair in pairs for item in cookie_parser(pair).items()]
 
 
-def cookie_values(connection: HTTPConnection, name: str) -> list[str]:
+def _cookie_values(connection: HTTPConnection, name: str) -> list[str]:
     """Every value the connection's cookies carry under ``name``, in order."""
-    return [value for key, value in cookie_pairs(connection) if key == name]
+    return [value for key, value in _cookie_pairs(connection) if key == name]
 
 
 def session_reference(session_id: str) -> SessionReference:
@@ -200,7 +200,7 @@ def sign_session_id(session_id: str, secret: bytes) -> str:
     return signed
 
 
-def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
+def _verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
     """Verify the HMAC signature and return the raw session_id, or None."""
     if "." not in cookie_value:
         return None
@@ -213,16 +213,16 @@ def verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
     return None
 
 
-def generate_csrf_token(session_id: str, secret: bytes) -> str:
+def _generate_csrf_token(session_id: str, secret: bytes) -> str:
     """Generate a CSRF token cryptographically bound to the session."""
     return hmac.new(
         secret, _CSRF_SIGNING_PREFIX + session_id.encode(), hashlib.sha256
     ).hexdigest()
 
 
-def verify_csrf_token(token: str, session_id: str, secret: bytes) -> bool:
+def _verify_csrf_token(token: str, session_id: str, secret: bytes) -> bool:
     """Verify a CSRF token is valid for the given session."""
-    expected = generate_csrf_token(session_id, secret)
+    expected = _generate_csrf_token(session_id, secret)
     return hmac.compare_digest(token.encode(), expected.encode())
 
 
@@ -251,7 +251,7 @@ def issue_session_cookies(
     )
     response.set_cookie(  # NOSONAR The client must read this CSRF token for double-submit.
         config.csrf_cookie_name,
-        generate_csrf_token(session_id, config.signing_key),
+        _generate_csrf_token(session_id, config.signing_key),
         max_age=max_age,
         httponly=False,
         samesite=samesite,
@@ -280,13 +280,13 @@ def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     )
 
 
-def id_token_hint_cookie_name(*, secure: bool) -> str:
+def _id_token_hint_cookie_name(*, secure: bool) -> str:
     """``__Host-`` would demand ``Path=/``, so the hint takes ``__Secure-``."""
-    plain_name = PLAIN_LOGOUT_HINT_COOKIE_NAME
-    return f"{SECURE_COOKIE_PREFIX}{plain_name}" if secure else plain_name
+    plain_name = _PLAIN_LOGOUT_HINT_COOKIE_NAME
+    return f"{_SECURE_COOKIE_PREFIX}{plain_name}" if secure else plain_name
 
 
-def issue_id_token_hint_cookie(
+def _issue_id_token_hint_cookie(
     response: Response, id_token: str, *, logout_path: str, config: WebAuthConfig,
 ) -> None:
     """Hand the browser the ID token, for the logout path alone.
@@ -295,10 +295,10 @@ def issue_id_token_hint_cookie(
     of an earlier login is cleared instead, so a logout never carries it.
     """
     if len(id_token) > MAX_ID_TOKEN_HINT_CHARS:
-        clear_id_token_hint_cookie(response, logout_path=logout_path, config=config)
+        _clear_id_token_hint_cookie(response, logout_path=logout_path, config=config)
         return
     response.set_cookie(
-        id_token_hint_cookie_name(secure=config.cookie_secure),
+        _id_token_hint_cookie_name(secure=config.cookie_secure),
         id_token,
         max_age=config.cookie_max_age_seconds,
         httponly=True,
@@ -308,12 +308,12 @@ def issue_id_token_hint_cookie(
     )
 
 
-def clear_id_token_hint_cookie(
+def _clear_id_token_hint_cookie(
     response: Response, *, logout_path: str, config: WebAuthConfig,
 ) -> None:
     """Take the hint back, repeating the attributes it was set with."""
     response.delete_cookie(
-        id_token_hint_cookie_name(secure=config.cookie_secure),
+        _id_token_hint_cookie_name(secure=config.cookie_secure),
         path=logout_path,
         secure=config.cookie_secure,
         httponly=True,
@@ -321,10 +321,10 @@ def clear_id_token_hint_cookie(
     )
 
 
-def id_token_hint_from_request(connection: HTTPConnection, config: WebAuthConfig) -> str | None:
+def _id_token_hint_from_request(connection: HTTPConnection, config: WebAuthConfig) -> str | None:
     """The hint the request carries: its sole cookie of that name, when it has the
     shape of a compact JWS within ``MAX_ID_TOKEN_HINT_CHARS``; otherwise ``None``."""
-    values = cookie_values(connection, id_token_hint_cookie_name(secure=config.cookie_secure))
+    values = _cookie_values(connection, _id_token_hint_cookie_name(secure=config.cookie_secure))
     if len(values) != 1:
         return None
     hint = values[0]
@@ -344,13 +344,13 @@ class PendingLogin:
     issued_at: int
 
 
-def issue_pending_login_cookie(
+def _issue_pending_login_cookie(
     response: Response, pending: PendingLogin, *, max_age_seconds: int, config: WebAuthConfig,
 ) -> None:
     """Hand the browser the signed pending login, in a cookie named for its state."""
     response.set_cookie(
-        pending_login_cookie_name(pending.state, secure=config.cookie_secure),
-        sign_pending_login(pending, config.signing_key),
+        _pending_login_cookie_name(pending.state, secure=config.cookie_secure),
+        _sign_pending_login(pending, config.signing_key),
         max_age=max_age_seconds,
         httponly=True,
         samesite=_PENDING_LOGIN_SAMESITE,
@@ -359,7 +359,7 @@ def issue_pending_login_cookie(
     )
 
 
-def clear_pending_login_cookie(response: Response, name: str, config: WebAuthConfig) -> None:
+def _clear_pending_login_cookie(response: Response, name: str, config: WebAuthConfig) -> None:
     """Take a pending-login cookie back, repeating the attributes it was set with."""
     response.delete_cookie(
         name,
@@ -370,7 +370,7 @@ def clear_pending_login_cookie(response: Response, name: str, config: WebAuthCon
     )
 
 
-def sign_pending_login(pending: PendingLogin, secret: bytes) -> str:
+def _sign_pending_login(pending: PendingLogin, secret: bytes) -> str:
     """Return the signed cookie value that carries ``pending``.
 
     Raises ``ValueError`` for a pending login ``webauth.oidc`` cannot have
@@ -388,10 +388,10 @@ def sign_pending_login(pending: PendingLogin, secret: bytes) -> str:
     return f"{payload}.{_pending_login_signature(payload, secret)}"
 
 
-def verify_pending_login(cookie_value: str, secret: bytes) -> PendingLogin | None:
+def _verify_pending_login(cookie_value: str, secret: bytes) -> PendingLogin | None:
     """The pending login a cookie value carries, or ``None`` when it is
     oversized, of another shape or version, or not signed under ``secret``."""
-    if len(cookie_value) > MAX_PENDING_LOGIN_COOKIE_CHARS:
+    if len(cookie_value) > _MAX_PENDING_LOGIN_COOKIE_CHARS:
         return None
     payload, _, signature = cookie_value.rpartition(".")
     fields = _PENDING_LOGIN_VALUE.fullmatch(payload)

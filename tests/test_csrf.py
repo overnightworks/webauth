@@ -24,7 +24,7 @@ from webauth_arrangement import (
 )
 
 from webauth.config import WebAuthConfig, install_web_auth_config
-from webauth.cookies import MAX_SESSION_COOKIE_CHARS, generate_csrf_token, sign_session_id
+from webauth.cookies import MAX_SESSION_COOKIE_CHARS, _generate_csrf_token, sign_session_id
 from webauth.middleware import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.policies import CsrfPolicy, PathRules
 
@@ -382,7 +382,7 @@ def _post_with_token(cookie_header: str, token_for: str) -> Response:
         API_PATH,
         headers={
             "cookie": cookie_header,
-            CONFIG.csrf_header_name: generate_csrf_token(token_for, CONFIG.signing_key),
+            CONFIG.csrf_header_name: _generate_csrf_token(token_for, CONFIG.signing_key),
         },
     )
 
