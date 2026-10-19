@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import count
@@ -598,6 +598,17 @@ class AuthApp:
 
     def signed_cookie(self, session_id: str = SESSION_ID) -> str:
         return sign_session_id(session_id, self.signing_key)
+
+
+def seeded_session(
+    sessions: SessionRecordsInMemory, hold: AbstractContextManager[None],
+    user_id: str, expires_at: datetime,
+) -> FakeSessionRecord:
+    """A stored session of ``user_id``, created the way a host does: under its write lock."""
+    with hold:
+        return sessions.create(
+            user_id, expires_at, ip_address=CLIENT_ADDRESS, user_agent=CLIENT_USER_AGENT,
+        )
 
 
 def a_session(

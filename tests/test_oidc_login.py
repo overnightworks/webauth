@@ -42,12 +42,12 @@ from oidc_arrangement import (
 from pydantic import SecretStr
 from webauth_arrangement import (
     ADMIN_ROLE,
-    CLIENT_ADDRESS,
     CLIENT_USER_AGENT,
     DOCUMENTED_ID_TOKEN_HINT_BOUND,
     HTTPS_TEST_SERVER,
     MEMBER_ROLE,
     SESSION_MAX_AGE_SECONDS,
+    FakeSessionRecord,
     FakeUser,
     RecordingAuditSink,
     SessionRecordsInMemory,
@@ -58,6 +58,7 @@ from webauth_arrangement import (
     _require_held_lock,
     a_web_auth_config,
     an_http_scope,
+    seeded_session,
     session_cookie_header,
     signed_without_bound,
 )
@@ -1673,13 +1674,10 @@ def a_host_with_sessions(
 
 def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
     for _ in range(count):
-        with host.lock.hold_uncounted():
-            host.sessions.create(
-                user_id,
-                datetime.now(UTC) + timedelta(seconds=host.sessions.max_age_seconds),
-                ip_address=CLIENT_ADDRESS,
-                user_agent=CLIENT_USER_AGENT,
-            )
+        seeded_session(
+            host.sessions, host.lock.hold_uncounted(), user_id,
+            datetime.now(UTC) + timedelta(seconds=host.sessions.max_age_seconds),
+        )
 
 
 def sessions_of(host: OidcHost, user_id: str) -> int:
@@ -1996,6 +1994,15 @@ class OpeningStore:
     lock: WriteLockInMemory
 
     @classmethod
+    def holding_session_named(cls, session_id: str) -> OpeningStore:
+        lock = WriteLockInMemory()
+        record = FakeSessionRecord(
+            id=session_id, user=ACCOUNT, created_at=FIRST_EXPIRY, expires_at=FIRST_EXPIRY,
+        )
+        users = UsersInMemory(ACCOUNT, BYSTANDER, lock=lock)
+        return cls(SessionRecordsInMemory(record, users=users, lock=lock), lock)
+
+    @classmethod
     def holding(
         cls, *owners: FakeUser,
         store_type: type[SessionRecordsInMemory] = SessionRecordsInMemory,
@@ -2009,10 +2016,7 @@ class OpeningStore:
         return store
 
     def create_for(self, owner: FakeUser, expires_at: datetime) -> str:
-        with self.lock.hold():
-            return self.sessions.create(
-                owner.id, expires_at, ip_address=CLIENT_ADDRESS, user_agent=CLIENT_USER_AGENT,
-            ).id
+        return seeded_session(self.sessions, self.lock.hold(), owner.id, expires_at).id
 
     def ids(self) -> list[str]:
         return [record.id for record in self.sessions.list_active()]
@@ -2037,12 +2041,6 @@ def signed(session_id: str) -> str:
     return sign_session_id(session_id, OPENING_CONFIG.signing_key)
 
 
-def oversized_cookie_of(session_id: str) -> str:
-    return signed_without_bound(
-        session_id + "x" * MAX_SESSION_COOKIE_CHARS, OPENING_CONFIG.signing_key,
-    )
-
-
 def test_a_new_session_has_a_fresh_id_and_the_clients_address_and_agent() -> None:
     store = OpeningStore.holding(ACCOUNT)
     [replaced] = store.ids()
@@ -2061,7 +2059,6 @@ def test_a_new_session_has_a_fresh_id_and_the_clients_address_and_agent() -> Non
     pytest.param(lambda ids: [f"{ids[0]}.{'0' * 64}"], [], id="forged"),
     pytest.param(lambda ids: [ids[0]], [], id="unsigned"),
     pytest.param(lambda ids: [signed(ids[0]), signed(ids[0])], [], id="duplicated"),
-    pytest.param(lambda ids: [oversized_cookie_of(ids[0])], [], id="oversized"),
 ])
 def test_only_the_session_a_verified_cookie_names_is_ended_whoever_it_belongs_to(
     cookie_values_of: Callable[[list[str]], list[str]], ended: list[int],
@@ -2075,6 +2072,24 @@ def test_only_the_session_a_verified_cookie_names_is_ended_whoever_it_belongs_to
         *(session_id for index, session_id in enumerate(before) if index not in ended),
         session.id,
     ]
+
+
+@pytest.mark.parametrize(("cookie_chars", "ended"), [
+    pytest.param(MAX_SESSION_COOKIE_CHARS, True, id="at-the-bound"),
+    pytest.param(MAX_SESSION_COOKIE_CHARS + 1, False, id="above-the-bound"),
+])
+def test_a_signed_cookie_longer_than_the_bound_ends_nothing_though_the_store_holds_its_session(
+    cookie_chars: int, ended: bool,
+) -> None:
+    signature_chars = len(signed("x")) - 1
+    long_id = "x" * (cookie_chars - signature_chars)
+    store = OpeningStore.holding_session_named(long_id)
+    cookie = signed_without_bound(long_id, OPENING_CONFIG.signing_key)
+    assert len(cookie) == cookie_chars
+
+    session = store.open_session(cookie)
+
+    assert store.ids() == ([] if ended else [long_id]) + [session.id]
 
 
 @pytest.mark.parametrize(("existing", "cookie", "max_sessions", "surviving"), [
@@ -2110,9 +2125,10 @@ def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_anything_is
 ) -> None:
     store = OpeningStore.holding(ACCOUNT)
     before = store.ids()
+    cookie = signed(before[0])
 
     with pytest.raises(ValueError, match="max_sessions"):
-        store.open_session(signed(before[0]), max_sessions=max_sessions)  # type: ignore[arg-type]
+        store.open_session(cookie, max_sessions=max_sessions)
 
     assert store.ids() == before
 
@@ -2121,9 +2137,10 @@ def test_a_failed_host_commit_after_open_session_keeps_the_replaced_session_only
     store = OpeningStore.holding(ACCOUNT)
     before = store.ids()
     store.sessions.commit_failure = StoreDown()
+    cookie = signed(before[0])
 
     with pytest.raises(StoreDown), store.sessions.transaction():
-        store.open_session(signed(before[0]))
+        store.open_session(cookie)
 
     assert store.ids() == before
 
@@ -2138,9 +2155,10 @@ def test_a_create_that_raises_after_the_delete_leaves_the_replaced_session(
         raise StoreDown
 
     monkeypatch.setattr(store.sessions, "create", store_down)
+    cookie = signed(before[0])
 
     with pytest.raises(StoreDown), store.sessions.transaction():
-        store.open_session(signed(before[0]))
+        store.open_session(cookie)
 
     assert store.ids() == before
 
@@ -2161,14 +2179,26 @@ def test_a_tie_on_created_at_that_would_prune_the_new_session_raises_and_rolls_b
 def test_a_store_that_hands_back_the_replaced_id_raises_and_rolls_back() -> None:
     store = OpeningStore.holding(ACCOUNT, store_type=SessionsReusingEndedIds)
     before = store.ids()
+    cookie = signed(before[0])
 
     with (
         pytest.raises(RuntimeError, match=r"SessionRecordStore\.create"),
         store.sessions.transaction(),
     ):
-        store.open_session(signed(before[0]))
+        store.open_session(cookie)
 
     assert store.ids() == before
+
+
+def test_a_store_that_hands_back_the_replaced_id_keeps_no_session_under_it_without_a_rollback(
+) -> None:
+    store = OpeningStore.holding(ACCOUNT, store_type=SessionsReusingEndedIds)
+    cookie = signed(store.ids()[0])
+
+    with pytest.raises(RuntimeError, match=r"SessionRecordStore\.create"):
+        store.open_session(cookie)
+
+    assert store.ids() == []
 
 
 def test_a_second_login_in_the_same_browser_replaces_the_first_session() -> None:

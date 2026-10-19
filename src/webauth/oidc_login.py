@@ -35,7 +35,7 @@ open; that lasts until the host's session lifetime runs out. The groups claim
 must carry full paths (Keycloak's group mapper with ``full.path`` on); a
 missing or empty claim means no membership.
 
-``open_session`` is what the host does between the two: under the host's lock it
+After ``finish_login`` admits an account, ``open_session`` under the host's lock
 ends the session the request's cookie names, creates the account's new one and
 prunes the account to a cap, never committing and setting no cookie, so the host
 commits and then issues the cookies.
@@ -343,6 +343,7 @@ def open_session(
             user_agent=client_user_agent(request),
         )
         if session.id == replaced_session_id:
+            end_session(sessions, session_id=session.id)
             raise RuntimeError(
                 "SessionRecordStore.create returned the id of the session it replaced",
             )

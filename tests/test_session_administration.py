@@ -8,13 +8,12 @@ from datetime import UTC, datetime
 
 import pytest
 from webauth_arrangement import (
-    CLIENT_ADDRESS,
-    CLIENT_USER_AGENT,
     FakeSessionRecord,
     FakeUser,
     LockNotHeldError,
     a_session_administration,
     a_web_auth_config,
+    seeded_session,
 )
 
 from webauth.cookies import session_reference
@@ -63,11 +62,9 @@ def empty_administration(administration: SessionAdministration) -> SessionAdmini
 @pytest.fixture
 def stored_sessions(administration: SessionAdministration) -> list[FakeSessionRecord]:
     return [
-        administration.sessions.create(
-            user_id,
-            datetime(2030, 1, 1, tzinfo=UTC),
-            ip_address=CLIENT_ADDRESS,
-            user_agent=CLIENT_USER_AGENT,
+        seeded_session(
+            administration.sessions, administration.lock.hold(),
+            user_id, datetime(2030, 1, 1, tzinfo=UTC),
         )
         for user_id in ("subject", "actor", "subject")
     ]
