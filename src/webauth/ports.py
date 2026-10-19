@@ -100,7 +100,8 @@ class SubjectUserStore(Protocol):
     def create_for_subject(self, subject: str, username: str, role: str) -> UserRecord:
         """Add an account whose ``id`` is ``subject``.
 
-        Raises ``UsernameTakenError`` for a duplicate username.
+        Raises ``UsernameTakenError`` when the store enforces a unique username and
+        ``username`` is taken; uniqueness is not required.
         """
         ...
 

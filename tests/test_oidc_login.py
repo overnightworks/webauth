@@ -142,8 +142,16 @@ class LegacyPasswordUser(FakeUser):
     password_hash: str = "legacy-hash"  # noqa: S105
 
 
+@dataclass
+class InactiveFlaggedUser(FakeUser):
+    """A host record whose own flag says inactive, which the library never reads."""
+
+    is_active: bool = False
+
+
 LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(ADMIN_GROUP,))
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
+LENA_FLAGGED_INACTIVE = InactiveFlaggedUser(id=SUBJECT, username="lena")
 LEGACY_ADMIN_WITH_PASSWORD_FIELD = LegacyPasswordUser(
     id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE,
 )
@@ -1001,11 +1009,10 @@ def test_a_request_carrying_only_the_hint_is_not_signed_in() -> None:
 
 @dataclass(frozen=True)
 class RefusedCallback:
-    """A callback that does not sign in: the accounts the host holds, and
-    the callback query the browser brings back given the issuer's."""
+    """A callback that does not sign in: the callback query the browser brings
+    back given the issuer's."""
 
     refusal: str
-    stored: tuple[FakeUser, ...] = ()
     groups_claim: object = (LOGIN_GROUP,)
     returned_query: Callable[[OidcHost, str], str] = lambda _host, query: query
 
@@ -1063,7 +1070,7 @@ _REFUSED_CALLBACKS = [
 def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its_cookie(
     refused: RefusedCallback,
 ) -> None:
-    host = an_oidc_host(*deepcopy(refused.stored), groups_claim=refused.groups_claim)
+    host = an_oidc_host(groups_claim=refused.groups_claim)
     other_tab = host.sign_in_at_issuer()
     query = host.sign_in_at_issuer()
 
@@ -1073,7 +1080,7 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.config.session_cookie_name not in set_cookies(response)
     assert ID_TOKEN_HINT_COOKIE_NAME not in set_cookies(response)
     assert host.sessions.count_active() == 0
-    assert host.accounts.list() == list(refused.stored)
+    assert host.accounts.list() == []
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
 
@@ -1090,6 +1097,15 @@ def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
     assert [event.kind for event in host.audit.account_events] == [
         AccountEventKind.ROLE_CHANGED,
     ]
+
+
+def test_an_account_whose_host_record_says_inactive_is_still_admitted_and_served() -> None:
+    host = an_oidc_host(deepcopy(LENA_FLAGGED_INACTIVE))
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert (response.status_code, response.json()) == (200, {"username": "lena"})
+    assert host.client.get("/me").json() == {"username": "lena"}
 
 
 def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:

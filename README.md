@@ -406,7 +406,7 @@ the commit's included, leaves every session in place and answers 400.
 The function runs in this order. It verifies the token before it takes the
 lock, and a refusal does nothing more. Under `lock.hold()` it looks up
 `accounts.get(subject)`. An unknown subject is accepted and creates no
-account. A known subject, an inactive account included, loses every session
+account. A known subject loses every session
 through `end_user_sessions`, and one `backchannel_logout` audit event with
 `actor_id=None` is emitted when at least one session ended. It never commits,
 clears a cookie or calls Keycloak.

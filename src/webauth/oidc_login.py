@@ -61,9 +61,9 @@ once the session has ended it has no power left.
 
 ``receive_backchannel_logout`` is the issuer's back-channel logout: it verifies
 the Logout Token before taking the lock, then, under the lock, ends every
-session of the account the token's subject names, an inactive account
-included, and records one ``BACKCHANNEL_LOGOUT`` event when a session ended.
-A subject without an account is accepted and provisions nothing. It never
+session of the account the token's subject names, and records one
+``BACKCHANNEL_LOGOUT`` event when a session ended. A subject without an account
+is accepted and provisions nothing. It never
 commits, clears a cookie or calls the issuer; a store or audit failure
 propagates so the host can roll back, and the host commits before it
 answers ``ACCEPTED``.
