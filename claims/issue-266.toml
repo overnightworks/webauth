@@ -1,0 +1,8 @@
+claim_id = "e0e60c56bf224f2fb913befdf86c0b21"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "c44762dfb95dc58db0b6270bce1edd82be0d6381"
+branch = "claude/issue-266-cookies-private"
+scope = ["CHANGELOG.md", "e2e/oidc/evidence.py", "e2e/oidc/prove.py", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/middleware/csrf.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "tests/test_cookies.py", "tests/test_csrf.py", "tests/test_oidc_login.py", "tests/test_web_auth_config.py", "tests/test_websocket_auth.py", "tests/webauth_arrangement.py"]
+opened_commit = "6768e1c2fbddf11385b79197a9de7bed64cd5841"
+whole_reason = "Renaming a cookies name edits its importers in the same commit; splitting by importer would leave main broken between slices."
