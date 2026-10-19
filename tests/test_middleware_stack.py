@@ -36,7 +36,7 @@ from webauth_arrangement import (
     starts,
 )
 
-from webauth.config import WEB_AUTH_STATE_ATTRIBUTE, install_web_auth_config
+from webauth.config import install_web_auth_config
 from webauth.middleware import (
     CsrfOriginMiddleware,
     CsrfTokenMiddleware,
@@ -96,13 +96,17 @@ def a_rate_limit_policy(max_requests: int) -> RateLimitPolicy:
 
 
 def a_fresh_app(
-    *, rate_limits: RateLimitBackend | None = None, cookie_secure: bool = True,
+    *,
+    rate_limits: RateLimitBackend | None = None,
+    cookie_secure: bool = True,
+    config_installed: bool = True,
 ) -> FastAPI:
     app = FastAPI()
     config = a_web_auth_config(cookie_secure=cookie_secure)
     if rate_limits is not None:
         config = replace(config, rate_limits=rate_limits)
-    install_web_auth_config(app, config)
+    if config_installed:
+        install_web_auth_config(app, config)
     app.state.background_ran = []
     for path in (API_PATH, PROTECTED_PATH, WEBHOOK_PATH):
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET", "POST"])
@@ -482,13 +486,11 @@ class TestBudgetSemantics:
         assert get_api(client).status_code == next_status
 
     def test_missing_config_500_spends_nothing(self) -> None:
-        app = a_fresh_app()
+        app = a_fresh_app(config_installed=False)
         install_full_stack(app, max_requests=1)
         client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
-        config = getattr(app.state, WEB_AUTH_STATE_ATTRIBUTE)
-        delattr(app.state, WEB_AUTH_STATE_ATTRIBUTE)
         assert get_api(client).status_code == 500
-        install_web_auth_config(app, config)
+        install_web_auth_config(app, a_web_auth_config())
         assert get_api(client).status_code == 200
 
 

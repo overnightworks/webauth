@@ -23,7 +23,9 @@ from webauth_arrangement import (
 
 import webauth.rate_limit
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
-from webauth.rate_limit import PRUNE_INTERVAL_SECONDS, SingleProcessRateLimitBackend
+from webauth.rate_limit import SingleProcessRateLimitBackend
+
+PRUNE_INTERVAL_SECONDS = 60
 
 
 class TestCountingAndExpiry:

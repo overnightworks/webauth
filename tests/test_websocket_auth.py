@@ -36,7 +36,6 @@ from webauth_arrangement import (
 )
 
 from webauth.config import (
-    DEFAULT_MAX_USER_AGENT_CHARS,
     install_web_auth_config,
     web_auth_config,
 )
@@ -51,6 +50,8 @@ from webauth.dependencies import WebSocketRefusal, session_id_from_request
 from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
 from webauth.proxies import client_user_agent, resolve_client_ip
 from webauth.session_ending import end_session
+
+DEFAULT_MAX_USER_AGENT_CHARS = 500
 
 CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key

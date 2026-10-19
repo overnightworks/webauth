@@ -31,7 +31,6 @@ from starlette.responses import Response
 from starlette.websockets import WebSocketDisconnect
 
 from webauth.config import (
-    MIN_SESSION_SECRET_CHARS,
     WebAuthConfig,
     install_web_auth_config,
     web_auth_config,
@@ -76,6 +75,7 @@ ALLOWED_ORIGIN = f"https://{ALLOWED_HOST}"
 # The suite reaches its applications over https, as production does, so the
 # cookie and header flags under test are the ones a deployment really sends.
 HTTPS_TEST_SERVER = "https://testserver"
+MIN_SESSION_SECRET_CHARS = 32
 SESSION_ID = "session-1"
 CLIENT_ADDRESS = "testclient"
 CLIENT_USER_AGENT = "TestBrowser/1.0"

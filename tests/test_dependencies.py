@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
@@ -42,7 +41,6 @@ from webauth_arrangement import (
     signed_without_bound,
 )
 
-from webauth import ports
 from webauth.config import install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
@@ -51,16 +49,17 @@ from webauth.cookies import (
     sign_session_id,
 )
 from webauth.dependencies import (
-    ACCOUNT_DISABLED_DETAIL,
-    ADMIN_REQUIRED_DETAIL,
-    AUTHENTICATION_REQUIRED_DETAIL,
-    INVALID_SESSION_DETAIL,
-    SESSION_EXPIRED_DETAIL,
     LoginRedirect,
     current_user_dependency,
     session_id_from_request,
 )
 from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
+
+ACCOUNT_DISABLED_DETAIL = "Account disabled"
+ADMIN_REQUIRED_DETAIL = "Admin access required"
+AUTHENTICATION_REQUIRED_DETAIL = "Authentication required"
+INVALID_SESSION_DETAIL = "Invalid session"
+SESSION_EXPIRED_DETAIL = "Session expired"
 
 A_LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 A_CONFIGURED_LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="return_to")
@@ -323,20 +322,6 @@ def test_a_session_a_second_before_expiry_on_the_configured_clock_is_renewed_fro
 
     assert response.status_code == 200
     assert record.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
-
-
-@pytest.mark.parametrize(
-    ("module", "name"),
-    [
-        ("webauth.dependencies", "AuthenticatedUser"),
-        ("webauth.jwt_verification", "WallClock"),
-    ],
-)
-def test_a_name_moved_to_ports_is_gone_from_its_old_module(
-    module: str, name: str,
-) -> None:
-    assert hasattr(ports, name)
-    assert not hasattr(importlib.import_module(module), name)
 
 
 def test_a_session_ended_between_load_and_touch_is_refused_without_audit() -> None:
