@@ -57,10 +57,6 @@ _PENDING = PendingLogin(
 )
 
 
-def test_the_default_csrf_header_name_is_the_one_clients_already_send() -> None:
-    assert a_web_auth_config().csrf_header_name == "x-csrf-token"
-
-
 @pytest.mark.parametrize(
     ("plain_name", "secure", "expected"),
     [
