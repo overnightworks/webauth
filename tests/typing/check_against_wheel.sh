@@ -17,6 +17,6 @@ uv pip install --quiet --python "$host/.venv/bin/python" --constraints "$host/co
 # Without py.typed pyright reads webauth as untyped and checks no export at all.
 site="$("$host/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
 [[ -f "$site/webauth/py.typed" ]] || { echo "the built wheel installs no webauth/py.typed" >&2; exit 1; }
-cp "$repo/tests/typing/oidc_host.py" "$host/"
+cp "$repo/tests/typing/oidc_host.py" "$repo/tests/typing/session_reference_refusal.py" "$host/"
 cd "$host"
-uv run --project "$repo" --locked --extra dev pyright --pythonpath .venv/bin/python oidc_host.py
+uv run --project "$repo" --locked --extra dev pyright --pythonpath .venv/bin/python oidc_host.py session_reference_refusal.py
