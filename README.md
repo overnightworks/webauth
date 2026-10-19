@@ -70,7 +70,13 @@ from fastapi import Request, Response
 
 from webauth.cookies import issue_session_cookies
 from webauth.oidc import OidcRefusal
-from webauth.oidc_login import AdmissionConfig, AdmissionRefusal, finish_login, start_login
+from webauth.oidc_login import (
+    AdmissionConfig,
+    AdmissionRefusal,
+    finish_login,
+    open_session,
+    start_login,
+)
 
 admission = AdmissionConfig(
     bound_issuer=client_config.issuer,
@@ -95,7 +101,13 @@ def callback(request: Request, response: Response) -> dict[str, str]:
     if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
         response.status_code = 403
         return describe_the_hosts_refusal(outcome)
-    session = open_the_hosts_session(outcome)
+    session = open_session(
+        request, config, outcome,
+        sessions=sessions, lock=lock,
+        expires_at=the_hosts_session_expiry(),
+        max_sessions=3,
+    )
+    commit_the_hosts_transaction()
     issue_session_cookies(response, session.id, config)
     ...
 ```
@@ -103,13 +115,36 @@ def callback(request: Request, response: Response) -> dict[str, str]:
 `start_login(relying_party, request, response, config)` begins a login, sets
 its pending-login cookie on `response` and returns the authorization URL.
 `finish_login(...)` answers the `UserRecord` to open a session for, or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
-the host commits on an account and opens the session itself. `finish_login`
+on an account the host calls [`open_session`](#opening-a-session), commits, and
+only then issues the cookies. `finish_login`
 sets the header that clears the pending-login cookie on `response`, so the
 host answers with that response on every outcome, refusals included: FastAPI
 copies an injected `response`'s headers only when the route returns a value
 that is not itself a `Response`; a returned `JSONResponse` is sent as-is and a
 raised `HTTPException` gets a new response, so neither carries them, which
 would leave the pending cookie in the browser.
+
+#### Opening a session
+
+`open_session(request, config, account, sessions=..., lock=..., expires_at=...,
+max_sessions=...)` is the whole sequence between admission and the cookies,
+inside one `lock.hold()`: it ends the session the request's cookie names
+(signed, sole and within the length bound, whichever account it belongs to; any
+other cookie ends nothing), creates the account's new session with the
+`expires_at` the host passes, and, with a cap, ends the account's oldest
+sessions above `max_sessions` last, so the replaced session never counts against
+the cap. With a cap of 2 and sessions `{S1, S2}`, a login whose cookie names `S2`
+leaves `{S1, S3}`. `max_sessions=None` states that the host sets no cap; any
+other value must be a positive whole number, or `ValueError` is raised before
+anything is written. It answers the new `SessionRecord`.
+
+It never commits and sets no cookie: the host commits, then calls
+`issue_session_cookies(response, session.id, config)`, so a cookie never names a
+session that was rolled back. It raises `RuntimeError`, for the host to roll
+back, when the store's `create` returns the replaced session's id, or when
+`prune_overflow` would end the new session (sessions sharing a `created_at`).
+It records no audit event, like `log_out`. The host's `WriteLock` must allow a
+second hold in the same request: one for admission, one for `open_session`.
 
 #### Logging out
 
@@ -385,20 +420,20 @@ Set the route up so that only the issuer can reach it:
 
 ### The host's duties at login
 
-The library never writes, so these belong to the host's OIDC
-callback route:
+The library never commits, so these belong to the host's OIDC
+callback route, around [`open_session`](#opening-a-session):
 
 - **`next`:** validate the final decoded value against the rule
   `LoginRedirect.path` enforces: one leading `/`; never `//` or a backslash
   form after browsers strip tab, CR and LF; no scheme. Otherwise fall back to
   a fixed local path.
-- **Fresh id:** every successful login mints a fresh session id. Never reuse
-  one from an incoming cookie, and never the issuer's `sid`.
-- **Replaced session:** when a verified session cookie is present, load its
-  record and end it with `end_session(sessions, session_id=<old id>)`, then
-  commit that transaction before `issue_session_cookies`.
-- **Entropy:** at least 128 bits from a CSPRNG. `secrets.token_urlsafe(32)`
-  gives 43 characters, under the 135-character bound.
+- **Commit before cookies:** commit the transaction `open_session` wrote
+  into, then call `issue_session_cookies`.
+- **Second hold:** the `WriteLock` must allow a second hold in the same
+  request, one for admission and one for `open_session`.
+- **Entropy:** the store mints the new session's id with at least 128 bits from
+  a CSPRNG; `secrets.token_urlsafe(32)` gives 43 characters, under the
+  135-character bound.
 
 ### The relying party
 
@@ -863,7 +898,8 @@ host that signs in through OpenID Connect logs out with
 itself; `end_user_sessions(sessions, user_id)` ends every session
 of an account and returns the store's count, and
 `prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
-a cap after a login and returns their identifiers. The next request carrying an
+a cap and returns their identifiers; [`open_session`](#opening-a-session) calls
+it after a login. The next request carrying an
 ended session's cookie is refused. The `session_administration` helpers
 end sessions through the same functions.
 
@@ -1103,7 +1139,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-endpoint POST, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `log_out`, which ends the browser's session and returns the issuer's end-session URL, `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, creates the new one and prunes the account to a cap, `log_out`, which ends the browser's session and returns the issuer's end-session URL, `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names, and `post_token_request_over_https`, the production `TokenRequestPost`. Takes its identity from `webauth.oidc`, so it needs `overnightworks-webauth[jwt]` too |
 
 It leaves the application everything that touches the application's own truth:
 

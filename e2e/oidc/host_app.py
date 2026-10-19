@@ -67,6 +67,7 @@ from webauth.oidc_login import (
     NoAdmins,
     finish_login,
     log_out,
+    open_session,
     post_token_request_over_https,
     receive_backchannel_logout,
     start_login,
@@ -430,14 +431,14 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             return PAGE.substitute(headline="Sign-in refused", body=html.escape(reason))
         current.logins_admitted += 1
         call_userinfo(settings, current)
-        with current.lock.hold():
-            record = current.sessions.create(
-                outcome.id,
-                datetime.now(UTC) + timedelta(seconds=current.sessions.max_age_seconds),
-                ip_address=request.client.host if request.client else "",
-                user_agent=request.headers.get("user-agent", "")[: config.max_user_agent_chars],
+        with current.sessions.transaction():
+            session = open_session(
+                request, config, outcome,
+                sessions=current.sessions, lock=current.lock,
+                expires_at=datetime.now(UTC) + timedelta(seconds=current.sessions.max_age_seconds),
+                max_sessions=None,
             )
-        issue_session_cookies(response, record.id, config)
+        issue_session_cookies(response, session.id, config)
         response.status_code = 303
         response.headers["location"] = "/"
         return ""

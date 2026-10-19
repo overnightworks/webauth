@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import count
@@ -339,6 +339,7 @@ class SessionRecordsInMemory:
         ip_address: str,
         user_agent: str,
     ) -> FakeSessionRecord:
+        _require_held_lock(self._lock)
         user = self._users.get(user_id)
         if user is None:
             raise UnknownAccountError("Account does not exist")
@@ -413,6 +414,7 @@ class SessionRecordsInMemory:
         return len(self._records)
 
     def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
+        _require_held_lock(self._lock)
         records = sorted(
             (record for record in self._records.values() if record.user_id == user_id),
             key=lambda record: record.created_at,
@@ -475,6 +477,23 @@ class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
         if record is not None:
             end_session(self, session_id=session_id)
         return record
+
+
+class SessionsReusingEndedIds(SessionRecordsInMemory):
+    """A store whose ids restart from the first one, so a replaced session's id comes back."""
+
+    def create(
+        self,
+        user_id: str,
+        expires_at: datetime,
+        *,
+        ip_address: str,
+        user_agent: str,
+    ) -> FakeSessionRecord:
+        self._ids = count(1)
+        return super().create(
+            user_id, expires_at, ip_address=ip_address, user_agent=user_agent,
+        )
 
 
 class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
@@ -579,6 +598,17 @@ class AuthApp:
 
     def signed_cookie(self, session_id: str = SESSION_ID) -> str:
         return sign_session_id(session_id, self.signing_key)
+
+
+def seeded_session(
+    sessions: SessionRecordsInMemory, hold: AbstractContextManager[None],
+    user_id: str, expires_at: datetime,
+) -> FakeSessionRecord:
+    """A stored session of ``user_id``, created the way a host does: under its write lock."""
+    with hold:
+        return sessions.create(
+            user_id, expires_at, ip_address=CLIENT_ADDRESS, user_agent=CLIENT_USER_AGENT,
+        )
 
 
 def a_session(

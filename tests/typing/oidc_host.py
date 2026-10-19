@@ -88,6 +88,7 @@ from webauth.oidc_login import (
     admit_identity,
     finish_login,
     log_out,
+    open_session,
     post_token_request_over_https,
     receive_backchannel_logout,
     start_login,
@@ -257,6 +258,17 @@ def a_host_finishes_a_keycloak_login(
             admin_group="/apps/host/admin",
         ),
         accounts=accounts, lock=lock, audit=audit,
+    )
+
+
+def a_host_opens_a_session(
+    request: Request, config: WebAuthConfig, account: UserRecord, expires_at: datetime,
+) -> SessionRecord:
+    sessions: SessionRecordStore = HostSessions()
+    lock: WriteLock = HostLock()
+    return open_session(
+        request, config, account,
+        sessions=sessions, lock=lock, expires_at=expires_at, max_sessions=None,
     )
 
 
