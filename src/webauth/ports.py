@@ -205,8 +205,7 @@ class SessionLivenessPolicy[StoredSessionT](Protocol):
 
     ``now`` is passed in by ``dependencies`` from the host's
     ``WebAuthConfig.wall_clock``, so a policy is a pure function of a session
-    and that instant. The
-    session loaded from the store is judged whole.
+    and that instant. The session loaded from the store is judged whole.
     """
 
     def admits_stored_session(self, record: StoredSessionT, now: datetime) -> bool:

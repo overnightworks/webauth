@@ -68,3 +68,13 @@ protected_modules =
     redis
 allowed_importers =
     webauth.rate_limit
+
+# Session administration is the library's own use case; it must not depend on
+# the FastAPI-bound request layer.
+[importlinter:contract:session-administration-does-not-import-dependencies]
+name = webauth.session_administration does not import webauth.dependencies
+type = forbidden
+source_modules =
+    webauth.session_administration
+forbidden_modules =
+    webauth.dependencies

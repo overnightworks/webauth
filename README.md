@@ -1186,7 +1186,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols: the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
+| `webauth.ports` | What the host supplies, as Protocols, and the types the library hands out (`AuthenticatedUser`, `WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.session_ending` | The one place a session ends in the host's store |
