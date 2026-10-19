@@ -1,8 +1,0 @@
-claim_id = "3afe26ab32724f79b3eb9c6f208d14e4"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "728f7fb5e92a9e2b872f2c6c70e55237682462fe"
-branch = "claude/issue-276-one-install-carries-oidc"
-scope = [".github/workflows/ci.yml", ".github/workflows/dependency-ceilings.yml", ".importlinter", "AGENTS.md", "CHANGELOG.md", "CLAUDE.md", "README.md", "e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/prove.py", "pyproject.toml", "src/webauth/__init__.py", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/oidc_transport.py", "tests/typing/check_against_wheel.sh", "uv.lock"]
-opened_commit = "d9d3c77897659adefdd9cf9576d3ee9bdf09c567"
-whole_reason = "Five small cards of one subject (what the package installs and says it is); they share pyproject, CI and the same README sections, so they land as one lane."
