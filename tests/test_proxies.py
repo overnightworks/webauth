@@ -14,8 +14,8 @@ from webauth import proxies
 from webauth.config import install_web_auth_config
 from webauth.proxies import (
     TrustedProxies,
-    budget_address,
-    get_client_ip,
+    _budget_address,
+    _get_client_ip,
 )
 
 MAX_ADDRESS_CHARS = 45
@@ -59,7 +59,7 @@ def test_parsing_rejects_a_zone_scoped_entry() -> None:
         TrustedProxies.parse("fe80::1%eth0")
 
 
-# -- get_client_ip -----------------------------------------------------------
+# -- _get_client_ip -----------------------------------------------------------
 
 _PROXY_NETWORK = "172.16.0.0/12"
 _TRUSTED_PEER = "172.18.0.1"
@@ -123,7 +123,7 @@ def test_client_ip_behind_a_trusted_proxy(
     buys a rate-limit budget.
     """
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    assert get_client_ip(_TRUSTED_PEER, forwarded_for, trusted) == expected
+    assert _get_client_ip(_TRUSTED_PEER, forwarded_for, trusted) == expected
 
 
 def test_a_poisoned_prefix_cannot_move_a_client_onto_the_gateway_identity() -> None:
@@ -136,8 +136,8 @@ def test_a_poisoned_prefix_cannot_move_a_client_onto_the_gateway_identity() -> N
     request keys on the peer.
     """
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    assert get_client_ip(_TRUSTED_PEER, [f"garbage, {_CLIENT}"], trusted) == _CLIENT
-    assert get_client_ip(_TRUSTED_PEER, [f"{_CLIENT}, garbage"], trusted) == _TRUSTED_PEER
+    assert _get_client_ip(_TRUSTED_PEER, [f"garbage, {_CLIENT}"], trusted) == _CLIENT
+    assert _get_client_ip(_TRUSTED_PEER, [f"{_CLIENT}, garbage"], trusted) == _TRUSTED_PEER
 
 
 class _CountedChain(str):
@@ -189,7 +189,7 @@ def test_a_huge_chain_costs_only_the_entries_it_reads(
     left of the answer are never cut out of the field at all."""
     header_field = _CountedChain(", ".join(chain))
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    assert get_client_ip(_TRUSTED_PEER, [header_field], trusted) == expected
+    assert _get_client_ip(_TRUSTED_PEER, [header_field], trusted) == expected
     assert len(header_field.pieces) <= MAX_FORWARDED_FOR_HOPS + 1
 
 
@@ -210,7 +210,7 @@ def test_an_entry_too_long_to_be_an_address_is_never_parsed(
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     entry_of_nothing_but_separators = "1." * _HOPS_BEYOND_ANY_DEPLOYMENT
 
-    assert get_client_ip(
+    assert _get_client_ip(
         _TRUSTED_PEER, [entry_of_nothing_but_separators], trusted,
     ) == _TRUSTED_PEER
     assert all(len(host) <= MAX_ADDRESS_CHARS for host in parsed_hosts)
@@ -232,28 +232,28 @@ def test_a_chain_that_names_nobody_is_logged(
     the proxy should have written correctly is a fault to see, not a default."""
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     with caplog.at_level(logging.WARNING, logger="webauth.proxies"):
-        assert get_client_ip(_TRUSTED_PEER, forwarded_for, trusted) == _TRUSTED_PEER
+        assert _get_client_ip(_TRUSTED_PEER, forwarded_for, trusted) == _TRUSTED_PEER
     assert [record.levelno for record in caplog.records] == [logging.WARNING]
 
 
 def test_client_ip_ignores_a_chain_from_an_untrusted_peer() -> None:
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    assert get_client_ip("203.0.113.50", ["10.9.9.9"], trusted) == "203.0.113.50"
+    assert _get_client_ip("203.0.113.50", ["10.9.9.9"], trusted) == "203.0.113.50"
 
 
 def test_client_ip_ignores_a_chain_when_no_proxy_is_configured() -> None:
-    assert get_client_ip("1.2.3.4", ["5.6.7.8", "9.10.11.12"], TrustedProxies()) == "1.2.3.4"
+    assert _get_client_ip("1.2.3.4", ["5.6.7.8", "9.10.11.12"], TrustedProxies()) == "1.2.3.4"
 
 
 def test_client_ip_canonicalizes_an_ipv4_mapped_peer() -> None:
     """Same client, one identity — otherwise a form switch doubles the budget."""
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    assert get_client_ip("::ffff:203.0.113.50", [], trusted) == "203.0.113.50"
+    assert _get_client_ip("::ffff:203.0.113.50", [], trusted) == "203.0.113.50"
 
 
 def test_client_ip_of_a_peer_that_is_not_an_address() -> None:
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    assert get_client_ip("testclient", ["203.0.113.7"], trusted) == "testclient"
+    assert _get_client_ip("testclient", ["203.0.113.7"], trusted) == "testclient"
 
 
 def _client_ip_app() -> FastAPI:
@@ -318,7 +318,7 @@ def test_an_application_without_a_configuration_names_nobody() -> None:
 def test_the_budget_of_an_address_pools_its_ipv6_network(
     address: str, prefix: int, budget: str,
 ) -> None:
-    assert budget_address(address, prefix) == budget
+    assert _budget_address(address, prefix) == budget
 
 
 # -- Forwarded protocol ------------------------------------------------------
