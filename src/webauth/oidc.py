@@ -63,8 +63,8 @@ from pydantic import SecretStr
 
 from webauth import WebAuthError
 from webauth.cookies import PENDING_SECRET_BYTES, PendingLogin
+from webauth.https_client import ExchangeFailure, is_https_url
 from webauth.jwt_verification import (
-    ExchangeFailure,
     JwtVerifier,
     KeySetFetch,
     MonotonicClock,
@@ -73,7 +73,6 @@ from webauth.jwt_verification import (
     VerificationRefusal,
     VerifiedClaims,
     WallClock,
-    is_https_url,
     strict_json_object,
 )
 

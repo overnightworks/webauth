@@ -13,8 +13,7 @@ import pytest
 
 import webauth
 from webauth import WebAuthError
-from webauth.https_client import KeySetFetchError
-from webauth.jwt_verification import ExchangeFailure
+from webauth.https_client import ExchangeFailure, KeySetFetchError
 from webauth.oidc import TokenEndpointError
 from webauth.ports import UsernameTakenError
 from webauth.session_administration import NotAnAdminError, UnknownSessionError

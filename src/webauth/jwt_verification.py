@@ -59,11 +59,8 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
 
-# Plain imports are not public here; ExchangeFailure is the one relay, listed in
-# __all__: webauth.oidc may not import its owner, webauth.https_client.
 from webauth.https_client import (
     MAX_KEY_SET_BYTES,
-    ExchangeFailure,
     KeySetFetchError,
     is_https_url,
 )
@@ -99,7 +96,6 @@ __all__ = [
     "KEY_SET_REFRESH_COOLDOWN_SECONDS",
     "MAX_KEY_SET_KEYS",
     "MAX_TOKEN_CHARACTERS",
-    "ExchangeFailure",
     "JwtVerifier",
     "KeySetFetch",
     "MonotonicClock",

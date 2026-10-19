@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from decimal import Decimal
@@ -497,3 +498,21 @@ def test_the_configuration_cannot_be_changed_after_it_is_installed() -> None:
         config.cookie_max_age_seconds = 1
 
     assert replace(config, cookie_max_age_seconds=1).cookie_max_age_seconds == 1
+
+
+def test_both_host_lists_empty_are_refused_naming_the_fields_and_the_localhost_migration() -> None:
+    with pytest.raises(ValueError) as refusal:
+        a_web_auth_config(allowed_hosts_exact=frozenset(), allowed_hosts_patterns=())
+
+    message = str(refusal.value)
+    assert "allowed_hosts_exact" in message
+    assert "allowed_hosts_patterns" in message
+    assert 'allowed_hosts_exact={"localhost", "127.0.0.1"}' in message
+
+
+def test_patterns_alone_are_enough_for_a_host_list() -> None:
+    config = a_web_auth_config(
+        allowed_hosts_exact=frozenset(), allowed_hosts_patterns=(re.compile(r"^app\.example$"),),
+    )
+
+    assert config.allowed_hosts_patterns

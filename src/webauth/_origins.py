@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from webauth.config import WebAuthConfig
 
 __all__ = []
-
-_LOCALHOST_PATTERN: Final = re.compile(r"^(localhost|127\.0\.0\.1)(:\d+)?$")
 
 
 def _is_allowed_host(
@@ -20,11 +18,9 @@ def _is_allowed_host(
     exact: frozenset[str],
     patterns: tuple[re.Pattern[str], ...],
 ) -> bool:
-    if exact or patterns:
-        if host_and_port in exact or hostname in exact:
-            return True
-        return any(p.fullmatch(host_and_port) for p in patterns)
-    return bool(_LOCALHOST_PATTERN.match(host_and_port))
+    if host_and_port in exact or hostname in exact:
+        return True
+    return any(p.fullmatch(host_and_port) for p in patterns)
 
 
 def origin_is_allowed(origin: str, config: WebAuthConfig) -> bool:
