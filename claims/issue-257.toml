@@ -3,6 +3,6 @@ agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
 role = "builder"
 base = "e6c132e186e2800bea45e4e6f0036415b003d282"
 branch = "claude/issue-257-hsts-hosts-csp"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/_origins.py", "src/webauth/config.py", "src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "src/webauth/validation.py", "tests/test_policies.py", "tests/test_security_headers.py", "tests/test_web_auth_config.py", "tests/test_websocket_auth.py", "tests/webauth_arrangement.py"]
+scope = ["CHANGELOG.md", "README.md", "src/webauth/_origins.py", "src/webauth/config.py", "src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "src/webauth/validation.py", "tests/test_csrf.py", "tests/test_policies.py", "tests/test_security_headers.py", "tests/test_web_auth_config.py", "tests/test_websocket_auth.py", "tests/webauth_arrangement.py"]
 opened_commit = "45e037e3028e068dac0fee3ebdb07185ba71f8f9"
 whole_reason = "Three request-path configuration fixes share config.py, README and CHANGELOG, and each is a host-facing break that the same message to the heads names."
