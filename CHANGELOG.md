@@ -23,6 +23,14 @@ Versions before 0.3.0 and releases without an entry here are described in the
   including an already-hashed reference, fails type checking. Migration:
   construct them with `webauth.cookies.session_reference(raw_session_id)`.
   Hosts that only read the fields are unaffected.
+- `WebAuthConfig` refuses an empty `allowed_hosts_exact` together with an empty
+  `allowed_hosts_patterns`; the silent fallback to `localhost` and `127.0.0.1`
+  is gone. Migration: `allowed_hosts_exact={"localhost", "127.0.0.1"}` admits
+  exactly what the fallback admitted.
+- `webauth.middleware.security_headers.STRICT_TRANSPORT_SECURITY` is removed;
+  `SecurityHeadersPolicy.strict_transport_security` renders the header. Its
+  default value is unchanged.
+
 - `post_token_request_over_https` moved from `webauth.oidc_login` to the new
   `webauth.oidc_transport`, and `webauth.jwt_verification` no longer
   re-exports `ExchangeFailure`, which `webauth.https_client` owns. Migration:
@@ -38,6 +46,17 @@ Versions before 0.3.0 and releases without an entry here are described in the
   it. A type checker now refuses a raw session id when an audit event is
   constructed or assigned with one. Hosts that read these fields as `str` are
   unaffected, at run time and in their own types.
+- `SecurityHeadersPolicy.hsts_max_age_seconds` (default
+  `DEFAULT_HSTS_MAX_AGE_SECONDS`, 31536000, a whole number
+  from 0 up; 0 sends `max-age=0`, which rolls a pin back) and
+  `hsts_include_subdomains` (default `True`). The defaults send today's header;
+  `cookie_secure` still decides whether HSTS is sent at all.
+
+**Fixed**
+
+- A keyword source added to a Content-Security-Policy (`'SELF'`) is lowercased,
+  so it no longer repeats the default `'self'`. Host sources, paths, nonces and
+  hashes keep their case.
 
 **Changed**
 

@@ -383,6 +383,25 @@ def styled(sources: object) -> dict[str, object]:
 
 
 class TestDefaultContentSecurityPolicy:
+    @pytest.mark.parametrize("directive", [
+        CspDirective.SCRIPT_SRC, CspDirective.FRAME_ANCESTORS, CspDirective.FORM_ACTION,
+    ])
+    def test_a_keyword_beside_the_default_one_differs_only_in_case_is_listed_once(
+        self, directive: CspDirective,
+    ) -> None:
+        policy = default_content_security_policy(added_sources={directive: ["'SELF'"]})
+
+        assert directive_sources(policy, directive).split(" ").count("'self'") == 1
+
+    @pytest.mark.parametrize("sources", [
+        pytest.param(["'nonce-AbC'", "'nonce-abc'"], id="nonces"),
+        pytest.param(["https://cdn.example/A", "https://cdn.example/a"], id="host-paths"),
+    ])
+    def test_sources_whose_case_carries_meaning_stay_apart(self, sources: list[str]) -> None:
+        policy = default_content_security_policy(added_sources={CspDirective.SCRIPT_SRC: sources})
+
+        assert set(sources) <= set(directive_sources(policy, CspDirective.SCRIPT_SRC).split(" "))
+
     @pytest.mark.parametrize(
         "arguments",
         [
@@ -449,7 +468,6 @@ class TestDefaultContentSecurityPolicy:
                 "self", "unsafe-inline", "unsafe-eval", "strict-dynamic", "unsafe-hashes",
                 "report-sample", "unsafe-allow-redirects", "wasm-unsafe-eval",
             )),
-            pytest.param("'SELF'", id="mixed-case-keyword"),
             pytest.param(f"'nonce-{A_DIGEST}'", id="nonce"),
             pytest.param("'NONCE-ab_c-d=='", id="mixed-case-nonce"),
             pytest.param("'sha256-abc'", id="sha256"),

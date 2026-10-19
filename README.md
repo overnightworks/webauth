@@ -682,8 +682,9 @@ is the one check a host runs at the handshake. It answers the
 The `Origin` is decided first, before the store is touched, so a refused
 handshake neither renews a session nor writes an audit event. Exactly one
 `Origin` must name a host the configured allowlist admits (`allowed_hosts_exact`
-and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `localhost`
-and `127.0.0.1` when none is configured). There is no `Referer` fallback, and
+and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `WebAuthConfig`
+refuses both empty, so local development lists
+`allowed_hosts_exact={"localhost", "127.0.0.1"}`). There is no `Referer` fallback, and
 `Sec-Fetch-Site` does not decide: a client that is not a browser must send an
 allowed `Origin` too. The `Origin` keeps a foreign page from using a visitor's
 cookie; it is no credential.
@@ -766,6 +767,11 @@ does not send a `Secure` cookie back over plain http, so local development
 over http works only with `cookie_secure=False` in that environment's
 configuration, which drops `Secure` and HSTS together. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
+
+`SecurityHeadersPolicy.hsts_max_age_seconds` sets the HSTS `max-age`; it
+defaults to `DEFAULT_HSTS_MAX_AGE_SECONDS` (31536000, one year) and takes a
+whole number of seconds from 0 up. `0` sends `max-age=0`, which rolls a pin
+back. `hsts_include_subdomains` (default `True`) adds `includeSubDomains`.
 
 `SecurityHeadersMiddleware` sends the `Permissions-Policy` its
 `SecurityHeadersPolicy` names in `permissions_policy`. The field defaults to

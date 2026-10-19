@@ -18,14 +18,12 @@ __all__ = [
     "CONTENT_TYPE_OPTIONS",
     "FRAME_OPTIONS",
     "REFERRER_POLICY",
-    "STRICT_TRANSPORT_SECURITY",
     "SecurityHeadersMiddleware",
 ]
 
 CONTENT_TYPE_OPTIONS: Final = "nosniff"
 FRAME_OPTIONS: Final = "DENY"
 REFERRER_POLICY: Final = "strict-origin-when-cross-origin"
-STRICT_TRANSPORT_SECURITY: Final = "max-age=31536000; includeSubDomains"
 
 
 class SecurityHeadersMiddleware:
@@ -81,6 +79,6 @@ class SecurityHeadersMiddleware:
         headers["Referrer-Policy"] = REFERRER_POLICY
         headers["Permissions-Policy"] = self._policy.permissions_policy
         if cookie_secure:
-            headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
+            headers["Strict-Transport-Security"] = self._policy.strict_transport_security
         elif "Strict-Transport-Security" in headers:
             del headers["Strict-Transport-Security"]
