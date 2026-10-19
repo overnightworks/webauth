@@ -12,6 +12,7 @@ jobs:
   newest-release-within-ceiling:
     name: newest release within ceiling
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -33,10 +34,14 @@ jobs:
           from packaging.version import Version
 
           project = tomllib.load(open("pyproject.toml", "rb"))["project"]
-          extras = project["optional-dependencies"]
+          runtime_extras = {
+              name: requirements
+              for name, requirements in project["optional-dependencies"].items()
+              if name != "dev"
+          }
           declared = [
               Requirement(text)
-              for text in [*project["dependencies"], *extras["redis"], *extras["jwt"]]
+              for text in [*project["dependencies"], *sum(runtime_extras.values(), [])]
           ]
 
 

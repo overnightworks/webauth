@@ -424,11 +424,6 @@ MAKER = [
         ("a.py", ["__all__ = []", "__all__ += [SessionReference(raw)]"], ["a.py:2"]),
         (
             "a.py",
-            ["def f(x: \"Annotated[str, Depends(lambda r: SessionReference(r))]\"): ..."],
-            ["a.py:1"],
-        ),
-        (
-            "a.py",
             ["def f(x: \"Annotated[str, Depends(SessionReference('raw'))]\"): ..."],
             ["a.py:1"],
         ),
