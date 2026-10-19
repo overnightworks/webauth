@@ -52,11 +52,7 @@ CI, which only lints it.
 - The user model, schema, configured role names, transaction boundaries and
   HTTP routes belong to the host. The library writes no response except its
   own refusals and the 500 of an unhandled exception; README.md lists them
-  under "What it owns, and what it leaves to the host". Session administration
-  is a library helper in `webauth.session_administration` over host-supplied
-  ports and a write lock; the host commits or rolls back its work. A `forbidden`
-  contract keeps `webauth.session_administration` from importing
-  `webauth.dependencies`, so the use case does not depend on the request layer.
+  under "What it owns, and what it leaves to the host".
 - A name is private when it, or a module on its path, starts with `_`. Tests
   and e2e take public names, or the functions and classes a module defines,
   never its private values or the names it only imports, because a value is

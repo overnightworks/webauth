@@ -66,7 +66,6 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
-from webauth.session_administration import SessionAdministration
 from webauth.session_ending import end_session
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
@@ -545,16 +544,6 @@ class RecordingAuditSink:
 
     def account_event(self, event: AccountEvent) -> None:
         self.account_events.append(event)
-
-
-def a_session_administration(*users: FakeUser, config: WebAuthConfig) -> SessionAdministration:
-    lock = WriteLockInMemory()
-    return SessionAdministration(
-        sessions=SessionRecordsInMemory(users=UsersInMemory(*users, lock=lock), lock=lock),
-        audit=RecordingAuditSink(),
-        lock=lock,
-        config=config,
-    )
 
 
 WEBSOCKET_PATH = "/ws"

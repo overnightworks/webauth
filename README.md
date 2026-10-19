@@ -955,8 +955,7 @@ of an account and returns the store's count, and
 `prune_sessions(sessions, user_id, max_sessions)` ends the oldest sessions above
 a cap and returns their identifiers; [`open_session`](#opening-a-session) calls
 it after a login. The next request carrying an
-ended session's cookie is refused. The `session_administration` helpers
-end sessions through the same functions.
+ended session's cookie is refused.
 
 ## Middleware order
 
@@ -1123,37 +1122,6 @@ Two backends implement `RateLimitBackend`:
 Redis is therefore an optional dependency: a deployment that supplies the
 in-process backend installs plain `webauth`.
 
-## Session administration
-
-Host developers use [`webauth.session_administration`](src/webauth/session_administration.py)
-to list and end sessions without a user store. Construct
-`SessionAdministration(sessions, audit, lock, config)` with the host's
-`SessionAdministrationStore`, `AuditSink`, `WriteLock` and `WebAuthConfig`.
-
-- `SessionAdministrationStore`: extends `SessionRecordStore` with
-  `list_active(*, offset=0, limit=None)`. The host selects
-  active records using its liveness rules and owns their order. These reads
-  need no write lock; `limit=None` returns all remaining records.
-- `WriteLock.hold()`: serializes checks and writes across the supplied stores
-  in one host-owned transaction. `revoke_session` acquires it and never
-  commits. The host commits on success and rolls back on failure. A
-  transaction-scoped lock can remain held until then.
-
-| Helper | Behavior |
-|---|---|
-| `list_sessions(offset=0, limit=None)` | Returns frozen `SessionSummary` records with `session_ref`, `user_id`, `username`, `ip_address`, and `user_agent` |
-| `revoke_session(actor, session_ref)` | Ends the active session identified by a listed reference; raises `UnknownSessionError` if absent |
-
-`revoke_session` requires `config.admin_role` and raises `NotAnAdminError`
-otherwise; the host guards `list_sessions` with its admin dependency. Public
-references are `webauth.ports.SessionReference` values (a `str` for the host)
-and come only from `webauth.cookies.session_reference(session_id)`:
-SHA-256 hex of the UTF-8 raw identifier. Lists, the `session_revoked` event, and
-`SessionIdentityChanged` (its `session_ref`) expose no raw token; the host reads
-any timestamps from its own records. Refusals derive from `webauth.WebAuthError`.
-[The session administration tests](tests/test_session_administration.py) verify
-the helpers, including REQ-ADMIN-12 for listed references.
-
 ## Audit events
 
 Map `AuditSink.account_event(event)` to the host's audit system, or
@@ -1163,7 +1131,6 @@ explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 | Event kind | Additional fields |
 |---|---|
 | `user_created` | `role` |
-| `session_revoked` | `session_ref` |
 | `role_changed` | `previous_role`, `role` |
 | `backchannel_logout` | none; `subject_id` is the account whose sessions the issuer ended |
 
@@ -1187,11 +1154,10 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore`, `SessionRecordStore` and `SessionAdministrationStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
+| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
 | `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.session_ending` | The one place a session ends in the host's store |
-| `webauth.session_administration` | Listing and revoking sessions by public reference through a host-owned session store, audit sink and write lock |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. Needs `overnightworks-webauth[jwt]` |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. Needs `overnightworks-webauth[jwt]` |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. Needs `overnightworks-webauth[jwt]` |

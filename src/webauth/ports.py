@@ -28,7 +28,6 @@ __all__ = [
     "AuditSink",
     "AuthenticatedUser",
     "RateLimitBackend",
-    "SessionAdministrationStore",
     "SessionIdentityChange",
     "SessionIdentityChanged",
     "SessionLivenessPolicy",
@@ -189,17 +188,6 @@ class SessionRecordStore(Protocol):
         ...
 
 
-@runtime_checkable
-class SessionAdministrationStore(SessionRecordStore, Protocol):
-    """Active sessions selected by the host's liveness and persistence rules."""
-
-    def list_active(
-        self, *, offset: int = 0, limit: int | None = None,
-    ) -> list[SessionRecord]:
-        """Read active sessions in store order without requiring a write lock."""
-        ...
-
-
 class SessionLivenessPolicy[StoredSessionT](Protocol):
     """Whether a session still stands, decided without reading the wall clock.
 
@@ -249,8 +237,7 @@ class SessionIdentityChanged:
 
     The raw session identifier never reaches an audit event: it is a bearer
     secret, so the field is a ``SessionReference``; a host makes one with
-    ``webauth.cookies.session_reference``. It matches the reference of
-    ``revoke_session``.
+    ``webauth.cookies.session_reference``.
     """
 
     change: SessionIdentityChange
@@ -262,7 +249,6 @@ class SessionIdentityChanged:
 
 class AccountEventKind(Enum):
     USER_CREATED = "user_created"
-    SESSION_REVOKED = "session_revoked"
     ROLE_CHANGED = "role_changed"
     BACKCHANNEL_LOGOUT = "backchannel_logout"
 

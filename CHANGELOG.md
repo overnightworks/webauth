@@ -10,6 +10,13 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- Session administration is removed: `webauth.session_administration`
+  (`SessionAdministration`, `SessionSummary`, `NotAnAdminError`,
+  `UnknownSessionError`), `webauth.ports.SessionAdministrationStore` and
+  `AccountEventKind.SESSION_REVOKED` (`session_revoked`) no longer exist, so
+  importing them fails. Logout, the session cap, back-channel logout and a
+  session the store ended are unchanged. Migration: a host that listed or
+  revoked sessions does it in Keycloak, or with its own store query.
 - Names outside a module's `__all__` start with an underscore, so importing one
   raises `ImportError`, and `webauth.validation` is now `webauth._validation`;
   0.15.0 declared them internal, and names added since were never in `__all__`.
@@ -20,9 +27,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   name made the browser send two same-name cookies at logout, and the logout
   ended no stored session. Migration: choose another name; no known host sets
   one.
-- `SessionIdentityChanged.session_ref`, `AccountEvent.session_ref` and
-  `SessionSummary.session_ref` are typed `webauth.ports.SessionReference`, no
-  longer `str`: host code that constructs these dataclasses with a plain `str`,
+- `SessionIdentityChanged.session_ref` and `AccountEvent.session_ref` are typed
+  `webauth.ports.SessionReference`, no longer `str`: host code that constructs these dataclasses with a plain `str`,
   including an already-hashed reference, fails type checking. Migration:
   construct them with `webauth.cookies.session_reference(raw_session_id)`.
   Hosts that only read the fields are unaffected.
@@ -50,9 +56,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   is the one reading of now behind the session decision: HTTP and WebSocket
   judge liveness at it and pass it to `SessionRecordStore.touch` as `now`.
 - `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of
-  `SessionIdentityChanged.session_ref`, `AccountEvent.session_ref` and
-  `SessionSummary.session_ref`, and `webauth.cookies.session_reference` returns
-  it. A type checker now refuses a raw session id when an audit event is
+  `SessionIdentityChanged.session_ref` and `AccountEvent.session_ref`, and
+  `webauth.cookies.session_reference` returns it. A type checker now refuses a raw session id when an audit event is
   constructed or assigned with one. Hosts that read these fields as `str` are
   unaffected, at run time and in their own types.
 - `SecurityHeadersPolicy.hsts_max_age_seconds` (default
