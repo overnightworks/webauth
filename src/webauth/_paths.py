@@ -24,6 +24,7 @@ _CONTROL_CHARACTER: Final = re.compile(r"[\x00-\x1f\x7f]")
 _FRAGMENT_MARK: Final = "#"
 _ALREADY_ASCII_SAFE: Final = "".join(chr(code) for code in range(0x21, 0x7F))
 _PATH_ENDS: Final = ("/", "?")
+_PLAIN_ROOT: Final = re.compile(r"[A-Za-z0-9\-._~/]*")
 _SEGMENT_SEPARATORS: Final = re.compile(r"[/\\]")
 _DOT_SEGMENT: Final = re.compile(r"(?:\.|%2e){1,2}", re.IGNORECASE)
 
@@ -41,12 +42,13 @@ def same_app_path(connection: HTTPConnection, candidate: str | None) -> str | No
     """``candidate`` as an ASCII path of the app serving ``connection``, or ``None``.
 
     The app is the one running the connection's route, so a login inside a
-    mounted sub-app judges against that mount's ``root_path``. Non-ASCII
-    characters are percent-encoded; the cap on length applies to that encoded
-    form. A browser resolves ``.`` and ``..`` segments before it sends a
-    request, so a path carrying one is not a deep link and is refused; so is a
-    literal ``#``, which a browser reads as the start of a fragment before it
-    resolves those segments and which a request never carries.
+    mounted sub-app judges against that mount's ``root_path``. A ``root_path``
+    with a character other than ASCII letters, digits, ``-._~`` and ``/`` keeps
+    no return path. Non-ASCII characters of the candidate are percent-encoded; the
+    cap on length applies to that encoded form. A browser resolves ``.`` and ``..``
+    segments before it sends a request, so a path carrying one is not a deep link
+    and is refused; so is a literal ``#``, which a browser reads as the start of a
+    fragment before it resolves those segments and which a request never carries.
     """
     if not candidate or not candidate.startswith("/") or _CONTROL_CHARACTER.search(candidate):
         return None
@@ -54,10 +56,12 @@ def same_app_path(connection: HTTPConnection, candidate: str | None) -> str | No
         return None
     try:
         encoded = _ascii(candidate)
-        encoded_root = _ascii(connection.scope.get("root_path", ""))
     except UnicodeEncodeError:
         return None
-    if not _is_under(encoded_root, encoded) or _has_dot_segment(encoded):
+    root_path = connection.scope.get("root_path", "")
+    if not _PLAIN_ROOT.fullmatch(root_path) or not _is_under(root_path, encoded):
+        return None
+    if _has_dot_segment(encoded):
         return None
     return encoded if len(encoded) <= MAX_RETURN_PATH_BYTES else None
 
@@ -66,9 +70,9 @@ def requested_address(connection: HTTPConnection) -> str:
     """The raw path and raw query the app was asked for, ``root_path`` included."""
     scope = connection.scope
     raw_path = scope.get("raw_path") or quote(scope["path"]).encode()
-    encoded_root = _ascii(scope.get("root_path", "")).encode()
-    if not _carries_root(raw_path, encoded_root):
-        raw_path = encoded_root + raw_path
+    root = scope.get("root_path", "").encode()
+    if not _carries_root(raw_path, root):
+        raw_path = root + raw_path
     address = raw_path.decode("utf-8", errors="surrogateescape")
     query = scope.get("query_string", b"").decode("utf-8", errors="surrogateescape")
     return f"{address}?{query}" if query else address
@@ -78,10 +82,10 @@ def _ascii(path: str) -> str:
     return quote_from_bytes(path.encode("utf-8"), safe=_ALREADY_ASCII_SAFE)
 
 
-def _carries_root(raw_path: bytes, encoded_root: bytes) -> bool:
-    if not encoded_root or not raw_path.startswith(encoded_root):
-        return not encoded_root
-    return raw_path[len(encoded_root):len(encoded_root) + 1] in (b"", b"/")
+def _carries_root(raw_path: bytes, root: bytes) -> bool:
+    if not root or not raw_path.startswith(root):
+        return not root
+    return raw_path[len(root):len(root) + 1] in (b"", b"/")
 
 
 def _has_dot_segment(path: str) -> bool:

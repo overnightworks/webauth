@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from dataclasses import fields, is_dataclass
 from datetime import timedelta
@@ -610,7 +611,6 @@ def a_guarded_catch_all_app() -> FastAPI:
             "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="the raw path is not decoded",
         ),
         pytest.param("/songs/1?x=2", "/songs/1?x=2", id="an ordinary path keeps its query"),
-        pytest.param("/\\evil.example/x", "/", id="a literal backslash"),
     ],
 )
 def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
@@ -622,6 +622,28 @@ def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
 
     assert response.status_code == 302
     assert response.headers["location"] == f"/login?{urlencode({'next': carried})}"
+
+
+def test_the_redirect_falls_back_for_a_literal_backslash_in_the_raw_path() -> None:
+    sent: list[dict] = []
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+        "scheme": "https", "server": ("testserver", 443), "client": ("127.0.0.1", 1),
+        "root_path": "", "path": "/\\evil.example/x", "raw_path": b"/\\evil.example/x",
+        "query_string": b"", "headers": [(b"host", b"testserver"), (b"accept", b"text/html")],
+    }
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    asyncio.run(a_guarded_catch_all_app()(scope, receive, send))
+
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    assert start["status"] == 302
+    assert dict(start["headers"])[b"location"].decode() == f"/login?{urlencode({'next': '/'})}"
 
 
 def a_redirect_location(client: TestClient, asked_for: str) -> str:
@@ -651,12 +673,20 @@ def a_redirect_location(client: TestClient, asked_for: str) -> str:
             id="a sibling of the prefix's name",
         ),
         pytest.param(
-            "/café", "/caf%C3%A9/albums/42", "/caf%C3%A9/albums/42",
-            id="a non-ASCII root the server left prefixed",
+            "/café", "/caf%C3%A9/albums/42", "/",
+            id="a non-ASCII root the server left prefixed falls back",
         ),
         pytest.param(
-            "/café", "/albums/42", "/caf%C3%A9/albums/42",
-            id="a non-ASCII root a proxy stripped",
+            "/café", "/albums/42", "/",
+            id="a non-ASCII root a proxy stripped falls back",
+        ),
+        pytest.param(
+            "/my-app", "/my-app/albums/42", "/my-app/albums/42",
+            id="a hyphenated root the server left prefixed",
+        ),
+        pytest.param(
+            "/my-app", "/albums/42", "/my-app/albums/42",
+            id="a hyphenated root a proxy stripped",
         ),
     ],
 )
