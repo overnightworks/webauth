@@ -31,8 +31,8 @@ from webauth.cookies import (
 )
 from webauth.dependencies import (
     AuthDependencies,
+    ConnectionRefusal,
     LoginRedirect,
-    WebSocketRefusal,
     authenticate_websocket,
     current_user_dependency,
     session_id_from_request,
@@ -122,7 +122,6 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
-from webauth.session_ending import end_session, end_user_sessions, prune_sessions
 
 
 @dataclass
@@ -325,7 +324,7 @@ async def a_host_accepts_a_websocket_only_for_a_signed_in_account(
     websocket: WebSocket,
 ) -> AuthenticatedUser | None:
     outcome = authenticate_websocket(websocket, sessions=HostSessions(), audit=HostAudit())
-    if isinstance(outcome, WebSocketRefusal):
+    if isinstance(outcome, ConnectionRefusal):
         await websocket.close(code=1008)
         return None
     await websocket.accept()
@@ -363,7 +362,7 @@ def a_host_signs_a_session_in_and_out(response: Response, config: WebAuthConfig)
 
 
 def a_host_ends_a_session() -> None:
-    end_session(HostSessions(), session_id="session-id")
+    HostSessions().delete("session-id")
 
 
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
@@ -382,7 +381,7 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
-        VerifiedClaims, VerifiedLogout, WallClock, end_user_sessions, install_web_auth_config,
-        is_https_url, prune_sessions, session_id_from_request, session_reference,
+        VerifiedClaims, VerifiedLogout, WallClock, install_web_auth_config,
+        is_https_url, session_id_from_request, session_reference,
         unauthenticated_response,
     )

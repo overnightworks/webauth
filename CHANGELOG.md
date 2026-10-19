@@ -10,9 +10,18 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- The library keeps no session wrappers, and its refusal names both channels.
+  `webauth.session_ending` and its `end_session`, `end_user_sessions` and
+  `prune_sessions` no longer exist, and `dependencies.WebSocketRefusal` is
+  renamed `ConnectionRefusal` with the same members and values. No port is
+  `@runtime_checkable` any more, so `isinstance` against a port raises
+  `TypeError`. Migration: call the store's `delete`, `delete_for_user` and
+  `prune_overflow` (normally `log_out` and `open_session` already do),
+  import `ConnectionRefusal`, and check conformance with a type checker.
+
 - Admission looks no username up and no local flag locks an account.
   `SubjectUserStore.get_by_username`, `UserRecord.is_active`,
-  `AuthenticatedUser.is_active`, `WebSocketRefusal.ACCOUNT_DISABLED` (its HTTP
+  `AuthenticatedUser.is_active`, `ConnectionRefusal.ACCOUNT_DISABLED` (its HTTP
   403 "Account disabled" included) and `AdmissionRefusal.ACCOUNT_DEACTIVATED`
   no longer exist. A store without a unique username admits a second subject
   whose `preferred_username` another account holds; `USERNAME_TAKEN` remains

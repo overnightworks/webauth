@@ -18,7 +18,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
-from typing import NewType, Protocol, runtime_checkable
+from typing import NewType, Protocol
 
 from webauth import WebAuthError
 
@@ -80,7 +80,6 @@ class SessionRecord(Protocol):
     user: UserRecord
 
 
-@runtime_checkable
 class SubjectUserStore(Protocol):
     """Accounts an identity provider vouches for, keyed by its subject.
 
@@ -119,7 +118,6 @@ class UsernameTakenError(WebAuthError):
     """The store could not create an account because its username is taken."""
 
 
-@runtime_checkable
 class WriteLock(Protocol):
     """Serialize check-then-write operations in the host's transaction.
 
@@ -132,7 +130,6 @@ class WriteLock(Protocol):
     def hold(self) -> AbstractContextManager[None]: ...
 
 
-@runtime_checkable
 class SessionRecordStore(Protocol):
     def create(
         self,
@@ -198,7 +195,6 @@ class SessionLivenessPolicy[StoredSessionT](Protocol):
         ...
 
 
-@runtime_checkable
 class RateLimitBackend(Protocol):
     """A per-key request budget: one sliding window, counted as it is spent."""
 
@@ -261,7 +257,6 @@ class AccountEvent:
     previous_role: str | None = None
 
 
-@runtime_checkable
 class AuditSink(Protocol):
     def session_identity_changed(self, event: SessionIdentityChanged) -> None:
         """Record that a live session began arriving from somewhere else."""

@@ -45,10 +45,9 @@ from webauth.cookies import (
     session_reference,
     sign_session_id,
 )
-from webauth.dependencies import WebSocketRefusal, session_id_from_request
+from webauth.dependencies import ConnectionRefusal, session_id_from_request
 from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
 from webauth.proxies import client_user_agent, resolve_client_ip
-from webauth.session_ending import end_session
 
 DEFAULT_MAX_USER_AGENT_CHARS = 500
 
@@ -67,18 +66,18 @@ def auth_app() -> AuthApp:
     return an_auth_app(a_session())
 
 
-def the_refusal_of(app: AuthApp, **handshake: object) -> WebSocketRefusal:
+def the_refusal_of(app: AuthApp, **handshake: object) -> ConnectionRefusal:
     """Drive a handshake that must close before accept, and say why the helper refused it."""
     with pytest.raises(WebSocketDisconnect) as closed, app.connect(**handshake):
         pass
     assert closed.value.code == POLICY_VIOLATION_CLOSE_CODE
     refusal = app.websocket_outcomes[-1]
-    assert isinstance(refusal, WebSocketRefusal)
+    assert isinstance(refusal, ConnectionRefusal)
     return refusal
 
 
 def test_the_refusals_keep_their_stable_values() -> None:
-    values_by_name = {refusal.name: refusal.value for refusal in WebSocketRefusal}
+    values_by_name = {refusal.name: refusal.value for refusal in ConnectionRefusal}
 
     assert values_by_name == {
         "NO_SESSION": "no-session",
@@ -125,7 +124,7 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
     with admitted_app.connect(cookie=admitted_app.signed_cookie()) as socket:
         socket.receive_json()
 
-    assert expired_app.websocket_outcomes == [WebSocketRefusal.SESSION_ENDED_OR_EXPIRED]
+    assert expired_app.websocket_outcomes == [ConnectionRefusal.SESSION_ENDED_OR_EXPIRED]
     assert expired.expires_at == FIXED_INSTANT - timedelta(seconds=1)
     assert admitted.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
 
@@ -170,19 +169,19 @@ def test_the_allowlist_decides_whatever_fetch_metadata_claims(auth_app: AuthApp)
 @pytest.mark.parametrize(
     ("handshake", "refusal"),
     [
-        pytest.param({}, WebSocketRefusal.NO_SESSION, id="no cookie"),
-        pytest.param({"cookie": ""}, WebSocketRefusal.NO_SESSION, id="an empty cookie"),
+        pytest.param({}, ConnectionRefusal.NO_SESSION, id="no cookie"),
+        pytest.param({"cookie": ""}, ConnectionRefusal.NO_SESSION, id="an empty cookie"),
         pytest.param(
             {"cookie": "x" * (MAX_SESSION_COOKIE_CHARS + 1)},
-            WebSocketRefusal.NO_SESSION,
+            ConnectionRefusal.NO_SESSION,
             id="an oversized cookie",
         ),
         pytest.param(
-            {"cookie": "unsigned"}, WebSocketRefusal.INVALID_SESSION, id="an unsigned cookie",
+            {"cookie": "unsigned"}, ConnectionRefusal.INVALID_SESSION, id="an unsigned cookie",
         ),
         pytest.param(
             {"cookie": sign_session_id(SESSION_ID, b"another signing key entirely")},
-            WebSocketRefusal.INVALID_SESSION,
+            ConnectionRefusal.INVALID_SESSION,
             id="a cookie signed with another key",
         ),
         pytest.param(
@@ -197,13 +196,13 @@ def test_the_allowlist_decides_whatever_fetch_metadata_claims(auth_app: AuthApp)
                     ),
                 ],
             },
-            WebSocketRefusal.INVALID_SESSION,
+            ConnectionRefusal.INVALID_SESSION,
             id="two session cookies",
         ),
     ],
 )
 def test_a_handshake_without_one_valid_session_cookie_is_refused(
-    auth_app: AuthApp, handshake: dict[str, object], refusal: WebSocketRefusal,
+    auth_app: AuthApp, handshake: dict[str, object], refusal: ConnectionRefusal,
 ) -> None:
     assert the_refusal_of(auth_app, **handshake) is refusal
 
@@ -212,22 +211,24 @@ def test_a_handshake_without_one_valid_session_cookie_is_refused(
     ("record", "refusal"),
     [
         pytest.param(
-            None, WebSocketRefusal.SESSION_ENDED_OR_EXPIRED, id="a session the store does not know",
+            None,
+            ConnectionRefusal.SESSION_ENDED_OR_EXPIRED,
+            id="a session the store does not know",
         ),
         pytest.param(
             a_session(remaining=-timedelta(seconds=1)),
-            WebSocketRefusal.SESSION_ENDED_OR_EXPIRED,
+            ConnectionRefusal.SESSION_ENDED_OR_EXPIRED,
             id="a session past its expiry",
         ),
         pytest.param(
             a_session(age=timedelta(days=2)),
-            WebSocketRefusal.SESSION_ENDED_OR_EXPIRED,
+            ConnectionRefusal.SESSION_ENDED_OR_EXPIRED,
             id="a session past the absolute limit",
         ),
     ],
 )
 def test_a_session_that_no_longer_stands_is_refused(
-    record: FakeSessionRecord | None, refusal: WebSocketRefusal,
+    record: FakeSessionRecord | None, refusal: ConnectionRefusal,
 ) -> None:
     app = an_auth_app(record)
 
@@ -237,32 +238,34 @@ def test_a_session_that_no_longer_stands_is_refused(
 @pytest.mark.parametrize(
     ("origin", "headers", "refusal"),
     [
-        pytest.param(None, [], WebSocketRefusal.MISSING_ORIGIN, id="no Origin"),
+        pytest.param(None, [], ConnectionRefusal.MISSING_ORIGIN, id="no Origin"),
         pytest.param(
             None,
             [("referer", f"{ALLOWED_ORIGIN}/room"), ("sec-fetch-site", "same-origin")],
-            WebSocketRefusal.MISSING_ORIGIN,
+            ConnectionRefusal.MISSING_ORIGIN,
             id="no Origin, an allowed Referer and same-origin metadata",
         ),
         pytest.param(
             "https://evil.test",
             [("sec-fetch-site", "same-origin")],
-            WebSocketRefusal.FOREIGN_ORIGIN,
+            ConnectionRefusal.FOREIGN_ORIGIN,
             id="a foreign Origin claiming same-origin metadata",
         ),
-        pytest.param("null", [], WebSocketRefusal.FOREIGN_ORIGIN, id="the null Origin"),
-        pytest.param("", [], WebSocketRefusal.FOREIGN_ORIGIN, id="an empty Origin"),
-        pytest.param("http://[::1", [], WebSocketRefusal.FOREIGN_ORIGIN, id="an unparsable Origin"),
+        pytest.param("null", [], ConnectionRefusal.FOREIGN_ORIGIN, id="the null Origin"),
+        pytest.param("", [], ConnectionRefusal.FOREIGN_ORIGIN, id="an empty Origin"),
+        pytest.param(
+            "http://[::1", [], ConnectionRefusal.FOREIGN_ORIGIN, id="an unparsable Origin",
+        ),
         pytest.param(
             f"https://user@{ALLOWED_HOST}",
             [],
-            WebSocketRefusal.FOREIGN_ORIGIN,
+            ConnectionRefusal.FOREIGN_ORIGIN,
             id="an Origin carrying credentials",
         ),
         pytest.param(
             None,
             [("origin", ALLOWED_ORIGIN), ("origin", ALLOWED_ORIGIN)],
-            WebSocketRefusal.FOREIGN_ORIGIN,
+            ConnectionRefusal.FOREIGN_ORIGIN,
             id="two Origins, both allowed",
         ),
     ],
@@ -271,7 +274,7 @@ def test_a_handshake_without_exactly_one_allowed_origin_is_refused(
     auth_app: AuthApp,
     origin: str | None,
     headers: Sequence[tuple[str, str]],
-    refusal: WebSocketRefusal,
+    refusal: ConnectionRefusal,
 ) -> None:
     assert (
         the_refusal_of(auth_app, cookie=auth_app.signed_cookie(), origin=origin, headers=headers)
@@ -289,7 +292,7 @@ def test_a_sibling_host_the_application_does_not_list_is_refused_even_as_same_si
         headers=[("sec-fetch-site", "same-site")],
     )
 
-    assert refusal is WebSocketRefusal.FOREIGN_ORIGIN
+    assert refusal is ConnectionRefusal.FOREIGN_ORIGIN
 
 
 def test_a_refused_origin_leaves_the_session_and_the_audit_untouched() -> None:
@@ -308,12 +311,12 @@ def test_a_refused_origin_leaves_the_session_and_the_audit_untouched() -> None:
 @pytest.mark.parametrize(
     ("origin", "refusal"),
     [
-        pytest.param(None, WebSocketRefusal.MISSING_ORIGIN, id="no Origin"),
-        pytest.param("https://evil.test", WebSocketRefusal.FOREIGN_ORIGIN, id="a foreign Origin"),
+        pytest.param(None, ConnectionRefusal.MISSING_ORIGIN, id="no Origin"),
+        pytest.param("https://evil.test", ConnectionRefusal.FOREIGN_ORIGIN, id="a foreign Origin"),
     ],
 )
 def test_a_refused_origin_never_asks_the_store(
-    origin: str | None, refusal: WebSocketRefusal,
+    origin: str | None, refusal: ConnectionRefusal,
 ) -> None:
     app = an_auth_app(None, sessions=SessionsThatMustNotBeAsked(a_session()))
 
@@ -327,7 +330,7 @@ def test_a_touch_reporting_no_row_refuses_the_handshake_without_audit() -> None:
 
     refusal = the_refusal_of(app, cookie=app.signed_cookie())
 
-    assert refusal is WebSocketRefusal.SESSION_ENDED_OR_EXPIRED
+    assert refusal is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
     assert app.audit.events == []
 
 
@@ -403,7 +406,7 @@ def test_a_long_user_agent_is_reported_cut_to_the_recorded_length() -> None:
 
 
 def logged_out(app: AuthApp) -> None:
-    end_session(app.sessions, session_id=SESSION_ID)
+    app.sessions.delete(SESSION_ID)
 
 
 def expired(app: AuthApp) -> None:
@@ -417,11 +420,11 @@ def past_the_absolute_limit(app: AuthApp) -> None:
 @pytest.mark.parametrize(
     ("ends_the_session", "refusal"),
     [
-        pytest.param(logged_out, WebSocketRefusal.SESSION_ENDED_OR_EXPIRED, id="a logout"),
-        pytest.param(expired, WebSocketRefusal.SESSION_ENDED_OR_EXPIRED, id="an expiry"),
+        pytest.param(logged_out, ConnectionRefusal.SESSION_ENDED_OR_EXPIRED, id="a logout"),
+        pytest.param(expired, ConnectionRefusal.SESSION_ENDED_OR_EXPIRED, id="an expiry"),
         pytest.param(
             past_the_absolute_limit,
-            WebSocketRefusal.SESSION_ENDED_OR_EXPIRED,
+            ConnectionRefusal.SESSION_ENDED_OR_EXPIRED,
             id="the absolute limit, however recently it was renewed",
         ),
     ],
@@ -429,7 +432,7 @@ def past_the_absolute_limit(app: AuthApp) -> None:
 def test_a_later_check_closes_a_socket_whose_session_has_ended(
     auth_app: AuthApp,
     ends_the_session: Callable[[AuthApp], None],
-    refusal: WebSocketRefusal,
+    refusal: ConnectionRefusal,
 ) -> None:
     with auth_app.connect(cookie=auth_app.signed_cookie()) as socket:
         socket.receive_json()
@@ -474,7 +477,7 @@ def test_a_host_dependency_around_the_helper_admits_a_live_session(auth_app: Aut
 def test_a_host_dependency_around_the_helper_refuses_as_the_plain_call_does(
     auth_app: AuthApp,
 ) -> None:
-    assert the_refusal_of(auth_app, path=WEBSOCKET_DEPENDENCY_PATH) is WebSocketRefusal.NO_SESSION
+    assert the_refusal_of(auth_app, path=WEBSOCKET_DEPENDENCY_PATH) is ConnectionRefusal.NO_SESSION
 
 
 async def no_message() -> dict[str, object]:

@@ -112,7 +112,6 @@ from webauth.ports import (
     AccountEventKind,
     AuthenticatedUser,
     SessionRecord,
-    SubjectUserStore,
     UserRecord,
 )
 
@@ -181,10 +180,6 @@ class Host:
 def a_host(*users: FakeUser, store: type[UsersInMemory] = UsersInMemory) -> Host:
     lock = WriteLockInMemory()
     return Host(store(*users, lock=lock), RecordingAuditSink(), lock)
-
-
-def test_the_in_memory_store_supplies_the_subject_port() -> None:
-    assert isinstance(a_host().accounts, SubjectUserStore)
 
 
 @pytest.mark.parametrize(("preferred_username", "username"), [
@@ -2219,6 +2214,7 @@ def test_a_signed_cookie_longer_than_the_bound_ends_nothing_though_the_store_hol
     pytest.param(2, 1, 2, [0], id="the-replaced-session-never-counts-against-the-cap"),
     pytest.param(3, None, 2, [2], id="the-oldest-above-the-cap-are-ended"),
     pytest.param(2, None, 1, [], id="a-cap-of-one-keeps-only-the-new-session"),
+    pytest.param(1, None, 3, [0], id="a-session-below-the-cap-is-kept"),
     pytest.param(3, None, None, [0, 1, 2], id="no-cap-prunes-nothing"),
 ])
 def test_the_account_holds_at_most_its_cap_afterwards_with_the_oldest_ended(

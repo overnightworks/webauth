@@ -37,8 +37,8 @@ from webauth.config import (
 )
 from webauth.cookies import _generate_csrf_token, sign_session_id
 from webauth.dependencies import (
+    ConnectionRefusal,
     LoginRedirect,
-    WebSocketRefusal,
     authenticate_websocket,
     current_user_dependency,
     session_id_from_request,
@@ -66,7 +66,6 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
-from webauth.session_ending import end_session
 
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 ALLOWED_HOST = "notes.example"
@@ -478,7 +477,7 @@ class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
     def load(self, session_id: str) -> FakeSessionRecord | None:
         record = super().load(session_id)
         if record is not None:
-            end_session(self, session_id=session_id)
+            self.delete(session_id)
         return record
 
 
@@ -562,7 +561,7 @@ class AuthApp:
     sessions: SessionRecordsInMemory
     audit: RecordingAuditSink
     authenticated: list[AuthenticatedUser]
-    websocket_outcomes: list[AuthenticatedUser | WebSocketRefusal]
+    websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal]
     signing_key: bytes
 
     def get(
@@ -631,7 +630,7 @@ def _add_websocket_routes(
     app: FastAPI,
     sessions: SessionRecordStore,
     audit: RecordingAuditSink,
-    outcomes: list[AuthenticatedUser | WebSocketRefusal],
+    outcomes: list[AuthenticatedUser | ConnectionRefusal],
 ) -> None:
     """The host recipe: authenticate in a worker and a finished transaction, then accept.
 
@@ -642,7 +641,7 @@ def _add_websocket_routes(
         sessions.transaction if isinstance(sessions, SessionRecordsInMemory) else nullcontext
     )
 
-    def authenticate(connection: HTTPConnection) -> AuthenticatedUser | WebSocketRefusal:
+    def authenticate(connection: HTTPConnection) -> AuthenticatedUser | ConnectionRefusal:
         with transaction():
             outcome = authenticate_websocket(connection, sessions=sessions, audit=audit)
         outcomes.append(outcome)
@@ -651,7 +650,7 @@ def _add_websocket_routes(
     @app.websocket(WEBSOCKET_PATH)
     async def watched(websocket: WebSocket) -> None:
         outcome = await run_in_threadpool(authenticate, websocket)
-        if isinstance(outcome, WebSocketRefusal):
+        if isinstance(outcome, ConnectionRefusal):
             await websocket.close(code=POLICY_VIOLATION_CLOSE_CODE)
             return
         await websocket.accept()
@@ -661,7 +660,7 @@ def _add_websocket_routes(
             while True:
                 await websocket.receive_text()
                 outcome = await run_in_threadpool(authenticate, websocket)
-                if isinstance(outcome, WebSocketRefusal):
+                if isinstance(outcome, ConnectionRefusal):
                     await websocket.close(code=POLICY_VIOLATION_CLOSE_CODE)
                     return
                 await websocket.send_json({"username": outcome.username})
@@ -671,9 +670,9 @@ def _add_websocket_routes(
     @app.websocket(WEBSOCKET_DEPENDENCY_PATH)
     async def through_a_dependency(
         websocket: WebSocket,
-        outcome: AuthenticatedUser | WebSocketRefusal = Depends(authenticate),
+        outcome: AuthenticatedUser | ConnectionRefusal = Depends(authenticate),
     ) -> None:
-        if isinstance(outcome, WebSocketRefusal):
+        if isinstance(outcome, ConnectionRefusal):
             await websocket.close(code=POLICY_VIOLATION_CLOSE_CODE)
             return
         await websocket.accept()
@@ -702,7 +701,7 @@ def an_auth_app(
         sessions = SessionRecordsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
-    websocket_outcomes: list[AuthenticatedUser | WebSocketRefusal] = []
+    websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal] = []
 
     dependencies = current_user_dependency(
         session_store=lambda: sessions,
@@ -765,7 +764,7 @@ def an_idle_auth_app(record: IdleSessionRecord | None) -> AuthApp:
     sessions = IdleSessionsInMemory(record)
     audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
-    websocket_outcomes: list[AuthenticatedUser | WebSocketRefusal] = []
+    websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal] = []
 
     dependencies = current_user_dependency(
         session_store=lambda: sessions,
