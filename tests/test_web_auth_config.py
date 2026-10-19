@@ -143,6 +143,13 @@ def test_a_lifetime_of_one_second_is_accepted(lifetime: str) -> None:
     LIFETIMES[lifetime](1)
 
 
+@pytest.mark.parametrize("lifetime", ["idle_seconds", "absolute_max_age_seconds"])
+def test_a_lifetime_no_timedelta_can_hold_is_refused_at_construction(lifetime: str) -> None:
+    seconds = 10**18
+    with pytest.raises(ValueError, match=f"{lifetime} is longer than a timedelta can hold"):
+        SessionLifetime(**{"idle_seconds": 1, "absolute_max_age_seconds": 1, lifetime: seconds})
+
+
 def test_a_lifetime_idling_as_long_as_its_cap_is_accepted() -> None:
     SessionLifetime(43200, 43200)
 

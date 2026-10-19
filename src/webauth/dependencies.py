@@ -10,7 +10,7 @@ commits it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
@@ -331,31 +331,37 @@ def _record_identity_changes(
         )
 
 
-def _as_utc(stored: datetime) -> datetime:
-    if stored.utcoffset() is None:
+def _as_instant(stored: datetime) -> datetime:
+    """The stored datetime pinned to the fixed offset it names, naive read as UTC.
+
+    A zone with a clock change would subtract two instants by wall time; a
+    fixed offset subtracts by the instants themselves, and unlike
+    ``astimezone`` it cannot overflow at the calendar's edge.
+    """
+    offset = stored.utcoffset()
+    if offset is None:
         return stored.replace(tzinfo=UTC)
-    return stored
+    return stored.replace(tzinfo=timezone(offset))
 
 
 def _renewed_expiry(
     lifetime: SessionLifetime, *, now: datetime, created_at: datetime,
 ) -> datetime:
-    return min(
-        now + timedelta(seconds=lifetime.idle_seconds),
-        created_at + timedelta(seconds=lifetime.absolute_max_age_seconds),
-    )
+    idle = timedelta(seconds=lifetime.idle_seconds)
+    remaining_cap = timedelta(seconds=lifetime.absolute_max_age_seconds) - (now - created_at)
+    return now + min(idle, remaining_cap)
 
 
 def _is_admitted(
     lifetime: SessionLifetime, record: ports.SessionRecord, now: datetime,
 ) -> bool:
-    created_at = _as_utc(record.created_at)
-    expires_at = _as_utc(record.expires_at)
-    latest_admitted_expiry = min(
-        now + timedelta(seconds=lifetime.idle_seconds) + _EXPIRY_TOLERANCE,
-        created_at + timedelta(seconds=lifetime.absolute_max_age_seconds),
+    created_at = _as_instant(record.created_at)
+    expires_at = _as_instant(record.expires_at)
+    return (
+        now <= expires_at
+        and expires_at - now <= timedelta(seconds=lifetime.idle_seconds) + _EXPIRY_TOLERANCE
+        and expires_at - created_at <= timedelta(seconds=lifetime.absolute_max_age_seconds)
     )
-    return now <= expires_at <= latest_admitted_expiry
 
 
 def _resolve_session(
@@ -385,7 +391,7 @@ def _resolve_session(
     renewed = sessions.touch(
         session_id,
         expires_at=_renewed_expiry(
-            config.session_lifetime, now=now, created_at=_as_utc(record.created_at),
+            config.session_lifetime, now=now, created_at=_as_instant(record.created_at),
         ),
         ip_address=current_ip,
         user_agent=current_user_agent,

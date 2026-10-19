@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Final, get_args
 
 from starlette.requests import HTTPConnection
@@ -86,6 +87,11 @@ class SessionLifetime:
         require_positive_whole_number(
             "absolute_max_age_seconds", self.absolute_max_age_seconds, unit="seconds",
         )
+        for name in ("idle_seconds", "absolute_max_age_seconds"):
+            try:
+                timedelta(seconds=getattr(self, name))
+            except OverflowError:
+                raise ValueError(f"{name} is longer than a timedelta can hold") from None
         if self.idle_seconds > self.absolute_max_age_seconds:
             raise ValueError(
                 "idle_seconds must not exceed absolute_max_age_seconds; "
