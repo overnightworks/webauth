@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from contextlib import nullcontext
 from dataclasses import FrozenInstanceError, asdict, replace
 from datetime import UTC, datetime
@@ -147,19 +148,72 @@ def test_REQ_ADMIN_12_the_revocation_event_carries_the_computed_reference_not_th
     assert type(event.session_ref) is str
 
 
+def scopes_making_a_session_reference(source: str) -> list[str]:
+    """Name the function around each call or cast that makes a SessionReference."""
+    tree = ast.parse(source)
+    names = {"SessionReference"} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == "SessionReference" and alias.asname
+    }
+
+    def names_it(node: ast.expr) -> bool:
+        return any(
+            (isinstance(part, ast.Name) and part.id in names)
+            or (isinstance(part, ast.Attribute) and part.attr == "SessionReference")
+            or (isinstance(part, ast.Constant) and part.value in names)
+            for part in ast.walk(node)
+        )
+
+    def makes_it(call: ast.Call) -> bool:
+        callee = call.func
+        callee_name = callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", "")
+        named_by_the_call = call.args[1:] if callee_name == "NewType" else call.args
+        return names_it(callee) or (
+            callee_name in {"cast", "NewType"} and any(names_it(arg) for arg in named_by_the_call)
+        )
+
+    def walk(node: ast.AST, scope: str) -> list[str]:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            scope = node.name
+        found = [scope] if isinstance(node, ast.Call) and makes_it(node) else []
+        return found + [
+            made for child in ast.iter_child_nodes(node) for made in walk(child, scope)
+        ]
+
+    return walk(tree, "<module>")
+
+
+@pytest.mark.parametrize(
+    ("source", "scopes"),
+    [
+        ("def f(x):\n    return SessionReference(x)\n", ["f"]),
+        ("def f(x):\n    return cast(SessionReference, x)\n", ["f"]),
+        ("def f(x):\n    return cast('SessionReference', x)\n", ["f"]),
+        ("from webauth.ports import SessionReference as Ref\nRef('x')\n", ["<module>"]),
+        ("from webauth import ports\ndef f(x):\n    return ports.SessionReference(x)\n", ["f"]),
+        ("Made = NewType('Made', SessionReference)\n", ["<module>"]),
+        ("def f(x):\n    return str(x)\n", []),
+        ("from webauth.ports import SessionReference\ndef f(x: SessionReference): ...\n", []),
+    ],
+)
+def test_the_session_reference_guard_sees_every_way_to_make_one(
+    source: str, scopes: list[str]
+) -> None:
+    assert scopes_making_a_session_reference(source) == scopes
+
+
 def test_only_session_reference_constructs_a_session_reference_in_the_library() -> None:
     library = Path(webauth.__file__).parent
-    constructing = sorted(
-        (path.name, number)
-        for path in library.glob("*.py")
-        for number, line in enumerate(path.read_text().splitlines(), start=1)
-        if "SessionReference(" in line
-    )
+    making = {
+        path.relative_to(library).as_posix(): scopes
+        for path in library.rglob("*.py")
+        if (scopes := scopes_making_a_session_reference(path.read_text()))
+    }
 
-    assert [name for name, _ in constructing] == ["cookies.py"]
-    cookies_source = (library / "cookies.py").read_text()
-    assert cookies_source.count("SessionReference(") == 1
-    assert "return SessionReference(" in cookies_source
+    assert making == {"cookies.py": ["session_reference"]}
 
 
 def test_REQ_ADMIN_12_revoking_a_consumed_reference_is_refused_without_another_event(

@@ -42,3 +42,7 @@ SessionSummary(
     session_ref=RAW_SESSION_ID,  # pyright: ignore[reportArgumentType] - raw id
     user_id="u", username="n", ip_address="a", user_agent="b",
 )
+SessionSummary(
+    RAW_SESSION_ID,  # pyright: ignore[reportArgumentType] - raw id, positional
+    "u", "n", "a", "b",
+)
