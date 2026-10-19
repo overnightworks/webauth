@@ -1,8 +1,0 @@
-claim_id = "e1e570a9683c4cf38da33ca58640b7be"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "e6c132e186e2800bea45e4e6f0036415b003d282"
-branch = "claude/issue-255-deps-tooling-guard"
-scope = [".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/dependency-ceilings.yml", "AGENTS.md", "CHANGELOG.md", "pyproject.toml", "tests/conftest.py", "tests/test_session_administration.py", "uv.lock"]
-opened_commit = "911cf248a92fd00cfe025f87fe7857cdca3a8cf6"
-whole_reason = "Repository tooling for #74's dependency findings shares pyproject.toml, uv.lock and CI; the guard row is the one test-only follow-up riding with it."
