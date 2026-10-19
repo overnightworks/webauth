@@ -17,7 +17,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
   last. `max_sessions` is required (`None` states no cap) and must otherwise be
   a positive whole number. It raises `RuntimeError`, so the host rolls back, when
   the store returns the replaced session's id or `prune_overflow` would end the
-  new session. It never commits and sets no cookie: the host commits, then
+  new session. When the store returns the replaced session's id, it ends that
+  session before it raises, so no session stays under the id the incoming
+  cookie named even without a rollback. It never commits and sets no cookie: the host commits, then
   issues the cookies.
 
 ## 0.16.0

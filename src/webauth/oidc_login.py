@@ -327,8 +327,11 @@ def open_session(
     Raises ``RuntimeError`` when the store's ``create`` hands back the replaced
     session's id, or its ``prune_overflow`` would end the new session (sessions
     with equal ``created_at``), so the host rolls back instead of handing out a
-    cookie for a session that does not stand. Never commits and sets no cookie:
-    the host commits, then calls ``issue_session_cookies`` with the returned id.
+    cookie for a session that does not stand. When the store hands back the
+    replaced session's id, that session is ended before the raise, so no session
+    stays under the id the incoming cookie named even without a rollback. Never
+    commits and sets no cookie: the host commits, then calls
+    ``issue_session_cookies`` with the returned id.
     """
     if max_sessions is not None:
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
