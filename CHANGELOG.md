@@ -21,7 +21,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 - Admission looks no username up and no local flag locks an account.
   `SubjectUserStore.get_by_username`, `UserRecord.is_active`,
-  `AuthenticatedUser.is_active`, `ConnectionRefusal.ACCOUNT_DISABLED` (its HTTP
+  `AuthenticatedUser.is_active`, `WebSocketRefusal.ACCOUNT_DISABLED` (its HTTP
   403 "Account disabled" included) and `AdmissionRefusal.ACCOUNT_DEACTIVATED`
   no longer exist. A store without a unique username admits a second subject
   whose `preferred_username` another account holds; `USERNAME_TAKEN` remains

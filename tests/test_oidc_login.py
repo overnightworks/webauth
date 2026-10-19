@@ -730,6 +730,7 @@ def an_oidc_host(
     *users: FakeUser, store_max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
     groups_claim: object = (LOGIN_GROUP,),
     address_budget: int | None = None,
+    max_sessions: int | None = None,
     root_path: str = "",
     **config_overrides: object,
 ) -> OidcHost:
@@ -815,7 +816,7 @@ def an_oidc_host(
                 request, config, outcome.account,
                 sessions=sessions, lock=lock,
                 expires_at=datetime.now(UTC) + timedelta(seconds=sessions.max_age_seconds),
-                max_sessions=None,
+                max_sessions=max_sessions,
             )
         issue_session_cookies(response, session.id, config)
         return {"username": outcome.account.username}
@@ -1790,10 +1791,11 @@ FORM = {"content-type": "application/x-www-form-urlencoded"}
 
 def a_host_with_sessions(
     *, subject_sessions: int, other_sessions: int = 0, address_budget: int | None = None,
+    max_sessions: int | None = None,
 ) -> OidcHost:
     host = an_oidc_host(
         FakeUser(id=SUBJECT, username="lena"), FakeUser(id=OTHER_SUBJECT, username="omar"),
-        address_budget=address_budget,
+        address_budget=address_budget, max_sessions=max_sessions,
     )
     open_sessions(host, SUBJECT, subject_sessions)
     open_sessions(host, OTHER_SUBJECT, other_sessions)
@@ -1830,6 +1832,43 @@ def test_a_valid_logout_token_ends_every_session_of_its_subject_and_keeps_anothe
 
     assert response.status_code == 200
     assert (sessions_of(host, SUBJECT), sessions_of(host, OTHER_SUBJECT)) == (0, 2)
+
+
+def the_cookie_header_of(host: OidcHost, session_id: str) -> dict[str, str]:
+    return {"cookie": session_cookie_header(sign_session_id(session_id, host.config.signing_key))}
+
+
+def _logged_out_holding_the_second_session(host: OidcHost, session_ids: list[str]) -> None:
+    headers = {**SAME_ORIGIN_FORM, **the_cookie_header_of(host, session_ids[1])}
+    assert post_logout(host, headers).status_code == 303
+
+
+def _logged_out_by_the_issuer(host: OidcHost, _session_ids: list[str]) -> None:
+    assert post_logout_token(host, a_logout_token_of_the_issuer()).status_code == 200
+
+
+def _logged_in_again_at_the_cap(host: OidcHost, _session_ids: list[str]) -> None:
+    assert host.callback(host.sign_in_at_issuer()).status_code == 200
+
+
+@pytest.mark.parametrize(("ending", "ended"), [
+    pytest.param(_logged_out_holding_the_second_session, {1}, id="logout-route"),
+    pytest.param(_logged_out_by_the_issuer, {0, 1, 2}, id="back-channel-logout-route"),
+    pytest.param(_logged_in_again_at_the_cap, {0}, id="login-at-the-session-cap"),
+])
+def test_after_a_session_ends_its_cookie_is_refused_and_every_other_sessions_cookie_still_works(
+    ending: Callable[[OidcHost, list[str]], None], ended: set[int],
+) -> None:
+    host = a_host_with_sessions(subject_sessions=3, other_sessions=1, max_sessions=3)
+    session_ids = [record.id for record in host.sessions.list_active()]
+
+    ending(host, session_ids)
+
+    statuses = [
+        host.client.get("/me", headers=the_cookie_header_of(host, session_id)).status_code
+        for session_id in session_ids
+    ]
+    assert statuses == [401 if index in ended else 200 for index in range(len(session_ids))]
 
 
 @pytest.mark.parametrize("claims", [
