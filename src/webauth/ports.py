@@ -54,7 +54,6 @@ class AuthenticatedUser:
     id: str
     username: str
     role: str
-    is_active: bool
 
 
 class UserRecord(Protocol):
@@ -63,7 +62,6 @@ class UserRecord(Protocol):
     id: str
     username: str
     role: str
-    is_active: bool
 
 
 class SessionRecord(Protocol):
@@ -98,8 +96,6 @@ class SubjectUserStore(Protocol):
         comparing bytes does (a binary column or a NO PAD binary collation).
         """
         ...
-
-    def get_by_username(self, username: str) -> UserRecord | None: ...
 
     def create_for_subject(self, subject: str, username: str, role: str) -> UserRecord:
         """Add an account whose ``id`` is ``subject``.

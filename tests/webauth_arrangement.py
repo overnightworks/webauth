@@ -210,7 +210,6 @@ class FakeUser:
     id: str = "user-1"
     username: str = "alice"
     role: str = MEMBER_ROLE
-    is_active: bool = True
 
 
 class UnknownAccountError(LookupError):
@@ -237,9 +236,6 @@ class UsersInMemory:
     def get(self, user_id: str) -> FakeUser | None:
         return self._users.get(user_id)
 
-    def get_by_username(self, username: str) -> FakeUser | None:
-        return self._usernames.get(username)
-
     def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
         return self._add(FakeUser(id=subject, username=username, role=role))
 
@@ -262,12 +258,22 @@ class UsersInMemory:
 
 
 class UsersWithCaseInsensitiveUsernames(UsersInMemory):
-    """A store whose unique index ignores case, while its lookup does not."""
+    """A store whose unique index ignores case."""
 
     def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
         if any(user.username.casefold() == username.casefold() for user in self.list()):
             raise UsernameTakenError("Username is already taken")
         return super().create_for_subject(subject, username, role)
+
+
+class UsersWithoutUniqueUsernames(UsersInMemory):
+    """A store with no unique index on the username."""
+
+    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
+        _require_held_lock(self._lock)
+        user = FakeUser(id=subject, username=username, role=role)
+        self._users[subject] = user
+        return user
 
 
 @dataclass

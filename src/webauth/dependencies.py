@@ -54,7 +54,6 @@ __all__ = [
 _AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
 _INVALID_SESSION_DETAIL: Final = "Invalid session"
 _SESSION_EXPIRED_DETAIL: Final = "Session expired"
-_ACCOUNT_DISABLED_DETAIL: Final = "Account disabled"
 _ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
 
 
@@ -153,7 +152,7 @@ def current_user_dependency(
         A logout needs the identifier of the very session it just
         authenticated, and ``AuthenticatedUser`` deliberately does not carry
         one. Resolving ``current_user`` first is what makes the answer
-        trustworthy: an expired, unknown, or deactivated session never reaches
+        trustworthy: an expired or unknown session never reaches
         this line, so a route can delete what it names here without checking
         anything again.
         """
@@ -254,7 +253,6 @@ class WebSocketRefusal(Enum):
     NO_SESSION = "no-session"
     INVALID_SESSION = "invalid-session"
     SESSION_ENDED_OR_EXPIRED = "session-ended-or-expired"
-    ACCOUNT_DISABLED = "account-disabled"
     MISSING_ORIGIN = "missing-origin"
     FOREIGN_ORIGIN = "foreign-origin"
 
@@ -296,8 +294,6 @@ def _read_session_cookie(
 def _http_refusal(
     request: Request, refusal: WebSocketRefusal, login_redirect: LoginRedirect | None,
 ) -> HTTPException:
-    if refusal is WebSocketRefusal.ACCOUNT_DISABLED:
-        return HTTPException(403, _ACCOUNT_DISABLED_DETAIL)
     detail = _HTTP_DETAIL_OF_SESSION_REFUSAL[refusal]
     return _unauthenticated(request, detail, login_redirect)
 
@@ -352,7 +348,7 @@ def _resolve_session(
 ) -> ports.AuthenticatedUser | WebSocketRefusal:
     """The one decision whom a connection's session cookie speaks for.
 
-    Cookie, signature, load, liveness, active account, renewal, identity
+    Cookie, signature, load, liveness, renewal, identity
     audit: HTTP and WebSocket both ask here and translate the refusal into
     their own answer.
     """
@@ -365,9 +361,6 @@ def _resolve_session(
     now = datetime.fromtimestamp(config.wall_clock(), UTC)
     if record is None or not config.session_liveness.admits_stored_session(record, now):
         return WebSocketRefusal.SESSION_ENDED_OR_EXPIRED
-
-    if not record.user.is_active:
-        return WebSocketRefusal.ACCOUNT_DISABLED
 
     current_ip = resolve_client_ip(connection)
     current_user_agent = client_user_agent(connection)
@@ -401,5 +394,4 @@ def _resolve_session(
         id=record.user.id,
         username=record.user.username,
         role=record.user.role,
-        is_active=record.user.is_active,
     )

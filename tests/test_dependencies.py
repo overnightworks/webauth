@@ -55,7 +55,6 @@ from webauth.dependencies import (
 )
 from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
 
-ACCOUNT_DISABLED_DETAIL = "Account disabled"
 ADMIN_REQUIRED_DETAIL = "Admin access required"
 AUTHENTICATION_REQUIRED_DETAIL = "Authentication required"
 INVALID_SESSION_DETAIL = "Invalid session"
@@ -100,7 +99,7 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
     auth_app.get("/me", cookie=auth_app.signed_cookie())
 
     assert auth_app.authenticated == [
-        AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, is_active=True),
+        AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE),
     ]
 
 
@@ -287,15 +286,6 @@ def test_a_session_that_no_longer_stands_is_refused(record: FakeSessionRecord | 
     assert response.json()["detail"] == SESSION_EXPIRED_DETAIL
 
 
-def test_a_deactivated_account_is_refused_its_own_live_session() -> None:
-    app = an_auth_app(a_session(user=FakeUser(is_active=False)))
-
-    response = app.get("/me", cookie=app.signed_cookie())
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == ACCOUNT_DISABLED_DETAIL
-
-
 def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None:
     before = auth_app.sessions.record.expires_at
 
@@ -477,13 +467,6 @@ def test_a_route_can_name_the_session_the_request_proved_it_holds(
             401,
             SESSION_EXPIRED_DETAIL,
             id="a session past its expiry",
-        ),
-        pytest.param(
-            a_session(user=FakeUser(is_active=False)),
-            SESSION_ID,
-            403,
-            ACCOUNT_DISABLED_DETAIL,
-            id="a deactivated account",
         ),
     ],
 )
@@ -733,18 +716,6 @@ def test_a_live_session_authenticates_regardless_of_a_configured_login_redirect(
 
     assert response.status_code == 200
     assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
-
-
-def test_a_deactivated_account_still_answers_403_not_a_redirect() -> None:
-    app = an_auth_app(
-        a_session(user=FakeUser(is_active=False)), login_redirect=A_LOGIN_REDIRECT,
-    )
-
-    response = app.get("/me", cookie=app.signed_cookie(), accept="text/html")
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == ACCOUNT_DISABLED_DETAIL
-    assert "location" not in response.headers
 
 
 @pytest.mark.parametrize(

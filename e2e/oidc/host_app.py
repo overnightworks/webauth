@@ -5,8 +5,7 @@ One process serves one cookie configuration on every origin it is told. Beside
 it a plain-http listener on loopback, which no browser is ever pointed at, answers
 ``GET /state`` with counts only (among them the access tokens refused as unfit for a
 header and the back-channel logouts accepted and refused), clears everything on
-``POST /reset`` (the relying parties, with their key-set caches, are built again) and
-deactivates every known account on ``POST /deactivate``.
+``POST /reset`` (the relying parties, with their key-set caches, are built again).
 
 Where an issuer is told a ``userinfo_endpoint``, the host calls it once, with the
 access token of the token answer, after and only after a login was admitted: the
@@ -210,11 +209,6 @@ class World:
         self.userinfo_calls = 0
         self.userinfo_answered = 0
 
-    def deactivate_accounts(self) -> None:
-        with self.lock.hold():
-            for account in self.accounts.list():
-                account.is_active = False
-
     def counts(self) -> dict[str, object]:
         return {
             "accounts": len(self.accounts.list()),
@@ -232,7 +226,7 @@ class World:
 
 
 class _Observation:
-    """The counts-only listener the scenarios read, reset and deactivate accounts through."""
+    """The counts-only listener the scenarios read and reset through."""
 
     def __init__(
         self, port: int, world: dict[str, World], new_world: Callable[[], World]
@@ -253,9 +247,7 @@ class _Observation:
             def do_POST(self) -> None:
                 if self.path == "/reset":
                     holder["world"] = new_world()
-                elif self.path == "/deactivate":
-                    holder["world"].deactivate_accounts()
-                self.send_response(204 if self.path in ("/reset", "/deactivate") else 404)
+                self.send_response(204 if self.path == "/reset" else 404)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 

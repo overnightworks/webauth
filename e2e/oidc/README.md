@@ -89,7 +89,7 @@ labels and fails on an absent or ambiguous one): it listens on the container
 network and passes the bytes to a unix socket in a private directory, where the host
 side accepts exactly `POST /auth/backchannel-logout`, at most 32 KiB, and forwards
 it to the app's loopback HTTPS endpoint, verifying the throwaway CA. Anything else
-(`/state`, `/reset`, `/deactivate`, another path) is answered 404 (an unknown method 501) and
+(`/state`, `/reset`, another path) is answered 404 (an unknown method 501) and
 reaches nothing. Every answer carries `Connection: close`: Keycloak's HTTP client keeps
 connections in a pool and does not retry a POST on one the bridge already closed. Every read waits at most 10 s, no body or header is logged, and the
 relay holds no secret (read-only, no capabilities, the caller's user id). The bridge
@@ -161,8 +161,7 @@ apps below. They prove two sentences of the README:
   calls B back.
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
-the app; enabled again, the same credentials sign in; an account the host
-holds as deactivated is refused at the callback with `account-deactivated`.
+the app; enabled again, the same credentials sign in.
 `SCENARIO 6` asserts by bounding boxes that the forms and pages lie inside the
 window. `SCENARIO 7` is the outsider: `d1-outsider` is in no group, signs in at
 Keycloak, reaches the callback and sees "Sign-in refused" with `not-a-member`;
