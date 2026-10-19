@@ -88,7 +88,7 @@ def _with_unused_signature_bits_set(token: str) -> str:
 
 
 _ISSUER = "https://login.example.org/realms/workshop"
-_AUDIENCE = "songmaker"
+_AUDIENCE = "notes-app"
 _JWKS_URL = f"{_ISSUER}/protocol/openid-connect/certs"
 # Canary whose recognisable text is the point
 _URL_SECRET = "s3cr3t-in-the-url"  # noqa: S105
@@ -195,11 +195,11 @@ def test_a_token_signed_by_a_key_of_the_fake_key_set_verifies_as_its_claims(
 def test_a_token_for_any_one_of_the_accepted_audiences_verifies(
     issuer: IssuerScenario,
 ) -> None:
-    verifier = issuer.verifier_with(audiences=["songmaker", "agent-board"])
+    verifier = issuer.verifier_with(audiences=["notes-app", "notes-api"])
 
-    outcome = verifier.verify(issuer.token({"aud": "agent-board"}))
+    outcome = verifier.verify(issuer.token({"aud": "notes-api"}))
 
-    assert outcome == issuer.verified({"aud": "agent-board"})
+    assert outcome == issuer.verified({"aud": "notes-api"})
 
 
 def test_a_token_whose_type_header_equals_the_expected_type_verifies(
@@ -1204,7 +1204,7 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
         ),
         pytest.param({"audiences": []}, "audiences", id="no-audience"),
         pytest.param({"audiences": [""]}, "audiences", id="empty-audience"),
-        pytest.param({"audiences": "songmaker"}, "audiences", id="audience-as-one-string"),
+        pytest.param({"audiences": "notes-app"}, "audiences", id="audience-as-one-string"),
         pytest.param({"jwks_url": "http://login.example.org/certs"}, "https", id="http-key-set"),
         pytest.param({"jwks_url": None}, "https", id="key-set-url-not-a-string"),
         pytest.param({"jwks_url": "https:///certs"}, "https", id="key-set-without-host"),
@@ -1229,7 +1229,7 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
             "https",
             id="key-set-url-with-a-control-character",
         ),
-        pytest.param({"leeway_seconds": -1}, "negative", id="negative-leeway"),
+        pytest.param({"leeway_seconds": -1}, "from 0 up", id="negative-leeway"),
         pytest.param({"leeway_seconds": 1.5}, "whole", id="fractional-leeway"),
         pytest.param({"leeway_seconds": True}, "whole", id="boolean-leeway"),
     ],

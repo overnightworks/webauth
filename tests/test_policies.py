@@ -43,14 +43,14 @@ class TestPathRules:
     @pytest.mark.parametrize("path", [
         "/exactly/this",
         "/by-prefix/anything",
-        "/api/jobs/some-id/stream",
+        "/api/items/some-id/stream",
         "/pattern/42",
     ])
     def test_selects_a_path_named_any_of_the_four_ways(self, path: str) -> None:
         rules = PathRules(
             exact=frozenset({"/exactly/this"}),
             prefixes=("/by-prefix/",),
-            shapes=(PathShape(starts_with="/api/jobs/", ends_with="/stream"),),
+            shapes=(PathShape(starts_with="/api/items/", ends_with="/stream"),),
             patterns=(re.compile(r"^/pattern/\d+$"),),
         )
 
@@ -59,14 +59,14 @@ class TestPathRules:
     @pytest.mark.parametrize("path", [
         "/exactly/this/plus-more",
         "/by-prefix",
-        "/api/jobs/some-id/streaming",
+        "/api/items/some-id/streaming",
         "/pattern/not-a-number",
     ])
     def test_leaves_a_path_no_rule_names(self, path: str) -> None:
         rules = PathRules(
             exact=frozenset({"/exactly/this"}),
             prefixes=("/by-prefix/",),
-            shapes=(PathShape(starts_with="/api/jobs/", ends_with="/stream"),),
+            shapes=(PathShape(starts_with="/api/items/", ends_with="/stream"),),
             patterns=(re.compile(r"^/pattern/\d+$"),),
         )
 

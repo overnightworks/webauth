@@ -19,15 +19,15 @@ host's accounts, never a configuration change. This module builds on
 Admission holds the host's write lock and never commits: the host commits or
 rolls back, and a refusal writes nothing. An ``AdmissionConfig`` states who
 may enter and who is admin: the bound issuer, the app's ``login_group``, a
-Keycloak group path such as ``/apps/songmaker``, and its ``admin_group``, a
-path below it such as ``/apps/songmaker/admin`` (or ``NoAdmins``). Only the
+Keycloak group path such as ``/apps/notes``, and its ``admin_group``, a
+path below it such as ``/apps/notes/admin`` (or ``NoAdmins``). Only the
 issuer's groups decide the role: it is rewritten at every login, so a person
 taken out of the admin group is a plain user from the next login and, the
 role living on the account, on every device at once. Until that login an open
 session keeps the old role. A person is a member when one of their
 groups is that path or a subgroup of it, compared character for character
-and by path segment, so ``/apps/songmaker/admin`` counts and
-``/apps/songmaker2`` does not. The check runs on every login, before any
+and by path segment, so ``/apps/notes/admin`` counts and
+``/apps/notes2`` does not. The check runs on every login, before any
 account is looked up or created, so a person removed from the group is
 refused at their next login while their account and data stay, and a person
 put back returns to the same account. It ends no session that is already
@@ -170,7 +170,7 @@ class AdmissionConfig:
     that is not a group path: one that does not start with ``/``, ends with
     ``/``, has an empty segment, whitespace around a segment, or a control,
     format or line-separator character. Under a ``login_group`` path, the
-    ``admin_group`` must lie strictly below it, such as ``/apps/songmaker/admin``."""
+    ``admin_group`` must lie strictly below it, such as ``/apps/notes/admin``."""
 
     bound_issuer: str
     login_group: str | EverySubject
