@@ -36,6 +36,9 @@ jobs:
       - name: Import boundaries
         run: uv run --locked lint-imports
 
+      - name: Declared dependencies
+        run: uv run --locked deptry src
+
       - name: Pyright
         run: uv run --locked --extra dev --group e2e pyright --stats
 

@@ -1,0 +1,64 @@
+name: Dependency ceilings
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  newest-release-within-ceiling:
+    name: newest release within ceiling
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+
+      - name: Fail when a runtime dependency's newest release lies above its declared range
+        run: |
+          uv run --no-project --with packaging python - <<'PY'
+          import json
+          import sys
+          import tomllib
+          import urllib.request
+
+          from packaging.requirements import Requirement
+          from packaging.version import Version
+
+          project = tomllib.load(open("pyproject.toml", "rb"))["project"]
+          extras = project["optional-dependencies"]
+          declared = [
+              Requirement(text)
+              for text in [*project["dependencies"], *extras["redis"], *extras["jwt"]]
+          ]
+
+
+          def newest_release(name: str) -> Version:
+              with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/json", timeout=30) as reply:
+                  releases = json.load(reply)["releases"]
+              stable = [
+                  Version(version)
+                  for version, files in releases.items()
+                  if files and not any(file["yanked"] for file in files)
+                  and not Version(version).is_prerelease
+              ]
+              return max(stable)
+
+
+          above_ceiling = []
+          for requirement in declared:
+              newest = newest_release(requirement.name)
+              print(f"{requirement.name}: newest {newest}, declared {requirement.specifier}")
+              if newest not in requirement.specifier:
+                  above_ceiling.append(f"{requirement.name} {newest} is outside {requirement.specifier}")
+
+          if above_ceiling:
+              sys.exit("Released above the declared range:\n" + "\n".join(above_ceiling))
+          PY

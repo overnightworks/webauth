@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
     "fastapi>=0.123.7,<1",
     "starlette>=0.46,<2",
-    "anyio>=4.12,<5",
+    "anyio>=4.0,<5",
     "pydantic>=2.6,<3",
 ]
 
@@ -39,6 +39,7 @@ dev = [
     "ruff>=0.4,<1",
     "import-linter>=2,<3",
     "pyright>=1.1.414,<2",
+    "deptry==0.25.1",
 ]
 
 [dependency-groups]
@@ -86,6 +87,13 @@ extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.deptry]
+optional_dependencies_dev_groups = ["dev"]
+
+[tool.deptry.per_rule_ignores]
+# rate_limit imports redis only under TYPE_CHECKING, which deptry does not count as use
+DEP002 = ["redis"]
 
 [tool.pyright]
 include = ["src/webauth", "e2e"]

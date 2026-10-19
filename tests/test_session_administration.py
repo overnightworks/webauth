@@ -159,23 +159,42 @@ def is_name(node: ast.AST, expected: str) -> bool:
 CODE_NODES = ast.Call | ast.Lambda | ast.NamedExpr
 
 
-def quoted_without_code(node: ast.Constant) -> bool:
+def is_mention(node: ast.AST, mention: re.Pattern[str]) -> bool:
+    if isinstance(node, ast.Name):
+        return bool(mention.fullmatch(node.id))
+    if isinstance(node, ast.Attribute):
+        return bool(mention.fullmatch(node.attr))
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and bool(mention.search(node.value))
+    )
+
+
+def quoted_expression_mentions_in_code(node: ast.Constant, mention: re.Pattern[str]) -> bool:
     if not isinstance(node.value, str):
-        return True
+        return False
     try:
         quoted = ast.parse(node.value, mode="eval")
     except SyntaxError:
-        return True
-    return len(nodes_without_code(quoted)) == len(list(ast.walk(quoted)))
+        return False
+    in_type_expression = {id(kept) for kept in nodes_without_code(quoted, mention)}
+    return any(
+        is_mention(inner, mention) and id(inner) not in in_type_expression
+        for inner in ast.walk(quoted)
+    )
 
 
-def nodes_without_code(root: ast.AST) -> list[ast.AST]:
+def nodes_without_code(root: ast.AST, mention: re.Pattern[str]) -> list[ast.AST]:
     """The nodes of a type expression, leaving out every call, lambda, walrus and
-    quoted expression that holds one, since FastAPI and typing evaluate them."""
+    quoted expression that mentions the name inside one, since FastAPI and typing
+    evaluate them."""
     pending, kept = [root], []
     while pending:
         node = pending.pop()
-        quoted_code = isinstance(node, ast.Constant) and not quoted_without_code(node)
+        quoted_code = isinstance(node, ast.Constant) and quoted_expression_mentions_in_code(
+            node, mention
+        )
         if isinstance(node, CODE_NODES) or quoted_code:
             continue
         kept.append(node)
@@ -213,6 +232,8 @@ def dunder_all_entries(statement: ast.stmt) -> list[ast.AST]:
     targets = statement.targets if isinstance(statement, ast.Assign) else []
     if isinstance(statement, ast.AnnAssign):
         targets = [statement.target]
+    if isinstance(statement, ast.AugAssign) and isinstance(statement.op, ast.Add):
+        targets = [statement.target]
     value = getattr(statement, "value", None)
     if len(targets) != 1 or not is_name(targets[0], "__all__"):
         return []
@@ -236,7 +257,7 @@ def maker_constructor_name(statement: ast.stmt) -> list[ast.AST]:
     return constructions if len(constructions) == 1 else []
 
 
-def allowed_mentions(tree: ast.Module, module: str) -> set[int]:
+def allowed_mentions(tree: ast.Module, module: str, mention: re.Pattern[str]) -> set[int]:
     """The ids of the nodes that may mention SessionReference: annotations without
     code, docstrings, string entries of a module ``__all__``, its NewType definition
     in ports.py and the one construction inside the maker in cookies.py."""
@@ -246,9 +267,9 @@ def allowed_mentions(tree: ast.Module, module: str) -> set[int]:
             if ast.get_docstring(node, clean=False) is not None:
                 allowed += ast.walk(node.body[0])
         if isinstance(node, ast.arg | ast.AnnAssign) and node.annotation:
-            allowed += nodes_without_code(node.annotation)
+            allowed += nodes_without_code(node.annotation, mention)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns:
-            allowed += nodes_without_code(node.returns)
+            allowed += nodes_without_code(node.returns, mention)
     for statement in tree.body:
         allowed += dunder_all_entries(statement)
         if module == "ports.py":
@@ -267,21 +288,12 @@ def session_reference_mentions_outside_the_allowed_places(source: str, module: s
         for alias in node.names
         if alias.asname and alias.name.split(".")[-1] == SESSION_REFERENCE
     }
-    excused = allowed_mentions(tree, module)
     mention = re.compile(rf"\b({'|'.join(map(re.escape, names))})\b")
+    excused = allowed_mentions(tree, module, mention)
     return sorted(
         f"{module}:{node.lineno}"
         for node in ast.walk(tree)
-        if id(node) not in excused
-        and (
-            (isinstance(node, ast.Name) and node.id in names)
-            or (isinstance(node, ast.Attribute) and node.attr in names)
-            or (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and mention.search(node.value)
-            )
-        )
+        if id(node) not in excused and is_mention(node, mention)
     )
 
 
@@ -409,7 +421,30 @@ MAKER = [
             ["SessionReference = NewType(name='SessionReference', tp=SessionReference)"],
             ["ports.py:1"],
         ),
+        ("a.py", ["__all__ = []", "__all__ += [SessionReference(raw)]"], ["a.py:2"]),
+        (
+            "a.py",
+            ["def f(x: \"Annotated[str, Depends(lambda r: SessionReference(r))]\"): ..."],
+            ["a.py:1"],
+        ),
+        (
+            "a.py",
+            ["def f(x: \"Annotated[str, Depends(SessionReference('raw'))]\"): ..."],
+            ["a.py:1"],
+        ),
         ("a.py", ["def f(x):", "    return str(x)"], []),
+        ("a.py", ["__all__ = []", "__all__ += ['SessionReference']"], []),
+        ("a.py", ["__all__ = []", "__all__ += ('SessionReference',)"], []),
+        (
+            "a.py",
+            ["def f(x: \"Annotated[SessionReference, Depends(provide_reference)]\"): ..."],
+            [],
+        ),
+        (
+            "a.py",
+            ["def f(x: \"Annotated[SessionReference, Depends(lambda r: str(r))]\"): ..."],
+            [],
+        ),
         ("a.py", ["__all__ = ('SessionReference',)"], []),
         ("a.py", ["__all__: list[str] = ['SessionReference']"], []),
         ("a.py", ["def f(x: Annotated[str, 'SessionReference']): ..."], []),
