@@ -254,12 +254,13 @@ RESERVED_COOKIE_NAMES = [
 
 @pytest.mark.parametrize("field", COOKIE_NAME_FIELDS)
 @pytest.mark.parametrize("how", ["construction", "replace"])
+@pytest.mark.parametrize("cookie_secure", [True, False])
 @pytest.mark.parametrize("name", RESERVED_COOKIE_NAMES)
 def test_a_name_webauths_own_cookies_use_is_refused_naming_its_field(
-    field: str, how: str, name: str,
+    field: str, how: str, cookie_secure: bool, name: str,
 ) -> None:
     with pytest.raises(ValueError, match=f"{field} .* webauth's own cookies use"):
-        a_config_reached_by(how, True, **{field: name})
+        a_config_reached_by(how, cookie_secure, **{field: name})
 
 
 @pytest.mark.parametrize("field", COOKIE_NAME_FIELDS)
@@ -395,6 +396,10 @@ def test_replacing_a_field_sets_or_keeps_the_cookie_lifetime(
     assert config.cookie_max_age_seconds == cookie_max_age_seconds
 
 
+class AnIntegerSubclass(int):
+    pass
+
+
 USER_AGENT_LIMIT_MESSAGE = "max_user_agent_chars must be a positive whole number of characters"
 
 
@@ -443,6 +448,7 @@ def test_a_role_or_user_agent_limit_that_cannot_work_is_refused_at_configuration
         pytest.param({}, id="the defaults"),
         pytest.param({"admin_role": "operator", "user_role": "member"}, id="custom roles"),
         pytest.param({"max_user_agent_chars": 500}, id="a limit of 500"),
+        pytest.param({"max_user_agent_chars": AnIntegerSubclass(500)}, id="an int subclass"),
     ],
 )
 def test_distinct_roles_and_a_positive_user_agent_limit_are_accepted(
