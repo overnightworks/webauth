@@ -39,10 +39,10 @@ from pydantic import SecretStr
 import webauth.https_client
 from webauth.https_client import (
     ExchangeFailure,
-    HttpsExchangeError,
     KeySetFetchError,
+    _HttpsExchangeError,
+    _post_form_over_https,
     fetch_key_set_over_https,
-    post_form_over_https,
 )
 from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequest
 from webauth.oidc_transport import post_token_request_over_https
@@ -341,7 +341,7 @@ def _fetch_key_set(url: str, **limits: float) -> object:
 
 
 def _post_token_form(url: str, timeout_seconds: float = 5, **limits: float) -> object:
-    return post_form_over_https(
+    return _post_form_over_https(
         url,
         _FORM,
         authorization=SecretStr(_BASIC_AUTHORIZATION),
@@ -355,7 +355,7 @@ _EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
     ("exchange", "error"),
     [
         pytest.param(_fetch_key_set, KeySetFetchError, id="key-set-fetch"),
-        pytest.param(_post_token_form, HttpsExchangeError, id="token-post"),
+        pytest.param(_post_token_form, _HttpsExchangeError, id="token-post"),
     ],
 )
 
@@ -398,7 +398,7 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     token_server: LoopbackHttpsServer,
     monkeypatch: pytest.MonkeyPatch,
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | HttpsExchangeError],
+    error: type[KeySetFetchError | _HttpsExchangeError],
     target: _StalledTarget,
 ) -> None:
     with contextlib.ExitStack() as stack:
@@ -422,7 +422,7 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
 @_EXCHANGES_UNDER_A_DEADLINE
 def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | HttpsExchangeError],
+    error: type[KeySetFetchError | _HttpsExchangeError],
     host: str,
 ) -> None:
     with pytest.raises(error) as refused:
@@ -441,7 +441,7 @@ def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
     token_server: LoopbackHttpsServer,
     monkeypatch: pytest.MonkeyPatch,
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | HttpsExchangeError],
+    error: type[KeySetFetchError | _HttpsExchangeError],
 ) -> None:
     started = time.monotonic()
 
@@ -466,7 +466,7 @@ def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
     "call",
     [
         pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
-        pytest.param(post_form_over_https, id="token-post"),
+        pytest.param(_post_form_over_https, id="token-post"),
     ],
 )
 def test_each_calls_default_deadline_is_exactly_ten_seconds(call: Callable[..., object]) -> None:

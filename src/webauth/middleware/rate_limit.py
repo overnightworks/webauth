@@ -13,7 +13,7 @@ from starlette.responses import JSONResponse
 from webauth.config import web_auth_config
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.policies import RateLimitBudget, RateLimitPolicy
-from webauth.proxies import budget_address, resolve_client_ip
+from webauth.proxies import _budget_address, resolve_client_ip
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -22,9 +22,9 @@ __all__ = [
     "IpRateLimitMiddleware",
 ]
 
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
-LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
+_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
 
 
 def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
@@ -36,7 +36,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """Spend one request of the client's budget for the budget it falls into.
 
     The budget belongs to the client's address, or to its whole IPv6 network
-    of the configured prefix -- see ``budget_address``.
+    of the configured prefix -- see ``_budget_address``.
     """
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
@@ -44,7 +44,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
         if self._policy.is_exempt(path):
             return None
         config = web_auth_config(request)
-        budget_identity = budget_address(resolve_client_ip(request), config.ipv6_budget_prefix)
+        budget_identity = _budget_address(resolve_client_ip(request), config.ipv6_budget_prefix)
         budget = self._policy.budget_for(path)
         try:
             allowed = await to_thread.run_sync(
@@ -58,10 +58,10 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
         except Exception:
             # The worker call is shielded: a cancellation arriving during it is delivered only here.
             await checkpoint_if_cancelled()
-            log.exception("IP rate limiter unavailable -- rejecting request")
+            _log.exception("IP rate limiter unavailable -- rejecting request")
             return JSONResponse(
                 {"detail": "Rate limiter unavailable"}, status_code=503,
-                headers={"Retry-After": str(LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
+                headers={"Retry-After": str(_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
             )
         await checkpoint_if_cancelled()
         if not allowed:

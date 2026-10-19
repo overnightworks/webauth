@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from webauth.validation import require_non_negative_whole_number, require_positive_whole_number
+from webauth._validation import require_non_negative_whole_number, require_positive_whole_number
 
 __all__ = [
     "DEFAULT_HSTS_MAX_AGE_SECONDS",

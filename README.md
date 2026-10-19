@@ -1248,8 +1248,12 @@ a minor release may break a public contract and says so under **Breaking** in th
 [CHANGELOG](CHANGELOG.md); a patch release never does. Only the latest minor
 release receives security fixes, as [SECURITY.md](SECURITY.md) says.
 
-A module's public names are the names its `__all__` lists. Any other name, with or
-without a leading underscore, may change or disappear in any release.
+A module's public names are the names its `__all__` lists. Every other name it
+defines starts with an underscore, and a module whose name starts with one (such
+as `webauth._validation`) is private as a whole, as the Python typing
+specification defines it. A name a module only imports is public there only when
+its `__all__` re-exports it. Anything private may change or disappear in any
+release.
 
 ## Development
 

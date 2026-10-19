@@ -71,9 +71,9 @@ from webauth.jwt_verification import (
     MonotonicClock,
     Rejected,
     RejectionReason,
-    VerificationRefusal,
     VerifiedClaims,
-    strict_json_object,
+    _strict_json_object,
+    _VerificationRefusal,
 )
 
 if TYPE_CHECKING:
@@ -451,7 +451,7 @@ class OidcRelyingParty:
         return len(id_token.audiences) == 1
 
 
-def callback_state(callback_query: str) -> str | OidcRefusal:
+def _callback_state(callback_query: str) -> str | OidcRefusal:
     """The state a callback query names once, non-empty and decodable, or the
     refusal `complete_login` answers for a query that names no such state.
 
@@ -553,8 +553,8 @@ def _token_answer_document(body: bytes) -> Mapping[str, object]:
     if len(body) > MAX_TOKEN_RESPONSE_BYTES:
         return {}
     try:
-        return strict_json_object(body)
-    except VerificationRefusal:
+        return _strict_json_object(body)
+    except _VerificationRefusal:
         return {}
 
 

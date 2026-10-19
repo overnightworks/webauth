@@ -29,31 +29,31 @@ __all__ = [
     "resolve_client_ip",
 ]
 
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
-IpAddress = IPv4Address | IPv6Address
-IpNetwork = IPv4Network | IPv6Network
-FORWARDED_FOR_HEADER: Final[str] = "x-forwarded-for"
-FORWARDED_PROTO_HEADER: Final[str] = "x-forwarded-proto"
-HTTPS_SCHEME: Final[str] = "https"
+_IpAddress = IPv4Address | IPv6Address
+_IpNetwork = IPv4Network | IPv6Network
+_FORWARDED_FOR_HEADER: Final[str] = "x-forwarded-for"
+_FORWARDED_PROTO_HEADER: Final[str] = "x-forwarded-proto"
+_HTTPS_SCHEME: Final[str] = "https"
 
 # The identity used when the connection has no address at all (an ASGI
 # transport without a client, as in tests). It is not an IP, so it is never
 # trusted and never matches a configured network.
-UNKNOWN_CLIENT_IP: Final[str] = "unknown"
+_UNKNOWN_CLIENT_IP: Final[str] = "unknown"
 
 # A zone identifier ("fe80::1%eth0") is meaningful only on the host that owns
 # the interface, and Python compares a scoped address against a network by its
 # numeric value alone -- the zone silently disappears from the decision. So no
 # address carrying one is ever matched or used as an identity here.
-ZONE_SEPARATOR: Final[str] = "%"
+_ZONE_SEPARATOR: Final[str] = "%"
 
 # The longest an address can be written is an IPv6 with an embedded IPv4 tail:
 # "0000:0000:0000:0000:0000:0000:255.255.255.255", 45 characters. Longer text
 # is not an address, and saying so without parsing keeps a header field full of
 # dots or colons from being cut into thousands of pieces inside ipaddress. This
 # is not a limit on what may be an identity -- nothing it rejects could parse.
-MAX_ADDRESS_CHARS: Final[int] = 45
+_MAX_ADDRESS_CHARS: Final[int] = 45
 
 # How many hops of a chain are ever read. Only the entries our own proxies
 # appended decide the identity, and a real deployment appends three: the CDN
@@ -62,7 +62,7 @@ MAX_ADDRESS_CHARS: Final[int] = 45
 # cannot cause it, because everything it writes lands left of the hop that
 # decides; a caller on the host itself reaches the server through the bridge
 # gateway, a trusted pass-through hop, and therefore can.
-MAX_FORWARDED_FOR_HOPS: Final[int] = 16
+_MAX_FORWARDED_FOR_HOPS: Final[int] = 16
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,7 @@ class TrustedProxies:
     never trusted, and no entries means no peer is trusted.
     """
 
-    networks: tuple[IpNetwork, ...] = ()
+    networks: tuple[_IpNetwork, ...] = ()
 
     @classmethod
     def parse(cls, raw: str) -> TrustedProxies:
@@ -83,7 +83,7 @@ class TrustedProxies:
         entries = (entry.strip() for entry in raw.split(","))
         return cls(tuple(_proxy_network(entry) for entry in entries if entry))
 
-    def trusts(self, address: IpAddress) -> bool:
+    def trusts(self, address: _IpAddress) -> bool:
         return any(address in network for network in self.networks)
 
     def __contains__(self, host: str) -> bool:
@@ -94,8 +94,8 @@ class TrustedProxies:
         return bool(self.networks)
 
 
-def _proxy_network(entry: str) -> IpNetwork:
-    if ZONE_SEPARATOR in entry:
+def _proxy_network(entry: str) -> _IpNetwork:
+    if _ZONE_SEPARATOR in entry:
         raise ValueError(
             f"Trusted proxy entry {entry!r} carries an interface zone: a zone is "
             "local to one host and is ignored when an address is matched against a "
@@ -110,13 +110,13 @@ def _proxy_network(entry: str) -> IpNetwork:
         ) from exc
 
 
-def _canonical_address(host: str) -> IpAddress | None:
+def _canonical_address(host: str) -> _IpAddress | None:
     """The one form of ``host`` every decision keys on, or None if it is not an IP.
 
     An IPv4-mapped IPv6 address collapses to its IPv4 form, so a client cannot
     hold two per-IP budgets by switching notation.
     """
-    if len(host) > MAX_ADDRESS_CHARS or ZONE_SEPARATOR in host:
+    if len(host) > _MAX_ADDRESS_CHARS or _ZONE_SEPARATOR in host:
         return None
     try:
         address = ip_address(host)
@@ -132,7 +132,7 @@ def _canonical_host(host: str) -> str:
     return host if address is None else str(address)
 
 
-def budget_address(address: str, ipv6_prefix: int) -> str:
+def _budget_address(address: str, ipv6_prefix: int) -> str:
     """The rate-limit identity of a client ``address``: whom its budget pools with.
 
     One IPv6 subscriber holds a whole network (a /64 at least), so counting
@@ -170,7 +170,7 @@ def _forwarded_entries(header_values: Sequence[str]) -> Iterator[str]:
 
 def _client_from_chain(
     entries: Iterator[str], trusted_proxies: TrustedProxies,
-) -> IpAddress | None:
+) -> _IpAddress | None:
     """The rightmost hop no trusted proxy vouches for, or None when there is none.
 
     ``entries`` starts at the hop our own proxy appended, and each trusted hop
@@ -182,26 +182,26 @@ def _client_from_chain(
     is logged only as far as an address could reach, so a huge one identifies
     the fault without filling the log.
     """
-    for entry in islice(entries, MAX_FORWARDED_FOR_HOPS):
+    for entry in islice(entries, _MAX_FORWARDED_FOR_HOPS):
         hop = _canonical_address(entry)
         if hop is None:
-            log.warning(
+            _log.warning(
                 "X-Forwarded-For carries %r where the nearest proxy should have "
                 "appended an address; keying this request on the direct peer.",
-                entry[:MAX_ADDRESS_CHARS],
+                entry[:_MAX_ADDRESS_CHARS],
             )
             return None
         if not trusted_proxies.trusts(hop):
             return hop
     if next(entries, None) is not None:
-        log.warning(
+        _log.warning(
             "X-Forwarded-For names more than %d trusted hops in a row; keying this "
-            "request on the direct peer.", MAX_FORWARDED_FOR_HOPS,
+            "request on the direct peer.", _MAX_FORWARDED_FOR_HOPS,
         )
     return None
 
 
-def get_client_ip(
+def _get_client_ip(
     peer: str, forwarded_for_fields: Sequence[str], trusted_proxies: TrustedProxies,
 ) -> str:
     """The client's identity: the rightmost hop no trusted proxy vouches for.
@@ -221,14 +221,14 @@ def get_client_ip(
 
 
 def _peer_host(connection: HTTPConnection) -> str:
-    return connection.client.host if connection.client else UNKNOWN_CLIENT_IP
+    return connection.client.host if connection.client else _UNKNOWN_CLIENT_IP
 
 
 def resolve_client_ip(connection: HTTPConnection) -> str:
     """The client identity of ``connection`` -- the one owner of that decision."""
-    return get_client_ip(
+    return _get_client_ip(
         _peer_host(connection),
-        connection.headers.getlist(FORWARDED_FOR_HEADER),
+        connection.headers.getlist(_FORWARDED_FOR_HEADER),
         web_auth_config(connection).trusted_proxies,
     )
 
@@ -241,12 +241,12 @@ def request_is_https(request: Request) -> bool:
     cut out the same bounded way. A client that prepends its own
     ``X-Forwarded-Proto`` cannot outvote it.
     """
-    if request.url.scheme == HTTPS_SCHEME:
+    if request.url.scheme == _HTTPS_SCHEME:
         return True
     if _peer_host(request) not in web_auth_config(request).trusted_proxies:
         return False
-    newest = next(_forwarded_entries(request.headers.getlist(FORWARDED_PROTO_HEADER)), "")
-    return newest.lower() == HTTPS_SCHEME
+    newest = next(_forwarded_entries(request.headers.getlist(_FORWARDED_PROTO_HEADER)), "")
+    return newest.lower() == _HTTPS_SCHEME
 
 
 def client_user_agent(connection: HTTPConnection) -> str:
