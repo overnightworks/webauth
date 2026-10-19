@@ -1140,7 +1140,9 @@ with `actor_id=None` means the issuer's groups decided, not a person.
 `AuditSink` has a second method, `session_identity_changed(event)`, which
 receives a `SessionIdentityChanged` with `change`, `user_id`, `session_ref`,
 `previous`, and `current` when a live session begins arriving from somewhere
-else.
+else. `session_ref` is a `webauth.ports.SessionReference`, the SHA-256 hex of the
+UTF-8 session id, made with `webauth.cookies.session_reference(session_id)`; the raw id
+never reaches an audit event.
 
 ## What it owns, and what it leaves to the host
 
