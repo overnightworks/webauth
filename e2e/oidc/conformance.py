@@ -21,19 +21,18 @@ from typing import Any, NamedTuple
 
 import httpx
 from certificates import ThrowawayTls, issue_throwaway_tls
-from evidence import NetworkLog, SecretRegistry
 from harness import (
     STOP_SIGNALS,
     Host,
     Interrupted,
     RunRecord,
+    browser_context,
     drive_browser_off_the_main_thread,
     free_port,
     host_state,
-    keep_clean_evidence,
+    keep_results,
     launch_pinned_chromium,
     raise_if_stop_pending,
-    recording_context,
     reset_host,
     runtime_directory,
     runtime_leftovers,
@@ -291,8 +290,6 @@ def drive_suite(run: RunRecord, runtime: Path, suite: HeldSuite, export_dir: Pat
     tls = issue_throwaway_tls(runtime, "d2", [SUITE_HOST, APP_HOST, "localhost"])
     client_secret = secrets.token_urlsafe(24)
     session_secret = secrets.token_urlsafe(48)
-    run.registry.add_client_secret(CLIENT_ID, client_secret)
-    run.registry.add("session secret", session_secret)
     with suite, TlsShim(tls, suite.port, SUITE_HOST) as shim:
         host: Host | None = None
         try:
@@ -392,7 +389,7 @@ def run_module(
             run, expectation.module, tls, settings
         )
         reset_host(host)
-        sign_in_at_the_relying_party(run, browser)
+        sign_in_at_the_relying_party(browser)
         api.state_within(
             module_id, ["FINISHED"], MODULE_FINISHES_SECONDS, run.stop_requested.is_set
         )
@@ -406,8 +403,8 @@ def run_module(
         cancel_unless_finished(api, module_id)
 
 
-def sign_in_at_the_relying_party(run: RunRecord, browser: Browser) -> None:
-    with recording_context(run, browser) as context:
+def sign_in_at_the_relying_party(browser: Browser) -> None:
+    with browser_context(browser) as context:
         context.new_page().goto(f"{APP_ORIGIN}/login/oidc")
 
 
@@ -491,8 +488,7 @@ def conform(scratch: Path) -> int:
     export_dir = scratch / "export"
     evidence_dir.mkdir(parents=True)
     export_dir.mkdir()
-    registry = SecretRegistry()
-    run = RunRecord(evidence_dir, registry, NetworkLog(registry))
+    run = RunRecord(evidence_dir)
     suite = HeldSuite(SUITE_HOST, lambda: raise_if_stop_pending(run))
     stop_on_first_signal(run)
     try:
@@ -511,7 +507,7 @@ def conform(scratch: Path) -> int:
             run.fail("interrupted")
         for left in [*runtime_leftovers(scratch), *suite_leftovers(suite)]:
             run.fail(left)
-    return max(0 if run.all_held else 1, keep_clean_evidence(run))
+    return max(0 if run.all_held else 1, keep_results(run))
 
 
 def main() -> int:

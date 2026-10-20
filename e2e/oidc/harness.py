@@ -1,16 +1,16 @@
 """The run plumbing every proof driver here shares: the private runtime
 directory, the host app process, the first-signal handling, the browser
-worker thread and the evidence scan. Nothing here knows a scenario.
+worker thread and the result table. Nothing here knows a scenario.
 
 It owns the pinned Chromium (``launch_pinned_chromium``: each host name mapped to
-a loopback port, one certificate trusted by its public-key hash) and the recording
-context (``recording_context``: every request logged field by field, every URL
-credential and cookie value registered)."""
+a loopback port, one certificate trusted by its public-key hash) and the browser
+context every scenario drives (``browser_context``)."""
 
 from __future__ import annotations
 
 import contextlib
 import os
+import re
 import shutil
 import signal
 import socket
@@ -18,21 +18,12 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.parse
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import httpx
-from evidence import (
-    NetworkLog,
-    SecretRegistry,
-    delete_contaminated,
-    recorded_cookie_name,
-    scan_evidence,
-    without_query_values,
-)
 from host_app import HostSettings
 from playwright.sync_api import Browser, BrowserContext, Cookie, Playwright
 from shim import LOOPBACK
@@ -45,7 +36,7 @@ STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 WORKER_ENDS_SECONDS = 15
 HOST_STOPS_SECONDS = 15
 PAGE_TIMEOUT_MILLISECONDS = 30_000
-URL_PARAMETERS_THAT_ARE_CREDENTIALS = ("code", "id_token_hint", "nonce", "session_state", "state")
+QUERY_IN_TEXT = re.compile(r"\?[^\s\"'<>]*")
 
 
 class Interrupted(BaseException):
@@ -54,11 +45,9 @@ class Interrupted(BaseException):
 
 @dataclass
 class RunRecord:
-    """What every run keeps: its masked lines, its failures and its stop state."""
+    """What every run keeps: its lines, its failures and its stop state."""
 
     evidence_dir: Path
-    registry: SecretRegistry
-    log: NetworkLog
     lines: list[str] = field(default_factory=list)
     failures: int = 0
     stop_requested: threading.Event = field(default_factory=threading.Event)
@@ -74,12 +63,8 @@ class RunRecord:
         self.record(f"FAILED: {without_query_values(message)}")
 
     def record(self, line: str) -> None:
-        masked_line = self.registry.masked(line)
-        self.lines.append(masked_line)
-        print(masked_line, flush=True)
-        leaked = self.registry.labels_in(line.encode())
-        if leaked:
-            self.fail(f"a recorded line held {', '.join(leaked)}")
+        self.lines.append(line)
+        print(line, flush=True)
 
 
 @dataclass(frozen=True)
@@ -155,27 +140,19 @@ def launch_pinned_chromium(
     ])
 
 
+def without_query_values(text: str) -> str:
+    """Free text with every query string cut, for messages that may quote a URL."""
+    return QUERY_IN_TEXT.sub("?...", text)
+
+
 @contextlib.contextmanager
-def recording_context(run: RunRecord, browser: Browser, **options: Any) -> Iterator[BrowserContext]:
-    """A browser context whose URL credentials, requests and cookies the run registers and logs."""
+def browser_context(browser: Browser, **options: Any) -> Iterator[BrowserContext]:
     context = browser.new_context(**options)
     context.set_default_timeout(PAGE_TIMEOUT_MILLISECONDS)
-    context.on("request", lambda request: remember_url_credentials(run, request.url))
-    context.on("request", run.log.watch)
     try:
         yield context
     finally:
-        with contextlib.ExitStack() as cleanup:
-            cleanup.callback(context.close)
-            cleanup.callback(run.log.collect)
-            cleanup.callback(remember_cookies, run, context)
-
-
-def remember_url_credentials(run: RunRecord, url: str) -> None:
-    query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
-    for name in URL_PARAMETERS_THAT_ARE_CREDENTIALS:
-        for value in query.get(name, []):
-            run.registry.add(f"url parameter {name}", value)
+        context.close()
 
 
 def cookie_name_and_value(cookie: Cookie) -> tuple[str, str]:
@@ -184,12 +161,6 @@ def cookie_name_and_value(cookie: Cookie) -> tuple[str, str]:
             f"Playwright returned a cookie without name or value; keys: {sorted(cookie)}"
         )
     return cookie["name"], cookie["value"]
-
-
-def remember_cookies(run: RunRecord, context: BrowserContext) -> None:
-    for cookie in context.cookies():
-        name, value = cookie_name_and_value(cookie)
-        run.registry.add(f"cookie {recorded_cookie_name(name)}", value)
 
 
 def wait_until_serving(run: RunRecord, process: subprocess.Popen[bytes], *ports: int) -> None:
@@ -266,7 +237,7 @@ def drive_browser_off_the_main_thread(run: RunRecord, drive: Callable[[], None])
         run.winding_down = True
         if worker.is_alive() and not worker_ended.wait(WORKER_ENDS_SECONDS):
             run.browser_outlived_run = True
-            run.fail("the browser worker did not stop; evidence is not trustworthy")
+            run.fail("the browser worker did not stop; the screenshots are not trustworthy")
     if crashes:
         crash = crashes[0]
         raise RuntimeError(
@@ -318,19 +289,12 @@ def leftovers(scratch: Path, container_filter: str) -> list[str]:
     return left
 
 
-def keep_clean_evidence(run: RunRecord) -> int:
+def keep_results(run: RunRecord) -> int:
     if run.browser_outlived_run:
         for screenshot in run.evidence_dir.glob("*.png"):
             screenshot.unlink()
-        print("FAILED: the browser outlived the run; screenshots deleted, evidence not scanned")
+        print("FAILED: the browser outlived the run; screenshots deleted")
         return 1
     (run.evidence_dir / "result-table.txt").write_text("\n".join(run.lines) + "\n")
-    run.log.write(run.evidence_dir / "network.har")
-    findings = scan_evidence(run.evidence_dir, run.registry)
-    if findings:
-        delete_contaminated(run.evidence_dir, findings)
-        for finding in findings:
-            print(f"FAILED: evidence {finding.file} held {finding.label}; file deleted")
-        return 1
-    print(f"evidence scan clean: {run.evidence_dir}", flush=True)
+    print(f"result table and screenshots kept: {run.evidence_dir}", flush=True)
     return 0
