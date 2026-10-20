@@ -29,6 +29,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   returns the ended ids, which the library no longer reads). `open_session` ends the
   replaced session, prunes with `max_sessions - 1`, then creates, so two logins in
   one clock tick both succeed and the `RuntimeError` for a pruned new session is gone.
+  Migration: the store's `prune_overflow` takes `keep_newest` where it took
+  `max_sessions`, and returns nothing.
 - The library keeps no session origin. `SessionRecord` loses `ip_address` and
   `user_agent`; `SessionRecordStore.create` and `touch` take neither. The identity
   audit goes with them: `SessionIdentityChanged`, `SessionIdentityChange`,
@@ -62,8 +64,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   limit) and an `idle_seconds` above `absolute_max_age_seconds` (presentator's
   `IdleWindowLiveness` cap was optional, so check it sets both), and a session
   created more than 60 s in the future is refused. Migration: the store's
-  `prune_overflow` takes `keep_newest` where it took `max_sessions` and returns
-  nothing, and `touch` takes the session id string where it took the `SessionRecord`;
+  `touch` takes the session id string where it took the `SessionRecord`;
   songmaker sets `SessionLifetime(idle, cap)`, and its store writes the given
   `expires_at` and drops its own arithmetic; presentator's sessions table gains
   `expires_at` beside `created_at` in place of `last_seen`, its `create` stores the
@@ -124,8 +125,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   underscore, and `webauth.validation` is now `webauth._validation`, so the old
   spelling raises `ImportError`. It covers `cookies`, `proxies`, `rate_limit`,
   `middleware.rate_limit`, `https_client`, `jwt_verification`, `oidc`, `oidc_login`,
-  `config` and `dependencies`; names a module only imports
-  stay reachable, and an underscored name stays importable, though private.
+  `config` and `dependencies`. A name that still resolves without being in `__all__`,
+  imported or underscored, is not public either.
   Migration: import only what a module's `__all__` lists. `generate_csrf_token` has no
   public replacement: read the token from the cookie
   `issue_session_cookies(Response(), session_id, config)` sets, as songmaker's
