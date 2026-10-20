@@ -297,11 +297,11 @@ OVER_HTTPS = f"https://{ALLOWED_HOST}"
 DEFAULT_SESSION_SET_COOKIE = (
     "__Host-session_id="
     "session-1.3052044bf3b276887bd8a25118374c1f96ff3567d5ab5568d6c393505b2e891d; "
-    "HttpOnly; Max-Age=3600; Path=/; SameSite=strict; Secure"
+    "HttpOnly; Max-Age=86400; Path=/; SameSite=strict; Secure"
 )
 DEFAULT_CSRF_SET_COOKIE = (
     "__Host-csrf_token=c2c5cecdd7ae3886e360411f973c9aa43a9e31840585dad8625d47ce82059851; "
-    "Max-Age=3600; Path=/; SameSite=strict; Secure"
+    "Max-Age=86400; Path=/; SameSite=strict; Secure"
 )
 CLEARED_SESSION_SET_COOKIE = (
     '__Host-session_id=""; HttpOnly; Max-Age=0; Path=/; SameSite=strict; Secure'
@@ -424,15 +424,14 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
 
     assert "HttpOnly" in header
     assert "SameSite=strict" in header
-    assert f"Max-Age={cookie_app.config.cookie_max_age_seconds}" in header
+    assert f"Max-Age={cookie_app.config.session_lifetime.absolute_max_age_seconds}" in header
     assert "Path=/" in header
 
 
-def test_a_cookie_lifetime_longer_than_the_idle_window_is_what_the_browser_keeps() -> None:
-    """A 30-day cookie over a 7-day idle window: the cookie is issued once, so it
-    must outlive the window for a session used every few days to stay signed in."""
+def test_a_seven_day_idle_window_with_a_thirty_day_cap_gives_a_thirty_day_cookie() -> None:
+    """The cookie is issued once, so it must live as long as the cap for a session
+    used every few days to stay signed in."""
     app = a_cookie_app(
-        cookie_max_age_seconds=THIRTY_DAYS_SECONDS,
         session_lifetime=SessionLifetime(SEVEN_DAYS_SECONDS, THIRTY_DAYS_SECONDS),
     )
     response = app.issue()

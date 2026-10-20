@@ -235,7 +235,7 @@ def issue_session_cookies(
     because behind an unlisted TLS proxy every request looks like plain http.
     """
     secure = config.cookie_secure
-    max_age = config.cookie_max_age_seconds
+    max_age = config.session_lifetime.absolute_max_age_seconds
     samesite = config.cookie_samesite
     response.set_cookie(
         config.session_cookie_name,
@@ -297,7 +297,7 @@ def _issue_id_token_hint_cookie(
     response.set_cookie(
         _id_token_hint_cookie_name(secure=config.cookie_secure),
         id_token,
-        max_age=config.cookie_max_age_seconds,
+        max_age=config.session_lifetime.absolute_max_age_seconds,
         httponly=True,
         samesite=_LOGOUT_HINT_SAMESITE,
         secure=config.cookie_secure,

@@ -314,7 +314,7 @@ own, so that `log_out` can pass it to Keycloak as `id_token_hint`:
   with `cookie_secure=False`. It cannot be a `__Host-` cookie, because that
   prefix demands `Path=/`.
 - **Flags:** `HttpOnly`, `SameSite=Strict` always, `Max-Age` as the session
-  cookie, `Secure` following `cookie_secure`, and `Path` set to the
+  cookie (the session cap), `Secure` following `cookie_secure`, and `Path` set to the
   `logout_path` of the `OidcClientConfig`. The browser sends it to every path
   beneath that prefix, so set `logout_path` to the narrowest prefix that covers
   the logout routes: with `/logout` only `/logout` and the paths under it carry
@@ -769,9 +769,7 @@ until the absolute cap of `SessionLifetime`, which bounds a socket's life.
 
 ## Configuration
 
-The host builds one `WebAuthConfig` by keyword and installs it. It must state
-`cookie_max_age_seconds`, the browser cookie's
-`Max-Age`; [Session lifetime](#session-lifetime) states the rule. The
+The host builds one `WebAuthConfig` by keyword and installs it. The
 `session_secret` must be at least 32 characters; a shorter one is refused.
 Fields a host may leave out:
 
@@ -915,15 +913,14 @@ expired session.
 
 ## Session lifetime
 
-Three numbers decide how long someone stays signed in. The library owns the
-session's lifetime; the host's store only writes the expiry it is given.
+Two numbers decide how long someone stays signed in. The library owns the
+session's lifetime; the host's store only writes the expiry it is given. The
+session, CSRF and ID-token hint cookies live as long as the cap: they are issued
+once at login and never reissued, so the browser keeps them exactly as long as
+the session may last. An open WebSocket captured the cookie at its handshake and
+runs on after the browser drops it; the absolute cap and the host's re-checks
+bound a socket (see "WebSocket handshakes").
 
-- `WebAuthConfig.cookie_max_age_seconds` is required and is the browser cookie's
-  `Max-Age`. The cookie is issued once at login and never reissued, so it bounds
-  the whole sign-in of a client that sends a request at a time. An open
-  WebSocket captured the cookie at its handshake and runs on after the browser
-  drops it; the absolute cap and the host's re-checks bound a socket (see
-  "WebSocket handshakes").
 - `SessionLifetime.idle_seconds` is how long a session stands without a request.
 - `SessionLifetime.absolute_max_age_seconds` is how long a session may live from
   its `created_at`, however recently it was used. The idle window is at most the cap, and the cap is at most 400 days
@@ -939,13 +936,13 @@ tolerance for the idle window and none for the cap. A session outside that is re
 created more than 60 seconds in the future is refused too. A stored
 timestamp without an offset is read as UTC.
 
-Every lifetime — `cookie_max_age_seconds`, `idle_seconds` and
+Every lifetime — `idle_seconds` and
 `absolute_max_age_seconds` — must be a positive whole number of seconds; `0`, a negative
 value, a `float`, a string or a `bool` is refused when the object is built.
 
 The recommended policy for a host that admits by `login_group` is a 12-hour
-cookie and cap, with an idle window of the same length. The cookie and the cap
-set the worst-case delay before a removal from the group takes effect, because
+cap, with an idle window of the same length. The cap
+sets the worst-case delay before a removal from the group takes effect, because
 an open session is not re-checked. Every login checks the group again, and
 the issuer's SSO session turns that login into a
 redirect the person does not notice. A removal takes effect at once only by disabling
@@ -969,7 +966,6 @@ config = WebAuthConfig(
     rate_limits=SingleProcessRateLimitBackend(),
     allowed_hosts_exact=frozenset({"app.example.com"}),
     allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
-    cookie_max_age_seconds=TWELVE_HOURS,
     session_lifetime=SessionLifetime(
         idle_seconds=TWELVE_HOURS, absolute_max_age_seconds=TWELVE_HOURS,
     ),

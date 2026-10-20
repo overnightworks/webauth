@@ -104,7 +104,6 @@ def web_auth_config_arguments() -> dict[str, object]:
         "rate_limits": SingleProcessRateLimitBackend(),
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
-        "cookie_max_age_seconds": SESSION_MAX_AGE_SECONDS,
         "session_lifetime": SessionLifetime(
             idle_seconds=SESSION_MAX_AGE_SECONDS,
             absolute_max_age_seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS,

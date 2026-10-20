@@ -197,7 +197,6 @@ def a_host_configures_without_local_credentials() -> WebAuthConfig:
         rate_limits=HostRateLimits(),
         allowed_hosts_exact=frozenset({"host.example"}),
         allowed_hosts_patterns=(re.compile(r".*\.example"),),
-        cookie_max_age_seconds=3600,
         session_lifetime=SessionLifetime(idle_seconds=3600, absolute_max_age_seconds=86400),
     )
 
