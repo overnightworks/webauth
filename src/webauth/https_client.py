@@ -127,8 +127,9 @@ def fetch_key_set_over_https(
     invalid JSON.
 
     `timeout_seconds` bounds connecting and each read on its own;
-    `deadline_seconds` bounds the fetch in total, so an origin that trickles
-    bytes within each read timeout is cut off. Connecting, which urllib3 bounds
+    `deadline_seconds` bounds the TLS handshake and the answer together, not
+    the fetch in total, so an origin that trickles bytes within each read
+    timeout is cut off. Connecting, which urllib3 bounds
     by the connect timeout once per resolved address, and the host name lookup,
     which the resolver offers no way to bound, run outside the deadline. Every
     failure fails closed, and every other request is refused at once rather

@@ -12,6 +12,83 @@ endpoint with HTTP Basic and sends PKCE with the `S256` method.
 Distribution `overnightworks-webauth`, import package `webauth`. [Install](#install) names
 where the wheel comes from.
 
+## Quick start
+
+```python
+import os
+
+from fastapi import Depends, FastAPI
+from pydantic import SecretStr
+
+from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
+from webauth.dependencies import current_user_dependency
+from webauth.middleware import install_web_auth_middleware
+from webauth.policies import CsrfPolicy, SecurityHeadersPolicy, default_content_security_policy
+from webauth.ports import AuthenticatedUser
+from webauth.proxies import TrustedProxies
+from webauth.rate_limit import SingleProcessRateLimitBackend
+
+app = FastAPI()
+config = WebAuthConfig(
+    session_secret=SecretStr(os.environ["SESSION_SECRET"]),
+    trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
+    rate_limits=SingleProcessRateLimitBackend(),
+    allowed_hosts_exact=frozenset({"app.example.com"}),
+    allowed_hosts_patterns=(),
+    session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
+)
+install_web_auth_config(app, config)
+install_web_auth_middleware(
+    app,
+    security_headers=SecurityHeadersPolicy(
+        content_security_policy=default_content_security_policy(),
+    ),
+    csrf_origin=CsrfPolicy(),
+    csrf_token=CsrfPolicy(),
+)
+auth = current_user_dependency(
+    session_store=the_hosts_session_store,
+    on_authenticated=bind_the_hosts_log_context,
+)
+
+
+@app.get("/me")
+def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUser:
+    return user
+```
+
+`current_user_dependency` returns an `AuthDependencies` with three fields:
+`current_user`, `admin_user` and `verified_session_id`. `session_store` is the
+host's own FastAPI dependency. `on_authenticated` binds the account into the
+host's log context. `login_redirect` is optional ([Reading the session](#reading-the-session)).
+`trusted_proxies` names the peers whose `X-Forwarded-For` and `X-Forwarded-Proto`
+are believed. The logout route is `token_exempt` ([Logging out](#logging-out)); the
+sign-in routes are under [OpenID Connect login](#openid-connect-login).
+[`tests/typing/oidc_host.py`](tests/typing/oidc_host.py) is a complete host,
+checked in CI against the built wheel.
+
+## Security model
+
+Who the library defends against, and what it trusts. Each line links to the
+section that owns its facts.
+
+1. **Browser to library** (cookies, [CSRF](#csrf-origin), Origin, [return path](#the-return-path), body size, [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that ([Configuration](#configuration)).
+2. **Library to issuer:** the configured issuer is trusted for what it signs and serves over TLS, and gets no defence beyond the JOSE and OpenID Connect specifications and PyJWT.
+   - In scope: anyone presenting a token that lacks the issuer's signature or carries the wrong `alg`, `aud`, `iss`, type or time.
+   - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
+   - Availability: every connection and read is bounded.
+3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed.
+4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty.
+5. **Host infrastructure** (`WallClock`, `WriteLock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
+6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
+7. **Named residues:**
+   - with a `WriteLock` that is released before the host commits (an in-process lock), a session that a login has created but not yet committed survives a back-channel logout of the same account that runs in between; a lock held until the transaction commits closes that window;
+   - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
+   - a clock reading past year 9999 fails closed;
+   - name resolution is bounded by the system resolver, not by the library; connecting is bounded per resolved address, outside the total deadline ([The relying party](#the-relying-party)).
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
 ## OpenID Connect login
 
 The host names the issuer's authorization, token, key-set and end-session
@@ -290,8 +367,9 @@ never overwrite each other:
 - **Name:** the pending-login prefix `__Host-oidc_pending_` followed by the
   first 16 hex characters of the SHA-256 of the login's state. With
   `cookie_secure=False` the name is the plain `oidc_pending_…` form and the
-  cookie is not `Secure`; that is for local development over http only, where
-  a sibling host or a network observer can set or read it.
+  cookie is not `Secure`. That is for a host's own session login over plain
+  http, where a sibling host or a network observer can set or read it; an
+  OpenID Connect sign-in needs https whatever `cookie_secure` is.
 - **Flags:** `HttpOnly`, `Path=/`, `Max-Age=600`, and `Secure` following
   `cookie_secure`. It is always `SameSite=Lax`, whatever `cookie_samesite`
   says: the callback is a top-level navigation from the issuer's site, which a
@@ -482,9 +560,7 @@ callback route, around [`open_session`](#opening-a-session):
   into, then call `issue_session_cookies`.
 - **Second hold:** the `WriteLock` must allow a second hold in the same
   request, one for admission and one for `open_session`.
-- **Entropy:** the store mints the new session's id with at least 128 bits from
-  a CSPRNG; `secrets.token_urlsafe(32)` gives 43 characters, under the
-  135-character bound.
+- **Entropy:** see `SessionRecordStore.create`.
 
 ### The relying party
 
@@ -598,8 +674,7 @@ the account directly, and `set_role(user_id, role)`, which changes an account's
 role in the caller's transaction, never commits, and returns the record). Any
 stored account whose `id` equals the subject character for character is that
 subject's account, whatever created it, and keeps its username; its role
-follows the groups (below). The host's `get` must compare exactly: no case, accent or
-trailing-space folding, even where its id column's collation folds. A host that
+follows the groups (below). A host that
 migrates legacy accounts makes sure that no legacy `id` can equal a subject of
 the bound issuer. After the issuer, membership is checked, before any lock or account:
 
@@ -795,9 +870,11 @@ Fields a host may leave out:
 are set and when they are cleared — and whether `SecurityHeadersMiddleware`
 sends HSTS. The request's scheme does not decide it, so a deployment behind
 a TLS proxy it has not listed in `trusted_proxies` still gets both. A browser
-does not send a `Secure` cookie back over plain http, so local development
-over http works only with `cookie_secure=False` in that environment's
-configuration, which drops `Secure` and HSTS together. With it off,
+does not send a `Secure` cookie back over plain http, so a host's own session
+login over plain http works only with `cookie_secure=False` in that
+environment's configuration, which drops `Secure` and HSTS together. An
+OpenID Connect sign-in needs https whatever it is set to, because
+`OidcClientConfig` refuses a URL that is not https. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
 `SecurityHeadersPolicy.hsts_max_age_seconds` sets the HSTS `max-age`; it
