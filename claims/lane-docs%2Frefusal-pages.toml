@@ -1,0 +1,7 @@
+claim_id = "d4fb71a13a9a414ab2890e14c0ced2c5"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "174e9dce29473f53b4f55dbd1a7ac295412a9ef1"
+branch = "docs/refusal-pages"
+scope = ["README.md"]
+opened_commit = "fdef5db09280868ee1e8c09d5c9bf5c9b37f0845"
