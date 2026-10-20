@@ -86,7 +86,6 @@ def test_a_removed_field_is_refused_as_an_unknown_keyword(
         a_web_auth_config(**{removed_keyword: 5})
 
 
-
 def test_a_configuration_built_positionally_is_refused() -> None:
     positional_arguments = list(web_auth_config_arguments().values())
 

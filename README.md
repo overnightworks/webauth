@@ -168,18 +168,23 @@ would leave the pending cookie in the browser.
 included, never the percent-decoded `request.url.path`; `LoginRedirect` builds
 its `next` the same way. The library keeps it in the pending-login cookie and
 returns it from `finish_login`, after judging it again. It is a same-origin
-path of this app, ASCII only (non-ASCII characters are percent-encoded) and at
-most 512 bytes, or `None`; `None` means the host's default page, and the login
-still succeeds. These never come back: a path a browser reads as another host
-(`//x`, `/\x`, tab, CR or LF between the slashes), an absolute URL, a bare
-host, any control character, the empty string, anything over 512 bytes, and,
-under a `root_path`, a path outside it. A `root_path` with a character other
-than ASCII letters, digits, `-._~` and `/` keeps no return path. A `.` or `..` segment (also as `%2e`)
-is refused too, because a browser resolves it before sending a request, and so
-is a literal `#`, which a request never carries. The
-library prepends `root_path` to the address unless the raw path already starts
-with it at a segment boundary, as Starlette's router reads it. A login route
-inside a mounted sub-app is judged against that mount's `root_path`. The
+path of this app, ASCII only (non-ASCII characters are percent-encoded) and, once
+percent-encoded, at most 512 bytes, or `None`; `None` means the host's default
+page, and the login still succeeds. These never come back: a path a browser
+reads as another host (`//x`, `/\x`, tab, CR or LF between the slashes), an
+absolute URL, a bare host, any control character, the empty string, anything
+over 512 bytes, and, under a `root_path`, a path outside it. A `root_path` with
+a character other than ASCII letters, digits, `-._~` and `/` keeps no return
+path. A `.` or `..` segment (also as `%2e`) is refused too, because a browser
+resolves it before sending a request, and so is a literal `#`, which a request
+never carries.
+
+`start_login` keeps a `return_to` only when it already lies under `root_path` at
+a segment boundary, as Starlette's router reads it, and prepends nothing: with
+`root_path="/app"`, `/app/albums/42` is kept and `/albums/42` comes back `None`.
+Only the address `LoginRedirect` builds from the request gets `root_path`
+prepended, unless the raw path already carries it at a segment boundary. A login
+route inside a mounted sub-app is judged against that mount's `root_path`. The
 fragment is lost, because browsers never send it.
 
 #### Opening a session
@@ -324,7 +329,7 @@ own, so that `log_out` can pass it to Keycloak as `id_token_hint`:
   `MAX_ID_TOKEN_HINT_CHARS` (3072) is not kept and the old cookie is cleared
   instead; the person is still signed in, and their logout asks. Keycloak
   asks once whenever the browser holds no ID token from its latest Keycloak
-  sign-in: a token over the bound, a sign-in that stored no token, or a
+  sign-in: a token over the bound, a hint cookie the browser no longer holds, or a
   token of another Keycloak session.
 - **Never a credential:** the hint is not signed by webauth, and it is never
   decoded, verified, logged or accepted as a session. Keycloak judges it. The
@@ -1194,10 +1199,10 @@ It owns the machinery an application should not rebuild:
 | `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `WriteLock`, `AuditSink` and `RateLimitBackend` |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
-| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. |
-| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. |
+| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
+| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity |
 | `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names. Takes its identity from `webauth.oidc` |
-| `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client`. |
+| `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client` |
 
 It leaves the application everything that touches the application's own truth:
 
