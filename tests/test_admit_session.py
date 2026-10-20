@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 
 import pytest
@@ -11,6 +12,7 @@ from webauth_arrangement import (
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_ID,
     SESSION_IDLE_SECONDS,
+    FakeSessionRecord,
     SessionRecordsInMemory,
     SessionsAnsweringTouch,
     a_session,
@@ -55,45 +57,51 @@ def test_a_renewal_stops_at_the_absolute_cap() -> None:
 
 
 @pytest.mark.parametrize(
-    ("session_id", "sessions", "renewal_is_observable"),
+    "make_record",
     [
         pytest.param(
-            SESSION_ID,
-            SessionRecordsInMemory(a_session(now=FIXED_INSTANT, remaining=-SECOND)),
-            True,
+            lambda: a_session(now=FIXED_INSTANT, remaining=-SECOND),
             id="past its expiry",
         ),
         pytest.param(
-            SESSION_ID,
-            SessionRecordsInMemory(
-                a_session(now=FIXED_INSTANT, age=CAP + SECOND, remaining=SECOND),
-            ),
-            True,
+            lambda: a_session(now=FIXED_INSTANT, age=CAP + SECOND, remaining=SECOND),
             id="past the absolute cap",
         ),
+    ],
+)
+def test_a_session_outside_its_lifetime_is_refused_and_not_renewed(
+    make_record: Callable[[], FakeSessionRecord],
+) -> None:
+    record = make_record()
+    stored_expiry = record.expires_at
+
+    outcome = admit(record.id, SessionRecordsInMemory(record))
+
+    assert outcome is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
+    assert record.expires_at == stored_expiry
+
+
+@pytest.mark.parametrize(
+    ("session_id", "make_store"),
+    [
         pytest.param(
             "unknown-session",
-            SessionRecordsInMemory(a_session(now=FIXED_INSTANT)),
-            True,
+            lambda: SessionRecordsInMemory(a_session(now=FIXED_INSTANT)),
             id="an unknown id",
         ),
         pytest.param(
             SESSION_ID,
-            SessionsAnsweringTouch(a_session(now=FIXED_INSTANT), False),
-            False,
+            lambda: SessionsAnsweringTouch(a_session(now=FIXED_INSTANT), False),
             id="a touch that finds no row",
         ),
     ],
 )
-def test_a_session_the_store_does_not_admit_is_refused_and_not_renewed(
-    session_id: str, sessions: SessionRecordsInMemory, renewal_is_observable: bool,
+def test_an_unknown_id_or_a_row_touch_no_longer_finds_is_refused(
+    session_id: str, make_store: Callable[[], SessionRecordsInMemory],
 ) -> None:
-    stored_expiry = sessions.record.expires_at
-
-    outcome = admit(session_id, sessions)
+    outcome = admit(session_id, make_store())
 
     assert outcome is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
-    assert not renewal_is_observable or sessions.record.expires_at == stored_expiry
 
 
 @pytest.mark.parametrize("answer", [None, 1, "yes"])
