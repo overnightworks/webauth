@@ -1,0 +1,7 @@
+claim_id = "9cc70a5d090a43fbb33fb77cdd9bdd4d"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "9135eeff95fe2669cd5405126203df2f384c4164"
+branch = "claude/issue-308-oidc-login-test-zombies"
+scope = ["tests/test_oidc_login.py", "tests/test_paths.py"]
+opened_commit = "490ce7fc478c4b73fcd829afbbec60fc72383f71"
