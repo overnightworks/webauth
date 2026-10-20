@@ -7,10 +7,9 @@ the claims beyond signature, issuer, audience and time — an ID token's nonce,
 a logout token's events — belongs to the caller, which reads them from
 `VerifiedClaims.claims`.
 
-The token is parsed strictly by this module before PyJWT sees it: bounded
-length and nesting, no duplicate JSON members, canonical base64url, an
-RS256-only header whose `kid`, when present, is a bounded string, and no header
-member that would let the token choose its own key. PyJWT then verifies the
+PyJWT reads the token. This module bounds the token length and the header
+segment before PyJWT parses anything, accepts an RS256-only header whose
+`kid`, when present, is a bounded string, and lets PyJWT verify the
 signature, audience and issuer; the time claims are checked here against the
 injected wall clock, so leeway has one owner.
 
@@ -44,14 +43,13 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import math
 import re
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, NoReturn, TypeGuard, cast
+from typing import TYPE_CHECKING, TypeGuard, cast
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
@@ -70,7 +68,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 MAX_TOKEN_CHARACTERS = 8 * 1024
-_MAX_JSON_NESTING_DEPTH = 8
+_MAX_HEADER_SEGMENT_CHARACTERS = 512
 _MAX_KEY_ID_CHARACTERS = 128
 _KEY_SET_TTL_SECONDS = 60 * 60
 KEY_SET_REFRESH_COOLDOWN_SECONDS = 30
@@ -78,11 +76,7 @@ MAX_KEY_SET_KEYS = 10
 _MIN_RSA_KEY_BITS = 2048
 
 _ALGORITHM = "RS256"
-_JWS_COMPACT_SEGMENTS = 3
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]*")
-# Members through which a token could name, embed or constrain its own key,
-# and `b64`, which would change how PyJWT reads the payload segment.
-_FORBIDDEN_HEADER_MEMBERS = frozenset({"crit", "jwk", "jku", "x5u", "x5c", "b64"})
 # Private RSA members, and `k`, a symmetric key: a key set publishing either
 # has leaked a secret and is not trusted for any of its keys.
 _SECRET_KEY_MEMBERS = frozenset({"d", "p", "q", "dp", "dq", "qi", "oth", "k"})
@@ -109,9 +103,6 @@ class RejectionReason(StrEnum):
     # A refusal reason, not a credential
     TOKEN_TOO_LONG = "token-too-long"  # noqa: S105
     MALFORMED_TOKEN = "malformed-token"  # noqa: S105
-    DUPLICATE_MEMBER = "duplicate-member"
-    NESTING_TOO_DEEP = "nesting-too-deep"
-    FORBIDDEN_HEADER = "forbidden-header"
     UNSUPPORTED_ALGORITHM = "unsupported-algorithm"
     INVALID_KEY_ID = "invalid-key-id"
     INVALID_TOKEN_TYPE = "invalid-token-type"  # noqa: S105
@@ -180,13 +171,6 @@ class _InvalidKeySetError(Exception):
 
 
 @dataclass(frozen=True)
-class _ParsedToken:
-    key_id: str | None
-    token_type: object
-    claims: Mapping[str, object]
-
-
-@dataclass(frozen=True)
 class _KeySet:
     named: Mapping[str, RSAPublicKey]
     sole: RSAPublicKey | None
@@ -246,11 +230,23 @@ class JwtVerifier:
             return Rejected(refusal.reason)
 
     def _verified_claims(self, token: str, expected_type: str | None) -> VerifiedClaims:
-        parsed = _parse_token(token)
-        if expected_type is not None and parsed.token_type != expected_type:
+        if len(token) > MAX_TOKEN_CHARACTERS:
+            raise _VerificationRefusal(RejectionReason.TOKEN_TOO_LONG)
+        # PyJWT parses the header with `json.loads` before it checks anything,
+        # and hostile nesting within the token cap crashes a thread whose stack
+        # is small (musl's default); the bound keeps the depth far below that.
+        if len(token.split(".", 1)[0]) > _MAX_HEADER_SEGMENT_CHARACTERS:
+            raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
+        try:
+            header = jwt.get_unverified_header(token)
+        except jwt.InvalidTokenError as error:
+            raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
+        if header.get("alg") != _ALGORITHM:
+            raise _VerificationRefusal(RejectionReason.UNSUPPORTED_ALGORITHM)
+        if expected_type is not None and header.get("typ") != expected_type:
             raise _VerificationRefusal(RejectionReason.INVALID_TOKEN_TYPE)
-        self._verify_signature_audience_and_issuer(token, self._signing_key(parsed.key_id))
-        claims = parsed.claims
+        key_id = _header_key_id(header)
+        claims = self._verified_payload(token, self._signing_key(key_id))
         expires_at, issued_at = self._checked_time_claims(claims)
         return VerifiedClaims(
             subject=_subject(claims),
@@ -261,9 +257,9 @@ class JwtVerifier:
             claims=claims,
         )
 
-    def _verify_signature_audience_and_issuer(self, token: str, key: RSAPublicKey) -> None:
+    def _verified_payload(self, token: str, key: RSAPublicKey) -> Mapping[str, object]:
         try:
-            jwt.decode(
+            claims = jwt.decode(
                 token,
                 key=key,
                 algorithms=[_ALGORITHM],
@@ -273,17 +269,15 @@ class JwtVerifier:
             )
         except jwt.InvalidSignatureError as error:
             raise _VerificationRefusal(RejectionReason.INVALID_SIGNATURE) from error
-        # After InvalidSignatureError, which subclasses it. `_parse_token`
-        # already refuses what PyJWT cannot decode; this keeps a disagreement
-        # between the two parses a rejection rather than an exception.
-        except jwt.DecodeError as error:
-            raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
         except jwt.InvalidAudienceError as error:
             raise _VerificationRefusal(RejectionReason.INVALID_AUDIENCE) from error
         except jwt.InvalidIssuerError as error:
             raise _VerificationRefusal(RejectionReason.INVALID_ISSUER) from error
         except jwt.MissingRequiredClaimError as error:
             raise _VerificationRefusal(RejectionReason.INVALID_CLAIM) from error
+        except jwt.InvalidTokenError as error:
+            raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
+        return MappingProxyType(claims)
 
     def _checked_time_claims(self, claims: Mapping[str, object]) -> tuple[int, int]:
         expires_at = _integer_claim(claims, "exp")
@@ -372,33 +366,12 @@ def _library_checks() -> Options:
     }
 
 
-def _parse_token(token: str) -> _ParsedToken:
-    if len(token) > MAX_TOKEN_CHARACTERS:
-        raise _VerificationRefusal(RejectionReason.TOKEN_TOO_LONG)
-    segments = token.split(".")
-    if len(segments) != _JWS_COMPACT_SEGMENTS:
-        raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
-    try:
-        header_bytes, claims_bytes, _signature = (_base64url_decode(part) for part in segments)
-    except ValueError as error:
-        raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
-    header = _strict_json_object(header_bytes)
-    claims = _strict_json_object(claims_bytes)
-    return _ParsedToken(
-        key_id=_header_key_id(header),
-        token_type=header.get("typ"),
-        claims=MappingProxyType(claims),
-    )
-
-
 def _header_key_id(header: Mapping[str, object]) -> str | None:
-    if _FORBIDDEN_HEADER_MEMBERS & header.keys():
-        raise _VerificationRefusal(RejectionReason.FORBIDDEN_HEADER)
-    if header.get("alg") != _ALGORITHM:
-        raise _VerificationRefusal(RejectionReason.UNSUPPORTED_ALGORITHM)
     if "kid" not in header:
         return None
     key_id = header["kid"]
+    if key_id is None or not isinstance(key_id, str):
+        raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
     if not _is_key_id(key_id):
         raise _VerificationRefusal(RejectionReason.INVALID_KEY_ID)
     return key_id
@@ -440,74 +413,6 @@ def _base64url_decode(segment: str) -> bytes:
     if base64.urlsafe_b64encode(decoded).rstrip(b"=") != segment.encode():
         raise ValueError("not canonical base64url")
     return decoded
-
-
-def _strict_json_object(document: bytes) -> dict[str, object]:
-    """The JSON object `document` holds, or a `_VerificationRefusal` naming why
-    it is not one: bad UTF-8, nesting too deep, a member named twice, a
-    non-finite number, or no object at the top."""
-    try:
-        text = document.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
-    # Measured before parsing: the stdlib parser recurses per level and would
-    # raise RecursionError on hostile nesting rather than a parse error.
-    if _nesting_depth(text) > _MAX_JSON_NESTING_DEPTH:
-        raise _VerificationRefusal(RejectionReason.NESTING_TOO_DEEP)
-    try:
-        parsed = json.loads(
-            text,
-            object_pairs_hook=_object_without_duplicates,
-            parse_constant=_refuse_non_json_constant,
-            parse_float=_finite_number,
-        )
-    except ValueError as error:
-        raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
-    if not isinstance(parsed, dict):
-        raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
-    return parsed
-
-
-def _nesting_depth(text: str) -> int:
-    depth = deepest = 0
-    in_string = escaped = False
-    for character in text:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif character == "\\":
-                escaped = True
-            elif character == '"':
-                in_string = False
-        elif character == '"':
-            in_string = True
-        elif character in "[{":
-            depth += 1
-            deepest = max(deepest, depth)
-        elif character in "]}":
-            depth -= 1
-    return deepest
-
-
-def _object_without_duplicates(members: list[tuple[str, object]]) -> dict[str, object]:
-    parsed = dict(members)
-    if len(parsed) != len(members):
-        raise _VerificationRefusal(RejectionReason.DUPLICATE_MEMBER)
-    return parsed
-
-
-def _refuse_non_json_constant(constant: str) -> NoReturn:
-    """The stdlib parser reads `NaN`, `Infinity` and `-Infinity`; JSON has none."""
-    raise ValueError(f"{constant} is not JSON")
-
-
-def _finite_number(literal: str) -> float:
-    """A literal such as `1e999999` is valid JSON that `float` rounds to an
-    infinity, the value `_refuse_non_json_constant` keeps out."""
-    number = float(literal)
-    if not math.isfinite(number):
-        raise ValueError(f"{literal} overflows to a non-finite number")
-    return number
 
 
 def _json_object(document: bytes) -> dict[str, object] | None:

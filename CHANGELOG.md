@@ -17,6 +17,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   several `logout_token` fields, an empty one) before it verifies anything or takes the
   lock. Migrate by passing `await request.body()` and `request.headers.get("content-type")`;
   the host's own form parse goes.
+- The ID and Logout Token are read by PyJWT instead of this library's strict parser.
+  `RejectionReason` loses `DUPLICATE_MEMBER`, `NESTING_TOO_DEEP` and `FORBIDDEN_HEADER`.
+  A null or non-string `kid`, `crit` and `b64` answer `MALFORMED_TOKEN`; a header member
+  named twice keeps its last value; `jwk`, `jku`, `x5u` and `x5c` are ignored rather than
+  refused; a padded signature is accepted. A header segment over 512 characters is
+  `MALFORMED_TOKEN`, refused before PyJWT parses anything.
 
 **Changed**
 
