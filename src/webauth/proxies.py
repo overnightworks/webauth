@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TrustedProxies",
-    "client_user_agent",
     "request_is_https",
     "resolve_client_ip",
 ]
@@ -248,8 +247,3 @@ def request_is_https(request: Request) -> bool:
     newest = next(_forwarded_entries(request.headers.getlist(_FORWARDED_PROTO_HEADER)), "")
     return newest.lower() == _HTTPS_SCHEME
 
-
-def client_user_agent(connection: HTTPConnection) -> str:
-    """The agent the client declares, cut to the length the deployment records."""
-    limit = web_auth_config(connection).max_user_agent_chars
-    return (connection.headers.get("user-agent") or "")[:limit]

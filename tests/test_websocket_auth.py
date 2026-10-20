@@ -13,7 +13,6 @@ from webauth_arrangement import (
     ALLOWED_HOST,
     ALLOWED_ORIGIN,
     CLIENT_ADDRESS,
-    CLIENT_USER_AGENT,
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     MEMBER_ROLE,
@@ -40,14 +39,11 @@ from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     _cookie_pairs,
     _cookie_values,
-    session_reference,
     sign_session_id,
 )
 from webauth.dependencies import ConnectionRefusal, session_id_from_request
-from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
-from webauth.proxies import client_user_agent, resolve_client_ip
-
-DEFAULT_MAX_USER_AGENT_CHARS = 500
+from webauth.ports import AuthenticatedUser
+from webauth.proxies import resolve_client_ip
 
 CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
@@ -282,17 +278,14 @@ def test_a_sibling_host_the_application_does_not_list_is_refused_even_as_same_si
     assert refusal is ConnectionRefusal.FOREIGN_ORIGIN
 
 
-def test_a_refused_origin_leaves_the_session_and_the_audit_untouched() -> None:
-    record = a_session(ip_address="203.0.113.9")
+def test_a_refused_origin_leaves_the_session_untouched() -> None:
+    record = a_session()
     app = an_auth_app(record)
-    stored = (record.expires_at, record.ip_address)
+    stored_expiry = record.expires_at
 
     the_refusal_of(app, cookie=app.signed_cookie(), origin="https://evil.test")
 
-    after = (record.expires_at, record.ip_address)
-
-    assert after == stored
-    assert app.audit.events == []
+    assert record.expires_at == stored_expiry
 
 
 @pytest.mark.parametrize(
@@ -308,17 +301,17 @@ def test_a_refused_origin_never_asks_the_store(
     app = an_auth_app(None, sessions=SessionsThatMustNotBeAsked(a_session()))
 
     assert the_refusal_of(app, cookie=app.signed_cookie(), origin=origin) is refusal
-    assert app.audit.events == []
 
 
-def test_a_touch_reporting_no_row_refuses_the_handshake_without_audit() -> None:
-    record = a_session(ip_address="203.0.113.9")
+def test_a_touch_reporting_no_row_refuses_the_handshake_and_writes_nothing() -> None:
+    record = a_session()
+    stored_expiry = record.expires_at
     app = an_auth_app(None, sessions=SessionsAnsweringTouch(record, False))
 
     refusal = the_refusal_of(app, cookie=app.signed_cookie())
 
     assert refusal is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
-    assert app.audit.events == []
+    assert record.expires_at == stored_expiry
 
 
 @pytest.mark.parametrize("answer", [None, 1], ids=["None", "an int"])
@@ -340,56 +333,6 @@ def test_a_failing_transaction_never_accepts_the_socket(auth_app: AuthApp) -> No
         auth_app.connect(cookie=auth_app.signed_cookie()),
     ):
         pass
-
-
-def test_a_handshake_from_a_new_address_and_agent_is_reported_once_each_by_reference() -> None:
-    app = an_auth_app(a_session(ip_address="203.0.113.9", user_agent="OldBrowser/1.0"))
-
-    with app.connect(cookie=app.signed_cookie()) as socket:
-        socket.receive_json()
-
-    assert app.audit.events == [
-        SessionIdentityChanged(
-            change=SessionIdentityChange.IP_ADDRESS,
-            user_id="user-1",
-            session_ref=session_reference(SESSION_ID),
-            previous="203.0.113.9",
-            current=CLIENT_ADDRESS,
-        ),
-        SessionIdentityChanged(
-            change=SessionIdentityChange.USER_AGENT,
-            user_id="user-1",
-            session_ref=session_reference(SESSION_ID),
-            previous="OldBrowser/1.0",
-            current=CLIENT_USER_AGENT,
-        ),
-    ]
-
-
-def test_a_forwarded_address_from_an_untrusted_peer_is_not_the_client_identity() -> None:
-    app = an_auth_app(a_session(ip_address="203.0.113.9"))
-
-    with app.connect(
-        cookie=app.signed_cookie(), headers=[("x-forwarded-for", "198.51.100.77")],
-    ) as socket:
-        socket.receive_json()
-
-    recorded = [event.current for event in app.audit.events]
-
-    assert recorded == [CLIENT_ADDRESS]
-
-
-def test_a_long_user_agent_is_reported_cut_to_the_recorded_length() -> None:
-    app = an_auth_app(a_session())
-
-    long_agent = "u" * 10 * DEFAULT_MAX_USER_AGENT_CHARS
-
-    with app.connect(cookie=app.signed_cookie(), headers=[("user-agent", long_agent)]) as socket:
-        socket.receive_json()
-
-    recorded = [event.current for event in app.audit.events]
-
-    assert recorded == ["u" * DEFAULT_MAX_USER_AGENT_CHARS]
 
 
 def logged_out(app: AuthApp) -> None:
@@ -483,10 +426,7 @@ def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTP
         "type": scope_type,
         "app": app,
         "client": (CLIENT_ADDRESS, 50000),
-        "headers": [
-            (b"cookie", cookie.encode()),
-            (b"user-agent", CLIENT_USER_AGENT.encode()),
-        ],
+        "headers": [(b"cookie", cookie.encode())],
     }
     if connection_type is WebSocket:
         return WebSocket(scope, no_message, discard_message)
@@ -515,7 +455,6 @@ def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTP
             id="cookie_values",
         ),
         pytest.param(resolve_client_ip, {}, CLIENT_ADDRESS, id="resolve_client_ip"),
-        pytest.param(client_user_agent, {}, CLIENT_USER_AGENT, id="client_user_agent"),
         pytest.param(
             session_id_from_request,
             {"config": CONFIG},

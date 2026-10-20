@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Final, Literal
 from starlette.requests import cookie_parser
 
 from webauth._paths import MAX_RETURN_PATH_BYTES
-from webauth.ports import SessionReference
 
 if TYPE_CHECKING:
     from starlette.requests import HTTPConnection
@@ -46,7 +45,6 @@ __all__ = [
     "PendingLogin",
     "clear_session_cookies",
     "issue_session_cookies",
-    "session_reference",
     "sign_session_id",
 ]
 
@@ -176,11 +174,6 @@ def _cookie_pairs(connection: HTTPConnection) -> list[tuple[str, str]]:
 def _cookie_values(connection: HTTPConnection, name: str) -> list[str]:
     """Every value the connection's cookies carry under ``name``, in order."""
     return [value for key, value in _cookie_pairs(connection) if key == name]
-
-
-def session_reference(session_id: str) -> SessionReference:
-    """Return the public SHA-256 hex reference for a raw session identifier."""
-    return SessionReference(hashlib.sha256(session_id.encode()).hexdigest())
 
 
 def _session_signature(session_id: str, secret: bytes) -> str:

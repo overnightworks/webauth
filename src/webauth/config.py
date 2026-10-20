@@ -52,7 +52,6 @@ __all__ = [
 ]
 
 _MIN_SESSION_SECRET_CHARS: Final = 32
-_DEFAULT_MAX_USER_AGENT_CHARS: Final = 500
 _DEFAULT_IPV6_BUDGET_PREFIX: Final = 64
 # Shorter than /32 would pool whole providers into one budget; longer than /128
 # is not an IPv6 prefix at all.
@@ -117,7 +116,6 @@ class WebAuthConfig:
     csrf_header_name: str = _DEFAULT_CSRF_HEADER_NAME
     cookie_samesite: CookieSameSite = _DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
-    max_user_agent_chars: int = _DEFAULT_MAX_USER_AGENT_CHARS
     ipv6_budget_prefix: int = _DEFAULT_IPV6_BUDGET_PREFIX
     admin_role: str = _DEFAULT_ADMIN_ROLE
     user_role: str = _DEFAULT_USER_ROLE
@@ -163,9 +161,6 @@ class WebAuthConfig:
                 "whose addresses share one rate-limit budget",
             )
         self._require_distinct_roles()
-        require_positive_whole_number(
-            "max_user_agent_chars", self.max_user_agent_chars, unit="characters",
-        )
 
     def _require_distinct_roles(self) -> None:
         for field in ("admin_role", "user_role"):

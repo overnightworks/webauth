@@ -60,7 +60,6 @@ from webauth.ports import (
     AccountEvent,
     AuthenticatedUser,
     RateLimitBackend,
-    SessionIdentityChanged,
     SessionRecordStore,
     UsernameTakenError,
 )
@@ -76,7 +75,6 @@ HTTPS_TEST_SERVER = "https://testserver"
 MIN_SESSION_SECRET_CHARS = 32
 SESSION_ID = "session-1"
 CLIENT_ADDRESS = "testclient"
-CLIENT_USER_AGENT = "TestBrowser/1.0"
 ADMIN_ROLE = "admin"
 MEMBER_ROLE = "user"
 SPEC_WITH_CONCURRENT_READER = "2.3"
@@ -302,8 +300,6 @@ class FakeSessionRecord:
     user: FakeUser
     created_at: datetime
     expires_at: datetime
-    ip_address: str = CLIENT_ADDRESS
-    user_agent: str = CLIENT_USER_AGENT
 
     @property
     def user_id(self) -> str:
@@ -341,8 +337,6 @@ class SessionRecordsInMemory:
         *,
         now: datetime,
         expires_at: datetime,
-        ip_address: str,
-        user_agent: str,
     ) -> FakeSessionRecord:
         _require_held_lock(self._lock)
         user = self._users.get(user_id)
@@ -356,8 +350,6 @@ class SessionRecordsInMemory:
             user=user,
             created_at=now,
             expires_at=expires_at,
-            ip_address=ip_address,
-            user_agent=user_agent,
         )
         self._records[record.id] = record
         return record
@@ -383,14 +375,10 @@ class SessionRecordsInMemory:
         session_id: str,
         *,
         expires_at: datetime,
-        ip_address: str,
-        user_agent: str,
     ) -> bool:
         record = self._records.get(session_id)
         if record is None:
             return False
-        record.ip_address = ip_address
-        record.user_agent = user_agent
         record.expires_at = expires_at
         return True
 
@@ -445,16 +433,12 @@ class SessionsReusingEndedIds(SessionRecordsInMemory):
         *,
         now: datetime,
         expires_at: datetime,
-        ip_address: str,
-        user_agent: str,
     ) -> FakeSessionRecord:
         self._ids = count(1)
         return super().create(
             user_id,
             now=now,
             expires_at=expires_at,
-            ip_address=ip_address,
-            user_agent=user_agent,
         )
 
 
@@ -469,8 +453,6 @@ class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
         session_id: str,
         *,
         expires_at: datetime,
-        ip_address: str,
-        user_agent: str,
     ) -> bool:
         raise AssertionError("the store was asked to touch a session")
 
@@ -490,19 +472,13 @@ class SessionsAnsweringTouch(SessionRecordsInMemory):
         session_id: str,
         *,
         expires_at: datetime,
-        ip_address: str,
-        user_agent: str,
     ) -> bool:
         return self.touch_answer
 
 
 @dataclass
 class RecordingAuditSink:
-    events: list[SessionIdentityChanged] = field(default_factory=list)
     account_events: list[AccountEvent] = field(default_factory=list)
-
-    def session_identity_changed(self, event: SessionIdentityChanged) -> None:
-        self.events.append(event)
 
     def account_event(self, event: AccountEvent) -> None:
         self.account_events.append(event)
@@ -519,7 +495,6 @@ class AuthApp:
 
     client: TestClient
     sessions: SessionRecordsInMemory
-    audit: RecordingAuditSink
     authenticated: list[AuthenticatedUser]
     websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal]
     signing_key: bytes
@@ -562,8 +537,6 @@ def seeded_session(
             user_id,
             now=now,
             expires_at=expires_at,
-            ip_address=CLIENT_ADDRESS,
-            user_agent=CLIENT_USER_AGENT,
         )
 
 
@@ -572,8 +545,6 @@ def a_session(
     age: timedelta = timedelta(minutes=5),
     remaining: timedelta = timedelta(minutes=30),
     user: FakeUser | None = None,
-    ip_address: str = CLIENT_ADDRESS,
-    user_agent: str = CLIENT_USER_AGENT,
     now: datetime | None = None,
 ) -> FakeSessionRecord:
     now = now or datetime.now(UTC)
@@ -582,8 +553,6 @@ def a_session(
         user=user or FakeUser(),
         created_at=now - age,
         expires_at=now + remaining,
-        ip_address=ip_address,
-        user_agent=user_agent,
     )
 
 
@@ -593,7 +562,6 @@ UNAUTHENTICATED_RESPONSE_PATH = "/unauthenticated-response"
 def _add_websocket_routes(
     app: FastAPI,
     sessions: SessionRecordStore,
-    audit: RecordingAuditSink,
     outcomes: list[AuthenticatedUser | ConnectionRefusal],
 ) -> None:
     """The host recipe: authenticate in a worker and a finished transaction, then accept.
@@ -607,7 +575,7 @@ def _add_websocket_routes(
 
     def authenticate(connection: HTTPConnection) -> AuthenticatedUser | ConnectionRefusal:
         with transaction():
-            outcome = authenticate_websocket(connection, sessions=sessions, audit=audit)
+            outcome = authenticate_websocket(connection, sessions=sessions)
         outcomes.append(outcome)
         return outcome
 
@@ -663,13 +631,11 @@ def an_auth_app(
     config = a_web_auth_config(admin_role=ADMIN_ROLE, **config_overrides)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
-    audit = RecordingAuditSink()
     authenticated: list[AuthenticatedUser] = []
     websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal] = []
 
     dependencies = current_user_dependency(
         session_store=lambda: sessions,
-        audit_sink=lambda: audit,
         on_authenticated=authenticated.append,
         login_redirect=login_redirect,
     )
@@ -695,17 +661,15 @@ def an_auth_app(
     def unauthenticated(request: Request) -> Response:
         return unauthenticated_response(request, login_redirect)
 
-    _add_websocket_routes(app, sessions, audit, websocket_outcomes)
+    _add_websocket_routes(app, sessions, websocket_outcomes)
 
     return AuthApp(
         client=TestClient(
             app,
             base_url=HTTPS_TEST_SERVER,
             cookies={},
-            headers={"user-agent": CLIENT_USER_AGENT},
         ),
         sessions=sessions,
-        audit=audit,
         authenticated=authenticated,
         websocket_outcomes=websocket_outcomes,
         signing_key=config.signing_key,

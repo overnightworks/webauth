@@ -32,7 +32,6 @@ from webauth.cookies import (
     PendingLogin,
     clear_session_cookies,
     issue_session_cookies,
-    session_reference,
 )
 from webauth.dependencies import (
     AuthDependencies,
@@ -114,7 +113,6 @@ from webauth.ports import (
     AuditSink,
     AuthenticatedUser,
     RateLimitBackend,
-    SessionIdentityChanged,
     SessionRecord,
     SessionRecordStore,
     SubjectUserStore,
@@ -138,8 +136,6 @@ class HostAccount:
 class HostSession:
     id: str
     user_id: str
-    ip_address: str
-    user_agent: str
     user: UserRecord
     created_at: datetime
     expires_at: datetime
@@ -159,19 +155,14 @@ class HostAccounts:
 class HostSessions:
     def create(
         self, user_id: str, *, now: datetime, expires_at: datetime,
-        ip_address: str, user_agent: str,
     ) -> SessionRecord:
         user = HostAccount(user_id, "someone", "user")
-        return HostSession(
-            "id", user_id, ip_address, user_agent, user, now, expires_at,
-        )
+        return HostSession("id", user_id, user, now, expires_at)
 
     def load(self, session_id: str) -> SessionRecord | None:
         return None
 
-    def touch(
-        self, session_id: str, *, expires_at: datetime, ip_address: str, user_agent: str,
-    ) -> bool:
+    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
         return True
 
     def delete(self, session_id: str) -> None:
@@ -190,10 +181,6 @@ class HostLock:
 
 
 class HostAudit:
-    def session_identity_changed(self, event: SessionIdentityChanged) -> None:
-        reference_read_as_text: str = event.session_ref
-        assert reference_read_as_text
-
     def account_event(self, event: AccountEvent) -> None:
         assert event.kind
 
@@ -316,7 +303,6 @@ def a_host_resolves_the_current_user(
 ) -> AuthDependencies:
     return current_user_dependency(
         session_store=HostSessions,
-        audit_sink=HostAudit,
         on_authenticated=on_authenticated,
     )
 
@@ -324,7 +310,7 @@ def a_host_resolves_the_current_user(
 async def a_host_accepts_a_websocket_only_for_a_signed_in_account(
     websocket: WebSocket,
 ) -> AuthenticatedUser | None:
-    outcome = authenticate_websocket(websocket, sessions=HostSessions(), audit=HostAudit())
+    outcome = authenticate_websocket(websocket, sessions=HostSessions())
     if isinstance(outcome, ConnectionRefusal):
         await websocket.close(code=1008)
         return None
@@ -384,6 +370,6 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
         VerifiedClaims, VerifiedLogout, WallClock, install_web_auth_config,
-        is_https_url, session_id_from_request, session_reference,
+        is_https_url, session_id_from_request,
         unauthenticated_response,
     )

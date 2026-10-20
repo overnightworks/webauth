@@ -412,13 +412,6 @@ def test_replacing_a_field_sets_or_keeps_the_cookie_lifetime(
     assert config.cookie_max_age_seconds == cookie_max_age_seconds
 
 
-class AnIntegerSubclass(int):
-    pass
-
-
-USER_AGENT_LIMIT_MESSAGE = "max_user_agent_chars must be a positive whole number of characters"
-
-
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
@@ -430,28 +423,9 @@ USER_AGENT_LIMIT_MESSAGE = "max_user_agent_chars must be a positive whole number
         pytest.param({"user_role": ""}, "user_role must name a role", id="empty user role"),
         pytest.param({"admin_role": None}, "admin_role must name a role", id="no admin role"),
         pytest.param({"user_role": 5}, "user_role must name a role", id="a numeric user role"),
-        pytest.param(
-            {"max_user_agent_chars": -1}, USER_AGENT_LIMIT_MESSAGE,
-            id="negative user-agent limit",
-        ),
-        pytest.param(
-            {"max_user_agent_chars": 0}, USER_AGENT_LIMIT_MESSAGE, id="zero user-agent limit",
-        ),
-        pytest.param(
-            {"max_user_agent_chars": True}, USER_AGENT_LIMIT_MESSAGE,
-            id="boolean user-agent limit",
-        ),
-        pytest.param(
-            {"max_user_agent_chars": "2"}, USER_AGENT_LIMIT_MESSAGE,
-            id="text user-agent limit",
-        ),
-        pytest.param(
-            {"max_user_agent_chars": 2.0}, USER_AGENT_LIMIT_MESSAGE,
-            id="float user-agent limit",
-        ),
     ],
 )
-def test_a_role_or_user_agent_limit_that_cannot_work_is_refused_at_configuration_time(
+def test_a_role_that_cannot_work_is_refused_at_configuration_time(
     overrides: dict[str, object], message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
@@ -463,11 +437,9 @@ def test_a_role_or_user_agent_limit_that_cannot_work_is_refused_at_configuration
     [
         pytest.param({}, id="the defaults"),
         pytest.param({"admin_role": "operator", "user_role": "member"}, id="custom roles"),
-        pytest.param({"max_user_agent_chars": 500}, id="a limit of 500"),
-        pytest.param({"max_user_agent_chars": AnIntegerSubclass(500)}, id="an int subclass"),
     ],
 )
-def test_distinct_roles_and_a_positive_user_agent_limit_are_accepted(
+def test_distinct_roles_are_accepted(
     overrides: dict[str, object],
 ) -> None:
     a_web_auth_config(**overrides)

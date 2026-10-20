@@ -13,20 +13,31 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - Opening a session reads the configured clock, and the session cap prunes before it
   creates. `open_session` loses `expires_at`: it reads `WebAuthConfig.wall_clock` once
   and creates the session at that instant, expiring one idle period later.
-  `SessionRecordStore.create` is now `create(user_id, *, now, expires_at, ip_address,
-  user_agent)`, and the store keeps `created_at == now`. `prune_overflow(user_id,
+  `SessionRecordStore.create` is now `create(user_id, *, now, expires_at)`, and the
+  store keeps `created_at == now`. `prune_overflow(user_id,
   keep_newest) -> None` ends all but the user's `keep_newest` newest sessions by
   `created_at`; `0` keeps none (songmaker's `queries/auth.py` raises for 0 today and
   returns the ended ids, which the library no longer reads). `open_session` ends the
   replaced session, prunes with `max_sessions - 1`, then creates, so two logins in
   one clock tick both succeed and the `RuntimeError` for a pruned new session is gone.
+- The library keeps no session origin. `SessionRecord` loses `ip_address` and
+  `user_agent`; `SessionRecordStore.create` and `touch` take neither. The identity
+  audit goes with them: `SessionIdentityChanged`, `SessionIdentityChange`,
+  `AuditSink.session_identity_changed`, `SessionReference` and
+  `webauth.cookies.session_reference` no longer exist, and neither do
+  `webauth.proxies.client_user_agent` and `WebAuthConfig.max_user_agent_chars`.
+  `current_user_dependency` and `authenticate_websocket` take no audit sink. The
+  login routes keep their `audit`, and rate limits keep `resolve_client_ip`.
+  Migration: songmaker drops its `UserSession` IP and user-agent columns and its two
+  identity audit actions; presentator's E3 store already fits; hosts stop passing
+  `audit_sink` to `current_user_dependency` and `audit` to `authenticate_websocket`.
 - The library owns one session lifetime. `WebAuthConfig.session_liveness`,
   `webauth.ports.SessionLivenessPolicy` and the module `webauth.liveness`
   (`ExpiryColumnLiveness`, `IdleWindowLiveness`) no longer exist; the required
   `WebAuthConfig.session_lifetime` is a `webauth.config.SessionLifetime(idle_seconds,
   absolute_max_age_seconds)`. `SessionRecord` gains read-only `created_at` and
   `expires_at`, and `SessionRecordStore.touch` is now
-  `touch(session_id, *, expires_at, ip_address, user_agent)`: the store writes the
+  `touch(session_id, *, expires_at)`: the store writes the
   expiry it is given and computes none of its own. A loaded session is admitted
   only when `now <= expires_at <= min(now + idle + 60 s, created_at + cap)`, and an
   admitted one is renewed to `min(now + idle, created_at + cap)`, so a session
@@ -94,11 +105,6 @@ Versions before 0.3.0 and releases without an entry here are described in the
   name made the browser send two same-name cookies at logout, and the logout
   ended no stored session. Migration: choose another name; no known host sets
   one.
-- `SessionIdentityChanged.session_ref` is typed `webauth.ports.SessionReference`,
-  no longer `str`: host code that constructs this dataclass with a plain `str`,
-  including an already-hashed reference, fails type checking. Migration:
-  construct it with `webauth.cookies.session_reference(raw_session_id)`.
-  Hosts that only read the field are unaffected.
 - `WebAuthConfig` refuses an empty `allowed_hosts_exact` together with an empty
   `allowed_hosts_patterns`; the silent fallback to `localhost` and `127.0.0.1`
   is gone. Migration: `allowed_hosts_exact={"localhost", "127.0.0.1"}` admits
@@ -131,11 +137,6 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `WebAuthConfig.session_lifetime` and to compute the `expires_at` passed to
   `SessionRecordStore.touch`; `open_session` reads it the same way for the `now` and
   `expires_at` it passes to `SessionRecordStore.create`.
-- `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of
-  `SessionIdentityChanged.session_ref`, and `webauth.cookies.session_reference`
-  returns it. A type checker now refuses a raw session id when the audit event
-  is constructed or assigned with one. Hosts that read the field as `str` are
-  unaffected, at run time and in their own types.
 - `SecurityHeadersPolicy.hsts_max_age_seconds` (default
   `DEFAULT_HSTS_MAX_AGE_SECONDS`, 31536000, a whole number
   from 0 up; 0 sends `max-age=0`, which rolls a pin back) and
@@ -157,9 +158,6 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 - The package description leads with OpenID Connect login: "OpenID Connect login for
   FastAPI applications, with sessions, CSRF and rate limits".
-- `max_user_agent_chars` is validated like the other positive quantities: its
-  refusal reads `max_user_agent_chars must be a positive whole number of
-  characters, not ...`.
 - `JwtVerifier` refuses a bad `leeway_seconds` like the other whole-number settings:
   `leeway_seconds must be a whole number of seconds from 0 up, not ...`.
 - The `anyio` floor is `>=4.0`, the lowest release `webauth` works with, instead of
