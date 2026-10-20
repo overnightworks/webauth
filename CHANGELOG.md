@@ -39,7 +39,14 @@ Versions before 0.3.0 and releases without an entry here are described in the
   login routes keep their `audit`, and rate limits keep `resolve_client_ip`.
   Migration: songmaker drops its `UserSession` IP and user-agent columns and its two
   identity audit actions; presentator's E3 store already fits; hosts stop passing
-  `audit_sink` to `current_user_dependency` and `audit` to `authenticate_websocket`.
+  `audit_sink` to `current_user_dependency` and `audit` to `authenticate_websocket`, and
+  a direct `deps.current_user(request, sessions)` call passes no audit argument: a
+  three-argument call raises `TypeError`.
+- `AuthDependencies` types its members as positional callables:
+  `current_user(request, sessions)`, `admin_user(request, user)` and
+  `verified_session_id(request, user)`. A type checker refuses other arguments, a
+  keyword call, and an `AuthDependencies` built from callables of another shape;
+  runtime is unchanged. Migration: call the members positionally.
 - The library owns one session lifetime. `WebAuthConfig.session_liveness`,
   `webauth.ports.SessionLivenessPolicy` and the module `webauth.liveness`
   (`ExpiryColumnLiveness`, `IdleWindowLiveness`) no longer exist; the required
@@ -171,8 +178,6 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `leeway_seconds must be a whole number of seconds from 0 up, not ...`.
 - The `anyio` floor is `>=4.0`, the lowest release `webauth` works with, instead of
   `>=4.12`: a host that pins an older `anyio` can now install it.
-- `AuthDependencies` names each member's parameters, so a type checker refuses a direct
-  call with the wrong arguments; runtime is unchanged.
 
 ## 0.17.0
 
