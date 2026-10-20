@@ -1,8 +1,0 @@
-claim_id = "99a78393893041b59ab990d29e513340"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "dd96a6df4c1d59c66233f23b867a3846ca5e77b0"
-branch = "claude/issue-330-fixation-guard"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/oidc_login.py", "tests/test_oidc_login.py", "tests/webauth_arrangement.py"]
-opened_commit = "7bbbddb2bb6493d3ec9853b11bd84c23611c268c"
-whole_reason = "One check, its README sentence, and the fakes and tests that only exercised it."
