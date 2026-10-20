@@ -1,8 +1,0 @@
-claim_id = "9922e470315b4ad698206809317016bc"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "dd96a6df4c1d59c66233f23b867a3846ca5e77b0"
-branch = "claude/issue-332-pyjwt-token-header"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/jwt_verification.py", "tests/test_jwt_verification.py"]
-opened_commit = "1328052268f39466a62e2dbe1c4871c4de53cd14"
-whole_reason = "One parser replaced by PyJWT behind one bound; its tests and the README and CHANGELOG lines that describe it."
