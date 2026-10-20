@@ -1,8 +1,0 @@
-claim_id = "ae312f8ae5fd4b369d75c87e01f60b0b"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "eafb3fcf99418cb47e26c623a9081e9052093fe3"
-branch = "claude/issue-318-e2e-evidence-hmac-fold"
-scope = ["e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/evidence.py", "e2e/oidc/harness.py", "e2e/oidc/prove.py", "src/webauth/cookies.py"]
-opened_commit = "cd19fa40cdf4a72a9fa4407da42cd4caf6ad3baa"
-whole_reason = "One evidence module and its callers in the e2e harness go together, and the six-line HMAC fold rides along as a bundled card."
