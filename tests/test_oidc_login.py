@@ -252,12 +252,15 @@ EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
         AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer where every subject is admitted",
     ),
 ])
-def test_a_refused_identity_is_answered_with_its_refusal_and_audits_nothing(
+def test_a_refused_identity_takes_no_lock_and_writes_nothing(
     identity: OidcIdentity, admission: AdmissionConfig, refusal: AdmissionRefusal,
 ) -> None:
-    host = Host(UsersInMemory(), RecordingAuditSink(), WriteLockInMemory())
+    lock = CountingWriteLock()
+    host = Host(UsersInMemory(lock=lock), RecordingAuditSink(), lock)
 
     assert host.admit(identity, admission) is refusal
+    assert lock.times_taken == 0
+    assert host.accounts.list() == []
     assert host.audit.account_events == []
 
 
