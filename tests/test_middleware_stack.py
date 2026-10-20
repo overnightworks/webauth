@@ -74,7 +74,6 @@ BACKGROUND_PATH = "/with-background"
 CONTEXT_SETTING_PATH = "/sets-context"
 A_CONFIG = a_web_auth_config()
 TWO_CHUNKS_UNDER_THE_LIMIT_EACH = (b"x" * 60, b"x" * 60)
-TOO_LARGE_BODY = {"detail": "Request body too large"}
 
 
 class TypedBody(BaseModel):
