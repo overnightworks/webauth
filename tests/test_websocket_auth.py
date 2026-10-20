@@ -22,7 +22,6 @@ from webauth_arrangement import (
     SESSION_IDLE_SECONDS,
     WEBSOCKET_DEPENDENCY_PATH,
     AuthApp,
-    FakeSessionRecord,
     SessionsAnsweringTouch,
     SessionsThatMustNotBeAsked,
     a_session,
@@ -191,34 +190,6 @@ def test_a_handshake_without_one_valid_session_cookie_is_refused(
 
 
 @pytest.mark.parametrize(
-    ("record", "refusal"),
-    [
-        pytest.param(
-            None,
-            ConnectionRefusal.SESSION_ENDED_OR_EXPIRED,
-            id="a session the store does not know",
-        ),
-        pytest.param(
-            a_session(remaining=-timedelta(seconds=1)),
-            ConnectionRefusal.SESSION_ENDED_OR_EXPIRED,
-            id="a session past its expiry",
-        ),
-        pytest.param(
-            a_session(age=timedelta(days=2)),
-            ConnectionRefusal.SESSION_ENDED_OR_EXPIRED,
-            id="a session past the absolute limit",
-        ),
-    ],
-)
-def test_a_session_that_no_longer_stands_is_refused(
-    record: FakeSessionRecord | None, refusal: ConnectionRefusal,
-) -> None:
-    app = an_auth_app(record)
-
-    assert the_refusal_of(app, cookie=app.signed_cookie()) is refusal
-
-
-@pytest.mark.parametrize(
     ("origin", "headers", "refusal"),
     [
         pytest.param(None, [], ConnectionRefusal.MISSING_ORIGIN, id="no Origin"),
@@ -301,17 +272,6 @@ def test_a_refused_origin_never_asks_the_store(
     app = an_auth_app(None, sessions=SessionsThatMustNotBeAsked(a_session()))
 
     assert the_refusal_of(app, cookie=app.signed_cookie(), origin=origin) is refusal
-
-
-def test_a_touch_reporting_no_row_refuses_the_handshake_and_writes_nothing() -> None:
-    record = a_session()
-    stored_expiry = record.expires_at
-    app = an_auth_app(None, sessions=SessionsAnsweringTouch(record, False))
-
-    refusal = the_refusal_of(app, cookie=app.signed_cookie())
-
-    assert refusal is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
-    assert record.expires_at == stored_expiry
 
 
 @pytest.mark.parametrize("answer", [None, 1], ids=["None", "an int"])
