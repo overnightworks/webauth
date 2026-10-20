@@ -19,7 +19,6 @@ from webauth_arrangement import (
     SESSION_ID,
     a_web_auth_config,
     session_cookie_header,
-    signed_like_release_0_14,
     signed_without_bound,
 )
 
@@ -400,9 +399,9 @@ def _post_with_token(cookie_header: str, token_for: str) -> Response:
             id="a cookie whose name starts like the session cookie",
         ),
         pytest.param(
-            session_cookie_header(signed_like_release_0_14(SESSION_ID, CONFIG.signing_key)),
+            session_cookie_header(sign_session_id(SESSION_ID, b"another-key" * 8)),
             SESSION_ID, 403, INVALID_TOKEN_DETAIL,
-            id="a session cookie signed the way 0.14.x did",
+            id="a session cookie signed under another key",
         ),
         pytest.param(
             session_cookie_header(SESSION_COOKIE, SESSION_COOKIE),
