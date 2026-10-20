@@ -69,7 +69,9 @@ class TestIsolationAndBounds:
             backend.is_allowed("stale-addr", limit=5, window_seconds=60)
             monotonic.return_value = 1_000.0 + 61
             backend.is_allowed("active-addr", limit=5, window_seconds=60)
-        assert backend.active_key_count() == 1
+            assert backend.is_allowed("stale-addr", limit=5, window_seconds=30) is True
+            with pytest.raises(ValueError, match="active-addr"):
+                backend.is_allowed("active-addr", limit=5, window_seconds=30)
 
     def test_the_full_sweep_clears_stale_keys_once_the_interval_elapses(self) -> None:
         backend = SingleProcessRateLimitBackend()
@@ -77,10 +79,15 @@ class TestIsolationAndBounds:
             monotonic.return_value = 1_000.0
             for n in range(5):
                 backend.is_allowed(f"addr-{n}", limit=1, window_seconds=10)
-            assert backend.active_key_count() == 5
+            for n in range(5):
+                with pytest.raises(ValueError, match=f"addr-{n}"):
+                    backend.is_allowed(f"addr-{n}", limit=1, window_seconds=20)
             monotonic.return_value = 1_000.0 + PRUNE_INTERVAL_SECONDS + 1
             backend.is_allowed("fresh", limit=1, window_seconds=10)
-        assert backend.active_key_count() == 1
+            for n in range(5):
+                assert backend.is_allowed(f"addr-{n}", limit=1, window_seconds=20) is True
+            with pytest.raises(ValueError, match="fresh"):
+                backend.is_allowed("fresh", limit=1, window_seconds=20)
 
     def test_a_sweep_respects_each_keys_own_window(self) -> None:
         backend = SingleProcessRateLimitBackend()
@@ -132,7 +139,7 @@ class TestThreadSafety:
     def test_a_check_that_waits_for_the_lock_cannot_file_an_older_timestamp(self) -> None:
         first_has_read_clock = threading.Event()
         second_is_settled = threading.Event()
-        readings = iter((100.0, 130.0, 210.0))
+        readings = iter((100.0, 130.0, 210.0, 220.0, 220.0))
 
         def scripted_monotonic() -> float:
             reading = next(readings)
@@ -166,7 +173,9 @@ class TestThreadSafety:
             second.join(timeout=5)
             backend.is_allowed("other", limit=1, window_seconds=100)
 
-        assert backend.active_key_count() == 2
+            for key in ("addr", "other"):
+                with pytest.raises(ValueError, match=key):
+                    backend.is_allowed(key, limit=1, window_seconds=200)
 
 
 OTHER_PATH = "/other/thing"

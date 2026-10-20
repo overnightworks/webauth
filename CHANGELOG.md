@@ -6,6 +6,13 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.19.0 - Unreleased
+
+**Breaking**
+
+- `SingleProcessRateLimitBackend` no longer has a method that counts its keys; nothing in the library
+  called it. A host that counted the backend's keys keeps its own count.
+
 ## 0.18.0
 
 **Breaking**
