@@ -21,9 +21,8 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 
-import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
@@ -60,7 +59,7 @@ from webauth.jwt_verification import (
 )
 
 KEY_SET_TTL_SECONDS = 60 * 60
-MAX_JSON_NESTING_DEPTH = 8
+MAX_HEADER_SEGMENT_CHARACTERS = 512
 MAX_KEY_ID_CHARACTERS = 128
 
 
@@ -175,10 +174,6 @@ def issuer() -> IssuerScenario:
         pytest.param({"aud": ["another-app", _AUDIENCE]}, id="audience-among-others"),
         pytest.param({"nbf": ABSENT}, id="without-nbf"),
         pytest.param({"sub": ABSENT}, id="without-sub"),
-        pytest.param(
-            {"note": 'a quoted "[[[[[[[[[[" and a \\ backslash'},
-            id="brackets-inside-a-string-are-no-nesting",
-        ),
     ],
 )
 def test_a_token_signed_by_a_key_of_the_fake_key_set_verifies_as_its_claims(
@@ -220,9 +215,6 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
     assert outcome == (
         issuer.verified() if accepted else Rejected(RejectionReason.INVALID_TOKEN_TYPE)
     )
-
-
-_DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
 
 
 @pytest.mark.parametrize(
@@ -314,13 +306,18 @@ _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
         # Headers
         pytest.param(
             lambda issuer: issuer.token(header={"kid": None}),
-            RejectionReason.INVALID_KEY_ID,
+            RejectionReason.MALFORMED_TOKEN,
             id="kid-null",
         ),
         pytest.param(
             lambda issuer: issuer.token(header={"kid": 7}),
-            RejectionReason.INVALID_KEY_ID,
+            RejectionReason.MALFORMED_TOKEN,
             id="kid-not-a-string",
+        ),
+        pytest.param(
+            lambda issuer: issuer.token(header={"alg": "RS512", "kid": 7}),
+            RejectionReason.MALFORMED_TOKEN,
+            id="kid-not-a-string-beside-a-wrong-alg",
         ),
         pytest.param(
             lambda issuer: issuer.token(header={"kid": ""}),
@@ -343,7 +340,7 @@ _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
                 issuer.claims(),
                 rs256(rsa_key("current")),
             ),
-            RejectionReason.DUPLICATE_MEMBER,
+            RejectionReason.UNSUPPORTED_ALGORITHM,
             id="duplicate-alg",
         ),
         pytest.param(
@@ -352,51 +349,23 @@ _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
                 issuer.claims(),
                 rs256(rsa_key("current")),
             ),
-            RejectionReason.DUPLICATE_MEMBER,
+            RejectionReason.UNKNOWN_KEY_ID,
             id="duplicate-kid",
         ),
         pytest.param(
-            lambda issuer: jws(
-                {"alg": "RS256", "kid": "current-key"},
-                '{"sub": "operator", "sub": "intruder"}',
-                rs256(rsa_key("current")),
-            ),
-            RejectionReason.DUPLICATE_MEMBER,
-            id="duplicate-claim",
-        ),
-        *(
-            pytest.param(
-                lambda issuer, member=member: issuer.token(header={member: "attacker-chosen"}),
-                RejectionReason.FORBIDDEN_HEADER,
-                id=f"header-{member}",
-            )
-            for member in ("crit", "jwk", "jku", "x5u", "x5c")
+            lambda issuer: issuer.token(header={"crit": ["exp"]}),
+            RejectionReason.MALFORMED_TOKEN,
+            id="header-crit",
         ),
         pytest.param(
             lambda issuer: issuer.token(header={"b64": False}),
-            RejectionReason.FORBIDDEN_HEADER,
+            RejectionReason.MALFORMED_TOKEN,
             id="header-b64-false",
         ),
         pytest.param(
             lambda issuer: issuer.token({"padding": "x" * MAX_TOKEN_CHARACTERS}),
             RejectionReason.TOKEN_TOO_LONG,
             id="oversized-token",
-        ),
-        pytest.param(
-            lambda issuer: jws(
-                {"alg": "RS256", "kid": "current-key"},
-                f'{{"deep": {_DEEP_ARRAY}}}',
-                rs256(rsa_key("current")),
-            ),
-            RejectionReason.NESTING_TOO_DEEP,
-            id="nesting-past-the-recursion-limit",
-        ),
-        pytest.param(
-            lambda issuer: issuer.token(
-                {"deep": json.loads("[" * MAX_JSON_NESTING_DEPTH + "]" * MAX_JSON_NESTING_DEPTH)}
-            ),
-            RejectionReason.NESTING_TOO_DEEP,
-            id="nesting-one-past-the-bound",
         ),
         *(
             pytest.param(lambda issuer, raw=raw: raw, RejectionReason.MALFORMED_TOKEN, id=name)
@@ -410,10 +379,13 @@ _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
                 ("header-not-an-object", f"{segment('[]')}.e30.c2ln"),
                 ("header-not-utf8", "_w.e30.c2ln"),
                 ("non-ascii-character", "e30.e30.sïg"),
+                ("lone-surrogate", "e30.e30.s\ud800g"),
             )
         ),
         pytest.param(
-            lambda issuer: jws({"alg": "RS256", "kid": "current-key"}, "[]", lambda _: b"s"),
+            lambda issuer: jws(
+                {"alg": "RS256", "kid": "current-key"}, "[]", rs256(rsa_key("current"))
+            ),
             RejectionReason.MALFORMED_TOKEN,
             id="claims-not-an-object",
         ),
@@ -421,20 +393,6 @@ _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
             lambda issuer: _with_unused_signature_bits_set(issuer.token()),
             RejectionReason.MALFORMED_TOKEN,
             id="non-canonical-base64url",
-        ),
-        pytest.param(
-            lambda issuer: issuer.token({"score": float("-inf")}),
-            RejectionReason.MALFORMED_TOKEN,
-            id="claim-with-a-non-json-constant",
-        ),
-        pytest.param(
-            lambda issuer: jws(
-                {"alg": "RS256", "kid": "current-key"},
-                '{"score": -1e999999}',
-                rs256(rsa_key("current")),
-            ),
-            RejectionReason.MALFORMED_TOKEN,
-            id="claim-overflowing-to-infinity",
         ),
     ],
 )
@@ -446,19 +404,61 @@ def test_a_hostile_token_is_refused_with_its_reason(
     assert issuer.verifier.verify(build_token(issuer)) == Rejected(reason)
 
 
-def test_a_token_pyjwt_cannot_decode_is_refused_as_malformed(
-    issuer: IssuerScenario, monkeypatch: pytest.MonkeyPatch
+def _token_with_header_of_bytes(issuer: IssuerScenario, header_bytes: int) -> str:
+    header = '{"alg": "RS256", "kid": "current-key"}'
+    return jws(
+        header + " " * (header_bytes - len(header)), issuer.claims(), rs256(rsa_key("current"))
+    )
+
+
+@pytest.mark.parametrize(
+    ("header_bytes", "outcome"),
+    [
+        pytest.param(MAX_HEADER_SEGMENT_CHARACTERS * 3 // 4, None, id="at-the-bound"),
+        pytest.param(
+            MAX_HEADER_SEGMENT_CHARACTERS * 3 // 4 + 1,
+            RejectionReason.MALFORMED_TOKEN,
+            id="one-byte-over-the-bound",
+        ),
+    ],
+)
+def test_a_header_segment_over_the_bound_is_refused_before_it_is_parsed(
+    issuer: IssuerScenario, header_bytes: int, outcome: RejectionReason | None
 ) -> None:
-    """The strict parse refuses every token PyJWT cannot decode today; should a
-    later PyJWT read a segment differently, its DecodeError is still a rejection."""
+    token = _token_with_header_of_bytes(issuer, header_bytes)
 
-    def decode_differently(*args: object, **kwargs: object) -> NoReturn:
-        del args, kwargs
-        raise jwt.DecodeError("this PyJWT reads the segment differently")
+    expected = issuer.verified() if outcome is None else Rejected(outcome)
+    assert issuer.verifier.verify(token) == expected
 
-    monkeypatch.setattr(jwt, "decode", decode_differently)
 
-    assert issuer.verifier.verify(issuer.token()) == Rejected(RejectionReason.MALFORMED_TOKEN)
+def test_the_deepest_header_the_bound_allows_does_not_crash_a_small_stack_thread(
+    issuer: IssuerScenario,
+) -> None:
+    """CPython 3.12 and 3.13 segfault in `json.loads` of deeply nested input on
+    a 128 KiB stack, the size of musl's thread default; a crash ends the test
+    run, which is the intended failure."""
+    header = "[" * (MAX_HEADER_SEGMENT_CHARACTERS * 3 // 4)
+    token = jws(header, issuer.claims(), rs256(rsa_key("current")))
+    outcomes: list[object] = []
+    worker = threading.Thread(target=lambda: outcomes.append(issuer.verifier.verify(token)))
+    previous_stack_size = threading.stack_size(128 * 1024)
+    try:
+        worker.start()
+    finally:
+        threading.stack_size(previous_stack_size)
+    worker.join()
+
+    assert outcomes == [Rejected(RejectionReason.MALFORMED_TOKEN)]
+
+
+@pytest.mark.parametrize("member", ["jwk", "jku", "x5u", "x5c"])
+def test_a_header_member_naming_a_key_is_ignored_and_only_the_configured_key_set_is_read(
+    issuer: IssuerScenario, member: str
+) -> None:
+    token = issuer.token(header={member: "attacker-chosen"})
+
+    assert issuer.verifier.verify(token) == issuer.verified()
+    assert issuer.endpoint.fetched_urls == [_JWKS_URL]
 
 
 @pytest.mark.parametrize(

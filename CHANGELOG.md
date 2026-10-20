@@ -23,6 +23,21 @@ Versions before 0.3.0 and releases without an entry here are described in the
   several `logout_token` fields, an empty one) before it verifies anything or takes the
   lock. Migrate by passing `await request.body()` and `request.headers.get("content-type")`;
   the host's own form parse goes.
+- The ID and Logout Token are read by PyJWT instead of this library's strict JSON parser,
+  so a token is held to the JOSE RFCs as PyJWT reads them and the parser's own refusals
+  are gone. `RejectionReason` loses `DUPLICATE_MEMBER`, `NESTING_TOO_DEEP` and
+  `FORBIDDEN_HEADER`. What the issuer signs is accepted as PyJWT reads it: for example, a
+  header member or claim named twice keeps its last value, and base64url padding, a
+  byte-order mark, UTF-16 or UTF-32 JSON, deep nesting, and `NaN` or an infinity in a
+  claim are all accepted; the `jwk`, `jku`, `x5u` and `x5c` members are ignored. These
+  refusals stay or are new: a token holding a character outside ASCII, or a header segment
+  over 512 characters, is `MALFORMED_TOKEN` before PyJWT parses anything. A null or
+  non-string `kid`, and a `crit` naming anything but a present `b64`, answer
+  `MALFORMED_TOKEN` whatever the `alg`. `b64: false` is refused (`MALFORMED_TOKEN` under
+  RS256), and `b64: true` is accepted. The payload's JSON is read only after the signature
+  holds, so a token whose signature fails answers `INVALID_SIGNATURE` even when its
+  payload is no JSON object, while a payload segment that is not base64url is still
+  `MALFORMED_TOKEN`. A wrong `typ` is answered before an empty or overlong `kid`.
 
 **Changed**
 
