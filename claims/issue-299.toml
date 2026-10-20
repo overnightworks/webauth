@@ -1,8 +1,0 @@
-claim_id = "52417fa704c94d6f815797239f8260c2"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "4c684a41d1d4ec2aee56f84f7d13e48a64da9434"
-branch = "claude/issue-299-admit-session"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/dependencies.py", "tests/test_admit_session.py", "tests/typing/oidc_host.py"]
-opened_commit = "a5bf5c7810ade8fa5a5b9247a272fc634d6b097f"
-whole_reason = "One new public decider carried through the function, its own tests, the typing host that proves its signature against the wheel and the docs that name it; split, the public surface would ship undocumented or unproven."
