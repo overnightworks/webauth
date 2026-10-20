@@ -511,9 +511,15 @@ def test_a_token_request_with_a_non_positive_timeout_is_refused_naming_the_timeo
 def test_a_key_set_fetch_that_timed_out_says_so_in_its_message(
     token_server: LoopbackHttpsServer,
 ) -> None:
-    with pytest.raises(KeySetFetchError, match=str(ExchangeFailure.TIMED_OUT)) as refused:
-        fetch_key_set_over_https(f"{token_server.base_url}/silent", timeout_seconds=0.2)
+    url = f"{token_server.base_url}/silent"
+    started = time.monotonic()
 
+    with pytest.raises(
+        KeySetFetchError, match=f"^fetching the key set failed: {ExchangeFailure.TIMED_OUT}"
+    ) as refused:
+        fetch_key_set_over_https(url, timeout_seconds=0.2)
+
+    assert time.monotonic() - started < SILENT_HOLD_SECONDS / 2
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
 
 
@@ -561,12 +567,14 @@ def test_a_key_set_fetch_that_could_not_connect_or_trust_the_origin_says_only_th
     target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch, int], str],
     failure: ExchangeFailure,
 ) -> None:
+    url = target(token_server, monkeypatch, closed_port)
+
     with pytest.raises(
         KeySetFetchError,
         match="^fetching the key set failed: the origin could not be reached,"
         " or the TLS handshake or HTTP exchange failed$",
     ) as refused:
-        fetch_key_set_over_https(target(token_server, monkeypatch, closed_port))
+        fetch_key_set_over_https(url)
 
     assert refused.value.failure is failure
 
