@@ -620,6 +620,7 @@ class OidcHost:
     audit: RecordingAuditSink
     config: WebAuthConfig
     lock: CountingWriteLock
+    relying_party: OidcRelyingParty
     issued_id_tokens: list[str]
     returned_to: list[str | None]
 
@@ -832,6 +833,7 @@ def an_oidc_host(
         audit=audit,
         config=config,
         lock=lock,
+        relying_party=relying_party,
         issued_id_tokens=issued_id_tokens,
         returned_to=returned_to,
     )
@@ -1817,27 +1819,83 @@ def test_an_id_token_posted_as_a_logout_token_ends_nothing() -> None:
     assert (response.status_code, sessions_of(host, SUBJECT)) == (400, 1)
 
 
-@pytest.mark.parametrize(("body", "headers"), [
-    pytest.param(b"", FORM, id="empty-body"),
-    pytest.param(b"other=1", FORM, id="token-missing"),
-    pytest.param(b"logout_token=", FORM, id="token-empty"),
-    pytest.param(b"logout_token", FORM, id="field-without-a-value"),
-    pytest.param(b"logout_token=%ff", FORM, id="undecodable-token"),
-    pytest.param(b"logout_token=a&logout_token=b", FORM, id="token-twice"),
-    pytest.param(b"\xff\xfe", FORM, id="body-not-utf-8"),
-    pytest.param(b"logout_token=a", {"content-type": "application/json"}, id="json-media-type"),
-    pytest.param(b"logout_token=a", {"content-type": "text/plain"}, id="text-media-type"),
-    pytest.param(b"logout_token=a", {}, id="no-media-type"),
+FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+
+
+def a_form_of(logout_token: str) -> bytes:
+    return urllib.parse.urlencode({"logout_token": logout_token}).encode()
+
+
+@pytest.mark.parametrize(("body", "content_type", "outcome"), [
+    pytest.param(b"", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="empty-body"),
+    pytest.param(b"other=1", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="token-missing"),
+    pytest.param(
+        b"logout_token=", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="token-empty",
+    ),
+    pytest.param(
+        b"logout_token", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED,
+        id="field-without-a-value",
+    ),
+    pytest.param(
+        b"logout_token=%ff", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED,
+        id="undecodable-token",
+    ),
+    pytest.param(
+        b"logout_token=a&logout_token=b", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED,
+        id="token-twice",
+    ),
+    pytest.param(
+        b"\xff\xfe", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="body-not-utf-8",
+    ),
+    pytest.param(
+        a_form_of(a_logout_token_of_the_issuer()), "application/json",
+        BackchannelLogoutResult.REFUSED, id="json-media-type",
+    ),
+    pytest.param(
+        a_form_of(a_logout_token_of_the_issuer()), "text/plain",
+        BackchannelLogoutResult.REFUSED, id="text-media-type",
+    ),
+    pytest.param(
+        a_form_of(a_logout_token_of_the_issuer()), "multipart/form-data",
+        BackchannelLogoutResult.REFUSED, id="multipart-media-type",
+    ),
+    pytest.param(
+        a_form_of(a_logout_token_of_the_issuer()), None,
+        BackchannelLogoutResult.REFUSED, id="no-media-type",
+    ),
+    pytest.param(
+        a_form_of(a_logout_token_of_the_issuer()), f"{FORM_MEDIA_TYPE}; charset=UTF-8",
+        BackchannelLogoutResult.ACCEPTED, id="media-type-with-parameter",
+    ),
+    pytest.param(
+        a_form_of(a_logout_token_of_the_issuer()), FORM_MEDIA_TYPE.upper(),
+        BackchannelLogoutResult.ACCEPTED, id="media-type-in-capitals",
+    ),
 ])
-def test_a_request_that_is_not_one_well_formed_logout_token_form_gets_an_empty_400(
-    body: bytes, headers: dict[str, str],
+def test_the_library_refuses_what_is_not_one_well_formed_logout_token_form_before_it_locks(
+    body: bytes, content_type: str | None, outcome: BackchannelLogoutResult,
 ) -> None:
     host = a_host_with_sessions(subject_sessions=1)
 
-    response = post_backchannel_logout(host, body, headers)
+    with host.sessions.transaction():
+        result = receive_backchannel_logout(
+            host.relying_party, body, content_type,
+            accounts=host.accounts, sessions=host.sessions, lock=host.lock, audit=host.audit,
+        )
+
+    assert result is outcome
+    if outcome is BackchannelLogoutResult.REFUSED:
+        assert (sessions_of(host, SUBJECT), host.lock.times_taken) == (1, 0)
+    else:
+        assert sessions_of(host, SUBJECT) == 0
+
+
+def test_a_malformed_logout_token_form_gets_an_empty_400() -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+
+    response = post_backchannel_logout(host, b"logout_token")
 
     assert (response.status_code, response.content) == (400, b"")
-    assert (sessions_of(host, SUBJECT), host.lock.times_taken) == (1, 0)
 
 
 def test_two_logout_tokens_in_one_form_are_refused_even_when_one_is_valid() -> None:

@@ -424,8 +424,8 @@ synchronous, so they run in a worker thread and create and use their stores
 there. The route answers 200 only after the commit; a refusal or a failure,
 the commit's included, leaves every session in place and answers 400.
 
-The function runs in this order. It verifies the token before it takes the
-lock, and a refusal does nothing more. Under `lock.hold()` it looks up
+The function runs in this order. It reads the form, then verifies the token
+before it takes the lock; a malformed form or a refusal does nothing more. Under `lock.hold()` it looks up
 `accounts.get(subject)`. An unknown subject is accepted and creates no
 account. A known subject loses every session
 through the store's `delete_for_user`, and one `backchannel_logout` audit event with
