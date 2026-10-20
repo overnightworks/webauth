@@ -1,8 +1,0 @@
-claim_id = "69a151c87c774e4c90040fbd9f00ac1a"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "6cfc526ea94adfd952dcd3e022fa5afbe263308c"
-branch = "claude/issue-321-urllib3-connect"
-scope = ["CHANGELOG.md", "README.md", "pyproject.toml", "src/webauth/https_client.py", "src/webauth/oidc_transport.py", "tests/oidc_arrangement.py", "tests/test_https_client.py"]
-opened_commit = "30a3db220883ab2254f9f4a9862cc7bf4d574a3c"
-whole_reason = "One override and the test helper only it needs; the README, pyproject and transport docstring lines name it."
