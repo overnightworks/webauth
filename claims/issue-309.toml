@@ -1,0 +1,7 @@
+claim_id = "6473b1268f444634a8070f2a23421445"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "9135eeff95fe2669cd5405126203df2f384c4164"
+branch = "claude/issue-309-middleware-stack-tests-wiring"
+scope = ["tests/test_body_size.py", "tests/test_middleware_stack.py", "tests/test_policies.py"]
+opened_commit = "6cc030630e10ac705a4b354837545fc8249ce711"
