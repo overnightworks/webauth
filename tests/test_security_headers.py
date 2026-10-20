@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
@@ -160,6 +161,38 @@ def test_a_missing_configuration_answers_a_500_without_hsts_before_the_route_run
 
     with pytest.raises(RuntimeError, match="install_web_auth_config"):
         client.get("/side-effect")
+
+
+@pytest.mark.parametrize(("path", "status"), [
+    pytest.param("/moved", 307, id="redirect"),
+    pytest.param("/forbidden", 403, id="handled-error"),
+    pytest.param("/route-pins-https", 200, id="route-sets-its-own-hsts"),
+])
+@pytest.mark.parametrize(("cookie_secure", "hsts"), [
+    pytest.param(True, "max-age=31536000; includeSubDomains", id="secure"),
+    pytest.param(False, None, id="secure-off"),
+])
+def test_every_answer_carries_exactly_the_hsts_cookie_secure_decides(
+    path: str, status: int, cookie_secure: bool, hsts: str | None,
+) -> None:
+    app = an_app(cookie_secure=cookie_secure)
+
+    @app.get("/moved")
+    def moved() -> RedirectResponse:
+        return RedirectResponse("/elsewhere")
+
+    @app.get("/forbidden")
+    def forbidden() -> None:
+        raise HTTPException(status_code=403)
+
+    @app.get("/route-pins-https")
+    def route_pins_https() -> Response:
+        return Response(headers={"Strict-Transport-Security": "max-age=60"})
+
+    response = TestClient(app).get(path, follow_redirects=False)
+
+    assert response.status_code == status
+    assert response.headers.get("strict-transport-security") == hsts
 
 
 @pytest.mark.anyio

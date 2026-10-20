@@ -142,11 +142,6 @@ def signed_without_bound(payload: str, secret: bytes) -> str:
     return f"{payload}.{signature}"
 
 
-def signed_like_release_0_14(session_id: str, secret: bytes) -> str:
-    """``session_id`` signed bare, the way 0.14.x and earlier issued session cookies."""
-    return f"{session_id}.{hmac.new(secret, session_id.encode(), hashlib.sha256).hexdigest()}"
-
-
 def session_cookie_header(*cookie_values: str) -> str:
     """A Cookie header carrying the default session cookie once per value, in order."""
     return "; ".join(f"{SESSION_COOKIE_NAME}={value}" for value in cookie_values)

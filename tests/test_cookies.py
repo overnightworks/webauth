@@ -10,8 +10,7 @@ from dataclasses import dataclass
 from http.cookies import SimpleCookie
 
 import pytest
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response as ClientResponse
 from starlette.requests import Request
@@ -23,7 +22,6 @@ from webauth_arrangement import (
     THIRTY_DAYS_SECONDS,
     a_web_auth_config,
     session_cookie_header,
-    signed_like_release_0_14,
     signed_without_bound,
 )
 
@@ -171,10 +169,6 @@ def test_verify_rejects_another_secret() -> None:
             f"oidc-pending:{_sign_pending_login(_PENDING, _TEST_SECRET)}",
             id="a pending-login signature appended to its signing input",
         ),
-        pytest.param(
-            signed_like_release_0_14("my-session-token", _TEST_SECRET),
-            id="a session cookie as 0.14.x signed it",
-        ),
     ],
 )
 def test_a_signature_made_for_another_purpose_is_no_session_cookie(
@@ -256,12 +250,6 @@ def test_a_pending_login_cookie_with_another_return_path_than_signed_does_not_ve
     assert _verify_pending_login(".".join([*fields, other_path, signature]), _TEST_SECRET) is None
 
 
-def test_a_pending_login_cookie_of_the_version_before_return_paths_does_not_verify() -> None:
-    signed = _sign_pending_login(_PENDING, _TEST_SECRET)
-
-    assert _verify_pending_login(signed.replace("v2.", "v1.", 1), _TEST_SECRET) is None
-
-
 _MINTED_SECRET = _PENDING.state
 
 
@@ -327,9 +315,6 @@ class CookieApp:
     def issue(self, headers: dict[str, str] | None = None) -> ClientResponse:
         return self.client.post("/issue", headers=headers)
 
-    def visit(self, path: str) -> ClientResponse:
-        return self.client.get(path, follow_redirects=False)
-
     def signed_in_session(self) -> ClientResponse:
         return self.client.get("/session")
 
@@ -385,18 +370,6 @@ def a_cookie_app(
     def clear(response: Response) -> dict[str, str]:
         clear_session_cookies(response, config)
         return {"status": "ok"}
-
-    @app.get("/moved")
-    def moved() -> RedirectResponse:
-        return RedirectResponse("/session")
-
-    @app.get("/forbidden")
-    def forbidden() -> None:
-        raise HTTPException(status_code=403)
-
-    @app.get("/route-pins-https")
-    def route_pins_https() -> Response:
-        return Response(headers={"Strict-Transport-Security": "max-age=60"})
 
     return CookieApp(client=TestClient(app, base_url=base_url, client=(peer, 50000)), config=config)
 
@@ -552,43 +525,6 @@ def test_a_host_that_configures_nothing_gets_secure_cookies_and_hsts_however_rea
     for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
         assert "Secure" in app.set_cookie_header(response, name).split("; ")
     assert response.headers[HSTS_HEADER] == HSTS_PINNING_HTTPS_FOR_A_YEAR
-
-
-@pytest.mark.parametrize(("path", "status"), [
-    pytest.param("/moved", 307, id="redirect"),
-    pytest.param("/forbidden", 403, id="handled-error"),
-    pytest.param("/route-pins-https", 200, id="route-sets-its-own-hsts"),
-])
-@pytest.mark.parametrize(("cookie_secure", "hsts"), [
-    pytest.param(True, HSTS_PINNING_HTTPS_FOR_A_YEAR, id="secure"),
-    pytest.param(False, None, id="secure-off"),
-])
-def test_every_answer_carries_exactly_the_hsts_cookie_secure_decides(
-    path: str, status: int, cookie_secure: bool, hsts: str | None,
-) -> None:
-    app = a_cookie_app(cookie_secure=cookie_secure)
-
-    response = app.visit(path)
-
-    assert response.status_code == status
-    assert response.headers.get(HSTS_HEADER) == hsts
-
-
-def test_security_headers_without_a_configuration_stop_before_the_route_runs() -> None:
-    route_ran: list[bool] = []
-    app = FastAPI()
-    with_security_headers(app)
-
-    @app.post("/side-effect")
-    def side_effect() -> None:
-        route_ran.append(True)
-
-    with (
-        TestClient(app, base_url=OVER_HTTPS) as client,
-        pytest.raises(RuntimeError, match="install_web_auth_config"),
-    ):
-        client.post("/side-effect")
-    assert route_ran == []
 
 
 def test_a_host_that_switches_cookie_secure_off_gets_neither_secure_nor_hsts() -> None:

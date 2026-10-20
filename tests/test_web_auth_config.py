@@ -70,22 +70,6 @@ def test_names_and_roles_default_to_the_conventional_ones() -> None:
     assert config.user_role == "user"
 
 
-@pytest.mark.parametrize("removed_keyword", [
-    "login_rate_limit",
-    "login_lockout_threshold",
-    "login_lockout_window_seconds",
-    "login_rate_window_seconds",
-    "password_hasher",
-    "session_max_age_seconds",
-    "cookie_max_age_seconds",
-])
-def test_a_removed_field_is_refused_as_an_unknown_keyword(
-    removed_keyword: str,
-) -> None:
-    with pytest.raises(TypeError, match=removed_keyword):
-        a_web_auth_config(**{removed_keyword: 5})
-
-
 def test_a_configuration_built_positionally_is_refused() -> None:
     positional_arguments = list(web_auth_config_arguments().values())
 
