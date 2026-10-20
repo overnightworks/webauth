@@ -147,7 +147,7 @@ def test_a_session_whose_store_never_renews_ends_once_its_old_expiry_passes() ->
     [
         pytest.param(
             "unknown-session",
-            lambda record: SessionRecordsInMemory(record),
+            SessionRecordsInMemory,
             id="an unknown id",
         ),
         pytest.param(
@@ -157,7 +157,7 @@ def test_a_session_whose_store_never_renews_ends_once_its_old_expiry_passes() ->
         ),
         pytest.param(
             SESSION_ID,
-            lambda record: SessionsEndedBetweenLoadAndTouch(record),
+            SessionsEndedBetweenLoadAndTouch,
             id="a session ended between load and touch",
         ),
     ],
