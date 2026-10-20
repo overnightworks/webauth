@@ -1,0 +1,8 @@
+claim_id = "7358b7fd9ffe4658977a0c891ea05dd9"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "673d1575cf90d547b153c3d4a493ba00192cee45"
+branch = "claude/issue-295-frozen-host-records"
+scope = ["CHANGELOG.md", "src/webauth/ports.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "1c021d0f927603ab41068817d8a96d8a564cd72e"
+whole_reason = "One change to the two record ports carried through the typing host that proves it and the arrangement and tests that read the removed attribute; split, the ports and their implementers would not type-check against each other."
