@@ -10,6 +10,16 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- Opening a session reads the configured clock, and the session cap prunes before it
+  creates. `open_session` loses `expires_at`: it reads `WebAuthConfig.wall_clock` once
+  and creates the session at that instant, expiring one idle period later.
+  `SessionRecordStore.create` is now `create(user_id, *, now, expires_at, ip_address,
+  user_agent)`, and the store keeps `created_at == now`. `prune_overflow(user_id,
+  keep_newest) -> None` ends all but the user's `keep_newest` newest sessions by
+  `created_at`; `0` keeps none (songmaker's `queries/auth.py` raises for 0 today and
+  returns the ended ids, which the library no longer reads). `open_session` ends the
+  replaced session, prunes with `max_sessions - 1`, then creates, so two logins in
+  one clock tick both succeed and the `RuntimeError` for a pruned new session is gone.
 - The library owns one session lifetime. `WebAuthConfig.session_liveness`,
   `webauth.ports.SessionLivenessPolicy` and the module `webauth.liveness`
   (`ExpiryColumnLiveness`, `IdleWindowLiveness`) no longer exist; the required
@@ -119,7 +129,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   is the one reading of now behind the session decision: HTTP and WebSocket
   read it once per request, as whole seconds, to judge the session against
   `WebAuthConfig.session_lifetime` and to compute the `expires_at` passed to
-  `SessionRecordStore.touch`.
+  `SessionRecordStore.touch`; `open_session` reads it the same way for the `now` and
+  `expires_at` it passes to `SessionRecordStore.create`.
 - `webauth.ports.SessionReference`, a `NewType` over `str`, is the type of
   `SessionIdentityChanged.session_ref`, and `webauth.cookies.session_reference`
   returns it. A type checker now refuses a raw session id when the audit event

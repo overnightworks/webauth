@@ -138,7 +138,6 @@ def callback(request: Request, response: Response) -> dict[str, str]:
     session = open_session(
         request, config, outcome.account,
         sessions=sessions, lock=lock,
-        expires_at=the_hosts_session_expiry(),
         max_sessions=3,
     )
     commit_the_hosts_transaction()
@@ -185,23 +184,28 @@ fragment is lost, because browsers never send it.
 
 #### Opening a session
 
-`open_session(request, config, account, sessions=..., lock=..., expires_at=...,
-max_sessions=...)` is the whole sequence between admission and the cookies,
-inside one `lock.hold()`: it ends the session the request's cookie names
-(signed, sole and within the length bound, whichever account it belongs to; any
-other cookie ends nothing), creates the account's new session with the
-`expires_at` the host passes, and, with a cap, ends the account's oldest
-sessions above `max_sessions` last, so the replaced session never counts against
-the cap. With a cap of 2 and sessions `{S1, S2}`, a login whose cookie names `S2`
-leaves `{S1, S3}`. `max_sessions=None` states that the host sets no cap; any
-other value must be a positive whole number, or `ValueError` is raised before
-anything is written. It answers the new `SessionRecord`.
+`open_session(request, config, account, sessions=..., lock=...,
+max_sessions=...)` is the whole sequence between admission and the cookies. It
+reads `WebAuthConfig.wall_clock` once, as the same whole seconds the session
+decision reads, and inside one `lock.hold()` it ends the session the request's
+cookie names (signed, sole and within the length bound, whichever account it
+belongs to; any other cookie ends nothing), then, with a cap, ends all but the
+account's newest `max_sessions - 1` sessions, then creates the account's new
+session through `create(user_id, *, now, expires_at, ip_address, user_agent)`
+with `created_at` equal to that `now` and `expires_at` one idle period later.
+The host passes no expiry, and the store writes the instants it is given. The
+new session is created last, so it is never the one the cap ends, and the
+replaced session never counts against the cap. With a cap of 2 and sessions
+`{S1, S2}`, a login whose cookie names `S2` leaves `{S1, S3}`; two logins in
+the same clock tick at a cap of 1 both succeed and leave the later one.
+`max_sessions=None` states that the host sets no cap; any other value must be
+a positive whole number, or `ValueError` is raised before anything is written.
+It answers the new `SessionRecord`.
 
 It never commits and sets no cookie: the host commits, then calls
 `issue_session_cookies(response, session.id, config)`, so a cookie never names a
 session that was rolled back. It raises `RuntimeError`, for the host to roll
-back, when the store's `create` returns the replaced session's id, or when
-`prune_overflow` would end the new session (sessions sharing a `created_at`).
+back, when the store's `create` returns the replaced session's id.
 It records no audit event, like `log_out`. The host's `WriteLock` must allow a
 second hold in the same request: one for admission, one for `open_session`.
 
@@ -977,10 +981,10 @@ config = WebAuthConfig(
 ## Ending a session
 
 Ending a session is a call on the host's store: `delete(session_id)`,
-`delete_for_user(user_id)` or `prune_overflow(user_id, max_sessions)`. The
+`delete_for_user(user_id)` or `prune_overflow(user_id, keep_newest)`, where `0` keeps none. The
 library makes that call in three places only: [`log_out`](#logging-out),
 [`open_session`](#opening-a-session) (the session an incoming cookie replaced,
-and the oldest above the cap) and back-channel logout. A host that signs in
+and all but the newest ones under the cap) and back-channel logout. A host that signs in
 through OpenID Connect ends a session with `log_out`. The next request carrying
 an ended session's cookie is refused.
 
@@ -1188,7 +1192,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity. |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, creates the new one and prunes the account to a cap, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names. Takes its identity from `webauth.oidc` |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names. Takes its identity from `webauth.oidc` |
 | `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client`. |
 
 It leaves the application everything that touches the application's own truth:

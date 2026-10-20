@@ -138,8 +138,9 @@ class SessionRecordStore(Protocol):
     def create(
         self,
         user_id: str,
-        expires_at: datetime,
         *,
+        now: datetime,
+        expires_at: datetime,
         ip_address: str,
         user_agent: str,
     ) -> SessionRecord: ...
@@ -180,8 +181,11 @@ class SessionRecordStore(Protocol):
 
     def delete_for_user(self, user_id: str) -> int: ...
 
-    def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
-        """Drop the oldest sessions above ``max_sessions``, newest kept."""
+    def prune_overflow(self, user_id: str, keep_newest: int) -> None:
+        """End all but the user's ``keep_newest`` newest sessions by ``created_at``.
+
+        ``0`` keeps none.
+        """
         ...
 
 

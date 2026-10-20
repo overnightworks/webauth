@@ -37,8 +37,8 @@ must carry full paths (Keycloak's group mapper with ``full.path`` on); a
 missing or empty claim means no membership.
 
 After ``finish_login`` admits an account, ``open_session`` under the host's lock
-ends the session the request's cookie names, creates the account's new one and
-prunes the account to a cap, never committing and setting no cookie, so the host
+ends the session the request's cookie names, prunes the account to a cap, creates
+its new one at the configured clock's instant, never committing and setting no cookie, so the host
 commits and then issues the cookies.
 
 ``log_out`` is the third route's whole sequence: it ends the session the
@@ -95,7 +95,7 @@ from webauth.cookies import (
     _verify_pending_login,
     clear_session_cookies,
 )
-from webauth.dependencies import session_id_from_request
+from webauth.dependencies import _renewed_expiry, _whole_second_now, session_id_from_request
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcRefusal,
@@ -106,8 +106,6 @@ from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 from webauth.proxies import client_user_agent, resolve_client_ip
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from starlette.requests import Request
     from starlette.responses import Response
 
@@ -324,37 +322,40 @@ def open_session(
     *,
     sessions: SessionRecordStore,
     lock: WriteLock,
-    expires_at: datetime,
     max_sessions: int | None,
 ) -> SessionRecord:
     """Open the new session of an admitted ``account``, ending the one the request carries.
 
-    Under one ``lock.hold()``, in this order: the session the request's cookie
-    names is ended, whoever it belongs to; the new session is created with
-    ``expires_at`` and the request's client address and agent; and, when
-    ``max_sessions`` is a number, the account's oldest sessions above it are
-    ended, so the replaced session never counts against the cap. ``None`` states
-    that the host sets no cap; any other value must be a positive whole number.
-    A forged, oversized or duplicated cookie ends nothing.
+    Under one ``lock.hold()``, reads ``config.wall_clock`` once, the same
+    whole-second instant the session decider reads, and in this order: the session the
+    request's cookie names is ended, whoever it belongs to; when ``max_sessions``
+    is a number, the account's newest ``max_sessions - 1`` sessions are kept and
+    the rest ended, so neither the replaced session nor the new one counts
+    against the cap; the new session is created at that instant, expiring one
+    idle period later, with the request's client address and agent. ``None``
+    states that the host sets no cap; any other value must be a positive whole
+    number. A forged, oversized or duplicated cookie ends nothing.
 
     Raises ``RuntimeError`` when the store's ``create`` hands back the replaced
-    session's id, or its ``prune_overflow`` would end the new session (sessions
-    with equal ``created_at``), so the host rolls back instead of handing out a
-    cookie for a session that does not stand. When the store hands back the
-    replaced session's id, that session is ended before the raise, so no session
-    stays under the id the incoming cookie named even without a rollback. Never
-    commits and sets no cookie: the host commits, then calls
+    session's id, so the host rolls back instead of handing out a cookie for a
+    session that does not stand. That session is ended before the raise, so no
+    session stays under the id the incoming cookie named even without a
+    rollback. Never commits and sets no cookie: the host commits, then calls
     ``issue_session_cookies`` with the returned id.
     """
     if max_sessions is not None:
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
     replaced_session_id = session_id_from_request(request, config)
     with lock.hold():
+        now = _whole_second_now(config)
         if replaced_session_id is not None:
             sessions.delete(replaced_session_id)
+        if max_sessions is not None:
+            sessions.prune_overflow(account.id, max_sessions - 1)
         session = sessions.create(
             account.id,
-            expires_at,
+            now=now,
+            expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
             ip_address=resolve_client_ip(request),
             user_agent=client_user_agent(request),
         )
@@ -362,13 +363,6 @@ def open_session(
             sessions.delete(session.id)
             raise RuntimeError(
                 "SessionRecordStore.create returned the id of the session it replaced",
-            )
-        if max_sessions is not None and session.id in sessions.prune_overflow(
-            account.id, max_sessions,
-        ):
-            raise RuntimeError(
-                "SessionRecordStore.prune_overflow ended the new session: "
-                "sessions with equal created_at leave no oldest one to end",
             )
     return session
 

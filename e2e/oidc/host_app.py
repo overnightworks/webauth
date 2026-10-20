@@ -31,7 +31,6 @@ import time
 import urllib.parse
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
@@ -441,7 +440,6 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             session = open_session(
                 request, config, outcome.account,
                 sessions=current.sessions, lock=current.lock,
-                expires_at=datetime.now(UTC) + timedelta(seconds=current.sessions.max_age_seconds),
                 max_sessions=None,
             )
         issue_session_cookies(response, session.id, config)

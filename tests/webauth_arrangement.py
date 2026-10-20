@@ -313,14 +313,12 @@ class FakeSessionRecord:
 class SessionRecordsInMemory:
     """Stored sessions, renewed in place and never committed.
 
-    ``touch`` writes the ``expires_at`` it is given; the max age only dates a
-    created session back to its ``created_at``.
+    ``create`` and ``touch`` write the instants they are given.
     """
 
     def __init__(
         self,
         record: FakeSessionRecord | None = None,
-        max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
         *,
         users: UsersInMemory | None = None,
         lock: WriteLockInMemory | None = None,
@@ -331,7 +329,6 @@ class SessionRecordsInMemory:
             *(() if record is None else (record.user,)),
         )
         self._ids = count(1)
-        self.max_age_seconds = max_age_seconds
         self.commit_failure: Exception | None = None
 
     @property
@@ -341,8 +338,9 @@ class SessionRecordsInMemory:
     def create(
         self,
         user_id: str,
-        expires_at: datetime,
         *,
+        now: datetime,
+        expires_at: datetime,
         ip_address: str,
         user_agent: str,
     ) -> FakeSessionRecord:
@@ -356,7 +354,7 @@ class SessionRecordsInMemory:
         record = FakeSessionRecord(
             id=session_id,
             user=user,
-            created_at=expires_at - timedelta(seconds=self.max_age_seconds),
+            created_at=now,
             expires_at=expires_at,
             ip_address=ip_address,
             user_agent=user_agent,
@@ -417,17 +415,15 @@ class SessionRecordsInMemory:
     def count_active(self) -> int:
         return len(self._records)
 
-    def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
+    def prune_overflow(self, user_id: str, keep_newest: int) -> None:
         _require_held_lock(self._lock)
         records = sorted(
             (record for record in self._records.values() if record.user_id == user_id),
             key=lambda record: record.created_at,
             reverse=True,
         )
-        removed = [record.id for record in records[max_sessions:]]
-        for session_id in removed:
-            self._remove_record(session_id)
-        return removed
+        for record in records[keep_newest:]:
+            self._remove_record(record.id)
 
 
 class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
@@ -446,14 +442,19 @@ class SessionsReusingEndedIds(SessionRecordsInMemory):
     def create(
         self,
         user_id: str,
-        expires_at: datetime,
         *,
+        now: datetime,
+        expires_at: datetime,
         ip_address: str,
         user_agent: str,
     ) -> FakeSessionRecord:
         self._ids = count(1)
         return super().create(
-            user_id, expires_at, ip_address=ip_address, user_agent=user_agent,
+            user_id,
+            now=now,
+            expires_at=expires_at,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
 
 
@@ -553,12 +554,16 @@ class AuthApp:
 
 def seeded_session(
     sessions: SessionRecordsInMemory, hold: AbstractContextManager[None],
-    user_id: str, expires_at: datetime,
+    user_id: str, now: datetime, expires_at: datetime,
 ) -> FakeSessionRecord:
     """A stored session of ``user_id``, created the way a host does: under its write lock."""
     with hold:
         return sessions.create(
-            user_id, expires_at, ip_address=CLIENT_ADDRESS, user_agent=CLIENT_USER_AGENT,
+            user_id,
+            now=now,
+            expires_at=expires_at,
+            ip_address=CLIENT_ADDRESS,
+            user_agent=CLIENT_USER_AGENT,
         )
 
 
