@@ -1,0 +1,8 @@
+claim_id = "c8a17d84d05048aca9499ebbfc07a9d3"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "6cfc526ea94adfd952dcd3e022fa5afbe263308c"
+branch = "claude/issue-320-plain-json"
+scope = ["CHANGELOG.md", "src/webauth/jwt_verification.py", "src/webauth/oidc.py", "tests/test_jwt_verification.py", "tests/test_oidc.py"]
+opened_commit = "455b20778374df6228a097c2320898b98e1d1af1"
+whole_reason = "One private JSON reader shared by the key set and the token answer, with their two test files."
