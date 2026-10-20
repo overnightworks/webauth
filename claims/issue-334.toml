@@ -1,0 +1,8 @@
+claim_id = "692778c059214ec9b8302428c07e7f49"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "3034cfffac7390bfbd984e9f1f8f9a0dc4298c17"
+branch = "claude/issue-334-policy-field-values"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/policies.py", "tests/test_policies.py"]
+opened_commit = "667445aa39c9331e0633dcda7c2040809c184fe7"
+whole_reason = "One bound for the three raw policy header values, its test table and the README and CHANGELOG lines that state it."
