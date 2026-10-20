@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from starlette.requests import Request
 
-__all__ = ["media_type_of", "prefers_html"]
+__all__ = []
 
 
 def media_type_of(value: str | None) -> str:
@@ -27,7 +27,7 @@ def _media_range_and_quality(entry: str) -> tuple[str, float]:
     quality = 1.0
     for param in params:
         name, _, value = param.strip().partition("=")
-        if name.strip() == "q":
+        if name.strip().lower() == "q":
             try:
                 quality = float(value.strip())
             except ValueError:

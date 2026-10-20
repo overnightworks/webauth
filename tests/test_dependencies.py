@@ -611,6 +611,11 @@ def test_the_redirect_of_a_mounted_app_carries_the_mount_prefix() -> None:
             id="the highest of several wildcards wins, not the first or the last",
         ),
         pytest.param("Text/HTML", 302, id="a media range compares without regard to case"),
+        pytest.param(
+            "TEXT/HTML;Q=0.1, application/json;q=0.5",
+            401,
+            id="the q parameter name compares without regard to case",
+        ),
     ],
 )
 def test_the_redirect_follows_accept_quality_negotiation(accept: str, status: int) -> None:
