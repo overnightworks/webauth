@@ -10,6 +10,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `SecurityHeadersPolicy` refuses a `content_security_policy` or `permissions_policy`
+  holding DEL, a non-ASCII character, or a control character other than tab; 0.18.0 refused
+  only CR or LF in `permissions_policy`.
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 - `receive_backchannel_logout` takes the request's form body and content type instead of
@@ -26,6 +29,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `NaN`, `Infinity`, `-Infinity` and `1e999999` (read as infinity) are accepted; nesting
   deeper than 8 is accepted up to the parser's recursion limit; UTF-16, UTF-32, a UTF-8 byte order mark and UTF-8-encoded
   surrogates are accepted. Every document accepted before parses to the same value.
+- A CSP source in `added_sources` is no longer checked against the CSP grammar. It is one
+  token of printable ASCII without `;` or `,`, kept verbatim, and keyword case is not
+  folded, so sources 0.18.0 refused now pass: for example `'trusted-types-eval'`, `'none'`,
+  nonces, hashes or keywords in `form-action` and `frame-ancestors`, and typos, which the
+  browser ignores. A source with a space, a control character or a non-ASCII character is
+  still a `ValueError`.
 
 **Added**
 

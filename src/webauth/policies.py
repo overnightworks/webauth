@@ -293,11 +293,13 @@ class SecurityHeadersPolicy:
         )
         if not isinstance(self.hsts_include_subdomains, bool):
             raise ValueError("hsts_include_subdomains must be True or False")
-        if "\r" in self.permissions_policy or "\n" in self.permissions_policy:
-            raise ValueError(
-                "permissions_policy cannot contain CR or LF: a header value with "
-                "a line break breaks every response it is sent on.",
-            )
+        for name in ("content_security_policy", "permissions_policy"):
+            if not _VISIBLE_ASCII_SPACE_AND_TAB.fullmatch(getattr(self, name)):
+                raise ValueError(
+                    f"{name} must be visible ASCII, space and tab: a control character "
+                    "or a character outside ASCII either breaks every response it is "
+                    "sent on or means nothing in this header.",
+                )
 
     @property
     def strict_transport_security(self) -> str:
@@ -331,7 +333,6 @@ class CspDirective(StrEnum):
 _TEXT_LIKE: Final = (str, bytes, bytearray, memoryview)
 _SELF_KEYWORD: Final = "'self'"
 _NONE_SOURCE: Final = "'none'"
-_GRAMMAR_FLAGS: Final = re.ASCII | re.IGNORECASE
 _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
     CspDirective.SCRIPT_SRC: (_SELF_KEYWORD,),
     CspDirective.STYLE_SRC: (_SELF_KEYWORD,),
@@ -346,49 +347,9 @@ _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
 }
 
 _BASE64_VALUE: Final = r"[A-Za-z0-9+/\-_]+={0,2}"
-_HASH_ALGORITHM: Final = r"sha(?:256|384|512)"
-_HOST_LABEL: Final = r"[A-Za-z0-9\-]+"
-_HOST: Final = rf"(?:\*|(?:\*\.)?{_HOST_LABEL}(?:\.{_HOST_LABEL})*\.?)"
-_PORT: Final = r":(?:[0-9]+|\*)"
-_PATH_CHAR: Final = r"(?:[\w\-.~!$&'()*+=:@]|%[0-9A-Fa-f]{2})"
-_PATH: Final = rf"/(?:{_PATH_CHAR}+(?:/{_PATH_CHAR}*)*)?"
-_SCHEME: Final = r"[A-Za-z][A-Za-z0-9+.\-]*"
-_KEYWORDS: Final = (
-    "self",
-    "unsafe-inline",
-    "unsafe-eval",
-    "strict-dynamic",
-    "unsafe-hashes",
-    "report-sample",
-    "unsafe-allow-redirects",
-    "wasm-unsafe-eval",
-)
-
-_BARE_HASH: Final = re.compile(f"{_HASH_ALGORITHM}-{_BASE64_VALUE}", _GRAMMAR_FLAGS)
-_KEYWORD_SOURCE: Final = re.compile(f"'(?:{'|'.join(_KEYWORDS)})'", _GRAMMAR_FLAGS)
-_SELF_SOURCE: Final = re.compile(_SELF_KEYWORD, _GRAMMAR_FLAGS)
-_NONCE_SOURCE: Final = re.compile(f"'nonce-{_BASE64_VALUE}'", _GRAMMAR_FLAGS)
-_HASH_SOURCE: Final = re.compile(f"'{_HASH_ALGORITHM}-{_BASE64_VALUE}'", _GRAMMAR_FLAGS)
-_SCHEME_SOURCE: Final = re.compile(f"{_SCHEME}:", _GRAMMAR_FLAGS)
-_HOST_SOURCE: Final = re.compile(
-    rf"(?:{_SCHEME}://)?{_HOST}(?:{_PORT})?(?:{_PATH})?",
-    _GRAMMAR_FLAGS,
-)
-_SOURCE_GRAMMAR: Final = (
-    _KEYWORD_SOURCE,
-    _NONCE_SOURCE,
-    _HASH_SOURCE,
-    _SCHEME_SOURCE,
-    _HOST_SOURCE,
-)
-_NAVIGATION_GRAMMAR: Final = (_SELF_SOURCE, _SCHEME_SOURCE, _HOST_SOURCE)
-_SOURCE_SUBSET: Final = (
-    "keyword sources "
-    + ", ".join(f"'{keyword}'" for keyword in _KEYWORDS)
-    + "; nonce and sha256, sha384, sha512 hash sources; scheme sources; host sources"
-)
-_NAVIGATION_SUBSET: Final = "'self', scheme sources and host sources"
-_NAVIGATION_DIRECTIVES: Final = frozenset({CspDirective.FRAME_ANCESTORS, CspDirective.FORM_ACTION})
+_BARE_HASH: Final = re.compile(rf"sha(?:256|384|512)-{_BASE64_VALUE}", re.ASCII | re.IGNORECASE)
+_SOURCE_TOKEN: Final = re.compile(r"[\x21-\x2b\x2d-\x3a\x3c-\x7e]+")
+_VISIBLE_ASCII_SPACE_AND_TAB: Final = re.compile(r"[\t\x20-\x7e]*")
 _FIXED_DIRECTIVES: Final = ("default-src 'none'", "base-uri 'self'")
 
 
@@ -413,16 +374,11 @@ def _validated_hash(script_hash: str) -> str:
 
 
 def _validated_source(directive: CspDirective, source: str) -> str:
-    is_navigation = directive in _NAVIGATION_DIRECTIVES
-    grammar = _NAVIGATION_GRAMMAR if is_navigation else _SOURCE_GRAMMAR
-    subset = _NAVIGATION_SUBSET if is_navigation else _SOURCE_SUBSET
-    if not any(production.fullmatch(source) for production in grammar):
+    if not _SOURCE_TOKEN.fullmatch(source):
         raise ValueError(
-            f"{directive}: {source!r} is not a source this library accepts; "
-            f"the declared subset is {subset}.",
+            f"{directive}: {source!r} must be one token of printable ASCII without "
+            "space, ';' or ','.",
         )
-    if _KEYWORD_SOURCE.fullmatch(source):
-        return source.lower()
     return source
 
 
@@ -470,8 +426,9 @@ def default_content_security_policy(
     quotes. A host adds its own sources per directive in ``added_sources`` as
     complete source expressions: keywords, nonces and hashes in their quotes,
     hosts and schemes bare. A non-empty addition to ``frame-ancestors`` replaces
-    its ``'none'``. A source outside the validated grammar is a ``ValueError``
-    and a wrong type a ``TypeError``, raised before any policy is built.
+    its ``'none'``. A source is one token of printable ASCII without space,
+    ``;`` or ``,`` and is kept verbatim; anything else is a ``ValueError`` and a
+    wrong type a ``TypeError``, raised before any policy is built.
     """
     quoted_hashes = tuple(
         _validated_hash(script_hash)
