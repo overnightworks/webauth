@@ -44,8 +44,11 @@ def post_token_request_over_https(
     this library's words, never quoting the request.
 
     ``timeout_seconds`` bounds connecting and each read on its own;
-    ``deadline_seconds`` bounds the exchange in total and is owned by
-    ``webauth.https_client``. A ``timeout_seconds`` above ``deadline_seconds``
+    ``deadline_seconds`` bounds the TLS handshake and the whole answer together,
+    counted from the start of the call, and is owned by ``webauth.https_client``;
+    connecting, which urllib3 bounds by the connect timeout once per resolved
+    address, and the host name lookup, which the resolver offers no way to
+    bound, run outside it. A ``timeout_seconds`` above ``deadline_seconds``
     raises ``ValueError`` rather than being silently capped, as does a
     ``deadline_seconds`` or ``timeout_seconds`` of zero or less.
     ``TokenEndpointError.failure`` names why the request failed."""

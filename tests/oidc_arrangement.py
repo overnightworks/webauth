@@ -422,6 +422,18 @@ def unanswering_loopback_port() -> Iterator[int]:
         yield listener.getsockname()[1]
 
 
+@contextlib.contextmanager
+def unconnectable_loopback_port() -> Iterator[int]:
+    """A loopback port whose accept queue is full, so the kernel drops every
+    further connection attempt and connecting waits, for as long as the block
+    lasts."""
+    with socket.socket() as listener, socket.socket() as queued:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(0)
+        queued.connect(listener.getsockname())
+        yield listener.getsockname()[1]
+
+
 def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:
     key = rsa_key("loopback-tls")
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "127.0.0.1")])

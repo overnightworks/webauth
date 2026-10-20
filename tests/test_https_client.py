@@ -33,6 +33,7 @@ from oidc_arrangement import (
     closed_loopback_port,
     loopback_https_server,
     unanswering_loopback_port,
+    unconnectable_loopback_port,
 )
 from pydantic import SecretStr
 
@@ -362,16 +363,14 @@ _EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
 )
 
 
-_StalledTarget = Callable[[LoopbackHttpsServer, pytest.MonkeyPatch, contextlib.ExitStack], str]
+_StalledTarget = Callable[[LoopbackHttpsServer, contextlib.ExitStack], str]
 
 
 def _route(path: str) -> _StalledTarget:
-    return lambda server, monkeypatch, stack: f"{server.base_url}{path}"
+    return lambda server, stack: f"{server.base_url}{path}"
 
 
-def _unanswering_tls_handshake(
-    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
-) -> str:
+def _unanswering_tls_handshake(server: LoopbackHttpsServer, stack: contextlib.ExitStack) -> str:
     return f"https://127.0.0.1:{stack.enter_context(unanswering_loopback_port())}/certs"
 
 
@@ -387,13 +386,12 @@ def _unanswering_tls_handshake(
 @_EXCHANGES_UNDER_A_DEADLINE
 def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     token_server: LoopbackHttpsServer,
-    monkeypatch: pytest.MonkeyPatch,
     exchange: Callable[..., object],
     error: type[KeySetFetchError | _HttpsExchangeError],
     target: _StalledTarget,
 ) -> None:
     with contextlib.ExitStack() as stack:
-        url = target(token_server, monkeypatch, stack)
+        url = target(token_server, stack)
         started = time.monotonic()
         with pytest.raises(error) as refused:
             exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
@@ -401,6 +399,30 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
+
+
+_CONNECT_TIMEOUT_SECONDS = 0.3
+_CONNECT_DEADLINE_SECONDS = 5
+
+
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_a_connect_nobody_answers_is_cut_off_by_the_connect_timeout_as_timed_out(
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | _HttpsExchangeError],
+) -> None:
+    with unconnectable_loopback_port() as port:
+        url = f"https://127.0.0.1:{port}/certs"
+        started = time.monotonic()
+        with pytest.raises(error) as refused:
+            exchange(
+                url,
+                timeout_seconds=_CONNECT_TIMEOUT_SECONDS,
+                deadline_seconds=_CONNECT_DEADLINE_SECONDS,
+            )
+        held = time.monotonic() - started
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+    assert _CONNECT_TIMEOUT_SECONDS <= held < _CONNECT_DEADLINE_SECONDS / 2
 
 
 @pytest.mark.parametrize(

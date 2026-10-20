@@ -6,9 +6,11 @@ same bounded posture: HTTPS only, under the system's trusted certificates
 total deadline over the TLS handshake, the status, the headers and the body
 together, so an origin that drips its answer cannot hold the caller;
 no retry; no redirect followed; no content decoding; and at most one byte past
-the operation's size limit read from the answer. Only the host name lookup
-and connecting, which urllib3 bounds by the connect timeout once per resolved
-address, run outside the deadline.
+the operation's size limit read from the answer. The deadline counts from the
+start of the call; connecting, which urllib3 bounds by the connect timeout once
+per resolved address, and the host name lookup, which the resolver offers no way
+to bound, run outside it, and the time they take comes off the handshake's and
+the answer's share.
 
 No error this module raises carries any part of the URL, the request or
 urllib3's error, and none chains urllib3's error, since its message may quote
@@ -126,9 +128,11 @@ def fetch_key_set_over_https(
 
     `timeout_seconds` bounds connecting and each read on its own;
     `deadline_seconds` bounds the fetch in total, so an origin that trickles
-    bytes within each read timeout is cut off. Only a stalled DNS lookup or
-    connecting holds this refresh past the deadline. Every failure fails closed, and every other
-    request is refused at once rather than waiting for this refresh. A
+    bytes within each read timeout is cut off. Connecting, which urllib3 bounds
+    by the connect timeout once per resolved address, and the host name lookup,
+    which the resolver offers no way to bound, run outside the deadline. Every
+    failure fails closed, and every other request is refused at once rather
+    than waiting for this refresh. A
     `timeout_seconds` or `deadline_seconds` of zero or less raises
     `ValueError`."""
     if not is_https_url(url):
