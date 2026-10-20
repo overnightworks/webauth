@@ -159,7 +159,7 @@ class _RefreshFailure(StrEnum):
 
     FETCH_FAILED = "fetch-failed"
     TOO_LARGE = "too-large"
-    NOT_STRICT_JSON = "not-strict-json"
+    NOT_JSON = "not-json"
     KEY_COUNT_OUT_OF_RANGE = "key-count-out-of-range"
     KEY_NOT_AN_OBJECT = "key-not-an-object"
     # A refusal reason, not a credential
@@ -510,15 +510,25 @@ def _finite_number(literal: str) -> float:
     return number
 
 
+def _json_object(document: bytes) -> dict[str, object] | None:
+    """The JSON object `document` holds, or `None` for anything else. The
+    issuer is trusted for what it serves, so the stdlib parser reads it as is:
+    a member named twice keeps its last value."""
+    try:
+        parsed = json.loads(document)
+    except (ValueError, RecursionError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _parse_key_set(
     document: bytes,
 ) -> tuple[Mapping[str, RSAPublicKey], RSAPublicKey | None]:
     if len(document) > MAX_KEY_SET_BYTES:
         raise _InvalidKeySetError(_RefreshFailure.TOO_LARGE)
-    try:
-        parsed = _strict_json_object(document)
-    except _VerificationRefusal:
-        raise _InvalidKeySetError(_RefreshFailure.NOT_STRICT_JSON) from None
+    parsed = _json_object(document)
+    if parsed is None:
+        raise _InvalidKeySetError(_RefreshFailure.NOT_JSON)
     jwks = parsed.get("keys")
     if not isinstance(jwks, list) or not jwks:
         raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
