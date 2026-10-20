@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 import anyio
 from starlette.responses import JSONResponse
 
+from webauth import WebAuthError
+
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -14,11 +16,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BodySizeLimitMiddleware",
+    "RequestBodyTooLarge",
 ]
 
 
-class _BodyTooLarge(Exception):
-    pass
+class RequestBodyTooLarge(WebAuthError):
+    """A streamed request body passed its limit after the response had started."""
 
 
 def _too_large() -> JSONResponse:
@@ -66,7 +69,7 @@ class BodySizeLimitMiddleware:
             if msg.get("type") == "http.request":
                 received += len(msg.get("body", b""))
                 if received > limit:
-                    raise _BodyTooLarge(f"request body over {limit} bytes")
+                    raise RequestBodyTooLarge(f"request body over {limit} bytes")
             return msg
 
         start_handed_over = False
@@ -85,7 +88,7 @@ class BodySizeLimitMiddleware:
 
         try:
             await self.app(scope, guarded_receive, send_start_whole)
-        except _BodyTooLarge:
+        except RequestBodyTooLarge:
             if start_handed_over:
                 raise
             await _too_large()(scope, receive, send)

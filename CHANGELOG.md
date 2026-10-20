@@ -13,6 +13,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 
+**Added**
+
+- `RequestBodyTooLarge`, a `WebAuthError` exported from `webauth.middleware`, is the error
+  `BodySizeLimitMiddleware` re-raises when a streamed body passes the limit after the
+  response has started. A host's middleware or log can catch it by name.
+
 ## 0.18.0
 
 **Breaking**

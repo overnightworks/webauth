@@ -24,8 +24,9 @@ from webauth_arrangement import (
     starts,
 )
 
+from webauth import WebAuthError
 from webauth.config import install_web_auth_config
-from webauth.middleware import install_web_auth_middleware
+from webauth.middleware import RequestBodyTooLarge, install_web_auth_middleware
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
@@ -136,7 +137,7 @@ async def test_a_response_started_before_the_body_overflowed_is_cut_off_without_
 
     assert [start["status"] for start in starts(sent)] == [200]
     assert not completed(sent)
-    assert raised is not None
+    assert isinstance(raised, RequestBodyTooLarge)
 
 
 @pytest.mark.parametrize(
@@ -152,7 +153,7 @@ async def test_a_start_still_in_its_send_when_the_body_overflows_stays_the_only_
 
     assert [start["status"] for start in starts(sent)] == [200]
     assert not completed(sent)
-    assert raised is not None
+    assert isinstance(raised, RequestBodyTooLarge)
 
 
 async def test_a_response_finished_before_the_overflow_is_noticed_stays_complete_and_the_error_reaches_the_server() -> None:  # noqa: E501
@@ -163,7 +164,8 @@ async def test_a_response_finished_before_the_overflow_is_noticed_stays_complete
     assert [start["status"] for start in starts(sent)] == [200]
     assert completed(sent)
     assert body_of(sent) == b"firstsecond"
-    assert raised is not None
+    assert isinstance(raised, RequestBodyTooLarge)
+    assert isinstance(raised, WebAuthError)
 
 
 @pytest.mark.parametrize("path", ["/reads", "/reads-stream"])

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from webauth.middleware.body_size import BodySizeLimitMiddleware
+from webauth.middleware.body_size import BodySizeLimitMiddleware, RequestBodyTooLarge
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
@@ -13,6 +13,7 @@ __all__ = [
     "CsrfOriginMiddleware",
     "CsrfTokenMiddleware",
     "IpRateLimitMiddleware",
+    "RequestBodyTooLarge",
     "SecurityHeadersMiddleware",
     "install_web_auth_middleware",
 ]
