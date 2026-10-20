@@ -1,0 +1,8 @@
+claim_id = "875cb91a5210413691bc036635de6508"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "6cfc526ea94adfd952dcd3e022fa5afbe263308c"
+branch = "claude/issue-322-backchannel-form"
+scope = ["CHANGELOG.md", "README.md", "e2e/oidc/host_app.py", "src/webauth/oidc_login.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py"]
+opened_commit = "0f8a9819c2a46129ee2ca77f807600d192f35d72"
+whole_reason = "One signature and its four call sites; splitting leaves a host copy of the parse."
