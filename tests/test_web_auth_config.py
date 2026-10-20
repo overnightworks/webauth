@@ -15,7 +15,6 @@ from webauth_arrangement import (
     HTTPS_TEST_SERVER,
     MIN_SESSION_SECRET_CHARS,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
-    SESSION_MAX_AGE_SECONDS,
     a_web_auth_config,
     web_auth_config_arguments,
 )
@@ -78,6 +77,7 @@ def test_names_and_roles_default_to_the_conventional_ones() -> None:
     "login_rate_window_seconds",
     "password_hasher",
     "session_max_age_seconds",
+    "cookie_max_age_seconds",
 ])
 def test_a_removed_field_is_refused_as_an_unknown_keyword(
     removed_keyword: str,
@@ -85,13 +85,6 @@ def test_a_removed_field_is_refused_as_an_unknown_keyword(
     with pytest.raises(TypeError, match=removed_keyword):
         a_web_auth_config(**{removed_keyword: 5})
 
-
-def test_a_configuration_without_a_cookie_lifetime_is_refused() -> None:
-    arguments = web_auth_config_arguments()
-    del arguments["cookie_max_age_seconds"]
-
-    with pytest.raises(TypeError, match="cookie_max_age_seconds"):
-        WebAuthConfig(**arguments)
 
 
 def test_a_configuration_built_positionally_is_refused() -> None:
@@ -122,7 +115,6 @@ def test_the_ipv6_budget_prefix_defaults_to_one_subscriber_network() -> None:
 
 
 LIFETIMES: dict[str, Callable[[object], object]] = {
-    "cookie_max_age_seconds": lambda seconds: a_web_auth_config(cookie_max_age_seconds=seconds),
     "idle_seconds": lambda seconds: SessionLifetime(seconds, SESSION_ABSOLUTE_MAX_AGE_SECONDS),
     "absolute_max_age_seconds": lambda seconds: SessionLifetime(1, seconds),
 }
@@ -398,21 +390,6 @@ def test_a_replace_keeps_the_names_the_host_chose_and_follows_secure_for_the_res
 
 
 @pytest.mark.parametrize(
-    ("replaced_with", "cookie_max_age_seconds"),
-    [
-        pytest.param({"cookie_max_age_seconds": 60}, 60, id="replace-sets-the-lifetime"),
-        pytest.param({"cookie_secure": False}, SESSION_MAX_AGE_SECONDS, id="replace-keeps-it"),
-    ],
-)
-def test_replacing_a_field_sets_or_keeps_the_cookie_lifetime(
-    replaced_with: dict[str, object], cookie_max_age_seconds: int,
-) -> None:
-    config = replace(a_web_auth_config(), **replaced_with)
-
-    assert config.cookie_max_age_seconds == cookie_max_age_seconds
-
-
-@pytest.mark.parametrize(
     ("overrides", "message"),
     [
         pytest.param(
@@ -482,9 +459,9 @@ def test_the_configuration_cannot_be_changed_after_it_is_installed() -> None:
     config = a_web_auth_config()
 
     with pytest.raises(AttributeError):
-        config.cookie_max_age_seconds = 1
+        config.cookie_secure = False
 
-    assert replace(config, cookie_max_age_seconds=1).cookie_max_age_seconds == 1
+    assert replace(config, cookie_secure=False).cookie_secure is False
 
 
 def test_both_host_lists_empty_are_refused_naming_the_fields_and_the_localhost_migration() -> None:

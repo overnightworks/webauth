@@ -109,7 +109,6 @@ class WebAuthConfig:
     rate_limits: RateLimitBackend
     allowed_hosts_exact: frozenset[str]
     allowed_hosts_patterns: tuple[re.Pattern[str], ...]
-    cookie_max_age_seconds: int
     session_lifetime: SessionLifetime
     session_cookie_name: str = _DefaultCookieName(DEFAULT_SESSION_COOKIE_NAME)
     csrf_cookie_name: str = _DefaultCookieName(DEFAULT_CSRF_COOKIE_NAME)
@@ -147,9 +146,6 @@ class WebAuthConfig:
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
         self._require_distinct_cookie_names()
-        require_positive_whole_number(
-            "cookie_max_age_seconds", self.cookie_max_age_seconds, unit="seconds",
-        )
         if (
             type(self.ipv6_budget_prefix) is not int
             or self.ipv6_budget_prefix not in _IPV6_BUDGET_PREFIX_RANGE

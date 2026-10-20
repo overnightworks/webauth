@@ -932,7 +932,7 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
 
     response = host.callback(host.sign_in_at_issuer())
 
-    configured = {"path=/", f"max-age={host.config.cookie_max_age_seconds}",
+    configured = {"path=/", f"max-age={host.config.session_lifetime.absolute_max_age_seconds}",
                   f"samesite={host.config.cookie_samesite}", "secure"}
     assert response.status_code == 200
     assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
@@ -980,7 +980,7 @@ def test_an_admitted_callback_hands_the_id_token_to_the_logout_path_alone(
 
     assert set_cookies(response)[name] == {
         "httponly",
-        f"max-age={host.config.cookie_max_age_seconds}",
+        f"max-age={host.config.session_lifetime.absolute_max_age_seconds}",
         f"path={LOGOUT_PATH}",
         "samesite=strict",
         *secure_attribute,

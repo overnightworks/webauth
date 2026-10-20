@@ -10,6 +10,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `WebAuthConfig.cookie_max_age_seconds` is removed, with no alias: passing it is a
+  `TypeError`. The session, CSRF and ID-token hint cookies now carry
+  `Max-Age = session_lifetime.absolute_max_age_seconds`, so they live as long as the
+  session may. Migrate by removing `cookie_max_age_seconds` and setting
+  `absolute_max_age_seconds` to the sign-in length you want.
 - Opening a session reads the configured clock, and the session cap prunes before it
   creates. `open_session` loses `expires_at`: it reads `WebAuthConfig.wall_clock` once
   and creates the session at that instant, expiring one idle period later.
