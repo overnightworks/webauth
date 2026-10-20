@@ -520,9 +520,8 @@ the pending login's age: one older than `PENDING_LOGIN_MAX_AGE_SECONDS`
 request is sent. An error the issuer reports is carried as its short error
 code only, never its description, and a `code` longer than
 `MAX_AUTHORIZATION_CODE_CHARS` (2048) is `MALFORMED_CALLBACK`. A token answer
-that names any member twice, at any depth, is `TOKEN_ENDPOINT_FAILED` rather
-than letting the last one win. The code is exchanged through the `post_token_request` the host
-injects, and the ID token is verified by a
+that names a member twice keeps its last value. The code is exchanged through
+the `post_token_request` the host injects, and the ID token is verified by a
 `JwtVerifier` whose one accepted audience is the client ID, then checked for
 the pending nonce and an authorized party: a token for several audiences must
 name the client as its `azp`, and any `azp` a token names must be the client.

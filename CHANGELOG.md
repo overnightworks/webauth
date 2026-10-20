@@ -15,8 +15,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Changed**
 
-- The issuer's key set and token answer are read as plain JSON: a member named twice
-  keeps its last value.
+- The issuer's key set and token answer are read as Python's `json.loads` reads bytes.
+  This withdraws the 0.14.0 refusals for the token answer and loosens the key set the same
+  way: a member named twice keeps its last value; `NaN`, `Infinity`, `-Infinity` and
+  `1e999999` (read as infinity) are accepted; nesting deeper than 8 is accepted up to the
+  parser's recursion limit; UTF-16, UTF-32, a UTF-8 byte order mark and UTF-8-encoded
+  surrogates are accepted. Every document accepted before parses to the same value.
 
 ## 0.18.0
 

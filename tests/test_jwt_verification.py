@@ -636,7 +636,11 @@ def _defective_key_sets() -> list[Any]:
         pytest.param(
             b'{"keys": {"current-key": {}}}', "key-count-out-of-range", id="keys-not-a-list"
         ),
-        pytest.param(b'{"keys": [], "keys": []}', "key-count-out-of-range", id="duplicate-member"),
+        pytest.param(
+            b'{"keys": ' + json.dumps([valid_jwk]).encode() + b', "keys": []}',
+            "key-count-out-of-range",
+            id="duplicate-member-keeps-the-last",
+        ),
         pytest.param(b'{"keys": [', "not-json", id="malformed-json"),
         pytest.param(b"[" * MAX_KEY_SET_BYTES, "not-json", id="nested-past-the-recursion-limit"),
         pytest.param(
