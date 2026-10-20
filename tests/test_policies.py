@@ -302,6 +302,11 @@ class TestBodySizePolicy:
             BodySizePolicy(default_max_bytes=1_000, start_send_seconds=seconds)
 
 
+RAW_HEADER_VALUE_FIELDS = [
+    "content_security_policy", "permissions_policy", "CacheControlRule.value",
+]
+
+
 class TestSecurityHeadersPolicy:
     def test_the_first_matching_cache_rule_answers_the_path(self) -> None:
         policy = SecurityHeadersPolicy(
@@ -351,33 +356,41 @@ class TestSecurityHeadersPolicy:
 
         assert response.headers["Permissions-Policy"] == expected
 
-    @pytest.mark.parametrize("field", ["content_security_policy", "permissions_policy"])
-    @pytest.mark.parametrize("outside_the_bound", ["\r", "\n", "\r\n", "\x00", "\x7f", "ä"])
-    def test_refuses_a_raw_header_value_outside_visible_ascii_space_and_tab(
-        self, field: str, outside_the_bound: str,
+    @pytest.mark.parametrize("field", RAW_HEADER_VALUE_FIELDS)
+    @pytest.mark.parametrize("refused", [
+        "camera=()\rX-Injected: 1", "camera=()\nX-Injected: 1", "camera=()\r\nX-Injected: 1",
+        "camera=()\x00", "camera=()\x7f", "camera=()ä",
+        " camera=()", "\tcamera=()", "camera=() ", "camera=()\t",
+        "", " ",
+    ])
+    def test_refuses_an_empty_edged_control_or_non_ascii_raw_header_value(
+        self, field: str, refused: str,
     ) -> None:
-        fields = {
-            "content_security_policy": "default-src 'none'",
-            "permissions_policy": "camera=()",
-            field: f"camera=(){outside_the_bound}X-Injected: 1",
-        }
-
         with pytest.raises(ValueError, match=field):
-            SecurityHeadersPolicy(**fields)
+            a_policy_with_raw_header_value(field, refused)
 
-    @pytest.mark.parametrize("field", ["content_security_policy", "permissions_policy"])
-    def test_accepts_a_tab_in_a_raw_header_value(self, field: str) -> None:
-        value = "camera=()\tmicrophone=()"
+    @pytest.mark.parametrize("field", RAW_HEADER_VALUE_FIELDS)
+    @pytest.mark.parametrize("value", ["camera=()\tmicrophone=()", "no-store, no-cache", "a"])
+    def test_accepts_an_inner_space_or_tab_in_a_raw_header_value(
+        self, field: str, value: str,
+    ) -> None:
+        policy = a_policy_with_raw_header_value(field, value)
 
-        fields = {
-            "content_security_policy": "default-src 'none'",
-            "permissions_policy": "camera=()",
-            field: value,
-        }
+        assert raw_header_value(policy, field) == value
 
-        policy = SecurityHeadersPolicy(**fields)
 
-        assert getattr(policy, field) == value
+def a_policy_with_raw_header_value(field: str, value: str) -> SecurityHeadersPolicy:
+    if field == "CacheControlRule.value":
+        rule = CacheControlRule(paths=PathRules(prefixes=("/",)), value=value)
+        return SecurityHeadersPolicy("default-src 'none'", cache_control_rules=(rule,))
+    fields = {"content_security_policy": "default-src 'none'", "permissions_policy": "camera=()"}
+    return SecurityHeadersPolicy(**{**fields, field: value})
+
+
+def raw_header_value(policy: SecurityHeadersPolicy, field: str) -> str | None:
+    if field == "CacheControlRule.value":
+        return policy.cache_control("/")
+    return getattr(policy, field)
 
 
 THE_DEFAULT_POLICY = (

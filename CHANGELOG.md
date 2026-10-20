@@ -13,6 +13,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `SecurityHeadersPolicy` refuses a `content_security_policy` or `permissions_policy`
   holding DEL, a non-ASCII character, or a control character other than tab; 0.18.0 refused
   only CR or LF in `permissions_policy`.
+- `SecurityHeadersPolicy` refuses an empty `content_security_policy` or `permissions_policy`,
+  and a space or tab at either end of either. `CacheControlRule` refuses a value outside the
+  same bound.
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 - `receive_backchannel_logout` takes the request's form body and content type instead of
