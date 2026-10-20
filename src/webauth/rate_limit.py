@@ -128,11 +128,6 @@ class SingleProcessRateLimitBackend:
             entry.timestamps.append(now)
             return True
 
-    def active_key_count(self) -> int:
-        """How many keys the store currently holds, after the last sweep."""
-        with self._lock:
-            return len(self._events)
-
     def _sweep_expired_when_due(self, now: float) -> None:
         if now < self._next_prune_at:
             return
