@@ -1,26 +1,26 @@
 # Repository agent guidance
 
-`webauth` is a library, not an application: it is installed by host
-applications and has no deployment of its own. Every change here is a change
-to a public contract that a tag has already frozen somewhere else.
+`webauth` is OpenID Connect login for FastAPI applications, with sessions,
+CSRF and rate limits: sessions the store decides on every request, HMAC-signed
+cookies, CSRF double-submit, admin checks, per-address rate limits, audit
+ports. Distribution `overnightworks-webauth`, import package `webauth`, Python
+3.12+, managed with uv. It was extracted, with its history, from
+[overnightworks/songmaker](https://github.com/overnightworks/songmaker)
+(issue #825), and songmaker installs the wheel from this repository's tagged
+release.
 
-- Before every repository edit, use the globally installed `aco` CLI
-  to check the live ledger and claim the exact write scope. Subagents remain
-  within their parent's live claim and do not take overlapping claims.
-- Keep the shared `main` checkout clean. Build in an isolated external
-  worktree, and never `git stash` — the stash stack is shared across
-  worktrees.
-- `main` is protected: every change lands through a pull request with green
-  CI. Nobody pushes to `main`.
+`webauth` is a library, not an application: it is installed by host
+applications and has no deployment of its own.
+
+`main` is protected: every change lands through a pull request with green CI.
+Nobody pushes to `main`.
 
 ## Repository layout
 
-The repository root holds only what a tool must find there — the package
-manifest and its lockfile, scanner configuration, the licence — and the entry
-documents `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md` and `SECURITY.md`. Everything else lives in
-the directory of its owner: the library under `src/webauth/`, its suite under
-`tests/`. No catch-all directory (`tooling/`, `misc/`) and no deeper hierarchy
-than the owner needs.
+The root holds the package manifest and its lockfile, the scanner
+configuration, the licence, and the entry documents `README.md`, `AGENTS.md`,
+`CLAUDE.md`, `CHANGELOG.md` and `SECURITY.md`. The library lives under
+`src/webauth/`, its suite under `tests/`.
 
 `e2e/` is the proof harness: real-browser scripts that drive a host application
 built on the library against a real issuer. It owns nothing shipped, the
@@ -59,6 +59,16 @@ CI, which only lints it.
   pinned while a function is a unit under test. `tests/test_public_api.py`
   enforces it.
 
+## Code patterns
+
+- Ports are Protocols, and none of them commits. A new host obligation is a
+  Protocol in `webauth.ports`, never a concrete class and never a query.
+- Deployment facts come from `WebAuthConfig`. Nothing reads an environment
+  variable or a global; the host installs one config on the app and every
+  module reads it from there.
+- Tests use the builders in `tests/webauth_arrangement.py` and
+  `tests/oidc_arrangement.py` rather than a second set of fakes.
+
 ## Checks
 
 ```bash
@@ -71,7 +81,7 @@ uv run --group e2e pyright
 tests/typing/check_against_wheel.sh
 ```
 
-`tests/typing/` holds the static typing hosts. The script type-checks it with
+`tests/typing/` holds the static typing hosts. The script type-checks them with
 the pinned pyright against the built wheel, from a directory without `src`, so
 a port change or an export a host cannot import fails here.
 
@@ -82,8 +92,7 @@ needs `checks` and `lowest-direct`, and lists both as mandatory in
 `quality/config.toml`. The quality gate's required check is `quality / verdict`;
 allowances for known secret false positives live only in `quality/config.toml`.
 
-The suite is fast and needs no service: Redis is faked in-process. Run it
-whole.
+The suite needs no service: Redis is faked in-process. CI runs it whole.
 
 ## Releasing
 
