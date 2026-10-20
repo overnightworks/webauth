@@ -1,0 +1,8 @@
+claim_id = "4384d169a5b64e07860db5eadb7c48a6"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "9135eeff95fe2669cd5405126203df2f384c4164"
+branch = "claude/issue-306-admit-session-tests-once"
+scope = ["tests/test_admit_session.py", "tests/test_dependencies.py", "tests/test_session_lifetime.py", "tests/test_websocket_auth.py"]
+opened_commit = "c874f4e8c14b6a9574aa251fe82d0d1ab8e7c076"
+whole_reason = "One test family moves into one module; the four test files change together or the moved tests are lost or doubled."
