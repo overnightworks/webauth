@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import gzip
 import inspect
+import json
 import logging
 import socket
 import sys
@@ -38,6 +40,7 @@ from pydantic import SecretStr
 
 import webauth.https_client
 from webauth.https_client import (
+    MAX_KEY_SET_BYTES,
     ExchangeFailure,
     KeySetFetchError,
     _HttpsExchangeError,
@@ -53,6 +56,7 @@ _CLIENT_SECRET = "canary-client-secret"  # noqa: S105
 _CODE = "canary-authorization-code"
 _CODE_VERIFIER = "canary-code-verifier"
 _URL_QUERY = "session=canary-url-query"
+_URL_SECRET = "s3cr3t-in-the-url"  # noqa: S105
 _FORM = {
     "grant_type": "authorization_code",
     "code": _CODE,
@@ -511,6 +515,145 @@ def test_a_key_set_fetch_that_timed_out_says_so_in_its_message(
         fetch_key_set_over_https(f"{token_server.base_url}/silent", timeout_seconds=0.2)
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
+
+
+def test_a_key_set_fetch_returns_the_served_key_set(token_server: LoopbackHttpsServer) -> None:
+    document = fetch_key_set_over_https(f"{token_server.base_url}/certs")
+
+    assert json.loads(document)["keys"][0]["kid"] == "current-key"
+
+
+def test_a_key_set_fetch_reads_at_most_one_byte_past_the_key_set_limit(
+    token_server: LoopbackHttpsServer,
+) -> None:
+    document = fetch_key_set_over_https(f"{token_server.base_url}/oversized")
+
+    assert len(document) == MAX_KEY_SET_BYTES + 1
+
+
+def test_a_key_set_fetch_hands_back_a_compressed_answer_still_compressed(
+    token_server: LoopbackHttpsServer,
+) -> None:
+    document = fetch_key_set_over_https(f"{token_server.base_url}/compressed")
+
+    assert json.loads(gzip.decompress(document))["keys"][0]["kid"] == "current-key"
+
+
+@pytest.mark.parametrize(
+    ("target", "failure"),
+    [
+        pytest.param(
+            lambda server, monkeypatch, port: _untrusted(server, monkeypatch),
+            ExchangeFailure.TLS_FAILED,
+            id="untrusted-certificate",
+        ),
+        pytest.param(
+            lambda server, monkeypatch, port: f"https://127.0.0.1:{port}/certs",
+            ExchangeFailure.UNREACHABLE,
+            id="nobody-listens",
+        ),
+    ],
+)
+def test_a_key_set_fetch_that_could_not_connect_or_trust_the_origin_says_only_that_it_failed(
+    token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
+    closed_port: int,
+    target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch, int], str],
+    failure: ExchangeFailure,
+) -> None:
+    with pytest.raises(
+        KeySetFetchError,
+        match="^fetching the key set failed: the origin could not be reached,"
+        " or the TLS handshake or HTTP exchange failed$",
+    ) as refused:
+        fetch_key_set_over_https(target(token_server, monkeypatch, closed_port))
+
+    assert refused.value.failure is failure
+
+
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_an_exchange_never_follows_a_redirect(
+    token_server: LoopbackHttpsServer,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | _HttpsExchangeError],
+) -> None:
+    with pytest.raises(error):
+        exchange(f"{token_server.base_url}/moved")
+
+    assert token_server.requested_paths == ["/moved"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("http://127.0.0.1:9/certs", id="http"),
+        pytest.param("file:///etc/hostname", id="file"),
+        pytest.param("https://[", id="unparseable-host"),
+        pytest.param("https://127.0.0.1:99999/certs", id="port-out-of-range"),
+        pytest.param(None, id="not-a-string"),
+    ],
+)
+def test_a_key_set_fetch_refuses_every_url_but_a_well_formed_https_one(url: object) -> None:
+    with pytest.raises(KeySetFetchError):
+        fetch_key_set_over_https(url)
+
+
+def test_a_key_set_fetch_refuses_a_c1_control_character_before_any_request(
+    token_server: LoopbackHttpsServer,
+) -> None:
+    with pytest.raises(KeySetFetchError):
+        fetch_key_set_over_https(f"{token_server.base_url}/ce\x85rts")
+
+    assert token_server.requested_paths == []
+
+
+@pytest.mark.parametrize(
+    "url_template",
+    [
+        pytest.param("https://operator:{secret}@{authority}/certs", id="credentials"),
+        pytest.param("https://{authority}/certs/{secret}", id="path-of-a-failed-fetch"),
+        pytest.param("https://{authority}/certs?signature={secret}", id="query-of-a-failed-fetch"),
+        pytest.param("https://key set.example/certs?signature={secret}", id="query-of-a-bad-host"),
+        pytest.param("https://127.0.0.1:99999/certs?signature={secret}", id="query-of-a-bad-port"),
+    ],
+)
+def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
+    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, url_template: str
+) -> None:
+    monkeypatch.delenv("SSL_CERT_FILE")
+    authority = token_server.base_url.removeprefix("https://")
+    url = url_template.format(secret=_URL_SECRET, authority=authority)
+
+    with pytest.raises(KeySetFetchError) as refusal:
+        fetch_key_set_over_https(url)
+
+    assert _URL_SECRET not in repr(refusal.value)
+    # urllib3's own error may hold the URL in an attribute no repr shows.
+    assert refusal.value.__cause__ is None
+    assert refusal.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "url_template",
+    [
+        pytest.param("https://{authority}/certs", id="untrusted-certificate"),
+        pytest.param("https://key set.example/certs", id="unparseable-host"),
+    ],
+)
+def test_a_failed_fetch_speaks_none_of_urllib3s_error_vocabulary(
+    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, url_template: str
+) -> None:
+    monkeypatch.delenv("SSL_CERT_FILE")
+    authority = token_server.base_url.removeprefix("https://")
+    url = url_template.format(authority=authority)
+
+    with pytest.raises(KeySetFetchError) as refusal:
+        fetch_key_set_over_https(url)
+
+    urllib3_error_names = {
+        name for name, value in vars(urllib3.exceptions).items() if isinstance(value, type)
+    }
+    assert not any(name in str(refusal.value) for name in urllib3_error_names)
 
 
 _connect_events: list[tuple[str, int]] = []
