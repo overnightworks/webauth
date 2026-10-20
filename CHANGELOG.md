@@ -20,6 +20,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Changed**
 
+- `open_session` no longer checks that the store's new session id differs from the one it
+  replaced; the store's entropy duty covers it, and the `RuntimeError` is gone.
 - The issuer's key set and token answer are read as Python's `json.loads` reads bytes.
   This withdraws the 0.14.0 refusals of non-finite numbers and deep nesting for the token
   answer and loosens the key set the same way: a member named twice keeps its last value;
