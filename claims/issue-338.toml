@@ -1,8 +1,0 @@
-claim_id = "e4ee84905746439aafc13dda91a6429f"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "13c05fd3f3966c38ce518c10315e06bf4f3084f6"
-branch = "claude/issue-338-security-model"
-scope = ["README.md", "SECURITY.md", "src/webauth/__init__.py", "src/webauth/dependencies.py", "src/webauth/https_client.py", "src/webauth/ports.py"]
-opened_commit = "09de2daee38ace90641a446ad8ef55808dfc1682"
-whole_reason = "One docs lane: the README sentences, SECURITY.md and the docstrings they cite are one statement that must be true at one merge."
