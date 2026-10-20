@@ -13,17 +13,15 @@ release.
 applications and has no deployment of its own. Every change here is a change
 to a public contract that a tag has already frozen somewhere else.
 
-- `main` is protected: every change lands through a pull request with green
-  CI. Nobody pushes to `main`.
+`main` is protected: every change lands through a pull request with green CI.
+Nobody pushes to `main`.
 
 ## Repository layout
 
-The repository root holds only what a tool must find there — the package
-manifest and its lockfile, scanner configuration, the licence — and the entry
-documents `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md` and `SECURITY.md`. Everything else lives in
-the directory of its owner: the library under `src/webauth/`, its suite under
-`tests/`. No catch-all directory (`tooling/`, `misc/`) and no deeper hierarchy
-than the owner needs.
+The root holds the package manifest and its lockfile, the scanner
+configuration, the licence, and the entry documents `README.md`, `AGENTS.md`,
+`CLAUDE.md`, `CHANGELOG.md` and `SECURITY.md`. The library lives under
+`src/webauth/`, its suite under `tests/`.
 
 `e2e/` is the proof harness: real-browser scripts that drive a host application
 built on the library against a real issuer. It owns nothing shipped, the
@@ -69,10 +67,9 @@ CI, which only lints it.
 - Deployment facts come from `WebAuthConfig`. Nothing reads an environment
   variable or a global; the host installs one config on the app and every
   module reads it from there.
-- No inline comments; a comment explains only a non-obvious why.
-- Tests name the behaviour they pin and use the builders in
-  `tests/webauth_arrangement.py` and `tests/oidc_arrangement.py` rather than a
-  second set of fakes.
+- No inline comments.
+- Tests use the builders in `tests/webauth_arrangement.py` and
+  `tests/oidc_arrangement.py` rather than a second set of fakes.
 
 ## Checks
 
@@ -97,8 +94,7 @@ needs `checks` and `lowest-direct`, and lists both as mandatory in
 `quality/config.toml`. The quality gate's required check is `quality / verdict`;
 allowances for known secret false positives live only in `quality/config.toml`.
 
-The suite needs no service: Redis is faked in-process. CI runs it whole; a
-local run takes only the test modules a change touches.
+The suite needs no service: Redis is faked in-process. CI runs it whole.
 
 ## Releasing
 
