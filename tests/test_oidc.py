@@ -397,27 +397,6 @@ _EXCHANGE_REFUSALS = [
         id="nested-past-the-parsers-recursion-limit",
     ),
     pytest.param(
-        Attempt(token_answer=lambda id_token: _answered_raw(
-            200, f'{{"id_token": "{id_token}", "id_token": "{id_token}"}}'
-        )),
-        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
-        id="answer-naming-id-token-twice",
-    ),
-    pytest.param(
-        Attempt(token_answer=lambda id_token: _answered_raw(
-            200, f'{{"id_token": "{id_token}", "profile": {{"name": "a", "name": "b"}}}}'
-        )),
-        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
-        id="answer-naming-a-nested-member-twice",
-    ),
-    pytest.param(
-        Attempt(token_answer=lambda id_token: _answered_raw(
-            200, f'{{"id_token": "{id_token}", "expires_in": NaN}}'
-        )),
-        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
-        id="answer-carrying-a-non-json-constant",
-    ),
-    pytest.param(
         Attempt(token_answer=_answered(200, {"access_token": "an-access-token"})),
         OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
         id="answer-without-id-token",

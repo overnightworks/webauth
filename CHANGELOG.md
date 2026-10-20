@@ -13,6 +13,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 
+**Changed**
+
+- The issuer's key set and token answer are read as plain JSON: a member named twice
+  keeps its last value.
+
 ## 0.18.0
 
 **Breaking**

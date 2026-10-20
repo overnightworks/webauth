@@ -636,20 +636,11 @@ def _defective_key_sets() -> list[Any]:
         pytest.param(
             b'{"keys": {"current-key": {}}}', "key-count-out-of-range", id="keys-not-a-list"
         ),
-        pytest.param(b'{"keys": [], "keys": []}', "not-strict-json", id="duplicate-member"),
-        pytest.param(b'{"keys": [', "not-strict-json", id="malformed-json"),
+        pytest.param(b'{"keys": [], "keys": []}', "key-count-out-of-range", id="duplicate-member"),
+        pytest.param(b'{"keys": [', "not-json", id="malformed-json"),
+        pytest.param(b"[" * MAX_KEY_SET_BYTES, "not-json", id="nested-past-the-recursion-limit"),
         pytest.param(
-            json.dumps({"keys": [valid_jwk], "extra": float("nan")}).encode(),
-            "not-strict-json",
-            id="non-json-constant",
-        ),
-        pytest.param(
-            json.dumps({"keys": [valid_jwk]}).encode()[:-1] + b', "extra": 1e999999}',
-            "not-strict-json",
-            id="number-overflowing-to-infinity",
-        ),
-        pytest.param(
-            gzip.compress(key_set_document(valid_jwk)), "not-strict-json", id="compressed"
+            gzip.compress(key_set_document(valid_jwk)), "not-json", id="compressed"
         ),
     ]
 
@@ -1074,7 +1065,7 @@ _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signa
             "fetch-failed",
             id="failed-fetch-quoting-its-url",
         ),
-        pytest.param(b"[]", "not-strict-json", id="invalid-key-set"),
+        pytest.param(b"[]", "not-json", id="invalid-key-set"),
         pytest.param(
             key_set_document(
                 public_jwk(rsa_key("current"), _URL_SECRET),
