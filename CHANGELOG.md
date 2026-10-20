@@ -15,9 +15,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Added**
 
-- `RequestBodyTooLarge`, a `WebAuthError` exported from `webauth.middleware`, is the error
+- `RequestBodyTooLarge`, exported from `webauth.middleware`, is the error
   `BodySizeLimitMiddleware` re-raises when a streamed body passes the limit after the
-  response has started. A host's middleware or log can catch it by name.
+  response has started. A host's middleware or log can catch it by name. It is
+  deliberately not a `WebAuthError`, so a host's `WebAuthError` handler cannot answer
+  in place of the 413.
 
 ## 0.18.0
 

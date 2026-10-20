@@ -1219,8 +1219,9 @@ It leaves the application everything that touches the application's own truth:
   machinery wrote, except the rate-limit budget, which counts attempts whether or
   not the request succeeds.
 - **Routes.** It defines none. The only responses it writes are its own
-  refusals: 401, 403, 413, 429, 503 and the 500 (and a `RequestBodyTooLarge` that escapes once a response has started), and the 302 to the host's login
-  path.
+  refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
+  path. Once a response has started it writes nothing more: a streamed body over
+  the limit then raises `RequestBodyTooLarge` to the server.
 - **Identity.** It issues no access or ID tokens: it is no identity provider, and
   it verifies the ID tokens an issuer made.
 - **HTTP framing** is the ASGI server's job. uvicorn's two parsers, h11 and

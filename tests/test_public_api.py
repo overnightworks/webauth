@@ -18,7 +18,6 @@ import pytest
 import webauth
 from webauth import WebAuthError, ports
 from webauth.https_client import ExchangeFailure, KeySetFetchError
-from webauth.middleware import RequestBodyTooLarge
 from webauth.oidc import TokenEndpointError
 from webauth.ports import UsernameTakenError
 
@@ -503,7 +502,6 @@ def test_every_module_imports_and_the_single_process_backend_counts_without_redi
             ExchangeFailure.TIMED_OUT,
             id="TokenEndpointError",
         ),
-        pytest.param(RequestBodyTooLarge("taken"), None, id="RequestBodyTooLarge"),
     ],
 )
 def test_every_public_operational_error_is_caught_as_web_auth_error_with_its_payload(
