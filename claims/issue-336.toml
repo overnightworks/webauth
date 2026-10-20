@@ -1,0 +1,8 @@
+claim_id = "6eaa424f48e749188c0d719703bd1dec"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "765b0dab4dab84189f26f0205ad12f996d90eade"
+branch = "claude/issue-336-media-type-case"
+scope = ["CHANGELOG.md", "src/webauth/_content_negotiation.py", "src/webauth/_media_types.py", "src/webauth/dependencies.py", "src/webauth/middleware/csrf.py", "src/webauth/oidc_login.py", "tests/test_csrf.py", "tests/test_dependencies.py"]
+opened_commit = "a161e021a5fb9a601dac0e303bc4be9bb17ad71d"
+whole_reason = "One media-type reader moved to its named owner and used by its three callers, with their test rows and the CHANGELOG line."
