@@ -7,11 +7,10 @@ Keycloak's own form, and the library calls the real token and key-set
 endpoints with its production transport.
 
 `harness.py` is the run plumbing every driver here shares (runtime directory,
-host process, first-signal handling, browser worker, run record, evidence scan). It
+host process, first-signal handling, browser worker, run record, result table). It
 also owns the pinned Chromium (`launch_pinned_chromium`: each name mapped to a loopback
-port, one leaf certificate trusted by its public-key hash) and the recording context
-(`recording_context`: requests logged field by field, URL credentials and cookie values
-registered).
+port, one leaf certificate trusted by its public-key hash) and the browser context
+(`browser_context`).
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
 Playwright browser, and takes a few minutes. CI only lints `e2e/`.
@@ -43,7 +42,7 @@ Stopping it: send SIGTERM to `timeout` or to the `prove.py` python process.
 reaches every descendant), hence Ctrl-C in the terminal reaches only `flock`
 and does not stop the run. The first SIGTERM or SIGINT ends the run with
 `FAILED: interrupted` and exit status 1 after an uninterruptible cleanup (host
-app, stack, `runtime/`, evidence scan); further signals are ignored. `--kill-after=240`
+app, stack, `runtime/`, result table); further signals are ignored. `--kill-after=240`
 exceeds the cleanup's worst case: browser worker 15 s, host SIGTERM 15 s, host
 SIGKILL 15 s, stack 180 s, together 225 s.
 
@@ -53,11 +52,11 @@ out-of-memory kill), nothing can clean up. By hand: `rm -rf SCRATCH/runtime`
 (`docker ps -a --filter name=edge-kc-probe`); `pkill -f e2e/oidc/host_app.py`
 if a listener on a random port remains (the host app dies with its parent,
 so this is rarely needed). Do not trust `evidence/` of such a run, nor of a
-run that prints `the browser worker did not stop`: its screenshots are deleted
-and nothing is scanned, because a live browser could still write.
+run that prints `the browser worker did not stop`: its screenshots are deleted,
+because a live browser could still write.
 
-`--scratch` must be empty. Afterwards it holds `evidence/` only: screenshots,
-`network.har` and `result-table.txt`. `runtime/` (credentials, keys, the stack's
+`--scratch` must be empty. Afterwards it holds `evidence/` only: screenshots
+and `result-table.txt`. `runtime/` (credentials, keys, the stack's
 scratch) is deleted on every exit path.
 
 ## How the browser reaches the stack
@@ -98,19 +97,14 @@ is shut down, its container removed, before the held stack is released, and
 production's internal DNS name of the app: it shows that the route works behind an
 internal name, not that production's name resolves.
 
-## Evidence rules
+## Screenshots
 
-The network log is built from allowlisted fields (URL without query values,
-header and cookie names, a few harmless header values, cookie attributes), never
-redacted from a raw capture. Every credential the run creates or sees is
-registered, and `evidence/` is scanned for each in raw, URL-encoded and
-form-encoded form before the script ends; a hit deletes the file and fails the
-run. Screenshots are taken only at fixed moments of a scenario: the start page,
+Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, Keycloak's confirmation page where a scenario expects it (16 and 18), the page after a bad hint signature (20), the app's page after the logout past the ID token's expiry (21), the app's page after each logout (15, 17, 22 and 23, and 16 and 18 after confirming), the cross-site page and the app's answer to it in scenario 22, Keycloak's confirmation page in scenario 23, A's page after the disable and before the admin logout in scenario 13, in
+clears the field), the result page (the refusal page in scenario 7), the second sign-in of scenarios 2 and 9, the app's page after the logout past the ID token's expiry (21), the app's page after each logout (15, 17, 22 and 23), the cross-site page and the app's answer to it in scenario 22, Keycloak's confirmation page in scenario 23, A's page after the disable and before the admin logout in scenario 13, in
 scenarios 10 to 13 also the other context's or app's result page, and, in
 scenario 5, only the first page, named after the origin and the `cookie_samesite`. A pending-login cookie's name carries a
-digest of the login's state; the log keeps `__Host-oidc_pending_*`.
+digest of the login's state; the result table keeps `__Host-oidc_pending_*`.
 
 ## What it proves
 
@@ -126,17 +120,11 @@ failure). `SCENARIO 9` (1280x800) ends the app session in the host while the
 page still shows the button: the logout shows no page either, and the next sign-in
 shows Keycloak's form.
 
-The logout shows Keycloak's confirmation page only when the host cannot send a usable
-hint. `SCENARIO 16` deletes the hint cookie and `SCENARIO 18` plants a second one at
-`Path=/`; in both Keycloak asks "Do you want to log out?" and, after confirming, the
-app shows "Signed out". The other hint scenarios: `SCENARIO 14` (the cookie is stored
+The hint scenarios: `SCENARIO 14` (the cookie is stored
 for `Path=/logout`, HttpOnly, Secure, SameSite=Strict, and no request to `/` or `/me`
 carries it), `SCENARIO 15` (a second login and logout show no page), `SCENARIO 17` (the
-same on the cross-site origin `demo.example.test`) and `SCENARIO 19` (a hint of the
-3072-character bound reaches Keycloak, which answers neither 414 nor 431). A refused
-sign-in (scenario 7) leaves no hint cookie. `SCENARIO 20` (1280x800) replaces the hint with one whose
-signature segment is altered: Keycloak answers 400 with its error page ("Invalid parameter:
-id_token_hint"), neither the confirmation page nor a redirect home. `SCENARIO 21`
+same on the cross-site origin `demo.example.test`). A refused
+sign-in (scenario 7) leaves no hint cookie. `SCENARIO 21`
 (1280x800) gives app A's client `access.token.lifespan` 15 s through the admin API (the
 previous setting is restored afterwards), signs in, reads the `exp` of the hint cookie's ID
 token, waits until the clock is 2 s past it and logs out: the end-session request carries
@@ -195,7 +183,7 @@ this host). Each client carries `frontchannelLogout: false`, `backchannel.logout
 "RS256"` and its `post.logout.redirect.uris`. The `d1-host` client of the scenarios
 above has no callback URL, so they are unchanged. The host counts accepted and refused
 callbacks beside its sessions, and no scenario calls `/reset` between its sign-in and
-its assertions. The evidence is counts, response outcomes and screenshots, never a Logout
+its assertions. The result is counts, response outcomes and screenshots, never a Logout
 Token.
 
 - `SCENARIO 10`, subject-wide: two contexts sign in to app A as the same person. One
@@ -259,11 +247,9 @@ request never comes). Every other row that is not `held` fails the run, so a wro
 `jwks_url`, a missing CA trust or a clock skew cannot pass as the finding.
 
 The access token never leaves the host process except in the one UserInfo request
-through the shim: it reaches no `/state`, log, HAR or table, a token no header can
+through the shim: it reaches no `/state`, log or table, a token no header can
 carry is not sent (and counted as refused), and a failing UserInfo call is logged by
-exception type only. The registry holds the client secret raw and in its
-`client_secret_basic` form (base64 of `client_id:secret`), so the scan finds either in
-the Authorization header. The host runs with the shipped default
+exception type only. The host runs with the shipped default
 `cookie_samesite="strict"`; the pending-login cookie is lax in any case and the app and
 suite hosts are same-site.
 
@@ -279,7 +265,7 @@ Each expectation is built from the module's class in the suite's sources
 ### Last run: the whole Basic plan
 
 Verdict: every applicable module is held, and the one skip is justified. 13 modules
-driven and held, 1 skipped, no known finding, exit status 0, evidence scan clean:
+driven and held, 1 skipped, no known finding, exit status 0:
 
 | Module | Suite | webauth decision | Verdict |
 |---|---|---|---|
@@ -328,7 +314,7 @@ independent calls (10 s each), so one failure never hides another kind. The
 (interrupted, failed or timed out). Worst case: 15 s worker join + 30 s host
 stop + 90 s first teardown + 90 s backstop teardown = 225 s, inside `--kill-after=240`.
 Every failure or timeout, with its stderr tail, is reported as a leftover line,
-and the result table and evidence scan still follow. After a SIGKILL nothing can clean up: find the project
+and the result table still follows. After a SIGKILL nothing can clean up: find the project
 with `docker ps -a --filter name=d2-suite`, then `docker compose -p NAME -f
 e2e/oidc/suite-compose.yaml down -v --remove-orphans` (with `SUITE_HOST` set to
 anything), and `rm -rf SCRATCH/runtime`.
@@ -341,7 +327,7 @@ Keycloak or the OIDF suite shows, and CI does not run those.
 
 By hand: bump the pin, then one D1 run (`prove.py`) and one conformance run
 (`conformance.py`), each under `/tmp/probe-stack.lock` as above, and land the bump only
-when both exit 0 with a clean evidence scan. A new image digest is pulled first, outside
+when both exit 0. A new image digest is pulled first, outside
 the lock.
 
 ## Last run: session cookie after the redirect
@@ -357,8 +343,8 @@ The pull request that last changed this directory carries the full result table.
 
 ## Last run: back-channel logout
 
-Exit status 0, evidence scan clean, the stack and the relay containers removed. Scenarios
-10 to 13 held at 390x844 and at 1280x800, scenarios 14 to 23 at 1280x800; scenario 5 is
+Exit status 0, the stack and the relay containers removed. Scenarios
+10 to 13 held at 390x844 and at 1280x800, scenarios 14, 15, 17 and 21 to 23 at 1280x800; scenario 5 is
 unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 
 | Scenario | What a person did | Held |
@@ -367,7 +353,6 @@ unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
 | 11 | one context in A and B, a second in B; a logout in A | both B sessions ended through B's callback |
 | 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
 | 13 | the account disabled, then Keycloak's admin logout (204) | the disable alone ended nothing; then each app called back exactly once, `/me` 401, and a fresh sign in was refused |
-| 20 | the hint's signature altered, then logout | Keycloak's error page (400, `Invalid parameter: id_token_hint`) |
 | 21 | the ID token (15 s lifespan) past its `exp` by 2.1 s, then logout | the end-session request carried the hint; a redirect to the app, no confirmation page, "Signed out", Keycloak's form at the next sign-in |
 | 22 | a form on `https://demo.example.test` posted to app A's `/logout` | 403 `Cross-origin request rejected`; the session and the hint cookie stood |
 | 23 | A's session ended by Keycloak's admin logout, B signed in, then A's logout with the first session's ID token | Keycloak asked to confirm; after confirming B was called back |

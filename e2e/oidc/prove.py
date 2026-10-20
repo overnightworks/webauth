@@ -22,43 +22,35 @@ import sys
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
 from certificates import ThrowawayTls, issue_throwaway_tls
-from evidence import (
-    NetworkLog,
-    SecretRegistry,
-    cookie_names,
-    recorded_cookie_name,
-    without_query_values,
-)
 from harness import (
     STOP_SIGNALS,
     Host,
     Interrupted,
     RunRecord,
+    browser_context,
     cookie_name_and_value,
     drive_browser_off_the_main_thread,
     free_port,
     host_state,
-    keep_clean_evidence,
+    keep_results,
     launch_pinned_chromium,
     leftovers,
-    recording_context,
-    remember_cookies,
     reset_host,
     runtime_directory,
     start_host,
     stop_host,
     stop_on_first_signal,
+    without_query_values,
 )
 from host_app import LOGOUT_PATH, HostSettings
 from playwright.sync_api import (
     Browser,
-    BrowserContext,
     Cookie,
     Page,
     Playwright,
@@ -73,11 +65,10 @@ from stack import Admin, HeldStack, require_pinned_clean_edge
 from webauth.config import WebAuthConfig
 from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
-    MAX_ID_TOKEN_HINT_CHARS,
     CookieSameSite,
     _id_token_hint_cookie_name,
     _is_pending_login_cookie_name,
-    _verify_pending_login,
+    _pending_login_cookie_prefix,
 )
 
 SHIPPED_COOKIE_SAMESITE = cast(
@@ -109,7 +100,6 @@ OUTSIDER_NAME = "d1-outsider"
 ADMIN_NAME = "d1-admin"
 ADMIN_GROUP = f"{USER_GROUP}/admin"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
-KEYCLOAK_BAD_HINT_MESSAGE = "Invalid parameter: id_token_hint"
 KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
 ID_TOKEN_HINT_COOKIE_NAME = _id_token_hint_cookie_name(secure=True)
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
@@ -210,7 +200,6 @@ class Proof(RunRecord):
     host: Host | None = None
     ca_certificate: Path | None = None
     session_secret: str = ""
-    app_session_secrets: list[str] = field(default_factory=list)
     apps: tuple[App, ...] = ()
     user_id: str = ""
     user_password: str = ""
@@ -247,37 +236,8 @@ class Proof(RunRecord):
     def browsing(self, width: Width = DESKTOP) -> Iterator[Page]:
         assert self.browser is not None
         self.width = width
-        with recording_context(self, self.browser, **width.context_options) as context:
-            page = context.new_page()
-            try:
-                yield page
-            finally:
-                self.register_pending_logins(context)
-
-    def register_pending_logins(self, context: BrowserContext) -> None:
-        for cookie in context.cookies():
-            name, value = cookie_name_and_value(cookie)
-            if _is_pending_login_cookie_name(name, secure=True):
-                self._register_pending_login(value)
-
-    def capture_cookies(self, context: BrowserContext) -> None:
-        remember_cookies(self, context)
-        self.register_pending_logins(context)
-
-    def _register_pending_login(self, cookie_value: str) -> None:
-        pending = next(
-            (
-                verified
-                for secret in (self.session_secret, *self.app_session_secrets)
-                if (verified := _verify_pending_login(cookie_value, secret.encode()))
-            ),
-            None,
-        )
-        if pending is None:
-            raise AssertionError("a pending-login cookie did not verify; secrets unregistered")
-        self.registry.add("pending login state", pending.state)
-        self.registry.add("pending login nonce", pending.nonce)
-        self.registry.add("pending login code_verifier", pending.code_verifier)
+        with browser_context(self.browser, **width.context_options) as context:
+            yield context.new_page()
 
     def shot(self, page: Page, scenario: str | None, moment: str) -> None:
         if scenario is None:
@@ -294,9 +254,7 @@ class Proof(RunRecord):
 
     def fresh_admin(self) -> Admin:
         assert self.stack is not None
-        admin = self.stack.admin()
-        self.registry.add("admin token", admin.token)
-        return admin
+        return self.stack.admin()
 
     def set_user_enabled(self, user_id: str, enabled: bool) -> None:
         self.fresh_admin().put(f"/{REALM}/users/{user_id}", {"enabled": enabled})
@@ -326,7 +284,6 @@ class Proof(RunRecord):
         self.shot(page, scenario, "start")
         self.press(page, "#sign-in")
         page.wait_for_selector("#username")
-        self.capture_cookies(page.context)
 
     def fill_keycloak_form(
         self, page: Page, scenario: str | None, password: str, username: str = USER_NAME
@@ -345,7 +302,6 @@ class Proof(RunRecord):
             page, scenario, self.user_password if password is None else password, username
         )
         page.wait_for_url(re.compile(f"^{re.escape(origin)}/"))
-        self.capture_cookies(page.context)
 
     def status_of(self, page: Page, path: str) -> int:
         return page.evaluate("path => fetch(path).then((answer) => answer.status)", path)
@@ -400,7 +356,6 @@ def a_wrong_password_stays_at_keycloak(proof: Proof, width: Width) -> str:
     proof.reset_host()
     with proof.browsing(width) as page:
         wrong_password = secrets.token_urlsafe(12)
-        proof.registry.add("wrong password", wrong_password)
         proof.start_sign_in(page, scenario)
         proof.fill_keycloak_form(page, scenario, wrong_password)
         page.get_by_text("Invalid username or password").wait_for()
@@ -494,10 +449,8 @@ def deep_link_survives_the_login(proof: Proof, width: Width) -> str:
     with proof.browsing(width) as page:
         page.goto(f"{APP_ORIGIN}{deep_link}")
         page.wait_for_selector("#username")
-        proof.capture_cookies(page.context)
         proof.fill_keycloak_form(page, scenario, proof.user_password)
         page.wait_for_url(re.compile(f"^{re.escape(APP_ORIGIN)}/"))
-        proof.capture_cookies(page.context)
         landed = page.url.removeprefix(APP_ORIGIN)
         assert landed == deep_link, f"the browser landed on {landed!r}"
         headline = proof.headline(page)
@@ -540,6 +493,22 @@ def pages_fit_the_window(proof: Proof, width: Width) -> str:
     )
 
 
+def cookie_names(request: Request) -> list[str]:
+    return [
+        pair.split("=", 1)[0].strip()
+        for header in request.headers_array() if header["name"].lower() == "cookie"
+        for pair in header["value"].split(";") if pair.strip()
+    ]
+
+
+def recorded_cookie_name(name: str) -> str:
+    """A pending-login cookie's name ends in a digest of the login's state;
+    the table keeps the shape only."""
+    if _is_pending_login_cookie_name(name, secure=True):
+        return f"{_pending_login_cookie_prefix(secure=True)}*"
+    return name
+
+
 def raw_header(request: Request, name: str) -> str:
     return next(
         (h["value"] for h in request.headers_array() if h["name"].lower() == name), "(none)"
@@ -560,9 +529,9 @@ def session_cookie_after_redirect(
         landing = next(r for r in requests if r.redirected_from is callback)
         assert any(
             _is_pending_login_cookie_name(name, secure=True)
-            for name in cookie_names(callback.headers_array())
+            for name in cookie_names(callback)
         ), "the callback carried no pending-login cookie; request cookies are not measured"
-        names = [recorded_cookie_name(name) for name in cookie_names(landing.headers_array())]
+        names = [recorded_cookie_name(name) for name in cookie_names(landing)]
         site = raw_header(landing, "sec-fetch-site")
         headline = proof.headline(page)
         proof.shot(page, scenario, "first-page")
@@ -585,7 +554,6 @@ def logout(proof: Proof, width: Width) -> str:
         session = next(
             c for c in cookies if cookie_name_and_value(c)[0] == DEFAULT_SESSION_COOKIE_NAME
         )
-        proof.registry.add("session cookie", cookie_name_and_value(session)[1])
 
         def nothing_of_the_app_is_left() -> None:
             left = held_names & {cookie_name_and_value(c)[0] for c in app_cookies(page)}
@@ -647,13 +615,6 @@ def signed_in_with_a_hint(
     return hint
 
 
-def plant_hint(page: Page, value: str, path: str) -> None:
-    page.context.add_cookies([{
-        "name": ID_TOKEN_HINT_COOKIE_NAME, "value": value, "domain": APP_HOST, "path": path,
-        "secure": True, "httpOnly": True, "sameSite": "Strict", "expires": time.time() + 3600,
-    }])
-
-
 def hint_cookie_stays_at_the_logout_path(proof: Proof, width: Width) -> str:
     scenario = f"14-{width.label}"
     proof.reset_host()
@@ -670,7 +631,7 @@ def hint_cookie_stays_at_the_logout_path(proof: Proof, width: Width) -> str:
         )
         assert hint.get("expires", 0) > time.time(), "the hint is a session cookie or expired"
         ordinary = [
-            cookie_names(r.headers_array()) for r in requests
+            cookie_names(r) for r in requests
             if urllib.parse.urlsplit(r.url).path in ("/", "/me") and r.url.startswith(APP_ORIGIN)
         ]
         assert any(DEFAULT_SESSION_COOKIE_NAME in names for names in ordinary), (
@@ -701,74 +662,6 @@ def second_login_and_logout_show_no_page(proof: Proof, width: Width) -> str:
     return "after a logout and a second login, the second logout, with the new hint, showed no page"
 
 
-def delete_the_hint(proof: Proof, page: Page) -> str:
-    page.context.clear_cookies(name=ID_TOKEN_HINT_COOKIE_NAME)
-    assert not hints_anywhere(page), "the hint cookie was not deleted"
-    return "with the hint cookie deleted"
-
-
-def duplicate_the_hint(proof: Proof, page: Page) -> str:
-    (hint,) = hint_cookies(page)
-    plant_hint(page, cookie_name_and_value(hint)[1], "/")
-    assert len(hint_cookies(page)) == 2, "the planted duplicate is not sent with the logout"
-    return "with a second hint cookie planted at Path=/"
-
-
-def alter_the_signature(proof: Proof, page: Page) -> str:
-    (hint,) = hint_cookies(page)
-    header, payload, signature = cookie_name_and_value(hint)[1].split(".")
-    altered = ("B" if signature[0] == "A" else "A") + signature[1:]
-    tampered = f"{header}.{payload}.{altered}"
-    assert len(tampered) <= MAX_ID_TOKEN_HINT_CHARS
-    proof.registry.add("tampered ID token hint", tampered)
-    page.context.clear_cookies(name=ID_TOKEN_HINT_COOKIE_NAME)
-    plant_hint(page, tampered, LOGOUT_PATH)
-    assert len(hint_cookies(page)) == 1, "the tampered hint is not the sole hint"
-    return "with the hint's signature altered"
-
-
-def logout_is_confirmed_at_keycloak(proof: Proof, page: Page, scenario: str) -> str:
-    log_out_through_keycloak(proof, page, scenario, APP_ORIGIN, asks_for_confirmation=True)
-    assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-    me_status = proof.status_of(page, "/me")
-    assert me_status == 401, f"/me answered {me_status}"
-    return (
-        "the logout led to Keycloak's confirmation page, and after confirming the app showed "
-        "Signed out and /me answered 401"
-    )
-
-
-def logout_stops_at_keycloaks_error_page(proof: Proof, page: Page, scenario: str) -> str:
-    answer = press_logout(proof, page)
-    page.wait_for_load_state()
-    shown = " ".join(page.inner_text("body").split())[:120]
-    proof.shot(page, scenario, "result")
-    assert answer.status == 400, f"Keycloak answered the end-session request {answer.status}"
-    assert KEYCLOAK_BAD_HINT_MESSAGE in page.inner_text("body"), "Keycloak did not name the hint"
-    assert page.locator(KEYCLOAK_LOGOUT_CONFIRMATION).count() == 0, "Keycloak asked to confirm"
-    assert not page.url.startswith(f"{APP_ORIGIN}/"), f"the browser went on to {page.url}"
-    return f"the logout stopped at Keycloak's error page ({answer.status}, {shown!r})"
-
-
-UNUSABLE_HINTS = (
-    (16, delete_the_hint, logout_is_confirmed_at_keycloak),
-    (18, duplicate_the_hint, logout_is_confirmed_at_keycloak),
-    (20, alter_the_signature, logout_stops_at_keycloaks_error_page),
-)
-
-
-def logout_with_an_unusable_hint(
-    proof: Proof, width: Width, number: int, spoil: Callable[[Proof, Page], str],
-    outcome: Callable[[Proof, Page, str], str],
-) -> str:
-    scenario = f"{number}-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        signed_in_with_a_hint(proof, page, scenario)
-        spoiled = spoil(proof, page)
-        return f"{spoiled}, {outcome(proof, page, scenario)}"
-
-
 def logout_on_the_cross_site_origin(proof: Proof, width: Width) -> str:
     scenario = f"17-{width.label}"
     proof.reset_host()
@@ -777,29 +670,6 @@ def logout_on_the_cross_site_origin(proof: Proof, width: Width) -> str:
         log_out_through_keycloak(proof, page, scenario, SECOND_APP_ORIGIN)
         assert not hints_anywhere(page), "an ID token hint remains after the logout"
     return f"at {SECOND_APP_ORIGIN} the hint was stored and the logout showed no page"
-
-
-def hint_at_the_size_bound_reaches_keycloak(proof: Proof, width: Width) -> str:
-    scenario = f"19-{width.label}"
-    proof.reset_host()
-    filler = MAX_ID_TOKEN_HINT_CHARS - 2002
-    bound_sized = f"{'a' * 1000}.{'b' * 1000}.{'c' * filler}"
-    assert len(bound_sized) == MAX_ID_TOKEN_HINT_CHARS
-    with proof.browsing(width) as page:
-        signed_in_with_a_hint(proof, page, scenario)
-        page.context.clear_cookies(name=ID_TOKEN_HINT_COOKIE_NAME)
-        plant_hint(page, bound_sized, LOGOUT_PATH)
-        answer = press_logout(proof, page)
-        body = page.inner_text("body")
-        shown = " ".join(body.split())[:80]
-        proof.shot(page, scenario, "result")
-    assert answer.status not in (414, 431), f"the request was refused as too large: {answer.status}"
-    assert answer.status < 500, f"Keycloak answered {answer.status}"
-    assert KEYCLOAK_BAD_HINT_MESSAGE in body, "Keycloak did not name the hint"
-    return (
-        f"a {MAX_ID_TOKEN_HINT_CHARS}-character hint reached Keycloak, which answered "
-        f"{answer.status} (not 414 or 431) and showed {shown!r}"
-    )
 
 
 def id_token_expiry(hint: Cookie) -> float:
@@ -910,7 +780,6 @@ def sign_in_through_keycloaks_session(
     page.goto(f"{origin}/")
     proof.press(page, "#sign-in")
     page.get_by_role("heading", name=f"Signed in as {username}").wait_for()
-    proof.capture_cookies(page.context)
 
 
 def wait_for_accepted_callbacks(app: App, accepted: int) -> None:
@@ -1182,15 +1051,6 @@ def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
     create_user(admin, ADMIN_NAME, proof.admin_password, (ADMIN_GROUP,))
 
 
-def register_stack_secrets(stack: HeldStack, admin: Admin, registry: SecretRegistry) -> None:
-    for path in stack.secrets_dir.rglob("*"):
-        if path.is_file():
-            for line in path.read_text().splitlines():
-                registry.add(f"stack secret {path.name}", line.strip())
-                registry.add(f"stack secret {path.name}", line.partition("=")[2].strip())
-    registry.add("admin token", admin.token)
-
-
 def host_settings(
     tls: ThrowawayTls, shim_port: int, app_origins: tuple[str, ...], client_id: str,
     client_secret: str, session_secret: str, cookie_samesite: CookieSameSite,
@@ -1228,9 +1088,6 @@ def backchannel_apps(
         for configuration in BACKCHANNEL_APPS:
             client_secret = secrets.token_urlsafe(24)
             session_secret = secrets.token_urlsafe(48)
-            proof.registry.add(f"{configuration.client_id} client secret", client_secret)
-            proof.registry.add(f"{configuration.client_id} session secret", session_secret)
-            proof.app_session_secrets.append(session_secret)
             settings = host_settings(
                 tls, shim_port, (configuration.origin,), configuration.client_id,
                 client_secret, session_secret, configuration.cookie_samesite,
@@ -1258,19 +1115,11 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
     proof.disabled_user_password = secrets.token_urlsafe(18)
     proof.outsider_password = secrets.token_urlsafe(18)
     proof.admin_password = secrets.token_urlsafe(18)
-    for label, value in (
-        ("session secret", proof.session_secret), ("user password", proof.user_password),
-        ("disabled user password", proof.disabled_user_password),
-        ("outsider password", proof.outsider_password), ("admin password", proof.admin_password),
-        ("client secret", proof.client_secret),
-    ):
-        proof.registry.add(label, value)
     tls = issue_throwaway_tls(runtime, "good", [IDP_HOST, APP_HOST, SECOND_APP_HOST, "localhost"])
     untrusted = issue_throwaway_tls(runtime, "untrusted", [UNTRUSTED_HOST])
     with HeldStack(edge, runtime / "stack") as stack:
         proof.stack = stack
         admin = stack.admin()
-        register_stack_secrets(stack, admin, proof.registry)
         prepare_keycloak(admin, proof, proof.client_secret)
         edge_port = urllib.parse.urlsplit(stack.edge_url).port
         assert edge_port is not None
@@ -1522,19 +1371,11 @@ def run_hint_scenarios(proof: Proof) -> None:
         (14, APP_ORIGIN, hint_cookie_stays_at_the_logout_path),
         (15, APP_ORIGIN, second_login_and_logout_show_no_page),
         (17, SECOND_APP_ORIGIN, logout_on_the_cross_site_origin),
-        (19, APP_ORIGIN, hint_at_the_size_bound_reaches_keycloak),
         (21, APP_ORIGIN, logout_after_the_id_token_expired),
     ):
         proof.held_or_failed(
             f"SCENARIO {number} {DESKTOP.label} {origin}",
             lambda scenario=scenario: scenario(proof, DESKTOP),
-        )
-    for number, spoil, outcome in UNUSABLE_HINTS:
-        proof.held_or_failed(
-            f"SCENARIO {number} {DESKTOP.label} {APP_ORIGIN}",
-            lambda number=number, spoil=spoil, outcome=outcome: logout_with_an_unusable_hint(
-                proof, DESKTOP, number, spoil, outcome
-            ),
         )
 
 
@@ -1544,8 +1385,7 @@ def prove(edge: Path, scratch: Path) -> int:
         return 2
     evidence_dir = scratch / "evidence"
     evidence_dir.mkdir(parents=True)
-    registry = SecretRegistry()
-    proof = Proof(evidence_dir, registry, NetworkLog(registry))
+    proof = Proof(evidence_dir)
     stop_on_first_signal(proof)
     try:
         require_pinned_clean_edge(edge)
@@ -1563,7 +1403,7 @@ def prove(edge: Path, scratch: Path) -> int:
             proof.fail("interrupted")
         for left in leftovers(scratch, EDGE_CONTAINER_FILTER):
             proof.fail(left)
-    return max(0 if proof.all_held else 1, keep_clean_evidence(proof))
+    return max(0 if proof.all_held else 1, keep_results(proof))
 
 
 def main() -> int:

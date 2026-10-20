@@ -176,10 +176,12 @@ def _cookie_values(connection: HTTPConnection, name: str) -> list[str]:
     return [value for key, value in _cookie_pairs(connection) if key == name]
 
 
+def _signature(prefix: bytes, text: str, secret: bytes) -> str:
+    return hmac.new(secret, prefix + text.encode(), hashlib.sha256).hexdigest()
+
+
 def _session_signature(session_id: str, secret: bytes) -> str:
-    return hmac.new(
-        secret, _SESSION_SIGNING_PREFIX + session_id.encode(), hashlib.sha256
-    ).hexdigest()
+    return _signature(_SESSION_SIGNING_PREFIX, session_id, secret)
 
 
 def sign_session_id(session_id: str, secret: bytes) -> str:
@@ -212,9 +214,7 @@ def _verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
 
 def _generate_csrf_token(session_id: str, secret: bytes) -> str:
     """Generate a CSRF token cryptographically bound to the session."""
-    return hmac.new(
-        secret, _CSRF_SIGNING_PREFIX + session_id.encode(), hashlib.sha256
-    ).hexdigest()
+    return _signature(_CSRF_SIGNING_PREFIX, session_id, secret)
 
 
 def _verify_csrf_token(token: str, session_id: str, secret: bytes) -> bool:
@@ -434,6 +434,4 @@ def _decoded_return_to(field: str) -> str | None:
 
 
 def _pending_login_signature(payload: str, secret: bytes) -> str:
-    return hmac.new(
-        secret, _PENDING_LOGIN_SIGNING_PREFIX + payload.encode(), hashlib.sha256
-    ).hexdigest()
+    return _signature(_PENDING_LOGIN_SIGNING_PREFIX, payload, secret)
