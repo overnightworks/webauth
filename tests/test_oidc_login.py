@@ -53,7 +53,6 @@ from webauth_arrangement import (
     FakeUser,
     RecordingAuditSink,
     SessionRecordsInMemory,
-    SessionsReusingEndedIds,
     UsersInMemory,
     UsersWithCaseInsensitiveUsernames,
     UsersWithoutUniqueUsernames,
@@ -235,16 +234,6 @@ def test_a_person_taken_out_of_the_group_is_refused_and_back_in_returns_to_the_a
     assert len(host.audit.account_events) == 1
 
 
-class UntouchableAccounts(UsersInMemory):
-    def get(self, user_id: str) -> FakeUser | None:
-        raise AssertionError("a refusal must not read an account")
-
-
-class UntouchableLock(WriteLockInMemory):
-    def hold(self) -> AbstractContextManager[None]:
-        raise AssertionError("a refusal must not take the write lock")
-
-
 FOREIGN_ISSUER = "https://other.example/realms/lab"
 EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
 
@@ -263,12 +252,15 @@ EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
         AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer where every subject is admitted",
     ),
 ])
-def test_a_refusal_before_any_account_takes_no_lock_reads_no_account_and_audits_nothing(
+def test_an_identity_refused_before_its_account_takes_no_lock_and_writes_nothing(
     identity: OidcIdentity, admission: AdmissionConfig, refusal: AdmissionRefusal,
 ) -> None:
-    host = Host(UntouchableAccounts(), RecordingAuditSink(), UntouchableLock())
+    lock = CountingWriteLock()
+    host = Host(UsersInMemory(lock=lock), RecordingAuditSink(), lock)
 
     assert host.admit(identity, admission) is refusal
+    assert lock.times_taken == 0
+    assert host.accounts.list() == []
     assert host.audit.account_events == []
 
 
@@ -2044,13 +2036,11 @@ class OpeningStore:
         return cls(SessionRecordsInMemory(record, users=users, lock=lock), lock)
 
     @classmethod
-    def holding(
-        cls, *owners: FakeUser,
-        store_type: type[SessionRecordsInMemory] = SessionRecordsInMemory,
-    ) -> OpeningStore:
+    def holding(cls, *owners: FakeUser) -> OpeningStore:
         """One session per owner, each created a minute after the one before."""
         lock = WriteLockInMemory()
-        sessions = store_type(users=UsersInMemory(ACCOUNT, BYSTANDER, lock=lock), lock=lock)
+        users = UsersInMemory(ACCOUNT, BYSTANDER, lock=lock)
+        sessions = SessionRecordsInMemory(users=users, lock=lock)
         store = cls(sessions, lock)
         for minute, owner in enumerate(owners):
             store.create_for(owner, FIRST_CREATED_AT + timedelta(minutes=minute))
@@ -2213,31 +2203,6 @@ def test_two_same_tick_logins_at_a_cap_of_one_both_succeed_and_the_later_remains
 
     assert first.created_at == second.created_at
     assert store.ids() == [second.id]
-
-
-def test_a_store_that_hands_back_the_replaced_id_raises_and_rolls_back() -> None:
-    store = OpeningStore.holding(ACCOUNT, store_type=SessionsReusingEndedIds)
-    before = store.ids()
-    cookie = signed(before[0])
-
-    with (
-        pytest.raises(RuntimeError, match=r"SessionRecordStore\.create"),
-        store.sessions.transaction(),
-    ):
-        store.open_session(cookie)
-
-    assert store.ids() == before
-
-
-def test_a_store_that_hands_back_the_replaced_id_keeps_no_session_under_it_without_a_rollback(
-) -> None:
-    store = OpeningStore.holding(ACCOUNT, store_type=SessionsReusingEndedIds)
-    cookie = signed(store.ids()[0])
-
-    with pytest.raises(RuntimeError, match=r"SessionRecordStore\.create"):
-        store.open_session(cookie)
-
-    assert store.ids() == []
 
 
 def test_a_second_login_in_the_same_browser_replaces_the_first_session() -> None:

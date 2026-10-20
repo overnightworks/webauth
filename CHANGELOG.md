@@ -23,6 +23,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Changed**
 
+- `open_session` no longer checks that the store's new session id differs from the one it
+  replaced; the store's entropy duty covers it, and the `RuntimeError` is gone.
 - The issuer's key set and token answer are read as Python's `json.loads` reads bytes.
   This withdraws the 0.14.0 refusals of non-finite numbers and deep nesting for the token
   answer and loosens the key set the same way: a member named twice keeps its last value;
@@ -35,6 +37,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   nonces, hashes or keywords in `form-action` and `frame-ancestors`, and typos, which the
   browser ignores. A source with a space, a control character or a non-ASCII character is
   still a `ValueError`.
+- Connecting to the issuer is bounded by the connect timeout per resolved address,
+  outside the total deadline; the deadline covers the TLS handshake and the answer.
 
 **Added**
 
@@ -43,11 +47,6 @@ Versions before 0.3.0 and releases without an entry here are described in the
   response has started. A host's middleware or log can catch it by name. It is
   deliberately not a `WebAuthError`, so a host's `WebAuthError` handler cannot answer
   in place of the 413.
-
-**Changed**
-
-- Connecting to the issuer is bounded by the connect timeout per resolved address,
-  outside the total deadline; the deadline covers the TLS handshake and the answer.
 
 ## 0.18.0
 

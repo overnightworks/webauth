@@ -415,24 +415,6 @@ class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
         return record
 
 
-class SessionsReusingEndedIds(SessionRecordsInMemory):
-    """A store whose ids restart from the first one, so a replaced session's id comes back."""
-
-    def create(
-        self,
-        user_id: str,
-        *,
-        now: datetime,
-        expires_at: datetime,
-    ) -> FakeSessionRecord:
-        self._ids = count(1)
-        return super().create(
-            user_id,
-            now=now,
-            expires_at=expires_at,
-        )
-
-
 class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
     """A store that fails the test on the first question put to it."""
 

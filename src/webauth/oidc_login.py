@@ -337,11 +337,7 @@ def open_session(
     states that the host sets no cap; any other value must be a positive whole
     number. A forged, oversized or duplicated cookie ends nothing.
 
-    Raises ``RuntimeError`` when the store's ``create`` hands back the replaced
-    session's id, so the host rolls back instead of handing out a cookie for a
-    session that does not stand. That session is ended before the raise, so no
-    session stays under the id the incoming cookie named even without a
-    rollback. Never commits and sets no cookie: the host commits, then calls
+    Never commits and sets no cookie: the host commits, then calls
     ``issue_session_cookies`` with the returned id.
     """
     if max_sessions is not None:
@@ -353,17 +349,11 @@ def open_session(
             sessions.delete(replaced_session_id)
         if max_sessions is not None:
             sessions.prune_overflow(account.id, max_sessions - 1)
-        session = sessions.create(
+        return sessions.create(
             account.id,
             now=now,
             expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
         )
-        if session.id == replaced_session_id:
-            sessions.delete(session.id)
-            raise RuntimeError(
-                "SessionRecordStore.create returned the id of the session it replaced",
-            )
-    return session
 
 
 def log_out(

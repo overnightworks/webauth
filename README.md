@@ -209,10 +209,9 @@ It answers the new `SessionRecord`.
 
 It never commits and sets no cookie: the host commits, then calls
 `issue_session_cookies(response, session.id, config)`, so a cookie never names a
-session that was rolled back. It raises `RuntimeError`, for the host to roll
-back, when the store's `create` returns the replaced session's id.
-It records no audit event, like `log_out`. The host's `WriteLock` must allow a
-second hold in the same request: one for admission, one for `open_session`.
+session that was rolled back. It records no audit event, like `log_out`. The
+host's `WriteLock` must allow a second hold in the same request: one for
+admission, one for `open_session`.
 
 #### Logging out
 
