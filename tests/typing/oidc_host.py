@@ -37,6 +37,7 @@ from webauth.dependencies import (
     AuthDependencies,
     ConnectionRefusal,
     LoginRedirect,
+    admit_session,
     authenticate_websocket,
     current_user_dependency,
     session_id_from_request,
@@ -316,6 +317,12 @@ async def a_host_accepts_a_websocket_only_for_a_signed_in_account(
     return outcome
 
 
+def a_host_admits_a_session_without_a_request(
+    session_id: str, config: WebAuthConfig,
+) -> AuthenticatedUser | ConnectionRefusal:
+    return admit_session(session_id, sessions=HostSessions(), config=config)
+
+
 def a_host_installs_the_middleware(app: FastAPI) -> None:
     install_web_auth_middleware(
         app,
@@ -367,7 +374,7 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
-        VerifiedClaims, VerifiedLogout, WallClock, install_web_auth_config,
+        VerifiedClaims, VerifiedLogout, WallClock, admit_session, install_web_auth_config,
         is_https_url, session_id_from_request,
         unauthenticated_response,
     )

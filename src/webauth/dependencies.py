@@ -38,6 +38,7 @@ __all__ = [
     "AuthDependencies",
     "LoginRedirect",
     "ConnectionRefusal",
+    "admit_session",
     "authenticate_websocket",
     "current_user_dependency",
     "session_id_from_request",
@@ -225,7 +226,8 @@ class ConnectionRefusal(Enum):
     The session members are the one taxonomy of why no live session was
     found; the HTTP dependencies answer them with their own responses, so a
     refusal reads the same on both channels. The origin members are decided
-    by ``authenticate_websocket`` alone.
+    by ``authenticate_websocket`` alone. ``admit_session`` returns only
+    ``SESSION_ENDED_OR_EXPIRED``.
     """
 
     NO_SESSION = "no-session"
@@ -321,19 +323,17 @@ def _is_admitted(
     )
 
 
-def _resolve_session(
-    connection: HTTPConnection, sessions: SessionRecordStore,
+def admit_session(
+    session_id: str, *, sessions: SessionRecordStore, config: WebAuthConfig,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
-    """The one decision whom a connection's session cookie speaks for.
+    """Decide whether a session id speaks for an account, and renew it if so.
 
-    Cookie, signature, load, liveness, renewal: HTTP and WebSocket both ask here
-    and translate the refusal into their own answer.
+    For a host that reads the id itself, without a request or a cookie.
+    Returns the account, or ``ConnectionRefusal.SESSION_ENDED_OR_EXPIRED`` for
+    an unknown id, a session outside its lifetime, or one the store no longer
+    holds; a refused session is not renewed. Sets no cookie. A failing store,
+    or a ``touch`` that answers anything but a ``bool``, raises.
     """
-    config = web_auth_config(connection)
-    session_id = _read_session_cookie(connection, config)
-    if isinstance(session_id, ConnectionRefusal):
-        return session_id
-
     record = sessions.load(session_id)
     now = _whole_second_now(config)
     if record is None or not _is_admitted(config.session_lifetime, record, now):
@@ -357,3 +357,19 @@ def _resolve_session(
         username=record.user.username,
         role=record.user.role,
     )
+
+
+def _resolve_session(
+    connection: HTTPConnection, sessions: SessionRecordStore,
+) -> ports.AuthenticatedUser | ConnectionRefusal:
+    """The one decision whom a connection's session cookie speaks for.
+
+    Cookie and signature are read here; ``admit_session`` decides the rest.
+    HTTP and WebSocket both ask here and translate the refusal into their own
+    answer.
+    """
+    config = web_auth_config(connection)
+    session_id = _read_session_cookie(connection, config)
+    if isinstance(session_id, ConnectionRefusal):
+        return session_id
+    return admit_session(session_id, sessions=sessions, config=config)
