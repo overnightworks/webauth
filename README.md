@@ -945,8 +945,9 @@ bound a socket (see "WebSocket handshakes").
 
 - `SessionLifetime.idle_seconds` is how long a session stands without a request.
 - `SessionLifetime.absolute_max_age_seconds` is how long a session may live from
-  its `created_at`, however recently it was used. The idle window is at most the cap, and the cap is at most 400 days
-  (`MAX_SESSION_LIFETIME_SECONDS`), the longest a browser keeps a cookie.
+  its `created_at`, however recently it was used. The idle window is at most
+  the cap, and the cap is at most 400 days (`MAX_SESSION_LIFETIME_SECONDS`), the
+  longest a browser keeps a cookie.
 
 `WebAuthConfig.session_lifetime` is required. The library reads `config.wall_clock`
 once per request, as whole seconds, and admits a loaded session only when
