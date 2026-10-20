@@ -703,7 +703,7 @@ is the one check a host runs at the handshake. It answers the
 | `FOREIGN_ORIGIN` | `foreign-origin` | an `Origin` that is empty, repeated, `null`, unparsable or not an allowed host |
 | `NO_SESSION` | `no-session` | the session cookie is missing, empty or longer than `MAX_SESSION_COOKIE_CHARS` |
 | `INVALID_SESSION` | `invalid-session` | the cookie is forged or present more than once |
-| `SESSION_ENDED_OR_EXPIRED` | `session-ended-or-expired` | the store does not know the session, the liveness policy refuses it, or `touch` answers `False` |
+| `SESSION_ENDED_OR_EXPIRED` | `session-ended-or-expired` | the store does not know the session, its stored expiry is outside the session lifetime, or `touch` answers `False` |
 
 The `Origin` is decided first, before the store is touched, so a refused
 handshake neither renews a session nor writes an audit event. Exactly one
@@ -762,10 +762,7 @@ transaction, before protected work and on its own schedule while a stream runs,
 and on a refusal closes the socket and stops the protected work. A successful
 re-check counts as activity like a request does: it renews the session, so a
 socket that keeps being re-checked stays signed in, and it stays signed in only
-until the absolute cap (`ExpiryColumnLiveness(absolute_max_age_seconds)` or
-`IdleWindowLiveness(..., absolute_max_age_seconds=...)`), which bounds a
-socket's life. A host without an absolute cap sets no end to a socket it keeps
-re-checking.
+until the absolute cap of `SessionLifetime`, which bounds a socket's life.
 
 ## Configuration
 
@@ -906,21 +903,18 @@ is ignored ([CSP3, Paths and Redirects](https://w3c.github.io/webappsec-csp/#sou
 The library caches no sessions. Every authenticated request costs one
 `SessionRecordStore.load` and one `touch`, so a session the host ended is
 refused on its next request, with 401 or the login redirect. Whether a loaded
-session still stands is decided by `WebAuthConfig.session_liveness`, a
-`webauth.ports.SessionLivenessPolicy`, and `webauth.dependencies` alone reads
-`WebAuthConfig.wall_clock` and passes the instant in. `webauth.liveness` ships two:
-`ExpiryColumnLiveness`, for a store with `created_at`/`expires_at` columns, and
-`IdleWindowLiveness`, for one that keeps `last_seen` (and `created_at` when it
-is given an absolute cap).
+session still stands is decided by the library alone, against
+`WebAuthConfig.session_lifetime` (see "Session lifetime"). `SessionRecordStore.touch`
+takes the session id and the `expires_at` the library computed; the store writes it
+and computes none of its own.
 `SessionRecordStore.touch` returns a strict `bool`: `True` when a stored row was
 renewed, `False` when the session is gone, which refuses the request like an
 expired session.
 
 ## Session lifetime
 
-Three numbers decide how long someone stays signed in, and each has one owner.
-The library reads no session lifetime of its own: the session's expiry belongs
-to the host's session store.
+Three numbers decide how long someone stays signed in. The library owns the
+session's lifetime; the host's store only writes the expiry it is given.
 
 - `WebAuthConfig.cookie_max_age_seconds` is required and is the browser cookie's
   `Max-Age`. The cookie is issued once at login and never reissued, so it bounds
@@ -928,18 +922,27 @@ to the host's session store.
   WebSocket captured the cookie at its handshake and runs on after the browser
   drops it; the absolute cap and the host's re-checks bound a socket (see
   "WebSocket handshakes").
-- The idle window — `IdleWindowLiveness`'s idle argument, or the host's
-  `expires_at` refresh for `ExpiryColumnLiveness` — refuses a session left unused for longer.
-- The absolute cap — `ExpiryColumnLiveness(absolute_max_age_seconds)` or
-  `IdleWindowLiveness(idle, absolute_max_age_seconds=...)` — refuses a session
-  older than the cap, however recently it was used.
+- `SessionLifetime.idle_seconds` is how long a session stands without a request.
+- `SessionLifetime.absolute_max_age_seconds` is how long a session may live from
+  its `created_at`, however recently it was used. The idle window is at most the cap, and the cap is at most 400 days
+  (`MAX_SESSION_LIFETIME_SECONDS`), the longest a browser keeps a cookie.
 
-Every lifetime — `cookie_max_age_seconds` and the windows and
-caps of both liveness policies — must be a positive whole number of seconds; `0`, a negative
+`WebAuthConfig.session_lifetime` is required. The library reads `config.wall_clock`
+once per request, as whole seconds, and admits a loaded session only when
+`now <= expires_at <= min(now + idle + 60 s, created_at + cap)`: the stored expiry
+is neither past nor further out than the lifetime allows, with 60 seconds of
+tolerance for the idle window and none for the cap. A session outside that is refused as
+`SESSION_ENDED_OR_EXPIRED` and not renewed. An admitted session is renewed to
+`min(now + idle, created_at + cap)`, so it never outlives its cap. A session
+created more than 60 seconds in the future is refused too. A stored
+timestamp without an offset is read as UTC.
+
+Every lifetime — `cookie_max_age_seconds`, `idle_seconds` and
+`absolute_max_age_seconds` — must be a positive whole number of seconds; `0`, a negative
 value, a `float`, a string or a `bool` is refused when the object is built.
 
 The recommended policy for a host that admits by `login_group` is a 12-hour
-cookie and cap, with the idle window left to the host. The cookie and the cap
+cookie and cap, with an idle window of the same length. The cookie and the cap
 set the worst-case delay before a removal from the group takes effect, because
 an open session is not re-checked. Every login checks the group again, and
 the issuer's SSO session turns that login into a
@@ -952,8 +955,7 @@ import re
 
 from pydantic import SecretStr
 
-from webauth.config import WebAuthConfig
-from webauth.liveness import IdleWindowLiveness
+from webauth.config import SessionLifetime, WebAuthConfig
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 
@@ -966,7 +968,9 @@ config = WebAuthConfig(
     allowed_hosts_exact=frozenset({"app.example.com"}),
     allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
     cookie_max_age_seconds=TWELVE_HOURS,
-    session_liveness=IdleWindowLiveness(TWELVE_HOURS, absolute_max_age_seconds=TWELVE_HOURS),
+    session_lifetime=SessionLifetime(
+        idle_seconds=TWELVE_HOURS, absolute_max_age_seconds=TWELVE_HOURS,
+    ),
 )
 ```
 
@@ -1179,8 +1183,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `SessionLivenessPolicy`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
-| `webauth.liveness` | Whether a session still stands: the expiry-column and idle-window policies |
+| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `WriteLock`, `AuditSink` and `RateLimitBackend` |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates. |

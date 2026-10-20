@@ -10,7 +10,7 @@ commits it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
@@ -23,7 +23,7 @@ from webauth import ports
 from webauth._content_negotiation import prefers_html
 from webauth._origins import origin_is_allowed
 from webauth._paths import reads_as_another_host, requested_address, same_app_path
-from webauth.config import WebAuthConfig, web_auth_config
+from webauth.config import SessionLifetime, WebAuthConfig, web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     _cookie_values,
@@ -56,6 +56,7 @@ _AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
 _INVALID_SESSION_DETAIL: Final = "Invalid session"
 _SESSION_EXPIRED_DETAIL: Final = "Session expired"
 _ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
+_EXPIRY_TOLERANCE: Final = timedelta(seconds=60)
 
 
 @dataclass(frozen=True)
@@ -330,6 +331,40 @@ def _record_identity_changes(
         )
 
 
+def _as_instant(stored: datetime) -> datetime:
+    """The stored datetime pinned to the fixed offset it names, naive read as UTC.
+
+    A zone with a clock change would subtract two instants by wall time; a
+    fixed offset subtracts by the instants themselves, and unlike
+    ``astimezone`` it cannot overflow at the calendar's edge.
+    """
+    offset = stored.utcoffset()
+    if offset is None:
+        return stored.replace(tzinfo=UTC)
+    return stored.replace(tzinfo=timezone(offset))
+
+
+def _renewed_expiry(
+    lifetime: SessionLifetime, *, now: datetime, created_at: datetime,
+) -> datetime:
+    idle = timedelta(seconds=lifetime.idle_seconds)
+    remaining_cap = timedelta(seconds=lifetime.absolute_max_age_seconds) - (now - created_at)
+    return now + min(idle, remaining_cap)
+
+
+def _is_admitted(
+    lifetime: SessionLifetime, record: ports.SessionRecord, now: datetime,
+) -> bool:
+    created_at = _as_instant(record.created_at)
+    expires_at = _as_instant(record.expires_at)
+    return (
+        created_at <= now + _EXPIRY_TOLERANCE
+        and now <= expires_at
+        and expires_at - now <= timedelta(seconds=lifetime.idle_seconds) + _EXPIRY_TOLERANCE
+        and expires_at - created_at <= timedelta(seconds=lifetime.absolute_max_age_seconds)
+    )
+
+
 def _resolve_session(
     connection: HTTPConnection, sessions: SessionRecordStore, audit: AuditSink,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
@@ -345,8 +380,8 @@ def _resolve_session(
         return session_id
 
     record = sessions.load(session_id)
-    now = datetime.fromtimestamp(config.wall_clock(), UTC)
-    if record is None or not config.session_liveness.admits_stored_session(record, now):
+    now = datetime.fromtimestamp(int(config.wall_clock()), UTC)
+    if record is None or not _is_admitted(config.session_lifetime, record, now):
         return ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
 
     current_ip = resolve_client_ip(connection)
@@ -355,10 +390,12 @@ def _resolve_session(
     stored_ip = record.ip_address
     stored_user_agent = record.user_agent
     renewed = sessions.touch(
-        record,
+        session_id,
+        expires_at=_renewed_expiry(
+            config.session_lifetime, now=now, created_at=_as_instant(record.created_at),
+        ),
         ip_address=current_ip,
         user_agent=current_user_agent,
-        now=now,
     )
     if type(renewed) is not bool:
         raise TypeError(

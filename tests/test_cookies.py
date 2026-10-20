@@ -31,7 +31,7 @@ from webauth_arrangement import (
 )
 
 import webauth
-from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
@@ -50,7 +50,6 @@ from webauth.cookies import (
     sign_session_id,
 )
 from webauth.dependencies import session_id_from_request
-from webauth.liveness import IdleWindowLiveness
 from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import SecurityHeadersPolicy, default_content_security_policy
 
@@ -439,7 +438,7 @@ def test_a_cookie_lifetime_longer_than_the_idle_window_is_what_the_browser_keeps
     must outlive the window for a session used every few days to stay signed in."""
     app = a_cookie_app(
         cookie_max_age_seconds=THIRTY_DAYS_SECONDS,
-        session_liveness=IdleWindowLiveness(SEVEN_DAYS_SECONDS),
+        session_lifetime=SessionLifetime(SEVEN_DAYS_SECONDS, THIRTY_DAYS_SECONDS),
     )
     response = app.issue()
 

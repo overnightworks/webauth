@@ -11,13 +11,18 @@ import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
 
 from webauth import WebAuthError
-from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.config import (
+    MAX_SESSION_LIFETIME_SECONDS,
+    SessionLifetime,
+    WebAuthConfig,
+    install_web_auth_config,
+)
 from webauth.cookies import (
     DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
@@ -55,7 +60,6 @@ from webauth.jwt_verification import (
     Rejected,
     VerifiedClaims,
 )
-from webauth.liveness import ExpiryColumnLiveness, IdleWindowLiveness
 from webauth.middleware import (
     BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
@@ -111,7 +115,6 @@ from webauth.ports import (
     AuthenticatedUser,
     RateLimitBackend,
     SessionIdentityChanged,
-    SessionLivenessPolicy,
     SessionRecord,
     SessionRecordStore,
     SubjectUserStore,
@@ -138,6 +141,7 @@ class HostSession:
     ip_address: str
     user_agent: str
     user: UserRecord
+    created_at: datetime
     expires_at: datetime
 
 
@@ -157,13 +161,15 @@ class HostSessions:
         self, user_id: str, expires_at: datetime, *, ip_address: str, user_agent: str,
     ) -> SessionRecord:
         user = HostAccount(user_id, "someone", "user")
-        return HostSession("id", user_id, ip_address, user_agent, user, expires_at)
+        return HostSession(
+            "id", user_id, ip_address, user_agent, user, datetime.now(UTC), expires_at,
+        )
 
     def load(self, session_id: str) -> SessionRecord | None:
         return None
 
     def touch(
-        self, record: SessionRecord, *, ip_address: str, user_agent: str, now: datetime,
+        self, session_id: str, *, expires_at: datetime, ip_address: str, user_agent: str,
     ) -> bool:
         return True
 
@@ -196,13 +202,7 @@ class HostRateLimits:
         return True
 
 
-class HostLiveness:
-    def admits_stored_session(self, record: HostSession, now: datetime) -> bool:
-        return record.expires_at > now
-
-
 def a_host_configures_without_local_credentials() -> WebAuthConfig:
-    liveness: SessionLivenessPolicy[HostSession] = HostLiveness()
     return WebAuthConfig(
         session_secret=SecretStr("x" * 32),
         trusted_proxies=TrustedProxies.parse("127.0.0.1"),
@@ -210,7 +210,7 @@ def a_host_configures_without_local_credentials() -> WebAuthConfig:
         allowed_hosts_exact=frozenset({"host.example"}),
         allowed_hosts_patterns=(re.compile(r".*\.example"),),
         cookie_max_age_seconds=3600,
-        session_liveness=liveness,
+        session_lifetime=SessionLifetime(idle_seconds=3600, absolute_max_age_seconds=86400),
     )
 
 
@@ -369,15 +369,16 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
         BodySizeLimitMiddleware, BodySizePolicy, CsrfOriginMiddleware,
         CsrfTokenMiddleware, DEFAULT_CSRF_COOKIE_NAME, DEFAULT_PERMISSIONS_POLICY,
-        DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, ExpiryColumnLiveness,
-        IdleWindowLiveness, IpRateLimitMiddleware, JwtVerifier,
+        DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,
         KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
         MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
         MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock,
         LOGOUT_TOKEN_MAX_AGE_SECONDS, OidcClientConfig,
         PENDING_LOGIN_MAX_AGE_SECONDS,
         PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
-        Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionRecordStore,
+        Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionLifetime,
+        MAX_SESSION_LIFETIME_SECONDS,
+        SessionRecordStore,
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,

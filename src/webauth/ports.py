@@ -30,7 +30,6 @@ __all__ = [
     "RateLimitBackend",
     "SessionIdentityChange",
     "SessionIdentityChanged",
-    "SessionLivenessPolicy",
     "SessionRecord",
     "SessionRecordStore",
     "SessionReference",
@@ -67,10 +66,9 @@ class UserRecord(Protocol):
 class SessionRecord(Protocol):
     """One stored session and the account it belongs to.
 
-    The fields every liveness policy leaves alone: identity and origin. When
-    and whether the session still stands is the policy's to read from the
-    concrete record its own store produces — the base contract assumes no
-    ``created_at``, ``expires_at``, or ``last_seen``.
+    ``created_at`` and ``expires_at`` are the stored instants the library's
+    ``WebAuthConfig.session_lifetime`` is judged against. A timestamp without
+    an offset is read as UTC.
     """
 
     id: str
@@ -78,6 +76,12 @@ class SessionRecord(Protocol):
     ip_address: str
     user_agent: str
     user: UserRecord
+
+    @property
+    def created_at(self) -> datetime: ...
+
+    @property
+    def expires_at(self) -> datetime: ...
 
 
 class SubjectUserStore(Protocol):
@@ -150,13 +154,13 @@ class SessionRecordStore(Protocol):
 
     def touch(
         self,
-        record: SessionRecord,
+        session_id: str,
         *,
+        expires_at: datetime,
         ip_address: str,
         user_agent: str,
-        now: datetime,
     ) -> bool:
-        """Renew ``record`` in place, and say whether a stored row was renewed.
+        """Renew the session in place, and say whether a stored row was renewed.
 
         ``True``: the stored row was renewed. ``False``: the row is gone and
         nothing was written; the request is refused like an expired session.
@@ -164,9 +168,8 @@ class SessionRecordStore(Protocol):
         session deleted meanwhile stays deleted. Any other answer raises
         ``TypeError``: answer ``rowcount == 1``, not ``rowcount``.
 
-        The store computes its own new expiry from the max age it was built
-        with; the caller passes only ``now``, read from the host's
-        ``WebAuthConfig.wall_clock``.
+        The store writes the ``expires_at`` it is given and computes none of
+        its own: the library alone applies ``WebAuthConfig.session_lifetime``.
         """
         ...
 
@@ -179,19 +182,6 @@ class SessionRecordStore(Protocol):
 
     def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
         """Drop the oldest sessions above ``max_sessions``, newest kept."""
-        ...
-
-
-class SessionLivenessPolicy[StoredSessionT](Protocol):
-    """Whether a session still stands, decided without reading the wall clock.
-
-    ``now`` is passed in by ``dependencies`` from the host's
-    ``WebAuthConfig.wall_clock``, so a policy is a pure function of a session
-    and that instant. The session loaded from the store is judged whole.
-    """
-
-    def admits_stored_session(self, record: StoredSessionT, now: datetime) -> bool:
-        """Whether a session loaded from the store still stands at ``now``."""
         ...
 
 
