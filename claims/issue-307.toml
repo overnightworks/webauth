@@ -1,7 +1,0 @@
-claim_id = "16bf1434d0cc49baae7a364aa23b4abc"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "9135eeff95fe2669cd5405126203df2f384c4164"
-branch = "claude/issue-307-key-set-tests-in-owner"
-scope = ["tests/test_https_client.py", "tests/test_jwt_verification.py"]
-opened_commit = "0f8472a15e32f67164dcbe8003c0035f2c8c93a6"
