@@ -20,7 +20,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
   expiry it is given and computes none of its own. A loaded session is admitted
   only when `now <= expires_at <= min(now + idle + 60 s, created_at + cap)`, and an
   admitted one is renewed to `min(now + idle, created_at + cap)`, so a session
-  never outlives its cap. Migration: songmaker sets `SessionLifetime(idle, cap)`,
+  never outlives its cap. `SessionLifetime` refuses an `absolute_max_age_seconds`
+  above 400 days (`webauth.config.MAX_SESSION_LIFETIME_SECONDS`, the browser's cookie
+  limit), and a session created more than 60 s in the future is refused. Migration: songmaker sets `SessionLifetime(idle, cap)`,
   and its store writes the given `expires_at` and drops its own arithmetic;
   presentator's sessions table gains `expires_at` beside `created_at` in place of
   `last_seen`, its `create` stores the given expiry and its `touch` writes the given

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import TYPE_CHECKING, Final, get_args
 
 from starlette.requests import HTTPConnection
@@ -44,6 +43,7 @@ if TYPE_CHECKING:
     from webauth.proxies import TrustedProxies
 
 __all__ = [
+    "MAX_SESSION_LIFETIME_SECONDS",
     "SessionLifetime",
     "WebAuthConfig",
     "install_web_auth_config",
@@ -75,6 +75,10 @@ class _DefaultCookieName(str):
     __slots__ = ()
 
 
+MAX_SESSION_LIFETIME_SECONDS: Final = 400 * 24 * 60 * 60
+"""Browsers cap a cookie's lifetime at 400 days, so no session may be configured longer."""
+
+
 @dataclass(frozen=True)
 class SessionLifetime:
     """How long a session stands: idle between requests, and at most from creation."""
@@ -87,11 +91,11 @@ class SessionLifetime:
         require_positive_whole_number(
             "absolute_max_age_seconds", self.absolute_max_age_seconds, unit="seconds",
         )
-        for name in ("idle_seconds", "absolute_max_age_seconds"):
-            try:
-                timedelta(seconds=getattr(self, name))
-            except OverflowError:
-                raise ValueError(f"{name} is longer than a timedelta can hold") from None
+        if self.absolute_max_age_seconds > MAX_SESSION_LIFETIME_SECONDS:
+            raise ValueError(
+                "absolute_max_age_seconds must not exceed "
+                f"{MAX_SESSION_LIFETIME_SECONDS} seconds (400 days)",
+            )
         if self.idle_seconds > self.absolute_max_age_seconds:
             raise ValueError(
                 "idle_seconds must not exceed absolute_max_age_seconds; "

@@ -924,7 +924,8 @@ session's lifetime; the host's store only writes the expiry it is given.
   "WebSocket handshakes").
 - `SessionLifetime.idle_seconds` is how long a session stands without a request.
 - `SessionLifetime.absolute_max_age_seconds` is how long a session may live from
-  its `created_at`, however recently it was used. The idle window is at most the cap.
+  its `created_at`, however recently it was used. The idle window is at most the cap, and the cap is at most 400 days
+  (`MAX_SESSION_LIFETIME_SECONDS`), the longest a browser keeps a cookie.
 
 `WebAuthConfig.session_lifetime` is required. The library reads `config.wall_clock`
 once per request, as whole seconds, and admits a loaded session only when
@@ -932,7 +933,8 @@ once per request, as whole seconds, and admits a loaded session only when
 is neither past nor further out than the lifetime allows, with 60 seconds of
 tolerance for the idle window and none for the cap. A session outside that is refused as
 `SESSION_ENDED_OR_EXPIRED` and not renewed. An admitted session is renewed to
-`min(now + idle, created_at + cap)`, so it never outlives its cap. A stored
+`min(now + idle, created_at + cap)`, so it never outlives its cap. A session
+created more than 60 seconds in the future is refused too. A stored
 timestamp without an offset is read as UTC.
 
 Every lifetime — `cookie_max_age_seconds`, `idle_seconds` and

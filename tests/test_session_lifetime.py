@@ -69,6 +69,10 @@ def at_offset(hours: int) -> Callable[[datetime], datetime]:
         pytest.param(
             FIVE_MINUTES, THIRTY_DAYS, 401, None, id="refused when a store wrote a 30-day expiry",
         ),
+        pytest.param(-TOLERANCE, IDLE, 200, IDLE, id="admitted created at the tolerance ahead"),
+        pytest.param(
+            -TOLERANCE - SECOND, IDLE, 401, None, id="refused created past the tolerance ahead",
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -183,6 +187,8 @@ def test_a_session_renewed_across_a_clock_change_is_held_at_the_cap_instant() ->
     [
         pytest.param("created_at", datetime.max, True, id="created at the latest, expired"),
         pytest.param("created_at", datetime.min, True, id="created at the earliest, expired"),
+        pytest.param("created_at", datetime.max, False, id="created at the latest, live"),
+        pytest.param("created_at", datetime.min, False, id="created at the earliest, live"),
         pytest.param("expires_at", datetime.max, False, id="expiring at the latest"),
         pytest.param("expires_at", datetime.min, False, id="expiring at the earliest"),
     ],
@@ -193,22 +199,10 @@ def test_a_stored_instant_at_the_edge_of_the_calendar_is_refused_not_a_server_er
     other_field_expired: bool,
     stored_as: Callable[[datetime], datetime],
 ) -> None:
-    record = a_session(now=FIXED_INSTANT, remaining=-SECOND if other_field_expired else IDLE)
+    record = a_session(now=FIXED_INSTANT, remaining=-SECOND if other_field_expired else TOLERANCE)
     setattr(record, edge_field, stored_as(edge))
     app = an_auth_app(record, wall_clock=FIXED_WALL_CLOCK)
 
     response = app.get("/me", cookie=app.signed_cookie())
 
     assert response.status_code == 401
-
-
-def test_a_lifetime_longer_than_the_calendar_still_admits_and_renews_an_ordinary_session() -> None:
-    record = a_session(now=FIXED_INSTANT)
-    app = an_auth_app(
-        record, session_lifetime=SessionLifetime(3600, 10**12), wall_clock=FIXED_WALL_CLOCK,
-    )
-
-    response = app.get("/me", cookie=app.signed_cookie())
-
-    assert response.status_code == 200
-    assert record.expires_at == FIXED_INSTANT + IDLE

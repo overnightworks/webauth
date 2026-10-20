@@ -358,7 +358,8 @@ def _is_admitted(
     created_at = _as_instant(record.created_at)
     expires_at = _as_instant(record.expires_at)
     return (
-        now <= expires_at
+        created_at <= now + _EXPIRY_TOLERANCE
+        and now <= expires_at
         and expires_at - now <= timedelta(seconds=lifetime.idle_seconds) + _EXPIRY_TOLERANCE
         and expires_at - created_at <= timedelta(seconds=lifetime.absolute_max_age_seconds)
     )
