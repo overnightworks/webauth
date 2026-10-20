@@ -29,6 +29,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `NaN`, `Infinity`, `-Infinity` and `1e999999` (read as infinity) are accepted; nesting
   deeper than 8 is accepted up to the parser's recursion limit; UTF-16, UTF-32, a UTF-8 byte order mark and UTF-8-encoded
   surrogates are accepted. Every document accepted before parses to the same value.
+- A CSP source in `added_sources` is no longer checked against the CSP grammar. It is one
+  token of printable ASCII without `;` or `,`, kept verbatim, and keyword case is not
+  folded, so sources 0.18.0 refused now pass: for example `'trusted-types-eval'`, `'none'`,
+  nonces, hashes or keywords in `form-action` and `frame-ancestors`, and typos, which the
+  browser ignores. A source with a space, a control character or a non-ASCII character is
+  still a `ValueError`.
 
 **Added**
 
@@ -37,15 +43,6 @@ Versions before 0.3.0 and releases without an entry here are described in the
   response has started. A host's middleware or log can catch it by name. It is
   deliberately not a `WebAuthError`, so a host's `WebAuthError` handler cannot answer
   in place of the 413.
-
-**Changed**
-
-- A CSP source in `added_sources` is no longer checked against the CSP grammar. It is one
-  token of printable ASCII without `;` or `,`, kept verbatim, and keyword case is not
-  folded, so sources 0.18.0 refused now pass: for example `'trusted-types-eval'`, `'none'`,
-  nonces, hashes or keywords in `form-action` and `frame-ancestors`, and typos, which the
-  browser ignores. A source with a space, a control character or a non-ASCII character is
-  still a `ValueError`.
 
 ## 0.18.0
 
