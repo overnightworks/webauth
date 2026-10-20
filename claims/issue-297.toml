@@ -1,8 +1,0 @@
-claim_id = "35d9947422494e76b3d17616a110691c"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "e3d7993d634e1183491bde07b64cf597b4586bad"
-branch = "claude/issue-297-ci-proves-the-types"
-scope = [".github/workflows/ci.yml", "AGENTS.md", "CHANGELOG.md", "e2e/oidc/host_app.py", "pyproject.toml", "src/webauth/dependencies.py", "tests/test_dependencies.py", "tests/test_oidc_login.py", "tests/test_session_lifetime.py", "tests/test_websocket_auth.py", "tests/webauth_arrangement.py"]
-opened_commit = "b1b87ad4735c251c79a3501d50c04b85f5334b7b"
-whole_reason = "One type gate carried through CI, the pyright include, the dependency types and every file the gate then checks; split, CI would go red on the arrangement or the e2e host the other half fixes."
