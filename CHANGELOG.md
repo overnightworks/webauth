@@ -13,6 +13,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 
+**Changed**
+
+- A CSP source in `added_sources` is one printable-ASCII token kept verbatim: keyword case
+  is no longer folded, and a source, or a `content_security_policy` or `permissions_policy`
+  string, outside printable ASCII is refused with a `ValueError`.
+
 ## 0.18.0
 
 **Breaking**
