@@ -254,8 +254,7 @@ class Proof(RunRecord):
 
     def fresh_admin(self) -> Admin:
         assert self.stack is not None
-        admin = self.stack.admin()
-        return admin
+        return self.stack.admin()
 
     def set_user_enabled(self, user_id: str, enabled: bool) -> None:
         self.fresh_admin().put(f"/{REALM}/users/{user_id}", {"enabled": enabled})
