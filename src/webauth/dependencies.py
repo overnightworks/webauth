@@ -83,9 +83,9 @@ class AuthDependencies:
     identity behind all three.
     """
 
-    current_user: Callable[..., ports.AuthenticatedUser]
-    admin_user: Callable[..., ports.AuthenticatedUser]
-    verified_session_id: Callable[..., str]
+    current_user: Callable[[Request, ports.SessionRecordStore], ports.AuthenticatedUser]
+    admin_user: Callable[[Request, ports.AuthenticatedUser], ports.AuthenticatedUser]
+    verified_session_id: Callable[[Request, ports.AuthenticatedUser], str]
 
 
 def current_user_dependency(

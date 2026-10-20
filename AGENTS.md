@@ -78,6 +78,7 @@ uv run ruff check src tests e2e
 uv run lint-imports
 uv run --locked deptry src
 uv run --group e2e pyright
+uv run --group dev pyright --verifytypes webauth --ignoreexternal
 tests/typing/check_against_wheel.sh
 ```
 

@@ -87,7 +87,12 @@ testpaths = ["tests"]
 DEP002 = ["redis"]
 
 [tool.pyright]
-include = ["src/webauth", "e2e"]
+include = [
+    "src/webauth",
+    "e2e",
+    "tests/webauth_arrangement.py",
+    "tests/oidc_arrangement.py",
+]
 pythonVersion = "3.12"
 
 [tool.uv]

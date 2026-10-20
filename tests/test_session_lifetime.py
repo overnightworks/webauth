@@ -11,7 +11,7 @@ from webauth_arrangement import (
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
-    SESSION_MAX_AGE_SECONDS,
+    SESSION_IDLE_SECONDS,
     AuthApp,
     FakeSessionRecord,
     SessionsAnsweringTouch,
@@ -23,7 +23,7 @@ from webauth.config import SessionLifetime
 
 THIRTY_DAYS = timedelta(days=30)
 SECOND = timedelta(seconds=1)
-IDLE = timedelta(seconds=SESSION_MAX_AGE_SECONDS)
+IDLE = timedelta(seconds=SESSION_IDLE_SECONDS)
 TOLERANCE = timedelta(seconds=60)
 CAP = timedelta(seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS)
 HALF_AN_HOUR = timedelta(minutes=30)

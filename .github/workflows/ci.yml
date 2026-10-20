@@ -42,6 +42,9 @@ jobs:
       - name: Pyright
         run: uv run --locked --group dev --group e2e pyright --stats
 
+      - name: Public types are fully annotated
+        run: uv run --locked --group dev pyright --verifytypes webauth --ignoreexternal
+
       - name: The typing hosts in tests/typing type-check against the built wheel
         run: tests/typing/check_against_wheel.sh
 

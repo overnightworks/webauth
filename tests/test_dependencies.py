@@ -17,7 +17,7 @@ from webauth_arrangement import (
     MEMBER_ROLE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
-    SESSION_MAX_AGE_SECONDS,
+    SESSION_IDLE_SECONDS,
     UNAUTHENTICATED_RESPONSE_PATH,
     AuthApp,
     FakeSessionRecord,
@@ -302,7 +302,7 @@ def test_a_session_a_second_before_expiry_on_the_configured_clock_is_renewed_fro
     response = app.get("/me", cookie=app.signed_cookie())
 
     assert response.status_code == 200
-    assert record.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
+    assert record.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS)
 
 
 def test_a_session_ended_between_load_and_touch_is_refused() -> None:

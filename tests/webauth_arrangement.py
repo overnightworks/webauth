@@ -79,7 +79,7 @@ ADMIN_ROLE = "admin"
 MEMBER_ROLE = "user"
 SPEC_WITH_CONCURRENT_READER = "2.3"
 SPEC_WITHOUT_CONCURRENT_READER = "2.4"
-SESSION_MAX_AGE_SECONDS = 3600
+SESSION_IDLE_SECONDS = 3600
 SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
 DOCUMENTED_ID_TOKEN_HINT_BOUND = 3_072
 SEVEN_DAYS_SECONDS = 7 * 24 * 3600
@@ -96,7 +96,7 @@ DRIVE_DEADLINE_SECONDS: Final = 5
 
 
 
-def web_auth_config_arguments() -> dict[str, object]:
+def web_auth_config_arguments() -> dict[str, Any]:
     """Every argument a complete configuration is built from."""
     return {
         "session_secret": SecretStr("s" * MIN_SESSION_SECRET_CHARS),
@@ -105,13 +105,13 @@ def web_auth_config_arguments() -> dict[str, object]:
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "session_lifetime": SessionLifetime(
-            idle_seconds=SESSION_MAX_AGE_SECONDS,
+            idle_seconds=SESSION_IDLE_SECONDS,
             absolute_max_age_seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS,
         ),
     }
 
 
-def a_web_auth_config(**overrides: object) -> WebAuthConfig:
+def a_web_auth_config(**overrides: Any) -> WebAuthConfig:
     """A complete configuration; a keyword replaces the field it names."""
     return WebAuthConfig(**{**web_auth_config_arguments(), **overrides})
 
@@ -172,7 +172,7 @@ def a_policy_rate_limited_client(
     policy: RateLimitPolicy,
     *,
     paths: tuple[str, ...] = (API_PATH,),
-    **config_overrides: object,
+    **config_overrides: Any,
 ) -> TestClient:
     """A client whose requests spend from ``policy`` over ``rate_limits``.
 
@@ -194,7 +194,7 @@ def a_rate_limited_client(
     *,
     max_requests: int,
     window_seconds: int = DEFAULT_RATE_WINDOW_SECONDS,
-    **config_overrides: object,
+    **config_overrides: Any,
 ) -> TestClient:
     """A client whose every request spends the one default budget of ``rate_limits``."""
     policy = RateLimitPolicy(
@@ -385,12 +385,13 @@ class SessionRecordsInMemory:
         self._records.pop(session_id, None)
 
     def delete_for_user(self, user_id: str) -> int:
-        session_ids = [
-            record.id for record in self._records.values() if record.user.id == user_id
-        ]
-        for session_id in session_ids:
-            self._remove_record(session_id)
-        return len(session_ids)
+        sessions = self.sessions_of(user_id)
+        for record in sessions:
+            self._remove_record(record.id)
+        return len(sessions)
+
+    def sessions_of(self, user_id: str) -> list[FakeSessionRecord]:
+        return [record for record in self._records.values() if record.user.id == user_id]
 
     def list_active(self) -> list[FakeSessionRecord]:
         return list(self._records.values())
@@ -401,7 +402,7 @@ class SessionRecordsInMemory:
     def prune_overflow(self, user_id: str, keep_newest: int) -> None:
         _require_held_lock(self._lock)
         records = sorted(
-            (record for record in self._records.values() if record.user.id == user_id),
+            self.sessions_of(user_id),
             key=lambda record: record.created_at,
             reverse=True,
         )
@@ -612,7 +613,7 @@ def an_auth_app(
     *,
     login_redirect: LoginRedirect | None = None,
     sessions: SessionRecordsInMemory | None = None,
-    **config_overrides: object,
+    **config_overrides: Any,
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route.
 
