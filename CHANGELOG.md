@@ -158,6 +158,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   from 0 up; 0 sends `max-age=0`, which rolls a pin back) and
   `hsts_include_subdomains` (default `True`). The defaults send today's header;
   `cookie_secure` still decides whether HSTS is sent at all.
+- `webauth.dependencies.admit_session(session_id, *, sessions, config)` decides a
+  session id with no request: it returns the `AuthenticatedUser` after renewing the
+  session, or `ConnectionRefusal.SESSION_ENDED_OR_EXPIRED` for an unknown id, a session
+  outside its lifetime or a `touch` that finds no row, and renews nothing it refuses.
+  `current_user_dependency` and `authenticate_websocket` ask it after their cookie read.
 
 **Fixed**
 

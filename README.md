@@ -693,6 +693,15 @@ is refused rather than resolved to either: `current_user_dependency` answers
 401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
 session cookie itself calls this function instead of `request.cookies`.
 
+A host that reads the session id itself, for example through
+`session_id_from_request` or its own socket layer, decides it with
+`webauth.dependencies.admit_session(session_id, *, sessions, config)`. It needs
+no request and sets no cookie. It returns the `webauth.ports.AuthenticatedUser`
+after renewing the session, or `ConnectionRefusal.SESSION_ENDED_OR_EXPIRED`
+for an unknown id, a session outside its lifetime, or a `touch` that answers
+`False`; a refused session is not renewed. A failing store, or a `touch` that
+does not answer a `bool`, raises.
+
 ## WebSocket handshakes
 
 A browser sends the session cookie on a cross-site WebSocket handshake too,
@@ -720,7 +729,7 @@ allowed `Origin` too. The `Origin` keeps a foreign page from using a visitor's
 cookie; it is no credential.
 
 Then the session is decided exactly as `current_user_dependency` decides it
-for a request, from the same code: an admitted handshake renews the session.
+for a request, by `admit_session`: an admitted handshake renews the session.
 A failing store, or a `touch` that does not answer a `bool`, raises instead of
 refusing, and an exception never accepts the socket.
 
@@ -1170,7 +1179,7 @@ It owns the machinery an application should not rebuild:
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
 | `webauth.cookies` | The signed session cookie, the CSRF token bound to it, the pending-login cookie and the ID token hint cookie, issued and cleared |
-| `webauth.dependencies` | Turning a signed cookie into the account that made the request or opened a WebSocket handshake (`authenticate_websocket`) |
+| `webauth.dependencies` | Turning a signed cookie into the account that made the request or opened a WebSocket handshake (`authenticate_websocket`), and a session id into that account without a request (`admit_session`) |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
