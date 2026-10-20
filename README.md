@@ -812,8 +812,9 @@ so a host that leaves it out keeps every one of those features off. The value
 replaces the whole header, so a host that records audio names every feature it
 still wants off, for example
 `permissions_policy="camera=(), microphone=(self), geolocation=()"`. A value
-outside printable ASCII and space, such as one with CR, LF or a non-ASCII character,
-is refused when the policy is built; `content_security_policy` is held to the same bound.
+may hold visible ASCII, space and tab; anything else, such as CR, LF, NUL, DEL or a
+non-ASCII character, is refused when the policy is built; `content_security_policy` is
+held to the same bound.
 
 A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only
 this exact host can set it: a sibling subdomain cannot plant one with
