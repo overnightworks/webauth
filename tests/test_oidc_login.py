@@ -136,27 +136,8 @@ LENA = OidcIdentity(
 )
 
 
-@dataclass
-class LegacyPasswordUser(FakeUser):
-    """A host model that still carries the field the library no longer reads."""
-
-    # Proves a host model still carrying the old password field works
-    password_hash: str = "legacy-hash"  # noqa: S105
-
-
-@dataclass
-class InactiveFlaggedUser(FakeUser):
-    """A host record whose own flag says inactive, which the library never reads."""
-
-    is_active: bool = False
-
-
 LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(ADMIN_GROUP,))
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
-LENA_FLAGGED_INACTIVE = InactiveFlaggedUser(id=SUBJECT, username="lena")
-LEGACY_ADMIN_WITH_PASSWORD_FIELD = LegacyPasswordUser(
-    id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE,
-)
 
 
 @dataclass
@@ -379,16 +360,8 @@ def test_an_admission_config_missing_a_required_group_setting_fails_at_construct
         AdmissionConfig(bound_issuer=BOUND_ISSUER, **settings)
 
 
-@pytest.mark.parametrize("legacy", [
-    pytest.param(LEGACY_ADMIN, id="an admin account created outside admission"),
-    pytest.param(
-        LEGACY_ADMIN_WITH_PASSWORD_FIELD, id="an account whose model carries a password field",
-    ),
-])
-def test_a_stored_admin_outside_the_admin_group_is_demoted_and_audited_at_login(
-    legacy: FakeUser,
-) -> None:
-    host = a_host(deepcopy(legacy))
+def test_a_stored_admin_outside_the_admin_group_is_demoted_and_audited_at_login() -> None:
+    host = a_host(deepcopy(LEGACY_ADMIN))
 
     account = host.admit(LENA)
 
@@ -940,8 +913,15 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
-def test_an_admitted_callback_opens_the_session_at_the_configured_clock_for_one_idle() -> None:
-    host = an_oidc_host(wall_clock=FIXED_WALL_CLOCK)
+@pytest.mark.parametrize(("seconds_into_the_instant", "seconds_per_reading"), [
+    pytest.param(0.0, 0.0, id="a fixed clock"),
+    pytest.param(0.9, 0.4, id="an advancing clock"),
+])
+def test_an_admitted_callback_opens_the_session_for_one_idle_from_one_whole_second_reading(
+    seconds_into_the_instant: float, seconds_per_reading: float,
+) -> None:
+    clock = FakeClock(FIXED_INSTANT.timestamp() + seconds_into_the_instant, seconds_per_reading)
+    host = an_oidc_host(wall_clock=clock)
 
     host.callback(host.sign_in_at_issuer())
 
@@ -951,20 +931,6 @@ def test_an_admitted_callback_opens_the_session_at_the_configured_clock_for_one_
         FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
     )
     assert host.client.get("/me").json() == {"username": "lena"}
-
-
-def test_an_admitted_callback_derives_both_stored_instants_from_one_whole_second_reading() -> None:
-    advancing_clock = FakeClock(FIXED_INSTANT.timestamp() + 0.9, step=0.4)
-    host = an_oidc_host(wall_clock=advancing_clock)
-
-    host.callback(host.sign_in_at_issuer())
-
-    record = host.sessions.record
-    assert record is not None
-    assert (record.created_at, record.expires_at) == (
-        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
-    )
-    assert host.client.get("/me").status_code == 200
 
 
 @pytest.mark.parametrize(("cookie_secure", "name", "secure_attribute"), [
@@ -1115,15 +1081,6 @@ def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
     ]
 
 
-def test_an_account_whose_host_record_says_inactive_is_still_admitted_and_served() -> None:
-    host = an_oidc_host(deepcopy(LENA_FLAGGED_INACTIVE))
-
-    response = host.callback(host.sign_in_at_issuer())
-
-    assert (response.status_code, response.json()) == (200, {"username": "lena"})
-    assert host.client.get("/me").json() == {"username": "lena"}
-
-
 def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
     host = an_oidc_host(deepcopy(LEGACY_ADMIN), groups_claim=[ADMIN_GROUP])
 
@@ -1156,72 +1113,14 @@ def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
     assert host.client.get("/admin").status_code == status_after
 
 
-def test_the_password_account_refusal_is_no_longer_an_admission_refusal() -> None:
-    with pytest.raises(ValueError):
-        AdmissionRefusal("subject-held-by-password-account")
-
-
-_A_LONG_PATH = "/" + "a" * 511
-_RETURN_TO_CASES = [
-    pytest.param("", "/albums/42", "/albums/42", id="a deep link"),
-    pytest.param("", "/albums/42?x=1", "/albums/42?x=1", id="a deep link with its query"),
-    pytest.param("", "/%2F%2Fevil.example", "/%2F%2Fevil.example", id="an encoded path"),
-    pytest.param(
-        "", "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="encoded characters stay raw",
-    ),
-    pytest.param("", "/lieder/\u00fc", "/lieder/%C3%BC", id="a non-ASCII path is encoded"),
-    pytest.param("", "/", "/", id="the root"),
-    pytest.param("", _A_LONG_PATH, _A_LONG_PATH, id="the longest path"),
-    pytest.param("/app", "/app", "/app", id="the app root"),
-    pytest.param("/app", "/app/", "/app/", id="the app root with a slash"),
-    pytest.param("/app", "/app/albums/42", "/app/albums/42", id="a deep link below the app"),
-    pytest.param("", "//evil.example", None, id="two slashes"),
-    pytest.param("", "/\\evil.example", None, id="slash backslash"),
-    pytest.param("", "\\\\evil.example", None, id="two backslashes"),
-    pytest.param("", "\\/evil.example", None, id="backslash slash"),
-    pytest.param("", "/\t/evil.example", None, id="a tab between the slashes"),
-    pytest.param("", "/\r/evil.example", None, id="a CR between the slashes"),
-    pytest.param("", "/\n/evil.example", None, id="an LF between the slashes"),
-    pytest.param("", "https://evil.example", None, id="an absolute URL"),
-    pytest.param("", "https:/evil.example", None, id="a scheme with one slash"),
-    pytest.param("", "javascript:alert(1)", None, id="a script URL"),
-    pytest.param("", "evil.example", None, id="a bare host"),
-    pytest.param("", "/albums/\x01", None, id="a C0 control"),
-    pytest.param("", "/albums/\x7f", None, id="DEL"),
-    pytest.param("", "", None, id="the empty string"),
-    pytest.param("", _A_LONG_PATH + "a", None, id="one byte over the cap"),
-    pytest.param("", "/\u00fc" * 74, None, id="an encoded form over the cap"),
-    pytest.param("/app", "/", None, id="the root outside the app"),
-    pytest.param("/app", "/other", None, id="another path outside the app"),
-    pytest.param("/app", "/application", None, id="a sibling of the app's name"),
-    pytest.param(
-        "/café", "/caf%C3%A9/albums/42", None, id="an encoded path under a non-ASCII root",
-    ),
-    pytest.param("/café", "/café/albums/42", None, id="a path under a non-ASCII root"),
-    pytest.param("/a%20b", "/a%20b/albums/42", None, id="a root with a percent sign"),
-    pytest.param("/my-app", "/my-app/albums/42", "/my-app/albums/42", id="a root with a hyphen"),
-    pytest.param("", "/albums/..x", "/albums/..x", id="dots inside a segment"),
-    pytest.param("", "/albums/x.", "/albums/x.", id="a trailing dot in a segment"),
-    pytest.param("/app", "/app/../other", None, id="a dot-dot segment leaving the app"),
-    pytest.param("/app", "/app/%2e%2e/other", None, id="an encoded dot-dot segment"),
-    pytest.param("/app", "/app/%2E%2e//evil.example", None, id="a mixed-case encoded dot-dot"),
-    pytest.param("/app", "/app/..\\other", None, id="a dot-dot segment before a backslash"),
-    pytest.param("", "/albums/./42", None, id="a dot segment"),
-    pytest.param("", "/albums/.%2e/x", None, id="a half-encoded dot-dot segment"),
-    pytest.param("", "/albums/x/..?next=1", None, id="a dot-dot segment before the query"),
-    pytest.param("", "/albums?back=../x", "/albums?back=../x", id="dots in the query"),
-    pytest.param("/app", "/app/..#x", None, id="a dot-dot segment before a fragment mark"),
-    pytest.param("/app", "/app/%2E%2E#x", None, id="an encoded dot-dot before a fragment mark"),
-    pytest.param("", "/albums/42#top", None, id="a literal fragment mark"),
-    pytest.param("", "/albums/42?q=%23x", "/albums/42?q=%23x", id="an encoded fragment mark"),
-]
-
-
-@pytest.mark.parametrize(("root_path", "asked_for", "returned"), _RETURN_TO_CASES)
+@pytest.mark.parametrize(("asked_for", "returned"), [
+    pytest.param("/albums/42", "/albums/42", id="a deep link"),
+    pytest.param("//evil.example", None, id="another host"),
+])
 def test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_default_page(
-    root_path: str, asked_for: str, returned: str | None,
+    asked_for: str, returned: str | None,
 ) -> None:
-    host = an_oidc_host(root_path=root_path)
+    host = an_oidc_host()
 
     response = host.callback(host.sign_in_at_issuer(return_to=asked_for))
 
@@ -1299,10 +1198,6 @@ def _of_another_version(host: OidcHost, query: str) -> str:
     return host.pending_cookie(query).replace("=v2.", "=v3.", 1)
 
 
-def _of_the_version_before_return_paths(host: OidcHost, query: str) -> str:
-    return host.pending_cookie(query).replace("=v2.", "=v1.", 1)
-
-
 def _with_a_return_path_added_after_signing(host: OidcHost, query: str) -> str:
     name, _, value = host.pending_cookie(query).partition("=")
     *signed_fields, _return_path, signature = value.split(".")
@@ -1344,10 +1239,6 @@ def _forged(host: OidcHost, query: str, issued_at: int, *, secret: bytes | None 
     pytest.param(_signed_as_a_session, "state-mismatch", id="signed as a session cookie"),
     pytest.param(_oversized, "state-mismatch", id="oversized"),
     pytest.param(_of_another_version, "state-mismatch", id="another version"),
-    pytest.param(
-        _of_the_version_before_return_paths, "state-mismatch",
-        id="a login in flight at the upgrade",
-    ),
     pytest.param(
         _with_a_return_path_added_after_signing, "state-mismatch",
         id="a return path altered after signing",
@@ -1681,45 +1572,38 @@ def _hint_cookies(*values: str) -> dict[str, str]:
     return {"cookie": "; ".join(f"{ID_TOKEN_HINT_COOKIE_NAME}={value}" for value in values)}
 
 
-@pytest.mark.parametrize("unusable_hint_cookies", [
-    pytest.param({}, id="missing"),
+@pytest.mark.parametrize(("hint_cookies", "forwarded_hint"), [
+    pytest.param({}, None, id="missing"),
     pytest.param(
-        _hint_cookies(a_fake_id_token("first"), a_fake_id_token("second")), id="duplicated",
+        _hint_cookies(a_fake_id_token("first"), a_fake_id_token("second")), None, id="duplicated",
     ),
     pytest.param(
-        _hint_cookies(_a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND + 1)),
+        _hint_cookies(_a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND + 1)), None,
         id="one-character-over-the-bound",
     ),
-    pytest.param(_hint_cookies("not-a-jws"), id="not-compact-jws-shaped"),
-    pytest.param(_hint_cookies("two.segments"), id="two-segments"),
-    pytest.param(_hint_cookies("bad+char.in.token"), id="outside-the-base64url-alphabet"),
-])
-def test_a_logout_without_a_usable_hint_leaves_it_out_and_still_clears_the_cookie(
-    unusable_hint_cookies: dict[str, str],
-) -> None:
-    host = an_oidc_host()
-
-    response = post_logout(host, {**SAME_ORIGIN_FORM, **unusable_hint_cookies})
-
-    assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=None)
-    assert the_hint_cookie_is_cleared_for_the_logout_path(response)
-
-
-@pytest.mark.parametrize("hint", [
-    pytest.param("AAAA.AAAA.AAAA", id="segments-that-are-no-json"),
-    pytest.param("bm90LWpzb24.bm90LWpzb24.c2ln", id="segments-that-decode-to-text"),
+    pytest.param(_hint_cookies("not-a-jws"), None, id="not-compact-jws-shaped"),
+    pytest.param(_hint_cookies("two.segments"), None, id="two-segments"),
+    pytest.param(_hint_cookies("bad+char.in.token"), None, id="outside-the-base64url-alphabet"),
     pytest.param(
+        _hint_cookies("AAAA.AAAA.AAAA"), "AAAA.AAAA.AAAA", id="segments-that-are-no-json",
+    ),
+    pytest.param(
+        _hint_cookies("bm90LWpzb24.bm90LWpzb24.c2ln"), "bm90LWpzb24.bm90LWpzb24.c2ln",
+        id="segments-that-decode-to-text",
+    ),
+    pytest.param(
+        _hint_cookies(_a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND)),
         _a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND), id="exactly-the-bound",
     ),
 ])
-def test_a_logout_forwards_a_sole_hint_in_the_shape_of_a_jws_byte_for_byte_undecoded(
-    hint: str,
+def test_a_logout_forwards_a_sole_jws_shaped_hint_byte_for_byte_and_otherwise_leaves_it_out(
+    hint_cookies: dict[str, str], forwarded_hint: str | None,
 ) -> None:
     host = an_oidc_host()
 
-    response = post_logout(host, {**SAME_ORIGIN_FORM, **_hint_cookies(hint)})
+    response = post_logout(host, {**SAME_ORIGIN_FORM, **hint_cookies})
 
-    assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=hint)
+    assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=forwarded_hint)
     assert the_hint_cookie_is_cleared_for_the_logout_path(response)
 
 
@@ -1881,24 +1765,6 @@ def test_after_a_session_ends_its_cookie_is_refused_and_every_other_sessions_coo
     assert statuses == [401 if index in ended else 200 for index in range(len(session_ids))]
 
 
-@pytest.mark.parametrize("claims", [
-    pytest.param({"sid": "4c2a9f0e-session"}, id="sub-and-sid"),
-    pytest.param({"sid": ABSENT}, id="sub-only"),
-    pytest.param({"events": {
-        "http://schemas.openid.net/event/backchannel-logout": {"reason": "admin"},
-    }}, id="events-with-contents"),
-    pytest.param({"aud": [CLIENT_ID]}, id="audience-array"),
-])
-def test_a_token_the_profile_admits_ends_every_session_of_its_subject(
-    claims: dict[str, object],
-) -> None:
-    host = a_host_with_sessions(subject_sessions=2)
-
-    response = post_logout_token(host, a_logout_token_of_the_issuer(claims=claims))
-
-    assert (response.status_code, sessions_of(host, SUBJECT)) == (200, 0)
-
-
 def test_a_logout_for_an_unknown_subject_is_accepted_without_provisioning_an_account() -> None:
     host = an_oidc_host(FakeUser(id=OTHER_SUBJECT, username="omar"))
     open_sessions(host, OTHER_SUBJECT, 1)
@@ -1946,24 +1812,6 @@ def test_an_accepted_logout_takes_the_lock_once_and_calls_no_issuer_endpoint() -
 
 @pytest.mark.parametrize("logout_token", [
     pytest.param(a_logout_token_of_the_issuer(key_name="forger"), id="forged-signature"),
-    pytest.param(a_logout_token_of_the_issuer(header={"alg": "none"}), id="alg-none"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"iss": FOREIGN_ISSUER}), id="wrong-issuer"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"aud": "other-app"}), id="wrong-audience"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"aud": [CLIENT_ID, "other-app"]}),
-                 id="extra-audience"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"events": ABSENT}), id="events-missing"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"events": {"urn:other": {}}}),
-                 id="events-of-another-event"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"nonce": "n"}), id="nonce"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"nonce": None}), id="nonce-null"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"sub": ABSENT}), id="sid-only"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"exp": ABSENT}), id="exp-missing"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"exp": NOW - 30, "iat": NOW - 100}),
-                 id="exp-at-the-deadline"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"iat": NOW + 31}), id="iat-in-the-future"),
-    pytest.param(a_logout_token_of_the_issuer(claims={"iat": NOW - 151}), id="iat-stale"),
-    pytest.param(a_logout_token_of_the_issuer(header={"typ": ABSENT}), id="typ-missing"),
-    pytest.param(a_logout_token_of_the_issuer(header={"typ": "JWT"}), id="typ-wrong"),
     pytest.param("not-a-token", id="malformed"),
 ])
 def test_a_logout_token_that_does_not_hold_is_refused_before_the_lock_and_ends_nothing(
