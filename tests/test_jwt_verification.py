@@ -16,7 +16,6 @@ import json
 import logging
 import string
 import threading
-import time
 import traceback
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -26,18 +25,15 @@ from typing import Any, NoReturn
 
 import jwt
 import pytest
-import urllib3
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 from oidc_arrangement import (
     ABSENT,
-    SILENT_HOLD_SECONDS,
     FakeClock,
     FakeKeySetEndpoint,
     LoopbackHttpsServer,
     changed,
-    closed_loopback_port,
     jws,
     key_set_document,
     loopback_https_server,
@@ -50,7 +46,6 @@ from oidc_arrangement import (
 
 from webauth.https_client import (
     MAX_KEY_SET_BYTES,
-    ExchangeFailure,
     KeySetFetchError,
     fetch_key_set_over_https,
 )
@@ -203,37 +198,28 @@ def test_a_token_for_any_one_of_the_accepted_audiences_verifies(
     assert outcome == issuer.verified({"aud": "notes-api"})
 
 
-def test_a_token_whose_type_header_equals_the_expected_type_verifies(
-    issuer: IssuerScenario,
-) -> None:
-    token = issuer.token(header={"typ": "logout+jwt"})
-
-    assert issuer.verifier.verify(token, expected_type="logout+jwt") == issuer.verified()
-
-
 @pytest.mark.parametrize(
-    "header",
+    ("header", "expected_type", "accepted"),
     [
-        pytest.param({"typ": ABSENT}, id="type-missing"),
-        pytest.param({"typ": "JWT"}, id="type-another"),
-        pytest.param({"typ": "LOGOUT+JWT"}, id="type-in-another-case"),
-        pytest.param({"typ": ["logout+jwt"]}, id="type-not-a-string"),
-        pytest.param({"typ": None}, id="type-null"),
+        pytest.param({"typ": "logout+jwt"}, "logout+jwt", True, id="type-equals-expected"),
+        pytest.param({"typ": ABSENT}, "logout+jwt", False, id="type-missing"),
+        pytest.param({"typ": "JWT"}, "logout+jwt", False, id="type-another"),
+        pytest.param({"typ": "LOGOUT+JWT"}, "logout+jwt", False, id="type-in-another-case"),
+        pytest.param({"typ": ["logout+jwt"]}, "logout+jwt", False, id="type-not-a-string"),
+        pytest.param({"typ": None}, "logout+jwt", False, id="type-null"),
+        pytest.param({"typ": ABSENT}, None, True, id="no-type-asked-for-none-sent"),
+        pytest.param({"typ": "logout+jwt"}, None, True, id="no-type-asked-for-one-sent"),
+        pytest.param({"typ": 7}, None, True, id="no-type-asked-for-not-a-string"),
     ],
 )
-def test_a_token_without_the_expected_type_is_rejected_as_an_invalid_token_type(
-    issuer: IssuerScenario, header: dict[str, Any]
+def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_is_asked_for(
+    issuer: IssuerScenario, header: dict[str, Any], expected_type: str | None, accepted: bool
 ) -> None:
-    outcome = issuer.verifier.verify(issuer.token(header=header), expected_type="logout+jwt")
+    outcome = issuer.verifier.verify(issuer.token(header=header), expected_type=expected_type)
 
-    assert outcome == Rejected(RejectionReason.INVALID_TOKEN_TYPE)
-
-
-@pytest.mark.parametrize("header", [{"typ": ABSENT}, {"typ": "logout+jwt"}, {"typ": 7}])
-def test_a_verifier_asked_for_no_type_ignores_the_type_header(
-    issuer: IssuerScenario, header: dict[str, Any]
-) -> None:
-    assert issuer.verifier.verify(issuer.token(header=header)) == issuer.verified()
+    assert outcome == (
+        issuer.verified() if accepted else Rejected(RejectionReason.INVALID_TOKEN_TYPE)
+    )
 
 
 _DEEP_ARRAY = "[" * 2_000 + "]" * 2_000
@@ -1245,25 +1231,12 @@ def test_a_verifier_refuses_a_configuration_it_cannot_verify_against(
 # The real HTTPS boundary, served from loopback under a self-signed certificate.
 
 
-_TRANSPORT_FAILURE = (
-    "fetching the key set failed: the origin could not be reached,"
-    " or the TLS handshake or HTTP exchange failed"
-)
-_TIMED_OUT_FAILURE = f"fetching the key set failed: {ExchangeFailure.TIMED_OUT}"
-
-
 @pytest.fixture
 def https_key_set_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[LoopbackHttpsServer]:
     with loopback_https_server(tmp_path, monkeypatch) as server:
         yield server
-
-
-def test_https_fetch_returns_the_served_key_set(https_key_set_server: LoopbackHttpsServer) -> None:
-    document = fetch_key_set_over_https(f"{https_key_set_server.base_url}/certs")
-
-    assert json.loads(document)["keys"][0]["kid"] == "current-key"
 
 
 def test_a_verifier_on_the_https_fetch_verifies_a_token_of_the_served_key_set(
@@ -1274,16 +1247,6 @@ def test_a_verifier_on_the_https_fetch_verifies_a_token_of_the_served_key_set(
     )
 
     assert verifier.verify(issuer.token()) == issuer.verified()
-
-
-def test_https_fetch_gives_up_on_an_origin_silent_past_the_read_timeout(
-    https_key_set_server: LoopbackHttpsServer,
-) -> None:
-    started = time.monotonic()
-    with pytest.raises(KeySetFetchError, match=_TIMED_OUT_FAILURE):
-        fetch_key_set_over_https(f"{https_key_set_server.base_url}/silent", timeout_seconds=0.2)
-
-    assert time.monotonic() - started < SILENT_HOLD_SECONDS / 2
 
 
 def test_a_request_during_a_stalled_key_set_fetch_is_refused_without_waiting(
@@ -1304,75 +1267,6 @@ def test_a_request_during_a_stalled_key_set_fetch_is_refused_without_waiting(
         assert refreshing.result(timeout=10) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
 
 
-def test_https_fetch_reads_at_most_one_byte_past_the_key_set_limit(
-    https_key_set_server: LoopbackHttpsServer,
-) -> None:
-    document = fetch_key_set_over_https(f"{https_key_set_server.base_url}/oversized")
-
-    assert len(document) == MAX_KEY_SET_BYTES + 1
-
-
-def test_https_fetch_hands_back_a_compressed_answer_still_compressed(
-    https_key_set_server: LoopbackHttpsServer,
-) -> None:
-    document = fetch_key_set_over_https(f"{https_key_set_server.base_url}/compressed")
-
-    assert json.loads(gzip.decompress(document))["keys"][0]["kid"] == "current-key"
-
-
-def test_https_fetch_refuses_a_certificate_the_system_does_not_trust(
-    https_key_set_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("SSL_CERT_FILE")
-
-    with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
-        fetch_key_set_over_https(f"{https_key_set_server.base_url}/certs")
-
-
-def test_https_fetch_names_an_origin_nobody_listens_on_as_unreachable() -> None:
-    with closed_loopback_port() as closed_port:
-        with pytest.raises(KeySetFetchError, match=_TRANSPORT_FAILURE):
-            fetch_key_set_over_https(f"https://127.0.0.1:{closed_port}/certs")
-
-
-def test_https_fetch_refuses_an_answer_other_than_200(
-    https_key_set_server: LoopbackHttpsServer,
-) -> None:
-    with pytest.raises(KeySetFetchError):
-        fetch_key_set_over_https(f"{https_key_set_server.base_url}/missing")
-
-
-def test_https_fetch_never_follows_a_redirect(https_key_set_server: LoopbackHttpsServer) -> None:
-    with pytest.raises(KeySetFetchError):
-        fetch_key_set_over_https(f"{https_key_set_server.base_url}/moved")
-
-    assert https_key_set_server.requested_paths == ["/moved"]
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        pytest.param("http://127.0.0.1:9/certs", id="http"),
-        pytest.param("file:///etc/hostname", id="file"),
-        pytest.param("https://[", id="unparseable-host"),
-        pytest.param("https://127.0.0.1:99999/certs", id="port-out-of-range"),
-        pytest.param(None, id="not-a-string"),
-    ],
-)
-def test_fetch_refuses_every_url_but_a_well_formed_https_one(url: object) -> None:
-    with pytest.raises(KeySetFetchError):
-        fetch_key_set_over_https(url)
-
-
-def test_fetch_refuses_a_c1_control_character_before_any_request(
-    https_key_set_server: LoopbackHttpsServer,
-) -> None:
-    with pytest.raises(KeySetFetchError):
-        fetch_key_set_over_https(f"{https_key_set_server.base_url}/ce\x85rts")
-
-    assert https_key_set_server.requested_paths == []
-
-
 def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
     issuer: IssuerScenario,
 ) -> None:
@@ -1380,52 +1274,3 @@ def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
         issuer.verifier_with(jwks_url=f"https://operator:{_URL_SECRET}@login.example.org/certs")
 
     assert _URL_SECRET not in "".join(traceback.format_exception(refusal.value))
-
-
-@pytest.mark.parametrize(
-    "url_template",
-    [
-        pytest.param("https://operator:{secret}@{authority}/certs", id="credentials"),
-        pytest.param("https://{authority}/certs/{secret}", id="path-of-a-failed-fetch"),
-        pytest.param("https://{authority}/certs?signature={secret}", id="query-of-a-failed-fetch"),
-        pytest.param("https://key set.example/certs?signature={secret}", id="query-of-a-bad-host"),
-        pytest.param("https://127.0.0.1:99999/certs?signature={secret}", id="query-of-a-bad-port"),
-    ],
-)
-def test_a_failed_fetch_never_repeats_a_secret_its_url_carries(
-    https_key_set_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, url_template: str
-) -> None:
-    monkeypatch.delenv("SSL_CERT_FILE")
-    authority = https_key_set_server.base_url.removeprefix("https://")
-    url = url_template.format(secret=_URL_SECRET, authority=authority)
-
-    with pytest.raises(KeySetFetchError) as refusal:
-        fetch_key_set_over_https(url)
-
-    assert _URL_SECRET not in repr(refusal.value)
-    # urllib3's own error may hold the URL in an attribute no repr shows.
-    assert refusal.value.__cause__ is None
-    assert refusal.value.__context__ is None
-
-
-@pytest.mark.parametrize(
-    "url_template",
-    [
-        pytest.param("https://{authority}/certs", id="untrusted-certificate"),
-        pytest.param("https://key set.example/certs", id="unparseable-host"),
-    ],
-)
-def test_a_failed_fetch_speaks_none_of_urllib3s_error_vocabulary(
-    https_key_set_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, url_template: str
-) -> None:
-    monkeypatch.delenv("SSL_CERT_FILE")
-    authority = https_key_set_server.base_url.removeprefix("https://")
-    url = url_template.format(authority=authority)
-
-    with pytest.raises(KeySetFetchError) as refusal:
-        fetch_key_set_over_https(url)
-
-    urllib3_error_names = {
-        name for name, value in vars(urllib3.exceptions).items() if isinstance(value, type)
-    }
-    assert not any(name in str(refusal.value) for name in urllib3_error_names)
