@@ -272,6 +272,9 @@ class CacheControlRule:
     paths: PathRules
     value: str
 
+    def __post_init__(self) -> None:
+        _require_header_field_value("CacheControlRule.value", self.value)
+
 
 DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
 DEFAULT_HSTS_MAX_AGE_SECONDS: Final = 365 * 24 * 60 * 60
@@ -293,13 +296,8 @@ class SecurityHeadersPolicy:
         )
         if not isinstance(self.hsts_include_subdomains, bool):
             raise ValueError("hsts_include_subdomains must be True or False")
-        for name in ("content_security_policy", "permissions_policy"):
-            if not _VISIBLE_ASCII_SPACE_AND_TAB.fullmatch(getattr(self, name)):
-                raise ValueError(
-                    f"{name} must be visible ASCII, space and tab: a control character "
-                    "or a character outside ASCII either breaks every response it is "
-                    "sent on or means nothing in this header.",
-                )
+        _require_header_field_value("content_security_policy", self.content_security_policy)
+        _require_header_field_value("permissions_policy", self.permissions_policy)
 
     @property
     def strict_transport_security(self) -> str:
@@ -349,8 +347,17 @@ _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
 _BASE64_VALUE: Final = r"[A-Za-z0-9+/\-_]+={0,2}"
 _BARE_HASH: Final = re.compile(rf"sha(?:256|384|512)-{_BASE64_VALUE}", re.ASCII | re.IGNORECASE)
 _SOURCE_TOKEN: Final = re.compile(r"[\x21-\x2b\x2d-\x3a\x3c-\x7e]+")
-_VISIBLE_ASCII_SPACE_AND_TAB: Final = re.compile(r"[\t\x20-\x7e]*")
+_HEADER_FIELD_VALUE: Final = re.compile(r"[\x21-\x7e](?:[\t\x20-\x7e]*[\x21-\x7e])?")
 _FIXED_DIRECTIVES: Final = ("default-src 'none'", "base-uri 'self'")
+
+
+def _require_header_field_value(name: str, value: str) -> None:
+    if not _HEADER_FIELD_VALUE.fullmatch(value):
+        raise ValueError(
+            f"{name} must be visible ASCII with space and tab only between visible "
+            "characters, and not empty: any other value either breaks every response "
+            "it is sent on or enforces nothing.",
+        )
 
 
 def _require_source_list(owner: str, sources: object) -> Sequence[str]:
