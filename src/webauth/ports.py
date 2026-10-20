@@ -41,7 +41,6 @@ WallClock = Callable[[], float]
 """Seconds since the epoch. The library reads it once per session decision, as
 whole seconds. A reading within the session cap plus 60 seconds of the end of
 year 9999 makes the decision raise, so no session is admitted."""
-"""Seconds since the epoch: the host's reading of now."""
 
 
 @dataclass(frozen=True)

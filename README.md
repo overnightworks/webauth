@@ -69,8 +69,8 @@ checked in CI against the built wheel.
 
 ## Security model
 
-Who the library defends against, and what it trusts. Each line links to the
-section that owns its facts.
+Who the library defends against, and what it trusts. Where a line has an
+owning section, it links there.
 
 1. **Browser to library** (cookies, [CSRF](#csrf-origin), Origin, [return path](#the-return-path), body size, [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that ([Configuration](#configuration)).
 2. **Library to issuer:** the configured issuer is trusted for what it signs and serves over TLS, and gets no defence beyond the JOSE and OpenID Connect specifications and PyJWT.
