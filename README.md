@@ -702,6 +702,14 @@ for an unknown id, a session outside its lifetime, or a `touch` that answers
 `False`; a refused session is not renewed. A failing store, or a `touch` that
 does not answer a `bool`, raises.
 
+`admit_session` decides the session alone and checks no `Origin`. A host that
+admits a WebSocket handshake with it instead of `authenticate_websocket` checks
+the `Origin` first, as "WebSocket handshakes" describes. A host that reads the
+id other than through `session_id_from_request` bounds its length itself, because
+`admit_session` hands the id to `SessionRecordStore.load` as given. Like the
+other entry points it never commits: the host finishes its transaction right
+after the call.
+
 ## WebSocket handshakes
 
 A browser sends the session cookie on a cross-site WebSocket handshake too,

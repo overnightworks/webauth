@@ -11,7 +11,6 @@ from webauth_arrangement import (
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_ID,
     SESSION_IDLE_SECONDS,
-    FakeSessionRecord,
     SessionRecordsInMemory,
     SessionsAnsweringTouch,
     a_session,
@@ -44,7 +43,7 @@ def test_a_session_inside_its_lifetime_returns_its_account_and_is_renewed() -> N
     assert outcome == AuthenticatedUser(
         id=record.user.id, username=record.user.username, role=record.user.role,
     )
-    assert record.expires_at == min(FIXED_INSTANT + IDLE, record.created_at + CAP)
+    assert record.expires_at == FIXED_INSTANT + IDLE
 
 
 def test_a_renewal_stops_at_the_absolute_cap() -> None:
@@ -56,51 +55,50 @@ def test_a_renewal_stops_at_the_absolute_cap() -> None:
 
 
 @pytest.mark.parametrize(
-    "record",
+    ("session_id", "sessions", "renewal_is_observable"),
     [
         pytest.param(
-            a_session(now=FIXED_INSTANT, remaining=-SECOND), id="past its expiry",
+            SESSION_ID,
+            SessionRecordsInMemory(a_session(now=FIXED_INSTANT, remaining=-SECOND)),
+            True,
+            id="past its expiry",
         ),
         pytest.param(
-            a_session(now=FIXED_INSTANT, age=CAP + SECOND, remaining=SECOND),
+            SESSION_ID,
+            SessionRecordsInMemory(
+                a_session(now=FIXED_INSTANT, age=CAP + SECOND, remaining=SECOND),
+            ),
+            True,
             id="past the absolute cap",
+        ),
+        pytest.param(
+            "unknown-session",
+            SessionRecordsInMemory(a_session(now=FIXED_INSTANT)),
+            True,
+            id="an unknown id",
+        ),
+        pytest.param(
+            SESSION_ID,
+            SessionsAnsweringTouch(a_session(now=FIXED_INSTANT), False),
+            False,
+            id="a touch that finds no row",
         ),
     ],
 )
-def test_a_session_outside_its_lifetime_is_refused_and_not_renewed(
-    record: FakeSessionRecord,
+def test_a_session_the_store_does_not_admit_is_refused_and_not_renewed(
+    session_id: str, sessions: SessionRecordsInMemory, renewal_is_observable: bool,
 ) -> None:
-    stored_expiry = record.expires_at
+    stored_expiry = sessions.record.expires_at
 
-    outcome = admit(record.id, SessionRecordsInMemory(record))
-
-    assert outcome is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
-    assert record.expires_at == stored_expiry
-
-
-def test_an_unknown_session_id_is_refused_and_no_session_is_renewed() -> None:
-    record = a_session(now=FIXED_INSTANT)
-    stored_expiry = record.expires_at
-
-    outcome = admit("unknown-session", SessionRecordsInMemory(record))
+    outcome = admit(session_id, sessions)
 
     assert outcome is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
-    assert record.expires_at == stored_expiry
-
-
-def test_a_touch_finding_no_row_refuses_an_otherwise_admitted_session() -> None:
-    record = a_session(now=FIXED_INSTANT)
-    stored_expiry = record.expires_at
-
-    outcome = admit(SESSION_ID, SessionsAnsweringTouch(record, False))
-
-    assert outcome is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
-    assert record.expires_at == stored_expiry
+    assert not renewal_is_observable or sessions.record.expires_at == stored_expiry
 
 
 @pytest.mark.parametrize("answer", [None, 1, "yes"])
 def test_a_touch_answering_anything_but_a_bool_raises(answer: object) -> None:
-    record = a_session(now=FIXED_INSTANT)
+    sessions = SessionsAnsweringTouch(a_session(now=FIXED_INSTANT), answer)
 
     with pytest.raises(TypeError, match="touch must return a bool"):
-        admit(SESSION_ID, SessionsAnsweringTouch(record, answer))
+        admit(SESSION_ID, sessions)
