@@ -815,7 +815,7 @@ still wants off, for example
 `permissions_policy="camera=(), microphone=(self), geolocation=()"`. A value
 may hold visible ASCII, and space and tab only between visible characters; anything
 else, such as an empty value, a space or tab at either end, CR, LF, NUL, DEL or a
-non-ASCII character, is refused when the policy is built. `content_security_policy`
+non-ASCII character, is refused when the policy or the rule is built. `content_security_policy`
 and the `value` of a `CacheControlRule` are held to the same bound.
 
 A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only

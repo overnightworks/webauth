@@ -35,9 +35,6 @@ def _a_budget(name: str, max_requests: int = 10) -> RateLimitBudget:
 _DEFAULT = _a_budget("default")
 _BULK = _a_budget("bulk")
 _UPLOAD = _a_budget("upload")
-RAW_HEADER_VALUE_FIELDS = [
-    "content_security_policy", "permissions_policy", "CacheControlRule.value",
-]
 _BULK_RULE = RateLimitRule(paths=PathRules(prefixes=("/bulk/",)), budget=_BULK)
 _UPLOAD_RULE = RateLimitRule(paths=PathRules(prefixes=("/bulk/up",)), budget=_UPLOAD)
 
@@ -305,6 +302,11 @@ class TestBodySizePolicy:
             BodySizePolicy(default_max_bytes=1_000, start_send_seconds=seconds)
 
 
+RAW_HEADER_VALUE_FIELDS = [
+    "content_security_policy", "permissions_policy", "CacheControlRule.value",
+]
+
+
 class TestSecurityHeadersPolicy:
     def test_the_first_matching_cache_rule_answers_the_path(self) -> None:
         policy = SecurityHeadersPolicy(
@@ -361,7 +363,7 @@ class TestSecurityHeadersPolicy:
         " camera=()", "\tcamera=()", "camera=() ", "camera=()\t",
         "", " ",
     ])
-    def test_refuses_an_empty_edged_or_non_ascii_raw_header_value(
+    def test_refuses_an_empty_edged_control_or_non_ascii_raw_header_value(
         self, field: str, refused: str,
     ) -> None:
         with pytest.raises(ValueError, match=field):
