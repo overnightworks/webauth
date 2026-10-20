@@ -10,6 +10,10 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `UserRecord` and `SessionRecord` declare read-only properties, so frozen and concrete
+  host records satisfy them, and `SessionRecord.user_id` is gone. Migrate by reading
+  `record.user.id` where you read `record.user_id` through the port; a store may keep its
+  own user-id column.
 - `WebAuthConfig.cookie_max_age_seconds` is removed, with no alias: passing it is a
   `TypeError`. The session, CSRF and ID-token hint cookies now carry
   `Max-Age = session_lifetime.absolute_max_age_seconds`, so they live as long as the

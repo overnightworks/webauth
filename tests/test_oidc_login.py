@@ -1821,7 +1821,7 @@ def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
 
 
 def sessions_of(host: OidcHost, user_id: str) -> int:
-    return sum(record.user_id == user_id for record in host.sessions.list_active())
+    return sum(record.user.id == user_id for record in host.sessions.list_active())
 
 
 def post_backchannel_logout(
@@ -2216,7 +2216,7 @@ def test_a_new_session_has_a_fresh_id() -> None:
 
     assert session.id != replaced
     assert store.ids() == [session.id]
-    assert (session.user_id, session.created_at, session.expires_at) == (
+    assert (session.user.id, session.created_at, session.expires_at) == (
         ACCOUNT.id, FIXED_INSTANT, FIXED_INSTANT + IDLE,
     )
 

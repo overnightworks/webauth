@@ -53,9 +53,14 @@ class AuthenticatedUser:
 class UserRecord(Protocol):
     """The account fields the auth machinery reads."""
 
-    id: str
-    username: str
-    role: str
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def username(self) -> str: ...
+
+    @property
+    def role(self) -> str: ...
 
 
 class SessionRecord(Protocol):
@@ -66,9 +71,11 @@ class SessionRecord(Protocol):
     an offset is read as UTC.
     """
 
-    id: str
-    user_id: str
-    user: UserRecord
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def user(self) -> UserRecord: ...
 
     @property
     def created_at(self) -> datetime: ...
