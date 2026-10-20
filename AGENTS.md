@@ -86,7 +86,7 @@ uv run --group e2e pyright
 tests/typing/check_against_wheel.sh
 ```
 
-`tests/typing/` holds the static typing hosts. The script type-checks it with
+`tests/typing/` holds the static typing hosts. The script type-checks them with
 the pinned pyright against the built wheel, from a directory without `src`, so
 a port change or an export a host cannot import fails here.
 
