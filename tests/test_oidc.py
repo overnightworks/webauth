@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import json
 import logging
 import urllib.parse
 from collections.abc import Callable
@@ -112,6 +113,12 @@ def _issued(id_token: str) -> TokenEndpointAnswer:
             "expires_in": 300,
             "id_token": id_token,
         },
+    )
+
+
+def _naming_id_token_twice(id_token: str) -> TokenEndpointAnswer:
+    return token_endpoint_answer(
+        200, f'{{"id_token": "not-a-token", "id_token": {json.dumps(id_token)}}}'.encode()
     )
 
 
@@ -231,6 +238,11 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
             dataclasses.replace(_IDENTITY, session_id=None, preferred_username=None),
             id="without-sid-and-preferred-username",
         ),
+        pytest.param(
+            Attempt(token_answer=_naming_id_token_twice),
+            _IDENTITY,
+            id="token-answer-naming-id-token-twice-keeps-the-last",
+        ),
         pytest.param(Attempt(callback={"iss": ABSENT}), _IDENTITY, id="callback-without-iss"),
         pytest.param(
             Attempt(callback={"code": "c" * MAX_AUTHORIZATION_CODE_CHARS}),
@@ -256,10 +268,6 @@ def _answered(
     status: int, document: dict[str, Any] | bytes
 ) -> Callable[[str], TokenEndpointAnswer]:
     return lambda _id_token: token_endpoint_answer(status, document)
-
-
-def _answered_raw(status: int, json_text: str) -> TokenEndpointAnswer:
-    return TokenEndpointAnswer(status, json_text.encode())
 
 
 def _padded_past_the_limit(id_token: str) -> TokenEndpointAnswer:
@@ -395,27 +403,6 @@ _EXCHANGE_REFUSALS = [
         Attempt(token_answer=_answered(200, b"[" * (MAX_TOKEN_RESPONSE_BYTES // 2))),
         OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
         id="nested-past-the-parsers-recursion-limit",
-    ),
-    pytest.param(
-        Attempt(token_answer=lambda id_token: _answered_raw(
-            200, f'{{"id_token": "{id_token}", "id_token": "{id_token}"}}'
-        )),
-        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
-        id="answer-naming-id-token-twice",
-    ),
-    pytest.param(
-        Attempt(token_answer=lambda id_token: _answered_raw(
-            200, f'{{"id_token": "{id_token}", "profile": {{"name": "a", "name": "b"}}}}'
-        )),
-        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
-        id="answer-naming-a-nested-member-twice",
-    ),
-    pytest.param(
-        Attempt(token_answer=lambda id_token: _answered_raw(
-            200, f'{{"id_token": "{id_token}", "expires_in": NaN}}'
-        )),
-        OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
-        id="answer-carrying-a-non-json-constant",
     ),
     pytest.param(
         Attempt(token_answer=_answered(200, {"access_token": "an-access-token"})),

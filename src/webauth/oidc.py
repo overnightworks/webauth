@@ -70,8 +70,7 @@ from webauth.jwt_verification import (
     Rejected,
     RejectionReason,
     VerifiedClaims,
-    _strict_json_object,
-    _VerificationRefusal,
+    _json_object,
 )
 
 if TYPE_CHECKING:
@@ -542,18 +541,15 @@ def _idp_error_code(error: str) -> str | None:
 
 
 def _token_answer_document(body: bytes) -> Mapping[str, object]:
-    """The answer's JSON object under the verifier's strict parser, or an empty
-    one for an answer too large, not strict JSON, or not an object.
+    """The answer's JSON object, or an empty one for an answer too large, not
+    JSON, or not an object.
 
     The production transport refuses an oversize body first (`TOO_LARGE`); the
     size check here guards an injected `TokenRequestPost`, which may return any
     body."""
     if len(body) > MAX_TOKEN_RESPONSE_BYTES:
         return {}
-    try:
-        return _strict_json_object(body)
-    except _VerificationRefusal:
-        return {}
+    return _json_object(body) or {}
 
 
 def _identity_of(id_token: VerifiedClaims, raw_id_token: str) -> OidcIdentity:
