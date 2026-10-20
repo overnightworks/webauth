@@ -232,13 +232,16 @@ class JwtVerifier:
     def _verified_claims(self, token: str, expected_type: str | None) -> VerifiedClaims:
         if len(token) > MAX_TOKEN_CHARACTERS:
             raise _VerificationRefusal(RejectionReason.TOKEN_TOO_LONG)
+        # RFC 7515's compact serialization is ASCII; PyJWT raises on a lone surrogate.
+        if not token.isascii():
+            raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
         # PyJWT parses the header with `json.loads` before it checks anything,
         # and hostile nesting within the token cap crashes a thread whose stack
         # is small (musl's default); the bound keeps the depth far below that.
         if len(token.split(".", 1)[0]) > _MAX_HEADER_SEGMENT_CHARACTERS:
             raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
         try:
-            header = jwt.get_unverified_header(token)
+            header = jwt.get_unverified_header(token)  # NOSONAR(S5659) picks key and refusal only
         except jwt.InvalidTokenError as error:
             raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
         if header.get("alg") != _ALGORITHM:
@@ -370,8 +373,6 @@ def _header_key_id(header: Mapping[str, object]) -> str | None:
     if "kid" not in header:
         return None
     key_id = header["kid"]
-    if key_id is None or not isinstance(key_id, str):
-        raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN)
     if not _is_key_id(key_id):
         raise _VerificationRefusal(RejectionReason.INVALID_KEY_ID)
     return key_id
@@ -404,9 +405,8 @@ def _audiences(claims: Mapping[str, object]) -> tuple[str, ...]:
 
 
 def _base64url_decode(segment: str) -> bytes:
-    """Decodes unpadded base64url, refusing what the lenient stdlib decoder
-    would silently skip or round off, so this parse accepts exactly the
-    canonical segments PyJWT accepts and both read the same bytes."""
+    """Decodes unpadded base64url (a JWK's `n` and `e`), refusing what the
+    lenient stdlib decoder would silently skip or round off."""
     if not _BASE64URL.fullmatch(segment):
         raise ValueError("not base64url")
     decoded = base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))

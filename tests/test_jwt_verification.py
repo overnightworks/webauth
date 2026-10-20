@@ -315,6 +315,11 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
             id="kid-not-a-string",
         ),
         pytest.param(
+            lambda issuer: issuer.token(header={"alg": "RS512", "kid": 7}),
+            RejectionReason.MALFORMED_TOKEN,
+            id="kid-not-a-string-beside-a-wrong-alg",
+        ),
+        pytest.param(
             lambda issuer: issuer.token(header={"kid": ""}),
             RejectionReason.INVALID_KEY_ID,
             id="kid-empty",
@@ -374,6 +379,7 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
                 ("header-not-an-object", f"{segment('[]')}.e30.c2ln"),
                 ("header-not-utf8", "_w.e30.c2ln"),
                 ("non-ascii-character", "e30.e30.sïg"),
+                ("lone-surrogate", "e30.e30.s\ud800g"),
             )
         ),
         pytest.param(
