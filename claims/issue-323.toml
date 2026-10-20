@@ -1,8 +1,0 @@
-claim_id = "2bb60ca2bf194d94973dbc30047ca893"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "6cfc526ea94adfd952dcd3e022fa5afbe263308c"
-branch = "claude/issue-323-csp-token"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/policies.py", "tests/test_policies.py"]
-opened_commit = "3111539baa06b6dd0d321b69e986a393e2af539b"
-whole_reason = "One policy module, its test file and the README sentences that describe it."
