@@ -153,7 +153,9 @@ every app follows; the library does not enforce it.
   shows one "Log in" button and never redirects by itself. See
   [Logging out](#logging-out).
 - **A refusal page shows one way out.** "No access" is for
-  `AdmissionRefusal.NOT_A_MEMBER`; "sign-in failed" is for an `OidcRefusal`.
+  `AdmissionRefusal.NOT_A_MEMBER`; "sign-in failed" is for an `OidcRefusal`
+  and for `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are
+  setup errors, not missing rights.
   Both types are returned by `finish_login`, see
   [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes).
   A refusal carries no identity, so the page shows no name. A
