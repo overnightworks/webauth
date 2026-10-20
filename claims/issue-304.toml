@@ -1,7 +1,0 @@
-claim_id = "10805605ac114c31ba850e4209c6c792"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "136f05154e4397b73c0584389904f70f9ff08964"
-branch = "claude/issue-304-readme-return-path-polish"
-scope = ["README.md", "tests/test_web_auth_config.py"]
-opened_commit = "22e2150dea0f3e3a5fa1d563f5482f7276cb3300"
