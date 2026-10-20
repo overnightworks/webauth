@@ -1,8 +1,0 @@
-claim_id = "5f83bed459b94656a35f1df84aa6b962"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "6a57b650f89b660f640fe9cb10e2877d385aa22d"
-branch = "claude/issue-291-cookie-lives-as-long-as-session"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "src/webauth/cookies.py", "tests/test_cookies.py", "tests/test_oidc_login.py", "tests/test_web_auth_config.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "5ed349e2dacb9bd31615d21e4c417d7f7cb67ec1"
-whole_reason = "One removed field carried through the config, its two cookie setters, every test and host that passes or pins it, and the docs; split, the config and its readers would not type-check against each other."
