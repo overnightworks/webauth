@@ -10,8 +10,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
-- `SingleProcessRateLimitBackend` no longer has a method that counts its keys; nothing in the library
-  called it. A host that counted the backend's keys keeps its own count.
+- `SingleProcessRateLimitBackend` no longer has a method that counts its keys;
+  nothing in the library called it. A host that counted the backend's keys keeps
+  its own count.
 
 ## 0.18.0
 
