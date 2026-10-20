@@ -88,6 +88,10 @@ def a_body_limited_app(
     async def reads(request: Request) -> dict[str, int]:
         return {"length": len(await request.body())}
 
+    @app.post("/reads-stream")
+    async def reads_stream(request: Request) -> dict[str, int]:
+        return {"length": sum([len(chunk) async for chunk in request.stream()])}
+
     body_size = policy or BodySizePolicy(default_max_bytes=LIMIT)
     if full_stack:
         install_web_auth_middleware(
@@ -162,13 +166,15 @@ async def test_a_response_finished_before_the_overflow_is_noticed_stays_complete
     assert raised is not None
 
 
+@pytest.mark.parametrize("path", ["/reads", "/reads-stream"])
 @pytest.mark.parametrize(
     "spec_version", [SPEC_WITH_CONCURRENT_READER, SPEC_WITHOUT_CONCURRENT_READER]
 )
 async def test_a_streamed_body_over_the_limit_read_before_the_response_starts_answers_413_with_the_headers(  # noqa: E501
+    path: str,
     spec_version: str,
 ) -> None:
-    sent, raised = await drive_post("/reads", spec_version, TWO_CHUNKS_UNDER_THE_LIMIT_EACH)
+    sent, raised = await drive_post(path, spec_version, TWO_CHUNKS_UNDER_THE_LIMIT_EACH)
 
     (start,) = starts(sent)
     assert start["status"] == 413
