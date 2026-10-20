@@ -17,7 +17,12 @@ from fastapi import FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
 
 from webauth import WebAuthError
-from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
+from webauth.config import (
+    MAX_SESSION_LIFETIME_SECONDS,
+    SessionLifetime,
+    WebAuthConfig,
+    install_web_auth_config,
+)
 from webauth.cookies import (
     DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
@@ -372,6 +377,7 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         PENDING_LOGIN_MAX_AGE_SECONDS,
         PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionLifetime,
+        MAX_SESSION_LIFETIME_SECONDS,
         SessionRecordStore,
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, WebAuthError,

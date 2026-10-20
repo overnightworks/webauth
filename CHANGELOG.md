@@ -22,11 +22,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
   admitted one is renewed to `min(now + idle, created_at + cap)`, so a session
   never outlives its cap. `SessionLifetime` refuses an `absolute_max_age_seconds`
   above 400 days (`webauth.config.MAX_SESSION_LIFETIME_SECONDS`, the browser's cookie
-  limit), and a session created more than 60 s in the future is refused. Migration: songmaker sets `SessionLifetime(idle, cap)`,
-  and its store writes the given `expires_at` and drops its own arithmetic;
-  presentator's sessions table gains `expires_at` beside `created_at` in place of
-  `last_seen`, its `create` stores the given expiry and its `touch` writes the given
-  `expires_at`; then its `webauth.liveness` import and its `IdleWindow` adapter go.
+  limit), and a session created more than 60 s in the future is refused. Migration:
+  songmaker sets `SessionLifetime(idle, cap)`, and its store writes the given
+  `expires_at` and drops its own arithmetic; presentator's sessions table gains
+  `expires_at` beside `created_at` in place of `last_seen`, its `create` stores the
+  given expiry and its `touch` writes the given `expires_at`; then its
+  `webauth.liveness` import and its `IdleWindow` adapter go.
 - The library keeps no session wrappers, and its refusal names both channels.
   `webauth.session_ending` and its `end_session`, `end_user_sessions` and
   `prune_sessions` no longer exist, and `dependencies.WebSocketRefusal` is
