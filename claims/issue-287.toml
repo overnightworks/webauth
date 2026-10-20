@@ -1,0 +1,8 @@
+claim_id = "5cefb6fa93dc4f8ab9e19af789d5e894"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "8636558ea77ab2769dc8dfe16e72b4ff11ef2e3a"
+branch = "claude/issue-287-open-session-clock"
+scope = ["CHANGELOG.md", "README.md", "e2e/oidc/host_app.py", "src/webauth/dependencies.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "8d8f9e8bac9ec59c62cdb2164d3d93dcfbfa9da8"
+whole_reason = "One opening contract: open_session, the store's create and prune_overflow, and every fake implementing them change together; split, the port and its implementers would not type-check against each other."
