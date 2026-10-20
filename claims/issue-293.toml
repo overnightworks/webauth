@@ -1,7 +1,0 @@
-claim_id = "f1a37b799cfb4c4b8766f1d60a63d8f6"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "6a57b650f89b660f640fe9cb10e2877d385aa22d"
-branch = "claude/issue-293-one-source-agent-guidance"
-scope = ["AGENTS.md", "CLAUDE.md"]
-opened_commit = "8b3e736bd11b4b766af33ede3621ef35cb4143c4"
