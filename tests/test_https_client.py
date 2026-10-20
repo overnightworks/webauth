@@ -14,7 +14,6 @@ import gzip
 import inspect
 import json
 import logging
-import socket
 import sys
 import time
 import traceback
@@ -34,7 +33,6 @@ from oidc_arrangement import (
     closed_loopback_port,
     loopback_https_server,
     unanswering_loopback_port,
-    unconnectable_loopback_port,
 )
 from pydantic import SecretStr
 
@@ -371,16 +369,6 @@ def _route(path: str) -> _StalledTarget:
     return lambda server, monkeypatch, stack: f"{server.base_url}{path}"
 
 
-def _unconnectable_on_every_address(
-    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
-) -> str:
-    port = stack.enter_context(unconnectable_loopback_port())
-    [address] = socket.getaddrinfo("127.0.0.1", port, type=socket.SOCK_STREAM)
-    # A host name resolving to three addresses, none of which answers.
-    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [address] * 3)
-    return f"https://issuer.example:{port}/certs"
-
-
 def _unanswering_tls_handshake(
     server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
 ) -> str:
@@ -390,7 +378,6 @@ def _unanswering_tls_handshake(
 @pytest.mark.parametrize(
     "target",
     [
-        pytest.param(_unconnectable_on_every_address, id="connect-on-every-address"),
         pytest.param(_unanswering_tls_handshake, id="tls-handshake"),
         pytest.param(_route("/dripping-status"), id="dripping-status-line"),
         pytest.param(_route("/dripping-head"), id="dripping-head"),

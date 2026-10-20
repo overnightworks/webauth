@@ -3,11 +3,12 @@
 This module is the one owner of urllib3, and every request it sends holds the
 same bounded posture: HTTPS only, under the system's trusted certificates
 (`SSL_CERT_FILE` included); a connect and a read timeout per operation, and a
-total deadline over connecting, the TLS handshake, the status, the headers and
-the body together, so an origin that drips its answer cannot hold the caller;
+total deadline over the TLS handshake, the status, the headers and the body
+together, so an origin that drips its answer cannot hold the caller;
 no retry; no redirect followed; no content decoding; and at most one byte past
 the operation's size limit read from the answer. Only the host name lookup
-runs outside the deadline: the resolver offers no way to bound it.
+and connecting, which urllib3 bounds by the connect timeout once per resolved
+address, run outside the deadline.
 
 No error this module raises carries any part of the URL, the request or
 urllib3's error, and none chains urllib3's error, since its message may quote
@@ -27,12 +28,10 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
-import socket
 import ssl
-import sys
 import time
 import urllib.parse
-from collections.abc import Buffer, Callable, Iterable, Iterator, Mapping
+from collections.abc import Buffer, Callable, Iterator, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -42,15 +41,7 @@ from typing import TypeGuard
 
 import urllib3
 from pydantic import SecretStr
-from urllib3.connection import HTTPSConnection
-from urllib3.exceptions import (
-    ConnectTimeoutError,
-    LocationParseError,
-    NameResolutionError,
-    NewConnectionError,
-)
 from urllib3.util import create_urllib3_context
-from urllib3.util.connection import allowed_gai_family
 
 from webauth import WebAuthError
 
@@ -135,8 +126,8 @@ def fetch_key_set_over_https(
 
     `timeout_seconds` bounds connecting and each read on its own;
     `deadline_seconds` bounds the fetch in total, so an origin that trickles
-    bytes within each read timeout is cut off. Only a stalled DNS lookup holds
-    this refresh past the deadline. Every failure fails closed, and every other
+    bytes within each read timeout is cut off. Only a stalled DNS lookup or
+    connecting holds this refresh past the deadline. Every failure fails closed, and every other
     request is refused at once rather than waiting for this refresh. A
     `timeout_seconds` or `deadline_seconds` of zero or less raises
     `ValueError`."""
@@ -256,8 +247,8 @@ def _exchange(
     A `timeout_seconds` or `deadline_seconds` of zero or less raises
     `ValueError`, since every exchange would then time out at once.
 
-    Once `deadline_seconds` have passed, the next connect attempt, read,
-    write or handshake step raises a timeout, and the exchange fails as
+    Once `deadline_seconds` have passed, the next read, write or handshake
+    step raises a timeout, and the exchange fails as
     `TIMED_OUT` whatever error urllib3 made of it."""
     if timeout_seconds <= 0:
         raise ValueError(f"timeout_seconds must be positive, not {timeout_seconds}")
@@ -272,7 +263,6 @@ def _exchange(
                 timeout=timeout, retries=False, ssl_context=_tls_context_under(deadline)
             ) as pool,
         ):
-            pool.pool_classes_by_scheme = {"https": _https_pool_class_under(deadline)}
             response = pool.request(
                 method,
                 url,
@@ -353,70 +343,6 @@ def _tls_context_under(deadline: _Deadline) -> ssl.SSLContext:
     context.load_default_certs()
     context.sslsocket_class = SocketUnderDeadline
     return context
-
-
-def _https_pool_class_under(deadline: _Deadline) -> type[urllib3.HTTPSConnectionPool]:
-    """urllib3's HTTPS pool, whose connections connect within `deadline`.
-
-    urllib3 gives each address the host name resolves to a connect timeout of
-    its own, so a host whose every address drops the connection would hold
-    the call for that timeout once per address. Here each attempt gets at
-    most what is left of the deadline, and none starts once it has passed;
-    urllib3's own error classes keep the failure's category."""
-
-    class ConnectionUnderDeadline(HTTPSConnection):
-        def _new_conn(self) -> socket.socket:
-            try:
-                connection = _connect_within(
-                    deadline, self._dns_host, self.port, self.timeout, self.socket_options
-                )
-            # The resolver's IDNA codec refuses an empty label or one over 63
-            # characters, which urllib3 reports as a URL it cannot parse.
-            except UnicodeError as error:
-                raise LocationParseError("label empty or too long") from error
-            except socket.gaierror as error:
-                raise NameResolutionError(self.host, self, error) from error
-            except TimeoutError as error:
-                raise ConnectTimeoutError(self, "connecting timed out") from error
-            except OSError as error:
-                raise NewConnectionError(self, "connecting failed") from error
-            sys.audit("http.client.connect", self, self.host, self.port)
-            return connection
-
-    class PoolUnderDeadline(urllib3.HTTPSConnectionPool):
-        # Under pyright, urllib3's own HTTPSConnection does not satisfy the
-        # BaseHTTPSConnection protocol this attribute is declared as.
-        ConnectionCls = ConnectionUnderDeadline  # pyright: ignore[reportAssignmentType]
-
-    return PoolUnderDeadline
-
-
-def _connect_within(
-    deadline: _Deadline,
-    host: str,
-    port: int,
-    timeout: float | None,
-    socket_options: Iterable[tuple[int, int, int | bytes]] | None,
-) -> socket.socket:
-    """A socket connected to the first address of `host` that answers, every
-    attempt bounded by `timeout` and by what is left of `deadline`."""
-    failure = OSError("the host name resolves to no address")
-    for family, kind, protocol, _, address in socket.getaddrinfo(
-        host.strip("[]"), port, allowed_gai_family(), socket.SOCK_STREAM
-    ):
-        attempt_timeout = deadline.bound(timeout)
-        connection = socket.socket(family, kind, protocol)
-        try:
-            for option in socket_options or ():
-                connection.setsockopt(*option)
-            connection.settimeout(attempt_timeout)
-            connection.connect(address)
-        except OSError as error:
-            connection.close()
-            failure = error
-        else:
-            return connection
-    raise failure
 
 
 @contextlib.contextmanager

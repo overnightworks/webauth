@@ -575,9 +575,10 @@ relying_party = OidcRelyingParty(
 Each request is HTTPS only, under the system's trusted certificates
 (`SSL_CERT_FILE` included), with a connect and a read timeout of five seconds
 each and a total deadline of ten seconds — `KEY_SET_FETCH_DEADLINE_SECONDS`
-and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over connecting, the TLS handshake and
-the whole answer, so an origin that drips its answer is cut off as a timeout;
-only the host name lookup runs outside it. No retry, no redirect followed and
+and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over the TLS handshake and the
+whole answer, so an origin that drips its answer is cut off as a timeout; the
+host name lookup and connecting, bounded by the connect timeout once per
+resolved address, run outside it. No retry, no redirect followed and
 no content decoding. The key-set
 fetch reads at most one byte past `MAX_KEY_SET_BYTES` and refuses any answer
 but 200. The token POST is a form POST with the client's Basic authorization

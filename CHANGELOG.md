@@ -13,6 +13,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 
+**Changed**
+
+- Connecting to the issuer is bounded by the connect timeout per resolved address,
+  outside the total deadline; the deadline covers the TLS handshake and the answer.
+
 ## 0.18.0
 
 **Breaking**
