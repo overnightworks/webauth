@@ -1,8 +1,0 @@
-claim_id = "de630cf8911449a1992c8f80f89ad989"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "6cfc526ea94adfd952dcd3e022fa5afbe263308c"
-branch = "claude/issue-324-request-body-too-large"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/middleware/__init__.py", "src/webauth/middleware/body_size.py", "tests/test_body_size.py", "tests/test_public_api.py"]
-opened_commit = "e4341abc191492d8aac6db3b070812c4e84168ef"
-whole_reason = "One exception, its re-export, its README cells and its two test rows."
