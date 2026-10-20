@@ -328,7 +328,10 @@ def admit_session(
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """Decide whether a session id speaks for an account, and renew it if so.
 
-    For a host that reads the id itself, without a request or a cookie.
+    For a host that reads the id itself, without a request or a cookie. It
+    checks no ``Origin``: a host that admits a socket with it instead of
+    ``authenticate_websocket`` applies the allowlist rule of the README's
+    "WebSocket handshakes" first.
     Returns the account, or ``ConnectionRefusal.SESSION_ENDED_OR_EXPIRED`` for
     an unknown id, a session outside its lifetime, or one the store no longer
     holds; a refused session is not renewed. Sets no cookie. A failing store,

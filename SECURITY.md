@@ -8,6 +8,10 @@ choose **Advisories**, then **Report a vulnerability**
 
 Please do not open a public issue or pull request for a vulnerability.
 
+## Scope
+
+What the library defends against, and what it trusts, is the README's [Security model](README.md#security-model).
+
 ## Supported versions
 
 Only the latest minor release receives security fixes. By policy, the 0.14

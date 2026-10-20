@@ -38,7 +38,9 @@ __all__ = [
 ]
 
 WallClock = Callable[[], float]
-"""Seconds since the epoch: the host's reading of now."""
+"""Seconds since the epoch. The library reads it once per session decision, as
+whole seconds. A reading within the session cap plus 60 seconds of the end of
+year 9999 makes the decision raise, so no session is admitted."""
 
 
 @dataclass(frozen=True)
@@ -141,10 +143,22 @@ class SessionRecordStore(Protocol):
         *,
         now: datetime,
         expires_at: datetime,
-    ) -> SessionRecord: ...
+    ) -> SessionRecord:
+        """Create the session and return it.
+
+        The store mints the new session's id with at least 128 bits from a
+        CSPRNG, in at most 135 characters. The cookie signs the id alone, so a
+        store that hands out an id again gives every old signed cookie for that
+        id the new session.
+        """
+        ...
 
     def load(self, session_id: str) -> SessionRecord | None:
         """The session held against concurrent writers until the caller commits.
+
+        The library hands it the id as the cookie reader bounded it. A host
+        that passes ``admit_session`` an id from elsewhere bounds the length
+        first.
 
         A concurrent ``delete`` of the same session waits until the caller of
         ``load`` commits, so a revocation never interleaves with a renewal.

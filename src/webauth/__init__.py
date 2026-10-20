@@ -17,4 +17,8 @@ __all__ = ["WebAuthError", "__version__"]
 
 
 class WebAuthError(Exception):
-    """The common base of the operational exceptions the library's public API raises."""
+    """The common base of the operational exceptions the library's public API raises.
+
+    ``RequestBodyTooLarge`` is not a ``WebAuthError`` on purpose, so a host's
+    ``WebAuthError`` handler cannot answer in place of the 413.
+    """
