@@ -14,11 +14,18 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BodySizeLimitMiddleware",
+    "RequestBodyTooLarge",
 ]
 
 
-class _BodyTooLarge(Exception):
-    pass
+class RequestBodyTooLarge(Exception):
+    """A streamed request body passed its limit.
+
+    `BodySizeLimitMiddleware` answers 413 when the response has not started and
+    raises this to the server when it has. It is deliberately not a
+    `WebAuthError`: it travels out of the host's route back to the middleware, and
+    a host's catch-all for `WebAuthError` must not answer before the middleware does.
+    """
 
 
 def _too_large() -> JSONResponse:
@@ -66,7 +73,7 @@ class BodySizeLimitMiddleware:
             if msg.get("type") == "http.request":
                 received += len(msg.get("body", b""))
                 if received > limit:
-                    raise _BodyTooLarge(f"request body over {limit} bytes")
+                    raise RequestBodyTooLarge(f"request body over {limit} bytes")
             return msg
 
         start_handed_over = False
@@ -85,7 +92,7 @@ class BodySizeLimitMiddleware:
 
         try:
             await self.app(scope, guarded_receive, send_start_whole)
-        except _BodyTooLarge:
+        except RequestBodyTooLarge:
             if start_handed_over:
                 raise
             await _too_large()(scope, receive, send)

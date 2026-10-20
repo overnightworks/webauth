@@ -1070,7 +1070,7 @@ the limiter is reached:
 | Body | Answer | Rate budget |
 |---|---|---|
 | Any Content-Length header over the limit | 413 before the route | spends nothing |
-| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete. The error reaches the server either way | spends one |
+| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete. The `RequestBodyTooLarge` error reaches the server either way | spends one |
 | Streamed (no Content-Length), read by the route through `request.body()` or `request.stream()` before the response starts | 413 with the headers | spends one |
 | Streamed, parsed by FastAPI (a typed body, `Form()`, `File()`/`UploadFile`) | FastAPI's 400 "There was an error parsing the body" through the host's `HTTPException` handler; the route never runs | spends one |
 | Streamed, never read, and the response is not a `StreamingResponse` under spec < 2.4 | Not size-checked; answers normally | spends one |
@@ -1220,7 +1220,8 @@ It leaves the application everything that touches the application's own truth:
   not the request succeeds.
 - **Routes.** It defines none. The only responses it writes are its own
   refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
-  path.
+  path. Once a response has started it writes nothing more: a streamed body over
+  the limit then raises `RequestBodyTooLarge` to the server.
 - **Identity.** It issues no access or ID tokens: it is no identity provider, and
   it verifies the ID tokens an issuer made.
 - **HTTP framing** is the ASGI server's job. uvicorn's two parsers, h11 and
