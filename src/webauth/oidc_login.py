@@ -331,7 +331,7 @@ def open_session(
     is a number, the account's newest ``max_sessions - 1`` sessions are kept and
     the rest ended, so neither the replaced session nor the new one counts
     against the cap; the new session is created at that instant, expiring one
-    idle period later, with the request's client address and agent. ``None``
+    idle period later. ``None``
     states that the host sets no cap; any other value must be a positive whole
     number. A forged, oversized or duplicated cookie ends nothing.
 
