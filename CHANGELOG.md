@@ -171,6 +171,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `leeway_seconds must be a whole number of seconds from 0 up, not ...`.
 - The `anyio` floor is `>=4.0`, the lowest release `webauth` works with, instead of
   `>=4.12`: a host that pins an older `anyio` can now install it.
+- `AuthDependencies` names each member's parameters, so a type checker refuses a direct
+  call with the wrong arguments; runtime is unchanged.
 
 ## 0.17.0
 

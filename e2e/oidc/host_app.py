@@ -386,9 +386,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
 
     def signed_in_user(request: Request) -> AuthenticatedUser | None:
         try:
-            return dependencies.current_user(
-                request, world["world"].sessions, world["world"].audit
-            )
+            return dependencies.current_user(request, world["world"].sessions)
         except HTTPException:
             return None
 

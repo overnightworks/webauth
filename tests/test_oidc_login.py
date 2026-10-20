@@ -48,7 +48,7 @@ from webauth_arrangement import (
     FIXED_WALL_CLOCK,
     HTTPS_TEST_SERVER,
     MEMBER_ROLE,
-    SESSION_MAX_AGE_SECONDS,
+    SESSION_IDLE_SECONDS,
     FakeSessionRecord,
     FakeUser,
     RecordingAuditSink,
@@ -948,7 +948,7 @@ def test_an_admitted_callback_opens_the_session_at_the_configured_clock_for_one_
     record = host.sessions.record
     assert record is not None
     assert (record.created_at, record.expires_at) == (
-        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
+        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
     )
     assert host.client.get("/me").json() == {"username": "lena"}
 
@@ -962,7 +962,7 @@ def test_an_admitted_callback_derives_both_stored_instants_from_one_whole_second
     record = host.sessions.record
     assert record is not None
     assert (record.created_at, record.expires_at) == (
-        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
+        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
     )
     assert host.client.get("/me").status_code == 200
 
@@ -1816,12 +1816,12 @@ def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
         created_at = first_created_at + timedelta(minutes=minute)
         seeded_session(
             host.sessions, host.lock.hold_uncounted(), user_id,
-            created_at, created_at + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
+            created_at, created_at + timedelta(seconds=SESSION_IDLE_SECONDS),
         )
 
 
 def sessions_of(host: OidcHost, user_id: str) -> int:
-    return sum(record.user.id == user_id for record in host.sessions.list_active())
+    return len(host.sessions.sessions_of(user_id))
 
 
 def post_backchannel_logout(
@@ -2146,7 +2146,7 @@ ACCOUNT = FakeUser(id=SUBJECT, username="lena")
 BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
 FIRST_EXPIRY = datetime(2030, 1, 1, tzinfo=UTC)
 FIRST_CREATED_AT = FIXED_INSTANT - timedelta(hours=1)
-IDLE = timedelta(seconds=SESSION_MAX_AGE_SECONDS)
+IDLE = timedelta(seconds=SESSION_IDLE_SECONDS)
 OPENING_CONFIG = a_web_auth_config(wall_clock=FIXED_WALL_CLOCK)
 
 

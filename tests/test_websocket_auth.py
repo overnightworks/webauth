@@ -19,7 +19,7 @@ from webauth_arrangement import (
     POLICY_VIOLATION_CLOSE_CODE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
-    SESSION_MAX_AGE_SECONDS,
+    SESSION_IDLE_SECONDS,
     WEBSOCKET_DEPENDENCY_PATH,
     AuthApp,
     FakeSessionRecord,
@@ -120,7 +120,7 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
 
     assert expired_app.websocket_outcomes == [ConnectionRefusal.SESSION_ENDED_OR_EXPIRED]
     assert expired.expires_at == FIXED_INSTANT - timedelta(seconds=1)
-    assert admitted.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
+    assert admitted.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS)
 
 
 @pytest.mark.parametrize(
