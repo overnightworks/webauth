@@ -807,6 +807,13 @@ def test_a_key_whose_key_ops_include_verify_is_accepted(issuer: IssuerScenario) 
     assert issuer.verifier.verify(issuer.token()) == issuer.verified()
 
 
+def test_a_key_set_naming_keys_twice_is_read_by_its_last_value(issuer: IssuerScenario) -> None:
+    valid_jwk = public_jwk(rsa_key("current"), "current-key")
+    issuer.serve(b'{"keys": [], "keys": ' + json.dumps([valid_jwk]).encode() + b"}")
+
+    assert issuer.verifier.verify(issuer.token()) == issuer.verified()
+
+
 @pytest.mark.parametrize(("response", "failure"), _defective_key_sets())
 def test_a_failed_refresh_keeps_the_last_valid_key_set_until_its_ttl(
     issuer: IssuerScenario,
