@@ -15,7 +15,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   only CR or LF in `permissions_policy`.
 - `SecurityHeadersPolicy` refuses an empty `content_security_policy` or `permissions_policy`,
   and a space or tab at either end of either. `CacheControlRule` refuses a value outside the
-  same bound.
+  same bound. Migrate by passing a value without the refused characters, non-empty and
+  without a space or tab at either end; the library's own defaults pass.
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 - `receive_backchannel_logout` takes the request's form body and content type instead of
@@ -26,15 +27,15 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - The ID and Logout Token are read by PyJWT instead of this library's strict JSON parser,
   so a token is held to the JOSE RFCs as PyJWT reads them and the parser's own refusals
   are gone. `RejectionReason` loses `DUPLICATE_MEMBER`, `NESTING_TOO_DEEP` and
-  `FORBIDDEN_HEADER`. What the issuer signs is accepted as PyJWT reads it: for example, a
+  `FORBIDDEN_HEADER`. A host that names one of them drops that reference; nothing else
+  is required of it. What the issuer signs is accepted as PyJWT reads it: for example, a
   header member or claim named twice keeps its last value, and base64url padding, a
   byte-order mark, UTF-16 or UTF-32 JSON, deep nesting, and `NaN` or an infinity in a
   claim are all accepted; the `jwk`, `jku`, `x5u` and `x5c` members are ignored. These
   refusals stay or are new: a token holding a character outside ASCII, or a header segment
   over 512 characters, is `MALFORMED_TOKEN` before PyJWT parses anything. A null or
   non-string `kid`, and a `crit` naming anything but a present `b64`, answer
-  `MALFORMED_TOKEN` whatever the `alg`. `b64: false` is refused (`MALFORMED_TOKEN` under
-  RS256), and `b64: true` is accepted. The payload's JSON is read only after the signature
+  `MALFORMED_TOKEN` whatever the `alg`, and so is `b64: false`; `b64: true` is accepted. The payload's JSON is read only after the signature
   holds, so a token whose signature fails answers `INVALID_SIGNATURE` even when its
   payload is no JSON object, while a payload segment that is not base64url is still
   `MALFORMED_TOKEN`. A wrong `typ` is answered before an empty or overlong `kid`.
@@ -44,8 +45,10 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `open_session` no longer checks that the store's new session id differs from the one it
   replaced; the store's entropy duty covers it, and the `RuntimeError` is gone.
 - Media types compare without regard to case, as RFC 9110 section 8.3.1 requires. A POST
-  with neither Origin nor Referer whose type is `Text/Plain` or a capitalised form type is
-  now refused as a form submission. `Accept: Text/HTML` asks for the HTML redirect.
+  with neither Origin nor Referer, and no `Sec-Fetch-Site` header or `Sec-Fetch-Site:
+  same-site`, whose type is `Text/Plain` or a capitalised form type is now refused as a
+  form submission. `Accept: Text/HTML` asks for the HTML redirect, and the Accept
+  parameter name `Q` counts as `q`.
 - The issuer's key set and token answer are read as Python's `json.loads` reads bytes.
   This withdraws the 0.14.0 refusals of non-finite numbers and deep nesting for the token
   answer and loosens the key set the same way: a member named twice keeps its last value;
