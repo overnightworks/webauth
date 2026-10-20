@@ -18,16 +18,18 @@ Versions before 0.3.0 and releases without an entry here are described in the
   lock. Migrate by passing `await request.body()` and `request.headers.get("content-type")`;
   the host's own form parse goes.
 - The ID and Logout Token are read by PyJWT instead of this library's strict parser.
-  `RejectionReason` loses `DUPLICATE_MEMBER`, `NESTING_TOO_DEEP` and `FORBIDDEN_HEADER`.
-  A header segment over 512 characters is `MALFORMED_TOKEN`, refused before PyJWT parses
-  anything. A null or non-string `kid`, a `crit` naming anything but a present `b64`, and
-  `b64: false` answer `MALFORMED_TOKEN` whatever the `alg`; `b64: true` is accepted; `jwk`,
-  `jku`, `x5u` and `x5c` are ignored rather than refused. A header member or claim named
-  twice keeps its last value, base64url padding is accepted in every segment, a header or
-  payload may be UTF-16 or UTF-32 JSON, a signed payload may nest deeper than eight levels,
-  and a claim may hold `NaN` or an infinity. The payload is read only after the signature
-  holds, so a token whose signature fails answers `INVALID_SIGNATURE` whatever its payload,
-  and a wrong `typ` is answered before an invalid `kid`.
+  `RejectionReason` loses `DUPLICATE_MEMBER`, `NESTING_TOO_DEEP` and `FORBIDDEN_HEADER`. A
+  header segment over 512 characters is `MALFORMED_TOKEN`, refused before PyJWT parses
+  anything. A null or non-string `kid` and a `crit` naming anything but a present `b64`
+  answer `MALFORMED_TOKEN` whatever the `alg`; `b64: false` is refused (`MALFORMED_TOKEN`
+  under RS256) and `b64: true` is accepted; `jwk`, `jku`, `x5u` and `x5c` are ignored
+  rather than refused. A header member or claim named twice keeps its last value,
+  base64url padding is accepted in every segment, a header or payload may be UTF-16 or
+  UTF-32 JSON, a signed payload may nest deeper than eight levels, and a claim may hold
+  `NaN` or an infinity. The payload's JSON is read only after the signature holds, so a
+  token whose signature fails answers `INVALID_SIGNATURE` even when its payload is no JSON
+  object; a payload segment that is not base64url is still `MALFORMED_TOKEN`. A wrong
+  `typ` is answered before an empty or overlong `kid`.
 
 **Changed**
 
