@@ -1,8 +1,0 @@
-claim_id = "72c5896458ff4b21b43eec3f5c375644"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "ff164b14b844d013f4fbea618e4013a10238904a"
-branch = "claude/issue-285-session-lifetime"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/config.py", "src/webauth/dependencies.py", "src/webauth/liveness.py", "src/webauth/ports.py", "tests/test_cookies.py", "tests/test_dependencies.py", "tests/test_liveness.py", "tests/test_session_lifetime.py", "tests/test_web_auth_config.py", "tests/test_websocket_auth.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "a5ab340420a3c250b368e70fe0591e2ffc992648"
-whole_reason = "One lifetime contract carried through the config, the port, the decider and every store fake that implements touch; split, the port and its implementers would not type-check against each other."
