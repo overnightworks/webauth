@@ -82,6 +82,7 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
+from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
 from webauth._validation import require_positive_whole_number
 from webauth.cookies import (
@@ -419,8 +420,7 @@ def receive_backchannel_logout(
 
 
 def _logout_token_of(form_body: bytes, content_type: str | None) -> str | None:
-    media_type = (content_type or "").partition(";")[0].strip().lower()
-    if media_type != "application/x-www-form-urlencoded":
+    if media_type_of(content_type) != "application/x-www-form-urlencoded":
         return None
     try:
         fields = urllib.parse.parse_qsl(

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final
 
 from starlette.responses import JSONResponse
 
+from webauth._media_types import media_type_of
 from webauth._origins import origin_is_allowed
 from webauth.config import web_auth_config
 from webauth.cookies import _verify_csrf_token
@@ -68,8 +69,7 @@ def _sec_fetch_site_allows(fetch_site: str) -> bool | None:
 
 
 def _is_form_submission(request: Request) -> bool:
-    content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
-    return content_type in _FORM_CONTENT_TYPES
+    return media_type_of(request.headers.get("content-type")) in _FORM_CONTENT_TYPES
 
 
 def _cross_origin_rejection() -> JSONResponse:
