@@ -1,7 +1,0 @@
-claim_id = "791b33007cec412da7ca10b8a4e2486e"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "9135eeff95fe2669cd5405126203df2f384c4164"
-branch = "claude/issue-310-remove-active-key-count"
-scope = ["CHANGELOG.md", "src/webauth/rate_limit.py", "tests/test_single_process_rate_limiter.py"]
-opened_commit = "055a2a997546f3b5218b9028510882bc686f6468"
