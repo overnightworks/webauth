@@ -43,7 +43,6 @@ from oidc_arrangement import (
 from pydantic import SecretStr
 from webauth_arrangement import (
     ADMIN_ROLE,
-    CLIENT_USER_AGENT,
     DOCUMENTED_ID_TOKEN_HINT_BOUND,
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
@@ -761,7 +760,6 @@ def an_oidc_host(
     authenticated: list[AuthenticatedUser] = []
     dependencies = current_user_dependency(
         session_store=lambda: sessions,
-        audit_sink=lambda: audit,
         on_authenticated=authenticated.append,
     )
 
@@ -870,7 +868,6 @@ def an_oidc_host(
     return OidcHost(
         client=TestClient(
             app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=root_path,
-            headers={"user-agent": CLIENT_USER_AGENT},
         ),
         issuer=issuer,
         key_set=key_set,
@@ -2197,7 +2194,7 @@ class OpeningStore:
     ) -> SessionRecord:
         app = FastAPI()
         install_web_auth_config(app, OPENING_CONFIG)
-        headers = [(b"user-agent", CLIENT_USER_AGENT.encode())]
+        headers: list[tuple[bytes, bytes]] = []
         if cookie_values:
             headers.append((b"cookie", session_cookie_header(*cookie_values).encode()))
         return open_session(
@@ -2211,7 +2208,7 @@ def signed(session_id: str) -> str:
     return sign_session_id(session_id, OPENING_CONFIG.signing_key)
 
 
-def test_a_new_session_has_a_fresh_id_and_the_clients_address_and_agent() -> None:
+def test_a_new_session_has_a_fresh_id() -> None:
     store = OpeningStore.holding(ACCOUNT)
     [replaced] = store.ids()
 
@@ -2222,7 +2219,6 @@ def test_a_new_session_has_a_fresh_id_and_the_clients_address_and_agent() -> Non
     assert (session.user_id, session.created_at, session.expires_at) == (
         ACCOUNT.id, FIXED_INSTANT, FIXED_INSTANT + IDLE,
     )
-    assert (session.ip_address, session.user_agent) == ("203.0.113.7", CLIENT_USER_AGENT)
 
 
 @pytest.mark.parametrize(("cookie_values_of", "ended"), [

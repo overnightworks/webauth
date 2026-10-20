@@ -119,8 +119,8 @@ def test_client_ip_behind_a_trusted_proxy(
 
     The first hop no trusted proxy vouches for is the client; entries further
     left are never read. When the readable part names nobody the request keys
-    on the peer, because an empty or nonsense identity binds a session and
-    buys a rate-limit budget.
+    on the peer, because an empty or nonsense identity buys a
+    rate-limit budget.
     """
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     assert _get_client_ip(_TRUSTED_PEER, forwarded_for, trusted) == expected
@@ -266,19 +266,26 @@ def _client_ip_app() -> FastAPI:
     return app
 
 
-def test_the_client_identity_of_a_configured_application() -> None:
+@pytest.mark.parametrize(
+    ("peer", "expected"),
+    [
+        pytest.param(_TRUSTED_PEER, _CLIENT, id="trusted-peer-names-the-forwarded-client"),
+        pytest.param("198.51.100.77", "198.51.100.77", id="untrusted-peer-ignores-a-forged-chain"),
+    ],
+)
+def test_the_client_identity_of_a_configured_application(peer: str, expected: str) -> None:
     app = _client_ip_app()
     install_web_auth_config(app, a_web_auth_config())
 
-    with TestClient(app, client=(_TRUSTED_PEER, 55000)) as client:
+    with TestClient(app, client=(peer, 55000)) as client:
         response = client.get("/client-ip", headers={"x-forwarded-for": _CLIENT})
 
-    assert response.json() == {"ip": _CLIENT}
+    assert response.json() == {"ip": expected}
 
 
 def test_the_client_identity_keeps_the_full_ipv6_address() -> None:
-    """Only the rate-limit budget pools a network; audit and sessions record
-    the address the client actually used."""
+    """Only the rate-limit budget pools a network; the identity keeps the
+    address the client actually used."""
     app = _client_ip_app()
     install_web_auth_config(app, a_web_auth_config(ipv6_budget_prefix=48))
 
@@ -289,9 +296,9 @@ def test_the_client_identity_keeps_the_full_ipv6_address() -> None:
 
 
 def test_an_application_without_a_configuration_names_nobody() -> None:
-    """Guessing here would hand a forged header the identity that binds a
-    session and buys a rate-limit budget, so a missing configuration has to
-    stop the request instead of falling back to the peer."""
+    """Guessing here would hand a forged header the identity that buys a
+    rate-limit budget, so a missing configuration has to stop the request
+    instead of falling back to the peer."""
     app = _client_ip_app()
 
     with (

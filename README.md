@@ -191,7 +191,7 @@ decision reads, and inside one `lock.hold()` it ends the session the request's
 cookie names (signed, sole and within the length bound, whichever account it
 belongs to; any other cookie ends nothing), then, with a cap, ends all but the
 account's newest `max_sessions - 1` sessions, then creates the account's new
-session through `create(user_id, *, now, expires_at, ip_address, user_agent)`
+session through `create(user_id, *, now, expires_at)`
 with `created_at` equal to that `now` and `expires_at` one idle period later.
 The host passes no expiry, and the store writes the instants it is given. The
 new session is created last, so it is never the one the cap ends, and the
@@ -697,7 +697,7 @@ session cookie itself calls this function instead of `request.cookies`.
 
 A browser sends the session cookie on a cross-site WebSocket handshake too,
 and the webauth middlewares pass WebSocket scopes through untouched.
-`webauth.dependencies.authenticate_websocket(connection, *, sessions, audit)`
+`webauth.dependencies.authenticate_websocket(connection, *, sessions)`
 is the one check a host runs at the handshake. It answers the
 `webauth.ports.AuthenticatedUser`, or a `ConnectionRefusal`:
 
@@ -710,7 +710,7 @@ is the one check a host runs at the handshake. It answers the
 | `SESSION_ENDED_OR_EXPIRED` | `session-ended-or-expired` | the store does not know the session, its stored expiry is outside the session lifetime, or `touch` answers `False` |
 
 The `Origin` is decided first, before the store is touched, so a refused
-handshake neither renews a session nor writes an audit event. Exactly one
+handshake neither renews a session nor writes anything. Exactly one
 `Origin` must name a host the configured allowlist admits (`allowed_hosts_exact`
 and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `WebAuthConfig`
 refuses both empty, so local development lists
@@ -720,10 +720,9 @@ allowed `Origin` too. The `Origin` keeps a foreign page from using a visitor's
 cookie; it is no credential.
 
 Then the session is decided exactly as `current_user_dependency` decides it
-for a request, from the same code: an admitted handshake renews the session
-and reports a changed address or agent. A failing store, or a `touch` that
-does not answer a `bool`, raises instead of refusing, and an exception never
-accepts the socket.
+for a request, from the same code: an admitted handshake renews the session.
+A failing store, or a `touch` that does not answer a `bool`, raises instead of
+refusing, and an exception never accepts the socket.
 
 ```python
 from fastapi import WebSocket
@@ -737,7 +736,7 @@ from webauth.ports import AuthenticatedUser
 async def room(websocket: WebSocket) -> None:
     def authenticate() -> AuthenticatedUser | ConnectionRefusal:
         with the_hosts_unit_of_work() as unit:
-            return authenticate_websocket(websocket, sessions=unit.sessions, audit=unit.audit)
+            return authenticate_websocket(websocket, sessions=unit.sessions)
 
     outcome = await run_in_threadpool(authenticate)
     if isinstance(outcome, ConnectionRefusal):
@@ -786,8 +785,7 @@ Fields a host may leave out:
 | `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
 | `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
 | `wall_clock` | `time.time` | a `webauth.ports.WallClock`, seconds since the epoch; the one reading of now behind every HTTP and WebSocket session decision, so a test fixes it |
-| `max_user_agent_chars` | `500` | a positive `int`; zero, a negative number, or a `bool` is refused |
-| `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address; sessions and audit keep the full address. Anything outside the range is refused |
+| `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address. Anything outside the range is refused |
 
 `cookie_secure` alone decides whether both cookies carry `Secure` — when they
 are set and when they are cleared — and whether `SecurityHeadersMiddleware`
@@ -1167,13 +1165,6 @@ explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
 
 Events contain no raw session identifiers or usernames. An admission event
 with `actor_id=None` means the issuer's groups decided, not a person.
-
-`AuditSink` has a second method, `session_identity_changed(event)`, which
-receives a `SessionIdentityChanged` with `change`, `user_id`, `session_ref`,
-`previous`, and `current` when a live session begins arriving from somewhere
-else. `session_ref` is a `webauth.ports.SessionReference`, the SHA-256 hex of the
-UTF-8 session id, made with `webauth.cookies.session_reference(session_id)`; the raw id
-never reaches an audit event.
 
 ## What it owns, and what it leaves to the host
 

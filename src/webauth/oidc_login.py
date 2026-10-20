@@ -103,7 +103,6 @@ from webauth.oidc import (
     _callback_state,
 )
 from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
-from webauth.proxies import client_user_agent, resolve_client_ip
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -332,7 +331,7 @@ def open_session(
     is a number, the account's newest ``max_sessions - 1`` sessions are kept and
     the rest ended, so neither the replaced session nor the new one counts
     against the cap; the new session is created at that instant, expiring one
-    idle period later, with the request's client address and agent. ``None``
+    idle period later. ``None``
     states that the host sets no cap; any other value must be a positive whole
     number. A forged, oversized or duplicated cookie ends nothing.
 
@@ -356,8 +355,6 @@ def open_session(
             account.id,
             now=now,
             expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
-            ip_address=resolve_client_ip(request),
-            user_agent=client_user_agent(request),
         )
         if session.id == replaced_session_id:
             sessions.delete(session.id)

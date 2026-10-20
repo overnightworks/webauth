@@ -345,12 +345,10 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
 
     dependencies = current_user_dependency(
         session_store=lambda: world["world"].sessions,
-        audit_sink=lambda: world["world"].audit,
         on_authenticated=lambda user: None,
     )
     redirecting_dependencies = current_user_dependency(
         session_store=lambda: world["world"].sessions,
-        audit_sink=lambda: world["world"].audit,
         on_authenticated=lambda user: None,
         login_redirect=LoginRedirect(path="/login/oidc", redirect_query_param="next"),
     )

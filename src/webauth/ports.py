@@ -17,8 +17,8 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum, auto
-from typing import NewType, Protocol
+from enum import Enum
+from typing import Protocol
 
 from webauth import WebAuthError
 
@@ -28,19 +28,14 @@ __all__ = [
     "AuditSink",
     "AuthenticatedUser",
     "RateLimitBackend",
-    "SessionIdentityChange",
-    "SessionIdentityChanged",
     "SessionRecord",
     "SessionRecordStore",
-    "SessionReference",
     "SubjectUserStore",
     "UserRecord",
     "UsernameTakenError",
     "WallClock",
     "WriteLock",
 ]
-
-SessionReference = NewType("SessionReference", str)
 
 WallClock = Callable[[], float]
 """Seconds since the epoch: the host's reading of now."""
@@ -73,8 +68,6 @@ class SessionRecord(Protocol):
 
     id: str
     user_id: str
-    ip_address: str
-    user_agent: str
     user: UserRecord
 
     @property
@@ -141,8 +134,6 @@ class SessionRecordStore(Protocol):
         *,
         now: datetime,
         expires_at: datetime,
-        ip_address: str,
-        user_agent: str,
     ) -> SessionRecord: ...
 
     def load(self, session_id: str) -> SessionRecord | None:
@@ -158,8 +149,6 @@ class SessionRecordStore(Protocol):
         session_id: str,
         *,
         expires_at: datetime,
-        ip_address: str,
-        user_agent: str,
     ) -> bool:
         """Renew the session in place, and say whether a stored row was renewed.
 
@@ -211,29 +200,6 @@ class RateLimitBackend(Protocol):
         ...
 
 
-class SessionIdentityChange(Enum):
-    """Which part of a session's origin stopped matching the stored one."""
-
-    IP_ADDRESS = auto()
-    USER_AGENT = auto()
-
-
-@dataclass(frozen=True)
-class SessionIdentityChanged:
-    """A session's origin changed; ``session_ref`` is the SHA-256 hex of its id.
-
-    The raw session identifier never reaches an audit event: it is a bearer
-    secret, so the field is a ``SessionReference``; a host makes one with
-    ``webauth.cookies.session_reference``.
-    """
-
-    change: SessionIdentityChange
-    user_id: str
-    session_ref: SessionReference
-    previous: str
-    current: str
-
-
 class AccountEventKind(Enum):
     USER_CREATED = "user_created"
     ROLE_CHANGED = "role_changed"
@@ -252,10 +218,6 @@ class AccountEvent:
 
 
 class AuditSink(Protocol):
-    def session_identity_changed(self, event: SessionIdentityChanged) -> None:
-        """Record that a live session began arriving from somewhere else."""
-        ...
-
     def account_event(self, event: AccountEvent) -> None:
         """Map an account operation to the host's audit, optionally doing nothing."""
         ...

@@ -2,7 +2,7 @@
 
 The application binds these two dependencies once, over the stores it
 supplies, and every protected route asks for them. Nothing here commits:
-the session renewal and the audit record land in whatever transaction the
+the session renewal lands in whatever transaction the
 application's stores write into, and become durable only when the endpoint
 commits it.
 """
@@ -28,15 +28,8 @@ from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     _cookie_values,
     _verify_session_cookie,
-    session_reference,
 )
-from webauth.ports import (
-    AuditSink,
-    SessionIdentityChange,
-    SessionIdentityChanged,
-    SessionRecordStore,
-)
-from webauth.proxies import client_user_agent, resolve_client_ip
+from webauth.ports import SessionRecordStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -98,15 +91,13 @@ class AuthDependencies:
 def current_user_dependency(
     *,
     session_store: Callable[..., SessionRecordStore],
-    audit_sink: Callable[..., AuditSink],
     on_authenticated: Callable[[ports.AuthenticatedUser], None],
     login_redirect: LoginRedirect | None = None,
 ) -> AuthDependencies:
     """Bind the auth dependencies to one application's stores.
 
-    ``session_store`` and ``audit_sink`` are the application's own
-    dependencies, so whatever transaction it puts them on is the one the
-    session renewal and the audit record are written into.
+    ``session_store`` is the application's own dependency, so whatever
+    transaction it puts it on is the one the session renewal is written into.
     ``on_authenticated`` is handed the account once the request's identity is
     established, so the application can bind it into its own log context.
     ``login_redirect`` is unset by default: a missing or dead session then
@@ -116,9 +107,8 @@ def current_user_dependency(
     def current_user(
         request: Request,
         sessions: SessionRecordStore = Depends(session_store),
-        audit: AuditSink = Depends(audit_sink),
     ) -> ports.AuthenticatedUser:
-        user = _resolve_session(request, sessions, audit)
+        user = _resolve_session(request, sessions)
         if isinstance(user, ConnectionRefusal):
             raise _http_refusal(request, user, login_redirect)
         on_authenticated(user)
@@ -155,17 +145,17 @@ def current_user_dependency(
 
 
 def authenticate_websocket(
-    connection: HTTPConnection, *, sessions: SessionRecordStore, audit: AuditSink,
+    connection: HTTPConnection, *, sessions: SessionRecordStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The account behind a WebSocket handshake, or why the handshake is refused.
 
-    The Origin is decided first, so a refused Origin never touches the store
-    or the audit: a browser sends the session cookie on a cross-site
-    handshake, and only the Origin tells a foreign page from the application's
-    own. Exactly one Origin naming a host the application serves is admitted;
-    there is no ``Referer`` fallback and ``Sec-Fetch-Site`` does not decide.
+    The Origin is decided first, so a refused Origin never touches the store: a
+    browser sends the session cookie on a cross-site handshake, and only the
+    Origin tells a foreign page from the application's own. Exactly one Origin
+    naming a host the application serves is admitted; there is no ``Referer``
+    fallback and ``Sec-Fetch-Site`` does not decide.
     Then the session is decided exactly as ``current_user`` decides it for an
-    HTTP request, renewal and identity audit included.
+    HTTP request, renewal included.
 
     Nothing here commits, and a failing store raises rather than refusing: the
     host finishes its transaction before ``accept`` and closes a refused
@@ -175,7 +165,7 @@ def authenticate_websocket(
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:
         return origin_refusal
-    return _resolve_session(connection, sessions, audit)
+    return _resolve_session(connection, sessions)
 
 
 def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
@@ -293,44 +283,6 @@ _HTTP_DETAIL_OF_SESSION_REFUSAL: Final = {
 }
 
 
-def _record_identity_changes(
-    audit: AuditSink,
-    *,
-    session_id: str,
-    user_id: str,
-    stored_ip: str,
-    stored_user_agent: str,
-    current_ip: str,
-    current_user_agent: str,
-) -> None:
-    """Report each part of the session's origin that stopped matching.
-
-    A session that was stored without an origin at all is not a change.
-    """
-    ip_changed = bool(stored_ip and stored_ip != current_ip)
-    user_agent_changed = bool(stored_user_agent and stored_user_agent != current_user_agent)
-    if ip_changed:
-        audit.session_identity_changed(
-            SessionIdentityChanged(
-                change=SessionIdentityChange.IP_ADDRESS,
-                user_id=user_id,
-                session_ref=session_reference(session_id),
-                previous=stored_ip,
-                current=current_ip,
-            ),
-        )
-    if user_agent_changed:
-        audit.session_identity_changed(
-            SessionIdentityChanged(
-                change=SessionIdentityChange.USER_AGENT,
-                user_id=user_id,
-                session_ref=session_reference(session_id),
-                previous=stored_user_agent,
-                current=current_user_agent,
-            ),
-        )
-
-
 def _as_instant(stored: datetime) -> datetime:
     """The stored datetime pinned to the fixed offset it names, naive read as UTC.
 
@@ -370,13 +322,12 @@ def _is_admitted(
 
 
 def _resolve_session(
-    connection: HTTPConnection, sessions: SessionRecordStore, audit: AuditSink,
+    connection: HTTPConnection, sessions: SessionRecordStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The one decision whom a connection's session cookie speaks for.
 
-    Cookie, signature, load, liveness, renewal, identity
-    audit: HTTP and WebSocket both ask here and translate the refusal into
-    their own answer.
+    Cookie, signature, load, liveness, renewal: HTTP and WebSocket both ask here
+    and translate the refusal into their own answer.
     """
     config = web_auth_config(connection)
     session_id = _read_session_cookie(connection, config)
@@ -388,18 +339,11 @@ def _resolve_session(
     if record is None or not _is_admitted(config.session_lifetime, record, now):
         return ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
 
-    current_ip = resolve_client_ip(connection)
-    current_user_agent = client_user_agent(connection)
-
-    stored_ip = record.ip_address
-    stored_user_agent = record.user_agent
     renewed = sessions.touch(
         session_id,
         expires_at=_renewed_expiry(
             config.session_lifetime, now=now, created_at=_as_instant(record.created_at),
         ),
-        ip_address=current_ip,
-        user_agent=current_user_agent,
     )
     if type(renewed) is not bool:
         raise TypeError(
@@ -407,16 +351,6 @@ def _resolve_session(
         )
     if not renewed:
         return ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
-
-    _record_identity_changes(
-        audit,
-        session_id=session_id,
-        user_id=record.user.id,
-        stored_ip=stored_ip,
-        stored_user_agent=stored_user_agent,
-        current_ip=current_ip,
-        current_user_agent=current_user_agent,
-    )
 
     return ports.AuthenticatedUser(
         id=record.user.id,

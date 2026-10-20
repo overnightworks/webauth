@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
-from dataclasses import fields, is_dataclass
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -13,8 +11,6 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from webauth_arrangement import (
     ADMIN_ROLE,
-    CLIENT_ADDRESS,
-    CLIENT_USER_AGENT,
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     HTTPS_TEST_SERVER,
@@ -26,7 +22,6 @@ from webauth_arrangement import (
     AuthApp,
     FakeSessionRecord,
     FakeUser,
-    RecordingAuditSink,
     SessionRecordsInMemory,
     SessionsAnsweringTouch,
     SessionsEndedBetweenLoadAndTouch,
@@ -42,7 +37,6 @@ from webauth.config import install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PLAIN_SESSION_COOKIE_NAME,
-    session_reference,
     sign_session_id,
 )
 from webauth.dependencies import (
@@ -50,7 +44,7 @@ from webauth.dependencies import (
     current_user_dependency,
     session_id_from_request,
 )
-from webauth.ports import AuthenticatedUser, SessionIdentityChange, SessionIdentityChanged
+from webauth.ports import AuthenticatedUser
 
 ADMIN_REQUIRED_DETAIL = "Admin access required"
 AUTHENTICATION_REQUIRED_DETAIL = "Authentication required"
@@ -311,15 +305,14 @@ def test_a_session_a_second_before_expiry_on_the_configured_clock_is_renewed_fro
     assert record.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS)
 
 
-def test_a_session_ended_between_load_and_touch_is_refused_without_audit() -> None:
-    sessions = SessionsEndedBetweenLoadAndTouch(a_session(ip_address="203.0.113.9"))
+def test_a_session_ended_between_load_and_touch_is_refused() -> None:
+    sessions = SessionsEndedBetweenLoadAndTouch(a_session())
     app = an_auth_app(None, sessions=sessions)
 
     response = app.get("/me", cookie=app.signed_cookie())
 
     assert response.status_code == 401
     assert sessions.record is None
-    assert app.audit.events == []
     assert app.authenticated == []
 
 
@@ -334,90 +327,15 @@ def test_a_touch_answering_anything_but_a_bool_is_refused(answer: object) -> Non
 
 
 def test_a_touch_reporting_no_row_refuses_the_request_and_writes_nothing() -> None:
-    record = a_session(ip_address="203.0.113.9")
+    record = a_session()
     stored_expiry = record.expires_at
     app = an_auth_app(None, sessions=SessionsAnsweringTouch(record, False))
 
     response = app.get("/me", cookie=app.signed_cookie())
 
     assert response.status_code == 401
-    assert app.audit.events == []
-    assert (record.ip_address, record.expires_at) == ("203.0.113.9", stored_expiry)
+    assert record.expires_at == stored_expiry
     assert app.authenticated == []
-
-
-@pytest.mark.parametrize(
-    ("stored_origin", "change", "previous", "current"),
-    [
-        pytest.param(
-            {"ip_address": "203.0.113.9"}, SessionIdentityChange.IP_ADDRESS,
-            "203.0.113.9", CLIENT_ADDRESS, id="a new address",
-        ),
-        pytest.param(
-            {"user_agent": "OldBrowser/1.0"}, SessionIdentityChange.USER_AGENT,
-            "OldBrowser/1.0", CLIENT_USER_AGENT, id="a new agent",
-        ),
-    ],
-)
-def test_a_session_arriving_from_a_new_origin_is_reported_once_by_reference(
-    stored_origin: dict[str, str],
-    change: SessionIdentityChange,
-    previous: str,
-    current: str,
-) -> None:
-    app = an_auth_app(a_session(**stored_origin))
-
-    app.get("/me", cookie=app.signed_cookie())
-
-    assert app.audit.events == [
-        SessionIdentityChanged(
-            change=change,
-            user_id="user-1",
-            session_ref=session_reference(SESSION_ID),
-            previous=previous,
-            current=current,
-        ),
-    ]
-
-
-def every_recorded_value(recorded: object) -> Iterator[str]:
-    """Each leaf value of an audit event, however deeply it is nested."""
-    if is_dataclass(recorded):
-        for field in fields(recorded):
-            yield from every_recorded_value(getattr(recorded, field.name))
-    elif isinstance(recorded, (list, tuple)):
-        for item in recorded:
-            yield from every_recorded_value(item)
-    else:
-        yield str(recorded)
-
-
-def test_no_identity_event_carries_the_raw_session_id_or_cookie() -> None:
-    app = an_auth_app(a_session(ip_address="203.0.113.9", user_agent="OldBrowser/1.0"))
-    cookie = app.signed_cookie()
-
-    app.get("/me", cookie=cookie)
-
-    assert {event.change for event in app.audit.events} == set(SessionIdentityChange)
-    assert not [
-        value
-        for value in every_recorded_value(app.audit.events)
-        if SESSION_ID in value or cookie in value
-    ]
-
-
-def test_a_session_stored_without_an_origin_reports_no_change() -> None:
-    app = an_auth_app(a_session(ip_address="", user_agent=""))
-
-    app.get("/me", cookie=app.signed_cookie())
-
-    assert app.audit.events == []
-
-
-def test_an_unchanged_origin_reports_nothing(auth_app: AuthApp) -> None:
-    auth_app.get("/me", cookie=auth_app.signed_cookie())
-
-    assert auth_app.audit.events == []
 
 
 def test_the_admin_route_admits_the_configured_admin_role() -> None:
@@ -564,7 +482,6 @@ def a_guarded_catch_all_app() -> FastAPI:
     install_web_auth_config(app, a_web_auth_config())
     guard = current_user_dependency(
         session_store=lambda: SessionRecordsInMemory(None),
-        audit_sink=RecordingAuditSink,
         on_authenticated=lambda user: None,
         login_redirect=A_LOGIN_REDIRECT,
     ).current_user
