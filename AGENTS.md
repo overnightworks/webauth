@@ -10,8 +10,7 @@ ports. Distribution `overnightworks-webauth`, import package `webauth`, Python
 release.
 
 `webauth` is a library, not an application: it is installed by host
-applications and has no deployment of its own. Every change here is a change
-to a public contract that a tag has already frozen somewhere else.
+applications and has no deployment of its own.
 
 `main` is protected: every change lands through a pull request with green CI.
 Nobody pushes to `main`.
@@ -67,7 +66,6 @@ CI, which only lints it.
 - Deployment facts come from `WebAuthConfig`. Nothing reads an environment
   variable or a global; the host installs one config on the app and every
   module reads it from there.
-- No inline comments.
 - Tests use the builders in `tests/webauth_arrangement.py` and
   `tests/oidc_arrangement.py` rather than a second set of fakes.
 
