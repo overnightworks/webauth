@@ -351,13 +351,33 @@ class TestSecurityHeadersPolicy:
 
         assert response.headers["Permissions-Policy"] == expected
 
-    @pytest.mark.parametrize("line_break", ["\r", "\n", "\r\n"])
-    def test_refuses_a_permissions_policy_with_a_line_break(self, line_break: str) -> None:
-        with pytest.raises(ValueError, match="CR or LF"):
-            SecurityHeadersPolicy(
-                content_security_policy="default-src 'none'",
-                permissions_policy=f"camera=(){line_break}X-Injected: 1",
-            )
+    @pytest.mark.parametrize("field", ["content_security_policy", "permissions_policy"])
+    @pytest.mark.parametrize("outside_the_bound", ["\r", "\n", "\r\n", "\x00", "\x7f", "ä"])
+    def test_refuses_a_raw_header_value_outside_visible_ascii_space_and_tab(
+        self, field: str, outside_the_bound: str,
+    ) -> None:
+        fields = {
+            "content_security_policy": "default-src 'none'",
+            "permissions_policy": "camera=()",
+            field: f"camera=(){outside_the_bound}X-Injected: 1",
+        }
+
+        with pytest.raises(ValueError, match=field):
+            SecurityHeadersPolicy(**fields)
+
+    @pytest.mark.parametrize("field", ["content_security_policy", "permissions_policy"])
+    def test_accepts_a_tab_in_a_raw_header_value(self, field: str) -> None:
+        value = "camera=()\tmicrophone=()"
+
+        fields = {
+            "content_security_policy": "default-src 'none'",
+            "permissions_policy": "camera=()",
+            field: value,
+        }
+
+        policy = SecurityHeadersPolicy(**fields)
+
+        assert getattr(policy, field) == value
 
 
 THE_DEFAULT_POLICY = (
@@ -388,16 +408,6 @@ def styled(sources: object) -> dict[str, object]:
 
 
 class TestDefaultContentSecurityPolicy:
-    @pytest.mark.parametrize("directive", [
-        CspDirective.SCRIPT_SRC, CspDirective.FRAME_ANCESTORS, CspDirective.FORM_ACTION,
-    ])
-    def test_a_keyword_beside_the_default_one_differs_only_in_case_is_listed_once(
-        self, directive: CspDirective,
-    ) -> None:
-        policy = default_content_security_policy(added_sources={directive: ["'SELF'"]})
-
-        assert directive_sources(policy, directive).split(" ").count("'self'") == 1
-
     @pytest.mark.parametrize("sources", [
         pytest.param(["'nonce-AbC'", "'nonce-abc'"], id="nonces"),
         pytest.param(["https://cdn.example/A", "https://cdn.example/a"], id="host-paths"),
@@ -475,6 +485,9 @@ class TestDefaultContentSecurityPolicy:
             )),
             pytest.param(f"'nonce-{A_DIGEST}'", id="nonce"),
             pytest.param("'NONCE-ab_c-d=='", id="mixed-case-nonce"),
+            pytest.param("'SELF'", id="upper-case-keyword"),
+            pytest.param("'trusted-types-eval'", id="keyword-outside-the-old-subset"),
+            pytest.param("'none'", id="none"),
             pytest.param("'sha256-abc'", id="sha256"),
             pytest.param("'sha384-abc='", id="sha384-padded"),
             pytest.param("'sha512-abc=='", id="sha512-padded"),
@@ -507,35 +520,22 @@ class TestDefaultContentSecurityPolicy:
         [
             pytest.param("", id="empty"),
             pytest.param("a b", id="space"),
+            pytest.param("https://a.example *", id="two-sources"),
             pytest.param("a;b", id="semicolon"),
             pytest.param("a,b", id="comma"),
             pytest.param("x\r\n", id="crlf"),
-            pytest.param("bücher.example.test", id="non-ascii-host"),
-            pytest.param("'ſelf'", id="long-s-folds-to-s"),
-            pytest.param("example.test/%zz", id="bad-percent-escape"),
-            pytest.param("example.test/a%", id="trailing-percent"),
-            pytest.param("example.test/%0", id="one-hex-digit"),
-            pytest.param("example.test/%G0", id="non-hex-escape"),
-            pytest.param("example.test//x", id="path-starting-with-two-slashes"),
-            pytest.param("*.", id="trailing-dot-after-bare-wildcard"),
-            pytest.param("https://*.", id="trailing-dot-after-bare-wildcard-with-scheme"),
-            pytest.param("'self", id="unclosed-quote"),
-            pytest.param("'nonce-'", id="empty-nonce"),
-            pytest.param("'nonce-a==='", id="three-paddings"),
-            pytest.param("'sha1-abc'", id="sha1"),
-            pytest.param("'unknown-keyword'", id="unknown-keyword"),
-            pytest.param("'trusted-types-eval'", id="draft-keyword-outside-the-subset"),
-            pytest.param("'report-sha256'", id="draft-report-keyword"),
+            pytest.param("a\tb", id="tab"),
+            pytest.param("a\x00b", id="nul"),
+            pytest.param("a\x7fb", id="del"),
+            pytest.param("https://例え.jp", id="non-ascii-host"),
             pytest.param("x; script-src *", id="injected-directive"),
-            pytest.param("'none'", id="none"),
-            pytest.param("'NONE'", id="none-upper-case"),
         ],
     )
     @pytest.mark.parametrize("directive", ALL_DIRECTIVES)
-    def test_refuses_an_added_source_outside_the_grammar_naming_the_directive(
+    def test_refuses_an_added_source_that_is_not_one_ascii_token_naming_the_directive(
         self, directive: CspDirective, source: str,
     ) -> None:
-        with pytest.raises(ValueError, match=f"{directive}.*declared subset"):
+        with pytest.raises(ValueError, match=f"{directive}.*one token"):
             default_content_security_policy(added_sources={directive: [source]})
 
     def test_adds_a_style_source_and_leaves_every_other_directive_alone(self) -> None:
@@ -571,26 +571,6 @@ class TestDefaultContentSecurityPolicy:
         assert directive_sources(policy, CspDirective.FRAME_ANCESTORS) == (
             "'self' https://parent.example.test"
         )
-
-    @pytest.mark.parametrize(
-        "source",
-        [
-            "'unsafe-inline'",
-            "'unsafe-allow-redirects'",
-            "'nonce-x'",
-            "'sha256-abc'",
-            "example.test/%zz",
-            "example.test//x",
-        ],
-    )
-    @pytest.mark.parametrize("directive", [CspDirective.FRAME_ANCESTORS, CspDirective.FORM_ACTION])
-    def test_refuses_a_source_the_navigation_grammar_lacks(
-        self,
-        directive: CspDirective,
-        source: str,
-    ) -> None:
-        with pytest.raises(ValueError, match=rf"{directive}.*declared subset is 'self', scheme"):
-            default_content_security_policy(added_sources={directive: [source]})
 
     @pytest.mark.parametrize(
         ("added", "expected"),

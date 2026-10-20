@@ -557,9 +557,11 @@ relying_party = OidcRelyingParty(
 Each request is HTTPS only, under the system's trusted certificates
 (`SSL_CERT_FILE` included), with a connect and a read timeout of five seconds
 each and a total deadline of ten seconds — `KEY_SET_FETCH_DEADLINE_SECONDS`
-and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over connecting, the TLS handshake and
-the whole answer, so an origin that drips its answer is cut off as a timeout;
-only the host name lookup runs outside it. No retry, no redirect followed and
+and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over the TLS handshake and the
+whole answer, so an origin that drips its answer is cut off as a timeout;
+connecting, which urllib3 bounds by the connect timeout once per resolved
+address, and the host name lookup, which the resolver offers no way to bound,
+run outside it. No retry, no redirect followed and
 no content decoding. The key-set
 fetch reads at most one byte past `MAX_KEY_SET_BYTES` and refuses any answer
 but 200. The token POST is a form POST with the client's Basic authorization
@@ -810,7 +812,9 @@ so a host that leaves it out keeps every one of those features off. The value
 replaces the whole header, so a host that records audio names every feature it
 still wants off, for example
 `permissions_policy="camera=(), microphone=(self), geolocation=()"`. A value
-containing CR or LF is refused when the policy is built.
+may hold visible ASCII, space and tab; anything else, such as CR, LF, NUL, DEL or a
+non-ASCII character, is refused when the policy is built; `content_security_policy` is
+held to the same bound.
 
 A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only
 this exact host can set it: a sibling subdomain cannot plant one with
@@ -873,12 +877,11 @@ default_content_security_policy(
 
 Callers supply complete source expressions: keywords, nonces and hashes in their
 quotes, hosts and schemes bare. Only `script_hashes` takes bare `sha256-<base64>`
-values and quotes them. Every source is validated against the CSP grammar when the
-policy is built, and a malformed one is a `ValueError`. A non-empty addition to
-`frame-ancestors` replaces its `'none'`, while an addition to `form-action` extends
-its `'self'`. `base-uri 'self'` is fixed and not extendable. Validation covers a declared subset of CSP Level 3: a
-well-formed keyword outside it, such as `'trusted-types-eval'`, is refused too, and a host that
-needs one writes the whole `SecurityHeadersPolicy` string itself.
+values and quotes them. A source is one token of printable ASCII without space, `;` or `,`,
+and is kept verbatim; anything else is a `ValueError` when the policy is built. A non-empty
+addition to `frame-ancestors` replaces its `'none'`, while an addition to `form-action` extends
+its `'self'`. `base-uri 'self'` is fixed and not extendable. The library does not check that a
+token is a valid CSP source, so a host that writes `'selff'` gets what it wrote.
 
 A form may submit only to this origin. A host whose form posts to another origin names
 it, for example an issuer such as Keycloak:
@@ -889,9 +892,7 @@ default_content_security_policy(
 )
 ```
 
-This writes `form-action 'self' https://id.example.test`. `form-action` takes `'self'`,
-scheme sources and host sources, as `frame-ancestors` does; nonces, hashes and other
-keywords are a `ValueError`.
+This writes `form-action 'self' https://id.example.test`.
 
 Browsers differ on redirects: MDN's compatibility data records that Chromium and Safari
 also check `form-action` on the redirect that answers a form submission, and Firefox does not
