@@ -14,7 +14,6 @@ import gzip
 import inspect
 import json
 import logging
-import socket
 import sys
 import time
 import traceback
@@ -364,33 +363,20 @@ _EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
 )
 
 
-_StalledTarget = Callable[[LoopbackHttpsServer, pytest.MonkeyPatch, contextlib.ExitStack], str]
+_StalledTarget = Callable[[LoopbackHttpsServer, contextlib.ExitStack], str]
 
 
 def _route(path: str) -> _StalledTarget:
-    return lambda server, monkeypatch, stack: f"{server.base_url}{path}"
+    return lambda server, stack: f"{server.base_url}{path}"
 
 
-def _unconnectable_on_every_address(
-    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
-) -> str:
-    port = stack.enter_context(unconnectable_loopback_port())
-    [address] = socket.getaddrinfo("127.0.0.1", port, type=socket.SOCK_STREAM)
-    # A host name resolving to three addresses, none of which answers.
-    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [address] * 3)
-    return f"https://issuer.example:{port}/certs"
-
-
-def _unanswering_tls_handshake(
-    server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch, stack: contextlib.ExitStack
-) -> str:
+def _unanswering_tls_handshake(server: LoopbackHttpsServer, stack: contextlib.ExitStack) -> str:
     return f"https://127.0.0.1:{stack.enter_context(unanswering_loopback_port())}/certs"
 
 
 @pytest.mark.parametrize(
     "target",
     [
-        pytest.param(_unconnectable_on_every_address, id="connect-on-every-address"),
         pytest.param(_unanswering_tls_handshake, id="tls-handshake"),
         pytest.param(_route("/dripping-status"), id="dripping-status-line"),
         pytest.param(_route("/dripping-head"), id="dripping-head"),
@@ -400,13 +386,12 @@ def _unanswering_tls_handshake(
 @_EXCHANGES_UNDER_A_DEADLINE
 def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     token_server: LoopbackHttpsServer,
-    monkeypatch: pytest.MonkeyPatch,
     exchange: Callable[..., object],
     error: type[KeySetFetchError | _HttpsExchangeError],
     target: _StalledTarget,
 ) -> None:
     with contextlib.ExitStack() as stack:
-        url = target(token_server, monkeypatch, stack)
+        url = target(token_server, stack)
         started = time.monotonic()
         with pytest.raises(error) as refused:
             exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
@@ -414,6 +399,30 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
+
+
+_CONNECT_TIMEOUT_SECONDS = 0.3
+_CONNECT_DEADLINE_SECONDS = 5
+
+
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_a_connect_nobody_answers_is_cut_off_by_the_connect_timeout_as_timed_out(
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | _HttpsExchangeError],
+) -> None:
+    with unconnectable_loopback_port() as port:
+        url = f"https://127.0.0.1:{port}/certs"
+        started = time.monotonic()
+        with pytest.raises(error) as refused:
+            exchange(
+                url,
+                timeout_seconds=_CONNECT_TIMEOUT_SECONDS,
+                deadline_seconds=_CONNECT_DEADLINE_SECONDS,
+            )
+        held = time.monotonic() - started
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+    assert _CONNECT_TIMEOUT_SECONDS <= held < _CONNECT_DEADLINE_SECONDS / 2
 
 
 @pytest.mark.parametrize(

@@ -44,6 +44,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   deliberately not a `WebAuthError`, so a host's `WebAuthError` handler cannot answer
   in place of the 413.
 
+**Changed**
+
+- Connecting to the issuer is bounded by the connect timeout per resolved address,
+  outside the total deadline; the deadline covers the TLS handshake and the answer.
+
 ## 0.18.0
 
 **Breaking**
