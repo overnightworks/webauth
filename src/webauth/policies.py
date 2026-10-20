@@ -294,10 +294,11 @@ class SecurityHeadersPolicy:
         if not isinstance(self.hsts_include_subdomains, bool):
             raise ValueError("hsts_include_subdomains must be True or False")
         for name in ("content_security_policy", "permissions_policy"):
-            if not _PRINTABLE_ASCII_AND_SPACE.fullmatch(getattr(self, name)):
+            if not _VISIBLE_ASCII_SPACE_AND_TAB.fullmatch(getattr(self, name)):
                 raise ValueError(
-                    f"{name} must be printable ASCII: a header value with a line break "
-                    "or a character outside Latin-1 breaks every response it is sent on.",
+                    f"{name} must be visible ASCII, space and tab: a control character "
+                    "or a character outside ASCII either breaks every response it is "
+                    "sent on or means nothing in this header.",
                 )
 
     @property
@@ -332,7 +333,6 @@ class CspDirective(StrEnum):
 _TEXT_LIKE: Final = (str, bytes, bytearray, memoryview)
 _SELF_KEYWORD: Final = "'self'"
 _NONE_SOURCE: Final = "'none'"
-_GRAMMAR_FLAGS: Final = re.ASCII | re.IGNORECASE
 _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
     CspDirective.SCRIPT_SRC: (_SELF_KEYWORD,),
     CspDirective.STYLE_SRC: (_SELF_KEYWORD,),
@@ -349,7 +349,7 @@ _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
 _BASE64_VALUE: Final = r"[A-Za-z0-9+/\-_]+={0,2}"
 _BARE_HASH: Final = re.compile(rf"sha(?:256|384|512)-{_BASE64_VALUE}", re.ASCII | re.IGNORECASE)
 _SOURCE_TOKEN: Final = re.compile(r"[\x21-\x2b\x2d-\x3a\x3c-\x7e]+")
-_PRINTABLE_ASCII_AND_SPACE: Final = re.compile(r"[\x20-\x7e]*")
+_VISIBLE_ASCII_SPACE_AND_TAB: Final = re.compile(r"[\t\x20-\x7e]*")
 _FIXED_DIRECTIVES: Final = ("default-src 'none'", "base-uri 'self'")
 
 

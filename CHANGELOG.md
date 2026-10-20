@@ -10,14 +10,20 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- `SecurityHeadersPolicy` refuses a `content_security_policy` or `permissions_policy`
+  holding a control character other than tab, DEL or a non-ASCII character; 0.18.0 refused
+  only CR or LF in `permissions_policy`.
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
 
 **Changed**
 
-- A CSP source in `added_sources` is one printable-ASCII token kept verbatim: keyword case
-  is no longer folded, and a source, or a `content_security_policy` or `permissions_policy`
-  string, outside printable ASCII is refused with a `ValueError`.
+- A CSP source in `added_sources` is no longer checked against the CSP grammar. It is one
+  token of printable ASCII without `;` or `,`, kept verbatim, and keyword case is not
+  folded, so sources 0.18.0 refused now pass: for example `'trusted-types-eval'`, `'none'`,
+  nonces, hashes or keywords in `form-action` and `frame-ancestors`, and typos, which the
+  browser ignores. A source with a space, a control character or a non-ASCII character is
+  still a `ValueError`.
 
 ## 0.18.0
 

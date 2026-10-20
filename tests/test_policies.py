@@ -352,18 +352,32 @@ class TestSecurityHeadersPolicy:
         assert response.headers["Permissions-Policy"] == expected
 
     @pytest.mark.parametrize("field", ["content_security_policy", "permissions_policy"])
-    @pytest.mark.parametrize("unsendable", ["\r", "\n", "\r\n", "ä", "\x7f"])
-    def test_refuses_a_raw_header_value_that_is_not_printable_ascii(
-        self, field: str, unsendable: str,
+    @pytest.mark.parametrize("outside_the_bound", ["\r", "\n", "\r\n", "\x00", "\x7f", "ä"])
+    def test_refuses_a_raw_header_value_outside_visible_ascii_space_and_tab(
+        self, field: str, outside_the_bound: str,
     ) -> None:
         fields = {
             "content_security_policy": "default-src 'none'",
             "permissions_policy": "camera=()",
-            field: f"camera=(){unsendable}X-Injected: 1",
+            field: f"camera=(){outside_the_bound}X-Injected: 1",
         }
 
         with pytest.raises(ValueError, match=field):
             SecurityHeadersPolicy(**fields)
+
+    @pytest.mark.parametrize("field", ["content_security_policy", "permissions_policy"])
+    def test_accepts_a_tab_in_a_raw_header_value(self, field: str) -> None:
+        value = "camera=()\tmicrophone=()"
+
+        fields = {
+            "content_security_policy": "default-src 'none'",
+            "permissions_policy": "camera=()",
+            field: value,
+        }
+
+        policy = SecurityHeadersPolicy(**fields)
+
+        assert getattr(policy, field) == value
 
 
 THE_DEFAULT_POLICY = (
@@ -510,6 +524,9 @@ class TestDefaultContentSecurityPolicy:
             pytest.param("a;b", id="semicolon"),
             pytest.param("a,b", id="comma"),
             pytest.param("x\r\n", id="crlf"),
+            pytest.param("a\tb", id="tab"),
+            pytest.param("a\x00b", id="nul"),
+            pytest.param("a\x7fb", id="del"),
             pytest.param("https://例え.jp", id="non-ascii-host"),
             pytest.param("x; script-src *", id="injected-directive"),
         ],

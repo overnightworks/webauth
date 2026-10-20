@@ -907,9 +907,7 @@ default_content_security_policy(
 )
 ```
 
-This writes `form-action 'self' https://id.example.test`. `form-action` takes `'self'`,
-scheme sources and host sources, as `frame-ancestors` does; nonces, hashes and other
-keywords are a `ValueError`.
+This writes `form-action 'self' https://id.example.test`.
 
 Browsers differ on redirects: MDN's compatibility data records that Chromium and Safari
 also check `form-action` on the redirect that answers a form submission, and Firefox does not
