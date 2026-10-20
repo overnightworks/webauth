@@ -1,8 +1,0 @@
-claim_id = "7d8c8d91234a4be1820eb479344b2665"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "a99f9c780142a1b3cd97c1d144692c907e5d8076"
-branch = "claude/issue-316-cookie-csrf-config-zombies"
-scope = ["tests/test_cookies.py", "tests/test_csrf.py", "tests/test_security_headers.py", "tests/test_web_auth_config.py", "tests/webauth_arrangement.py"]
-opened_commit = "a4754c7660d40e659da7f64ab23ed2b809740d80"
-whole_reason = "One retired helper and one moved test family span these five test files; splitting leaves the helper with callers or the HSTS test in two places."
