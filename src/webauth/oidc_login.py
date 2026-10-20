@@ -60,8 +60,9 @@ like a compact JWS) the issuer asks. Because the logout is a GET to the
 issuer, the hint reaches the browser's history and any TLS-terminating edge;
 once the session has ended it has no power left.
 
-``receive_backchannel_logout`` is the issuer's back-channel logout: it verifies
-the Logout Token before taking the lock, then, under the lock, ends every
+``receive_backchannel_logout`` is the issuer's back-channel logout: it reads the
+form body (one non-empty ``logout_token`` field, as the issuer posts it) and
+verifies the Logout Token before taking the lock, then, under the lock, ends every
 session of the account the token's subject names, and records one
 ``BACKCHANNEL_LOGOUT`` event when a session ended. A subject without an account
 is accepted and provisions nothing. It never
@@ -76,6 +77,7 @@ module's.
 from __future__ import annotations
 
 import unicodedata
+import urllib.parse
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
@@ -396,14 +398,22 @@ class BackchannelLogoutResult(Enum):
 
 def receive_backchannel_logout(
     relying_party: OidcRelyingParty,
-    logout_token: str,
+    form_body: bytes,
+    content_type: str | None,
     *,
     accounts: SubjectUserStore,
     sessions: SessionRecordStore,
     lock: WriteLock,
     audit: AuditSink,
 ) -> BackchannelLogoutResult:
-    """End every session of the subject a verified Logout Token names."""
+    """End every session of the subject a verified Logout Token names.
+
+    A request that is not one URL-encoded form with exactly one non-empty
+    ``logout_token`` is refused before anything is verified or locked.
+    """
+    logout_token = _logout_token_of(form_body, content_type)
+    if logout_token is None:
+        return BackchannelLogoutResult.REFUSED
     logout = relying_party.verify_logout_token(logout_token)
     if isinstance(logout, OidcRefusal):
         return BackchannelLogoutResult.REFUSED
@@ -416,6 +426,20 @@ def receive_backchannel_logout(
                 subject_id=account.id,
             ))
     return BackchannelLogoutResult.ACCEPTED
+
+
+def _logout_token_of(form_body: bytes, content_type: str | None) -> str | None:
+    media_type = (content_type or "").partition(";")[0].strip().lower()
+    if media_type != "application/x-www-form-urlencoded":
+        return None
+    try:
+        fields = urllib.parse.parse_qsl(
+            form_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
+        )
+    except ValueError:
+        return None
+    tokens = [value for name, value in fields if name == "logout_token"]
+    return tokens[0] if len(tokens) == 1 and tokens[0] else None
 
 
 def _sole_pending_login(

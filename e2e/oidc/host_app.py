@@ -28,7 +28,6 @@ import ssl
 import sys
 import threading
 import time
-import urllib.parse
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -282,20 +281,6 @@ def _relying_party(
     )
 
 
-def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
-    media_type = (content_type or "").partition(";")[0].strip().lower()
-    if media_type != FORM_CONTENT_TYPE:
-        return None
-    try:
-        fields = urllib.parse.parse_qsl(
-            request_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
-        )
-    except ValueError:
-        return None
-    tokens = [value for name, value in fields if name == "logout_token"]
-    return tokens[0] if len(tokens) == 1 and tokens[0] else None
-
-
 def call_userinfo(settings: HostSettings, current: World) -> None:
     """The one UserInfo request of an admitted login, trusting what ``SSL_CERT_FILE`` names."""
     access_token = current.token_requests.access_token
@@ -461,27 +446,25 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         )
         return response
 
-    def end_the_sessions_of(logout_token: str) -> BackchannelLogoutResult:
+    def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
         current = world["world"]
         with current.sessions.transaction():
             return receive_backchannel_logout(
-                next(iter(current.relying_parties.values())), logout_token,
+                next(iter(current.relying_parties.values())), form_body, content_type,
                 accounts=current.accounts, sessions=current.sessions,
                 lock=current.lock, audit=current.audit,
             )
 
     @app.post(BACKCHANNEL_LOGOUT_PATH)
     async def backchannel_logout(request: Request) -> Response:
-        logout_token = the_logout_token_of(
-            await request.body(), request.headers.get("content-type"),
-        )
+        form_body = await request.body()
+        content_type = request.headers.get("content-type")
         current = world["world"]
         result = BackchannelLogoutResult.REFUSED
-        if logout_token is not None:
-            try:
-                result = await anyio.to_thread.run_sync(end_the_sessions_of, logout_token)
-            except Exception:
-                logger.exception("back-channel logout failed")
+        try:
+            result = await anyio.to_thread.run_sync(end_the_sessions_of, form_body, content_type)
+        except Exception:
+            logger.exception("back-channel logout failed")
         if result is BackchannelLogoutResult.ACCEPTED:
             current.backchannel_accepted += 1
             return Response(status_code=200)

@@ -9,7 +9,7 @@ import anyio.lowlevel
 import pytest
 from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from webauth_arrangement import (
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
@@ -24,8 +24,9 @@ from webauth_arrangement import (
     starts,
 )
 
+from webauth import WebAuthError
 from webauth.config import install_web_auth_config
-from webauth.middleware import install_web_auth_middleware
+from webauth.middleware import RequestBodyTooLarge, install_web_auth_middleware
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
@@ -136,7 +137,7 @@ async def test_a_response_started_before_the_body_overflowed_is_cut_off_without_
 
     assert [start["status"] for start in starts(sent)] == [200]
     assert not completed(sent)
-    assert raised is not None
+    assert isinstance(raised, RequestBodyTooLarge)
 
 
 @pytest.mark.parametrize(
@@ -152,7 +153,7 @@ async def test_a_start_still_in_its_send_when_the_body_overflows_stays_the_only_
 
     assert [start["status"] for start in starts(sent)] == [200]
     assert not completed(sent)
-    assert raised is not None
+    assert isinstance(raised, RequestBodyTooLarge)
 
 
 async def test_a_response_finished_before_the_overflow_is_noticed_stays_complete_and_the_error_reaches_the_server() -> None:  # noqa: E501
@@ -163,7 +164,7 @@ async def test_a_response_finished_before_the_overflow_is_noticed_stays_complete
     assert [start["status"] for start in starts(sent)] == [200]
     assert completed(sent)
     assert body_of(sent) == b"firstsecond"
-    assert raised is not None
+    assert isinstance(raised, RequestBodyTooLarge)
 
 
 @pytest.mark.parametrize("path", ["/reads", "/reads-stream"])
@@ -182,6 +183,22 @@ async def test_a_streamed_body_over_the_limit_read_before_the_response_starts_an
     assert raised is None
     assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
 
+
+
+async def test_a_web_auth_error_handler_does_not_answer_in_place_of_the_413() -> None:
+    app = a_body_limited_app()
+
+    @app.exception_handler(WebAuthError)
+    async def answer_502(request: Request, error: WebAuthError) -> JSONResponse:
+        return JSONResponse({"detail": "handled"}, status_code=502)
+
+    sent, raised = await drive_post(
+        "/reads", SPEC_WITH_CONCURRENT_READER, TWO_CHUNKS_UNDER_THE_LIMIT_EACH, app=app
+    )
+
+    (start,) = starts(sent)
+    assert start["status"] == 413
+    assert raised is None
 
 
 async def test_a_start_send_held_past_the_deadline_fails_after_the_policy_bound_without_a_second_start() -> None:  # noqa: E501
@@ -248,4 +265,4 @@ async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_th
 
     assert [start["status"] for start in starts(sent)] == [200]
     assert not completed(sent)
-    assert raised is not None
+    assert isinstance(raised, RequestBodyTooLarge)

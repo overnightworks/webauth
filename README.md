@@ -380,14 +380,15 @@ taken before the callback is stopped by the issuer refusing the spent code
 When a person's Keycloak session ends, for example after they sign out of
 one app, Keycloak posts a Logout Token to the `backchannel.logout.url` of
 every client that session signed in to. `receive_backchannel_logout(relying_party,
-logout_token, *, accounts, sessions, lock, audit)` verifies it and ends every
-session of its subject, in every browser, and answers
-`BackchannelLogoutResult.ACCEPTED` or `REFUSED`. The host's route is a POST of
-a form with one `logout_token` field:
+form_body, content_type, *, accounts, sessions, lock, audit)` reads the POSTed
+form (one non-empty `logout_token` field, `application/x-www-form-urlencoded`),
+verifies the token and ends every session of its subject, in every browser, and
+answers `BackchannelLogoutResult.ACCEPTED` or `REFUSED`; a malformed form is
+`REFUSED` before anything is verified or locked. The host's route passes the
+raw body and the content type:
 
 ```python
 import logging
-import urllib.parse
 
 import anyio.to_thread
 from fastapi import Request, Response
@@ -397,37 +398,20 @@ from webauth.oidc_login import BackchannelLogoutResult, receive_backchannel_logo
 logger = logging.getLogger(__name__)
 
 
-def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
-    media_type = (content_type or "").partition(";")[0].strip().lower()
-    if media_type != "application/x-www-form-urlencoded":
-        return None
-    try:
-        fields = urllib.parse.parse_qsl(
-            request_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
-        )
-    except ValueError:
-        return None
-    tokens = [value for name, value in fields if name == "logout_token"]
-    return tokens[0] if len(tokens) == 1 and tokens[0] else None
-
-
-def end_the_sessions_of(logout_token: str) -> BackchannelLogoutResult:
+def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
     with the_hosts_transaction() as work:
         return receive_backchannel_logout(
-            relying_party, logout_token,
+            relying_party, form_body, content_type,
             accounts=work.accounts, sessions=work.sessions, lock=work.lock, audit=work.audit,
         )
 
 
 @app.post("/auth/backchannel-logout")
 async def backchannel_logout(request: Request) -> Response:
-    logout_token = the_logout_token_of(
-        await request.body(), request.headers.get("content-type"),
-    )
-    if logout_token is None:
-        return Response(status_code=400)
+    form_body = await request.body()
+    content_type = request.headers.get("content-type")
     try:
-        result = await anyio.to_thread.run_sync(end_the_sessions_of, logout_token)
+        result = await anyio.to_thread.run_sync(end_the_sessions_of, form_body, content_type)
     except Exception:
         logger.exception("back-channel logout failed")
         return Response(status_code=400)
@@ -440,8 +424,8 @@ synchronous, so they run in a worker thread and create and use their stores
 there. The route answers 200 only after the commit; a refusal or a failure,
 the commit's included, leaves every session in place and answers 400.
 
-The function runs in this order. It verifies the token before it takes the
-lock, and a refusal does nothing more. Under `lock.hold()` it looks up
+The function runs in this order. It reads the form, then verifies the token
+before it takes the lock; a malformed form or a refusal does nothing more. Under `lock.hold()` it looks up
 `accounts.get(subject)`. An unknown subject is accepted and creates no
 account. A known subject loses every session
 through the store's `delete_for_user`, and one `backchannel_logout` audit event with
@@ -1068,7 +1052,7 @@ the limiter is reached:
 | Body | Answer | Rate budget |
 |---|---|---|
 | Any Content-Length header over the limit | 413 before the route | spends nothing |
-| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete. The error reaches the server either way | spends one |
+| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete. The `RequestBodyTooLarge` error reaches the server either way | spends one |
 | Streamed (no Content-Length), read by the route through `request.body()` or `request.stream()` before the response starts | 413 with the headers | spends one |
 | Streamed, parsed by FastAPI (a typed body, `Form()`, `File()`/`UploadFile`) | FastAPI's 400 "There was an error parsing the body" through the host's `HTTPException` handler; the route never runs | spends one |
 | Streamed, never read, and the response is not a `StreamingResponse` under spec < 2.4 | Not size-checked; answers normally | spends one |
@@ -1200,7 +1184,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: strict parsing, its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which ends every session of the subject a verified Logout Token names. Takes its identity from `webauth.oidc` |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
 | `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client` |
 
 It leaves the application everything that touches the application's own truth:
@@ -1218,7 +1202,8 @@ It leaves the application everything that touches the application's own truth:
   not the request succeeds.
 - **Routes.** It defines none. The only responses it writes are its own
   refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
-  path.
+  path. Once a response has started it writes nothing more: a streamed body over
+  the limit then raises `RequestBodyTooLarge` to the server.
 - **Identity.** It issues no access or ID tokens: it is no identity provider, and
   it verifies the ID tokens an issuer made.
 - **HTTP framing** is the ASGI server's job. uvicorn's two parsers, h11 and

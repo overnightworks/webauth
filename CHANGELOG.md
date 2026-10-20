@@ -15,6 +15,19 @@ Versions before 0.3.0 and releases without an entry here are described in the
   only CR or LF in `permissions_policy`.
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
+- `receive_backchannel_logout` takes the request's form body and content type instead of
+  the Logout Token, and refuses a malformed form (wrong media type, invalid UTF-8, no or
+  several `logout_token` fields, an empty one) before it verifies anything or takes the
+  lock. Migrate by passing `await request.body()` and `request.headers.get("content-type")`;
+  the host's own form parse goes.
+
+**Added**
+
+- `RequestBodyTooLarge`, exported from `webauth.middleware`, is the error
+  `BodySizeLimitMiddleware` re-raises when a streamed body passes the limit after the
+  response has started. A host's middleware or log can catch it by name. It is
+  deliberately not a `WebAuthError`, so a host's `WebAuthError` handler cannot answer
+  in place of the 413.
 
 **Changed**
 
