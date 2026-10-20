@@ -344,6 +344,10 @@ def _as_instant(stored: datetime) -> datetime:
     return stored.replace(tzinfo=timezone(offset))
 
 
+def _whole_second_now(config: WebAuthConfig) -> datetime:
+    return datetime.fromtimestamp(int(config.wall_clock()), UTC)
+
+
 def _renewed_expiry(
     lifetime: SessionLifetime, *, now: datetime, created_at: datetime,
 ) -> datetime:
@@ -380,7 +384,7 @@ def _resolve_session(
         return session_id
 
     record = sessions.load(session_id)
-    now = datetime.fromtimestamp(int(config.wall_clock()), UTC)
+    now = _whole_second_now(config)
     if record is None or not _is_admitted(config.session_lifetime, record, now):
         return ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
 

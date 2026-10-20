@@ -11,7 +11,7 @@ import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
@@ -158,11 +158,12 @@ class HostAccounts:
 
 class HostSessions:
     def create(
-        self, user_id: str, expires_at: datetime, *, ip_address: str, user_agent: str,
+        self, user_id: str, *, now: datetime, expires_at: datetime,
+        ip_address: str, user_agent: str,
     ) -> SessionRecord:
         user = HostAccount(user_id, "someone", "user")
         return HostSession(
-            "id", user_id, ip_address, user_agent, user, datetime.now(UTC), expires_at,
+            "id", user_id, ip_address, user_agent, user, now, expires_at,
         )
 
     def load(self, session_id: str) -> SessionRecord | None:
@@ -179,8 +180,8 @@ class HostSessions:
     def delete_for_user(self, user_id: str) -> int:
         return 0
 
-    def prune_overflow(self, user_id: str, max_sessions: int) -> list[str]:
-        return []
+    def prune_overflow(self, user_id: str, keep_newest: int) -> None:
+        return None
 
 
 class HostLock:
@@ -244,13 +245,13 @@ def a_host_sends_the_browser_back(admitted: AdmittedLogin) -> tuple[UserRecord, 
 
 
 def a_host_opens_a_session(
-    request: Request, config: WebAuthConfig, account: UserRecord, expires_at: datetime,
+    request: Request, config: WebAuthConfig, account: UserRecord,
 ) -> SessionRecord:
     sessions: SessionRecordStore = HostSessions()
     lock: WriteLock = HostLock()
     return open_session(
         request, config, account,
-        sessions=sessions, lock=lock, expires_at=expires_at, max_sessions=None,
+        sessions=sessions, lock=lock, max_sessions=None,
     )
 
 

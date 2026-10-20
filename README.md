@@ -138,7 +138,6 @@ def callback(request: Request, response: Response) -> dict[str, str]:
     session = open_session(
         request, config, outcome.account,
         sessions=sessions, lock=lock,
-        expires_at=the_hosts_session_expiry(),
         max_sessions=3,
     )
     commit_the_hosts_transaction()
@@ -185,23 +184,28 @@ fragment is lost, because browsers never send it.
 
 #### Opening a session
 
-`open_session(request, config, account, sessions=..., lock=..., expires_at=...,
-max_sessions=...)` is the whole sequence between admission and the cookies,
-inside one `lock.hold()`: it ends the session the request's cookie names
-(signed, sole and within the length bound, whichever account it belongs to; any
-other cookie ends nothing), creates the account's new session with the
-`expires_at` the host passes, and, with a cap, ends the account's oldest
-sessions above `max_sessions` last, so the replaced session never counts against
-the cap. With a cap of 2 and sessions `{S1, S2}`, a login whose cookie names `S2`
-leaves `{S1, S3}`. `max_sessions=None` states that the host sets no cap; any
-other value must be a positive whole number, or `ValueError` is raised before
-anything is written. It answers the new `SessionRecord`.
+`open_session(request, config, account, sessions=..., lock=...,
+max_sessions=...)` is the whole sequence between admission and the cookies. It
+reads `WebAuthConfig.wall_clock` once, as the same whole seconds the session
+decision reads, and inside one `lock.hold()` it ends the session the request's
+cookie names (signed, sole and within the length bound, whichever account it
+belongs to; any other cookie ends nothing), then, with a cap, ends all but the
+account's newest `max_sessions - 1` sessions, then creates the account's new
+session through `create(user_id, *, now, expires_at, ip_address, user_agent)`
+with `created_at` equal to that `now` and `expires_at` one idle period later.
+The host passes no expiry, and the store writes the instants it is given. The
+new session is created last, so it is never the one the cap ends, and the
+replaced session never counts against the cap. With a cap of 2 and sessions
+`{S1, S2}`, a login whose cookie names `S2` leaves `{S1, S3}`; two logins in
+the same clock tick at a cap of 1 both succeed and leave the later one.
+`max_sessions=None` states that the host sets no cap; any other value must be
+a positive whole number, or `ValueError` is raised before anything is written.
+It answers the new `SessionRecord`.
 
 It never commits and sets no cookie: the host commits, then calls
 `issue_session_cookies(response, session.id, config)`, so a cookie never names a
 session that was rolled back. It raises `RuntimeError`, for the host to roll
-back, when the store's `create` returns the replaced session's id, or when
-`prune_overflow` would end the new session (sessions sharing a `created_at`).
+back, when the store's `create` returns the replaced session's id.
 It records no audit event, like `log_out`. The host's `WriteLock` must allow a
 second hold in the same request: one for admission, one for `open_session`.
 
@@ -977,10 +981,10 @@ config = WebAuthConfig(
 ## Ending a session
 
 Ending a session is a call on the host's store: `delete(session_id)`,
-`delete_for_user(user_id)` or `prune_overflow(user_id, max_sessions)`. The
+`delete_for_user(user_id)` or `prune_overflow(user_id, keep_newest)`, where `0` keeps none. The
 library makes that call in three places only: [`log_out`](#logging-out),
 [`open_session`](#opening-a-session) (the session an incoming cookie replaced,
-and the oldest above the cap) and back-channel logout. A host that signs in
+and all but the newest ones under the cap) and back-channel logout. A host that signs in
 through OpenID Connect ends a session with `log_out`. The next request carrying
 an ended session's cookie is refused.
 

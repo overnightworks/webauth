@@ -45,6 +45,8 @@ from webauth_arrangement import (
     ADMIN_ROLE,
     CLIENT_USER_AGENT,
     DOCUMENTED_ID_TOKEN_HINT_BOUND,
+    FIXED_INSTANT,
+    FIXED_WALL_CLOCK,
     HTTPS_TEST_SERVER,
     MEMBER_ROLE,
     SESSION_MAX_AGE_SECONDS,
@@ -727,7 +729,7 @@ def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | 
 
 
 def an_oidc_host(
-    *users: FakeUser, store_max_age_seconds: int = SESSION_MAX_AGE_SECONDS,
+    *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
     address_budget: int | None = None,
     max_sessions: int | None = None,
@@ -737,9 +739,7 @@ def an_oidc_host(
     config = a_web_auth_config(**config_overrides)
     lock = CountingWriteLock()
     accounts = UsersInMemory(*users, lock=lock)
-    sessions = SessionRecordsInMemory(
-        max_age_seconds=store_max_age_seconds, users=accounts, lock=lock,
-    )
+    sessions = SessionRecordsInMemory(users=accounts, lock=lock)
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
     issued_id_tokens: list[str] = []
@@ -815,7 +815,6 @@ def an_oidc_host(
             session = open_session(
                 request, config, outcome.account,
                 sessions=sessions, lock=lock,
-                expires_at=datetime.now(UTC) + timedelta(seconds=sessions.max_age_seconds),
                 max_sessions=max_sessions,
             )
         issue_session_cookies(response, session.id, config)
@@ -944,18 +943,16 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
-def test_an_admitted_callback_expires_the_session_by_the_stores_lifetime() -> None:
-    store_max_age_seconds = 1_200
-    host = an_oidc_host(store_max_age_seconds=store_max_age_seconds)
+def test_an_admitted_callback_opens_the_session_at_the_configured_clock_for_one_idle() -> None:
+    host = an_oidc_host(wall_clock=FIXED_WALL_CLOCK)
 
-    response = host.callback(host.sign_in_at_issuer())
+    host.callback(host.sign_in_at_issuer())
 
     record = host.sessions.record
     assert record is not None
-    expires_in = (record.expires_at - datetime.now(UTC)).total_seconds()
-    assert expires_in == pytest.approx(store_max_age_seconds, abs=60)
-    session_cookie = set_cookies(response)[host.config.session_cookie_name]
-    assert f"max-age={host.config.cookie_max_age_seconds}" in session_cookie
+    assert (record.created_at, record.expires_at) == (
+        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
+    )
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
@@ -1803,10 +1800,12 @@ def a_host_with_sessions(
 
 
 def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
-    for _ in range(count):
+    first_created_at = datetime.now(UTC) - timedelta(minutes=30)
+    for minute in range(count):
+        created_at = first_created_at + timedelta(minutes=minute)
         seeded_session(
             host.sessions, host.lock.hold_uncounted(), user_id,
-            datetime.now(UTC) + timedelta(seconds=host.sessions.max_age_seconds),
+            created_at, created_at + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
         )
 
 
@@ -2135,8 +2134,9 @@ def test_the_callback_needs_neither_an_origin_nor_a_cookie() -> None:
 ACCOUNT = FakeUser(id=SUBJECT, username="lena")
 BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
 FIRST_EXPIRY = datetime(2030, 1, 1, tzinfo=UTC)
-LATER_EXPIRY = FIRST_EXPIRY + timedelta(days=1)
-OPENING_CONFIG = a_web_auth_config()
+FIRST_CREATED_AT = FIXED_INSTANT - timedelta(hours=1)
+IDLE = timedelta(seconds=SESSION_MAX_AGE_SECONDS)
+OPENING_CONFIG = a_web_auth_config(wall_clock=FIXED_WALL_CLOCK)
 
 
 class StoreDown(Exception):
@@ -2169,18 +2169,17 @@ class OpeningStore:
         sessions = store_type(users=UsersInMemory(ACCOUNT, BYSTANDER, lock=lock), lock=lock)
         store = cls(sessions, lock)
         for minute, owner in enumerate(owners):
-            store.create_for(owner, FIRST_EXPIRY + timedelta(minutes=minute))
+            store.create_for(owner, FIRST_CREATED_AT + timedelta(minutes=minute))
         return store
 
-    def create_for(self, owner: FakeUser, expires_at: datetime) -> str:
-        return seeded_session(self.sessions, self.lock.hold(), owner.id, expires_at).id
+    def create_for(self, owner: FakeUser, now: datetime) -> str:
+        return seeded_session(self.sessions, self.lock.hold(), owner.id, now, now + IDLE).id
 
     def ids(self) -> list[str]:
         return [record.id for record in self.sessions.list_active()]
 
     def open_session(
-        self, *cookie_values: str,
-        expires_at: datetime = LATER_EXPIRY, max_sessions: int | None = None,
+        self, *cookie_values: str, max_sessions: int | None = None,
     ) -> SessionRecord:
         app = FastAPI()
         install_web_auth_config(app, OPENING_CONFIG)
@@ -2190,7 +2189,7 @@ class OpeningStore:
         return open_session(
             Request(an_http_scope(app, headers=headers)), OPENING_CONFIG, ACCOUNT,
             sessions=self.sessions, lock=self.lock,
-            expires_at=expires_at, max_sessions=max_sessions,
+            max_sessions=max_sessions,
         )
 
 
@@ -2206,7 +2205,9 @@ def test_a_new_session_has_a_fresh_id_and_the_clients_address_and_agent() -> Non
 
     assert session.id != replaced
     assert store.ids() == [session.id]
-    assert (session.user_id, session.expires_at) == (ACCOUNT.id, LATER_EXPIRY)
+    assert (session.user_id, session.created_at, session.expires_at) == (
+        ACCOUNT.id, FIXED_INSTANT, FIXED_INSTANT + IDLE,
+    )
     assert (session.ip_address, session.user_agent) == ("203.0.113.7", CLIENT_USER_AGENT)
 
 
@@ -2260,7 +2261,7 @@ def test_the_account_holds_at_most_its_cap_afterwards_with_the_oldest_ended(
     existing: int, cookie: int | None, max_sessions: int | None, surviving: list[int],
 ) -> None:
     store = OpeningStore.holding(*[ACCOUNT] * existing)
-    bystander = store.create_for(BYSTANDER, FIRST_EXPIRY)
+    bystander = store.create_for(BYSTANDER, FIRST_CREATED_AT)
     before = store.ids()
     cookie_values = [] if cookie is None else [signed(before[cookie])]
 
@@ -2321,17 +2322,14 @@ def test_a_create_that_raises_after_the_delete_leaves_the_replaced_session(
     assert store.ids() == before
 
 
-def test_a_tie_on_created_at_that_would_prune_the_new_session_raises_and_rolls_back() -> None:
-    store = OpeningStore.holding(ACCOUNT)
-    before = store.ids()
+def test_two_same_tick_logins_at_a_cap_of_one_both_succeed_and_the_later_remains() -> None:
+    store = OpeningStore.holding()
 
-    with (
-        pytest.raises(RuntimeError, match=r"SessionRecordStore\.prune_overflow"),
-        store.sessions.transaction(),
-    ):
-        store.open_session(expires_at=FIRST_EXPIRY, max_sessions=1)
+    first = store.open_session(max_sessions=1)
+    second = store.open_session(max_sessions=1)
 
-    assert store.ids() == before
+    assert first.created_at == second.created_at
+    assert store.ids() == [second.id]
 
 
 def test_a_store_that_hands_back_the_replaced_id_raises_and_rolls_back() -> None:
