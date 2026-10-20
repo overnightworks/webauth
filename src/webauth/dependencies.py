@@ -20,7 +20,7 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, Response
 
 from webauth import ports
-from webauth._content_negotiation import prefers_html
+from webauth._media_types import prefers_html
 from webauth._origins import origin_is_allowed
 from webauth._paths import reads_as_another_host, requested_address, same_app_path
 from webauth.config import SessionLifetime, WebAuthConfig, web_auth_config

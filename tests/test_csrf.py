@@ -80,26 +80,26 @@ def a_client_allowing_only_pattern(pattern: str) -> TestClient:
     ))
 
 
-def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Response:
+def _call(method: str, headers: dict[str, str], *, content_type: str | None = None) -> Response:
     client = an_origin_guarded_client()
     if method == "GET":
         return client.get(API_PATH, headers=headers)
-    if as_form:
+    if content_type is not None:
         return client.post(
             API_PATH,
             content=b"n=1",
-            headers={**headers, "content-type": "application/x-www-form-urlencoded"},
+            headers={**headers, "content-type": content_type},
         )
     return client.post(API_PATH, json={"n": 1}, headers=headers)
 
 
 @pytest.mark.parametrize(
-    ("method", "headers", "as_form", "status", "body"),
+    ("method", "headers", "content_type", "status", "body"),
     [
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-origin"},
-            False,
+            None,
             200,
             OK,
             id="same-origin-without-origin-passes",
@@ -107,7 +107,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-origin", "origin": FOREIGN_ORIGIN},
-            False,
+            None,
             200,
             OK,
             id="same-origin-with-foreign-origin-passes",
@@ -115,7 +115,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {"sec-fetch-site": "cross-site", "origin": ALLOWED_ORIGIN},
-            False,
+            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="cross-site-wins-over-allowlisted-origin",
@@ -123,7 +123,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-site", "origin": ALLOWED_ORIGIN},
-            False,
+            None,
             200,
             OK,
             id="same-site-with-allowlisted-origin-passes",
@@ -131,7 +131,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-site", "origin": FOREIGN_ORIGIN},
-            False,
+            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="same-site-with-foreign-origin-refused",
@@ -139,7 +139,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {"origin": ALLOWED_ORIGIN},
-            False,
+            None,
             200,
             OK,
             id="absent-header-allowlisted-origin-passes",
@@ -147,7 +147,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {"origin": FOREIGN_ORIGIN},
-            False,
+            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="absent-header-foreign-origin-refused",
@@ -155,7 +155,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {},
-            False,
+            None,
             200,
             OK,
             id="absent-both-json-passes",
@@ -163,15 +163,47 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "POST",
             {},
-            True,
+            "application/x-www-form-urlencoded",
             403,
             MISSING_ORIGIN_DETAIL,
             id="absent-both-form-refused",
         ),
         pytest.param(
             "POST",
+            {},
+            "application/json",
+            200,
+            OK,
+            id="absent-both-explicit-json-passes",
+        ),
+        pytest.param(
+            "POST",
+            {},
+            "Text/Plain",
+            403,
+            MISSING_ORIGIN_DETAIL,
+            id="absent-both-capitalised-text-plain-refused",
+        ),
+        pytest.param(
+            "POST",
+            {},
+            "APPLICATION/X-WWW-FORM-URLENCODED; charset=utf-8",
+            403,
+            MISSING_ORIGIN_DETAIL,
+            id="absent-both-capitalised-urlencoded-form-refused",
+        ),
+        pytest.param(
+            "POST",
+            {},
+            "MULTIPART/FORM-DATA; boundary=x",
+            403,
+            MISSING_ORIGIN_DETAIL,
+            id="absent-both-capitalised-multipart-form-refused",
+        ),
+        pytest.param(
+            "POST",
             {"sec-fetch-site": "none"},
-            False,
+            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="none-with-post-refused",
@@ -179,7 +211,7 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
         pytest.param(
             "GET",
             {"sec-fetch-site": "cross-site"},
-            False,
+            None,
             200,
             OK,
             id="safe-method-cross-site-passes",
@@ -189,11 +221,11 @@ def _call(method: str, headers: dict[str, str], *, as_form: bool = False) -> Res
 def test_a_request_is_judged_by_sec_fetch_site_then_origin(
     method: str,
     headers: dict[str, str],
-    as_form: bool,
+    content_type: str | None,
     status: int,
     body: dict[str, str],
 ) -> None:
-    response = _call(method, headers, as_form=as_form)
+    response = _call(method, headers, content_type=content_type)
 
     assert response.status_code == status
     assert response.json() == body

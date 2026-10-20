@@ -25,6 +25,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 - `open_session` no longer checks that the store's new session id differs from the one it
   replaced; the store's entropy duty covers it, and the `RuntimeError` is gone.
+- Media types compare without regard to case, as RFC 9110 section 8.3.1 requires. A POST
+  with neither Origin nor Referer whose type is `Text/Plain` or a capitalised form type is
+  now refused as a form submission. `Accept: Text/HTML` asks for the HTML redirect.
 - The issuer's key set and token answer are read as Python's `json.loads` reads bytes.
   This withdraws the 0.14.0 refusals of non-finite numbers and deep nesting for the token
   answer and loosens the key set the same way: a member named twice keeps its last value;

@@ -1,4 +1,4 @@
-"""Whether a request asks for an HTML page rather than a JSON answer."""
+"""Reading media types: the type of a header value, and what an Accept header asks for."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from starlette.requests import Request
 
-__all__ = []
+__all__ = ["media_type_of", "prefers_html"]
+
+
+def media_type_of(value: str | None) -> str:
+    """The media type before any parameter, stripped and lower-cased (RFC 9110 section 8.3.1)."""
+    return (value or "").partition(";")[0].strip().lower()
 
 
 def prefers_html(request: Request) -> bool:
@@ -18,7 +23,7 @@ def prefers_html(request: Request) -> bool:
 
 
 def _media_range_and_quality(entry: str) -> tuple[str, float]:
-    type_part, *params = entry.split(";")
+    _, *params = entry.split(";")
     quality = 1.0
     for param in params:
         name, _, value = param.strip().partition("=")
@@ -27,7 +32,7 @@ def _media_range_and_quality(entry: str) -> tuple[str, float]:
                 quality = float(value.strip())
             except ValueError:
                 quality = 1.0
-    return type_part.strip(), quality
+    return media_type_of(entry), quality
 
 
 def _accepted_quality(accept_header: str, media_type: str) -> float:
