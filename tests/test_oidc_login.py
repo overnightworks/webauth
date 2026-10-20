@@ -685,21 +685,6 @@ def a_logout_token_of_the_issuer(
     )
 
 
-def the_logout_token_of(request_body: bytes, content_type: str | None) -> str | None:
-    """The one non-empty ``logout_token`` a back-channel request's form carries, or ``None``."""
-    media_type = (content_type or "").partition(";")[0].strip().lower()
-    if media_type != "application/x-www-form-urlencoded":
-        return None
-    try:
-        fields = urllib.parse.parse_qsl(
-            request_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
-        )
-    except ValueError:
-        return None
-    tokens = [value for name, value in fields if name == "logout_token"]
-    return tokens[0] if len(tokens) == 1 and tokens[0] else None
-
-
 def an_oidc_host(
     *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
@@ -807,22 +792,19 @@ def an_oidc_host(
             ),
         }
 
-    def end_the_sessions_of(logout_token: str) -> BackchannelLogoutResult:
+    def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
         with sessions.transaction():
             return receive_backchannel_logout(
-                relying_party, logout_token,
+                relying_party, form_body, content_type,
                 accounts=accounts, sessions=sessions, lock=lock, audit=audit,
             )
 
     @app.post(BACKCHANNEL_LOGOUT_PATH)
     async def backchannel_logout(request: Request) -> Response:
-        logout_token = the_logout_token_of(
-            await request.body(), request.headers.get("content-type"),
-        )
-        if logout_token is None:
-            return Response(status_code=400)
+        form_body = await request.body()
+        content_type = request.headers.get("content-type")
         try:
-            result = await anyio.to_thread.run_sync(end_the_sessions_of, logout_token)
+            result = await anyio.to_thread.run_sync(end_the_sessions_of, form_body, content_type)
         except Exception:
             logging.getLogger(__name__).exception("back-channel logout failed")
             return Response(status_code=400)

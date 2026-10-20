@@ -251,14 +251,14 @@ def a_host_logs_out(
 
 
 def a_host_receives_a_backchannel_logout(
-    relying_party: OidcRelyingParty, logout_token: str,
+    relying_party: OidcRelyingParty, form_body: bytes, content_type: str | None,
 ) -> BackchannelLogoutResult:
     accounts: SubjectUserStore = HostAccounts()
     sessions: SessionRecordStore = HostSessions()
     lock: WriteLock = HostLock()
     audit: AuditSink = HostAudit()
     return receive_backchannel_logout(
-        relying_party, logout_token,
+        relying_party, form_body, content_type,
         accounts=accounts, sessions=sessions, lock=lock, audit=audit,
     )
 

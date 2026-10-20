@@ -12,6 +12,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 - `SingleProcessRateLimitBackend.active_key_count` is gone; nothing in the library
   called it. A host that counted the backend's keys keeps its own count.
+- `receive_backchannel_logout` takes the request's form body and content type instead of
+  the Logout Token, and refuses a malformed form (wrong media type, invalid UTF-8, no or
+  several `logout_token` fields, an empty one) before it verifies anything or takes the
+  lock. Migrate by passing `await request.body()` and `request.headers.get("content-type")`;
+  the host's own form parse goes.
 
 ## 0.18.0
 
