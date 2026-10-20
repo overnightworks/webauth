@@ -318,11 +318,12 @@ class TestRefusedInstallation:
     ) -> None:
         app = a_fresh_app()
         token_policy = CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGIN_PATH})))
+        origin_policy = CsrfPolicy(protected=PathRules(prefixes=("/api",)))
         with pytest.raises(ValueError, match="does not check"):
             install_web_auth_middleware(
                 app,
                 security_headers=HEADERS_POLICY,
-                csrf_origin=CsrfPolicy(protected=PathRules(prefixes=("/api",))),
+                csrf_origin=origin_policy,
                 csrf_token=token_policy,
             )
         assert app.user_middleware == []
