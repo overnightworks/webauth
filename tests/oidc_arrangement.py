@@ -139,9 +139,12 @@ def a_logout_token(
 @dataclass
 class FakeClock:
     now: float
+    step: float = 0.0
 
     def __call__(self) -> float:
-        return self.now
+        reading = self.now
+        self.now += self.step
+        return reading
 
 
 @dataclass

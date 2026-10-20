@@ -956,6 +956,20 @@ def test_an_admitted_callback_opens_the_session_at_the_configured_clock_for_one_
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
+def test_an_admitted_callback_derives_both_stored_instants_from_one_whole_second_reading() -> None:
+    advancing_clock = FakeClock(FIXED_INSTANT.timestamp() + 0.9, step=0.4)
+    host = an_oidc_host(wall_clock=advancing_clock)
+
+    host.callback(host.sign_in_at_issuer())
+
+    record = host.sessions.record
+    assert record is not None
+    assert (record.created_at, record.expires_at) == (
+        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
+    )
+    assert host.client.get("/me").status_code == 200
+
+
 @pytest.mark.parametrize(("cookie_secure", "name", "secure_attribute"), [
     pytest.param(True, "__Secure-oidc_id_token_hint", {"secure"}, id="secure"),
     pytest.param(False, "oidc_id_token_hint", set(), id="insecure-development"),

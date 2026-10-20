@@ -326,8 +326,8 @@ def open_session(
 ) -> SessionRecord:
     """Open the new session of an admitted ``account``, ending the one the request carries.
 
-    Reads ``config.wall_clock`` once, the same whole-second instant the session
-    decider reads, and under one ``lock.hold()``, in this order: the session the
+    Under one ``lock.hold()``, reads ``config.wall_clock`` once, the same
+    whole-second instant the session decider reads, and in this order: the session the
     request's cookie names is ended, whoever it belongs to; when ``max_sessions``
     is a number, the account's newest ``max_sessions - 1`` sessions are kept and
     the rest ended, so neither the replaced session nor the new one counts
@@ -346,8 +346,8 @@ def open_session(
     if max_sessions is not None:
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
     replaced_session_id = session_id_from_request(request, config)
-    now = _whole_second_now(config)
     with lock.hold():
+        now = _whole_second_now(config)
         if replaced_session_id is not None:
             sessions.delete(replaced_session_id)
         if max_sessions is not None:
