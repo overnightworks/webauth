@@ -32,7 +32,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - The library keeps no session origin. `SessionRecord` loses `ip_address` and
   `user_agent`; `SessionRecordStore.create` and `touch` take neither. The identity
   audit goes with them: `SessionIdentityChanged`, `SessionIdentityChange`,
-  `AuditSink.session_identity_changed`, `SessionReference` and
+  `AuditSink.session_identity_changed` and
   `webauth.cookies.session_reference` no longer exist, and neither do
   `webauth.proxies.client_user_agent` and `WebAuthConfig.max_user_agent_chars`.
   `current_user_dependency` and `authenticate_websocket` take no audit sink. The
@@ -59,7 +59,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
   admitted one is renewed to `min(now + idle, created_at + cap)`, so a session
   never outlives its cap. `SessionLifetime` refuses an `absolute_max_age_seconds`
   above 400 days (`webauth.config.MAX_SESSION_LIFETIME_SECONDS`, the browser's cookie
-  limit), and a session created more than 60 s in the future is refused. Migration:
+  limit) and an `idle_seconds` above `absolute_max_age_seconds` (presentator's
+  `IdleWindowLiveness` cap was optional, so check it sets both), and a session
+  created more than 60 s in the future is refused. Migration: the store's
+  `prune_overflow` takes `keep_newest` where it took `max_sessions` and returns
+  nothing, and `touch` takes the session id string where it took the `SessionRecord`;
   songmaker sets `SessionLifetime(idle, cap)`, and its store writes the given
   `expires_at` and drops its own arithmetic; presentator's sessions table gains
   `expires_at` beside `created_at` in place of `last_seen`, its `create` stores the
@@ -68,12 +72,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - The library keeps no session wrappers, and its refusal names both channels.
   `webauth.session_ending` and its `end_session`, `end_user_sessions` and
   `prune_sessions` no longer exist, and `dependencies.WebSocketRefusal` is
-  renamed `ConnectionRefusal` with the same members and values. No port is
+  renamed `ConnectionRefusal` with the same members and values, less `ACCOUNT_DISABLED`
+  (see the admission bullet below). No port is
   `@runtime_checkable` any more, so `isinstance` against a port raises
   `TypeError`. Migration: call the store's `delete`, `delete_for_user` and
   `prune_overflow` (normally `log_out` and `open_session` already do),
   import `ConnectionRefusal`, and check conformance with a type checker.
-
 - Admission looks no username up and no local flag locks an account.
   `SubjectUserStore.get_by_username`, `UserRecord.is_active`,
   `AuthenticatedUser.is_active`, `WebSocketRefusal.ACCOUNT_DISABLED` (its HTTP
@@ -93,11 +97,16 @@ Versions before 0.3.0 and releases without an entry here are described in the
   query of this app (`None` for none), and `finish_login` returns an
   `AdmittedLogin(account, return_to)` instead of a bare `UserRecord`. The path is
   kept in the pending-login cookie, now `v2.` with a base64url return-path field
-  and at most 896 characters, and judged again at the callback; a value that is not
-  a same-origin ASCII path of at most 512 bytes under `root_path` and free of `.`/`..`
-  segments or a literal `#` comes back as `None`, and so does every path when `root_path`
-  holds a character other than ASCII letters, digits, `-._~` and `/`; `root_path` is prepended unless the raw path
-  already starts with it at a segment boundary. A login in flight at the upgrade carries a `v1.` cookie and fails once
+  and at most 896 characters, and judged again at the callback; a value that is not a
+  path of this app comes back as `None`: it is not absolute, names another host, holds a control
+  character, a `.`/`..` segment or a literal `#`, lies outside `root_path`, or exceeds
+  512 bytes once percent-encoded (non-ASCII characters are encoded, not refused). Every
+  path is `None` when `root_path` holds a character other than ASCII letters, digits,
+  `-._~` and `/`. `start_login` prepends no `root_path`: with `root_path="/app"`,
+  `return_to="/albums/42"` is dropped, so pass the path as the browser asked for it,
+  `/app/albums/42`. Only `LoginRedirect`, which builds the address from the request,
+  prepends `root_path` unless the raw path already starts with it at a segment
+  boundary. A login in flight at the upgrade carries a `v1.` cookie and fails once
   with `STATE_MISMATCH`. `LoginRedirect` now carries the raw, percent-encoded path
   instead of the decoded one. Migration: pass `return_to` from your login route's
   query, open the session for `admitted.account`, and redirect to
@@ -111,9 +120,16 @@ Versions before 0.3.0 and releases without an entry here are described in the
   drops it. Logout, the session cap, back-channel logout and a
   session the store ended are unchanged. Migration: a host that listed or
   revoked sessions does it in Keycloak, or with its own store query.
-- Names outside a module's `__all__` start with an underscore, so importing one
-  raises `ImportError`, and `webauth.validation` is now `webauth._validation`;
-  0.15.0 declared them internal, and names added since were never in `__all__`.
+- Names a module defines outside its `__all__` are renamed with a leading
+  underscore, and `webauth.validation` is now `webauth._validation`, so the old
+  spelling raises `ImportError`. It covers `cookies`, `proxies`, `rate_limit`,
+  `middleware.rate_limit`, `https_client`, `jwt_verification`, `oidc`, `oidc_login`,
+  `config` and `dependencies`; names a module only imports
+  stay reachable, and an underscored name stays importable, though private.
+  Migration: import only what a module's `__all__` lists. `generate_csrf_token` has no
+  public replacement: read the token from the cookie
+  `issue_session_cookies(Response(), session_id, config)` sets, as songmaker's
+  `tests/test_server_middleware.py` should.
 - `WebAuthConfig` refuses a `session_cookie_name` or `csrf_cookie_name` that is
   one of webauth's own cookies, in either variant: the ID token hint cookie
   (`__Secure-oidc_id_token_hint`, `oidc_id_token_hint`) or a name starting with
