@@ -1662,7 +1662,8 @@ def test_the_logout_url_ignores_any_target_the_request_names() -> None:
 
 
 OTHER_SUBJECT = "0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23"
-FORM = {"content-type": "application/x-www-form-urlencoded"}
+FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+FORM = {"content-type": FORM_MEDIA_TYPE}
 
 
 def a_host_with_sessions(
@@ -1698,9 +1699,12 @@ def post_backchannel_logout(
     return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=content, headers=headers)
 
 
+def a_form_of(logout_token: str, **other_fields: str) -> bytes:
+    return urllib.parse.urlencode({"logout_token": logout_token, **other_fields}).encode()
+
+
 def post_logout_token(host: OidcHost, logout_token: str, **other_fields: str) -> HttpxResponse:
-    form = urllib.parse.urlencode({"logout_token": logout_token, **other_fields})
-    return post_backchannel_logout(host, form.encode())
+    return post_backchannel_logout(host, a_form_of(logout_token, **other_fields))
 
 
 def test_a_valid_logout_token_ends_every_session_of_its_subject_and_keeps_anothers() -> None:
@@ -1819,75 +1823,57 @@ def test_an_id_token_posted_as_a_logout_token_ends_nothing() -> None:
     assert (response.status_code, sessions_of(host, SUBJECT)) == (400, 1)
 
 
-FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
-
-
-def a_form_of(logout_token: str) -> bytes:
-    return urllib.parse.urlencode({"logout_token": logout_token}).encode()
-
-
-@pytest.mark.parametrize(("body", "content_type", "outcome"), [
-    pytest.param(b"", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="empty-body"),
-    pytest.param(b"other=1", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="token-missing"),
+@pytest.mark.parametrize(("body", "content_type"), [
+    pytest.param(b"", FORM_MEDIA_TYPE, id="empty-body"),
+    pytest.param(b"other=1", FORM_MEDIA_TYPE, id="token-missing"),
+    pytest.param(b"logout_token=", FORM_MEDIA_TYPE, id="token-empty"),
+    pytest.param(b"logout_token", FORM_MEDIA_TYPE, id="field-without-a-value"),
+    pytest.param(b"logout_token=%ff", FORM_MEDIA_TYPE, id="undecodable-token"),
+    pytest.param(b"logout_token=a&logout_token=b", FORM_MEDIA_TYPE, id="token-twice"),
+    pytest.param(b"\xff\xfe", FORM_MEDIA_TYPE, id="body-not-utf-8"),
     pytest.param(
-        b"logout_token=", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="token-empty",
+        a_form_of(a_logout_token_of_the_issuer()), "application/json", id="json-media-type",
     ),
+    pytest.param(a_form_of(a_logout_token_of_the_issuer()), "text/plain", id="text-media-type"),
     pytest.param(
-        b"logout_token", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED,
-        id="field-without-a-value",
+        a_form_of(a_logout_token_of_the_issuer()), "multipart/form-data", id="multipart-media-type",
     ),
-    pytest.param(
-        b"logout_token=%ff", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED,
-        id="undecodable-token",
-    ),
-    pytest.param(
-        b"logout_token=a&logout_token=b", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED,
-        id="token-twice",
-    ),
-    pytest.param(
-        b"\xff\xfe", FORM_MEDIA_TYPE, BackchannelLogoutResult.REFUSED, id="body-not-utf-8",
-    ),
-    pytest.param(
-        a_form_of(a_logout_token_of_the_issuer()), "application/json",
-        BackchannelLogoutResult.REFUSED, id="json-media-type",
-    ),
-    pytest.param(
-        a_form_of(a_logout_token_of_the_issuer()), "text/plain",
-        BackchannelLogoutResult.REFUSED, id="text-media-type",
-    ),
-    pytest.param(
-        a_form_of(a_logout_token_of_the_issuer()), "multipart/form-data",
-        BackchannelLogoutResult.REFUSED, id="multipart-media-type",
-    ),
-    pytest.param(
-        a_form_of(a_logout_token_of_the_issuer()), None,
-        BackchannelLogoutResult.REFUSED, id="no-media-type",
-    ),
-    pytest.param(
-        a_form_of(a_logout_token_of_the_issuer()), f"{FORM_MEDIA_TYPE}; charset=UTF-8",
-        BackchannelLogoutResult.ACCEPTED, id="media-type-with-parameter",
-    ),
-    pytest.param(
-        a_form_of(a_logout_token_of_the_issuer()), FORM_MEDIA_TYPE.upper(),
-        BackchannelLogoutResult.ACCEPTED, id="media-type-in-capitals",
-    ),
+    pytest.param(a_form_of(a_logout_token_of_the_issuer()), None, id="no-media-type"),
 ])
 def test_the_library_refuses_what_is_not_one_well_formed_logout_token_form_before_it_locks(
-    body: bytes, content_type: str | None, outcome: BackchannelLogoutResult,
+    body: bytes, content_type: str | None,
 ) -> None:
     host = a_host_with_sessions(subject_sessions=1)
 
+    result = receive_in_a_transaction(host, body, content_type)
+
+    assert result is BackchannelLogoutResult.REFUSED
+    assert (sessions_of(host, SUBJECT), host.lock.times_taken) == (1, 0)
+
+
+@pytest.mark.parametrize("content_type", [
+    pytest.param(f"{FORM_MEDIA_TYPE}; charset=UTF-8", id="media-type-with-parameter"),
+    pytest.param(FORM_MEDIA_TYPE.upper(), id="media-type-in-capitals"),
+])
+def test_a_form_media_type_with_a_parameter_or_in_capitals_is_read(content_type: str) -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+
+    result = receive_in_a_transaction(
+        host, a_form_of(a_logout_token_of_the_issuer()), content_type,
+    )
+
+    assert result is BackchannelLogoutResult.ACCEPTED
+    assert sessions_of(host, SUBJECT) == 0
+
+
+def receive_in_a_transaction(
+    host: OidcHost, body: bytes, content_type: str | None,
+) -> BackchannelLogoutResult:
     with host.sessions.transaction():
-        result = receive_backchannel_logout(
+        return receive_backchannel_logout(
             host.relying_party, body, content_type,
             accounts=host.accounts, sessions=host.sessions, lock=host.lock, audit=host.audit,
         )
-
-    assert result is outcome
-    if outcome is BackchannelLogoutResult.REFUSED:
-        assert (sessions_of(host, SUBJECT), host.lock.times_taken) == (1, 0)
-    else:
-        assert sessions_of(host, SUBJECT) == 0
 
 
 def test_a_malformed_logout_token_form_gets_an_empty_400() -> None:
@@ -2012,8 +1998,7 @@ def test_the_callback_bypasses_an_exhausted_address_budget() -> None:
 def test_every_answer_of_the_callback_carries_no_store(body: bytes | None, status: int) -> None:
     host = a_host_with_sessions(subject_sessions=1)
     content = (
-        urllib.parse.urlencode({"logout_token": a_logout_token_of_the_issuer()}).encode()
-        if body is None else body
+        a_form_of(a_logout_token_of_the_issuer()) if body is None else body
     )
 
     response = post_backchannel_logout(host, content)
