@@ -300,10 +300,6 @@ class FakeSessionRecord:
     created_at: datetime
     expires_at: datetime
 
-    @property
-    def user_id(self) -> str:
-        return self.user.id
-
 
 class SessionRecordsInMemory:
     """Stored sessions, renewed in place and never committed.
@@ -390,7 +386,7 @@ class SessionRecordsInMemory:
 
     def delete_for_user(self, user_id: str) -> int:
         session_ids = [
-            record.id for record in self._records.values() if record.user_id == user_id
+            record.id for record in self._records.values() if record.user.id == user_id
         ]
         for session_id in session_ids:
             self._remove_record(session_id)
@@ -405,7 +401,7 @@ class SessionRecordsInMemory:
     def prune_overflow(self, user_id: str, keep_newest: int) -> None:
         _require_held_lock(self._lock)
         records = sorted(
-            (record for record in self._records.values() if record.user_id == user_id),
+            (record for record in self._records.values() if record.user.id == user_id),
             key=lambda record: record.created_at,
             reverse=True,
         )

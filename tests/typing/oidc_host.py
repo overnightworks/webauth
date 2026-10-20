@@ -125,41 +125,40 @@ from webauth.proxies import TrustedProxies
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
 
 
-@dataclass
+@dataclass(frozen=True)
 class HostAccount:
     id: str
     username: str
     role: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class HostSession:
     id: str
-    user_id: str
-    user: UserRecord
+    user: HostAccount
     created_at: datetime
     expires_at: datetime
 
 
 class HostAccounts:
-    def get(self, user_id: str) -> UserRecord | None:
+    def get(self, user_id: str) -> HostAccount | None:
         return HostAccount(user_id, "someone", "user")
 
-    def create_for_subject(self, subject: str, username: str, role: str) -> UserRecord:
+    def create_for_subject(self, subject: str, username: str, role: str) -> HostAccount:
         return HostAccount(subject, username, role)
 
-    def set_role(self, user_id: str, role: str) -> UserRecord:
+    def set_role(self, user_id: str, role: str) -> HostAccount:
         return HostAccount(user_id, "someone", role)
 
 
 class HostSessions:
     def create(
         self, user_id: str, *, now: datetime, expires_at: datetime,
-    ) -> SessionRecord:
+    ) -> HostSession:
         user = HostAccount(user_id, "someone", "user")
-        return HostSession("id", user_id, user, now, expires_at)
+        return HostSession("id", user, now, expires_at)
 
-    def load(self, session_id: str) -> SessionRecord | None:
+    def load(self, session_id: str) -> HostSession | None:
         return None
 
     def touch(self, session_id: str, *, expires_at: datetime) -> bool:
