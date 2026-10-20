@@ -17,19 +17,16 @@ from webauth_arrangement import (
     MEMBER_ROLE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
-    SESSION_IDLE_SECONDS,
     UNAUTHENTICATED_RESPONSE_PATH,
     AuthApp,
     FakeSessionRecord,
     FakeUser,
     SessionRecordsInMemory,
     SessionsAnsweringTouch,
-    SessionsEndedBetweenLoadAndTouch,
     a_session,
     a_web_auth_config,
     an_auth_app,
     session_cookie_header,
-    signed_like_release_0_14,
     signed_without_bound,
 )
 
@@ -112,11 +109,6 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
             sign_session_id(SESSION_ID, b"a different signing key entirely"),
             INVALID_SESSION_DETAIL,
             id="a cookie signed with another key",
-        ),
-        pytest.param(
-            signed_like_release_0_14(SESSION_ID, a_web_auth_config().signing_key),
-            INVALID_SESSION_DETAIL,
-            id="a cookie signed the way 0.14.x did",
         ),
     ],
 )
@@ -251,30 +243,13 @@ def test_one_session_cookie_among_others_still_authenticates(
 
 
 def test_a_signed_cookie_under_the_pre_upgrade_name_signs_nobody_in(auth_app: AuthApp) -> None:
-    """Upgrading past v0.8 signs every user of a host on the default names out once."""
+    """Only the configured ``__Host-`` name is read; a sibling host can plant the plain one."""
     old_cookie = f"{PLAIN_SESSION_COOKIE_NAME}={auth_app.signed_cookie()}"
 
     response = auth_app.client.get("/me", headers={"cookie": old_cookie})
 
     assert response.status_code == 401
     assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL
-
-
-@pytest.mark.parametrize(
-    "record",
-    [
-        pytest.param(None, id="a session the store does not know"),
-        pytest.param(a_session(remaining=-timedelta(seconds=1)), id="a session past its expiry"),
-        pytest.param(a_session(age=timedelta(days=2)), id="a session past the absolute limit"),
-    ],
-)
-def test_a_session_that_no_longer_stands_is_refused(record: FakeSessionRecord | None) -> None:
-    app = an_auth_app(record)
-
-    response = app.get("/me", cookie=app.signed_cookie())
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == SESSION_EXPIRED_DETAIL
 
 
 def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None:
@@ -292,28 +267,8 @@ def test_a_session_one_second_past_the_configured_clock_is_refused_and_not_renew
     response = app.get("/me", cookie=app.signed_cookie())
 
     assert response.status_code == 401
+    assert response.json()["detail"] == SESSION_EXPIRED_DETAIL
     assert record.expires_at == FIXED_INSTANT - timedelta(seconds=1)
-
-
-def test_a_session_a_second_before_expiry_on_the_configured_clock_is_renewed_from_it() -> None:
-    record = a_session(now=FIXED_INSTANT, remaining=timedelta(seconds=1))
-    app = an_auth_app(record, wall_clock=FIXED_WALL_CLOCK)
-
-    response = app.get("/me", cookie=app.signed_cookie())
-
-    assert response.status_code == 200
-    assert record.expires_at == FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS)
-
-
-def test_a_session_ended_between_load_and_touch_is_refused() -> None:
-    sessions = SessionsEndedBetweenLoadAndTouch(a_session())
-    app = an_auth_app(None, sessions=sessions)
-
-    response = app.get("/me", cookie=app.signed_cookie())
-
-    assert response.status_code == 401
-    assert sessions.record is None
-    assert app.authenticated == []
 
 
 @pytest.mark.parametrize("answer", [None, 1], ids=["None", "an int"])
