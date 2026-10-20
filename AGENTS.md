@@ -97,8 +97,8 @@ needs `checks` and `lowest-direct`, and lists both as mandatory in
 `quality/config.toml`. The quality gate's required check is `quality / verdict`;
 allowances for known secret false positives live only in `quality/config.toml`.
 
-The suite is fast and needs no service: Redis is faked in-process. Run it
-whole.
+The suite needs no service: Redis is faked in-process. CI runs it whole; a
+local run takes only the test modules a change touches.
 
 ## Releasing
 
