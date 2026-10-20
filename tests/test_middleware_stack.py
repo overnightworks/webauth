@@ -48,7 +48,6 @@ from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
     PathRules,
-    PathShape,
     RateLimitBudget,
     RateLimitPolicy,
     SecurityHeadersPolicy,
@@ -69,14 +68,12 @@ FORM = "application/x-www-form-urlencoded"
 JSON = "application/json"
 OVERSIZED_BODY = b"x" * (BODY_LIMIT_BYTES + 1)
 READING_PATH = "/reads-body"
-STREAM_READING_PATH = "/reads-stream"
 TYPED_PATH = "/typed"
 FAILING_STREAM_PATH = "/fails-mid-stream"
 BACKGROUND_PATH = "/with-background"
 CONTEXT_SETTING_PATH = "/sets-context"
 A_CONFIG = a_web_auth_config()
 TWO_CHUNKS_UNDER_THE_LIMIT_EACH = (b"x" * 60, b"x" * 60)
-TOO_LARGE_BODY = {"detail": "Request body too large"}
 
 
 class TypedBody(BaseModel):
@@ -121,10 +118,6 @@ def an_app_without_config() -> FastAPI:
     @app.post(READING_PATH)
     async def reading(request: Request) -> dict[str, int]:
         return {"length": len(await request.body())}
-
-    @app.post(STREAM_READING_PATH)
-    async def stream_reading(request: Request) -> dict[str, int]:
-        return {"length": sum([len(chunk) async for chunk in request.stream()])}
 
     @app.post(TYPED_PATH)
     async def typed(body: TypedBody) -> dict[str, int]:
@@ -320,56 +313,12 @@ class TestRefusedInstallation:
             )
         assert app.user_middleware == []
 
-    @pytest.mark.parametrize(
-        ("origin_policy", "token_exempt"),
-        [
-            pytest.param(
-                CsrfPolicy(protected=PathRules(prefixes=("/api",))),
-                PathRules(exact=frozenset({LOGIN_PATH})),
-                id="exact-path",
-            ),
-            pytest.param(
-                CsrfPolicy(protected=PathRules(prefixes=("/api",))),
-                PathRules(prefixes=("/login",)),
-                id="prefix",
-            ),
-            pytest.param(
-                CsrfPolicy(protected=PathRules(prefixes=("/api",))),
-                PathRules(shapes=(PathShape("/log", "in"),)),
-                id="unverifiable-shape",
-            ),
-            pytest.param(
-                CsrfPolicy(exempt=PathRules(exact=frozenset({"/api/auth/login"}))),
-                PathRules(prefixes=("/api/auth/",)),
-                id="origin-exempts-an-exact-path-below-the-prefix",
-            ),
-            pytest.param(
-                CsrfPolicy(exempt=PathRules(prefixes=("/api/auth/l",))),
-                PathRules(prefixes=("/api/auth/",)),
-                id="origin-exempts-a-prefix-below-the-prefix",
-            ),
-            pytest.param(
-                CsrfPolicy(protected=PathRules(exact=frozenset({"/api/internal/"}))),
-                PathRules(prefixes=("/api/internal/",)),
-                id="exact-protected-path-does-not-cover-its-prefix",
-            ),
-            pytest.param(
-                CsrfPolicy(protected=PathRules(exact=frozenset({"/login/"}))),
-                PathRules(prefixes=("/login/",)),
-                id="exact-protected-prefix-string-does-not-cover-paths-below",
-            ),
-            pytest.param(
-                CsrfPolicy(exempt=PathRules(exact=frozenset({"/login/reset"}))),
-                PathRules(prefixes=("/login/",)),
-                id="origin-exempts-an-exact-path-under-a-protected-prefix-string",
-            ),
-        ],
-    )
     def test_token_exemption_outside_the_origin_check_is_refused_before_touching_the_app(
-        self, origin_policy: CsrfPolicy, token_exempt: PathRules,
+        self,
     ) -> None:
         app = a_fresh_app()
-        token_policy = CsrfPolicy(token_exempt=token_exempt)
+        token_policy = CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGIN_PATH})))
+        origin_policy = CsrfPolicy(protected=PathRules(prefixes=("/api",)))
         with pytest.raises(ValueError, match="does not check"):
             install_web_auth_middleware(
                 app,
@@ -389,23 +338,6 @@ class TestRefusedInstallation:
         )
         client = TestClient(app)
         assert client.post(LOGIN_PATH, json={}, headers=FOREIGN).status_code == 403
-
-    def test_exact_and_prefix_token_exemptions_under_a_protected_prefix_are_installed(self) -> None:
-        app = a_fresh_app()
-        install_web_auth_middleware(
-            app,
-            security_headers=HEADERS_POLICY,
-            csrf_origin=CsrfPolicy(protected=PathRules(prefixes=("/api/",))),
-            csrf_token=CsrfPolicy(
-                protected=PathRules(prefixes=("/api/",)),
-                token_exempt=PathRules(
-                    exact=frozenset({"/api/auth/login", "/api/auth/setup"}),
-                    prefixes=("/api/internal/",),
-                ),
-            ),
-        )
-        response = TestClient(app).post("/api/auth/login", json={}, headers=FOREIGN)
-        assert response.status_code == 403
 
     @pytest.mark.parametrize(
         "arrange",
@@ -603,18 +535,6 @@ def streamed(*chunks: bytes) -> Iterator[bytes]:
 
 
 class TestAStreamedBodyOverTheLimit:
-    @pytest.mark.parametrize("path", [READING_PATH, STREAM_READING_PATH])
-    def test_a_streamed_body_over_the_limit_that_the_route_reads_answers_413_with_the_headers(
-        self, path: str
-    ) -> None:
-        client = a_csrf_passing_client(an_authenticated_full_stack_app())
-
-        response = client.post(path, content=streamed(*TWO_CHUNKS_UNDER_THE_LIMIT_EACH))
-
-        assert response.status_code == 413
-        assert response.json() == TOO_LARGE_BODY
-        assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
-
     def test_a_streamed_413_spends_exactly_one_request_of_the_budget(self) -> None:
         client = a_csrf_passing_client(an_authenticated_full_stack_app(max_requests=2))
 

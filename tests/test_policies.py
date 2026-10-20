@@ -233,6 +233,11 @@ class TestCsrfPolicy:
             id="exact-path-the-origin-check-skips",
         ),
         pytest.param(
+            CsrfPolicy(protected=PathRules(prefixes=("/api",))),
+            PathRules(prefixes=("/login",)),
+            id="prefix-the-origin-check-skips",
+        ),
+        pytest.param(
             CsrfPolicy(),
             PathRules(shapes=(PathShape("/log", "in"),)),
             id="shape-is-unverifiable",
