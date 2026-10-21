@@ -10,11 +10,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Added**
 
-- `OidcClientConfig` accepts `http` (in any case) for `redirect_uri` and `post_logout_redirect_uri` when the
-  host is exactly `localhost`, `127.0.0.1` or `[::1]`, so an app's local or CI test stack can
-  boot without a TLS proxy. Every issuer URL stays https and every other http host stays refused.
+- `OidcClientConfig` accepts `http` (in any case) for `redirect_uri` and
+  `post_logout_redirect_uri` when the host is exactly `localhost`, `127.0.0.1` or `[::1]`, so an
+  app's local or CI test stack can boot without a TLS proxy. Every issuer URL stays https and
+  every other http host stays refused.
 
-## 0.20.0 - Unreleased
+## 0.20.0
 
 **Breaking**
 
@@ -27,7 +28,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `SessionRecordStore.create` takes a required keyword `refresh_token: SecretStr | None`, and
   `SessionRecord` gains the property `refresh_token -> SecretStr | None`. Migrate by adding one
   nullable text column to the session table, writing the token with `get_secret_value()` and
-  returning it from the record; nothing is deleted, and existing rows answer `None`.
+  returning it from the record wrapped in `SecretStr`; nothing is deleted, and existing rows
+  answer `None`.
 - `open_session(request, config, admitted, *, sessions, lock, max_sessions)` takes the
   `AdmittedLogin` instead of its account, and stores its refresh token in the new session.
 - `OidcIdentity` and `AdmittedLogin` gain a required `refresh_token: SecretStr | None`, which
@@ -61,17 +63,22 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `AccessTokenRefusal` with `AccessTokenRefusalReason` `SESSION_ENDED`, `SIGN_IN_AGAIN` or
   `ISSUER_UNAVAILABLE`. It reads the session in one `SessionTransaction`, sends the refresh token
   with no transaction open, and decides again in a second one; it stores a rotated refresh token
-  and never renews the session.
+  and never renews the session. Call it from a worker thread (a sync route, or
+  `run_in_threadpool`), outside any open session transaction and outside its `WriteLock`, and
+  keep the token only for the one call it serves.
 - `OidcRelyingParty.workload_access_token()` posts a `client_credentials` grant and answers the
   client's own access token or an `OidcRefusal`. Both calls need a Bearer token in the answer and
   hold nothing between calls.
-- `install_web_auth_middleware` takes `session_gate=SessionGate(...)`. Every request then
-  needs a live session, except those named by `public` (`PublicRule`, by path and optionally
-  by method) and `optional`. A request without one gets exactly what `current_user_dependency`
-  answers for it: the login redirect for a navigation, otherwise 401 with the dependency's
-  detail (`Authentication required`, `Invalid session` or `Session expired`). The gate opens
-  the host's transaction through the new `webauth.ports.SessionTransaction`, and commits the
-  session renewal before the route runs; a route that fails afterwards does not undo it.
+- `install_web_auth_middleware` takes `session_gate=SessionGate(...)` and then installs the new
+  `webauth.middleware.SessionGateMiddleware` innermost. Every HTTP request then needs a live
+  session, except those named by `public` (`PublicRule`, by path and optionally by method) and
+  `optional`. A request without one gets what `current_user_dependency` answers for it, with the
+  gate's own `login_redirect`: the login redirect for a navigation, otherwise 401 with the
+  dependency's detail (`Authentication required`, `Invalid session` or `Session expired`). A
+  WebSocket handshake passes the gate untouched; `authenticate_websocket` still decides it. The
+  gate opens the host's transaction through the new `webauth.ports.SessionTransaction`, and
+  commits the session renewal before the route runs; a route that fails afterwards does not undo
+  it.
 - Behind the gate, `current_user`, `admin_user` and `verified_session_id` return the gate's
   admission for the request's own session cookie, so a request still costs one `load` and one
   `touch`. `webauth.middleware.admitted_user` reads the account where no dependency is used,

@@ -48,7 +48,7 @@ from harness import (
     stop_on_first_signal,
     without_query_values,
 )
-from host_app import LOGOUT_PATH, HostSettings
+from host_app import ACCESS_TOKEN_PATH, LOGOUT_PATH, WORKLOAD_TOKEN_PATH, HostSettings
 from playwright.sync_api import (
     Browser,
     Cookie,
@@ -752,14 +752,22 @@ def back_button_shows(proof: Proof, page: Page) -> str:
     return f"{page_text} (the host's last sign-in refusal: {proof.host_state()['last_refusal']})"
 
 
-def replayed_session_status(proof: Proof, session: Cookie) -> int:
+def host_answer(proof: Proof, path: str, session: Cookie | None = None) -> httpx.Response:
+    """A request to the default host as the app's origin, with the session cookie if given."""
     assert proof.ca_certificate is not None and proof.host is not None
-    name, value = cookie_name_and_value(session)
+    headers = {"Host": APP_HOST}
+    if session is not None:
+        name, value = cookie_name_and_value(session)
+        headers["Cookie"] = f"{name}={value}"
     return httpx.get(
-        f"https://localhost:{proof.host.app_port}/me",
-        headers={"Cookie": f"{name}={value}"},
+        f"https://localhost:{proof.host.app_port}{path}",
+        headers=headers,
         verify=ssl.create_default_context(cafile=str(proof.ca_certificate)),
-    ).status_code
+    )
+
+
+def replayed_session_status(proof: Proof, session: Cookie) -> int:
+    return host_answer(proof, "/me", session).status_code
 
 
 def second_sign_in(proof: Proof, page: Page, scenario: str) -> str:
@@ -1180,6 +1188,79 @@ def drive_browser(
         drive_backchannel_phase(proof, playwright, runtime, tls, shim_port, untrusted_port)
 
 
+def session_cookie(page: Page) -> Cookie:
+    return next(
+        c for c in app_cookies(page) if cookie_name_and_value(c)[0] == DEFAULT_SESSION_COOKIE_NAME
+    )
+
+
+def access_token_answer(proof: Proof, session: Cookie) -> dict[str, Any]:
+    answer = host_answer(proof, ACCESS_TOKEN_PATH, session)
+    assert answer.status_code == 200, f"{ACCESS_TOKEN_PATH} answered {answer.status_code}"
+    return answer.json()
+
+
+def keycloak_rotates_the_refresh_token(proof: Proof, width: Width) -> str:
+    scenario = f"25-{width.label}"
+    proof.reset_host()
+    with proof.browsing(width) as page:
+        proof.sign_in(page, scenario)
+        session = session_cookie(page)
+        first = access_token_answer(proof, session)
+        second = access_token_answer(proof, session)
+    assert first["outcome"] == "token", f"the first call answered {first}"
+    assert second["outcome"] == "token", f"the second call answered {second}"
+    assert (first["refresh_tokens_stored"], second["refresh_tokens_stored"]) == (1, 2), (
+        f"the stored refresh token did not change between the calls: {first}, {second}"
+    )
+    return (
+        "after a sign-in two calls of fresh_access_token both answered token, and the host "
+        "stored a different refresh token after each: Keycloak rotates the string on every refresh"
+    )
+
+
+def a_person_ended_at_the_issuer_signs_in_again(proof: Proof, width: Width) -> str:
+    scenario = f"26-{width.label}"
+    proof.reset_host()
+    with proof.browsing(width) as page:
+        proof.sign_in(page, scenario)
+        session = session_cookie(page)
+        proof.log_out_user_everywhere(proof.user_id)
+        refused = access_token_answer(proof, session)
+        assert refused["outcome"] == "sign-in-again", f"after the admin logout: {refused}"
+        assert refused["refresh_tokens_stored"] == 1, f"no refresh token was stored: {refused}"
+        me_status = proof.status_of(page, "/me")
+        assert me_status == 200, f"/me answered {me_status}, the app session should stand"
+        log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
+        ended = access_token_answer(proof, session)
+    assert ended["outcome"] == "session-ended", f"after the app logout: {ended}"
+    return (
+        "Keycloak's admin logout of the user's sessions made the next call answer sign-in-again "
+        "(invalid_grant) while /me still answered 200; after the app's own logout, replaying the "
+        "old session cookie made it answer session-ended"
+    )
+
+
+def a_client_without_service_account_is_refused_its_workload_token(
+    proof: Proof, width: Width
+) -> str:
+    refused = host_answer(proof, WORKLOAD_TOKEN_PATH).json()
+    assert refused == {
+        "outcome": "token-request-refused", "issuer_error": "unauthorized_client",
+    }, f"the workload call answered {refused}"
+    return (
+        f"the probe's client, created with serviceAccountsEnabled false, was refused its "
+        f"client_credentials grant: {refused['outcome']} with {refused['issuer_error']}"
+    )
+
+
+REFRESH_SCENARIOS = (
+    (25, keycloak_rotates_the_refresh_token),
+    (26, a_person_ended_at_the_issuer_signs_in_again),
+    (27, a_client_without_service_account_is_refused_its_workload_token),
+)
+
+
 BACKCHANNEL_SCENARIOS = (
     (10, logout_ends_every_session_of_the_subject),
     (11, logout_in_one_app_ends_the_sessions_of_the_other),
@@ -1361,6 +1442,11 @@ def run_default_scenarios(proof: Proof) -> bool:
         lambda: deep_link_survives_the_login(proof, DESKTOP),
     )
     run_hint_scenarios(proof)
+    for number, scenario in REFRESH_SCENARIOS:
+        proof.held_or_failed(
+            f"SCENARIO {number} {DESKTOP.label} {APP_ORIGIN}",
+            lambda scenario=scenario: scenario(proof, DESKTOP),
+        )
     return True
 
 
