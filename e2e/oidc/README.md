@@ -30,8 +30,8 @@ Playwright browser, and takes a few minutes. CI only lints `e2e/`.
 
 Read the 1-minute load average first; above 18 on a 12-core machine, wait.
 
-The cap is 900 s (`timeout 900`). The full run measured 128 s at edge `2b125b8`
-(21.10.2026, load 4 to 5; 136 s and 153 s on 19.10.2026), so the cap leaves a factor of about 6 of room.
+The cap is 900 s (`timeout 900`). The full run, with the refresh phase, measured 134 s at edge `2b125b8`
+(21.10.2026, load 3 to 5; 136 s and 153 s on 19.10.2026), so the cap leaves a factor of about 6 of room.
 
     flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
         uv run --group dev --group e2e python e2e/oidc/prove.py \
@@ -200,6 +200,23 @@ Token.
   with 0 callbacks and A's page still says signed in. Keycloak's admin logout (204) then
   calls each app back exactly once, which also shows the disable sent none; each holds
   0 sessions and answers `/me` with 401. A fresh sign in is refused at Keycloak's form.
+
+`SCENARIO 25` to `27` are the refresh phase, on the default host at 1280x800. The host's
+`GET /access-token` calls `fresh_access_token` for the request's session and `GET
+/workload-token` calls `workload_access_token`; each answers the outcome only, never a token,
+and the first adds how many different refresh tokens the host has found stored after these
+calls since its last reset.
+
+- `SCENARIO 25`, rotation: after a sign-in two calls both answer `token`, and the host has
+  stored a different refresh token after each (Keycloak rotates the string on every refresh).
+- `SCENARIO 26`, the issuer ends the person: Keycloak's admin logout of the user's sessions
+  (the `d1-host` client has no back-channel URL, so the app session stands) makes the next call
+  answer `sign-in-again` while `/me` still answers 200; after the app's own logout, the old
+  session cookie replayed makes it answer `session-ended`.
+- `SCENARIO 27`, the workload grant: the probe's client is created with
+  `serviceAccountsEnabled: false`, so its `client_credentials` request is answered
+  `token-request-refused` with `unauthorized_client`. A successful workload token is not proven
+  here.
 
 `SCENARIO 5` is the session cookie after the callback redirect. One host
 process per `cookie_samesite` serves both app origins; each cell uses a fresh
