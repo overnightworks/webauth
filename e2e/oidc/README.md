@@ -17,9 +17,9 @@ Playwright browser, and takes a few minutes. CI only lints `e2e/`.
 
 ## Prerequisites
 
-- Ports 8081 and 8090 free (stop the live edge first) and Docker.
+- Docker. The probe picks free loopback ports, so the live edge keeps running.
 - An edge checkout at the commit in `EDGE_SHA`, with no change in any path its
-  probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `traefik.yml`,
+  probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/edge`, `traefik.yml`,
   `dynamic`). The script refuses to run otherwise.
 - Playwright's Chromium for the pinned version (`uv run --group e2e playwright
   install chromium` if `~/.cache/ms-playwright` lacks it).
@@ -30,8 +30,8 @@ Playwright browser, and takes a few minutes. CI only lints `e2e/`.
 
 Read the 1-minute load average first; above 18 on a 12-core machine, wait.
 
-The cap is 900 s (`timeout 900`). The full run measured 136 s and 153 s wall time
-(19.10.2026, load 3 to 4), so the cap leaves a factor of about 6 of room.
+The cap is 900 s (`timeout 900`). The full run measured 128 s at edge `2b125b8`
+(21.10.2026, load 4 to 5; 136 s and 153 s on 19.10.2026), so the cap leaves a factor of about 6 of room.
 
     flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
         uv run --group dev --group e2e python e2e/oidc/prove.py \
@@ -65,8 +65,8 @@ The browser keeps the canonical URLs (`https://auth.hallucinai.de`,
 `https://demo.hallucinai.de`, port 443); only the connection is redirected.
 
 - `--host-resolver-rules="MAP name 127.0.0.1:port"` sends each name to a TLS
-  shim (for Keycloak) or to the host app. The shim forwards to Traefik on
-  8081 with `Host: auth.hallucinai.de` and `X-Forwarded-Proto: https`, as
+  shim (for Keycloak) or to the host app. The shim forwards to the probe's Traefik
+  at the READY line's `edge_url` with `Host: auth.hallucinai.de` and `X-Forwarded-Proto: https`, as
   Cloudflare's tunnel does.
 - Trust is per browser process: `--ignore-certificate-errors-spki-list` names
   the hash of the throwaway leaf's public key. Nothing is installed in any
@@ -158,7 +158,7 @@ window. `SCENARIO 7` is the outsider: `d1-outsider` is in no group, signs in at
 Keycloak, reaches the callback and sees "Sign-in refused" with `not-a-member`;
 the host holds 0 accounts and 0 sessions and the browser carries no session
 cookie. `SCENARIO 8` is `d1-admin`, a member of `/apps/songmaker/admin` only
-(the subgroup the run creates, since the pinned realm has none): it is
+(the subgroup the pinned realm declares under `/apps/songmaker`): it is
 admitted, `/admin` answers 200 (the host's `admin_group` is that subgroup),
 and the host holds 1 account. `CHECK outsider-groups-claim` records,
 as a count only, whether Keycloak sends the outsider a `groups` claim at all;
