@@ -1,0 +1,8 @@
+claim_id = "f66c5fb252f74f7dba18ea240e48b85e"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "5db855f28e5af601924d9f5be16735c5c5986e2f"
+branch = "claude/issue-372-shipped-check-and-release-scripts"
+scope = [".github/workflows/ci.yml", "AGENTS.md", "scripts/check.sh", "scripts/regenerate-build-constraints.sh", "scripts/verify-release.sh"]
+opened_commit = "65a20112f44c818856508d8a25ff9fddbaff2302"
+whole_reason = "The check script, the two release scripts, the CI job that calls the check script and the AGENTS sections that name them are one change; a part alone leaves a document naming a command that does not exist or CI running steps the script does not."
