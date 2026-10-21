@@ -33,12 +33,12 @@ plain ``oidc_id_token_hint`` with ``cookie_secure=False``; it cannot be
 session cookie and ``Path`` the ``logout_path`` of the ``OidcClientConfig``, so
 the browser sends it to every path beneath that prefix: the narrowest prefix
 covering the logout routes keeps it off every other request, and behind a
-path-rewriting proxy it is the path the browser sees. A new login overwrites the old hint, and a token over the
-bound is not kept and clears it instead. Changing ``logout_path`` between
-deployments leaves the old cookie in the browser, which a logout clears only at
-the new path; where the old path still matches the logout route, a second
-cookie of the same name makes the logout omit the hint, and the issuer asks
-until the old one expires or the person removes it.
+path-rewriting proxy it is the path the browser sees. A new login overwrites the
+old hint, and a token over the bound is not kept and clears it instead. Changing
+``logout_path`` between deployments leaves the old cookie in the browser, which
+a logout clears only at the new path; where the old path still matches the
+logout route, a second cookie of the same name makes the logout omit the hint,
+and the issuer asks until the old one expires or the person removes it.
 """
 
 from __future__ import annotations
