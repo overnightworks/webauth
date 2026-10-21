@@ -40,10 +40,12 @@ SIGTERM or SIGINT ends the run with `FAILED: interrupted` and exit status 1 afte
 uninterruptible cleanup (host app, stack, `runtime/`, result table); further signals
 are ignored.
 
-If the run is killed with SIGKILL anyway (the `timeout` fallback, `kill -9`, an
-out-of-memory kill), nothing can clean up: the verb `cleanup` removes `runtime/`
-(credentials and keys), the probe stack and the suite project, and a host app
-that is still listening. Do not trust `evidence/` of such a run, nor of a
+If the run is killed outright (SIGKILL, the `timeout` fallback, an out-of-memory
+kill), nothing can clean up: the verb `cleanup` removes `runtime/`
+(credentials and keys), the probe stack, the suite project and the relay containers,
+and a host app that is still listening; it refuses a `SCRATCH` that holds anything
+but `runtime/` and `evidence/`, and exits non-zero while anything of the probe remains.
+Do not trust `evidence/` of such a run, nor of a
 run that prints `the browser worker did not stop`: its screenshots are deleted,
 because a live browser could still write.
 
