@@ -1,8 +1,0 @@
-claim_id = "13b9bf85c23147b28928d2294dc93ef8"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "5db855f28e5af601924d9f5be16735c5c5986e2f"
-branch = "claude/issue-373-shipped-e2e-command"
-scope = ["e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/prove.py", "e2e/oidc/stack.py", "scripts/e2e-oidc.sh"]
-opened_commit = "f63b39ccaf2a4ed8cadf40da6b38495cd87f27e7"
-whole_reason = "The script and the README, docstrings, run instructions and the one stack comment that name it are one change; a part alone leaves a document naming a command that does not exist."
