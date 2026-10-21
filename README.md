@@ -67,6 +67,31 @@ sign-in routes are under [OpenID Connect login](#openid-connect-login).
 [`tests/typing/oidc_host.py`](tests/typing/oidc_host.py) is a complete host,
 checked in CI against the built wheel.
 
+## Testing a host
+
+A test that needs a signed-in person needs no issuer. It creates the account and
+a session inside the configured lifetime in the host's own store, then calls
+`issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
+a `Response` and copies both cookies it sets (read them from
+`response.headers.getlist("set-cookie")`) into its client. The cookies cover a
+read-only request; a state-changing request also sends the value of the CSRF
+cookie in the header named `config.csrf_header_name`, and a form POST also needs
+`Sec-Fetch-Site: same-origin`, or an `Origin` the config allows ([CSRF
+origin](#csrf-origin)); a JSON POST needs neither. When the client keeps the
+cookies' attributes and `cookie_secure` is on, use an `https` base URL.
+
+A test of the host's own start, callback and logout routes gives
+`OidcRelyingParty` its own `post_token_request` (a `TokenRequestPost`, from
+`webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from
+`webauth.jwt_verification`) instead of the HTTPS ones, with the clocks as in
+[The relying party](#the-relying-party). The host owns that stub.
+
+The sign-in flow itself is proven against a real issuer: `e2e/oidc/` drives
+Keycloak in a real browser, run by hand, and is webauth's own proof. A host
+proves its own sign-in against a real issuer of its choosing. webauth ships no
+fake issuer, because one that mints tokens does not belong in every production
+install.
+
 ## Security model
 
 Who the library defends against, and what it trusts. Where a line has an
