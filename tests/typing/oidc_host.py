@@ -85,6 +85,8 @@ from webauth.oidc import (
     VerifiedLogout,
 )
 from webauth.oidc_login import (
+    AccessTokenRefusal,
+    AccessTokenRefusalReason,
     AdmissionConfig,
     AdmissionRefusal,
     AdmittedLogin,
@@ -95,6 +97,7 @@ from webauth.oidc_login import (
     admit_identity,
     app_role,
     finish_login,
+    fresh_access_token,
     log_out,
     open_session,
     receive_backchannel_logout,
@@ -174,6 +177,9 @@ class HostSessions:
     def touch(self, session_id: str, *, expires_at: datetime) -> bool:
         return True
 
+    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
+        return True
+
     def delete(self, session_id: str) -> None:
         return None
 
@@ -248,6 +254,17 @@ def a_host_opens_a_session(
         request, config, admitted,
         sessions=sessions, lock=lock, max_sessions=None,
     )
+
+
+def a_host_gets_a_fresh_access_token(
+    relying_party: OidcRelyingParty, session_id: str, config: WebAuthConfig,
+) -> SecretStr | AccessTokenRefusalReason:
+    outcome = fresh_access_token(
+        relying_party, session_id,
+        session_transaction=lambda: nullcontext(HostSessions()),
+        config=config,
+    )
+    return outcome.reason if isinstance(outcome, AccessTokenRefusal) else outcome
 
 
 def a_host_logs_out(

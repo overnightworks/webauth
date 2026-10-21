@@ -99,7 +99,12 @@ from webauth.cookies import (
     _verify_pending_login,
     clear_session_cookies,
 )
-from webauth.dependencies import _renewed_expiry, _whole_second_now, session_id_from_request
+from webauth.dependencies import (
+    _is_admitted,
+    _renewed_expiry,
+    _whole_second_now,
+    session_id_from_request,
+)
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcRefusal,
@@ -242,8 +247,9 @@ def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | Non
 
     It reads nothing but its arguments. It does not look at
     ``admission.bound_issuer``: the caller has checked that the groups come from
-    that issuer, as ``admit_identity`` does, and passes the groups claim as a
-    list of strings, refusing any other shape, as webauth's login refuses it.
+    that issuer, as ``admit_identity`` does. The caller also validates the raw
+    groups claim, refusing any shape but a list of strings as webauth's login
+    does, and passes the normalized sequence of strings.
     """
     login_group = admission.login_group
     if isinstance(login_group, str) and not _is_member_of(login_group, groups):
@@ -428,6 +434,8 @@ def log_out(
 
 
 class AccessTokenRefusalReason(StrEnum):
+    """Why a session yields no access token."""
+
     SESSION_ENDED = "session-ended"
     SIGN_IN_AGAIN = "sign-in-again"
     ISSUER_UNAVAILABLE = "issuer-unavailable"
@@ -435,8 +443,19 @@ class AccessTokenRefusalReason(StrEnum):
 
 @dataclass(frozen=True)
 class AccessTokenRefusal:
+    """``SESSION_ENDED``: the session is gone or outside its lifetime, so the
+    person is signed out. ``SIGN_IN_AGAIN``: it holds no refresh token, or the
+    issuer ended the person's own session. ``ISSUER_UNAVAILABLE``: the issuer
+    did not answer usefully, and ``issuer_refusal`` says how."""
+
     reason: AccessTokenRefusalReason
     issuer_refusal: OidcRefusal | None = None
+
+
+_SESSION_ENDED: Final = AccessTokenRefusal(AccessTokenRefusalReason.SESSION_ENDED)
+_SIGN_IN_AGAIN: Final = AccessTokenRefusal(AccessTokenRefusalReason.SIGN_IN_AGAIN)
+_INVALID_GRANT: Final = "invalid_grant"
+"""The error code (RFC 6749 section 5.2) of a refresh token the issuer no longer honours."""
 
 
 def fresh_access_token(
@@ -446,7 +465,67 @@ def fresh_access_token(
     session_transaction: SessionTransaction,
     config: WebAuthConfig,
 ) -> SecretStr | AccessTokenRefusal:
-    raise NotImplementedError
+    """A new access token for the person ``session_id`` signs in, in memory only.
+
+    Reads the session in one transaction, sends its refresh token to the issuer
+    with no transaction and no lock open, then reads the session again in a
+    second transaction and stores the issuer's new refresh token when it
+    differs from the one sent. The token is handed out only when the second
+    transaction has been left and the session still stood in it. Admission's
+    own decision judges the session both times, and nothing renews it: asking
+    for a token is not the person's request.
+
+    Call it from a worker thread, outside any open session transaction and
+    outside the host's write lock. It raises when the store fails, when
+    ``replace_refresh_token`` answers anything but a ``bool``, or when the
+    transaction's exit fails; no token is handed out then.
+    """
+    sent = _refresh_token_of_standing_session(session_id, session_transaction, config)
+    if isinstance(sent, AccessTokenRefusal):
+        return sent
+    renewed = relying_party.renew_access(sent)
+    if isinstance(renewed, OidcRefusal):
+        return _refusal_of_grant(renewed)
+    with session_transaction() as sessions:
+        record = sessions.load(session_id)
+        stands = record is not None and _is_admitted(
+            config.session_lifetime, record, _whole_second_now(config),
+        )
+        rotated = renewed.refresh_token
+        if stands and rotated is not None and rotated != sent:
+            stands = _stored(sessions, session_id, rotated)
+    return renewed.access_token if stands else _SESSION_ENDED
+
+
+def _refresh_token_of_standing_session(
+    session_id: str, session_transaction: SessionTransaction, config: WebAuthConfig,
+) -> SecretStr | AccessTokenRefusal:
+    with session_transaction() as sessions:
+        record = sessions.load(session_id)
+        if record is None or not _is_admitted(
+            config.session_lifetime, record, _whole_second_now(config),
+        ):
+            return _SESSION_ENDED
+        return _SIGN_IN_AGAIN if record.refresh_token is None else record.refresh_token
+
+
+def _refusal_of_grant(refusal: OidcRefusal) -> AccessTokenRefusal:
+    if (
+        refusal.reason is OidcRefusalReason.TOKEN_REQUEST_REFUSED
+        and refusal.idp_error == _INVALID_GRANT
+    ):
+        return _SIGN_IN_AGAIN
+    return AccessTokenRefusal(AccessTokenRefusalReason.ISSUER_UNAVAILABLE, refusal)
+
+
+def _stored(sessions: SessionRecordStore, session_id: str, refresh_token: SecretStr) -> bool:
+    stored = sessions.replace_refresh_token(session_id, refresh_token=refresh_token)
+    if type(stored) is not bool:
+        raise TypeError(
+            "SessionRecordStore.replace_refresh_token must return a bool, "
+            f"not {type(stored).__name__}",
+        )
+    return stored
 
 
 class BackchannelLogoutResult(Enum):

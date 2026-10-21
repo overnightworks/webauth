@@ -478,10 +478,14 @@ class SessionsRecordingTheirTransaction(SessionRecordsInMemory):
 
 
 class SessionsFailingToLoad(SessionRecordsInMemory):
-    """A store whose ``load`` raises, as a database that went away does."""
+    """A store whose ``load`` raises while ``failing``, as a database that went away does."""
+
+    failing = True
 
     def load(self, session_id: str) -> FakeSessionRecord | None:
-        raise ConnectionError("session store down")
+        if self.failing:
+            raise ConnectionError("session store down")
+        return super().load(session_id)
 
 
 class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
