@@ -1,0 +1,7 @@
+claim_id = "e0295a89f7104ae7bad0105e191c0409"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "ebe757e8a21c020f6ccb04aebf0a52f975400337"
+branch = "docs/backchannel-login-window"
+scope = ["README.md"]
+opened_commit = "71904590dd0e6e25000090ba03dac8f96fad6784"
