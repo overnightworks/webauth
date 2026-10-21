@@ -65,8 +65,14 @@ class LoginRedirect:
     ``redirect_query_param`` is the host's own name for the query key that
     carries the address the browser asked for, so the login page reads it
     back under a name the host already chose rather than one this library
-    invents. A request whose ``Accept`` header does not prefer HTML — an API
-    call, a fetch — still gets 401: only a browser navigation is redirected.
+    invents; it carries the raw path and query the browser asked for. A
+    request whose ``Accept`` header does not rate ``text/html`` above
+    ``application/json`` by q-value — an API call, a fetch — still gets 401:
+    only a browser navigation is redirected.
+
+    ``path`` must be a same-origin absolute path: browsers drop tab, CR and LF
+    and read a backslash as a slash, so ``/\\x`` and ``/<tab>/x`` lead off the
+    site exactly as ``//x`` does, and a path written like that is refused.
     """
 
     path: str
@@ -113,6 +119,9 @@ def current_user_dependency(
     established, so the application can bind it into its own log context.
     ``login_redirect`` is unset by default: a missing or dead session then
     keeps answering 401, byte-identically to a host that never names one.
+    A dependency can only raise ``HTTPException``, so the 302 still carries
+    FastAPI's default JSON body (``{"detail":"Found"}``) beside its
+    ``Location`` header.
     """
 
     def current_user(
@@ -164,14 +173,33 @@ def authenticate_websocket(
     browser sends the session cookie on a cross-site handshake, and only the
     Origin tells a foreign page from the application's own. Exactly one Origin
     naming a host the application serves is admitted; there is no ``Referer``
-    fallback and ``Sec-Fetch-Site`` does not decide.
+    fallback and ``Sec-Fetch-Site`` does not decide. For local development list
+    ``localhost`` and ``127.0.0.1`` in ``allowed_hosts_exact``.
+    A client that is not a browser must send an allowed Origin too. The Origin
+    keeps a foreign page from using a visitor's cookie; it is no credential.
     Then the session is decided exactly as ``current_user`` decides it for an
     HTTP request, renewal included.
 
-    Nothing here commits, and a failing store raises rather than refusing: the
-    host finishes its transaction before ``accept`` and closes a refused
-    handshake with code 1008. A socket outlives its session unless the host
-    calls this again, in a fresh transaction, and closes on a refusal.
+    Nothing here commits, and a failing store raises rather than refusing: an
+    exception never accepts the socket. The host runs a synchronous store in a
+    worker, not in the receive loop, and finishes its transaction before
+    ``accept`` and before waiting for a message: a transactional store holds
+    the session's row until the transaction ends, which would block a logout.
+    It closes a refused handshake with code 1008 before ``accept``; a real
+    server answers the handshake with HTTP 403, and the browser receives no
+    close frame. After success, ``session_id_from_request`` names the session
+    on the same handshake.
+
+    A socket outlives its session: a logout, a host's own revocation and
+    back-channel logout delete the stored session and cannot signal an open
+    socket. The host calls this again, in a fresh transaction, before protected
+    work and on its own schedule while a stream runs, and on a refusal closes
+    the socket and stops the work. A successful re-check renews the session
+    like a request, up to the absolute cap of ``SessionLifetime``, which bounds
+    a socket's life.
+
+    A host may wrap this function in its own dependency: FastAPI resolves an
+    ``HTTPConnection`` parameter on a WebSocket route as well as on an HTTP one.
     """
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:
@@ -237,13 +265,27 @@ class ConnectionRefusal(Enum):
     refusal reads the same on both channels. The origin members are decided
     by ``authenticate_websocket`` alone. ``admit_session`` returns only
     ``SESSION_ENDED_OR_EXPIRED``.
+
+    The HTTP dependencies answer a navigation with the 302 to ``login_redirect``
+    when the host named one, and every other request with the 401 each session
+    member names.
     """
 
     NO_SESSION = "no-session"
+    """The session cookie is missing, empty or too long; 401 ``Authentication required``."""
     INVALID_SESSION = "invalid-session"
+    """The cookie is forged or present more than once; 401 ``Invalid session``.
+
+    A sibling subdomain can set a second cookie of the same name, so a request
+    carrying two is refused rather than resolved to either.
+    """
     SESSION_ENDED_OR_EXPIRED = "session-ended-or-expired"
+    """The store does not know the session, its stored expiry is outside the
+    session lifetime, or ``touch`` answers ``False``; 401 ``Session expired``."""
     MISSING_ORIGIN = "missing-origin"
+    """The handshake carries no ``Origin`` header."""
     FOREIGN_ORIGIN = "foreign-origin"
+    """The ``Origin`` is empty, repeated, ``null``, unparsable or not an allowed host."""
 
 
 def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -> str | None:
@@ -253,7 +295,8 @@ def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -
     ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed,
     forged, or present more than once: a sibling subdomain can set a second cookie of the same
     name, and choosing either would let it decide whose account the connection
-    runs in.
+    runs in. A host that reads the session cookie itself calls this instead of
+    ``request.cookies``.
     """
     reading = _read_session_cookie(connection, config)
     return None if isinstance(reading, ConnectionRefusal) else reading
@@ -350,12 +393,20 @@ def admit_session(
 
     For a host that reads the id itself, without a request or a cookie. It
     checks no ``Origin``: a host that admits a socket with it instead of
-    ``authenticate_websocket`` applies the allowlist rule of the README's
-    "WebSocket handshakes" first.
+    ``authenticate_websocket`` applies that function's Origin rule first.
     Returns the account, or ``ConnectionRefusal.SESSION_ENDED_OR_EXPIRED`` for
     an unknown id, a session outside its lifetime, or one the store no longer
     holds; a refused session is not renewed. Sets no cookie. A failing store,
-    or a ``touch`` that answers anything but a ``bool``, raises.
+    or a ``touch`` that answers anything but a ``bool``, raises. Nothing here
+    commits: the host finishes its transaction right after the call.
+
+    The clock is ``config.wall_clock`` read once, as whole seconds. A stored
+    session is admitted only when ``created_at <= now + 60 s`` and
+    ``now <= expires_at <= min(now + idle + 60 s, created_at + cap)``, with
+    ``idle`` and ``cap`` from ``WebAuthConfig.session_lifetime``: the 60 seconds
+    tolerate clock skew on the idle window and on ``created_at``, and none on the
+    cap. An admitted session is renewed to ``min(now + idle, created_at + cap)``,
+    so it never outlives its cap.
     """
     record = sessions.load(session_id)
     now = _whole_second_now(config)

@@ -340,170 +340,31 @@ The rules, the order of refusals, and what is written are in the docstrings of
 
 ## Reading the session
 
-`webauth.dependencies.current_user_dependency` answers 401 for a missing or
-dead session by default. A server-rendered host instead passes
-`login_redirect=LoginRedirect(path="/login", redirect_query_param="next")` —
-`path` must be a same-origin absolute path, never a scheme or `//` address, nor a backslash or tab/CR/LF form a browser reads as one —
-and a browser navigation (`Accept` rating `text/html` above
-`application/json` by q-value) with no live session then answers 302 to that
-path, with the raw path and query string it asked for under the query key it
-named, while every other request still gets 401. A dependency can only raise
-an `HTTPException`, so the 302 still carries FastAPI's default JSON body
-(`{"detail":"Found"}`) alongside its `Location` header.
-
-`webauth.dependencies.session_id_from_request(connection, config)` is the one
-reader of the session cookie: it parses the raw `Cookie` headers and returns
-the verified session identifier, or `None` when the cookie is missing, longer
-than `MAX_SESSION_COOKIE_CHARS` (200 characters, defined in `webauth.cookies`),
-forged, or present more than once. The limit holds even for a correctly signed
-cookie, so `issue_session_cookies` raises `ValueError` for an identifier whose
-signed cookie would exceed it (identifiers up to 135 characters fit) or that is empty. The signature is an HMAC-SHA256 over `session:` and the identifier, so a signature made for a CSRF token or a pending login is no session cookie, and a cookie issued by 0.14.x or earlier is refused. A sibling
-subdomain can set a second cookie of the same name, so a request carrying two
-is refused rather than resolved to either: `current_user_dependency` answers
-401 (`Invalid session`) and `CsrfTokenMiddleware` 403. A host that reads the
-session cookie itself calls this function instead of `request.cookies`.
-
-A host that reads the session id itself, for example through
-`session_id_from_request` or its own socket layer, decides it with
-`webauth.dependencies.admit_session(session_id, *, sessions, config)`. It needs
-no request and sets no cookie. It returns the `webauth.ports.AuthenticatedUser`
-after renewing the session, or `ConnectionRefusal.SESSION_ENDED_OR_EXPIRED`
-for an unknown id, a session outside its lifetime, or a `touch` that answers
-`False`; a refused session is not renewed. A failing store, or a `touch` that
-does not answer a `bool`, raises.
-
-`admit_session` decides the session alone and checks no `Origin`. A host that
-admits a WebSocket handshake with it instead of `authenticate_websocket` checks
-the `Origin` first, as "WebSocket handshakes" describes. A host that reads the
-id other than through `session_id_from_request` bounds its length itself, because
-`admit_session` hands the id to `SessionRecordStore.load` as given. Like the
-other entry points it never commits: the host finishes its transaction right
-after the call.
+`current_user_dependency` binds the host's session store into the route
+dependencies `current_user`, `admin_user` and `verified_session_id`. A missing
+or dead session answers 401, or, for a browser navigation on a server-rendered
+host that names a `LoginRedirect`, a redirect to its login page.
+`session_id_from_request` is the one reader of the signed session cookie, and
+`admit_session` decides a session id that the host read itself. Both, and the
+rule that bounds a stored expiry, are documented on the functions.
 
 ## The session gate
 
 `install_web_auth_middleware(..., session_gate=SessionGate(...))` makes the rule
 of "Signed out and refused" hold for every route: a request needs a live
-session unless the host names it. A route that forgets a dependency is gated,
-not public.
-
-```python
-SessionGate(
-    session_transaction=lambda: nullcontext(sessions),
-    login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
-    public=(PublicRule(PathRules(exact=frozenset({"/login", "/health"}))),),
-    optional=PathRules(exact=frozenset({"/privacy"})),
-)
-```
-
-- **Fail closed.** `public` rules (`PublicRule`, by path and optionally by
-  `methods`) let a request through untouched, with no store read. `optional`
-  paths admit and renew a live session and let every other request through as
-  signed out. A `methods` set opens only the methods it names: `HEAD` and
-  `OPTIONS` stay gated unless listed.
-- **Paths.** Gate rules are router paths, written as the routes are:
-  `root_path` is stripped when it starts the path at a segment boundary. The
-  CSRF, rate-limit and security-header rules are full paths, `root_path`
-  included. A host under a `root_path` keeps each rule in its own convention.
-  A path with a `.` or `..` segment is never public or optional.
-- **WebSocket and lifespan scopes** pass; `authenticate_websocket` decides a
-  handshake.
-- **`SessionTransaction`** is the host's transaction around the gate's store
-  calls: one call from construction to exit, on one worker thread, with
-  concurrent calls for concurrent requests. A clean exit makes the renewal
-  durable before the route runs (`lambda: nullcontext(store)` for a store that
-  commits each call); rolling back on an exception is the host's decision. A
-  failing store or commit answers the library 500, on optional paths too, and a
-  route that fails afterwards leaves the renewal in place.
-- **Refusals** are what `current_user_dependency` answers, under FastAPI's
-  default exception handler: the 302 to `login_redirect` for a navigation,
-  otherwise 401 `Authentication required`, `Invalid session` or
-  `Session expired`.
-- **Behind the gate**, `current_user`, `admin_user` and `verified_session_id`
-  return the gate's admission for the request's own session cookie, so a
-  request costs one `load` and one `touch`. A public route that uses them admits
-  by itself, and so does a mounted app with another `WebAuthConfig` instance.
-  The admission vouches for one request: host code that carries it into another
-  request with the same cookie carries that request's decision along, which the
-  library does not defend against ([Security model](#security-model), item 3).
-- **`webauth.middleware.admitted_user(request)`** returns the account where no
-  dependency is used, and `None` on public paths and on optional paths without a
-  live session. It raises `RuntimeError` when no gate decided the request. For
-  the session id use `session_id_from_request`.
+session unless the host names it, so a route that forgets a dependency is gated,
+not public. `SessionGate` names the public and optional paths and the host's
+`SessionTransaction`; behind it the dependencies return the gate's admission
+instead of admitting a second time, and `admitted_user` reads it where no
+dependency is used.
 
 ## WebSocket handshakes
 
-A browser sends the session cookie on a cross-site WebSocket handshake too,
-and the webauth middlewares pass WebSocket scopes through untouched.
-`webauth.dependencies.authenticate_websocket(connection, *, sessions)`
-is the one check a host runs at the handshake. It answers the
-`webauth.ports.AuthenticatedUser`, or a `ConnectionRefusal`:
-
-| Refusal | Value | When |
-|---|---|---|
-| `MISSING_ORIGIN` | `missing-origin` | no `Origin` header |
-| `FOREIGN_ORIGIN` | `foreign-origin` | an `Origin` that is empty, repeated, `null`, unparsable or not an allowed host |
-| `NO_SESSION` | `no-session` | the session cookie is missing, empty or longer than `MAX_SESSION_COOKIE_CHARS` |
-| `INVALID_SESSION` | `invalid-session` | the cookie is forged or present more than once |
-| `SESSION_ENDED_OR_EXPIRED` | `session-ended-or-expired` | the store does not know the session, its stored expiry is outside the session lifetime, or `touch` answers `False` |
-
-The `Origin` is decided first, before the store is touched, so a refused
-handshake neither renews a session nor writes anything. Exactly one
-`Origin` must name a host the configured allowlist admits (`allowed_hosts_exact`
-and `allowed_hosts_patterns`, the same matching as "CSRF origin"; `WebAuthConfig`
-refuses both empty, so local development lists
-`allowed_hosts_exact={"localhost", "127.0.0.1"}`). There is no `Referer` fallback, and
-`Sec-Fetch-Site` does not decide: a client that is not a browser must send an
-allowed `Origin` too. The `Origin` keeps a foreign page from using a visitor's
-cookie; it is no credential.
-
-Then the session is decided exactly as `current_user_dependency` decides it
-for a request, by `admit_session`: an admitted handshake renews the session.
-A failing store, or a `touch` that does not answer a `bool`, raises instead of
-refusing, and an exception never accepts the socket.
-
-```python
-from fastapi import WebSocket
-from starlette.concurrency import run_in_threadpool
-
-from webauth.dependencies import ConnectionRefusal, authenticate_websocket
-from webauth.ports import AuthenticatedUser
-
-
-@app.websocket("/room")
-async def room(websocket: WebSocket) -> None:
-    def authenticate() -> AuthenticatedUser | ConnectionRefusal:
-        with the_hosts_unit_of_work() as unit:
-            return authenticate_websocket(websocket, sessions=unit.sessions)
-
-    outcome = await run_in_threadpool(authenticate)
-    if isinstance(outcome, ConnectionRefusal):
-        await websocket.close(code=1008)
-        return
-    await websocket.accept()
-    ...
-```
-
-- Authenticate, and finish the transaction, before `accept` and before waiting
-  for a message. A transactional store holds the session's row until its
-  transaction ends, so a transaction kept open for the socket's life would block
-  a logout.
-- A refusal closes with code 1008 before `accept`. A real server answers the
-  handshake with HTTP 403; the browser does not receive a close frame.
-- A synchronous store runs in a worker, as above, not in the receive loop.
-- A host may wrap the plain function in its own dependency: FastAPI resolves a
-  parameter annotated `HTTPConnection` on a WebSocket route.
-- After a successful check, `session_id_from_request(websocket, config)` names
-  the session on the same handshake.
-
-A socket does not end when its session does: a logout, a host's own revocation
-through its store, and `webauth.oidc_login.receive_backchannel_logout` delete the stored
-session and cannot signal an open socket. The host calls the same helper again, in a fresh
-transaction, before protected work and on its own schedule while a stream runs,
-and on a refusal closes the socket and stops the protected work. A successful
-re-check counts as activity like a request does: it renews the session, so a
-socket that keeps being re-checked stays signed in, and it stays signed in only
-until the absolute cap of `SessionLifetime`, which bounds a socket's life.
+A browser sends the session cookie on a cross-site WebSocket handshake too, and
+the middlewares pass WebSocket scopes through. `authenticate_websocket` is the
+one check a host runs at the handshake: it decides the `Origin` first, then the
+session, and answers the account or a `ConnectionRefusal`. A socket does not end
+when its session does, so the host checks again while it streams.
 
 ## Configuration
 
@@ -543,91 +404,32 @@ the `form-action` case for a form that posts or redirects to an issuer.
 
 ## The store decides every request
 
-The library caches no sessions. Every authenticated request costs one
-`SessionRecordStore.load` and one `touch`, so a session the host ended is
-refused on its next request, with 401 or the login redirect. The exception is a
-gated request whose route runs in a mounted app with another `WebAuthConfig`:
-[the session gate](#the-session-gate) admits it under each. Whether a loaded
-session still stands is decided by the library alone, against
-`WebAuthConfig.session_lifetime` (see "Session lifetime"). `SessionRecordStore.touch`
-takes the session id and the `expires_at` the library computed; the store writes it
-and computes none of its own.
-`SessionRecordStore.touch` returns a strict `bool`: `True` when a stored row was
-renewed, `False` when the session is gone, which refuses the request like an
-expired session.
+The library caches no sessions: `SessionRecordStore` is asked on every
+authenticated request, so a session the host ended is refused on its next one.
+The library alone decides whether a loaded session still stands; the store
+writes the expiry it is given.
 
 ## Session lifetime
 
-Two numbers decide how long someone stays signed in. The library owns the
-session's lifetime; the host's store only writes the expiry it is given. The
-session, CSRF and ID-token hint cookies live as long as the cap: they are issued
-once at login and never reissued, so the browser keeps them exactly as long as
-the session may last. An open WebSocket captured the cookie at its handshake and
-runs on after the browser drops it; the absolute cap and the host's re-checks
-bound a socket (see "WebSocket handshakes").
-
-- `SessionLifetime.idle_seconds` is how long a session stands without a request.
-- `SessionLifetime.absolute_max_age_seconds` is how long a session may live from
-  its `created_at`, however recently it was used. The idle window is at most
-  the cap, and the cap is at most 400 days (`MAX_SESSION_LIFETIME_SECONDS`), the
-  longest a browser keeps a cookie.
-
-`WebAuthConfig.session_lifetime` is required. The library reads `config.wall_clock`
-once per request, as whole seconds, and admits a loaded session only when
-`now <= expires_at <= min(now + idle + 60 s, created_at + cap)`: the stored expiry
-is neither past nor further out than the lifetime allows, with 60 seconds of
-tolerance for the idle window and none for the cap. A session outside that is refused as
-`SESSION_ENDED_OR_EXPIRED` and not renewed. An admitted session is renewed to
-`min(now + idle, created_at + cap)`, so it never outlives its cap. A session
-created more than 60 seconds in the future is refused too. A stored
-timestamp without an offset is read as UTC.
-
-Every lifetime — `idle_seconds` and
-`absolute_max_age_seconds` — must be a positive whole number of seconds; `0`, a negative
-value, a `float`, a string or a `bool` is refused when the object is built.
-
-The recommended policy for a host that admits by `login_group` is a 12-hour
-cap, with an idle window of the same length. The cap
-sets the worst-case delay before a removal from the group takes effect, because
-an open session is not re-checked. Every login checks the group again, and
-the issuer's SSO session turns that login into a
-redirect the person does not notice. A removal takes effect at once only by disabling
-the user at the issuer together with the back-channel logout ("Back-channel logout"
+`SessionLifetime` holds the two numbers that decide how long someone stays
+signed in: an idle window and an absolute cap from the session's creation. The
+library owns the rule; `admit_session` documents it. The session, CSRF and
+ID-token hint cookies live as long as the cap, issued once at login and never
+reissued (`issue_session_cookies`), so the cap is also the worst-case delay
+before a removal from the host's login group takes effect: an open session is
+not re-checked. The recommended policy for a host that admits by `login_group`
+is a 12-hour cap with an idle window of the same length. Every login checks the
+group again, and the issuer's SSO session turns that login into a redirect the
+person does not notice. A removal takes effect at once only by disabling the
+user at the issuer together with the back-channel logout ("Back-channel logout"
 above); without it, an open app session stays valid until it expires.
-
-```python
-import re
-
-from pydantic import SecretStr
-
-from webauth.config import SessionLifetime, WebAuthConfig
-from webauth.proxies import TrustedProxies
-from webauth.rate_limit import SingleProcessRateLimitBackend
-
-TWELVE_HOURS = 12 * 3600
-
-config = WebAuthConfig(
-    session_secret=SecretStr("a-secret-of-at-least-thirty-two-characters"),
-    trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
-    rate_limits=SingleProcessRateLimitBackend(),
-    allowed_hosts_exact=frozenset({"app.example.com"}),
-    allowed_hosts_patterns=(re.compile(r"^.+\.example\.com$"),),
-    session_lifetime=SessionLifetime(
-        idle_seconds=TWELVE_HOURS, absolute_max_age_seconds=TWELVE_HOURS,
-    ),
-)
-```
 
 ## Ending a session
 
-The refresh token is part of the session row: whatever ends the row ends it, and no other row
-or table holds it. Ending a session is a call on the host's store: `delete(session_id)`,
-`delete_for_user(user_id)` or `prune_overflow(user_id, keep_newest)`, where `0` keeps none. The
-library makes that call in three places only: [`log_out`](#logging-out),
-[`open_session`](#opening-a-session) (the session an incoming cookie replaced,
-and all but the newest ones under the cap) and back-channel logout. A host that signs in
-through OpenID Connect ends a session with `log_out`. The next request carrying
-an ended session's cookie is refused.
+Ending a session is a call on the host's store: `delete`, `delete_for_user` or
+`prune_overflow`. The library makes it in `log_out`, `open_session` and
+back-channel logout only, and a host that signs in through OpenID Connect ends a
+session with [`log_out`](#logging-out).
 
 ## Middleware order
 

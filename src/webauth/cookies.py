@@ -215,6 +215,10 @@ def _session_signature(session_id: str, secret: bytes) -> str:
 def sign_session_id(session_id: str, secret: bytes) -> str:
     """Return ``session_id.hmac_hex`` for use as a cookie value.
 
+    The session cookie is signed with HMAC-SHA256 over a prefix of its own
+    plus the id, so the signature of a CSRF token or a pending login is no
+    session cookie.
+
     Raises ``ValueError`` when the signed value would exceed
     ``MAX_SESSION_COOKIE_CHARS`` or when ``session_id`` is empty, since the
     reader would refuse that cookie.
@@ -255,6 +259,12 @@ def issue_session_cookies(
     response: Response, session_id: str, config: WebAuthConfig,
 ) -> None:
     """Hand the browser its signed session and the CSRF token bound to it.
+
+    Both cookies live as long as
+    ``session_lifetime.absolute_max_age_seconds``, the cap, and so does the
+    ID-token hint cookie that ``finish_login`` sets. They are issued once at login:
+    renewing a session reissues none of them, so the browser keeps them exactly
+    as long as the session may last.
 
     Only the session cookie is kept from scripts: the CSRF token has to be
     readable, because the double-submit check compares it against a header the
