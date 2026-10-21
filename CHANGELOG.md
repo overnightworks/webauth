@@ -25,6 +25,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `OidcIdentity` and `AdmittedLogin` gain a required `refresh_token: SecretStr | None`, which
   breaks every caller that constructs one. The code exchange's access token is still never read
   or kept.
+- `SessionRecordStore.replace_refresh_token(session_id, *, refresh_token: SecretStr) -> bool` is a
+  new required method. It only updates a row that exists and never creates one: `True` means the
+  stored row now holds the token, `False` means the session is gone and nothing was written, and
+  any other answer raises `TypeError` (answer `rowcount == 1`). Migrate by adding one `UPDATE`
+  of the refresh-token column `WHERE id = ?`.
 - A code-exchange answer carrying a `refresh_token` outside RFC 6749 Appendix A.17's `1*VSCHAR`
   (printable ASCII) is `TOKEN_ENDPOINT_FAILED`; that login used to be admitted.
 - `SessionRecordStore.load` no longer promises to hold the session against concurrent
@@ -43,6 +48,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `OidcRelyingParty.renew_access(refresh_token: SecretStr)` posts a refresh grant and answers a
   `RenewedAccess` (the new access token and the rotated refresh token, or `None`) or an
   `OidcRefusal`.
+- `webauth.oidc_login.fresh_access_token(relying_party, session_id, *, session_transaction,
+  config)` answers a new access token (`SecretStr`) for a live session, or an
+  `AccessTokenRefusal` with `AccessTokenRefusalReason` `SESSION_ENDED`, `SIGN_IN_AGAIN` or
+  `ISSUER_UNAVAILABLE`. It reads the session in one `SessionTransaction`, sends the refresh token
+  with no transaction open, and decides again in a second one; it stores a rotated refresh token
+  and never renews the session.
 - `OidcRelyingParty.workload_access_token()` posts a `client_credentials` grant and answers the
   client's own access token or an `OidcRefusal`. Both calls need a Bearer token in the answer and
   hold nothing between calls.

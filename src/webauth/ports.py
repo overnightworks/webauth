@@ -210,6 +210,22 @@ class SessionRecordStore(Protocol):
         """
         ...
 
+    def replace_refresh_token(
+        self,
+        session_id: str,
+        *,
+        refresh_token: SecretStr,
+    ) -> bool:
+        """Replace the session's refresh token, and say whether the stored row now holds it.
+
+        ``True``: the stored row holds the given token. ``False``: the row is
+        gone and nothing was written. Like ``touch``, it only updates an existing
+        row and never creates one, so a session deleted meanwhile stays deleted.
+        Any other answer raises ``TypeError``: answer ``rowcount == 1``, not
+        ``rowcount``.
+        """
+        ...
+
     def delete(self, session_id: str) -> None:
         """Drop the session. An id the store does not hold is a no-op, never an
         error: a logout names whatever the browser's cookie says."""

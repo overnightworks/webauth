@@ -110,7 +110,9 @@ owning section, it links there.
    - with a `WriteLock` that is released before the host commits (an in-process lock), a session that a login has created but not yet committed survives a back-channel logout of the same account that runs in between; a lock held until the transaction commits closes that window;
    - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
    - a clock reading past year 9999 fails closed;
-   - name resolution is bounded by the system resolver, not by the library; connecting is bounded per resolved address, outside the total deadline ([The relying party](#the-relying-party)).
+   - name resolution is bounded by the system resolver, not by the library; connecting is bounded per resolved address, outside the total deadline ([The relying party](#the-relying-party));
+   - an access token that [`fresh_access_token`](#the-persons-access-token) handed out stays valid at the service it is sent to, and at the issuer's own endpoints, until its own `exp`, even after a logout or an expiry that lands once the call has decided; webauth revokes nothing;
+   - with a store that commits every statement, a session deleted between `fresh_access_token`'s second `load` and the end of its block is seen only through `replace_refresh_token` answering `False`, and an issuer that echoes or omits the refresh token never reaches that call, so the call then hands out a token for the session deleted in that window.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -710,6 +712,82 @@ malformed header text the origin sends back. A `timeout_seconds` or
 exceeds `deadline_seconds` instead of capping it. `TokenEndpointError.failure`
 names the `ExchangeFailure` that ended the request, so a caller can tell
 `TIMED_OUT` from other transport failures.
+
+### The person's access token
+
+`webauth.oidc_login.fresh_access_token(relying_party, session_id, *,
+session_transaction, config)` turns a signed-in session into a new access token
+for one call to another service (an agent service, say). It answers a
+`SecretStr`, or an `AccessTokenRefusal` whose `reason` is one of three:
+
+| `AccessTokenRefusalReason` | Meaning | The host |
+|---|---|---|
+| `SESSION_ENDED` | The session is gone or outside its lifetime: the person is signed out. | Treats the person as signed out, as it does after a refused request. |
+| `SIGN_IN_AGAIN` | The session holds no refresh token (it began before the host stored them, or the issuer gave none), or the issuer refused it as `invalid_grant`. | Sends the person to sign in again. The app session itself still stands: only this call is refused. |
+| `ISSUER_UNAVAILABLE` | The issuer is unreachable, answered something unusable, or refused for another reason. `issuer_refusal` carries the `OidcRefusal`, so `invalid_client` shows its cause. | Fails the call and logs `issuer_refusal`; the person stays signed in. |
+
+The session holds only the refresh token; the access token is never stored. Each
+call costs one refresh grant at the issuer and hands the new access token to the
+host in memory, for the one call it serves. Keep it nowhere. When the issuer
+answers a refresh token different from the one the call sent, the call
+stores it with `SessionRecordStore.replace_refresh_token`. It renews nothing:
+asking for a token is not the person's request, so the session's expiry does not
+move.
+
+The call has four phases, and admission's own decision judges the session in
+the first and the third:
+
+1. **Read.** In one `session_transaction`, `load` the session. No row, or one
+   outside its lifetime, is `SESSION_ENDED`; a row without a refresh token is
+   `SIGN_IN_AGAIN`. Either way the issuer is not asked. The block is left,
+   which releases every row lock `load` took.
+2. **Grant.** With no transaction and no `WriteLock` open, send the stored
+   refresh token. `invalid_grant` is `SIGN_IN_AGAIN`; every other refusal is
+   `ISSUER_UNAVAILABLE`. A refusal writes nothing.
+3. **Decide.** In a second `session_transaction`, `load` the session again at a
+   new clock reading. A session that is gone or outside its lifetime now is
+   `SESSION_ENDED` and the token is dropped, whatever refresh token the issuer
+   returned. Otherwise a refresh token that differs from the one **sent**
+   (not the one re-read) is stored; `replace_refresh_token` answering `False`
+   is `SESSION_ENDED`.
+4. **Return.** The token is handed out only after the second block was left
+   without an exception.
+
+So a slow issuer holds only the host's worker thread, never a session row, a login
+or a logout. That thread is bounded as [The relying party](#the-relying-party)
+describes for the token POST. A logout, a back-channel logout, an overflow prune
+or a lifetime expiry that happens during the grant is seen in phase 3.
+
+What it cannot do: the final decision is the last check. A token it authorized may
+be returned after a logout or an expiry that lands later, and it stays valid at the
+service it is sent to, and at the issuer's own endpoints, until its own `exp`
+(300 s in a Keycloak realm with the default access-token lifespan). webauth makes no revocation call. With a store that
+commits every statement, a deletion landing between the second `load` and the end of
+the block is seen only through `replace_refresh_token` answering `False`, so an issuer
+that echoes or omits the refresh token leaves that window open ([Security
+model](#security-model), item 7).
+
+The host's duties:
+
+- Call it from a worker thread (a sync route, or `run_in_threadpool`), outside any
+  open session transaction and outside its `WriteLock`.
+- Pass an id the cookie reader bounded, or bound it first, as `admit_session` asks.
+- Pass the `SessionTransaction` it hands the session gate, or
+  `lambda: nullcontext(store)` for a store that commits each statement. The call
+  commits nothing beyond the two transactions it opens and leaves, neither held
+  across the grant.
+- Store the refresh token in the session row and answer `replace_refresh_token` with
+  a strict `bool`: `True` when the stored row now holds the token, `False` when the
+  row is gone. It only updates an existing row, never creates one.
+
+Two assumptions follow from the realm. The app session and the realm's SSO session
+end separately: an app session that outlives the realm's SSO session (the realm sets
+its idle and maximum lifetimes, for example 7 days and 30 days) gets `SIGN_IN_AGAIN`
+for these calls while the person stays signed in to the app. And the issuer lets a refresh token be used again
+after it issued a new one (Keycloak's `revokeRefreshToken` unset): two overlapping
+calls for one session each get a valid token, and the later write wins. If the issuer
+revokes a refresh token on use, the second of two overlapping calls is refused as
+`invalid_grant` and answers a false `SIGN_IN_AGAIN`.
 
 ### Admitting an identity
 
@@ -1391,7 +1469,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: PyJWT reads the token behind a bound of 8,192 characters on the token and 512 on its header segment (longer is `TOKEN_TOO_LONG` or `MALFORMED_TOKEN`), its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` or a `kid` that is not a string is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity, and the refresh and client-credentials grants answering a fresh access token |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login) and `app_role`, the same rule as a pure function for a second service, `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one, holding the login's refresh token, at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login) and `app_role`, the same rule as a pure function for a second service, `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one, holding the login's refresh token, at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, `fresh_access_token`, which turns a live session into a new access token for one call and stores the issuer's rotated refresh token, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
 | `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client` |
 
 It leaves the application everything that touches the application's own truth:
@@ -1411,6 +1489,9 @@ It leaves the application everything that touches the application's own truth:
   Behind [the session gate](#the-session-gate), the gate makes the session
   renewal durable through the host's `SessionTransaction` before the route runs,
   so a route that fails afterwards does not undo it.
+  [`fresh_access_token`](#the-persons-access-token) opens and leaves two short
+  transactions through the same `SessionTransaction`, neither held across the
+  issuer's grant.
 - **Routes.** It defines none. The only responses it writes are its own
   refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
   path. Once a response has started it writes nothing more: a streamed body over
