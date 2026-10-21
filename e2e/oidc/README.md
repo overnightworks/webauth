@@ -204,7 +204,8 @@ Token.
 `SCENARIO 25` to `27` are the refresh phase, on the default host at 1280x800. The host's
 `GET /access-token` calls `fresh_access_token` for the request's session and `GET
 /workload-token` calls `workload_access_token`; each answers the outcome only, never a token,
-and the first adds how many different refresh tokens the session has stored so far.
+and the first adds how many different refresh tokens the host has found stored after these
+calls since its last reset.
 
 - `SCENARIO 25`, rotation: after a sign-in two calls both answer `token`, and the host has
   stored a different refresh token after each (Keycloak rotates the string on every refresh).

@@ -1228,6 +1228,7 @@ def a_person_ended_at_the_issuer_signs_in_again(proof: Proof, width: Width) -> s
         proof.log_out_user_everywhere(proof.user_id)
         refused = access_token_answer(proof, session)
         assert refused["outcome"] == "sign-in-again", f"after the admin logout: {refused}"
+        assert refused["refresh_tokens_stored"] == 1, f"no refresh token was stored: {refused}"
         me_status = proof.status_of(page, "/me")
         assert me_status == 200, f"/me answered {me_status}, the app session should stand"
         log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
