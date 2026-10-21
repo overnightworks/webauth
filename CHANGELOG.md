@@ -6,6 +6,17 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.20.0 - Unreleased
+
+**Breaking**
+
+- `SecurityHeadersPolicy.hsts_max_age_seconds`, `hsts_include_subdomains` and
+  `strict_transport_security`, and `webauth.policies.DEFAULT_HSTS_MAX_AGE_SECONDS`, are gone.
+  The header is always `max-age=31536000; includeSubDomains` (now
+  `webauth.middleware.security_headers.STRICT_TRANSPORT_SECURITY`), sent exactly when
+  `cookie_secure` is on. Migrate by dropping the two arguments; a host that set neither is
+  unchanged.
+
 ## 0.19.0
 
 **Breaking**
