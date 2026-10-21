@@ -34,22 +34,13 @@ CI, which only lints it.
   reaches it through the Protocols in `webauth.ports`, which the host
   application implements over the persistence it already owns. `.importlinter`
   forbids `sqlalchemy` and `lint-imports` proves it in CI.
-- No host application is a dependency. `webauth` depends on FastAPI (with
-  Starlette and anyio, which `src` imports), Pydantic and the OpenID Connect
-  stack below at runtime, and on nothing else; `deptry src` proves in CI that `src` imports
-  nothing undeclared. Redis is optional — install
-  `overnightworks-webauth[redis]` for the Redis rate-limit backend; a single-node
-  host that supplies the in-process rate-limit backend needs no Redis at all.
-  JWT verification and OpenID Connect login are part of the plain install:
-  PyJWT and cryptography, which only `webauth.jwt_verification` imports, and
-  urllib3, which only `webauth.https_client` imports — the one owner of
-  outbound HTTPS — are core dependencies. Only
-  `webauth.oidc` imports `webauth.jwt_verification`; only
-  `webauth.jwt_verification`, `webauth.oidc` and `webauth.oidc_transport`
-  import `webauth.https_client`. Four `protected` import-linter contracts
-  enforce this. A fifth confines `redis` to `webauth.rate_limit`, and
-  `tests/test_public_api.py` imports every module with `redis` blocked, so the
-  in-process backend never needs the extra.
+- No host application is a dependency, and PyJWT and cryptography, urllib3 and
+  the optional `redis` each sit behind the one module that owns them.
+  `pyproject.toml` declares the dependencies and the `redis` extra,
+  `.importlinter` holds the contracts that confine them, and `deptry src` proves
+  in CI that `src` imports nothing undeclared. A single-node host that supplies
+  the in-process rate-limit backend needs no Redis, and `tests/test_public_api.py`
+  imports every module with `redis` blocked to prove it.
 - The user model, schema, configured role names, transaction boundaries and
   HTTP routes belong to the host. The library writes no response except its
   own refusals and the 500 of an unhandled exception; README.md lists them
