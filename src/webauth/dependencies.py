@@ -69,6 +69,10 @@ class LoginRedirect:
     request whose ``Accept`` header does not rate ``text/html`` above
     ``application/json`` by q-value — an API call, a fetch — still gets 401:
     only a browser navigation is redirected.
+
+    ``path`` must be a same-origin absolute path: browsers drop tab, CR and LF
+    and read a backslash as a slash, so ``/\\x`` and ``/<tab>/x`` lead off the
+    site exactly as ``//x`` does, and a path written like that is refused.
     """
 
     path: str
@@ -169,7 +173,8 @@ def authenticate_websocket(
     browser sends the session cookie on a cross-site handshake, and only the
     Origin tells a foreign page from the application's own. Exactly one Origin
     naming a host the application serves is admitted; there is no ``Referer``
-    fallback and ``Sec-Fetch-Site`` does not decide.
+    fallback and ``Sec-Fetch-Site`` does not decide. For local development list
+    ``localhost`` and ``127.0.0.1`` in ``allowed_hosts_exact``.
     A client that is not a browser must send an allowed Origin too. The Origin
     keeps a foreign page from using a visitor's cookie; it is no credential.
     Then the session is decided exactly as ``current_user`` decides it for an
@@ -192,6 +197,9 @@ def authenticate_websocket(
     the socket and stops the work. A successful re-check renews the session
     like a request, up to the absolute cap of ``SessionLifetime``, which bounds
     a socket's life.
+
+    A host may wrap this function in its own dependency: FastAPI resolves an
+    ``HTTPConnection`` parameter on a WebSocket route as well as on an HTTP one.
     """
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:

@@ -228,6 +228,14 @@ def issue_session_cookies(
 ) -> None:
     """Hand the browser its signed session and the CSRF token bound to it.
 
+    The session cookie is signed with HMAC-SHA256 over a prefix of its own
+    plus the id, so the signature of a CSRF token or a pending login is no
+    session cookie. Both cookies live as long as
+    ``session_lifetime.absolute_max_age_seconds``, the cap, and so does the
+    ID-token hint cookie that ``finish_login`` sets. They are issued once at login:
+    renewing a session reissues none of them, so the browser keeps them exactly
+    as long as the session may last.
+
     Only the session cookie is kept from scripts: the CSRF token has to be
     readable, because the double-submit check compares it against a header the
     client sends back itself. Both carry ``Secure`` unless the host switched

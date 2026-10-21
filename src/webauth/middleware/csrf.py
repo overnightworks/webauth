@@ -37,7 +37,13 @@ _SAME_SITE: Final = "same-site"
 
 
 class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
-    """Reject a state-changing request whose CSRF token does not match its session."""
+    """Reject a state-changing request whose CSRF token does not match its session.
+
+    A request is refused with 403 when it sends no token header, a token that
+    does not belong to its session, or no usable session cookie to bind a token
+    to: a session cookie that is missing, forged, too long or present more than
+    once reads as no session (``session_id_from_request``).
+    """
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
         if (

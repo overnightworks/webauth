@@ -1053,13 +1053,16 @@ writes the expiry it is given.
 
 `SessionLifetime` holds the two numbers that decide how long someone stays
 signed in: an idle window and an absolute cap from the session's creation. The
-library owns the rule; `admit_session` documents it. The session cookies live as
-long as the cap, so the cap is also the worst-case delay before a removal from
-the host's login group takes effect: an open session is not re-checked. The
-recommended policy for a host that admits by `login_group` is a 12-hour cap with
-an idle window of the same length. A removal takes effect at once only by
-disabling the user at the issuer together with the back-channel logout
-("Back-channel logout" above).
+library owns the rule; `admit_session` documents it. The session, CSRF and
+ID-token hint cookies live as long as the cap, issued once at login and never
+reissued (`issue_session_cookies`), so the cap is also the worst-case delay
+before a removal from the host's login group takes effect: an open session is
+not re-checked. The recommended policy for a host that admits by `login_group`
+is a 12-hour cap with an idle window of the same length. Every login checks the
+group again, and the issuer's SSO session turns that login into a redirect the
+person does not notice. A removal takes effect at once only by disabling the
+user at the issuer together with the back-channel logout ("Back-channel logout"
+above); without it, an open app session stays valid until it expires.
 
 ## Ending a session
 

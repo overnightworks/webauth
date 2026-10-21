@@ -45,11 +45,12 @@ class SessionGate:
 
     Every request needs a live session unless a ``public`` rule names it;
     an ``optional`` path admits a live session and lets every other request
-    through. Paths are the router's: ``root_path`` stripped, written as the
-    routes are; the CSRF, rate-limit and security-header rules are full paths,
-    ``root_path`` included, so a host under a ``root_path`` keeps each rule in
-    its own convention. A path with a ``.`` or ``..`` segment is never public
-    or optional. WebSocket and lifespan scopes pass; ``authenticate_websocket``
+    through. Paths are the router's: ``root_path`` stripped at a segment boundary
+    (under ``/app``, ``/app/x`` is ``/x`` but ``/apple`` stays ``/apple``),
+    written as the routes are; the CSRF, rate-limit and security-header rules
+    are full paths, ``root_path`` included, so a host under a ``root_path``
+    keeps each rule in its own convention. A path with a ``.`` or ``..`` segment
+    is never public or optional. WebSocket and lifespan scopes pass; ``authenticate_websocket``
     decides a handshake.
 
     The gate calls ``session_transaction`` once per request that carries a
@@ -58,6 +59,10 @@ class SessionGate:
     ``touch``) runs inside it, and the block is left before the route runs, so
     the renewal is durable then. An exception, or a failing exit, answers the
     library 500 without running the route, on an optional path too.
+
+    The admission vouches for one request. Host code that carries it into
+    another request with the same cookie carries that request's decision along;
+    the library does not defend against it.
     """
 
     session_transaction: SessionTransaction
@@ -125,7 +130,8 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
     installed, the connection is a WebSocket, the route runs under another
     ``WebAuthConfig`` instance, or the decision was made for another session
     cookie. A forgotten gate never reads as signed out. For the session id use
-    ``session_id_from_request``.
+    ``session_id_from_request``. The account is this request's own: a host must
+    not hand it to another request.
     """
     decided = _gate_admission(connection)
     if decided is None:

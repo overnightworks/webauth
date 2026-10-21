@@ -155,12 +155,15 @@ class WriteLock(Protocol):
 class SessionRecordStore(Protocol):
     """The host's sessions, which the library asks on every request.
 
-    The library caches no sessions: every authenticated request costs one
-    ``load`` and one ``touch``, so a session the host ended is refused on its
-    next request. The library ends a session in three places only, by calling
-    ``delete``, ``delete_for_user`` or ``prune_overflow``: ``log_out``,
-    ``open_session`` (the session an incoming cookie replaced, and all but the
-    newest ones under the cap) and back-channel logout.
+    The library caches no sessions: every admission costs one ``load`` and one
+    ``touch``, so a session the host ended is refused on its next request. A
+    request is admitted once, or twice when the session gate admitted it and a
+    mounted application under another ``WebAuthConfig`` admits it again.
+
+    The library ends a session in three places only, by calling ``delete``,
+    ``delete_for_user`` or ``prune_overflow``: ``log_out``, ``open_session`` (the
+    session an incoming cookie replaced, and all but the newest ones under the
+    cap) and back-channel logout.
     """
 
     def create(
