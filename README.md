@@ -534,14 +534,15 @@ judged, the token rules and the transports' bounds.
 `webauth.oidc_login.fresh_access_token` turns a signed-in session into a new
 access token for one call to another service (an agent service, say). The
 session holds only the refresh token, so a call that finds a standing session
-is one refresh grant, and the access token goes to the host in memory only. It answers a `SecretStr`, or
-an `AccessTokenRefusal` whose `AccessTokenRefusalReason` says what the host
-does: treat the person as signed out, send them to sign in again, or fail the
-call. A slow issuer holds only the caller's thread, never a session row, a
-login or a logout. A token handed out stays valid until its own `exp` after a
-later logout, and webauth makes no revocation call ([Security
-model](#security-model), item 7). The docstrings of `fresh_access_token` and
-the reasons hold the phases, the host's duties and the realm's assumptions.
+with a refresh token is one refresh grant, and the access token goes to the
+host in memory only. It answers a `SecretStr`, or an `AccessTokenRefusal` whose
+`AccessTokenRefusalReason` says what the host does: treat the person as signed
+out, send them to sign in again, or fail the call. A slow issuer holds only the
+caller's thread, never a session row, a login or a logout. A token handed out
+stays valid until its own `exp` after a later logout, and webauth makes no
+revocation call ([Security model](#security-model), item 7). The docstrings of
+`fresh_access_token` and the reasons hold the phases, the host's duties and the
+realm's assumptions.
 
 ### Admitting an identity
 
