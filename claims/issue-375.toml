@@ -1,8 +1,0 @@
-claim_id = "d7ae82e674ee40e0ad8e0996763181d2"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "5db855f28e5af601924d9f5be16735c5c5986e2f"
-branch = "claude/issue-375-login-route-details-in-oidc-login"
-scope = ["README.md", "e2e/oidc/README.md", "e2e/oidc/host_app.py", "src/webauth/cookies.py", "src/webauth/oidc_login.py"]
-opened_commit = "88e0566907829dd2651309150aa8659efe4e7f79"
-whole_reason = "The README region, the docstrings that receive its facts, and the e2e host app and README that cite it are one move; a part alone leaves a fact in two places or in none."
