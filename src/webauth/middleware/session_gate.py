@@ -46,15 +46,18 @@ class SessionGate:
     Every request needs a live session unless a ``public`` rule names it;
     an ``optional`` path admits a live session and lets every other request
     through. Paths are the router's: ``root_path`` stripped, written as the
-    routes are. A path with a ``.`` or ``..`` segment is never public or
-    optional.
+    routes are; the CSRF, rate-limit and security-header rules are full paths,
+    ``root_path`` included, so a host under a ``root_path`` keeps each rule in
+    its own convention. A path with a ``.`` or ``..`` segment is never public
+    or optional. WebSocket and lifespan scopes pass; ``authenticate_websocket``
+    decides a handshake.
 
     The gate calls ``session_transaction`` once per request that carries a
     validly signed session cookie on a gated or optional path, never on a public
     path and never without such a cookie. The admission (``load``, then
     ``touch``) runs inside it, and the block is left before the route runs, so
     the renewal is durable then. An exception, or a failing exit, answers the
-    library 500 without running the route.
+    library 500 without running the route, on an optional path too.
     """
 
     session_transaction: SessionTransaction
