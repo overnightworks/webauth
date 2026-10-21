@@ -1,0 +1,8 @@
+claim_id = "24817d50474f4ecca18bc643e1a90a8a"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "55d36103b71733a3ddb355406c5301d358f56c07"
+branch = "claude/issue-363-fresh-access-token"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_fresh_access_token.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "02d3054d3787cda2a691baec9affdebac60601ea"
+whole_reason = "The call, the port method it writes through and the fakes that prove its two-transaction decision are one behaviour; the port alone is a method with no caller, the call alone cannot store a rotated token (#348 §3)."
