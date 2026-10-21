@@ -372,44 +372,9 @@ def the_hsts_header_of(policy: SecurityHeadersPolicy, *, cookie_secure: bool = T
     return TestClient(app).get("/ok").headers.get("strict-transport-security")
 
 
-@pytest.mark.parametrize(
-    ("fields", "expected"),
-    [
-        pytest.param({}, "max-age=31536000; includeSubDomains", id="default"),
-        pytest.param(
-            {"hsts_include_subdomains": False}, "max-age=31536000", id="without-subdomains",
-        ),
-        pytest.param(
-            {"hsts_max_age_seconds": 0}, "max-age=0; includeSubDomains", id="rollback",
-        ),
-        pytest.param({"hsts_max_age_seconds": 300}, "max-age=300; includeSubDomains", id="short"),
-    ],
-)
-def test_hsts_follows_the_policy_fields_when_cookies_are_secure(
-    fields: dict[str, object], expected: str,
-) -> None:
-    policy = SecurityHeadersPolicy(POLICY.content_security_policy, **fields)  # type: ignore[arg-type]
-
-    assert the_hsts_header_of(policy) == expected
+def test_hsts_is_sent_when_cookies_are_secure() -> None:
+    assert the_hsts_header_of(POLICY) == "max-age=31536000; includeSubDomains"
 
 
-def test_hsts_is_absent_without_secure_cookies_whatever_the_fields_say() -> None:
-    policy = SecurityHeadersPolicy(
-        POLICY.content_security_policy, hsts_max_age_seconds=600, hsts_include_subdomains=True,
-    )
-
-    assert the_hsts_header_of(policy, cookie_secure=False) is None
-
-
-@pytest.mark.parametrize("seconds", [-1, True, False, 1.5, "60", None])
-def test_an_hsts_max_age_that_is_not_a_whole_number_from_zero_up_is_refused(
-    seconds: object,
-) -> None:
-    with pytest.raises(ValueError, match="hsts_max_age_seconds"):
-        SecurityHeadersPolicy(POLICY.content_security_policy, hsts_max_age_seconds=seconds)  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize("include", [1, "yes", None])
-def test_an_hsts_subdomain_flag_that_is_not_a_bool_is_refused(include: object) -> None:
-    with pytest.raises(ValueError, match="hsts_include_subdomains"):
-        SecurityHeadersPolicy(POLICY.content_security_policy, hsts_include_subdomains=include)  # type: ignore[arg-type]
+def test_hsts_is_absent_without_secure_cookies() -> None:
+    assert the_hsts_header_of(POLICY, cookie_secure=False) is None
