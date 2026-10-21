@@ -813,6 +813,8 @@ _LOOPBACK_HTTP_URLS = [
     "http://LOCALHOST:8080/cb",
     "http://127.0.0.1:8080/cb",
     "http://[::1]:8080/cb",
+    "HTTP://localhost/cb",
+    "Http://127.0.0.1:8080/cb",
 ]
 
 
@@ -849,6 +851,13 @@ def test_an_issuer_url_stays_https_even_on_a_loopback_host(field_name: str, url:
         "http://localhost:8080/cb#top",
         "ftp://localhost/cb",
         "ws://localhost/cb",
+        "http://127.0.0.1.nip.io/cb",
+        "http://localhost./cb",
+        "http://local\thost/cb",
+        "http://local\nhost/cb",
+        "http://localhost /cb",
+        "http://localhost:99999/cb",
+        "http://localhost@evil.test/cb",
     ],
 )
 def test_the_apps_own_two_urls_refuse_http_unless_the_host_is_loopback_and_the_rest_is_plain(
