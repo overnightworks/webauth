@@ -97,12 +97,25 @@ is_relay_container() {
   [[ -z "$project" && "$name" == "$relay_prefix"* && "$image" == "$relay_image" ]]
 }
 
+# Runs a listing command and prints its output. A command that fails ends cleanup with the
+# command named, so a failed listing is never read as an empty one.
+listing_of() {
+  local output
+  output="$("$@")" || {
+    echo "cleanup failed: '$*' exited $?" >&2
+    exit 1
+  }
+  printf '%s\n' "$output"
+}
+
 # Prints "ID|PROJECT|NAME|IMAGE" for every container, the image as it was named when the
 # container was created (docker ps drops a digest).
 docker_container_identities() {
+  local listing
   local -a ids
-  mapfile -t ids < <(docker ps -a --no-trunc --quiet)
-  [[ ${#ids[@]} -eq 0 ]] && return 0
+  listing="$(listing_of docker ps -a --no-trunc --quiet)"
+  mapfile -t ids <<<"$listing"
+  [[ -n "${ids[0]}" ]] || return 0
   docker inspect --format '{{.Id}}|{{with index .Config.Labels "'"$compose_project_label"'"}}{{.}}{{end}}|{{.Name}}|{{.Config.Image}}' "${ids[@]}"
 }
 
@@ -123,7 +136,7 @@ probe_objects() {
     fi
   done <<<"$listing"
   for kind in network volume; do
-    listing="$(docker "$kind" ls --format '{{.Name}}|{{.Label "'"$compose_project_label"'"}}')"
+    listing="$(listing_of docker "$kind" ls --format '{{.Name}}|{{.Label "'"$compose_project_label"'"}}')"
     while IFS='|' read -r name project; do
       [[ -n "$name" ]] || continue
       if is_probe_project "$probe_project" "$project"; then
@@ -133,9 +146,18 @@ probe_objects() {
   done
 }
 
-# Prints the pid of each host app this checkout's probe starts. Its argv is exactly what
-# harness.py:start_host builds: the interpreter, this checkout's host_app.py, --settings,
-# and a settings file inside the state root. /proc/PID/cmdline keeps the arguments apart.
+# The interpreter of this checkout's environment, as the harness sees it in sys.executable.
+checkout_interpreter() {
+  local interpreter
+  interpreter="$(listing_of uv run --locked --project "$root" --group e2e python -c 'import sys; print(sys.executable)')"
+  realpath -m -s -- "$interpreter"
+}
+
+# Prints the pid of each host app this checkout's probe starts. Its argv is exactly the six
+# fields harness.py:start_host builds: this checkout's interpreter, this checkout's
+# host_app.py, --settings, a settings file inside the state root, --parent-pid and a pid.
+# /proc/PID/cmdline keeps the arguments apart. host_interpreter is read once per cleanup;
+# its symlinks are kept, so another environment sharing a base Python is not taken for this one.
 host_app_pids() {
   local host_app state_real cmdline pid
   local -a argv
@@ -144,8 +166,10 @@ host_app_pids() {
   for cmdline in /proc/[0-9]*/cmdline; do
     pid="${cmdline#/proc/}"
     pid="${pid%/cmdline}"
-    mapfile -d '' argv <"$cmdline" 2>/dev/null || continue
-    [[ ${#argv[@]} -ge 4 && "${argv[2]}" == --settings ]] || continue
+    mapfile -d "" argv 2>/dev/null <"$cmdline" || continue
+    [[ ${#argv[@]} -eq 6 && "${argv[2]}" == --settings && "${argv[4]}" == --parent-pid ]] || continue
+    [[ "${argv[5]}" =~ ^[0-9]+$ ]] || continue
+    [[ "$(realpath -m -s -- "${argv[0]}")" == "$host_interpreter" ]] || continue
     [[ "$(realpath -m -- "${argv[1]}")" == "$host_app" ]] || continue
     [[ "$(realpath -m -- "${argv[3]}")" == "$state_real"/* ]] || continue
     echo "$pid"
@@ -153,10 +177,10 @@ host_app_pids() {
 }
 
 # The runtime directories exactly one level below the run directories of the state root,
-# found without following a symlink.
+# found without following a symlink, each followed by a NUL so no path name can split.
 run_runtime_directories() {
   [[ -d "$state_root" ]] || return 0
-  find -P "$state_root" -mindepth 2 -maxdepth 2 -type d -name runtime
+  find -P "$state_root" -mindepth 2 -maxdepth 2 -type d -name runtime -print0
 }
 
 remove_probe_objects() {
@@ -172,19 +196,23 @@ remove_probe_objects() {
 }
 
 cleanup_under_lock() {
-  local pid directory leftovers
-  for pid in $(host_app_pids); do
+  local pids pid directory leftovers
+  host_interpreter="$(checkout_interpreter)"
+  pids="$(host_app_pids)"
+  for pid in $pids; do
     kill -KILL "$pid" 2>/dev/null || true
   done
   sleep 1
   remove_probe_objects
-  while IFS= read -r directory; do
+  # A process that can swap a directory under the state root runs as this user and already
+  # holds every right this removal has, so the path is not re-checked between find and rm.
+  while IFS= read -r -d '' directory; do
     rm -rf -- "$directory"
   done < <(run_runtime_directories)
   leftovers="$(
     probe_objects
     host_app_pids
-    run_runtime_directories
+    run_runtime_directories | tr '\0' '\n'
   )"
   if [[ -n "$leftovers" ]]; then
     echo "still present after cleanup:" >&2
