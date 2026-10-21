@@ -85,7 +85,6 @@ class Arrangement:
     clock: FakeClock
     config: WebAuthConfig
     relying_party: OidcRelyingParty
-    token_endpoint: FakeIssuer | FakeTokenEndpoint
 
     def fresh_access_token(
         self, provider: SessionTransaction, session_id: str = _SESSION_ID,
@@ -150,7 +149,7 @@ def an_arrangement(
         monotonic_clock=FakeClock(5_000.0),
     )
     return Arrangement(
-        issuer, sessions_of(record), clock, config, relying_party, token_endpoint or issuer,
+        issuer, sessions_of(record), clock, config, relying_party,
     )
 
 
@@ -212,11 +211,13 @@ class TestTheTwoTransactions:
             arrangement.clock.now += SESSION_IDLE_SECONDS + 1
 
         arrangement.issuer.before_exchange = let_the_session_expire
+        before = arrangement.instants
 
         outcome = arrangement.fresh_access_token(provider_of(arrangement.sessions))
 
         assert outcome == SESSION_ENDED
         assert arrangement.stored_refresh_token == ISSUED_REFRESH_TOKEN
+        assert arrangement.instants == before
 
     def test_a_row_deleted_between_the_second_load_and_the_replace_ends_the_session(self) -> None:
         arrangement = an_arrangement(SessionsEndedBeforeReplacingTheRefreshToken)
@@ -322,8 +323,11 @@ class TestAGrantedToken:
             pytest.param({"refresh_token": ABSENT}, id="omitted"),
         ],
     )
+    @_SHAPES
     def test_an_unchanged_or_omitted_refresh_token_writes_nothing(
-        self, refresh_answer_members: dict[str, Any],
+        self,
+        provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
+        refresh_answer_members: dict[str, Any],
     ) -> None:
         arrangement = an_arrangement(SessionsRecordingTheirTransaction)
         sessions = arrangement.sessions
@@ -332,12 +336,15 @@ class TestAGrantedToken:
             "access_token": GRANTED_ACCESS_TOKEN, **refresh_answer_members,
         }
 
-        outcome = arrangement.fresh_access_token(sessions.in_transaction)
+        before = arrangement.instants
+
+        outcome = arrangement.fresh_access_token(provider_of(sessions))
 
         assert isinstance(outcome, SecretStr)
         assert outcome.get_secret_value() == GRANTED_ACCESS_TOKEN
         assert arrangement.stored_refresh_token == ISSUED_REFRESH_TOKEN
         assert "replace" not in sessions.event_names
+        assert arrangement.instants == before
 
 
 _ISSUER_FAILURES = [
@@ -441,12 +448,14 @@ class TestRefusals:
     ) -> None:
         arrangement = an_arrangement(age=age)
         arrangement.clock.now += idle_for
+        before = arrangement.instants
 
         outcome = arrangement.fresh_access_token(provider_of(arrangement.sessions), session_id)
 
         assert outcome == SESSION_ENDED
         assert arrangement.issuer.requests == []
         assert arrangement.stored_refresh_token == ISSUED_REFRESH_TOKEN
+        assert arrangement.instants == before
 
 
 class TestAFailingStore:
