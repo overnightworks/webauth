@@ -28,8 +28,10 @@ step is a verb of `scripts/e2e-oidc.sh`, which holds the commands, the caps and 
 
 ## Run
 
-`prove` runs `prove.py` with `--edge` (the edge checkout) and `--scratch` (an empty
-directory). It takes `/tmp/probe-stack.lock`, refuses to start while the 1-minute
+`prove --edge DIR` runs `prove.py` against the edge checkout `DIR`. The script makes
+the run's directory itself, under `${XDG_STATE_HOME:-~/.local/state}/webauth-e2e-oidc/`
+(named `prove-` and a random suffix), passes it to the driver as `--scratch` and prints it
+when the run starts; a caller never names it. It takes `/tmp/probe-stack.lock`, refuses to start while the 1-minute
 load average is above 1.5 times the cores, and caps the run (the script's comment
 gives the numbers and why).
 
@@ -41,15 +43,15 @@ uninterruptible cleanup (host app, stack, `runtime/`, result table); further sig
 are ignored.
 
 If the run is killed outright (SIGKILL, the `timeout` fallback, an out-of-memory
-kill), nothing can clean up: the verb `cleanup` removes `runtime/`
-(credentials and keys), the probe stack, the suite project and the relay containers,
-and a host app that is still listening; it refuses a `SCRATCH` that holds anything
-but `runtime/`, `evidence/` and `export/`, and exits non-zero while anything of the probe remains.
-Do not trust `evidence/` of such a run, nor of a
+kill), nothing can clean up: the verb `cleanup`, which takes no argument, removes
+`runtime/` (credentials and keys) of the run directories under that root, without
+following a symlink, and the probe stack, the suite project, the relay containers
+and the host apps that are still listening. It exits non-zero while anything of the
+probe remains. Do not trust `evidence/` of such a run, nor of a
 run that prints `the browser worker did not stop`: its screenshots are deleted,
 because a live browser could still write.
 
-`--scratch` must be empty. Afterwards it holds `evidence/` only: screenshots
+The run directory starts empty. Afterwards it holds `evidence/` only: screenshots
 and `result-table.txt`. `runtime/` (credentials, keys, the stack's
 scratch) is deleted on every exit path.
 
@@ -234,7 +236,7 @@ client secret, prints the plan's 14 modules as the suite names them (a count oth
 14 fails the run), and drives every module the expectation table in `conformance.py`
 does not skip with the host app (`host_app.py`) as the relying party under test and a
 real Chromium following the redirects. A module without a table row, or a row without a
-module, fails the run. It then writes the plan export to `SCRATCH/export/`. The
+module, fails the run. It then writes the plan export to the run directory's `export/`. The
 export is a full protocol transcript with the client secret and the suite's
 private keys in it: keep it local, never attach it to anything.
 
@@ -275,8 +277,8 @@ Each expectation is built from the module's class in the suite's sources
 
 ### Running the conformance suite
 
-`conformance` runs `conformance.py` with `--scratch` (an empty directory), under the
-same lock, load check and cap as `prove`; the suite's images come from `prepare`.
+`conformance` takes no argument and runs `conformance.py` in a run directory made as for
+`prove` (named `conformance-`), under the same lock, load check and cap as `prove`; the suite's images come from `prepare`.
 `held` and `skipped` rows carry their justification in the expectation table in
 `conformance.py`, so a skip is read there. Stopping works as for `prove` (exit
 status 1). On every exit path the suite project is taken down with its volumes

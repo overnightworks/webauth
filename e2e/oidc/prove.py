@@ -1,6 +1,6 @@
 """Proves login and logout of a webauth host in a real browser against a real Keycloak.
 
-    scripts/e2e-oidc.sh prove --edge PATH --scratch EMPTY_DIR
+    scripts/e2e-oidc.sh prove --edge PATH
 
 Read ``README.md`` beside this file first. Nothing of the OIDC path is faked:
 the browser fills Keycloak's own form, the host's library talks to the real

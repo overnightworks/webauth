@@ -7,6 +7,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 probe_lock=/tmp/probe-stack.lock
 suite_host=conformance.example.test
 compose_project_label=com.docker.compose.project
+state_root="${XDG_STATE_HOME:-$HOME/.local/state}/webauth-e2e-oidc"
 
 # The cap is a whole-run limit. --kill-after must exceed the worst case of a
 # run's cleanup, or timeout's SIGKILL would cut it short and leave the stack
@@ -22,9 +23,11 @@ usage() {
 usage: scripts/e2e-oidc.sh VERB [ARGS]
 
   prepare            install the pinned Chromium and pull the relay and suite images
-  prove ARGS         run e2e/oidc/prove.py (ARGS: --edge DIR --scratch EMPTY_DIR)
-  conformance ARGS   run e2e/oidc/conformance.py (ARGS: --scratch EMPTY_DIR)
-  cleanup SCRATCH    remove what a killed run left behind (SCRATCH: the run's --scratch)
+  prove --edge DIR   run e2e/oidc/prove.py against the edge checkout DIR
+  conformance        run e2e/oidc/conformance.py
+  cleanup            remove what a killed run left behind
+
+A run's directory is made under the state root and printed when the run starts.
 USAGE
   exit 2
 }
@@ -39,15 +42,30 @@ refuse_while_loaded() {
   fi
 }
 
+# Every run directory lives below the state root, which cleanup trusts only as a real directory.
+refuse_unsafe_state_root() {
+  if [[ -L "$state_root" || ( -e "$state_root" && ! -d "$state_root" ) ]]; then
+    echo "refusing: '$state_root' is not a real directory" >&2
+    exit 1
+  fi
+}
+
 # timeout runs in its own process group so its limit reaches every descendant;
 # Ctrl-C reaches only flock. Stop a run with SIGTERM to timeout or the python process.
 # The load is read again once the lock is held, because the wait for it can be long.
+# The run directory is made under the lock and handed to the driver as --scratch.
 run_under_lock() {
   local driver="$1"
   shift
   refuse_while_loaded
+  mkdir -p -- "$state_root"
+  refuse_unsafe_state_root
   flock -o "$probe_lock" bash -c "$(declare -f refuse_while_loaded)"'
-refuse_while_loaded && exec "$@"' _ \
+refuse_while_loaded
+run_directory="$(mktemp -d "$1/$2-XXXXXX")" || exit
+echo "run directory: $run_directory"
+shift 2
+exec "$@" --scratch "$run_directory"' _ "$state_root" "${driver%.py}" \
     timeout --kill-after="$kill_after_seconds" "$run_cap_seconds" \
     uv run --locked --project "$root" --group dev --group e2e python "$root/e2e/oidc/$driver" "$@"
 }
@@ -65,30 +83,42 @@ prepare() {
   SUITE_HOST="$suite_host" docker compose -f "$root/e2e/oidc/suite-compose.yaml" pull
 }
 
-# The command line harness.py:start_host builds for this checkout's host app:
-# the interpreter, then this checkout's host_app.py.
-host_app_pattern() {
-  local escaped
-  escaped="$(printf '%s' "$root/e2e/oidc/host_app.py" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
-  printf '^[^ ]+ %s ' "$escaped"
-}
-
-# Succeeds for the compose project of the probe stack (stack.py) and for a suite
-# project (suite.py: d2-suite- and eight lowercase hex digits), by whole-string match.
+# The compose project names are reserved for the probe: the harness's own teardown
+# removes them (stack.py PROBE_PROJECT, suite.py d2-suite- and eight lowercase hex
+# digits) and cleanup replays that teardown. The live edge stack's project is `edge`.
 is_probe_project() {
   [[ "$2" == "$1" || "$2" =~ ^d2-suite-[0-9a-f]{8}$ ]]
 }
 
+# A relay container (shim.py: docker run --rm) has the relay name prefix and image
+# and no compose project label.
+is_relay_container() {
+  local relay_prefix="$1" relay_image="$2" project="$3" name="$4" image="$5"
+  [[ -z "$project" && "$name" == "$relay_prefix"* && "$image" == "$relay_image" ]]
+}
+
+# Prints "ID|PROJECT|NAME|IMAGE" for every container, the image as it was named when the
+# container was created (docker ps drops a digest).
+docker_container_identities() {
+  local -a ids
+  mapfile -t ids < <(docker ps -a --no-trunc --quiet)
+  [[ ${#ids[@]} -eq 0 ]] && return 0
+  docker inspect --format '{{.Id}}|{{with index .Config.Labels "'"$compose_project_label"'"}}{{.}}{{end}}|{{.Name}}|{{.Config.Image}}' "${ids[@]}"
+}
+
 # Prints "KIND NAME" for each docker object a probe run makes: containers, networks and
-# volumes labelled with a probe project, and the relay containers (shim.py) by name prefix.
+# volumes labelled with a probe project, and the relay containers (shim.py).
 probe_objects() {
-  local probe_project relay_prefix listing kind id project name
+  local probe_project relay_prefix relay_image listing kind id project name image
   probe_project="$(harness_constant stack PROBE_PROJECT)"
   relay_prefix="$(harness_constant shim RELAY_NAME_PREFIX)"
-  listing="$(docker ps -a --format '{{.ID}}|{{.Label "'"$compose_project_label"'"}}|{{.Names}}')"
-  while IFS='|' read -r id project name; do
+  relay_image="$(harness_constant shim RELAY_IMAGE)"
+  listing="$(docker_container_identities)"
+  while IFS='|' read -r id project name image; do
     [[ -n "$id" ]] || continue
-    if is_probe_project "$probe_project" "$project" || [[ "$name" == "$relay_prefix"* ]]; then
+    name="${name#/}"
+    if is_probe_project "$probe_project" "$project" \
+      || is_relay_container "$relay_prefix" "$relay_image" "$project" "$name" "$image"; then
       echo "container $id"
     fi
   done <<<"$listing"
@@ -103,25 +133,30 @@ probe_objects() {
   done
 }
 
-# A directory a run leaves behind holds runtime, evidence and export, and nothing else.
-holds_only_run_leftovers() {
-  local scratch="$1" entry found=0
-  [[ -n "$scratch" && -d "$scratch" ]] || return 1
-  for entry in "$scratch"/* "$scratch"/.[!.]* "$scratch"/..?*; do
-    [[ -e "$entry" || -L "$entry" ]] || continue
-    case "${entry##*/}" in
-      runtime | evidence | export) found=1 ;;
-      *) return 1 ;;
-    esac
+# Prints the pid of each host app this checkout's probe starts. Its argv is exactly what
+# harness.py:start_host builds: the interpreter, this checkout's host_app.py, --settings,
+# and a settings file inside the state root. /proc/PID/cmdline keeps the arguments apart.
+host_app_pids() {
+  local host_app state_real cmdline pid
+  local -a argv
+  host_app="$(realpath -m -- "$root/e2e/oidc/host_app.py")"
+  state_real="$(realpath -m -- "$state_root")"
+  for cmdline in /proc/[0-9]*/cmdline; do
+    pid="${cmdline#/proc/}"
+    pid="${pid%/cmdline}"
+    mapfile -d '' argv <"$cmdline" 2>/dev/null || continue
+    [[ ${#argv[@]} -ge 4 && "${argv[2]}" == --settings ]] || continue
+    [[ "$(realpath -m -- "${argv[1]}")" == "$host_app" ]] || continue
+    [[ "$(realpath -m -- "${argv[3]}")" == "$state_real"/* ]] || continue
+    echo "$pid"
   done
-  [[ $found -eq 1 ]]
 }
 
-# Prints the processes of this checkout's host app; pgrep status 1 means none.
-running_host_apps() {
-  local status=0
-  pgrep -af -- "$(host_app_pattern)" || status=$?
-  [[ $status -le 1 ]] || exit "$status"
+# The runtime directories exactly one level below the run directories of the state root,
+# found without following a symlink.
+run_runtime_directories() {
+  [[ -d "$state_root" ]] || return 0
+  find -P "$state_root" -mindepth 2 -maxdepth 2 -type d -name runtime
 }
 
 remove_probe_objects() {
@@ -137,15 +172,19 @@ remove_probe_objects() {
 }
 
 cleanup_under_lock() {
-  local scratch="$1" status=0 leftovers
-  pkill -f -- "$(host_app_pattern)" || status=$?
-  [[ $status -le 1 ]] || exit "$status"
+  local pid directory leftovers
+  for pid in $(host_app_pids); do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  sleep 1
   remove_probe_objects
-  rm -rf -- "$scratch/runtime"
+  while IFS= read -r directory; do
+    rm -rf -- "$directory"
+  done < <(run_runtime_directories)
   leftovers="$(
     probe_objects
-    running_host_apps
-    if [[ -e "$scratch/runtime" ]]; then echo "$scratch/runtime"; fi
+    host_app_pids
+    run_runtime_directories
   )"
   if [[ -n "$leftovers" ]]; then
     echo "still present after cleanup:" >&2
@@ -154,17 +193,13 @@ cleanup_under_lock() {
   fi
 }
 
-# The scratch directory is checked before the wait, and the work waits for the lock
-# so that no proof runs while it acts. The lock descriptor is not passed on.
+# The work waits for the lock so that no proof runs while it acts. The lock descriptor
+# is not passed on.
 cleanup() {
-  local scratch="$1"
-  if ! holds_only_run_leftovers "$scratch"; then
-    echo "refusing: '$scratch' is not a directory holding only runtime, evidence and export" >&2
-    exit 2
-  fi
+  refuse_unsafe_state_root
   (
     flock 9
-    cleanup_under_lock "$scratch" 9>&-
+    cleanup_under_lock 9>&-
   ) 9>"$probe_lock"
 }
 
@@ -176,11 +211,17 @@ case "$verb" in
     [[ $# -eq 0 ]] || usage
     prepare
     ;;
-  prove) run_under_lock prove.py "$@" ;;
-  conformance) run_under_lock conformance.py "$@" ;;
+  prove)
+    [[ $# -eq 2 && "$1" == --edge && -d "$2" ]] || usage
+    run_under_lock prove.py "$@"
+    ;;
+  conformance)
+    [[ $# -eq 0 ]] || usage
+    run_under_lock conformance.py
+    ;;
   cleanup)
-    [[ $# -eq 1 ]] || usage
-    cleanup "$1"
+    [[ $# -eq 0 ]] || usage
+    cleanup
     ;;
   *) usage ;;
 esac
