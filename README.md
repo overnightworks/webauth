@@ -507,134 +507,39 @@ until the absolute cap of `SessionLifetime`, which bounds a socket's life.
 
 ## Configuration
 
-The host builds one `WebAuthConfig` by keyword and installs it. The
-`session_secret` must be at least 32 characters; a shorter one is refused.
-Fields a host may leave out:
+The host builds one `WebAuthConfig` by keyword and installs it with
+`install_web_auth_config`; no module reads an environment variable or a global.
+It holds the deployment facts: the session secret, trusted proxies, rate-limit
+backend, allowed hosts, session lifetime, cookie and header names, roles, the
+clock and the IPv6 rate-limit prefix. Its docstring says what each field
+decides, and refuses what the library cannot honour at construction.
 
-| Field | Default | Values |
-|---|---|---|
-| `cookie_samesite` | `"strict"` | `"strict"` or `"lax"`; `None` is refused (a cross-site cookie is not what this library issues) |
-| `cookie_secure` | `True` | `True` or `False`; any other value is refused |
-| `session_cookie_name` | `"__Host-session_id"`, or `"session_id"` with `cookie_secure=False` | a cookie name that obeys [the cookie-name rule](#the-cookie-name-rule) |
-| `csrf_header_name` | `"x-csrf-token"` | the request header that carries the CSRF token |
-| `csrf_cookie_name` | `"__Host-csrf_token"`, or `"csrf_token"` with `cookie_secure=False` | a cookie name that obeys [the cookie-name rule](#the-cookie-name-rule) |
-| `admin_role` | `"admin"` | a role name; empty, whitespace-only, or equal to `user_role` is refused |
-| `user_role` | `"user"` | a role name; empty, whitespace-only, or equal to `admin_role` is refused |
-| `wall_clock` | `time.time` | a `webauth.ports.WallClock`, seconds since the epoch; the one reading of now behind every HTTP and WebSocket session decision, so a test fixes it |
-| `ipv6_budget_prefix` | `64` | `32` to `128`; every IPv6 address in one network of this prefix shares one rate-limit budget, so users behind one `/64` limit each other. IPv4 (mapped or not) keeps a budget per address. Anything outside the range is refused |
+`cookie_secure` is the one switch for transport security. It alone decides
+whether both cookies carry `Secure` and whether `SecurityHeadersMiddleware`
+sends HSTS, whatever the request's scheme, so a host serving plain http
+(local development) turns it off for that environment and nowhere else.
 
-`cookie_secure` alone decides whether both cookies carry `Secure` — when they
-are set and when they are cleared — and whether `SecurityHeadersMiddleware`
-sends HSTS. The request's scheme does not decide it, so a deployment behind
-a TLS proxy it has not listed in `trusted_proxies` still gets both. A browser
-does not send a `Secure` cookie back over plain http, so a host's own session
-login over plain http works only with `cookie_secure=False` in that
-environment's configuration, which drops `Secure` and HSTS together. An
-OpenID Connect sign-in needs an https issuer whatever it is set to, because
-`OidcClientConfig` refuses an issuer URL that is not https. With it off,
-`SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
-
-The HSTS value is fixed at `max-age=31536000; includeSubDomains`; the policy has
-no field for it.
-
-`SecurityHeadersMiddleware` sends the `Permissions-Policy` its
-`SecurityHeadersPolicy` names in `permissions_policy`. The field defaults to
-`DEFAULT_PERMISSIONS_POLICY` (`"camera=(), microphone=(), geolocation=()"`),
-so a host that leaves it out keeps every one of those features off. The value
-replaces the whole header, so a host that records audio names every feature it
-still wants off, for example
-`permissions_policy="camera=(), microphone=(self), geolocation=()"`. A value
-may hold visible ASCII, and space and tab only between visible characters; anything
-else, such as an empty value, a space or tab at either end, CR, LF, NUL, DEL or a
-non-ASCII character, is refused when the policy or the rule is built. `content_security_policy`
-and the `value` of a `CacheControlRule` are held to the same bound.
-
-A `__Host-` cookie carries `Secure` and `Path=/` and no `Domain`, so only
-this exact host can set it: a sibling subdomain cannot plant one with
-`Domain=parent`. Browsers drop a `__Host-` cookie without `Secure`, so an
-unnamed cookie falls back to its plain name when `cookie_secure=False`, and a
-`__Host-` or `__Secure-` name a host sets itself with `cookie_secure=False` is refused when
-the configuration is built rather than ending in a silent login loop.
-
-`SecurityHeadersMiddleware` is a pure ASGI middleware: the 500 of an unhandled exception
-carries the security headers and the exception still reaches the server. A host's 500
-handler runs, but the response it returns is not sent, and with `debug=True` Starlette's
-traceback page is not sent either: the client gets the library 500 with the headers.
-`install_web_auth_middleware` (see [Middleware order](#middleware-order)) installs the
-whole stack in the order that makes every library refusal carry the headers. What changed
-in each release is in the [CHANGELOG](CHANGELOG.md).
-
-The cookies' default names are the public constants `DEFAULT_SESSION_COOKIE_NAME` and
-`DEFAULT_CSRF_COOKIE_NAME` in `webauth.cookies` (the `__Host-` names) and
-`PLAIN_SESSION_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME` (the names with `cookie_secure=False`).
-A client that reads the CSRF cookie by name reads `config.csrf_cookie_name`.
-A request that reaches the library in an app without `install_web_auth_config` raises
-`RuntimeError`.
+`SecurityHeadersPolicy` names the headers every response carries, the
+Permissions-Policy and Cache-Control rules among them, and the library's own
+refusals and the 500 carry them too (see [Middleware order](#middleware-order)).
 
 ### The cookie-name rule
 
-`session_cookie_name` and `csrf_cookie_name` are refused at construction unless
-each is:
-
-- an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`\|~`` (empty,
-  spaces, `;`, `=`, `,`, quotes and non-ASCII are refused);
-- different from the other cookie's name;
-- not a `__Host-` or `__Secure-` name with `cookie_secure=False`;
-- not a name webauth's own cookies use: the pending-login cookies (names
-  starting `__Host-oidc_pending_`, or `oidc_pending_` with
-  `cookie_secure=False`) and the ID token hint cookie
-  (`__Secure-oidc_id_token_hint`, or `oidc_id_token_hint`), in both variants
-  whatever `cookie_secure` is;
-- not `None`.
-
-The OpenID Connect ID token hint cookie is described under
-[The ID token hint](#the-id-token-hint).
+The session and CSRF cookies default to `__Host-` names, which only this exact
+host can set, and to plain names when `cookie_secure=False`. A name a host
+chooses is held to a rule that stops a login loop or a clash with a cookie the
+library sets itself; `WebAuthConfig` lists it and refuses a breach when it is
+built. The defaults are the constants in `webauth.cookies`. The ID token hint
+cookie is described under [The ID token hint](#the-id-token-hint).
 
 ### Content-Security-Policy
 
-`default_content_security_policy()` holds no host fact: `default-src 'none'` with
-`'self'` for scripts, styles, connections, fonts, manifests and workers, `data:` and
-`blob:` besides for images, `blob:` for media, `base-uri 'self'`, `form-action 'self'` and
-`frame-ancestors 'none'`. A host
-adds its own sources to one directive through `added_sources`, without copying the
-string. A framework that writes style attributes, for example, needs inline style, and
-that is the host's choice, so the host names it:
-
-```python
-from webauth.policies import CspDirective, default_content_security_policy
-
-default_content_security_policy(
-    added_sources={CspDirective.STYLE_SRC: ["'unsafe-inline'"]},
-)
-```
-
-Callers supply complete source expressions: keywords, nonces and hashes in their
-quotes, hosts and schemes bare. Only `script_hashes` takes bare `sha256-<base64>`
-values and quotes them. A source is one token of printable ASCII without space, `;` or `,`,
-and is kept verbatim; anything else is a `ValueError` when the policy is built. A non-empty
-addition to `frame-ancestors` replaces its `'none'`, while an addition to `form-action` extends
-its `'self'`. `base-uri 'self'` is fixed and not extendable. The library does not check that a
-token is a valid CSP source, so a host that writes `'selff'` gets what it wrote.
-
-A form may submit only to this origin. A host whose form posts to another origin names
-it, for example an issuer such as Keycloak:
-
-```python
-default_content_security_policy(
-    added_sources={CspDirective.FORM_ACTION: ["https://id.example.test"]},
-)
-```
-
-This writes `form-action 'self' https://id.example.test`.
-
-Browsers differ on redirects: MDN's compatibility data records that Chromium and Safari
-also check `form-action` on the redirect that answers a form submission, and Firefox does not
-([MDN `form-action`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action),
-its compatibility table row `blocks_redirects`; [w3c/webappsec-csp#8](https://github.com/w3c/webappsec-csp/issues/8);
-[CSP3 `form-action`](https://w3c.github.io/webappsec-csp/#directive-form-action)).
-A host whose form POST is answered by a redirect to another origin, such as an issuer's
-logout endpoint, adds that origin. Add the origin, not a path: after a redirect the path
-is ignored ([CSP3, Paths and Redirects](https://w3c.github.io/webappsec-csp/#source-list-paths-and-redirects)).
+`default_content_security_policy()` builds the policy a host gives
+`SecurityHeadersPolicy`: nothing loads unless this origin serves it, and no page
+may frame it. It holds no host fact; a host adds its own sources per
+`CspDirective` through `added_sources` without copying the string. Its
+docstring holds the default directives, how sources are written and checked, and
+the `form-action` case for a form that posts or redirects to an issuer.
 
 ## The store decides every request
 

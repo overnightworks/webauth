@@ -36,6 +36,12 @@ class SecurityHeadersMiddleware:
     http, and a deployment that serves Secure cookies must still pin https.
     With ``cookie_secure`` off no HSTS leaves, not even one a route set: a
     browser that pinned https could no longer reach the plain-http host.
+
+    An exception before the response started is answered with a plain 500
+    that carries the policy headers, and the exception still reaches the
+    server: a host's 500 handler runs, but the response it returns is not
+    sent, and with ``debug=True`` Starlette's traceback page is not sent
+    either. After the response started, nothing more is sent.
     """
 
     def __init__(self, app: ASGIApp, policy: SecurityHeadersPolicy) -> None:
