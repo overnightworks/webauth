@@ -104,6 +104,47 @@ class SessionLifetime:
 
 @dataclass(frozen=True, kw_only=True)
 class WebAuthConfig:
+    """Every deployment fact the library reads, built by keyword and installed once.
+
+    ``session_secret`` signs every session cookie and must be at least 32
+    characters. ``cookie_samesite`` is ``"strict"`` (the default) or ``"lax"``;
+    ``None`` is refused, because a cross-site cookie is not what this library
+    issues. ``csrf_header_name`` (default ``"x-csrf-token"``) is the request
+    header that carries the CSRF token. ``admin_role`` (``"admin"``) and
+    ``user_role`` (``"user"``) are the role names the host stores; each must be
+    non-blank and they must differ, or every new account would be an admin.
+    ``wall_clock`` is the one reading of now behind every HTTP and WebSocket
+    session decision, so a test fixes it. ``ipv6_budget_prefix`` (``64``, from
+    ``32`` to ``128``) sizes the network whose IPv6 addresses share one
+    rate-limit budget, so users behind one ``/64`` limit each other; IPv4
+    keeps a budget per address.
+
+    ``cookie_secure`` alone decides whether both cookies carry ``Secure``, when
+    they are set and when they are cleared, and whether
+    ``SecurityHeadersMiddleware`` sends HSTS. The request's scheme does not
+    decide it, so a deployment behind a TLS proxy missing from
+    ``trusted_proxies`` still gets both. A browser does not send a ``Secure``
+    cookie back over plain http, so a host's own session login over plain http
+    works only with ``cookie_secure=False``, which drops ``Secure`` and HSTS
+    together. Any value that is not a ``bool`` is refused.
+
+    ``session_cookie_name`` and ``csrf_cookie_name`` default to the ``__Host-``
+    names, or to the plain names with ``cookie_secure=False``. A ``__Host-``
+    cookie carries ``Secure`` and ``Path=/`` and no ``Domain``, so only this
+    exact host can set it and a sibling subdomain cannot plant one with
+    ``Domain=parent``. A name a host sets itself is refused at construction
+    unless it is:
+
+    - an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`|~``;
+    - different from the other cookie's name;
+    - not a ``__Host-`` or ``__Secure-`` name with ``cookie_secure=False``,
+      which a browser drops and which would end in a silent login loop;
+    - not a name webauth's own cookies use: the pending-login cookies and the
+      ID token hint cookie, in both variants whatever ``cookie_secure`` is.
+
+    A client that reads the CSRF cookie by name reads ``csrf_cookie_name``.
+    """
+
     session_secret: SecretStr
     trusted_proxies: TrustedProxies
     rate_limits: RateLimitBackend
@@ -216,7 +257,11 @@ def install_web_auth_config(app: Starlette, config: WebAuthConfig) -> None:
 
 
 def installed_web_auth_config(app: Starlette) -> WebAuthConfig:
-    """The configuration ``app`` was started with."""
+    """The configuration ``app`` was started with.
+
+    An application that serves a request without having installed one raises
+    ``RuntimeError``.
+    """
     config = getattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, None)
     if config is None:
         raise RuntimeError(

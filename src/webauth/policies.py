@@ -295,7 +295,22 @@ DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
 
 @dataclass(frozen=True)
 class SecurityHeadersPolicy:
-    """The policy headers every response carries out of this deployment."""
+    """The policy headers every response carries out of this deployment.
+
+    The headers also reach the 500 of an unhandled exception, which still
+    reaches the server: a host's 500 handler runs, but the response it returns
+    is not sent, and with ``debug=True`` Starlette's traceback page is not sent
+    either.
+
+    ``permissions_policy`` replaces the whole header, so a host that records
+    audio names every feature it still wants off, for example
+    ``"camera=(), microphone=(self), geolocation=()"``. This policy, its
+    ``content_security_policy`` and the ``value`` of a ``CacheControlRule`` may
+    hold visible ASCII, and space and tab only between visible characters;
+    anything else, such as an empty value, a space or tab at either end, CR,
+    LF, NUL, DEL or a non-ASCII character, is refused when the policy or the
+    rule is built.
+    """
 
     content_security_policy: str
     cache_control_rules: tuple[CacheControlRule, ...] = ()
@@ -427,15 +442,31 @@ def default_content_security_policy(
     """Nothing loads unless this origin serves it, and no page may frame it.
 
     Forms post only to this origin and a ``<base>`` may point only at it.
+    Scripts, styles, connections, fonts, manifests and workers load from
+    ``'self'``, images also from ``data:`` and ``blob:``, media also from
+    ``blob:``, and ``frame-ancestors`` is ``'none'``.
 
     The default holds no host fact. Inline scripts a build emits into its own
     document are admitted by bare hash (``sha256-<base64>``), which this function
     quotes. A host adds its own sources per directive in ``added_sources`` as
     complete source expressions: keywords, nonces and hashes in their quotes,
     hosts and schemes bare. A non-empty addition to ``frame-ancestors`` replaces
-    its ``'none'``. A source is one token of printable ASCII without space,
-    ``;`` or ``,`` and is kept verbatim; anything else is a ``ValueError`` and a
-    wrong type a ``TypeError``, raised before any policy is built.
+    its ``'none'``, while an addition to ``form-action`` extends its ``'self'``.
+    A source is one token of printable ASCII without space, ``;`` or ``,`` and
+    is kept verbatim; anything else is a ``ValueError`` and a wrong type a
+    ``TypeError``, raised before any policy is built. The library does not
+    check that a token is a valid CSP source, so ``'selff'`` is emitted as
+    written.
+
+    A framework that writes style attributes needs ``'unsafe-inline'`` in
+    ``style-src``; that is the host's choice, so the host names it. A form that
+    posts to another origin, such as an issuer, names that origin in
+    ``form-action``. Chromium and Safari also check ``form-action`` on the
+    redirect that answers a submission and Firefox does not (see
+    `MDN <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action>`_),
+    so a form answered by a redirect to another origin, such as an issuer's
+    logout endpoint, adds that origin as well: the origin, not a path, because
+    a path is ignored after a redirect.
     """
     quoted_hashes = tuple(
         _validated_hash(script_hash)
