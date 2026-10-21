@@ -17,9 +17,9 @@ Playwright browser, and takes a few minutes. CI only lints `e2e/`.
 
 ## Prerequisites
 
-- Ports 8081 and 8090 free (stop the live edge first) and Docker.
+- Docker. The probe picks free loopback ports, so the live edge keeps running.
 - An edge checkout at the commit in `EDGE_SHA`, with no change in any path its
-  probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `traefik.yml`,
+  probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/edge`, `traefik.yml`,
   `dynamic`). The script refuses to run otherwise.
 - Playwright's Chromium for the pinned version (`uv run --group e2e playwright
   install chromium` if `~/.cache/ms-playwright` lacks it).
@@ -65,8 +65,8 @@ The browser keeps the canonical URLs (`https://auth.hallucinai.de`,
 `https://demo.hallucinai.de`, port 443); only the connection is redirected.
 
 - `--host-resolver-rules="MAP name 127.0.0.1:port"` sends each name to a TLS
-  shim (for Keycloak) or to the host app. The shim forwards to Traefik on
-  8081 with `Host: auth.hallucinai.de` and `X-Forwarded-Proto: https`, as
+  shim (for Keycloak) or to the host app. The shim forwards to the probe's Traefik
+  at the READY line's `edge_url` with `Host: auth.hallucinai.de` and `X-Forwarded-Proto: https`, as
   Cloudflare's tunnel does.
 - Trust is per browser process: `--ignore-certificate-errors-spki-list` names
   the hash of the throwaway leaf's public key. Nothing is installed in any
