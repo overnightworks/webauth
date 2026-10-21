@@ -1,0 +1,8 @@
+claim_id = "bfd6558a1bb64821a65c7d4432780ba6"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "5db855f28e5af601924d9f5be16735c5c5986e2f"
+branch = "claude/issue-376-session-reading-details-in-dependencies"
+scope = ["README.md", "src/webauth/dependencies.py", "src/webauth/middleware/session_gate.py", "src/webauth/ports.py"]
+opened_commit = "7c87cad1c428d48a9df85baf300542e77f69fde6"
+whole_reason = "The README region and the docstrings that receive its facts are one move; a part alone leaves a fact in two places or in none."
