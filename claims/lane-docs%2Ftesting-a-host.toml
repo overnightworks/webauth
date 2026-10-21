@@ -1,0 +1,7 @@
+claim_id = "0ce8a296e1a542f58f309844bdf2194a"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "07c2f064c09e67b029549f62d7d34a278d7f4cf8"
+branch = "docs/testing-a-host"
+scope = ["README.md"]
+opened_commit = "8bb59ce3956ebd3349428d684e85b4474999f24d"
