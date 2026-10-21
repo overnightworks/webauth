@@ -18,9 +18,12 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from webauth import WebAuthError
+
+if TYPE_CHECKING:
+    from pydantic import SecretStr
 
 __all__ = [
     "AccountEvent",
@@ -85,6 +88,13 @@ class SessionRecord(Protocol):
     @property
     def expires_at(self) -> datetime: ...
 
+    @property
+    def refresh_token(self) -> SecretStr | None:
+        """The refresh token the login's code exchange issued, or ``None`` when
+        the issuer gave none or the row was stored before the host held refresh
+        tokens."""
+        ...
+
 
 class SubjectUserStore(Protocol):
     """Accounts an identity provider vouches for, keyed by its subject.
@@ -143,8 +153,14 @@ class SessionRecordStore(Protocol):
         *,
         now: datetime,
         expires_at: datetime,
+        refresh_token: SecretStr | None,
     ) -> SessionRecord:
         """Create the session and return it.
+
+        The refresh token is part of the session row: whatever ends the row
+        ends it, and no other row or table holds it. The host writes it with
+        ``get_secret_value()``; the library bounds the value only by the 64 KiB
+        token response, so the column takes no smaller length.
 
         The store mints the new session's id with at least 128 bits from a
         CSPRNG, in at most 135 characters. The cookie signs the id alone, so a

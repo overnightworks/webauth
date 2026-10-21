@@ -73,6 +73,10 @@ def jws(header: dict[str, Any] | str, claims: dict[str, Any] | str, sign: Callab
     return f"{signing_input}.{signature}"
 
 
+ISSUED_REFRESH_TOKEN = "refresh-token-rt-1"  # noqa: S105
+ISSUED_ACCESS_TOKEN_CANARY = "access-token-canary-never-stored"  # noqa: S105
+
+
 def changed(base: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
     merged = {**base, **changes}
     return {name: value for name, value in merged.items() if value is not ABSENT}
@@ -201,11 +205,21 @@ class FakeIssuer:
     answers each code once, and only to the verifier of that challenge, with
     the ID token `mint_id_token` makes for the nonce; `before_exchange` runs
     before a code is looked up, so a test can hold two exchanges together.
+    `code_answer_members` are the members besides `id_token` of a code
+    exchange's 200 answer: a refresh token, and an access token with its type
+    as the canary no store may hold. `ABSENT` removes a member.
     """
 
     mint_id_token: Callable[[str], str]
     requests: list[TokenRequest] = field(default_factory=list)
     before_exchange: Callable[[], None] = lambda: None
+    code_answer_members: dict[str, Any] = field(
+        default_factory=lambda: {
+            "refresh_token": ISSUED_REFRESH_TOKEN,
+            "access_token": ISSUED_ACCESS_TOKEN_CANARY,
+            "token_type": "Bearer",
+        }
+    )
     _codes: dict[str, _IssuedCode] = field(default_factory=dict)
     _codes_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -223,7 +237,10 @@ class FakeIssuer:
         verifier = request.form["code_verifier"]
         if issued is None or s256_code_challenge(verifier) != issued.code_challenge:
             return token_endpoint_answer(400, {"error": "invalid_grant"})
-        return token_endpoint_answer(200, {"id_token": self.mint_id_token(issued.nonce)})
+        return token_endpoint_answer(
+            200,
+            changed({"id_token": self.mint_id_token(issued.nonce)}, self.code_answer_members),
+        )
 
 
 def s256_code_challenge(code_verifier: str) -> str:

@@ -21,6 +21,8 @@ import pytest
 from oidc_arrangement import (
     ABSENT,
     BACKCHANNEL_LOGOUT_EVENT,
+    ISSUED_ACCESS_TOKEN_CANARY,
+    ISSUED_REFRESH_TOKEN,
     FakeClock,
     FakeKeySetEndpoint,
     FakeTokenEndpoint,
@@ -71,6 +73,8 @@ _NOW = 1_800_000_000
 _CODE = "authorization-code-from-the-callback"
 _SUBJECT = "7335d417-61da-459d-899c-0a01c76a2f94"
 _SESSION_ID = "4c2a9f0e-session"
+# The grammar's two ends: a space and a tilde.
+_TOKEN_AT_BOTH_ENDS = " ~"  # noqa: S105
 _GROUPS = ("/workshop/admins", "/workshop/makers")
 _IDENTITY = OidcIdentity(
     subject=_SUBJECT,
@@ -79,6 +83,7 @@ _IDENTITY = OidcIdentity(
     session_id=_SESSION_ID,
     preferred_username="operator",
     id_token=a_fake_id_token("the-identity-every-login-yields"),
+    refresh_token=SecretStr(ISSUED_REFRESH_TOKEN),
 )
 _BASIC_AUTHORIZATION = (
     "Basic " + base64.b64encode(f"{_CLIENT_ID}:{_CLIENT_SECRET}".encode()).decode()
@@ -104,16 +109,24 @@ def _config(**changes: Any) -> OidcClientConfig:
     return OidcClientConfig(**{**arguments, **changes})
 
 
-def _issued(id_token: str) -> TokenEndpointAnswer:
+def _issued(id_token: str, **changes: Any) -> TokenEndpointAnswer:
     return token_endpoint_answer(
         200,
-        {
-            "access_token": "an-access-token",
-            "token_type": "Bearer",
-            "expires_in": 300,
-            "id_token": id_token,
-        },
+        changed(
+            {
+                "access_token": ISSUED_ACCESS_TOKEN_CANARY,
+                "token_type": "Bearer",
+                "expires_in": 300,
+                "refresh_token": ISSUED_REFRESH_TOKEN,
+                "id_token": id_token,
+            },
+            changes,
+        ),
     )
+
+
+def _issued_with(**changes: Any) -> Callable[[str], TokenEndpointAnswer]:
+    return lambda id_token: _issued(id_token, **changes)
 
 
 def _naming_id_token_twice(id_token: str) -> TokenEndpointAnswer:
@@ -240,8 +253,23 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
         ),
         pytest.param(
             Attempt(token_answer=_naming_id_token_twice),
-            _IDENTITY,
+            dataclasses.replace(_IDENTITY, refresh_token=None),
             id="token-answer-naming-id-token-twice-keeps-the-last",
+        ),
+        pytest.param(
+            Attempt(token_answer=_issued_with(refresh_token=ABSENT)),
+            dataclasses.replace(_IDENTITY, refresh_token=None),
+            id="answer-without-a-refresh-token",
+        ),
+        pytest.param(
+            Attempt(token_answer=_issued_with(access_token=ABSENT, token_type=ABSENT)),
+            _IDENTITY,
+            id="answer-without-access-token-and-token-type",
+        ),
+        pytest.param(
+            Attempt(token_answer=_issued_with(refresh_token=_TOKEN_AT_BOTH_ENDS)),
+            dataclasses.replace(_IDENTITY, refresh_token=SecretStr(_TOKEN_AT_BOTH_ENDS)),
+            id="refresh-token-at-both-ends-of-the-grammar",
         ),
         pytest.param(Attempt(callback={"iss": ABSENT}), _IDENTITY, id="callback-without-iss"),
         pytest.param(
@@ -262,6 +290,17 @@ def test_a_login_the_issuer_vouched_for_yields_its_identity(
     _pending, outcome = login.attempt(attempt)
 
     assert outcome == login.identity_with_the_minted_token(identity)
+
+
+def test_the_issued_refresh_token_is_in_no_repr_and_the_access_token_is_nowhere(
+    login: LoginScenario,
+) -> None:
+    _pending, outcome = login.attempt(Attempt())
+
+    assert isinstance(outcome, OidcIdentity)
+    assert ISSUED_REFRESH_TOKEN not in repr(outcome)
+    assert ISSUED_ACCESS_TOKEN_CANARY not in repr(outcome)
+    assert ISSUED_ACCESS_TOKEN_CANARY not in repr(dataclasses.asdict(outcome))
 
 
 def _answered(
@@ -408,6 +447,24 @@ _EXCHANGE_REFUSALS = [
         Attempt(token_answer=_answered(200, {"access_token": "an-access-token"})),
         OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
         id="answer-without-id-token",
+    ),
+    *(
+        pytest.param(
+            Attempt(token_answer=_issued_with(refresh_token=refresh_token)),
+            OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
+            id=f"refresh-token-{name}",
+        )
+        for name, refresh_token in {
+            "empty": "",
+            "a-number": 42,
+            "null": None,
+            "with-a-nul": "rt\x00",
+            "with-a-carriage-return": "rt\r",
+            "with-a-line-feed": "rt\n",
+            "with-a-del": "rt\x7f",
+            "non-ascii": "rté",
+            "a-lone-surrogate": "rt\ud800",
+        }.items()
     ),
     pytest.param(
         Attempt(token_answer=_padded_past_the_limit),

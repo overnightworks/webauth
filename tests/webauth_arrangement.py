@@ -295,6 +295,7 @@ class FakeSessionRecord:
     user: FakeUser
     created_at: datetime
     expires_at: datetime
+    refresh_token: SecretStr | None = None
 
 
 class SessionRecordsInMemory:
@@ -328,6 +329,7 @@ class SessionRecordsInMemory:
         *,
         now: datetime,
         expires_at: datetime,
+        refresh_token: SecretStr | None,
     ) -> FakeSessionRecord:
         _require_held_lock(self._lock)
         user = self._users.get(user_id)
@@ -341,6 +343,7 @@ class SessionRecordsInMemory:
             user=user,
             created_at=now,
             expires_at=expires_at,
+            refresh_token=refresh_token,
         )
         self._records[record.id] = record
         return record
@@ -503,7 +506,7 @@ class AuthApp:
 
 def seeded_session(
     sessions: SessionRecordsInMemory, hold: AbstractContextManager[None],
-    user_id: str, now: datetime, expires_at: datetime,
+    user_id: str, now: datetime, expires_at: datetime, refresh_token: SecretStr | None = None,
 ) -> FakeSessionRecord:
     """A stored session of ``user_id``, created the way a host does: under its write lock."""
     with hold:
@@ -511,6 +514,7 @@ def seeded_session(
             user_id,
             now=now,
             expires_at=expires_at,
+            refresh_token=refresh_token,
         )
 
 

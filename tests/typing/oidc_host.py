@@ -139,6 +139,7 @@ class HostSession:
     user: HostAccount
     created_at: datetime
     expires_at: datetime
+    refresh_token: SecretStr | None
 
 
 class HostAccounts:
@@ -155,9 +156,10 @@ class HostAccounts:
 class HostSessions:
     def create(
         self, user_id: str, *, now: datetime, expires_at: datetime,
+        refresh_token: SecretStr | None,
     ) -> HostSession:
         user = HostAccount(user_id, "someone", "user")
-        return HostSession("id", user, now, expires_at)
+        return HostSession("id", user, now, expires_at, refresh_token)
 
     def load(self, session_id: str) -> HostSession | None:
         return None
@@ -231,12 +233,12 @@ def a_host_sends_the_browser_back(admitted: AdmittedLogin) -> tuple[UserRecord, 
 
 
 def a_host_opens_a_session(
-    request: Request, config: WebAuthConfig, account: UserRecord,
+    request: Request, config: WebAuthConfig, admitted: AdmittedLogin,
 ) -> SessionRecord:
     sessions: SessionRecordStore = HostSessions()
     lock: WriteLock = HostLock()
     return open_session(
-        request, config, account,
+        request, config, admitted,
         sessions=sessions, lock=lock, max_sessions=None,
     )
 

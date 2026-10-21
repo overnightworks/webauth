@@ -15,7 +15,9 @@ controls. The code is exchanged with the PKCE verifier over the injected
 `TokenRequestPost`, the client authenticating with HTTP Basic. The ID token
 is verified by a `JwtVerifier` of `webauth.jwt_verification` whose one
 accepted audience is the client ID; its nonce and authorized party are
-checked here, as OpenID Connect Core asks of the relying party.
+checked here, as OpenID Connect Core asks of the relying party. A refresh
+token in the answer must be RFC 6749 Appendix A.17's `1*VSCHAR`, or the login
+is refused as `TOKEN_ENDPOINT_FAILED`; the access token is not read.
 
 The state, nonce and verifier are each `_PENDING_SECRET_BYTES` random bytes,
 and the received state and nonce are compared in constant time. A pending
@@ -113,6 +115,8 @@ _IDP_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 # RFC 3986 pchar and "/", without ";" which would end a cookie's Path attribute.
 _LOGOUT_PATH_CHARACTERS = re.compile(r"/[A-Za-z0-9\-._~!$&'()*+,=:@/%]*")
 _UNFINISHED_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+# RFC 6749 Appendix A.17: refresh-token = 1*VSCHAR, printable ASCII.
+_REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
 _URL_FIELDS = (
     "issuer",
@@ -251,7 +255,9 @@ class OidcIdentity:
     """The person the issuer vouched for. `groups` are the issuer's full group
     paths, uninterpreted; `session_id` is the issuer's `sid`; `id_token` is the
     verified ID token as received, which only ever goes back to the issuer as
-    the logout hint."""
+    the logout hint; `refresh_token` is the one the code exchange issued, or
+    `None` when the issuer gave none. The exchange's access token is never
+    kept."""
 
     subject: str
     issuer: str
@@ -259,6 +265,7 @@ class OidcIdentity:
     session_id: str | None
     preferred_username: str | None
     id_token: str = field(repr=False)
+    refresh_token: SecretStr | None
 
 
 @dataclass(frozen=True)
@@ -347,13 +354,13 @@ class OidcRelyingParty:
 
     def _identity(self, pending: PendingLogin, callback_query: str) -> OidcIdentity:
         code = self._authorization_code(pending, _callback_parameters(callback_query))
-        raw_id_token = self._exchanged_id_token(pending, code)
+        raw_id_token, refresh_token = self._exchanged_tokens(pending, code)
         id_token = self._verified_id_token(raw_id_token)
         if not _is_same_secret(id_token.claims.get("nonce"), pending.nonce):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.NONCE_MISMATCH))
         if not self._is_authorized_party(id_token):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH))
-        return _identity_of(id_token, raw_id_token)
+        return _identity_of(id_token, raw_id_token, refresh_token)
 
     def _authorization_code(self, pending: PendingLogin, callback: Mapping[str, str]) -> str:
         if not _is_same_secret(callback.get("state"), pending.state):
@@ -378,7 +385,7 @@ class OidcRelyingParty:
         age_seconds = self._wall_clock() - pending.issued_at
         return 0 <= age_seconds <= PENDING_LOGIN_MAX_AGE_SECONDS
 
-    def _exchanged_id_token(self, pending: PendingLogin, code: str) -> str:
+    def _exchanged_tokens(self, pending: PendingLogin, code: str) -> tuple[str, SecretStr | None]:
         request = TokenRequest(
             url=self._config.token_endpoint,
             form=MappingProxyType(
@@ -391,16 +398,21 @@ class OidcRelyingParty:
             ),
             authorization=self._client_authorization,
         )
+        document = self._token_answer(request)
+        id_token = document.get("id_token")
+        if not isinstance(id_token, str):
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+        return id_token, _issued_refresh_token(document)
+
+    def _token_answer(self, request: TokenRequest) -> Mapping[str, object]:
         try:
             answer = self._post_token_request(request)
         except TokenEndpointError as error:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED)) from error
         document = _token_answer_document(answer.body)
         if answer.status == HTTPStatus.OK:
-            id_token = document.get("id_token")
-            if isinstance(id_token, str):
-                return id_token
-        elif answer.status in _TOKEN_ERROR_STATUSES and isinstance(
+            return document
+        if answer.status in _TOKEN_ERROR_STATUSES and isinstance(
             error := document.get("error"), str
         ):
             raise _RefusalError(
@@ -552,7 +564,18 @@ def _token_answer_document(body: bytes) -> Mapping[str, object]:
     return _json_object(body) or {}
 
 
-def _identity_of(id_token: VerifiedClaims, raw_id_token: str) -> OidcIdentity:
+def _issued_refresh_token(document: Mapping[str, object]) -> SecretStr | None:
+    if "refresh_token" not in document:
+        return None
+    refresh_token = document["refresh_token"]
+    if not isinstance(refresh_token, str) or not _REFRESH_TOKEN.fullmatch(refresh_token):
+        raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+    return SecretStr(refresh_token)
+
+
+def _identity_of(
+    id_token: VerifiedClaims, raw_id_token: str, refresh_token: SecretStr | None
+) -> OidcIdentity:
     if id_token.subject is None:
         raise _RefusalError(OidcRefusal(OidcRefusalReason.INVALID_IDENTITY_CLAIM))
     return OidcIdentity(
@@ -562,6 +585,7 @@ def _identity_of(id_token: VerifiedClaims, raw_id_token: str) -> OidcIdentity:
         session_id=_optional_string_claim(id_token.claims, "sid"),
         preferred_username=_optional_string_claim(id_token.claims, "preferred_username"),
         id_token=raw_id_token,
+        refresh_token=refresh_token,
     )
 
 
