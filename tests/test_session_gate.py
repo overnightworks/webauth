@@ -365,8 +365,9 @@ class TestTransaction:
 class TestAdmittedUser:
     def test_it_is_an_error_where_no_gate_is_installed(self) -> None:
         app = an_auth_app(a_session())
+        cookie = signed_in(app)
         with pytest.raises(RuntimeError):
-            ask(app, "/health", cookie=signed_in(app))
+            ask(app, "/health", cookie=cookie)
 
 
 class Rule(Enum):
