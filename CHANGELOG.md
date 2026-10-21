@@ -6,7 +6,7 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
-## 0.20.0 - Unreleased
+## 0.20.0
 
 **Breaking**
 
