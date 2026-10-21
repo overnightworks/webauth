@@ -135,14 +135,20 @@ _REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
 _ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
 _BEARER_TOKEN_TYPE = "bearer"  # noqa: S105
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
-_URL_FIELDS = (
+_ENDPOINT_URL_FIELDS = (
     "issuer",
     "authorization_endpoint",
     "token_endpoint",
     "jwks_url",
     "end_session_endpoint",
-    "redirect_uri",
-    "post_logout_redirect_uri",
+)
+_APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
+# RFC 8252 sections 7.3 and 8.3: the loopback literals and localhost.
+# `urlsplit` lowercases the hostname and drops the brackets of an IPv6 literal.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_URL_RULE = (
+    "a host, a valid port if any, and no control character, space,"
+    " credentials, query or fragment"
 )
 
 
@@ -157,8 +163,13 @@ class OidcClientConfig:
     parent of all its logout routes; the cookie that carries the ID token hint
     is scoped to it. It starts with `/` and holds only RFC 3986 path characters
     other than `;`.
-    Every URL is https, names a host and carries no control character, space,
-    credentials, query or fragment; `scopes` includes `openid`. `leeway_seconds`
+    Every URL names a host and carries no control character, space,
+    credentials, query or fragment. The issuer, the three endpoints and
+    `jwks_url` are https, because the library connects to them or trusts what
+    they sign. `redirect_uri` and `post_logout_redirect_uri` are only values
+    the browser is sent to, so they may also be http when the host is exactly
+    `localhost`, `127.0.0.1` or `[::1]`, for local and CI test stacks.
+    `scopes` includes `openid`. `leeway_seconds`
     is checked by the `JwtVerifier` the relying party builds from it."""
 
     issuer: str
@@ -175,11 +186,14 @@ class OidcClientConfig:
     leeway_seconds: int
 
     def __post_init__(self) -> None:
-        for name in _URL_FIELDS:
+        for name in _ENDPOINT_URL_FIELDS:
             if not _is_endpoint_url(getattr(self, name)):
+                raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
+        for name in _APP_URL_FIELDS:
+            if not _is_app_url(getattr(self, name)):
                 raise ValueError(
-                    f"{name} must be an https URL naming a host, a valid port if any,"
-                    " and no control character, space, credentials, query or fragment"
+                    f"{name} must be an https URL, or an http URL whose host is"
+                    f" localhost, 127.0.0.1 or [::1], naming {_URL_RULE}"
                 )
         if (
             not isinstance(self.logout_path, str)
@@ -552,6 +566,22 @@ def _is_utf8(text: str) -> bool:
 
 def _is_endpoint_url(url: object) -> bool:
     return is_https_url(url) and "?" not in url and "#" not in url
+
+
+def _is_app_url(url: object) -> bool:
+    """An endpoint URL, or the same shape over http on a loopback host.
+
+    The http form is judged by `is_https_url` with its scheme swapped, so the
+    control character, space, credential and port guards stay in one place."""
+    if _is_endpoint_url(url):
+        return True
+    if not isinstance(url, str) or url[:5].lower() != "http:":
+        return False
+    try:
+        host = urllib.parse.urlsplit(url).hostname
+    except ValueError:
+        return False
+    return host in _LOOPBACK_HOSTS and _is_endpoint_url(f"https:{url[5:]}")
 
 
 def _is_scope_list_with_openid(scopes: object) -> bool:

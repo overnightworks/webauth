@@ -747,7 +747,9 @@ def _text_of(value: object) -> str:
             "token_endpoint", f"{_TOKEN_ENDPOINT}#fragment", id="token-endpoint-with-fragment"
         ),
         pytest.param("jwks_url", "ftp://login.example.org/certs", id="jwks-url-not-https"),
-        pytest.param("redirect_uri", "http://localhost:8000/auth/callback", id="redirect-uri-http"),
+        pytest.param(
+            "redirect_uri", "http://example.test/auth/callback", id="redirect-uri-http-remote"
+        ),
         pytest.param(
             "redirect_uri",
             "https://user:pass@notes.example.org/auth/callback",
@@ -804,6 +806,65 @@ def test_a_client_configuration_is_refused_by_the_field_it_breaks_never_its_valu
 
     text = _text_of(value)
     assert not text or text not in str(refusal.value)
+
+
+_LOOPBACK_HTTP_URLS = [
+    "http://localhost",
+    "http://LOCALHOST:8080/cb",
+    "http://127.0.0.1:8080/cb",
+    "http://[::1]:8080/cb",
+    "HTTP://localhost/cb",
+    "Http://127.0.0.1:8080/cb",
+]
+
+
+@pytest.mark.parametrize("field_name", ["redirect_uri", "post_logout_redirect_uri"])
+@pytest.mark.parametrize("url", _LOOPBACK_HTTP_URLS)
+def test_the_apps_own_two_urls_may_be_http_on_a_loopback_host(
+    field_name: str, url: str
+) -> None:
+    config = _config(**{field_name: url})
+
+    assert getattr(config, field_name) == url
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["issuer", "authorization_endpoint", "token_endpoint", "jwks_url", "end_session_endpoint"],
+)
+@pytest.mark.parametrize("url", _LOOPBACK_HTTP_URLS)
+def test_an_issuer_url_stays_https_even_on_a_loopback_host(field_name: str, url: str) -> None:
+    with pytest.raises(ValueError, match=f"^{field_name} must "):
+        _config(**{field_name: url})
+
+
+@pytest.mark.parametrize("field_name", ["redirect_uri", "post_logout_redirect_uri"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.2/cb",
+        "http://localhost.example/cb",
+        "http://0.0.0.0/cb",
+        "http://example.test/cb",
+        "http://user:pass@localhost:8080/cb",
+        "http://localhost:8080/cb?next=/",
+        "http://localhost:8080/cb#top",
+        "ftp://localhost/cb",
+        "ws://localhost/cb",
+        "http://127.0.0.1.nip.io/cb",
+        "http://localhost./cb",
+        "http://local\thost/cb",
+        "http://local\nhost/cb",
+        "http://localhost /cb",
+        "http://localhost:99999/cb",
+        "http://localhost@evil.test/cb",
+    ],
+)
+def test_the_apps_own_two_urls_refuse_http_unless_the_host_is_loopback_and_the_rest_is_plain(
+    field_name: str, url: str
+) -> None:
+    with pytest.raises(ValueError, match=f"^{field_name} must "):
+        _config(**{field_name: url})
 
 
 @pytest.mark.parametrize("client_id", [

@@ -402,9 +402,9 @@ never overwrite each other:
 - **Name:** the pending-login prefix `__Host-oidc_pending_` followed by the
   first 16 hex characters of the SHA-256 of the login's state. With
   `cookie_secure=False` the name is the plain `oidc_pending_…` form and the
-  cookie is not `Secure`. That is for a host's own session login over plain
-  http, where a sibling host or a network observer can set or read it; an
-  OpenID Connect sign-in needs https whatever `cookie_secure` is.
+  cookie is not `Secure`. That is for plain http, a host's own session login
+  or a test stack whose two app URLs are http on a loopback host, where a
+  sibling host or a network observer can set or read it.
 - **Flags:** `HttpOnly`, `Path=/`, `Max-Age=600`, and `Secure` following
   `cookie_secure`. It is always `SameSite=Lax`, whatever `cookie_samesite`
   says: the callback is a top-level navigation from the issuer's site, which a
@@ -600,8 +600,13 @@ callback route, around [`open_session`](#opening-a-session):
 ### The relying party
 
 `webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE
-for one client at one issuer, described by an `OidcClientConfig` whose URLs
-are all https and whose `client_secret` is a `SecretStr`. `begin_login()`
+for one client at one issuer, described by an `OidcClientConfig` whose issuer URLs
+are all https and whose `client_secret` is a `SecretStr`. The two app URLs,
+`redirect_uri` and `post_logout_redirect_uri`, may instead be http on a loopback host
+(`localhost`, `127.0.0.1` or `[::1]`) for local and CI test stacks; every issuer URL
+stays https. Browsers differ in whether they keep a `Secure` cookie over http on a
+loopback host, so a stack that must work in each runs with
+[`cookie_secure=False`](#configuration) and the plain cookie names. `begin_login()`
 answers the URL to send the browser to and a `PendingLogin` — its state,
 nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
 `complete_login(pending, callback_query)` takes that pending login and the
@@ -1070,8 +1075,8 @@ a TLS proxy it has not listed in `trusted_proxies` still gets both. A browser
 does not send a `Secure` cookie back over plain http, so a host's own session
 login over plain http works only with `cookie_secure=False` in that
 environment's configuration, which drops `Secure` and HSTS together. An
-OpenID Connect sign-in needs https whatever it is set to, because
-`OidcClientConfig` refuses a URL that is not https. With it off,
+OpenID Connect sign-in needs an https issuer whatever it is set to, because
+`OidcClientConfig` refuses an issuer URL that is not https. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
 The HSTS value is fixed at `max-age=31536000; includeSubDomains`; the policy has
