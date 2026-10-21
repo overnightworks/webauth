@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 __all__ = [
     "CONTENT_TYPE_OPTIONS",
     "FRAME_OPTIONS",
-    "STRICT_TRANSPORT_SECURITY",
     "REFERRER_POLICY",
+    "STRICT_TRANSPORT_SECURITY",
     "SecurityHeadersMiddleware",
 ]
 
