@@ -143,8 +143,8 @@ _ENDPOINT_URL_FIELDS = (
     "end_session_endpoint",
 )
 _APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
-# RFC 8252 section 7.3: the literal loopback hosts. `urlsplit` lowercases the
-# hostname and drops the brackets of an IPv6 literal.
+# RFC 8252 sections 7.3 and 8.3: the loopback literals and localhost.
+# `urlsplit` lowercases the hostname and drops the brackets of an IPv6 literal.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _URL_RULE = (
     "a host, a valid port if any, and no control character, space,"
@@ -575,13 +575,13 @@ def _is_app_url(url: object) -> bool:
     control character, space, credential and port guards stay in one place."""
     if _is_endpoint_url(url):
         return True
-    if not isinstance(url, str) or not url.startswith("http:"):
+    if not isinstance(url, str) or url[:5].lower() != "http:":
         return False
     try:
         host = urllib.parse.urlsplit(url).hostname
     except ValueError:
         return False
-    return host in _LOOPBACK_HOSTS and _is_endpoint_url(f"https:{url[len('http:'):]}")
+    return host in _LOOPBACK_HOSTS and _is_endpoint_url(f"https:{url[5:]}")
 
 
 def _is_scope_list_with_openid(scopes: object) -> bool:
