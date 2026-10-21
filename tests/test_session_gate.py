@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -251,6 +252,13 @@ class TestRouterPaths:
             pytest.param(b"/static/%2e%2e/me", "/static/../me", id="encoded-dot-dot"),
             pytest.param(b"/static/%2E/x.css", "/static/./x.css", id="encoded-dot"),
             pytest.param(b"/static%2F..%2Fme", "/static/../me", id="encoded-slashes"),
+            pytest.param(
+                b"/static/x%3f/%2e%2e/secret", "/static/x?/../secret", id="encoded-question-mark",
+            ),
+            pytest.param(
+                b"/opt/x%3f/%2e%2e/secret", "/opt/x?/../secret",
+                id="optional-encoded-question-mark",
+            ),
             pytest.param(b"/health/", "/health/", id="trailing-slash"),
             pytest.param(b"//health", "//health", id="doubled-slash"),
             pytest.param(b"/opt/../me", "/opt/../me", id="optional-with-dot-segment"),
@@ -361,10 +369,16 @@ class TestAdmittedUser:
             ask(app, "/health", cookie=signed_in(app))
 
 
+class Rule(Enum):
+    GATED = "gated"
+    OPTIONAL = "optional"
+    PUBLIC = "public"
+
+
 @dataclass(frozen=True)
 class Reuse:
     path: str
-    mode: str = "gated"
+    mode: Rule = Rule.GATED
     role: str = MEMBER_ROLE
     dead: bool = False
     expected_status: int = 200
@@ -383,15 +397,15 @@ class TestTheGatesAdmissionIsTheDependencys:
             ),
             pytest.param(Reuse("/session-id"), id="verified-session-id"),
             pytest.param(Reuse(ALL_DEPENDENCIES_PATH, role=ADMIN_ROLE), id="all-three"),
-            pytest.param(Reuse("/me", mode="optional"), id="optional-live"),
+            pytest.param(Reuse("/me", mode=Rule.OPTIONAL), id="optional-live"),
             pytest.param(
                 Reuse(
-                    "/me", mode="optional", dead=True, expected_status=401,
+                    "/me", mode=Rule.OPTIONAL, dead=True, expected_status=401,
                     gate_counts=(1, 0), authenticated=0,
                 ),
                 id="optional-dead",
             ),
-            pytest.param(Reuse("/me", mode="public"), id="public-admits-by-itself"),
+            pytest.param(Reuse("/me", mode=Rule.PUBLIC), id="public-admits-by-itself"),
         ],
     )
     def test_a_route_costs_one_load_and_one_touch_and_answers_as_without_the_gate(
@@ -409,8 +423,8 @@ class TestTheGatesAdmissionIsTheDependencys:
         gated = a_gated_app(
             record,
             sessions=gated_sessions,
-            optional=path_rules if case.mode == "optional" else PathRules(),
-            public=(PublicRule(path_rules),) if case.mode == "public" else (),
+            optional=path_rules if case.mode is Rule.OPTIONAL else PathRules(),
+            public=(PublicRule(path_rules),) if case.mode is Rule.PUBLIC else (),
         )
         plain_record, plain_sessions = fresh()
         plain = a_plain_app(plain_record, sessions=plain_sessions)
@@ -419,7 +433,7 @@ class TestTheGatesAdmissionIsTheDependencys:
         assert_answers_alike(answer, ask(plain, case.path, cookie=signed_in(plain)))
         assert answer.status_code == case.expected_status
         gate_counts = (counted(gated_sessions, "load"), counted(gated_sessions, "touch"))
-        if case.mode == "public":
+        if case.mode is Rule.PUBLIC:
             assert gate_counts == (1, 1)
         else:
             assert gate_counts == case.gate_counts

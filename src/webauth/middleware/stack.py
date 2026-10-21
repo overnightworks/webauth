@@ -51,8 +51,8 @@ def install_web_auth_middleware(
 
     Security headers sit outside everything so the library's own refusals carry
     them; the rate limit sits outside CSRF so a refused forgery spends budget;
-    the session gate sits inside all of them, so a refused request never costs
-    a session lookup.
+    the session gate sits inside all of them, so a request refused before
+    admission never costs a session lookup.
     Refuses, before touching ``app``: a token policy without an origin policy;
     a token policy whose ``token_exempt`` paths (login routes skip the token on
     the promise that origin checking protects them) are not all covered by the

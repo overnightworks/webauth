@@ -1062,10 +1062,10 @@ is ignored ([CSP3, Paths and Redirects](https://w3c.github.io/webappsec-csp/#sou
 ## The store decides every request
 
 The library caches no sessions. Every authenticated request costs one
-`SessionRecordStore.load` and one `touch`, except a gated request whose route
-runs in a mounted app with another `WebAuthConfig`, which
-[the session gate](#the-session-gate) admits under each, so a session the host ended is
-refused on its next request, with 401 or the login redirect. Whether a loaded
+`SessionRecordStore.load` and one `touch`, so a session the host ended is
+refused on its next request, with 401 or the login redirect. The exception is a
+gated request whose route runs in a mounted app with another `WebAuthConfig`:
+[the session gate](#the-session-gate) admits it under each. Whether a loaded
 session still stands is decided by the library alone, against
 `WebAuthConfig.session_lifetime` (see "Session lifetime"). `SessionRecordStore.touch`
 takes the session id and the `expires_at` the library computed; the store writes it
@@ -1164,8 +1164,8 @@ front, so the installer adds them in reverse.
    address's budget.
 4. `CsrfOriginMiddleware`.
 5. `CsrfTokenMiddleware`.
-6. `SessionGateMiddleware`: innermost, so a request the others refuse never
-   costs a session lookup, and a forged state-changing request is refused
+6. `SessionGateMiddleware`: innermost, so a request the others refuse before
+   admission never costs a session lookup, and a forged state-changing request is refused
    before it renews a session.
 
 `csrf_origin` and `csrf_token` take separate `CsrfPolicy` values. The
