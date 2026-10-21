@@ -1,7 +1,0 @@
-claim_id = "d4c06e5a1ead4b78b893aa8b7bd1e292"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "a8dd88b8d6a64309bc12be86f9e4cde159486807"
-branch = "docs/sign-in-states"
-scope = ["README.md"]
-opened_commit = "5269b054b00940b8fc9a06ea46d38c50bf6efd21"
