@@ -1,4 +1,4 @@
-"""The host application of the proof: the README's start, callback and back-channel
+"""The host application of the proof: start, callback, logout and back-channel
 logout routes over the library's own in-memory stores, served over TLS.
 
 One process serves one cookie configuration on every origin it is told. Beside

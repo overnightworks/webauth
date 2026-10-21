@@ -197,295 +197,77 @@ host without the gate follows it itself.
 
 ### The host's start, callback and logout routes
 
-`webauth.oidc_login` carries the pending login for the host, so the host
-keeps no server-side store and `WebAuthConfig` knows nothing of OpenID
-Connect. The host serves three routes over its one `OidcRelyingParty`:
-start, callback and logout. In the example, `config` is the
-`WebAuthConfig` built under [Session lifetime](#session-lifetime) and
-`relying_party` is built under [The relying party](#the-relying-party); see
-also [Admitting an identity](#admitting-an-identity).
+`webauth.oidc_login` carries the pending login for the host in a signed cookie
+of its own, so the host keeps no server-side store and `WebAuthConfig` knows
+nothing of OpenID Connect. The host serves three routes over its one
+`OidcRelyingParty`: start (`start_login`), callback (`finish_login`, then
+`open_session`) and logout (`log_out`). Each function's docstring holds its
+contract, and `build_app` in
+[`e2e/oidc/host_app.py`](e2e/oidc/host_app.py) is the worked set of routes,
+type-checked and run against a real issuer; `config` is the `WebAuthConfig`
+built under [Session lifetime](#session-lifetime) and the relying party is built
+under [The relying party](#the-relying-party). See also
+[Admitting an identity](#admitting-an-identity).
 
-```python
-from fastapi import Request, Response
-
-from webauth.cookies import issue_session_cookies
-from webauth.oidc import OidcRefusal
-from webauth.oidc_login import (
-    AdmissionConfig,
-    AdmissionRefusal,
-    finish_login,
-    open_session,
-    start_login,
-)
-
-admission = AdmissionConfig(
-    bound_issuer=client_config.issuer,
-    login_group="/apps/notes",
-    admin_group="/apps/notes/admin",
-)
-
-
-@app.get("/login/oidc")
-def start(request: Request, next: str | None = None) -> Response:
-    response = Response(status_code=303)
-    response.headers["location"] = start_login(
-        relying_party, request, response, config, return_to=next,
-    )
-    return response
-
-
-@app.get("/auth/callback")
-def callback(request: Request, response: Response) -> dict[str, str]:
-    outcome = finish_login(
-        relying_party, request, response, config,
-        admission=admission, accounts=accounts, lock=lock, audit=audit,
-    )
-    if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
-        response.status_code = 403
-        return describe_the_hosts_refusal(outcome)
-    session = open_session(
-        request, config, outcome,
-        sessions=sessions, lock=lock,
-        max_sessions=3,
-    )
-    commit_the_hosts_transaction()
-    issue_session_cookies(response, session.id, config)
-    response.status_code = 303
-    response.headers["location"] = outcome.return_to or "/"
-    ...
-```
-
-`start_login(relying_party, request, response, config, *, return_to)` begins a
-login, sets its pending-login cookie on `response` and returns the
-authorization URL. The keyword is required, so a host cannot forget it; pass
-`None` for none.
-`finish_login(...)` answers an `AdmittedLogin` (the `account` to open a session
-for, the `return_to` path or `None`, and the login's `refresh_token` or `None`), or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
-on an `AdmittedLogin` the host calls [`open_session`](#opening-a-session), commits, and
-only then issues the cookies. `finish_login`
-sets the header that clears the pending-login cookie on `response`, so the
-host answers with that response on every outcome, refusals included: FastAPI
-copies an injected `response`'s headers only when the route returns a value
-that is not itself a `Response`; a returned `JSONResponse` is sent as-is and a
-raised `HTTPException` gets a new response, so neither carries them, which
-would leave the pending cookie in the browser.
+The host answers the callback with the `response` it passed to `finish_login` on
+every outcome, refusals included, because that response carries the header that
+clears the pending-login cookie. `finish_login` answers an `AdmittedLogin`, or
+the `OidcRefusal` or `AdmissionRefusal` that stopped it; the host then opens
+the session, commits, and only then issues the cookies, so a cookie never names
+a session that was rolled back.
 
 #### The return path
 
-`return_to` is the raw path and raw query as the app sees them, `root_path`
-included, never the percent-decoded `request.url.path`; `LoginRedirect` builds
-its `next` the same way. The library keeps it in the pending-login cookie and
-returns it from `finish_login`, after judging it again. It is a same-origin
-path of this app, ASCII only (non-ASCII characters are percent-encoded) and, once
-percent-encoded, at most 512 bytes, or `None`; `None` means the host's default
-page, and the login still succeeds. These never come back: a path a browser
-reads as another host (`//x`, `/\x`, tab, CR or LF between the slashes), an
-absolute URL, a bare host, any control character, the empty string, anything
-over 512 bytes, and, under a `root_path`, a path outside it. A `root_path` with
-a character other than ASCII letters, digits, `-._~` and `/` keeps no return
-path. A `.` or `..` segment (also as `%2e`) is refused too, because a browser
-resolves it before sending a request, and so is a literal `#`, which a request
-never carries.
-
-`start_login` keeps a `return_to` only when it already lies under `root_path` at
-a segment boundary, as Starlette's router reads it, and prepends nothing: with
-`root_path="/app"`, `/app/albums/42` is kept and `/albums/42` comes back `None`.
-Only the address `LoginRedirect` builds from the request gets `root_path`
-prepended, unless the raw path already carries it at a segment boundary. A login
-route inside a mounted sub-app is judged against that mount's `root_path`. The
-fragment is lost, because browsers never send it.
+The path a person was headed to before signing in travels through the login as
+`return_to`: the host hands it to `start_login`, and `finish_login` answers it
+again after judging it a second time. Only a same-origin path of this app comes
+back, so a login can never send a browser to another site; anything else comes
+back as `None`, the host's default page, and the login still succeeds. The
+rule, including how `root_path` is read, is in the `start_login` docstring.
 
 #### Opening a session
 
-`open_session(request, config, admitted, sessions=..., lock=...,
-max_sessions=...)` is the whole sequence between admission and the cookies. It
-reads `WebAuthConfig.wall_clock` once, as the same whole seconds the session
-decision reads, and inside one `lock.hold()` it ends the session the request's
-cookie names (signed, sole and within the length bound, whichever account it
-belongs to; any other cookie ends nothing), then, with a cap, ends all but the
-account's newest `max_sessions - 1` sessions, then creates the account's new
-session through `create(user_id, *, now, expires_at, refresh_token)`
-with `created_at` equal to that `now`, `expires_at` one idle period later and the
-`refresh_token` of `admitted`, a `SecretStr` or `None`.
-The host passes no expiry, and the store writes the instants and the token it is given.
-The store writes the token with `get_secret_value()` into one nullable text column of the session
-row; the library bounds it only by the 64 KiB token response, so the column takes no smaller
-length. A session stored before the host held refresh tokens answers `None`. The
-new session is created last, so it is never the one the cap ends, and the
-replaced session never counts against the cap. With a cap of 2 and sessions
-`{S1, S2}`, a login whose cookie names `S2` leaves `{S1, S3}`; two logins in
-the same clock tick at a cap of 1 both succeed and leave the later one.
-`max_sessions=None` states that the host sets no cap; any other value must be
-a positive whole number, or `ValueError` is raised before anything is written.
-It answers the new `SessionRecord`.
-
-It never commits and sets no cookie: the host commits, then calls
-`issue_session_cookies(response, session.id, config)`, so a cookie never names a
-session that was rolled back. It records no audit event, like `log_out`. The
-host's `WriteLock` must allow a second hold in the same request: one for
-admission, one for `open_session`.
+`open_session` is the whole sequence between admission and the cookies: under
+the host's write lock it ends the session the request's cookie names, prunes the
+account to the host's cap and creates the new session, holding the login's
+refresh token. It never commits and sets no cookie; the host commits, then calls
+`issue_session_cookies`. See its docstring for the order and the cap.
 
 #### Logging out
 
-`log_out(relying_party, request, response, config, sessions=..., lock=...)` is
-the whole logout sequence in one call, so no host rebuilds its order: it ends
-the session the request's cookie names (when there is one) under the write
-lock, clears the session and CSRF cookies on `response` and returns the
-issuer's end-session URL. That URL carries the client ID, the configured
-`post_logout_redirect_uri` and the `id_token_hint` that `finish_login` handed
-the browser at sign-in (see [The ID token hint](#the-id-token-hint)), so
-Keycloak ends the session without asking the person to confirm. Without a
-usable hint the URL leaves it out and Keycloak asks once. While the session lives, its row
-holds the refresh token; no logout step sends it to Keycloak, and deleting the row removes it. The logout is a GET to Keycloak, so the hint lands in that
-device's browser history and is visible to a TLS-terminating edge; in the
-fetch shape it also reaches the page's own script. Once the session has
-ended, the hint has no logout power left. `log_out` makes no outbound call
-and never commits, so an issuer that is down still leaves the person signed
-out of the app. A request with no usable session (a
-missing, expired-and-deleted, forged, oversized or duplicated cookie) still
-gets the URL and the cookie clearing, so the issuer's session ends too. A
-forged or duplicated cookie ends no stored session: a duplicated cookie's
-session lasts until it expires.
+`log_out` is the whole logout sequence in one call: it ends the session the
+request's cookie names, clears the session and CSRF cookies and returns the
+issuer's end-session URL, so Keycloak ends its own session too, without asking
+when it receives the ID token hint. It makes no outbound call and never
+commits, so an issuer that is down still leaves the person signed out of the
+app. The logout route is protected by the origin check, not by the CSRF token,
+which is why it is listed in `token_exempt`; the `log_out` docstring says how a
+form and a `fetch` logout differ and what the host's policy needs. The
+post-logout redirect URI must be registered at the issuer (see
+`OidcClientConfig`), and a form logout needs the issuer's origin in
+`form-action` (see [Content-Security-Policy](#content-security-policy)).
 
-A form logs out through a route that builds the `Response` itself and passes
-it in. Never return a `RedirectResponse` here: FastAPI sends a returned
-`Response` as is, so the cookie deletions on an injected `response` would be
-lost.
-
-```python
-from webauth.oidc_login import log_out
-
-
-@app.post("/logout")
-def logout(request: Request) -> Response:
-    response = Response(status_code=303)
-    response.headers["location"] = log_out(
-        relying_party, request, response, config, sessions=sessions, lock=lock,
-    )
-    commit_the_hosts_transaction()
-    return response
-```
-
-A page that logs out through `fetch` returns the URL as JSON through the
-injected `response` and navigates itself, because `fetch` would follow a
-cross-origin 303: `return {"logout_url": log_out(...)}`, then
-`location.assign(logout_url)`. Neither route uses `Depends(current_user)`.
-
-The logout is protected by the origin check, not by the CSRF token. The token
-is bound to the session, so it fails once the session has expired, and a plain
-form cannot send the token header. Install the stack with
-`csrf_origin=CsrfPolicy()` and
-`csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({"/logout"})))`.
-The host lists its own logout route's exact path, whichever shape it uses: a
-fetch logout at `/logout/fetch` lists `"/logout/fetch"` instead.
-Keep the route POST only, because the origin check runs only on mutating
-methods; name the path exactly in `token_exempt`, never in `exempt` and never
-as a prefix, so no other route falls under it.
-
-A logout form redirects the browser to the issuer, and Chromium checks
-`form-action` on that redirect. A host whose logout is a form adds the
-end-session endpoint's origin to `form-action` in its policy (see
-[Content-Security-Policy](#content-security-policy)). A page that logs out
-through `fetch` is not subject to `form-action`.
-
-Register each app's post-logout redirect URI at the issuer: Keycloak checks
-`post_logout_redirect_uri` against the client's `post.logout.redirect.uris`.
-
-An issuer on another registrable domain than the app needs
-`cookie_samesite="lax"`. With the default `"strict"` the browser withholds the
-session cookie from the first page after the callback redirect, and that page
-is signed out. An issuer on the same site works with either value.
-
-The pending login travels in a cookie of its own, one per login, so two tabs
-never overwrite each other:
-
-- **Name:** the pending-login prefix `__Host-oidc_pending_` followed by the
-  first 16 hex characters of the SHA-256 of the login's state. With
-  `cookie_secure=False` the name is the plain `oidc_pending_…` form and the
-  cookie is not `Secure`. That is for plain http, a host's own session login
-  or a test stack whose two app URLs are http on a loopback host, where a
-  sibling host or a network observer can set or read it.
-- **Flags:** `HttpOnly`, `Path=/`, `Max-Age=600`, and `Secure` following
-  `cookie_secure`. It is always `SameSite=Lax`, whatever `cookie_samesite`
-  says: the callback is a top-level navigation from the issuer's site, which a
-  `Strict` cookie would not accompany.
-- **Value:** `v2.` followed by the state, nonce, verifier, `issued_at` and the
-  base64url-encoded return path (empty when there is none), each bounded to the
-  exact shape `begin_login` mints or `return_to` allows, and an HMAC-SHA256
-  signature under the session signing key with an `oidc-pending:` prefix no
-  other cookie uses; the whole value is at most 896 characters, and the
-  signature is compared in constant time.
-- **Cap:** a browser holds at most five pending-login cookies. A start beyond
-  them clears the oldest by `issued_at` — a cookie that does not verify, or
-  whose name appears twice, counts as oldest — so repeated starts never crowd
-  out the session and CSRF cookies. Only names of the exact pending-login
-  shape, the prefix and 16 lowercase hex characters, count; any other cookie
-  whose name merely starts with the prefix is neither counted nor cleared.
+The pending login travels in a cookie per login, so two tabs never overwrite
+each other. Its name, flags, value and cap are in the `webauth.cookies` module
+docstring.
 
 #### The ID token hint
 
-`finish_login` also hands the browser the login's ID token in a cookie of its
-own, so that `log_out` can pass it to Keycloak as `id_token_hint`:
+`finish_login` hands the browser the login's ID token in a cookie of its own,
+and `log_out` passes it to Keycloak as `id_token_hint`, so Keycloak can end its
+session without asking the person to confirm. The hint is never a credential:
+webauth does not sign, decode, verify or log it, and Keycloak judges it. The
+cookie is scoped to the `logout_path` of the `OidcClientConfig`; its name,
+flags and bound, and what a changed `logout_path` leaves behind, are in the
+`webauth.cookies` module docstring.
 
-- **Name:** `__Secure-oidc_id_token_hint`, or the plain `oidc_id_token_hint`
-  with `cookie_secure=False`. It cannot be a `__Host-` cookie, because that
-  prefix demands `Path=/`.
-- **Flags:** `HttpOnly`, `SameSite=Strict` always, `Max-Age` as the session
-  cookie (the session cap), `Secure` following `cookie_secure`, and `Path` set to the
-  `logout_path` of the `OidcClientConfig`. The browser sends it to every path
-  beneath that prefix, so set `logout_path` to the narrowest prefix that covers
-  the logout routes: with `/logout` only `/logout` and the paths under it carry
-  the hint, while `/` sends it with every request.
-- **Set only on an admitted login:** a refused callback sets none, and a new
-  login overwrites the old one. An ID token longer than
-  `MAX_ID_TOKEN_HINT_CHARS` (3072) is not kept and the old cookie is cleared
-  instead; the person is still signed in, and their logout asks. Keycloak
-  asks once whenever the browser holds no ID token from its latest Keycloak
-  sign-in: a token over the bound, a hint cookie the browser no longer holds, or a
-  token of another Keycloak session.
-- **Never a credential:** the hint is not signed by webauth, and it is never
-  decoded, verified, logged or accepted as a session. Keycloak judges it. The
-  reader passes on only a sole cookie of that name that has the shape of a
-  compact JWS within the bound; anything else counts as missing.
-- **Cleared on every logout.** `log_out` clears the cookie whether or not it
-  could use the hint.
-- **`logout_path`** is the browser-visible path of the host's logout route, or
-  a parent of all its logout routes, such as `/logout` for `/logout` and
-  `/logout/fetch`. Behind a path-rewriting proxy it is the path the browser
-  sees. Changing it between deployments leaves the
-  cookie of the old path in the browser, and `log_out` clears only the new
-  path. Where the old path still matches the logout route, as `/` does for
-  `/logout`, a new login adds a second cookie of the same name; a logout that
-  finds two omits the hint, so Keycloak keeps asking until the old cookie
-  expires or the person removes it.
-  After a realm signing key is deleted, an old hint gives Keycloak's
-  error page instead of a confirmation.
-
-`finish_login` reads the state from the callback, selects exactly the cookie
-that state names and clears it on every outcome — admitted or refused —
-while every other tab's cookie stays. A callback names a usable state when it
-carries `state` exactly once, non-empty and decodable.
-
-- With a usable state, a malformed rest (a parameter named twice, one that
-  does not decode, or a pair that strict query parsing refuses, such as a
-  trailing `&` or a name without `=`) still clears that state's cookie. It is
-  refused as `MALFORMED_CALLBACK` when that cookie is genuine and as
-  `STATE_MISMATCH` otherwise.
-- Without a usable state no cookie is selected. The callback is refused as
-  `MALFORMED_CALLBACK` when it holds a parameter named twice, one that does
-  not decode, or a pair that strict query parsing refuses, such as a trailing
-  `&` or a name without `=`, and as `STATE_MISMATCH` otherwise.
-- With a well-formed rest, a missing, forged, oversized, unknown-version or
-  duplicated cookie, or a genuine cookie of another login, is
-  `STATE_MISMATCH`.
-
-Every one of these is refused before any token request.
-
-**Single use, stated honestly.** A pending login is single-use because its
-cookie is cleared on every outcome and the issuer accepts its authorization
-code once. webauth keeps no server-side replay store: a copy of the cookie
-taken before the callback is stopped by the issuer refusing the spent code
-(`TOKEN_REQUEST_REFUSED`), not by webauth remembering it.
+The callback names its pending login by state, and `finish_login` clears that
+login's cookie on every outcome while every other tab's stays. A pending login
+is single-use because its cookie is cleared and the issuer accepts its
+authorization code once; webauth keeps no replay store, so a copied cookie is
+stopped by the issuer refusing the spent code (`TOKEN_REQUEST_REFUSED`). The
+callback matrix, which refusal answers which malformed callback, is in the
+`finish_login` docstring.
 
 ### Back-channel logout
 
@@ -585,17 +367,11 @@ Set the route up so that only the issuer can reach it:
 
 ### The host's duties at login
 
-The library never commits, so these belong to the host's OIDC
-callback route, around [`open_session`](#opening-a-session):
-
-- **Return path:** redirect to `admitted.return_to`, or to a fixed local path
-  when it is `None`. The library has already judged it (see
-  [The return path](#the-return-path)).
-- **Commit before cookies:** commit the transaction `open_session` wrote
-  into, then call `issue_session_cookies`.
-- **Second hold:** the `WriteLock` must allow a second hold in the same
-  request, one for admission and one for `open_session`.
-- **Entropy:** see `SessionRecordStore.create`.
+The library never commits, so these belong to the host's callback route:
+redirect to `admitted.return_to` or to a fixed local path, commit the
+transaction `open_session` wrote into before it issues the cookies, and give the
+`WriteLock` a second hold in the same request. The `finish_login` and
+`open_session` docstrings hold the detail.
 
 ### The relying party
 
@@ -796,92 +572,21 @@ revokes a refresh token on use, the second of two overlapping calls is refused a
 
 ### Admitting an identity
 
-`webauth.oidc_login.admit_identity(identity, *, admission, accounts, lock,
-audit, config)` turns that identity into the account it signs in as, and
-`finish_login` takes the same `admission`. It is an
-`AdmissionConfig(bound_issuer=..., login_group=..., admin_group=...)` the host builds once at
-startup. The host binds its store to one issuer — the `issuer` of its
-`OidcClientConfig` — and passes it as `bound_issuer`; changing the issuer is a
-migration of the host's accounts, never a configuration change. `login_group`
-is required: the app's Keycloak group path, such as `/apps/notes`. A host
-that leaves it out gets a `TypeError`; one whose value is not a group path (no
-leading `/`, a trailing `/`, an empty segment, whitespace around a segment, a
-control, format or line-separator character) gets a `ValueError`, both at startup. Whether the group
-exists in Keycloak is not checked here. `accounts` is a `SubjectUserStore`
-(`get`, `create_for_subject(subject, username, role)`,
-which adds an account whose `id` is the subject, so a back-channel logout names
-the account directly, and `set_role(user_id, role)`, which changes an account's
-role in the caller's transaction, never commits, and returns the record). Any
-stored account whose `id` equals the subject character for character is that
-subject's account, whatever created it, and keeps its username; its role
-follows the groups (below). A host that
-migrates legacy accounts makes sure that no legacy `id` can equal a subject of
-the bound issuer. After the issuer, membership is checked, before any lock or account:
+`admit_identity` turns a verified identity into the account it signs in as, and
+`finish_login` takes the same `AdmissionConfig`, which the host builds once at
+startup. The host's store is bound to one issuer, so an account's `id` is the
+issuer's subject. The app names a group path such as `/apps/notes`:
+members come in, members of `admin_group` get the admin role, and both are
+decided again at every login, so a change at the issuer takes effect at the
+next sign-in while an open session runs on. Only the issuer's groups decide the
+role. `EverySubject` states on purpose that admission needs no group, and `NoAdmins`
+that the app has no admins; `EverySubject` leaves `admin_group` deciding who is
+admin. A second service that verifies the issuer's token
+itself calls `app_role` instead of copying the rule.
 
-- A person is a member when one of the identity's groups is `login_group` or
-  below it, compared character for character and by path segment:
-  `/apps/notes/admin` counts for `/apps/notes`, `/apps/notes2` and
-  a bare `notes` do not. A missing or empty `groups` claim means no
-  membership; a malformed one is refused as `INVALID_IDENTITY_CLAIM`. The
-  check runs on every login, after `FOREIGN_ISSUER` and before any account is
-  looked up or created, so a refusal writes nothing and sets no session
-  cookie. What the refused person sees is the host's page.
-- Taking someone out of the group refuses them at their next login; their
-  account and data stay, and putting them back returns them to the same
-  account. A session that is already open runs on until the host's session
-  lifetime (below) ends it.
-
-After that, admission holds `lock.hold()` and never commits:
-
-- A new subject gets an account with the issuer's `preferred_username` (or the
-  subject when it suggests none, or only whitespace) and `config.user_role`
-  (or `admin_role`, for a member of `admin_group`), and the audit sink hears
-  `user_created` with `actor_id=None`.
-- A known subject reuses its account, even when its suggested username
-  changed. No username is looked up, so a second subject whose
-  `preferred_username` another account holds is admitted by a store without a
-  unique username; disabling a person is done at the issuer.
-- The role comes from `admin_group`, a required setting: a group path strictly
-  below `login_group`, such as `/apps/notes/admin`, or
-  `NoAdmins.IN_THIS_APP` when the app has no admins. A missing `admin_group`
-  is a `TypeError`; a malformed path, or one not below `login_group`,
-  is a `ValueError`, both at startup (under `EverySubject`, any group path is
-  allowed). A person who is in `admin_group` or below it gets `admin_role`;
-  everyone else, and everyone under `NoAdmins`, gets `user_role`. This holds at
-  every login, for new and known accounts alike: a known account whose stored
-  role differs is rewritten with `set_role` and the audit sink hears
-  `role_changed`; a stored role other than `admin_role` or `user_role` is
-  overwritten to `user_role` (unless the identity belongs to `admin_group`,
-  which gives `admin_role`). The issuer's groups are the only source of admin:
-  a person taken out of the group is a plain user from their next login, on
-  every device at once, since the role lives on the account, while a session
-  that is already open keeps the old role until then. Only the derived role is
-  stored, never the groups. Migrating from a store with its own admins: put them
-  into the admin group first, or they are demoted at their next login.
-- Otherwise it answers an `AdmissionRefusal` and writes nothing:
-  `FOREIGN_ISSUER` for an identity from another issuer, `NOT_A_MEMBER` for a
-  person outside `login_group`, and `USERNAME_TAKEN` when a store that enforces
-  a unique username raises `UsernameTakenError` from `create_for_subject`.
-
-`login_group` may instead be `EverySubject.OF_THE_BOUND_ISSUER`, which admits
-without looking at groups. It admits every subject of the realm, the users of
-other apps included, so a host says it on purpose and only when the issuer
-already limits who can sign in.
-
-The issuer must send full group paths: in Keycloak the group membership mapper
-needs `full.path` on. Without it the claim holds bare names, no group path
-matches and everyone is refused, which fails safe.
-
-A second service that verifies the issuer's token itself, such as an API behind
-the app, calls `webauth.oidc_login.app_role(groups, admission)` with the same
-`AdmissionConfig` instead of copying the rule. It answers `AppRole.ADMIN` for
-`admin_group` or a path below it, `AppRole.USER` for any other member, and
-`None` for a person outside `login_group`; `EverySubject` makes every set of
-groups a member and `NoAdmins` never yields `ADMIN`. The answer is the kind of
-role, not the host's spelling of it. It reads nothing but its arguments, so
-checking that the groups come from `bound_issuer` stays with the caller, and so
-does checking that the claim is a list of strings: webauth's login refuses any
-other shape, and so should the caller.
+The rules, the order of refusals, and what is written are in the docstrings of
+`AdmissionConfig`, `admit_identity` and `app_role`, and in the
+`webauth.oidc_login` module docstring.
 
 ## Reading the session
 

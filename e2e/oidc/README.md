@@ -1,8 +1,8 @@
 # Real-browser proof of the OIDC relying party
 
 `prove.py` drives a real Chromium through a real login and logout at a real
-Keycloak (edge's `hold` stack) against a small host application built from the
-library's README example. The OIDC path is not faked: the browser fills
+Keycloak (edge's `hold` stack) against a small host application whose routes are
+`build_app` in `host_app.py`. The OIDC path is not faked: the browser fills
 Keycloak's own form, and the library calls the real token and key-set
 endpoints with its production transport.
 
@@ -133,7 +133,7 @@ appears, the app shows "Signed out", and the next sign-in shows Keycloak's form.
 the production case: Keycloak's ID token lasts 5 minutes by default, the session cookie 12 hours.
 
 `SCENARIO 22` and `SCENARIO 23` run in the back-channel phase at 1280x800, with the two
-apps below. They prove two sentences of the README:
+apps below. They prove two sentences of the `log_out` docstring:
 
 - `SCENARIO 22`, a logout from another site: the browser holds a signed-in session at app A
   (`https://demo.hallucinai.de`). A page on `https://demo.example.test`, which the harness
@@ -145,7 +145,7 @@ apps below. They prove two sentences of the README:
   Keycloak session S1), Keycloak's admin logout ends S1 (A's back-channel call ends A's session,
   its hint cookie stays), a sign-in to B in the same browser opens S2, and A's page, still
   showing its button, posts the logout, which sends T1. Keycloak asks "Do you want to log
-  out?" (status 200 and `#kc-logout`), as the README says; after confirming, it ends S2 and
+  out?" (status 200 and `#kc-logout`), as the docstring says; after confirming, it ends S2 and
   calls B back.
 
 `SCENARIO 4` is the disabled user: Keycloak's form refuses, no callback reaches
@@ -175,8 +175,8 @@ an `Admin.delete` in `stack.py`. The run stays inside its 900 s budget.
 run against two further hosts, app A on `https://demo.hallucinai.de` and app B on
 `https://demo.example.test` (cookie `lax`), each configured independently: its own
 Keycloak client (`d1-app-a`, `d1-app-b`), its own session and account stores and its
-own signing secret, and each with the README's `/auth/backchannel-logout` route (the
-body-size, cache-control and CSRF exemptions the route recipe lists; no rate limit in
+own signing secret, and each with `build_app`'s `/auth/backchannel-logout` route (the
+body-size, cache-control and CSRF exemptions `build_app` sets; no rate limit in
 this host). Each client carries `frontchannelLogout: false`, `backchannel.logout.url`
 (its bridge), `backchannel.logout.session.required: "false"`,
 `backchannel.logout.revoke.offline.tokens: "false"`, `id.token.signed.response.alg:
