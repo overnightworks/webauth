@@ -1108,7 +1108,7 @@ _NOT_A_BEARER_ACCESS_TOKEN = {
     "token-type-a-number": {"token_type": 7},
     "token-type-mac": {"token_type": "MAC"},
     "token-type-with-a-trailing-space": {"token_type": "Bearer "},
-    "token-type-a-non-ascii-look-alike": {"token_type": "Bearer\u0131"},
+    "token-type-a-non-ascii-look-alike": {"token_type": "B\u0435arer"},
     "access-token-missing": {"access_token": ABSENT},
     "access-token-a-number": {"access_token": 7},
     "access-token-empty": {"access_token": ""},

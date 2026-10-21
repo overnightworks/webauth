@@ -219,9 +219,9 @@ class FakeIssuer:
     `end_sso_session()`, is `invalid_grant`. `refresh_tokens` holds the
     accepted ones, so a test can add a token without a login. The
     `client_credentials` grant answers a new access token per call, or
-    `unauthorized_client` while `service_accounts_enabled` is false. Both
-    grants' answers take `refresh_answer_members` and `workload_answer_members`
-    as the code exchange takes `code_answer_members`.
+    `unauthorized_client` while `service_accounts_enabled` is false. The
+    refresh grant's answer takes `refresh_answer_members` as the code exchange
+    takes `code_answer_members`.
     """
 
     mint_id_token: Callable[[str], str]
@@ -235,7 +235,6 @@ class FakeIssuer:
         }
     )
     refresh_answer_members: dict[str, Any] = field(default_factory=dict)
-    workload_answer_members: dict[str, Any] = field(default_factory=dict)
     service_accounts_enabled: bool = True
     refresh_tokens: set[str] = field(default_factory=lambda: {ISSUED_REFRESH_TOKEN})
     _codes: dict[str, _IssuedCode] = field(default_factory=dict)
@@ -294,7 +293,7 @@ class FakeIssuer:
         if not self.service_accounts_enabled:
             return token_endpoint_answer(400, {"error": "unauthorized_client"})
         members = {"access_token": f"workload-token-{next(self._minted)}", "token_type": "Bearer"}
-        return token_endpoint_answer(200, changed(members, self.workload_answer_members))
+        return token_endpoint_answer(200, members)
 
 
 def s256_code_challenge(code_verifier: str) -> str:
