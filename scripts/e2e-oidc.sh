@@ -103,14 +103,14 @@ probe_objects() {
   done
 }
 
-# A directory a run leaves behind holds runtime and evidence and nothing else.
+# A directory a run leaves behind holds runtime, evidence and export, and nothing else.
 holds_only_run_leftovers() {
   local scratch="$1" entry found=0
   [[ -n "$scratch" && -d "$scratch" ]] || return 1
   for entry in "$scratch"/* "$scratch"/.[!.]* "$scratch"/..?*; do
     [[ -e "$entry" || -L "$entry" ]] || continue
     case "${entry##*/}" in
-      runtime | evidence) found=1 ;;
+      runtime | evidence | export) found=1 ;;
       *) return 1 ;;
     esac
   done
@@ -159,7 +159,7 @@ cleanup_under_lock() {
 cleanup() {
   local scratch="$1"
   if ! holds_only_run_leftovers "$scratch"; then
-    echo "refusing: '$scratch' is not a directory holding only runtime and evidence" >&2
+    echo "refusing: '$scratch' is not a directory holding only runtime, evidence and export" >&2
     exit 2
   fi
   (

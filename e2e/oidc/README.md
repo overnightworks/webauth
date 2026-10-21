@@ -44,7 +44,7 @@ If the run is killed outright (SIGKILL, the `timeout` fallback, an out-of-memory
 kill), nothing can clean up: the verb `cleanup` removes `runtime/`
 (credentials and keys), the probe stack, the suite project and the relay containers,
 and a host app that is still listening; it refuses a `SCRATCH` that holds anything
-but `runtime/` and `evidence/`, and exits non-zero while anything of the probe remains.
+but `runtime/`, `evidence/` and `export/`, and exits non-zero while anything of the probe remains.
 Do not trust `evidence/` of such a run, nor of a
 run that prints `the browser worker did not stop`: its screenshots are deleted,
 because a live browser could still write.
