@@ -35,6 +35,12 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Added**
 
+- `OidcRelyingParty.renew_access(refresh_token: SecretStr)` posts a refresh grant and answers a
+  `RenewedAccess` (the new access token and the rotated refresh token, or `None`) or an
+  `OidcRefusal`.
+- `OidcRelyingParty.workload_access_token()` posts a `client_credentials` grant and answers the
+  client's own access token or an `OidcRefusal`. Both calls need a Bearer token in the answer and
+  hold nothing between calls.
 - `install_web_auth_middleware` takes `session_gate=SessionGate(...)`. Every request then
   needs a live session, except those named by `public` (`PublicRule`, by path and optionally
   by method) and `optional`. A request without one gets exactly what `current_user_dependency`

@@ -24,6 +24,7 @@ from oidc_arrangement import (
     ISSUED_ACCESS_TOKEN_CANARY,
     ISSUED_REFRESH_TOKEN,
     FakeClock,
+    FakeIssuer,
     FakeKeySetEndpoint,
     FakeTokenEndpoint,
     a_fake_id_token,
@@ -52,8 +53,10 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
+    RenewedAccess,
     TokenEndpointAnswer,
     TokenEndpointError,
+    TokenRequestPost,
     VerifiedLogout,
 )
 
@@ -76,6 +79,17 @@ _SUBJECT = "7335d417-61da-459d-899c-0a01c76a2f94"
 _SESSION_ID = "4c2a9f0e-session"
 # The grammar's two ends: a space and a tilde.
 _TOKEN_AT_BOTH_ENDS = " ~"  # noqa: S105
+_OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR = {
+    "empty": "",
+    "a-number": 42,
+    "null": None,
+    "with-a-nul": "rt\x00",
+    "with-a-carriage-return": "rt\r",
+    "with-a-line-feed": "rt\n",
+    "with-a-del": "rt\x7f",
+    "non-ascii": "rté",
+    "a-lone-surrogate": "rt\ud800",
+}
 _GROUPS = ("/workshop/admins", "/workshop/makers")
 _IDENTITY = OidcIdentity(
     subject=_SUBJECT,
@@ -150,6 +164,20 @@ class Attempt:
     elapsed_seconds: float = 0
 
 
+def _relying_party(
+    token_endpoint: TokenRequestPost, config: OidcClientConfig, wall_clock: FakeClock
+) -> OidcRelyingParty:
+    return OidcRelyingParty(
+        config,
+        post_token_request=token_endpoint,
+        fetch_key_set=FakeKeySetEndpoint(
+            key_set_document(public_jwk(rsa_key("current"), "current-key"))
+        ),
+        wall_clock=wall_clock,
+        monotonic_clock=FakeClock(5_000.0),
+    )
+
+
 @dataclass
 class LoginScenario:
     token_endpoint: FakeTokenEndpoint
@@ -159,15 +187,7 @@ class LoginScenario:
     minted_id_tokens: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.relying_party = OidcRelyingParty(
-            self.config,
-            post_token_request=self.token_endpoint,
-            fetch_key_set=FakeKeySetEndpoint(
-                key_set_document(public_jwk(rsa_key("current"), "current-key"))
-            ),
-            wall_clock=self.wall_clock,
-            monotonic_clock=FakeClock(5_000.0),
-        )
+        self.relying_party = _relying_party(self.token_endpoint, self.config, self.wall_clock)
 
     def id_token(self, pending: PendingLogin, changes: dict[str, Any]) -> str:
         now = int(self.wall_clock.now)
@@ -456,17 +476,7 @@ _EXCHANGE_REFUSALS = [
             OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
             id=f"refresh-token-{name}",
         )
-        for name, refresh_token in {
-            "empty": "",
-            "a-number": 42,
-            "null": None,
-            "with-a-nul": "rt\x00",
-            "with-a-carriage-return": "rt\r",
-            "with-a-line-feed": "rt\n",
-            "with-a-del": "rt\x7f",
-            "non-ascii": "rté",
-            "a-lone-surrogate": "rt\ud800",
-        }.items()
+        for name, refresh_token in _OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR.items()
     ),
     pytest.param(
         Attempt(token_answer=_padded_past_the_limit),
@@ -1022,3 +1032,242 @@ def test_an_id_token_is_not_a_logout_token() -> None:
     outcome = login.relying_party.verify_logout_token(login.id_token(pending, {}))
 
     assert outcome == _rejected(RejectionReason.INVALID_TOKEN_TYPE)
+
+
+def _renewed_access_token(relying_party: OidcRelyingParty) -> SecretStr | OidcRefusal:
+    outcome = relying_party.renew_access(SecretStr(ISSUED_REFRESH_TOKEN))
+    return outcome.access_token if isinstance(outcome, RenewedAccess) else outcome
+
+
+def _workload_access_token(relying_party: OidcRelyingParty) -> SecretStr | OidcRefusal:
+    return relying_party.workload_access_token()
+
+
+_BOTH_GRANTS = pytest.mark.parametrize(
+    "grant",
+    [
+        pytest.param(_renewed_access_token, id="refresh-grant"),
+        pytest.param(_workload_access_token, id="workload-grant"),
+    ],
+)
+
+
+def _granting(endpoint: TokenRequestPost) -> OidcRelyingParty:
+    return _relying_party(endpoint, _config(), FakeClock(float(_NOW)))
+
+
+def _grant_answer(status: int = 200, **changes: Any) -> FakeTokenEndpoint:
+    document = changed({"access_token": "granted-token", "token_type": "Bearer"}, changes)
+    return FakeTokenEndpoint(answer=token_endpoint_answer(status, document))
+
+
+def _an_issuer() -> FakeIssuer:
+    return FakeIssuer(mint_id_token=a_fake_id_token)
+
+
+def test_renewing_access_posts_the_refresh_grant_and_yields_the_rotated_tokens() -> None:
+    issuer = _an_issuer()
+
+    outcome = _granting(issuer).renew_access(SecretStr(ISSUED_REFRESH_TOKEN))
+
+    [request] = issuer.requests
+    assert request.url == _TOKEN_ENDPOINT
+    assert dict(request.form) == {
+        "grant_type": "refresh_token",
+        "refresh_token": ISSUED_REFRESH_TOKEN,
+    }
+    assert request.authorization.get_secret_value() == _BASIC_AUTHORIZATION
+    assert isinstance(outcome, RenewedAccess)
+    assert outcome.refresh_token is not None
+    assert outcome.refresh_token.get_secret_value() != ISSUED_REFRESH_TOKEN
+    assert isinstance(_granting(issuer).renew_access(outcome.refresh_token), RenewedAccess)
+
+
+def test_a_refresh_answer_without_a_refresh_token_yields_none() -> None:
+    issuer = _an_issuer()
+    issuer.refresh_answer_members = {"refresh_token": ABSENT}
+
+    outcome = _granting(issuer).renew_access(SecretStr(ISSUED_REFRESH_TOKEN))
+
+    assert isinstance(outcome, RenewedAccess)
+    assert outcome.refresh_token is None
+
+
+@_BOTH_GRANTS
+@pytest.mark.parametrize("token_type", ["Bearer", "bearer", "BEARER"])
+def test_a_grant_accepts_a_bearer_token_type_in_any_ascii_case(
+    grant: Callable[[OidcRelyingParty], SecretStr | OidcRefusal], token_type: str
+) -> None:
+    outcome = grant(_granting(_grant_answer(token_type=token_type)))
+
+    assert outcome == SecretStr("granted-token")
+
+
+_NOT_A_BEARER_ACCESS_TOKEN = {
+    "token-type-missing": {"token_type": ABSENT},
+    "token-type-a-number": {"token_type": 7},
+    "token-type-mac": {"token_type": "MAC"},
+    "token-type-with-a-trailing-space": {"token_type": "Bearer "},
+    "token-type-a-non-ascii-look-alike": {"token_type": "Bearer\u0131"},
+    "access-token-missing": {"access_token": ABSENT},
+    "access-token-a-number": {"access_token": 7},
+    "access-token-empty": {"access_token": ""},
+    "access-token-with-a-carriage-return": {"access_token": "token\r"},
+    "access-token-with-a-line-feed": {"access_token": "token\n"},
+    "access-token-with-a-space": {"access_token": "to ken"},
+}
+
+
+@_BOTH_GRANTS
+@pytest.mark.parametrize(
+    "changes", _NOT_A_BEARER_ACCESS_TOKEN.values(), ids=list(_NOT_A_BEARER_ACCESS_TOKEN)
+)
+def test_a_grant_answer_that_is_no_bearer_access_token_is_refused(
+    grant: Callable[[OidcRelyingParty], SecretStr | OidcRefusal], changes: dict[str, Any]
+) -> None:
+    assert grant(_granting(_grant_answer(**changes))) == OidcRefusal(
+        OidcRefusalReason.TOKEN_ENDPOINT_FAILED
+    )
+
+
+@pytest.mark.parametrize(
+    "refresh_token",
+    _OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR.values(),
+    ids=list(_OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR),
+)
+def test_a_refresh_answer_with_a_refresh_token_outside_the_grammar_is_refused(
+    refresh_token: object,
+) -> None:
+    endpoint = _grant_answer(refresh_token=refresh_token)
+
+    outcome = _granting(endpoint).renew_access(SecretStr(ISSUED_REFRESH_TOKEN))
+
+    assert outcome == OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED)
+
+
+@pytest.mark.parametrize(
+    "refresh_token",
+    [value for value in _OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR.values() if isinstance(value, str)],
+    ids=[
+        name for name, value in _OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR.items() if isinstance(value, str)
+    ],
+)
+def test_a_refresh_token_outside_the_grammar_is_refused_without_a_request(
+    refresh_token: str,
+) -> None:
+    endpoint = _grant_answer()
+
+    outcome = _granting(endpoint).renew_access(SecretStr(refresh_token))
+
+    assert outcome == OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED)
+    assert endpoint.requests == []
+
+
+def test_a_refresh_token_at_both_ends_of_the_grammar_is_sent_and_received_exactly() -> None:
+    issuer = _an_issuer()
+    issuer.refresh_tokens.add(_TOKEN_AT_BOTH_ENDS)
+    issuer.refresh_answer_members = {"refresh_token": _TOKEN_AT_BOTH_ENDS}
+
+    outcome = _granting(issuer).renew_access(SecretStr(_TOKEN_AT_BOTH_ENDS))
+
+    [request] = issuer.requests
+    assert request.form["refresh_token"] == _TOKEN_AT_BOTH_ENDS
+    assert isinstance(outcome, RenewedAccess)
+    assert outcome.refresh_token == SecretStr(_TOKEN_AT_BOTH_ENDS)
+
+
+_REFUSED_GRANT_ANSWERS = [
+    pytest.param(
+        token_endpoint_answer(status, {"error": error}),
+        OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=error),
+        id=f"{status}-{error}",
+    )
+    for status, error in [
+        (400, "invalid_grant"),
+        (401, "invalid_client"),
+        (400, "unauthorized_client"),
+    ]
+] + [
+    pytest.param(answer, OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED), id=name)
+    for name, answer in {
+        "server-error": token_endpoint_answer(503, {"error": "server_error"}),
+        "non-json-answer": token_endpoint_answer(200, b"<html>signed in</html>"),
+        "transport-error": TokenEndpointError("connection refused"),
+    }.items()
+]
+
+
+@_BOTH_GRANTS
+@pytest.mark.parametrize(("answer", "refusal"), _REFUSED_GRANT_ANSWERS)
+def test_a_grant_the_issuer_refuses_or_fails_is_refused_with_its_reason(
+    grant: Callable[[OidcRelyingParty], SecretStr | OidcRefusal],
+    answer: TokenEndpointAnswer | Exception,
+    refusal: OidcRefusal,
+) -> None:
+    assert grant(_granting(FakeTokenEndpoint(answer=answer))) == refusal
+
+
+def test_a_refresh_token_the_issuer_never_issued_or_ended_is_invalid_grant() -> None:
+    issuer = _an_issuer()
+    relying_party = _granting(issuer)
+    invalid_grant = OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_grant")
+
+    assert relying_party.renew_access(SecretStr("never-issued")) == invalid_grant
+    issuer.end_sso_session()
+    assert relying_party.renew_access(SecretStr(ISSUED_REFRESH_TOKEN)) == invalid_grant
+
+
+def test_a_workload_token_is_refused_while_the_client_has_no_service_account() -> None:
+    issuer = _an_issuer()
+    issuer.service_accounts_enabled = False
+
+    assert _granting(issuer).workload_access_token() == OidcRefusal(
+        OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="unauthorized_client"
+    )
+
+
+def test_the_workload_grant_posts_only_the_grant_type_with_the_clients_authorization() -> None:
+    issuer = _an_issuer()
+
+    outcome = _granting(issuer).workload_access_token()
+
+    [request] = issuer.requests
+    assert request.url == _TOKEN_ENDPOINT
+    assert dict(request.form) == {"grant_type": "client_credentials"}
+    assert request.authorization.get_secret_value() == _BASIC_AUTHORIZATION
+    assert isinstance(outcome, SecretStr)
+
+
+def test_two_workload_calls_post_twice_and_yield_two_different_tokens() -> None:
+    issuer = _an_issuer()
+    relying_party = _granting(issuer)
+
+    first = relying_party.workload_access_token()
+    second = relying_party.workload_access_token()
+
+    assert len(issuer.requests) == 2
+    assert isinstance(first, SecretStr)
+    assert isinstance(second, SecretStr)
+    assert first != second
+
+
+def test_no_repr_shows_a_token_a_grant_sent_or_received() -> None:
+    issuer = _an_issuer()
+    relying_party = _granting(issuer)
+    renewed = relying_party.renew_access(SecretStr(ISSUED_REFRESH_TOKEN))
+    workload = relying_party.workload_access_token()
+    assert isinstance(renewed, RenewedAccess)
+    assert renewed.refresh_token is not None
+    assert isinstance(workload, SecretStr)
+
+    shown = " ".join(repr(each) for each in (renewed, workload, *issuer.requests))
+
+    for secret in (
+        ISSUED_REFRESH_TOKEN,
+        renewed.access_token.get_secret_value(),
+        renewed.refresh_token.get_secret_value(),
+        workload.get_secret_value(),
+        _CLIENT_SECRET,
+        _BASIC_AUTHORIZATION,
+    ):
+        assert secret not in shown

@@ -304,6 +304,10 @@ def a_host_uses_the_production_transports() -> tuple[KeySetFetch, TokenRequestPo
     return key_set_fetch, token_post
 
 
+def a_host_gets_a_workload_token(relying_party: OidcRelyingParty) -> SecretStr | OidcRefusal:
+    return relying_party.workload_access_token()
+
+
 def a_host_resolves_the_current_user(
     on_authenticated: Callable[[AuthenticatedUser], None],
 ) -> AuthDependencies:

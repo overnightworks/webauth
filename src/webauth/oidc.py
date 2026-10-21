@@ -19,6 +19,18 @@ checked here, as OpenID Connect Core asks of the relying party. A refresh
 token in the answer must be RFC 6749 Appendix A.17's `1*VSCHAR`, or the login
 is refused as `TOKEN_ENDPOINT_FAILED`; the access token is not read.
 
+`OidcRelyingParty.renew_access` posts a refresh token the issuer gave and
+answers a `RenewedAccess`: the new access token and the refresh token the
+issuer rotated to, or `None` when it sent none. `workload_access_token` posts
+a `client_credentials` grant and answers the client's own access token. Each
+is one POST with the code exchange's client authentication, no cache and no
+lock, so every call is a fresh token. The issuer's answer must be a Bearer
+token (`token_type` compared in ASCII case-insensitively) whose `access_token`
+has RFC 6750's `b64token` shape; anything else, and a sent or received refresh
+token outside `1*VSCHAR`, is `TOKEN_ENDPOINT_FAILED`. The status handling is
+the code exchange's, so an issuer's `error` is `TOKEN_REQUEST_REFUSED`. No
+token is decoded: judging its claims belongs to whoever receives it.
+
 The state, nonce and verifier are each `_PENDING_SECRET_BYTES` random bytes,
 and the received state and nonce are compared in constant time. A pending
 login is stamped with the wall clock when it begins and stands for
@@ -58,7 +70,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from http import HTTPStatus
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeGuard
 
 from pydantic import SecretStr
 
@@ -89,6 +101,7 @@ __all__ = [
     "OidcRefusal",
     "OidcRefusalReason",
     "OidcRelyingParty",
+    "RenewedAccess",
     "TokenEndpointAnswer",
     "TokenEndpointError",
     "TokenRequest",
@@ -117,6 +130,10 @@ _LOGOUT_PATH_CHARACTERS = re.compile(r"/[A-Za-z0-9\-._~!$&'()*+,=:@/%]*")
 _UNFINISHED_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 # RFC 6749 Appendix A.17: refresh-token = 1*VSCHAR, printable ASCII.
 _REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
+# RFC 6750 section 2.1: a bearer token is a b64token, so it can sit in an
+# `Authorization` header without a CR, LF or space.
+_ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
+_BEARER_TOKEN_TYPE = "bearer"  # noqa: S105
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
 _URL_FIELDS = (
     "issuer",
@@ -269,6 +286,16 @@ class OidcIdentity:
 
 
 @dataclass(frozen=True)
+class RenewedAccess:
+    """What a refresh grant yields: the new access token, and the refresh token
+    the issuer rotated to, or `None` when it kept the one sent (RFC 6749
+    section 6)."""
+
+    access_token: SecretStr
+    refresh_token: SecretStr | None
+
+
+@dataclass(frozen=True)
 class VerifiedLogout:
     """A Logout Token that held: the issuer's `subject` whose sessions end."""
 
@@ -385,18 +412,42 @@ class OidcRelyingParty:
         age_seconds = self._wall_clock() - pending.issued_at
         return 0 <= age_seconds <= PENDING_LOGIN_MAX_AGE_SECONDS
 
-    def _exchanged_tokens(self, pending: PendingLogin, code: str) -> tuple[str, SecretStr | None]:
-        request = TokenRequest(
+    def renew_access(self, refresh_token: SecretStr) -> RenewedAccess | OidcRefusal:
+        try:
+            return self._renewed_access(refresh_token.get_secret_value())
+        except _RefusalError as refusal:
+            return refusal.refusal
+
+    def _renewed_access(self, refresh_token: str) -> RenewedAccess:
+        if not _is_refresh_token(refresh_token):
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+        document = self._token_answer(
+            self._grant_request({"grant_type": "refresh_token", "refresh_token": refresh_token})
+        )
+        return RenewedAccess(_bearer_access_token(document), _issued_refresh_token(document))
+
+    def workload_access_token(self) -> SecretStr | OidcRefusal:
+        try:
+            document = self._token_answer(self._grant_request({"grant_type": "client_credentials"}))
+            return _bearer_access_token(document)
+        except _RefusalError as refusal:
+            return refusal.refusal
+
+    def _grant_request(self, form: Mapping[str, str]) -> TokenRequest:
+        return TokenRequest(
             url=self._config.token_endpoint,
-            form=MappingProxyType(
-                {
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": self._config.redirect_uri,
-                    "code_verifier": pending.code_verifier,
-                }
-            ),
+            form=MappingProxyType(dict(form)),
             authorization=self._client_authorization,
+        )
+
+    def _exchanged_tokens(self, pending: PendingLogin, code: str) -> tuple[str, SecretStr | None]:
+        request = self._grant_request(
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": self._config.redirect_uri,
+                "code_verifier": pending.code_verifier,
+            }
         )
         document = self._token_answer(request)
         id_token = document.get("id_token")
@@ -564,13 +615,31 @@ def _token_answer_document(body: bytes) -> Mapping[str, object]:
     return _json_object(body) or {}
 
 
+def _is_refresh_token(value: object) -> TypeGuard[str]:
+    return isinstance(value, str) and _REFRESH_TOKEN.fullmatch(value) is not None
+
+
 def _issued_refresh_token(document: Mapping[str, object]) -> SecretStr | None:
     if "refresh_token" not in document:
         return None
     refresh_token = document["refresh_token"]
-    if not isinstance(refresh_token, str) or not _REFRESH_TOKEN.fullmatch(refresh_token):
+    if not _is_refresh_token(refresh_token):
         raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
     return SecretStr(refresh_token)
+
+
+def _bearer_access_token(document: Mapping[str, object]) -> SecretStr:
+    token_type = document.get("token_type")
+    access_token = document.get("access_token")
+    if (
+        not isinstance(token_type, str)
+        or not token_type.isascii()
+        or token_type.lower() != _BEARER_TOKEN_TYPE
+        or not isinstance(access_token, str)
+        or not _ACCESS_TOKEN.fullmatch(access_token)
+    ):
+        raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+    return SecretStr(access_token)
 
 
 def _identity_of(

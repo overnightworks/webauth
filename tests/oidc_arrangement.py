@@ -15,6 +15,7 @@ import datetime
 import gzip
 import hashlib
 import ipaddress
+import itertools
 import json
 import secrets
 import socket
@@ -203,12 +204,24 @@ class FakeIssuer:
     `authorize` plays the person signing in at the issuer: it reads the
     authorization URL and answers the callback query with a fresh code bound
     to the login's nonce and PKCE challenge. Called as the token endpoint, it
-    answers each code once, and only to the verifier of that challenge, with
-    the ID token `mint_id_token` makes for the nonce; `before_exchange` runs
-    before a code is looked up, so a test can hold two exchanges together.
-    `code_answer_members` are the members besides `id_token` of a code
-    exchange's 200 answer: a refresh token, and an access token with its type
-    as the canary no store may hold. `ABSENT` removes a member.
+    dispatches on `grant_type`; `before_exchange` runs before every grant, so
+    a test can hold two together.
+
+    The code exchange answers each code once, and only to the verifier of
+    that challenge, with the ID token `mint_id_token` makes for the nonce.
+    `code_answer_members` are the members besides `id_token` of its 200
+    answer: a refresh token, and an access token with its type as the canary
+    no store may hold. `ABSENT` removes a member.
+
+    The refresh grant answers a new access token and a new refresh token each
+    time, and keeps accepting every refresh token it issued (reuse allowed, as
+    in edge's realm); any other token, and every token after
+    `end_sso_session()`, is `invalid_grant`. `refresh_tokens` holds the
+    accepted ones, so a test can add a token without a login. The
+    `client_credentials` grant answers a new access token per call, or
+    `unauthorized_client` while `service_accounts_enabled` is false. Both
+    grants' answers take `refresh_answer_members` and `workload_answer_members`
+    as the code exchange takes `code_answer_members`.
     """
 
     mint_id_token: Callable[[str], str]
@@ -221,8 +234,13 @@ class FakeIssuer:
             "token_type": "Bearer",
         }
     )
+    refresh_answer_members: dict[str, Any] = field(default_factory=dict)
+    workload_answer_members: dict[str, Any] = field(default_factory=dict)
+    service_accounts_enabled: bool = True
+    refresh_tokens: set[str] = field(default_factory=lambda: {ISSUED_REFRESH_TOKEN})
     _codes: dict[str, _IssuedCode] = field(default_factory=dict)
     _codes_lock: threading.Lock = field(default_factory=threading.Lock)
+    _minted: Iterator[int] = field(default_factory=lambda: itertools.count(2))
 
     def authorize(self, authorization_url: str) -> str:
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(authorization_url).query)
@@ -230,18 +248,53 @@ class FakeIssuer:
         self._codes[code] = _IssuedCode(query["nonce"][0], query["code_challenge"][0])
         return urllib.parse.urlencode({"state": query["state"][0], "code": code})
 
+    def end_sso_session(self) -> None:
+        self.refresh_tokens.clear()
+
     def __call__(self, request: TokenRequest) -> TokenEndpointAnswer:
         self.requests.append(request)
         self.before_exchange()
+        match request.form["grant_type"]:
+            case "authorization_code":
+                return self._exchanged_code(request)
+            case "refresh_token":
+                return self._refreshed(request)
+            case "client_credentials":
+                return self._workload()
+        return token_endpoint_answer(400, {"error": "unsupported_grant_type"})
+
+    def _exchanged_code(self, request: TokenRequest) -> TokenEndpointAnswer:
         with self._codes_lock:
             issued = self._codes.pop(request.form["code"], None)
         verifier = request.form["code_verifier"]
         if issued is None or s256_code_challenge(verifier) != issued.code_challenge:
             return token_endpoint_answer(400, {"error": "invalid_grant"})
+        refresh_token = self.code_answer_members.get("refresh_token")
+        if isinstance(refresh_token, str):
+            self.refresh_tokens.add(refresh_token)
         return token_endpoint_answer(
             200,
             changed({"id_token": self.mint_id_token(issued.nonce)}, self.code_answer_members),
         )
+
+    def _refreshed(self, request: TokenRequest) -> TokenEndpointAnswer:
+        if request.form["refresh_token"] not in self.refresh_tokens:
+            return token_endpoint_answer(400, {"error": "invalid_grant"})
+        number = next(self._minted)
+        rotated = f"refresh-token-rt-{number}"
+        self.refresh_tokens.add(rotated)
+        members = {
+            "access_token": f"access-token-at-{number}",
+            "token_type": "Bearer",
+            "refresh_token": rotated,
+        }
+        return token_endpoint_answer(200, changed(members, self.refresh_answer_members))
+
+    def _workload(self) -> TokenEndpointAnswer:
+        if not self.service_accounts_enabled:
+            return token_endpoint_answer(400, {"error": "unauthorized_client"})
+        members = {"access_token": f"workload-token-{next(self._minted)}", "token_type": "Bearer"}
+        return token_endpoint_answer(200, changed(members, self.workload_answer_members))
 
 
 def s256_code_challenge(code_verifier: str) -> str:
@@ -489,7 +542,8 @@ def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:
 
 
 def leaf_texts(
-    subject: object, path: tuple[str, ...] = (),
+    subject: object,
+    path: tuple[str, ...] = (),
 ) -> Iterator[tuple[tuple[str, ...], str]]:
     """Every leaf a value holds as text with its field path, a secret unwrapped."""
     if isinstance(subject, SecretStr):
