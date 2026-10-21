@@ -28,6 +28,7 @@ from oidc_arrangement import (
     FakeTokenEndpoint,
     a_fake_id_token,
     a_logout_token,
+    assert_holds_only_the_refresh_token,
     changed,
     jws,
     key_set_document,
@@ -301,22 +302,7 @@ def test_the_issued_refresh_token_is_in_no_repr_and_the_access_token_is_nowhere(
     assert ISSUED_REFRESH_TOKEN not in repr(outcome)
     assert ISSUED_ACCESS_TOKEN_CANARY not in repr(outcome)
     assert ISSUED_ACCESS_TOKEN_CANARY not in repr(dataclasses.asdict(outcome))
-    unwrapped = {
-        member.name: (
-            value.get_secret_value()
-            if isinstance(value := getattr(outcome, member.name), SecretStr)
-            else value
-        )
-        for member in dataclasses.fields(outcome)
-    }
-    assert unwrapped["refresh_token"] == ISSUED_REFRESH_TOKEN
-    assert not [
-        name for name, value in unwrapped.items()
-        if name != "refresh_token" and ISSUED_REFRESH_TOKEN in repr(value)
-    ]
-    assert not [
-        name for name, value in unwrapped.items() if ISSUED_ACCESS_TOKEN_CANARY in repr(value)
-    ]
+    assert_holds_only_the_refresh_token(outcome)
 
 
 def _answered(

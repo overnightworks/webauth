@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass, fields, is_dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
@@ -36,6 +36,7 @@ from oidc_arrangement import (
     FakeKeySetEndpoint,
     a_fake_id_token,
     a_logout_token,
+    assert_holds_only_the_refresh_token,
     jws,
     key_set_document,
     public_jwk,
@@ -912,16 +913,8 @@ def test_an_admitted_callback_stores_the_refresh_token_and_nothing_of_the_access
     )
     assert ISSUED_ACCESS_TOKEN_CANARY not in visible
     assert ISSUED_REFRESH_TOKEN not in visible
-    assert not [
-        value for value in public_values(admitted) + public_values(record)
-        if ISSUED_ACCESS_TOKEN_CANARY in value
-    ]
-    assert [value for value in public_values(admitted) if ISSUED_REFRESH_TOKEN in value] == [
-        ISSUED_REFRESH_TOKEN,
-    ]
-    assert [value for value in public_values(record) if ISSUED_REFRESH_TOKEN in value] == [
-        ISSUED_REFRESH_TOKEN,
-    ]
+    assert_holds_only_the_refresh_token(admitted)
+    assert_holds_only_the_refresh_token(record)
 
 
 @pytest.mark.parametrize(("members", "stored"), [
@@ -1750,19 +1743,6 @@ def a_host_with_sessions(
     open_sessions(host, SUBJECT, subject_sessions)
     open_sessions(host, OTHER_SUBJECT, other_sessions)
     return host
-
-
-def public_values(subject: object) -> list[str]:
-    """Every value the public fields of a record hold, a secret unwrapped, as text."""
-    if isinstance(subject, SecretStr):
-        return [subject.get_secret_value()]
-    if is_dataclass(subject) and not isinstance(subject, type):
-        return [
-            text
-            for member in fields(subject)
-            for text in public_values(getattr(subject, member.name))
-        ]
-    return [repr(subject)]
 
 
 def stored_refresh_tokens(host: OidcHost) -> list[str]:

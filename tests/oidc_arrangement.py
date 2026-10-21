@@ -23,7 +23,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from functools import cache
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -35,6 +35,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import RSAAlgorithm
+from pydantic import SecretStr
 
 from webauth.https_client import MAX_KEY_SET_BYTES
 from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointAnswer, TokenRequest
@@ -485,3 +486,31 @@ def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:
         )
     )
     return certificate_path, key_path
+
+
+def leaf_texts(
+    subject: object, path: tuple[str, ...] = (),
+) -> Iterator[tuple[tuple[str, ...], str]]:
+    """Every leaf a value holds as text with its field path, a secret unwrapped."""
+    if isinstance(subject, SecretStr):
+        yield path, subject.get_secret_value()
+    elif is_dataclass(subject) and not isinstance(subject, type):
+        for member in fields(subject):
+            yield from leaf_texts(getattr(subject, member.name), (*path, member.name))
+    elif isinstance(subject, Mapping):
+        for key, member in subject.items():
+            yield from leaf_texts(key, path)
+            yield from leaf_texts(member, (*path, str(key)))
+    elif isinstance(subject, list | tuple | set | frozenset):
+        for index, member in enumerate(subject):
+            yield from leaf_texts(member, (*path, str(index)))
+    else:
+        yield path, str(subject)
+
+
+def assert_holds_only_the_refresh_token(subject: object) -> None:
+    """The issued refresh token is in the `refresh_token` field alone, the access token nowhere."""
+    leaves = list(leaf_texts(subject))
+    assert not [path for path, text in leaves if ISSUED_ACCESS_TOKEN_CANARY in text]
+    assert [path for path, text in leaves if ISSUED_REFRESH_TOKEN in text] == [("refresh_token",)]
+    assert subject.refresh_token.get_secret_value() == ISSUED_REFRESH_TOKEN
