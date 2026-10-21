@@ -27,7 +27,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from functools import cache
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import pytest
 from cryptography import x509
@@ -508,9 +508,15 @@ def leaf_texts(
         yield path, str(subject)
 
 
-def assert_holds_only_the_refresh_token(subject: object) -> None:
+class HoldsRefreshToken(Protocol):
+    @property
+    def refresh_token(self) -> SecretStr | None: ...
+
+
+def assert_holds_only_the_refresh_token(subject: HoldsRefreshToken) -> None:
     """The issued refresh token is in the `refresh_token` field alone, the access token nowhere."""
     leaves = list(leaf_texts(subject))
     assert not [path for path, text in leaves if ISSUED_ACCESS_TOKEN_CANARY in text]
     assert [path for path, text in leaves if ISSUED_REFRESH_TOKEN in text] == [("refresh_token",)]
+    assert subject.refresh_token is not None
     assert subject.refresh_token.get_secret_value() == ISSUED_REFRESH_TOKEN
