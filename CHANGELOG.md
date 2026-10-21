@@ -6,6 +6,14 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.20.1 - Unreleased
+
+**Added**
+
+- `OidcClientConfig` accepts `http` for `redirect_uri` and `post_logout_redirect_uri` when the
+  host is exactly `localhost`, `127.0.0.1` or `[::1]`, so an app's local or CI test stack can
+  boot without a TLS proxy. Every issuer URL stays https and every other http host stays refused.
+
 ## 0.20.0 - Unreleased
 
 **Breaking**

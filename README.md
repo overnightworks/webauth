@@ -600,8 +600,11 @@ callback route, around [`open_session`](#opening-a-session):
 ### The relying party
 
 `webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE
-for one client at one issuer, described by an `OidcClientConfig` whose URLs
-are all https and whose `client_secret` is a `SecretStr`. `begin_login()`
+for one client at one issuer, described by an `OidcClientConfig` whose issuer URLs
+are all https and whose `client_secret` is a `SecretStr`. The two app URLs,
+`redirect_uri` and `post_logout_redirect_uri`, may instead be http on a loopback host
+(`localhost`, `127.0.0.1` or `[::1]`) for local and CI test stacks; every issuer URL
+stays https, and on `http://localhost` cookies are the host's choice (`cookie_secure`). `begin_login()`
 answers the URL to send the browser to and a `PendingLogin` — its state,
 nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
 `complete_login(pending, callback_query)` takes that pending login and the
@@ -1070,8 +1073,8 @@ a TLS proxy it has not listed in `trusted_proxies` still gets both. A browser
 does not send a `Secure` cookie back over plain http, so a host's own session
 login over plain http works only with `cookie_secure=False` in that
 environment's configuration, which drops `Secure` and HSTS together. An
-OpenID Connect sign-in needs https whatever it is set to, because
-`OidcClientConfig` refuses a URL that is not https. With it off,
+OpenID Connect sign-in needs an https issuer whatever it is set to, because
+`OidcClientConfig` refuses an issuer URL that is not https. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
 The HSTS value is fixed at `max-age=31536000; includeSubDomains`; the policy has
