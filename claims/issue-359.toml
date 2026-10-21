@@ -1,0 +1,8 @@
+claim_id = "8edaf344b69e45c78301098d164a4546"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "9a6c61d032a987a9825d1e86b8d92bffdf27521e"
+branch = "claude/issue-359-app-role"
+scope = ["CHANGELOG.md", "README.md", "src/webauth/oidc_login.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py"]
+opened_commit = "2b7f47dcbf6161d74c40736118975f5ac90718d1"
+whole_reason = "A public function, its one production caller, its typing host and its documentation are one change; a part alone leaves an export nobody calls or a README naming a function that does not exist."
