@@ -285,6 +285,13 @@ class RateLimitBackend(Protocol):
 
 
 class AccountEventKind(Enum):
+    """What happened to an account; the fields beyond ``AccountEvent``'s common ones.
+
+    ``USER_CREATED`` carries ``role``; ``ROLE_CHANGED`` carries ``previous_role``
+    and ``role``; ``BACKCHANNEL_LOGOUT`` carries none, and its ``subject_id`` is
+    the account whose sessions the issuer ended.
+    """
+
     USER_CREATED = "user_created"
     ROLE_CHANGED = "role_changed"
     BACKCHANNEL_LOGOUT = "backchannel_logout"
@@ -303,5 +310,9 @@ class AccountEvent:
 
 class AuditSink(Protocol):
     def account_event(self, event: AccountEvent) -> None:
-        """Map an account operation to the host's audit, optionally doing nothing."""
+        """Map an account operation to the host's audit, optionally doing nothing.
+
+        An event with ``actor_id=None`` means the issuer's groups decided, not
+        a person.
+        """
         ...

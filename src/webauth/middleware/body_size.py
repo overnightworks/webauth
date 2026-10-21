@@ -48,7 +48,34 @@ def _declared_length(value: bytes) -> int:
 
 
 class BodySizeLimitMiddleware:
-    """Stop an oversized body at the door, and again while it streams in."""
+    """Stop an oversized body at the door, and again while it streams in.
+
+    A body whose Content-Length is over the limit is refused with 413 before
+    the route runs and spends no rate-limit budget. A streamed body (no
+    Content-Length) is counted as the app reads it, after the session gate's
+    admission, and then spends one budget:
+
+    - read through ``request.body()`` or ``request.stream()`` before the
+      response starts: 413 with the library headers;
+    - parsed by FastAPI (a typed body, ``Form()``, ``File()``/``UploadFile``):
+      FastAPI's 400 "There was an error parsing the body" through the host's
+      ``HTTPException`` handler, and the route never runs;
+    - found over the limit after the response has started (a streaming
+      response that reads the body, or any ``StreamingResponse`` under ASGI
+      spec < 2.4, whose disconnect listener reads it; uvicorn reports 2.3): no
+      second start and no 413, the response is cut off at its next await, one
+      that already finished stays complete, and ``RequestBodyTooLarge``
+      reaches the server either way;
+    - never read, and the response is not a ``StreamingResponse`` under spec
+      < 2.4: not size-checked, the request is answered normally.
+
+    A response's start is sent whole: a cancellation inside the app waits until
+    the start is sent, and so does a host deadline that cancels through an
+    anyio cancel scope outside the stack; asyncio cancellation
+    (``asyncio.timeout``, server shutdown) still interrupts it. The wait ends
+    after ``BodySizePolicy.start_send_seconds``, when the start is cut off with
+    an error that reaches the server; no 413 and no second start follow.
+    """
 
     def __init__(self, app: ASGIApp, policy: BodySizePolicy) -> None:
         self.app = app

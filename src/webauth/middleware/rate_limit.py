@@ -36,7 +36,19 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """Spend one request of the client's budget for the budget it falls into.
 
     The budget belongs to the client's address, or to its whole IPv6 network
-    of the configured prefix -- see ``_budget_address``.
+    of the configured prefix -- see ``_budget_address``. A path in the policy's
+    ``exempt`` spends nothing. The limiter key is ``<name>:<address>``, so
+    renaming a budget starts it fresh.
+
+    A limiter that raises answers 503 with ``Retry-After``, failing closed; so
+    does a Redis that refuses the script. What other refusals spend, when the
+    path is not exempt and the limiter is reached:
+
+    - a 413 by Content-Length spends nothing;
+    - a 413 for a streamed body the route reads spends one;
+    - a CSRF 403 spends one;
+    - the library 500 spends one, except a missing-config 500, which fails
+      before rate admission.
     """
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
