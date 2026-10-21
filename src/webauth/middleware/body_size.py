@@ -53,7 +53,7 @@ class BodySizeLimitMiddleware:
     A body whose Content-Length is over the limit is refused with 413 before
     the route runs and spends no rate-limit budget. A streamed body (no
     Content-Length) is counted as the app reads it, so the request has already
-    passed the middleware outside this one: where the rate limit is installed,
+    passed the middleware inside this one: where the rate limit is installed,
     the path is not exempt and the limiter is reached, it has spent one budget,
     and where the session gate is installed it has been admitted. What follows
     for a body found over the limit:
