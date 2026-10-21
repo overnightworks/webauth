@@ -158,7 +158,7 @@ window. `SCENARIO 7` is the outsider: `d1-outsider` is in no group, signs in at
 Keycloak, reaches the callback and sees "Sign-in refused" with `not-a-member`;
 the host holds 0 accounts and 0 sessions and the browser carries no session
 cookie. `SCENARIO 8` is `d1-admin`, a member of `/apps/songmaker/admin` only
-(the subgroup the run creates, since the pinned realm has none): it is
+(the subgroup the pinned realm declares under `/apps/songmaker`): it is
 admitted, `/admin` answers 200 (the host's `admin_group` is that subgroup),
 and the host holds 1 account. `CHECK outsider-groups-claim` records,
 as a count only, whether Keycloak sends the outsider a `groups` claim at all;

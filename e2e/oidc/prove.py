@@ -1041,8 +1041,6 @@ def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
         f"/{REALM}/clients",
         client_representation(CLIENT_ID, client_secret, (APP_ORIGIN, SECOND_APP_ORIGIN)),
     )
-    songmaker = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")
-    admin.create(f"/{REALM}/groups/{songmaker['id']}/children", {"name": "admin"})
     proof.user_id = create_user(admin, USER_NAME, proof.user_password, (USER_GROUP,))
     proof.disabled_user_id = create_user(
         admin, DISABLED_USER_NAME, proof.disabled_user_password, (USER_GROUP,)
