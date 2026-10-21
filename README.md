@@ -769,6 +769,17 @@ The issuer must send full group paths: in Keycloak the group membership mapper
 needs `full.path` on. Without it the claim holds bare names, no group path
 matches and everyone is refused, which fails safe.
 
+A second service that verifies the issuer's token itself, such as an API behind
+the app, calls `webauth.oidc_login.app_role(groups, admission)` with the same
+`AdmissionConfig` instead of copying the rule. It answers `AppRole.ADMIN` for
+`admin_group` or a path below it, `AppRole.USER` for any other member, and
+`None` for a person outside `login_group`; `EverySubject` makes every set of
+groups a member and `NoAdmins` never yields `ADMIN`. The answer is the kind of
+role, not the host's spelling of it. It reads nothing but its arguments, so
+checking that the groups come from `bound_issuer` stays with the caller, and so
+does checking that the claim is a list of strings: webauth's login refuses any
+other shape, and so should the caller.
+
 ## Reading the session
 
 `webauth.dependencies.current_user_dependency` answers 401 for a missing or
@@ -1360,7 +1371,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: PyJWT reads the token behind a bound of 8,192 characters on the token and 512 on its header segment (longer is `TOKEN_TOO_LONG` or `MALFORMED_TOKEN`), its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` or a `kid` that is not a string is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one, holding the login's refresh token, at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login) and `app_role`, the same rule as a pure function for a second service, `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one, holding the login's refresh token, at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
 | `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client` |
 
 It leaves the application everything that touches the application's own truth:

@@ -28,7 +28,8 @@ role living on the account, on every device at once. Until that login an open
 session keeps the old role. A person is a member when one of their
 groups is that path or a subgroup of it, compared character for character
 and by path segment, so ``/apps/notes/admin`` counts and
-``/apps/notes2`` does not. The check runs on every login, before any
+``/apps/notes2`` does not. ``app_role`` is that rule's public form, for a second
+service that verifies the issuer's token itself. The check runs on every login, before any
 account is looked up or created, so a person removed from the group is
 refused at their next login while their account and data stay, and a person
 put back returns to the same account. It ends no session that is already
@@ -108,6 +109,8 @@ from webauth.oidc import (
 from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pydantic import SecretStr
     from starlette.requests import Request
     from starlette.responses import Response
@@ -128,10 +131,12 @@ __all__ = [
     "AdmissionConfig",
     "AdmissionRefusal",
     "AdmittedLogin",
+    "AppRole",
     "BackchannelLogoutResult",
     "EverySubject",
     "NoAdmins",
     "admit_identity",
+    "app_role",
     "finish_login",
     "log_out",
     "open_session",
@@ -212,8 +217,37 @@ def _is_below(group_path: str, group: str) -> bool:
     return group.startswith(group_path + "/")
 
 
-def _is_member_of(group_path: str, groups: tuple[str, ...]) -> bool:
+def _is_member_of(group_path: str, groups: Sequence[str]) -> bool:
     return any(group == group_path or _is_below(group_path, group) for group in groups)
+
+
+class AppRole(StrEnum):
+    """The kind of role an app's groups carry, not the host's spelling of it."""
+
+    ADMIN = "admin"
+    USER = "user"
+
+
+def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | None:
+    """The role ``groups`` carry in the app ``admission`` describes.
+
+    ``None`` means no member: the groups hold no path of ``admission.login_group``
+    (under ``EverySubject`` every set of groups is a member, the empty one
+    included). ``ADMIN`` means they hold ``admission.admin_group`` or a path below
+    it, which ``NoAdmins`` never matches; ``USER`` is every other member.
+
+    It reads nothing but its arguments. It does not look at
+    ``admission.bound_issuer``: the caller has checked that the groups come from
+    that issuer, as ``admit_identity`` does, and passes the groups claim as a
+    list of strings, refusing any other shape, as webauth's login refuses it.
+    """
+    login_group = admission.login_group
+    if isinstance(login_group, str) and not _is_member_of(login_group, groups):
+        return None
+    admin_group = admission.admin_group
+    if isinstance(admin_group, str) and _is_member_of(admin_group, groups):
+        return AppRole.ADMIN
+    return AppRole.USER
 
 
 class AdmissionRefusal(StrEnum):
@@ -495,22 +529,15 @@ def admit_identity(
     """
     if identity.issuer != admission.bound_issuer:
         return AdmissionRefusal.FOREIGN_ISSUER
-    if not _admits(admission.login_group, identity):
+    derived = app_role(identity.groups, admission)
+    if derived is None:
         return AdmissionRefusal.NOT_A_MEMBER
-    role = _derived_role(admission.admin_group, identity, config)
+    role = config.admin_role if derived is AppRole.ADMIN else config.user_role
     with lock.hold():
         account = accounts.get(identity.subject)
         if account is None:
             return _provision(identity, role, accounts=accounts, audit=audit)
         return _with_role(account, role, accounts=accounts, audit=audit)
-
-
-def _derived_role(
-    admin_group: str | NoAdmins, identity: OidcIdentity, config: WebAuthConfig,
-) -> str:
-    if isinstance(admin_group, str) and _is_member_of(admin_group, identity.groups):
-        return config.admin_role
-    return config.user_role
 
 
 def _with_role(
@@ -528,12 +555,6 @@ def _with_role(
         previous_role=previous_role,
     ))
     return updated
-
-
-def _admits(login_group: str | EverySubject, identity: OidcIdentity) -> bool:
-    if isinstance(login_group, EverySubject):
-        return True
-    return _is_member_of(login_group, identity.groups)
 
 
 def _provision(

@@ -88,10 +88,12 @@ from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
     AdmittedLogin,
+    AppRole,
     BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
     admit_identity,
+    app_role,
     finish_login,
     log_out,
     open_session,
@@ -296,6 +298,14 @@ def a_host_admits_an_identity(
         ),
         accounts=accounts, lock=lock, audit=audit, config=config,
     )
+
+
+def a_second_service_reads_the_app_role_of_its_token_groups(groups: list[str]) -> AppRole | None:
+    return app_role(groups, AdmissionConfig(
+        bound_issuer="https://keycloak.example/realms/host",
+        login_group="/apps/host",
+        admin_group="/apps/host/admin",
+    ))
 
 
 def a_host_uses_the_production_transports() -> tuple[KeySetFetch, TokenRequestPost]:

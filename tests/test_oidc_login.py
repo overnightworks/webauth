@@ -92,10 +92,12 @@ from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
     AdmittedLogin,
+    AppRole,
     BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
     admit_identity,
+    app_role,
     finish_login,
     log_out,
     open_session,
@@ -430,6 +432,26 @@ def test_an_account_gets_the_role_its_groups_derive_at_every_login(case: RoleCas
         [] if case.stored_role else [AccountEventKind.USER_CREATED]
     )
     assert kinds == expected
+
+
+@pytest.mark.parametrize(("groups", "admission", "role"), [
+    pytest.param((ADMIN_GROUP,), ADMISSION, AppRole.ADMIN, id="the admin group"),
+    pytest.param((f"{ADMIN_GROUP}/ops",), ADMISSION, AppRole.ADMIN, id="an admin subgroup"),
+    pytest.param((LOGIN_GROUP,), ADMISSION, AppRole.USER, id="the login group"),
+    pytest.param((f"{LOGIN_GROUP}/staff",), ADMISSION, AppRole.USER, id="a login subgroup"),
+    pytest.param((f"{LOGIN_GROUP}2",), ADMISSION, None, id="a group named like the login group"),
+    pytest.param((), ADMISSION, None, id="no groups"),
+    pytest.param((), EVERYONE, AppRole.USER, id="no groups under every subject"),
+    pytest.param((ADMIN_GROUP,), EVERYONE, AppRole.ADMIN,
+                 id="the admin group under every subject"),
+    pytest.param((LOGIN_GROUP,), EVERYONE_WITH_ADMIN_GROUP, AppRole.USER,
+                 id="every subject without the admin group"),
+    pytest.param((ADMIN_GROUP,), NO_ADMINS, AppRole.USER, id="the admin path without admins"),
+])
+def test_app_role_names_the_role_the_groups_carry(
+    groups: tuple[str, ...], admission: AdmissionConfig, role: AppRole | None,
+) -> None:
+    assert app_role(groups, admission) is role
 
 
 def test_a_role_change_audit_event_carries_the_roles_and_no_username() -> None:
