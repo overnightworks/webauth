@@ -57,40 +57,33 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
     return user
 ```
 
-`current_user_dependency` returns an `AuthDependencies` with three fields:
-`current_user`, `admin_user` and `verified_session_id`. `session_store` is the
-host's own FastAPI dependency. `on_authenticated` binds the account into the
-host's log context. `login_redirect` is optional ([Reading the session](#reading-the-session)).
-`trusted_proxies` names the peers whose `X-Forwarded-For` and `X-Forwarded-Proto`
-are believed. The logout route is `token_exempt` ([Logging out](#logging-out)); the
-sign-in routes are under [OpenID Connect login](#openid-connect-login).
-[`tests/typing/oidc_host.py`](tests/typing/oidc_host.py) is a complete host,
-checked in CI against the built wheel.
+`current_user_dependency` returns an `AuthDependencies` (`current_user`,
+`admin_user`, `verified_session_id`) and its docstring says what `session_store`
+and `on_authenticated` are. `trusted_proxies` names the peers whose
+`X-Forwarded-For` and `X-Forwarded-Proto` are believed. The sign-in routes are
+under [OpenID Connect login](#openid-connect-login); [`tests/typing/oidc_host.py`](tests/typing/oidc_host.py)
+is a complete host, checked in CI against the built wheel.
 
 ## Testing a host
 
 A test that needs a signed-in person needs no issuer. It creates the account and
-a session inside the configured lifetime in the host's own store, then calls
+a session inside the configured lifetime in the host's own store, calls
 `issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
-a `Response` and copies both cookies it sets (read them from
-`response.headers.getlist("set-cookie")`) into its client. The cookies cover a
-read-only request; a state-changing request also sends the value of the CSRF
-cookie in the header named `config.csrf_header_name`, and a form POST also needs
-`Sec-Fetch-Site: same-origin`, or an `Origin` the config allows ([CSRF
-origin](#csrf-origin)); a JSON POST needs neither. When the client keeps the
-cookies' attributes and `cookie_secure` is on, use an `https` base URL.
+a `Response` and copies both cookies it sets into its client. A state-changing
+request also sends the CSRF cookie's value in the header named
+`config.csrf_header_name` and passes the origin check ([CSRF origin](#csrf-origin)).
+When the client keeps the cookies' attributes and `cookie_secure` is on, use an
+`https` base URL.
 
 A test of the host's own start, callback and logout routes gives
 `OidcRelyingParty` its own `post_token_request` (a `TokenRequestPost`, from
 `webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from
-`webauth.jwt_verification`) instead of the HTTPS ones, with the clocks as in
-[The relying party](#the-relying-party). The host owns that stub.
+`webauth.jwt_verification`) instead of the HTTPS ones. The host owns that stub.
 
 The sign-in flow itself is proven against a real issuer: `e2e/oidc/` drives
-Keycloak in a real browser, run by hand, and is webauth's own proof. A host
-proves its own sign-in against a real issuer of its choosing. webauth ships no
-fake issuer, because one that mints tokens does not belong in every production
-install.
+Keycloak in a real browser and is webauth's own proof. A host proves its own
+sign-in against an issuer of its choosing. webauth ships no fake issuer, because
+one that mints tokens does not belong in every production install.
 
 ## Security model
 
@@ -197,146 +190,82 @@ host without the gate follows it itself.
 
 ### The host's start, callback and logout routes
 
-`webauth.oidc_login` carries the pending login for the host in a signed cookie
-of its own, so the host keeps no server-side store and `WebAuthConfig` knows
-nothing of OpenID Connect. The host serves three routes over its one
-`OidcRelyingParty`: start (`start_login`), callback (`finish_login`, then
-`open_session`) and logout (`log_out`). Each function's docstring holds its
-contract, and `build_app` in
+The host serves three routes over its one `OidcRelyingParty`: start
+(`start_login`), callback (`finish_login`, then `open_session`) and logout
+(`log_out`). `webauth.oidc_login` carries the pending login in a signed cookie of
+its own, one per login, so the host keeps no server-side store and
+`WebAuthConfig` knows nothing of OpenID Connect. Each function's docstring holds
+its contract, the `webauth.oidc_login` and `webauth.cookies` module docstrings
+hold the login and its cookies, and `build_app` in
 [`e2e/oidc/host_app.py`](e2e/oidc/host_app.py) is the worked set of routes,
-type-checked and run against a real issuer; `config` is the `WebAuthConfig`
-built under [Session lifetime](#session-lifetime) and the relying party is built
-under [The relying party](#the-relying-party). See also
-[Admitting an identity](#admitting-an-identity).
+type-checked and run against a real issuer.
 
-The host answers the callback with the `response` it passed to `finish_login` on
-every outcome, refusals included, because that response carries the header that
-clears the pending-login cookie. `finish_login` answers an `AdmittedLogin`, or
-the `OidcRefusal` or `AdmissionRefusal` that stopped it; the host then opens
-the session, commits, and only then issues the cookies, so a cookie never names
-a session that was rolled back.
+The library never commits: the host commits an admitted login before it issues
+the cookies. A pending login is single-use because its cookie is cleared and the
+issuer accepts a code once; webauth keeps no replay store. The `finish_login`
+docstring holds the callback's outcomes and the host's duties.
 
 #### The return path
 
-The path a person was headed to before signing in travels through the login as
-`return_to`: the host hands it to `start_login`, and `finish_login` answers it
-again after judging it a second time. Only a same-origin path of this app comes
-back, so a login can never send a browser to another site; anything else comes
+The path a person was headed to travels through the login as `return_to`. Only a
+same-origin path of this app comes back from `finish_login`; anything else comes
 back as `None`, the host's default page, and the login still succeeds. The
-rule, including how `root_path` is read, is in the `start_login` docstring.
-
-#### Opening a session
-
-`open_session` is the whole sequence between admission and the cookies: under
-the host's write lock it ends the session the request's cookie names, prunes the
-account to the host's cap and creates the new session, holding the login's
-refresh token. It never commits and sets no cookie; the host commits, then calls
-`issue_session_cookies`. See its docstring for the order and the cap.
+`start_login` docstring holds the rule.
 
 #### Logging out
 
-`log_out` is the whole logout sequence in one call: it ends the session the
-request's cookie names, clears the session and CSRF cookies and returns the
-issuer's end-session URL, so Keycloak ends its own session too, without asking
-when it receives the ID token hint. It makes no outbound call and never
-commits, so an issuer that is down still leaves the person signed out of the
-app. The logout route is protected by the origin check, not by the CSRF token,
-which is why it is listed in `token_exempt`; the `log_out` docstring says how a
-form and a `fetch` logout differ and what the host's policy needs. The
-post-logout redirect URI must be registered at the issuer (see
-`OidcClientConfig`), and a form logout needs the issuer's origin in
-`form-action` (see [Content-Security-Policy](#content-security-policy)).
-
-The pending login travels in a cookie per login, so two tabs never overwrite
-each other. Its name, flags, value and cap are in the `webauth.cookies` module
-docstring.
+`log_out` is the whole logout sequence in one call: it ends the session, clears
+the cookies and returns the issuer's end-session URL, so the issuer ends its own
+session too. It makes no outbound call, so an issuer that is down still leaves
+the person signed out of the app. Its docstring holds the rest.
 
 #### The ID token hint
 
 `finish_login` hands the browser the login's ID token in a cookie of its own,
 and `log_out` passes it to Keycloak as `id_token_hint`, so Keycloak can end its
 session without asking the person to confirm. The hint is never a credential:
-webauth does not sign, decode, verify or log it, and Keycloak judges it. The
-cookie is scoped to the `logout_path` of the `OidcClientConfig`; its name,
-flags and bound, and what a changed `logout_path` leaves behind, are in the
-`webauth.cookies` module docstring.
-
-The callback names its pending login by state, and `finish_login` clears that
-login's cookie on every outcome while every other tab's stays. A pending login
-is single-use because its cookie is cleared and the issuer accepts its
-authorization code once; webauth keeps no replay store, so a copied cookie is
-stopped by the issuer refusing the spent code (`TOKEN_REQUEST_REFUSED`). The
-callback matrix, which refusal answers which malformed callback, is in the
-`finish_login` docstring.
+webauth does not sign, decode, verify or log it, and Keycloak judges it. Its
+cookie name, scope and flags are in the `webauth.cookies` module docstring.
 
 ### Back-channel logout
 
-When a person's session ends at the issuer, for example after they sign out of
-one app, the issuer posts a Logout Token to every client that session signed in
-to. `webauth.oidc_login.receive_backchannel_logout` reads that form, has
+When a person's session ends at the issuer, the issuer posts a Logout Token to
+every client that session signed in to.
+`webauth.oidc_login.receive_backchannel_logout` reads that form, has
 `OidcRelyingParty.verify_logout_token` check the token, and ends every session
 of its subject, in every browser. The host owns the route and the transaction;
-the route answers 200 only after its commit. The worked route is `build_app`
-in `e2e/oidc/host_app.py`. The token's signature is the only control, so the
-route must be reachable by the issuer alone. The docstrings of those two
-names hold the token rules, the order of the steps, and the CSRF, rate-limit,
-body-size and reachability setup the route needs.
-
-### The host's duties at login
-
-The library never commits, so these belong to the host's callback route:
-redirect to `admitted.return_to` or to a fixed local path, commit the
-transaction `open_session` wrote into before it issues the cookies, and give the
-`WriteLock` a second hold in the same request. The `finish_login` and
-`open_session` docstrings hold the detail.
+the route answers 200 only after its commit. The token's signature is the only
+control, so the route must be reachable by the issuer alone. The docstrings of
+those two names hold the token rules and the setup the route needs.
 
 ### The relying party
 
 `webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE for
 one client at one issuer, described by an `OidcClientConfig` that the host
-builds with its secrets from its own secret channel. `begin_login` starts a
-login, `complete_login` turns the callback into an `OidcIdentity` or an
-`OidcRefusal`, `renew_access` and `workload_access_token` post a refresh and a
-client-credentials grant, and `verify_logout_token` judges a Logout Token.
-Every outbound call goes through the two transports the host injects
+builds with its secrets from its own secret channel. Every outbound call goes
+through the two transports the host injects
 (`webauth.oidc_transport.post_token_request_over_https` and
 `webauth.https_client.fetch_key_set_over_https`), which speak https only, bound
 every request in time and size, follow no redirect and log nothing.
-`build_app` in `e2e/oidc/host_app.py` composes them in a worked host. The docstrings of those names hold the order in which a callback is
-judged, the token rules and the transports' bounds.
 
 ### The person's access token
 
 `webauth.oidc_login.fresh_access_token` turns a signed-in session into a new
-access token for one call to another service (an agent service, say). The
-session holds only the refresh token, so a call that finds a standing session
-with a refresh token is one refresh grant, and the access token goes to the
-host in memory only. It answers a `SecretStr`, or an `AccessTokenRefusal` whose
-`AccessTokenRefusalReason` says what the host does: treat the person as signed
-out, send them to sign in again, or fail the call. A slow issuer holds only the
-caller's thread, never a session row, a login or a logout. A token handed out
-stays valid until its own `exp` after a later logout, and webauth makes no
-revocation call ([Security model](#security-model), item 7). The docstrings of
-`fresh_access_token` and the reasons hold the phases, the host's duties and the
-realm's assumptions.
+access token for one call to another service, in memory only. It answers a
+`SecretStr`, or an `AccessTokenRefusal` whose `AccessTokenRefusalReason` says
+what the host does. A token handed out stays valid until its own `exp` after a
+later logout, and webauth makes no revocation call
+([Security model](#security-model), item 7). `OidcRelyingParty.workload_access_token`
+answers the client's own token.
 
 ### Admitting an identity
 
 `admit_identity` turns a verified identity into the account it signs in as, and
-`finish_login` takes the same `AdmissionConfig`, which the host builds once at
-startup. The host's store is bound to one issuer, so an account's `id` is the
-issuer's subject. The app names a group path such as `/apps/notes`:
-members come in, members of `admin_group` get the admin role, and both are
-decided again at every login, so a change at the issuer takes effect at the
-next sign-in while an open session runs on. Only the issuer's groups decide the
-role. `EverySubject` states on purpose that admission needs no group, and `NoAdmins`
-that the app has no admins; `EverySubject` leaves `admin_group` deciding who is
-admin. A second service that verifies the issuer's token
-itself calls `app_role` instead of copying the rule.
-
-The rules, the order of refusals, and what is written are in the docstrings of
-`AdmissionConfig`, `admit_identity` and `app_role`, and in the
-`webauth.oidc_login` module docstring.
+`finish_login` takes the same `AdmissionConfig`. The host's store is bound to one
+issuer, so an account's `id` is the issuer's subject. Members of `login_group`
+come in, members of `admin_group` get the admin role, and `EverySubject` and
+`NoAdmins` state on purpose that there is no group to require or no admin. A
+second service that verifies the issuer's token itself calls `app_role`.
 
 ## Reading the session
 
@@ -344,63 +273,35 @@ The rules, the order of refusals, and what is written are in the docstrings of
 dependencies `current_user`, `admin_user` and `verified_session_id`. A missing
 or dead session answers 401, or, for a browser navigation on a server-rendered
 host that names a `LoginRedirect`, a redirect to its login page.
-`session_id_from_request` is the one reader of the signed session cookie, and
-`admit_session` decides a session id that the host read itself. Both, and the
-rule that bounds a stored expiry, are documented on the functions.
+`session_id_from_request` reads the signed session cookie and `admit_session`
+decides a session id that the host read itself.
 
 ## The session gate
 
 `install_web_auth_middleware(..., session_gate=SessionGate(...))` makes the rule
 of "Signed out and refused" hold for every route: a request needs a live
 session unless the host names it, so a route that forgets a dependency is gated,
-not public. `SessionGate` names the public and optional paths and the host's
-`SessionTransaction`; behind it the dependencies return the gate's admission
-instead of admitting a second time, and `admitted_user` reads it where no
-dependency is used.
+not public. `admitted_user` reads the gate's admission where no dependency is
+used.
 
 ## WebSocket handshakes
 
-A browser sends the session cookie on a cross-site WebSocket handshake too, and
-the middlewares pass WebSocket scopes through. `authenticate_websocket` is the
-one check a host runs at the handshake: it decides the `Origin` first, then the
-session, and answers the account or a `ConnectionRefusal`. A socket does not end
-when its session does, so the host checks again while it streams.
+A browser sends the session cookie on a cross-site WebSocket handshake too.
+`authenticate_websocket` is the one check a host runs at the handshake: it
+decides the `Origin` first, then the session. A socket does not end when its
+session does, so the host checks again while it streams.
 
 ## Configuration
 
 The host builds one `WebAuthConfig` by keyword and installs it with
 `install_web_auth_config`; no module reads an environment variable or a global.
-It holds the deployment facts: the session secret, trusted proxies, rate-limit
-backend, allowed hosts, session lifetime, cookie and header names, roles, the
-clock and the IPv6 rate-limit prefix. Its docstring says what each field
-decides, and refuses what the library cannot honour at construction.
-
-`cookie_secure` is the one switch for transport security. It alone decides
-whether both cookies carry `Secure` and whether `SecurityHeadersMiddleware`
-sends HSTS, whatever the request's scheme, so a host serving plain http
-(local development) turns it off for that environment and nowhere else.
-
-`SecurityHeadersPolicy` names the headers every response carries, the
-Permissions-Policy and Cache-Control rules among them, and the library's own
-refusals and the 500 carry them too (see [Middleware order](#middleware-order)).
-
-### The cookie-name rule
-
-The session and CSRF cookies default to `__Host-` names, which only this exact
-host can set, and to plain names when `cookie_secure=False`. A name a host
-chooses is held to a rule that stops a login loop or a clash with a cookie the
-library sets itself; `WebAuthConfig` lists it and refuses a breach when it is
-built. The defaults are the constants in `webauth.cookies`. The ID token hint
-cookie is described under [The ID token hint](#the-id-token-hint).
-
-### Content-Security-Policy
-
-`default_content_security_policy()` builds the policy a host gives
-`SecurityHeadersPolicy`: nothing loads unless this origin serves it, and no page
-may frame it. It holds no host fact; a host adds its own sources per
-`CspDirective` through `added_sources` without copying the string. Its
-docstring holds the default directives, how sources are written and checked, and
-the `form-action` case for a form that posts or redirects to an issuer.
+Its docstring says what each field decides and what construction refuses.
+`cookie_secure` is the one switch for transport security: it alone decides
+whether both cookies carry `Secure` and whether HSTS is sent, whatever the
+request's scheme, so a host serving plain http (local development) turns it off
+for that environment and nowhere else. `SecurityHeadersPolicy` names the headers
+every response carries, the library's own refusals and the 500 among them, and
+`default_content_security_policy()` builds the policy a host gives it.
 
 ## The store decides every request
 
@@ -412,82 +313,48 @@ writes the expiry it is given.
 ## Session lifetime
 
 `SessionLifetime` holds the two numbers that decide how long someone stays
-signed in: an idle window and an absolute cap from the session's creation. The
-library owns the rule; `admit_session` documents it. The session, CSRF and
-ID-token hint cookies live as long as the cap, issued once at login and never
-reissued (`issue_session_cookies`), so the cap is also the worst-case delay
-before a removal from the host's login group takes effect: an open session is
-not re-checked. The recommended policy for a host that admits by `login_group`
-is a 12-hour cap with an idle window of the same length. Every login checks the
-group again, and the issuer's SSO session turns that login into a redirect the
-person does not notice. A removal takes effect at once only by disabling the
-user at the issuer together with the back-channel logout ("Back-channel logout"
-above); without it, an open app session stays valid until it expires.
-
-## Ending a session
-
-Ending a session is a call on the host's store: `delete`, `delete_for_user` or
-`prune_overflow`. The library makes it in `log_out`, `open_session` and
-back-channel logout only, and a host that signs in through OpenID Connect ends a
-session with [`log_out`](#logging-out).
+signed in: an idle window and an absolute cap from the session's creation. An
+open session is not re-checked, so the cap is also the worst-case delay before a
+removal from the host's login group takes effect. The recommended policy for a
+host that admits by `login_group` is a 12-hour cap with an idle window of the
+same length. Every login checks the group again, and the issuer's SSO session
+turns that login into a redirect the person does not notice. A removal takes
+effect at once only by disabling the user at the issuer together with
+[Back-channel logout](#back-channel-logout).
 
 ## Middleware order
 
 `install_web_auth_middleware` adds the library's middleware in one order,
-outermost first, and refuses a stack that would break it:
-
-1. `SecurityHeadersMiddleware` (required): outside everything, so the library's
-   own refusals (the 413s, the 429 and 503, the CSRF 403s and the 500) carry
-   the headers.
-2. `BodySizeLimitMiddleware`: a body declared too large is refused before it
-   costs a rate-limit budget or a session lookup.
-3. `IpRateLimitMiddleware`: outside CSRF, so forged requests spend the
-   address's budget.
-4. `CsrfOriginMiddleware`.
-5. `CsrfTokenMiddleware`.
-6. `SessionGateMiddleware`: innermost, so a request refused before admission
-   never costs a session lookup, and a forged state-changing request is refused
-   before it renews a session.
-
-Install it once and add no library middleware yourself. Where a host's own
-middleware goes, what each refusal spends from the rate-limit budget, and the
-cases of a body over the limit are in the docstrings of
-`install_web_auth_middleware`, `IpRateLimitMiddleware` and
-`BodySizeLimitMiddleware`. A host whose own middleware is the session authority
-answers a request without a session with `webauth.dependencies.unauthenticated_response`.
+outermost first, and refuses a stack that would break it: security headers, body
+size limit, per-address rate limit, CSRF origin, CSRF token, session gate. Install
+it once and add no library middleware yourself. Its docstring holds the reason
+for each position and where a host's own middleware goes. A host
+whose own middleware is the session authority answers a request without a
+session with `webauth.dependencies.unauthenticated_response`.
 
 ## CSRF origin
 
 `CsrfOriginMiddleware` refuses a state-changing request that a foreign page
-originated. It trusts `Sec-Fetch-Site` where a browser sends it and otherwise
-compares `Origin` (or `Referer`) with the hosts in `WebAuthConfig`. A request
-that names no origin passes when it is a JSON POST and is refused when it is a
-form. `CsrfPolicy` decides which paths are checked and defaults to fail-closed;
-the middleware's docstring holds how a malformed origin and an allowed host
-pattern are matched.
+originated, by `Sec-Fetch-Site` where a browser sends it and otherwise by
+comparing `Origin` (or `Referer`) with the hosts in `WebAuthConfig`. `CsrfPolicy`
+decides which paths are checked and defaults to fail-closed.
 
 ## Rate limiting, and the optional Redis extra
 
-`WebAuthConfig.rate_limits` is a `webauth.ports.RateLimitBackend`: a sliding
-window per key that counts the current event and raises rather than guessing
-when it cannot answer, so the middleware fails the request closed. The host
-names its budgets in a `webauth.policies.RateLimitPolicy`: a default budget,
-rules that give some paths another, and paths that spend nothing.
-
-Two backends implement the port. `webauth.rate_limit.RedisRateLimitBackend`
-shares one window across every process that reaches the same Redis and needs
-the optional extra, `overnightworks-webauth[redis]`.
-`webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
-process's memory, for a single-node host that runs one worker, and needs no
-Redis.
+`WebAuthConfig.rate_limits` is a `webauth.ports.RateLimitBackend`, and the host
+names its budgets in a `webauth.policies.RateLimitPolicy`. A backend that cannot
+answer raises, so the middleware fails the request closed.
+`webauth.rate_limit.RedisRateLimitBackend` shares one window across processes and
+needs the optional extra, `overnightworks-webauth[redis]`;
+`webauth.rate_limit.SingleProcessRateLimitBackend` serves a single-node host that
+runs one worker and needs no Redis.
 
 ## Audit events
 
 The library reports an account operation (a user created, a role changed, a
-back-channel logout) to the host's `AuditSink.account_event`. The host maps it
-to its audit system or implements a no-op. An event carries no session
-identifier or username; the fields each `AccountEventKind` adds are in its
-docstring.
+back-channel logout) to the host's `AuditSink.account_event`, which maps it to
+the host's audit system or does nothing. An event carries no session identifier
+or username.
 
 ## What it owns, and what it leaves to the host
 
@@ -497,42 +364,35 @@ It owns the machinery an application should not rebuild:
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
 | `webauth.cookies` | The signed session cookie, the CSRF token bound to it, the pending-login cookie and the ID token hint cookie, issued and cleared |
-| `webauth.dependencies` | Turning a signed cookie into the account that made the request or opened a WebSocket handshake (`authenticate_websocket`), and a session id into that account without a request (`admit_session`) |
+| `webauth.dependencies` | Turning a signed cookie, or a session id, into the account that made the request or opened a WebSocket handshake |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
-| `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `SessionTransaction`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
+| `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with, Redis or in-process |
+| `webauth.ports` | What the host supplies, as Protocols, and `AuthenticatedUser`, which the library hands out |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, security-header and session-gate middleware, and `install_web_auth_middleware`, which installs them in the one order |
-| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: PyJWT reads the token behind a bound of 8,192 characters on the token and 512 on its header segment (longer is `TOKEN_TOO_LONG` or `MALFORMED_TOKEN`), its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` or a `kid` that is not a string is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
-| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
-| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity, and the refresh and client-credentials grants answering a fresh access token |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login) and `app_role`, the same rule as a pure function for a second service, `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one, holding the login's refresh token, at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, `fresh_access_token`, which turns a live session into a new access token for one call and stores the issuer's rotated refresh token, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
-| `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client` |
+| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds, against the issuer's cached key set |
+| `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-request form POST |
+| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged, the ID token verified, and the refresh and client-credentials grants |
+| `webauth.oidc_login` | The login from the host's routes: admission and role, `open_session`, `log_out`, `fresh_access_token` and `receive_backchannel_logout` |
+| `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost` |
 
 It leaves the application everything that touches the application's own truth:
 
 - **Users and roles.** It has no user model and no role names beyond the
   configured ones; the one thing it writes to an account is the role admission
-  derives from the issuer's groups (`admin_role` or `user_role`), and it
-  decides no authorisation beyond the admin check.
-- **Persistence.** It holds no schema and no ORM, and an import-linter contract
-  keeps it that way. What it needs reaches it through the Protocols in
-  `webauth.ports`.
-- **Transactions.** The library commits nothing; a store either applies each of
-  its calls at once or writes into a transaction the host commits. Whether a
-  request that fails leaves the auth machinery's writes behind is the host's: a
-  transaction that rolls back on an exception leaves none, a store that applies
-  each call keeps them, and the rate-limit budget counts attempts either way.
-  Behind [the session gate](#the-session-gate), the gate makes the session
-  renewal durable through the host's `SessionTransaction` before the route runs,
-  so a route that fails afterwards does not undo it.
-  [`fresh_access_token`](#the-persons-access-token) opens and leaves two short
-  transactions through the same `SessionTransaction`, neither held across the
-  issuer's grant.
+  derives from the issuer's groups, and it decides no authorisation beyond the
+  admin check.
+- **Persistence.** It holds no schema and no ORM; what it needs reaches it
+  through the Protocols in `webauth.ports`.
+- **Transactions.** The library commits nothing. Whether a request that fails
+  leaves the auth machinery's writes behind is the host's: a transaction that
+  rolls back on an exception leaves none, a store that applies each call keeps
+  them, and the rate-limit budget counts attempts either way. Behind
+  [the session gate](#the-session-gate), the renewal is durable before the route
+  runs.
 - **Routes.** It defines none. The only responses it writes are its own
   refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
-  path. Once a response has started it writes nothing more: a streamed body over
-  the limit then raises `RequestBodyTooLarge` to the server.
+  path.
 - **Identity.** It issues no access or ID tokens: it is no identity provider, and
   it verifies the ID tokens an issuer made.
 - **HTTP framing** is the ASGI server's job. uvicorn's two parsers, h11 and
@@ -543,15 +403,9 @@ It leaves the application everything that touches the application's own truth:
 ## Install
 
 `overnightworks-webauth` is not on PyPI: it installs only from the wheel
-published as an asset on each tag's release. Take the version
-from the [Releases page](https://github.com/overnightworks/webauth/releases)
-and put it in place of `X.Y.Z`:
-
-```bash
-uv pip install "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl"
-```
-
-In a `pyproject.toml`:
+published as an asset on each tag's release. Take the version from the
+[Releases page](https://github.com/overnightworks/webauth/releases) and put it in
+place of `X.Y.Z`, in a `pyproject.toml`:
 
 ```toml
 dependencies = [
@@ -577,8 +431,17 @@ release.
 
 ## Development
 
-The checks a change must pass, and the commands that run them, are in
-[AGENTS.md](AGENTS.md) under "Checks".
+[AGENTS.md](AGENTS.md) holds the repository's rules, the checks a change must
+pass and how a release is made. The commands live under `scripts/`:
+
+- `scripts/check.sh` runs every static check CI's `checks` job runs;
+- `scripts/regenerate-build-constraints.sh` regenerates the hash-pinned build
+  constraints from the setuptools floor in `pyproject.toml`;
+- `scripts/verify-release.sh` downloads a release and checks the checksums and
+  build-provenance attestations of its wheel and sdist.
+
+The proof runs against a real issuer are described in
+[`e2e/oidc/README.md`](e2e/oidc/README.md).
 
 ## Licence
 

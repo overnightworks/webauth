@@ -16,12 +16,12 @@ injected wall clock, so leeway has one owner.
 Signing keys come from the configured key-set URL through the injected fetch.
 A fetched key set replaces the cached one only once every key in it is sound,
 so a failed or poisoned refresh never evicts the last good set; that set
-expires on the injected monotonic clock. Keys published for another purpose —
-encryption, another algorithm or key type — are passed over, not refused,
-because issuers such as Keycloak publish them beside the signing keys. They
-do not count toward `MAX_KEY_SET_KEYS`, which bounds the RS256 verification
-keys, named or not, the only ones that cost key construction and cache space.
-The size of the whole document is bounded by `MAX_KEY_SET_BYTES`, so
+expires one hour after it was fetched, on the injected monotonic clock. Keys
+published for another purpose — encryption, another algorithm or key type — are
+passed over, not refused, because issuers such as Keycloak publish them beside
+the signing keys. They do not count toward `MAX_KEY_SET_KEYS`, which bounds the
+RS256 verification keys, named or not, the only ones that cost key construction
+and cache space. The size of the whole document is bounded by `MAX_KEY_SET_BYTES`, so
 passed-over entries cost a few lookups each and nothing more. Each entry is
 checked in this order: an object without a secret member, then RS256
 eligibility, then the count, then the key itself.
@@ -33,9 +33,18 @@ An eligible key may lack `kid`; beside other eligible keys it is admitted but
 unreachable, because a named `kid` looks up only named keys. An explicit
 `"kid": null` is malformed, and a duplicate named `kid` is refused. A token
 without `kid` triggers no refresh of its own, so a rotation of a sole key, or a
-change between one and several keys, can stay unseen until the key set
-expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh
+change between one and several keys, can stay unseen for up to that hour,
+unless a token naming an unfamiliar `kid` triggers an earlier refresh
 (OIDC Core 10.1.1: an unfamiliar `kid` is the rotation signal).
+
+A token naming an unfamiliar `kid` triggers a refresh, but not on every such
+token: a refresh is skipped for `KEY_SET_REFRESH_COOLDOWN_SECONDS` after the
+last attempt and while another request is refreshing. The refusal then depends
+on the last refresh attempt: `UNKNOWN_KEY_ID` when it succeeded and the key set
+it fetched lacks the `kid`, `KEY_SET_UNAVAILABLE` when it failed, because the
+`kid` may belong to a rotated key. A token that passes the header checks while
+no current key set remains after the refresh attempt is refused as
+`KEY_SET_UNAVAILABLE`.
 """
 
 from __future__ import annotations
@@ -223,7 +232,13 @@ class JwtVerifier:
 
     def verify(self, token: str, *, expected_type: str | None = None) -> VerifiedClaims | Rejected:
         """Verify ``token``; when ``expected_type`` is given, its header's
-        ``typ`` must equal it exactly."""
+        ``typ`` must equal it exactly.
+
+        A token over ``MAX_TOKEN_CHARACTERS`` is refused as ``TOKEN_TOO_LONG``.
+        A token whose encoded header segment, the part before the first dot,
+        exceeds 512 characters is refused as ``MALFORMED_TOKEN`` even when the
+        whole token fits that limit; an issuer whose headers carry more than
+        that cannot be verified."""
         try:
             return self._verified_claims(token, expected_type)
         except _VerificationRefusal as refusal:
