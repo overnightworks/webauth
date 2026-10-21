@@ -1,8 +1,0 @@
-claim_id = "089e4b7ff1fc4ec7962f51101c9e1410"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "9c9a188bdd94778de42a3e8d31d7d9527e5dadbd"
-branch = "claude/issue-361-refresh-and-workload-grants"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/oidc.py", "tests/oidc_arrangement.py", "tests/test_oidc.py", "tests/typing/oidc_host.py"]
-opened_commit = "c242932c724f555c3cb3315cb19e99aff2d79007"
-whole_reason = "Both grants share one request builder, one status helper and one Bearer reader in oidc.py; landing one without the other leaves a shared reader with a single caller and the code exchange half moved (#348 §3b)."
