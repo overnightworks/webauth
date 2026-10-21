@@ -44,9 +44,10 @@ issuer posts (OpenID Connect Back-Channel Logout 1.0, section 2.6) with the
 same verifier and key cache, and answers the `VerifiedLogout` naming the
 subject whose sessions end, or an `OidcRefusal`. The token must be an RS256
 `logout+jwt` of the configured issuer whose one audience is the client ID,
-issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway ago, with
-an `exp` after its `iat`, the back-channel logout event, a `sub` and no
-`nonce`. Its `sid` is never read. There is no replay store: the age bound is
+issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway ago and
+not more than the leeway ahead, with an `exp` after its `iat`, an `events`
+member holding exactly the back-channel logout event and no other, a `sub` and
+no `nonce`. Its `sid` is never read. There is no replay store: the age bound is
 what limits a copy.
 
 `OidcRelyingParty.logout_url` answers the issuer's end-session URL, which
@@ -518,7 +519,8 @@ class OidcRelyingParty:
         """The subject whose sessions end, or the refusal.
 
         Stricter than the Back-Channel Logout profile asks: `iat` must be an
-        integer, the `events` member for the logout event an object, `sub`
+        integer and no more than the leeway in the future, `events` must hold
+        the logout event and no other key, that event's member an object, `sub`
         non-empty (a token naming only a `sid` is refused) and `nonce` absent,
         even as `null`. The token, its claims and its `sid` are never returned,
         so no session id is stored. A copy of a valid token ends the subject's

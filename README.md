@@ -533,8 +533,8 @@ judged, the token rules and the transports' bounds.
 
 `webauth.oidc_login.fresh_access_token` turns a signed-in session into a new
 access token for one call to another service (an agent service, say). The
-session holds only the refresh token, so each call is one refresh grant, and
-the access token goes to the host in memory only. It answers a `SecretStr`, or
+session holds only the refresh token, so a call that finds a standing session
+is one refresh grant, and the access token goes to the host in memory only. It answers a `SecretStr`, or
 an `AccessTokenRefusal` whose `AccessTokenRefusalReason` says what the host
 does: treat the person as signed out, send them to sign in again, or fail the
 call. A slow issuer holds only the caller's thread, never a session row, a

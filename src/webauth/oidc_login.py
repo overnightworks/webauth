@@ -485,10 +485,13 @@ def fresh_access_token(
     issuer returned. Admission's own decision judges the session both times,
     and nothing renews it: asking for a token is not the person's request.
 
-    Each call costs one refresh grant at the issuer, and the host holds the
-    token in memory for the one call it serves and stores it nowhere. No session row or lock is held
-    during the grant, so a slow issuer holds only the caller's thread, bounded
-    by the transport's deadline.
+    A call that finds the session ended or without a refresh token answers
+    before the issuer is contacted; every other call costs one refresh grant at
+    the issuer. The host holds the token in memory for the one call it serves
+    and stores it nowhere. No session row or lock is held during the grant, so
+    a slow issuer holds only the caller's thread, for as long as the
+    transport's documented bounds allow (its deadline excludes the host name
+    lookup and connecting).
 
     The second transaction is the last check: a token handed out stays valid at the
     service it is sent to, and at the issuer's own endpoints, until its own
@@ -554,8 +557,9 @@ def _stored(sessions: SessionRecordStore, session_id: str, refresh_token: Secret
 
 class BackchannelLogoutResult(Enum):
     """The host's route answers 200 for ``ACCEPTED`` only after it has committed,
-    and 400 for ``REFUSED`` and for any failure, which leave every session in
-    place."""
+    and 400 for ``REFUSED`` and for any failure. The function deletes sessions
+    before it emits its audit event and rolls nothing back, so a failure leaves
+    every session in place only when the host's transaction rolls back."""
 
     ACCEPTED = "accepted"
     """The token held: the subject's sessions, if any, are deleted in the
@@ -583,8 +587,10 @@ def receive_backchannel_logout(
     lock is taken. Under the lock, a subject with no account is accepted and
     creates none; a known subject loses every session in every browser, and one
     ``backchannel_logout`` audit event with ``actor_id=None`` is emitted when
-    at least one session ended. It never commits, clears a cookie or calls the
-    issuer.
+    at least one session ended. It never commits, rolls back, clears a cookie
+    or calls the issuer. Run it inside one host transaction that rolls back
+    when it raises, including when the audit sink fails after the deletion, and
+    commits only after it returns ``ACCEPTED``.
 
     The verification, the lock and the stores are synchronous: run it in a
     worker thread that creates and uses its stores there.
@@ -594,8 +600,8 @@ def receive_backchannel_logout(
     Origin nor a cookie, so list the exact path (never a prefix) in ``exempt``
     of both CSRF policies. It posts from shared server addresses, so exempt the
     exact path from the rate limit too, or one budget refuses a real logout.
-    Give it a ``BodySizeRule`` that admits a Logout Token (32 KiB in the proof
-    host, above its default) and a ``CacheControlRule`` of ``no-store``, and
+    Give it a ``BodySizeRule`` that admits a Logout Token, which the default
+    may not, and a ``CacheControlRule`` of ``no-store``, and
     register the URL on the client by an internal name, never through the
     public hostname or an access proxy in front of it.
     """
