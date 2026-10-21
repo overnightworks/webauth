@@ -957,10 +957,8 @@ OpenID Connect sign-in needs https whatever it is set to, because
 `OidcClientConfig` refuses a URL that is not https. With it off,
 `SecurityHeadersMiddleware` also removes an HSTS header a route set itself.
 
-`SecurityHeadersPolicy.hsts_max_age_seconds` sets the HSTS `max-age`; it
-defaults to `DEFAULT_HSTS_MAX_AGE_SECONDS` (31536000, one year) and takes a
-whole number of seconds from 0 up. `0` sends `max-age=0`, which rolls a pin
-back. `hsts_include_subdomains` (default `True`) adds `includeSubDomains`.
+The HSTS value is fixed at `max-age=31536000; includeSubDomains`; the policy has
+no field for it.
 
 `SecurityHeadersMiddleware` sends the `Permissions-Policy` its
 `SecurityHeadersPolicy` names in `permissions_policy`. The field defaults to

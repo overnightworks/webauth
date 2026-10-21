@@ -55,6 +55,7 @@ from webauth.middleware.security_headers import (
     CONTENT_TYPE_OPTIONS,
     FRAME_OPTIONS,
     REFERRER_POLICY,
+    STRICT_TRANSPORT_SECURITY,
 )
 from webauth.policies import (
     PathRules,
@@ -139,7 +140,7 @@ def assert_carries_policy_headers(
         "permissions-policy": policy.permissions_policy,
     }
     if hsts:
-        expected["strict-transport-security"] = policy.strict_transport_security
+        expected["strict-transport-security"] = STRICT_TRANSPORT_SECURITY
     carried = {name: headers.get(name) for name in (*expected, "strict-transport-security")}
     assert carried == {"strict-transport-security": None, **expected}
 
