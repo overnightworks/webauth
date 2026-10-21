@@ -1,0 +1,7 @@
+claim_id = "5f8646235c0245ee8b2ad2f6ae3afa23"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "90612a1b1ac3bd00a16181089e932cf34ffa0b49"
+branch = "docs/login-failed-name"
+scope = ["README.md"]
+opened_commit = "defe5b348105c395b9411b6180929cb5252dccf5"
