@@ -622,6 +622,26 @@ or kept. A `refresh_token` in the answer must be a string of RFC 6749 Appendix A
 `1*VSCHAR` (printable ASCII); anything else, `null` included, is
 `TOKEN_ENDPOINT_FAILED`.
 
+Two more calls post a grant to the same token endpoint, with the same Basic
+authorization, no cache and no lock, so each call is one POST and a fresh
+token. `renew_access(refresh_token)` posts `grant_type=refresh_token` with the
+refresh token a `SecretStr` holds and answers a `RenewedAccess`: the new
+`access_token` and the `refresh_token` the issuer rotated to, or `None` when it
+sent none. `workload_access_token()` posts `grant_type=client_credentials` and
+nothing else, so the issuer applies the client's default scopes, and answers
+the client's own access token. Both answers need a `token_type` that is
+`Bearer` in ASCII, any case, and an `access_token` of RFC 6750's `b64token`
+shape, so it can sit in an `Authorization` header; anything else is
+`TOKEN_ENDPOINT_FAILED`. A refresh token outside the grammar above, sent or
+received, is `TOKEN_ENDPOINT_FAILED` too, and a sent one reaches no request.
+An issuer's `error` on a 400 or 401 is `TOKEN_REQUEST_REFUSED` carrying
+`idp_error`, as in the code exchange (`invalid_grant` for a refresh token the
+issuer no longer accepts, `unauthorized_client` for a client with no service
+account); any other failure is `TOKEN_ENDPOINT_FAILED`. Neither call decodes
+a token: its claims are for whoever receives it to judge. The realm must give
+the client a service account holding the role the receiver demands; that is
+the realm's duty, not the library's.
+
 For a Keycloak client the host builds one `OidcClientConfig`. The client id and secret come
 from the host's secret channel, never from source:
 
@@ -682,7 +702,7 @@ and `Accept: application/json`; it hands back any answer but a redirect —
 an issuer's `400 invalid_grant` included — and raises `TokenEndpointError`
 for a redirect, an answer past `MAX_TOKEN_RESPONSE_BYTES`, a TLS failure, a
 timeout or an unreachable origin. Its message is the library's own and never
-quotes the URL, the client secret, the code or the verifier. urllib3 logs
+quotes the URL, the client secret, the code, the verifier or a refresh token. urllib3 logs
 nothing during either call, since its records quote the URL and whatever
 malformed header text the origin sends back. A `timeout_seconds` or
 `deadline_seconds` of zero or less raises `ValueError`, and
@@ -1370,7 +1390,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.middleware` | Body-size, CSRF, rate-limit, security-header and session-gate middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: PyJWT reads the token behind a bound of 8,192 characters on the token and 512 on its header segment (longer is `TOKEN_TOO_LONG` or `MALFORMED_TOKEN`), its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` or a `kid` that is not a string is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
-| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity |
+| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity, and the refresh and client-credentials grants answering a fresh access token |
 | `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login) and `app_role`, the same rule as a pure function for a second service, `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one, holding the login's refresh token, at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
 | `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client` |
 
