@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
@@ -27,6 +28,7 @@ from webauth_arrangement import (
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
     AlwaysFailingRateLimitBackend,
+    SessionRecordsInMemory,
     a_csrf_passing_request_headers,
     a_web_auth_config,
     an_http_scope,
@@ -42,6 +44,8 @@ from webauth.middleware import (
     CsrfTokenMiddleware,
     IpRateLimitMiddleware,
     SecurityHeadersMiddleware,
+    SessionGate,
+    SessionGateMiddleware,
     install_web_auth_middleware,
 )
 from webauth.policies import (
@@ -62,6 +66,11 @@ WEBHOOK_PREFIX = "/webhook/"
 WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
 PROTECTED_PATH = "/api/protected"
 HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+A_SESSION_GATE = SessionGate(
+    session_transaction=lambda: nullcontext(SessionRecordsInMemory()),
+    login_redirect=None,
+    public=(),
+)
 SAME_ORIGIN = {"origin": ALLOWED_ORIGIN, "sec-fetch-site": "same-origin"}
 FOREIGN = {"origin": FOREIGN_ORIGIN}
 FORM = "application/x-www-form-urlencoded"
@@ -144,7 +153,9 @@ def an_app_without_config() -> FastAPI:
     return app
 
 
-def install_full_stack(app: FastAPI, *, max_requests: int = 100) -> None:
+def install_full_stack(
+    app: FastAPI, *, max_requests: int = 100, session_gate: SessionGate | None = None,
+) -> None:
     install_web_auth_middleware(
         app,
         security_headers=HEADERS_POLICY,
@@ -152,6 +163,7 @@ def install_full_stack(app: FastAPI, *, max_requests: int = 100) -> None:
         rate_limit=a_rate_limit_policy(max_requests),
         csrf_origin=CsrfPolicy(),
         csrf_token=CsrfPolicy(),
+        session_gate=session_gate,
     )
 
 
@@ -362,6 +374,7 @@ class TestRefusedInstallation:
             pytest.param(type("OwnLimiter", (IpRateLimitMiddleware,), {}), id="rate-limit"),
             pytest.param(type("OwnOriginCheck", (CsrfOriginMiddleware,), {}), id="csrf-origin"),
             pytest.param(type("OwnTokenCheck", (CsrfTokenMiddleware,), {}), id="csrf-token"),
+            pytest.param(type("OwnGate", (SessionGateMiddleware,), {}), id="session-gate"),
         ],
     )
     def test_hand_added_subclass_of_library_middleware_is_refused_and_leaves_the_app_alone(
@@ -378,7 +391,7 @@ class TestRefusedInstallation:
         self,
     ) -> None:
         installed = a_fresh_app()
-        install_full_stack(installed)
+        install_full_stack(installed, session_gate=A_SESSION_GATE)
         accepted = []
         for entry in installed.user_middleware:
             carrier = a_fresh_app()

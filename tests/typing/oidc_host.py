@@ -66,6 +66,9 @@ from webauth.middleware import (
     CsrfTokenMiddleware,
     IpRateLimitMiddleware,
     SecurityHeadersMiddleware,
+    SessionGate,
+    SessionGateMiddleware,
+    admitted_user,
     install_web_auth_middleware,
 )
 from webauth.oidc import (
@@ -102,6 +105,7 @@ from webauth.policies import (
     CspDirective,
     CsrfPolicy,
     PathRules,
+    PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
     RateLimitRule,
@@ -116,6 +120,7 @@ from webauth.ports import (
     RateLimitBackend,
     SessionRecord,
     SessionRecordStore,
+    SessionTransaction,
     SubjectUserStore,
     UsernameTakenError,
     UserRecord,
@@ -345,7 +350,21 @@ def a_host_installs_the_middleware(app: FastAPI) -> None:
         ),
         csrf_origin=CsrfPolicy(),
         csrf_token=CsrfPolicy(),
+        session_gate=SessionGate(
+            session_transaction=a_host_session_transaction,
+            login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
+            public=(PublicRule(PathRules(exact=frozenset({"/login"}))),),
+        ),
     )
+
+
+def a_host_session_transaction() -> AbstractContextManager[SessionRecordStore]:
+    return nullcontext(HostSessions())
+
+
+def a_host_reads_the_admitted_user(request: Request) -> str | None:
+    user = admitted_user(request)
+    return None if user is None else user.username
 
 
 def a_host_signs_a_session_in_and_out(response: Response, config: WebAuthConfig) -> None:
@@ -370,7 +389,8 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionLifetime,
         MAX_SESSION_LIFETIME_SECONDS,
-        SessionRecordStore,
+        SessionGate, SessionGateMiddleware, SessionRecordStore, SessionTransaction,
+        PublicRule, admitted_user,
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,

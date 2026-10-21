@@ -16,6 +16,25 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `webauth.middleware.security_headers.STRICT_TRANSPORT_SECURITY`), sent exactly when
   `cookie_secure` is on. Migrate by dropping the two arguments; a host that set neither is
   unchanged.
+- `SessionRecordStore.load` no longer promises to hold the session against concurrent
+  writers until the caller commits. The library relies on `touch`'s update-only answer
+  instead, which a store that applies each call at once meets too. A host's store needs no
+  change; a host that relied on the hold itself keeps it only from its own transactional
+  store.
+
+**Added**
+
+- `install_web_auth_middleware` takes `session_gate=SessionGate(...)`. Every request then
+  needs a live session, except those named by `public` (`PublicRule`, by path and optionally
+  by method) and `optional`. A request without one gets exactly what `current_user_dependency`
+  answers for it: the login redirect for a navigation, otherwise 401 with the dependency's
+  detail (`Authentication required`, `Invalid session` or `Session expired`). The gate opens
+  the host's transaction through the new `webauth.ports.SessionTransaction`, and commits the
+  session renewal before the route runs; a route that fails afterwards does not undo it.
+- Behind the gate, `current_user`, `admin_user` and `verified_session_id` return the gate's
+  admission for the request's own session cookie, so a request still costs one `load` and one
+  `touch`. `webauth.middleware.admitted_user` reads the account where no dependency is used,
+  and on optional paths.
 
 ## 0.19.0
 
