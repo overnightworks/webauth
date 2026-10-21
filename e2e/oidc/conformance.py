@@ -1,7 +1,6 @@
 """Runs webauth as the relying party of the pinned OpenID conformance suite.
 
-    flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \\
-        uv run --group dev --group e2e python e2e/oidc/conformance.py --scratch EMPTY_DIR
+    scripts/e2e-oidc.sh conformance --scratch EMPTY_DIR
 
 Read ``README.md`` beside this file first. The run lists the plan's modules as
 the suite names them, drives each one the expectation table does not skip through

@@ -13,45 +13,37 @@ port, one leaf certificate trusted by its public-key hash) and the browser conte
 (`browser_context`).
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
-Playwright browser, and takes a few minutes. CI only lints `e2e/`.
+Playwright browser, and takes a few minutes. CI only lints `e2e/`. Every terminal
+step is a verb of `scripts/e2e-oidc.sh`, which holds the commands, the caps and the lock.
 
 ## Prerequisites
 
 - Docker. The probe picks free loopback ports, so the live edge keeps running.
 - An edge checkout at the commit in `EDGE_SHA`, with no change in any path its
   probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/edge`, `traefik.yml`,
-  `dynamic`). The script refuses to run otherwise.
-- Playwright's Chromium for the pinned version (`uv run --group e2e playwright
-  install chromium` if `~/.cache/ms-playwright` lacks it).
-- The relay image of the back-channel phase, `RELAY_IMAGE` in `shim.py` (a pinned
-  `python:3.12-slim`); Docker pulls it on first use, so pull it first, outside the lock.
+  `dynamic`). The run refuses otherwise.
+- Playwright's Chromium for the pinned version, the relay image of the back-channel
+  phase (`RELAY_IMAGE` in `shim.py`) and the conformance suite's images. The verb
+  `prepare` installs and pulls them; run it first, because it needs no lock.
 
 ## Run
 
-Read the 1-minute load average first; above 18 on a 12-core machine, wait.
+`prove` runs `prove.py` with `--edge` (the edge checkout) and `--scratch` (an empty
+directory). It takes `/tmp/probe-stack.lock`, refuses to start while the 1-minute
+load average is above 1.5 times the cores, and caps the run (the script's comment
+gives the numbers and why).
 
-The cap is 900 s (`timeout 900`). The full run, with the refresh phase, measured 134 s at edge `2b125b8`
-(21.10.2026, load 3 to 5; 136 s and 153 s on 19.10.2026), so the cap leaves a factor of about 6 of room.
-
-    flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
-        uv run --group dev --group e2e python e2e/oidc/prove.py \
-        --edge ~/git/edge --scratch EMPTY_DIR
-
-Stopping it: send SIGTERM to `timeout` or to the `prove.py` python process.
-`timeout` runs in its own process group (no `--foreground`, so that its limit
-reaches every descendant), hence Ctrl-C in the terminal reaches only `flock`
-and does not stop the run. The first SIGTERM or SIGINT ends the run with
-`FAILED: interrupted` and exit status 1 after an uninterruptible cleanup (host
-app, stack, `runtime/`, result table); further signals are ignored. `--kill-after=240`
-exceeds the cleanup's worst case: browser worker 15 s, host SIGTERM 15 s, host
-SIGKILL 15 s, stack 180 s, together 225 s.
+Stopping it: send SIGTERM to `timeout` or to the `prove.py` python process. Ctrl-C
+in the terminal reaches only `flock` and does not stop the run, because `timeout`
+runs in its own process group so that its limit reaches every descendant. The first
+SIGTERM or SIGINT ends the run with `FAILED: interrupted` and exit status 1 after an
+uninterruptible cleanup (host app, stack, `runtime/`, result table); further signals
+are ignored.
 
 If the run is killed with SIGKILL anyway (the `timeout` fallback, `kill -9`, an
-out-of-memory kill), nothing can clean up. By hand: `rm -rf SCRATCH/runtime`
-(it holds credentials and keys); remove the stack with edge's README procedure
-(`docker ps -a --filter name=edge-kc-probe`); `pkill -f e2e/oidc/host_app.py`
-if a listener on a random port remains (the host app dies with its parent,
-so this is rarely needed). Do not trust `evidence/` of such a run, nor of a
+out-of-memory kill), nothing can clean up: the verb `cleanup` removes `runtime/`
+(credentials and keys), the probe stack and the suite project, and a host app
+that is still listening. Do not trust `evidence/` of such a run, nor of a
 run that prints `the browser worker did not stop`: its screenshots are deleted,
 because a live browser could still write.
 
@@ -279,62 +271,17 @@ restarted per module would, because the suite generates new keys per module.
 Each expectation is built from the module's class in the suite's sources
 (`net/openid/conformance/openid/client` at release-v5.3.3), named in its justification.
 
-### Last run: the whole Basic plan
+### Running the conformance suite
 
-Verdict: every applicable module is held, and the one skip is justified. 13 modules
-driven and held, 1 skipped, no known finding, exit status 0:
-
-| Module | Suite | webauth decision | Verdict |
-|---|---|---|---|
-| `oidcc-client-test` | FINISHED/PASSED | admitted, UserInfo answered | held |
-| `oidcc-client-test-invalid-iss` | FINISHED/PASSED | `id-token-rejected/invalid-issuer` | held |
-| `oidcc-client-test-missing-sub` | FINISHED/PASSED | `invalid-identity-claim` | held |
-| `oidcc-client-test-invalid-aud` | FINISHED/PASSED | `id-token-rejected/invalid-audience` | held |
-| `oidcc-client-test-missing-iat` | FINISHED/PASSED | `id-token-rejected/invalid-claim` | held |
-| `oidcc-client-test-kid-absent-single-jwks` | FINISHED/PASSED | admitted, UserInfo answered | held |
-| `oidcc-client-test-kid-absent-multiple-jwks` | FINISHED/PASSED | `id-token-rejected/invalid-key-id` | held |
-| `oidcc-client-test-idtoken-sig-rs256` | FINISHED/PASSED | admitted, UserInfo answered | held |
-| `oidcc-client-test-idtoken-sig-none` | FINISHED/SKIPPED | `id-token-rejected/unsupported-algorithm` | held |
-| `oidcc-client-test-invalid-sig-rs256` | FINISHED/PASSED | `id-token-rejected/invalid-signature` | held |
-| `oidcc-client-test-userinfo-invalid-sub` | not driven | not driven | skipped |
-| `oidcc-client-test-nonce-invalid` | FINISHED/PASSED | `nonce-mismatch` | held |
-| `oidcc-client-test-scope-userinfo-claims` | FINISHED/PASSED | admitted, UserInfo answered | held |
-| `oidcc-client-test-client-secret-basic` | FINISHED/PASSED | admitted, UserInfo answered | held |
-
-Skip:
-- `oidcc-client-test-userinfo-invalid-sub`: webauth takes identity only from the verified
-  ID token and never reads a UserInfo answer, so there is no sub to compare.
-
-`oidcc-client-test-kid-absent-single-jwks` signs without a `kid` from a key set whose only
-RS256-eligible key has none either (6 keys); webauth admits it and UserInfo answers (#160).
-`oidcc-client-test-kid-absent-multiple-jwks` offers three kid-less eligible keys: they are
-admitted to the set but unreachable, so webauth refuses with `invalid-key-id`.
-`oidcc-client-test-idtoken-sig-none` is driven: webauth refuses alg none with
-`id-token-rejected/unsupported-algorithm` and the suite ends the module FINISHED/SKIPPED
-after its timeout. No known finding is left; the mechanism stays for the next one.
-
-Pull the images first, outside the lock:
-
-    SUITE_HOST=conformance.example.test docker compose -f e2e/oidc/suite-compose.yaml pull
-
-Then, with the 1-minute load average at or below 18:
-
-    flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
-        uv run --group dev --group e2e python e2e/oidc/conformance.py --scratch EMPTY_DIR
-
-Stopping works as above (SIGTERM to `timeout` or to the python process; exit
+`conformance` runs `conformance.py` with `--scratch` (an empty directory), under the
+same lock, load check and cap as `prove`; the suite's images come from `prepare`.
+`held` and `skipped` rows carry their justification in the expectation table in
+`conformance.py`, so a skip is read there. Stopping works as for `prove` (exit
 status 1). On every exit path the suite project is taken down with its volumes
-and the run lists the containers, volumes and networks still carrying its
-compose project label. The `down` always runs (60 s) and the three listings are
-independent calls (10 s each), so one failure never hides another kind. The
-`down` runs a second time only when the first did not complete cleanly
-(interrupted, failed or timed out). Worst case: 15 s worker join + 30 s host
-stop + 90 s first teardown + 90 s backstop teardown = 225 s, inside `--kill-after=240`.
-Every failure or timeout, with its stderr tail, is reported as a leftover line,
-and the result table still follows. After a SIGKILL nothing can clean up: find the project
-with `docker ps -a --filter name=d2-suite`, then `docker compose -p NAME -f
-e2e/oidc/suite-compose.yaml down -v --remove-orphans` (with `SUITE_HOST` set to
-anything), and `rm -rf SCRATCH/runtime`.
+and the run lists the containers, volumes and networks still carrying its compose
+project label; every failure or timeout, with its stderr tail, is reported as a
+leftover line, and the result table still follows. After a SIGKILL, `cleanup`
+removes the suite project.
 
 ## Refreshing the pins
 
@@ -342,34 +289,5 @@ Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` depe
 a hand-set pin as well. A bump of any of them can break what only a real browser, a real
 Keycloak or the OIDF suite shows, and CI does not run those.
 
-By hand: bump the pin, then one D1 run (`prove.py`) and one conformance run
-(`conformance.py`), each under `/tmp/probe-stack.lock` as above, and land the bump only
-when both exit 0. A new image digest is pulled first, outside
-the lock.
-
-## Last run: session cookie after the redirect
-
-| App origin | `cookie_samesite` | First page | Session cookie sent | `Sec-Fetch-Site` |
-|---|---|---|---|---|
-| `https://demo.hallucinai.de` (same site as Keycloak) | strict | Signed in | yes | same-site |
-| `https://demo.example.test` (cross site) | strict | Signed out (`FAILED-as-found`) | no | cross-site |
-| `https://demo.hallucinai.de` | lax | Signed in | yes | same-site |
-| `https://demo.example.test` | lax | Signed in | yes | cross-site |
-
-The pull request that last changed this directory carries the full result table.
-
-## Last run: back-channel logout
-
-Exit status 0, the stack and the relay containers removed. Scenarios
-10 to 13 held at 390x844 and at 1280x800, scenarios 14, 15, 17 and 21 to 23 at 1280x800; scenario 5 is
-unchanged (`https://demo.example.test` with `strict` stays `FAILED-as-found`).
-
-| Scenario | What a person did | Held |
-|---|---|---|
-| 10 | two contexts signed in to app A; one logged out through Keycloak | the other session ended through one accepted callback |
-| 11 | one context in A and B, a second in B; a logout in A | both B sessions ended through B's callback |
-| 12 | Keycloak's admin logout (204) of a person in A and B | both apps called back once, `/me` 401 in each |
-| 13 | the account disabled, then Keycloak's admin logout (204) | the disable alone ended nothing; then each app called back exactly once, `/me` 401, and a fresh sign in was refused |
-| 21 | the ID token (15 s lifespan) past its `exp` by 2.1 s, then logout | the end-session request carried the hint; a redirect to the app, no confirmation page, "Signed out", Keycloak's form at the next sign-in |
-| 22 | a form on `https://demo.example.test` posted to app A's `/logout` | 403 `Cross-origin request rejected`; the session and the hint cookie stood |
-| 23 | A's session ended by Keycloak's admin logout, B signed in, then A's logout with the first session's ID token | Keycloak asked to confirm; after confirming B was called back |
+Bump the pin, run `prepare` for a new image, then one `prove` and one `conformance`
+run, and land the bump only when both exit 0. The pull request carries both result tables.
