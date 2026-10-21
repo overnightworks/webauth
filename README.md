@@ -200,12 +200,10 @@ hold the login and its cookies, and `build_app` in
 [`e2e/oidc/host_app.py`](e2e/oidc/host_app.py) is the worked set of routes,
 type-checked and run against a real issuer.
 
-The library never commits. The host answers the callback with the `response` it
-passed to `finish_login` on every outcome, because that response clears the
-pending-login cookie. On an admitted login it calls `open_session`, commits, and
-only then issues the cookies, so a cookie never names a session that was rolled
-back. A pending login is single-use because its cookie is cleared and the issuer
-accepts a code once; webauth keeps no replay store.
+The library never commits: the host commits an admitted login before it issues
+the cookies. A pending login is single-use because its cookie is cleared and the
+issuer accepts a code once; webauth keeps no replay store. The `finish_login`
+docstring holds the callback's outcomes and the host's duties.
 
 #### The return path
 
@@ -216,14 +214,10 @@ back as `None`, the host's default page, and the login still succeeds. The
 
 #### Logging out
 
-`log_out` is the whole logout sequence in one call: it ends the session the
-request's cookie names, clears the session and CSRF cookies and returns the
-issuer's end-session URL, so Keycloak ends its own session too. It makes no
-outbound call and never commits, so an issuer that is down still leaves the
-person signed out of the app. The origin check protects the route, not the CSRF
-token, which is why it is listed in `token_exempt`. The `log_out` docstring says
-how a form and a `fetch` logout differ and what the host's policy needs; the
-post-logout redirect URI must be registered at the issuer.
+`log_out` is the whole logout sequence in one call: it ends the session, clears
+the cookies and returns the issuer's end-session URL, so the issuer ends its own
+session too. It makes no outbound call, so an issuer that is down still leaves
+the person signed out of the app. Its docstring holds the rest.
 
 #### The ID token hint
 
@@ -319,25 +313,20 @@ writes the expiry it is given.
 ## Session lifetime
 
 `SessionLifetime` holds the two numbers that decide how long someone stays
-signed in: an idle window and an absolute cap from the session's creation.
-The cookies live as long as the cap and are never reissued, so the cap is also
-the worst-case delay before a removal from the host's login group takes effect:
-an open session is not re-checked. The recommended policy for a host that admits
-by `login_group` is a 12-hour cap with an idle window of the same length. Every
-login checks the group again, and the issuer's SSO session turns that login into
-a redirect the person does not notice. A removal takes effect at once only by
-disabling the user at the issuer together with
-[Back-channel logout](#back-channel-logout).
+signed in: an idle window and an absolute cap from the session's creation. An
+open session is not re-checked, so the cap is also the worst-case delay before
+a removal from the host's login group takes effect. The recommended policy for a
+host that admits by `login_group` is a 12-hour cap with an idle window of the
+same length. A removal takes effect at once only by disabling the user at the
+issuer together with [Back-channel logout](#back-channel-logout).
 
 ## Middleware order
 
 `install_web_auth_middleware` adds the library's middleware in one order,
 outermost first, and refuses a stack that would break it: security headers, body
-size limit, per-address rate limit, CSRF origin, CSRF token, session gate. The
-headers sit outside everything so the library's own refusals carry them; the
-gate sits innermost, so a request refused before admission never costs a session
-lookup. Install it once and add no library middleware yourself. Its docstring
-holds the reason for each position and where a host's own middleware goes. A host
+size limit, per-address rate limit, CSRF origin, CSRF token, session gate. Install
+it once and add no library middleware yourself. Its docstring holds the reason
+for each position and where a host's own middleware goes. A host
 whose own middleware is the session authority answers a request without a
 session with `webauth.dependencies.unauthenticated_response`.
 
@@ -379,7 +368,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with, Redis or in-process |
 | `webauth.ports` | What the host supplies, as Protocols, and `AuthenticatedUser`, which the library hands out |
 | `webauth.middleware` | Body-size, CSRF, rate-limit, security-header and session-gate middleware, and `install_web_auth_middleware`, which installs them in the one order |
-| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds, against the issuer's cached key set. A token naming an unknown `kid` is refused as `UNKNOWN_KEY_ID` only when the key-set refresh succeeded without that key, and as `KEY_SET_UNAVAILABLE` when the refresh failed or is cooling down |
+| `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds, against the issuer's cached key set |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-request form POST |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged, the ID token verified, and the refresh and client-credentials grants |
 | `webauth.oidc_login` | The login from the host's routes: admission and role, `open_session`, `log_out`, `fresh_access_token` and `receive_backchannel_logout` |
