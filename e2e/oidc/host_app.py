@@ -45,7 +45,11 @@ from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import issue_session_cookies
-from webauth.dependencies import LoginRedirect, current_user_dependency
+from webauth.dependencies import (
+    LoginRedirect,
+    current_user_dependency,
+    session_id_from_request,
+)
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
@@ -63,6 +67,7 @@ from webauth.oidc_login import (
     EverySubject,
     NoAdmins,
     finish_login,
+    fresh_access_token,
     log_out,
     open_session,
     receive_backchannel_logout,
@@ -87,6 +92,8 @@ LOOPBACK = "127.0.0.1"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
+ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
+WORKLOAD_TOKEN_PATH = "/workload-token"  # noqa: S105  # a route, not a credential
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
@@ -206,6 +213,13 @@ class World:
         self.last_token_rejection: str | None = None
         self.userinfo_calls = 0
         self.userinfo_answered = 0
+        self.stored_refresh_tokens: set[str] = set()
+
+    def remember_refresh_token_of(self, session_id: str) -> None:
+        """Keep the refresh token the session stores now, to count how many differ."""
+        record = self.sessions.load(session_id)
+        if record is not None and record.refresh_token is not None:
+            self.stored_refresh_tokens.add(record.refresh_token.get_secret_value())
 
     def counts(self) -> dict[str, object]:
         return {
@@ -431,6 +445,31 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     @app.get("/me")
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
         return {"username": user.username}
+
+    @app.get(ACCESS_TOKEN_PATH)
+    def access_token(request: Request) -> dict[str, object]:
+        """The outcome of ``fresh_access_token`` for the request's session, never the token."""
+        current = world["world"]
+        session_id = session_id_from_request(request, config)
+        if session_id is None:
+            raise HTTPException(status_code=401)
+        outcome = fresh_access_token(
+            relying_party_of(request), session_id,
+            session_transaction=current.sessions.in_transaction, config=config,
+        )
+        current.remember_refresh_token_of(session_id)
+        return {
+            "outcome": "token" if isinstance(outcome, SecretStr) else outcome.reason.value,
+            "refresh_tokens_stored": len(current.stored_refresh_tokens),
+        }
+
+    @app.get(WORKLOAD_TOKEN_PATH)
+    def workload_token(request: Request) -> dict[str, str | None]:
+        """The outcome of the client's own grant, never the token."""
+        outcome = relying_party_of(request).workload_access_token()
+        if isinstance(outcome, OidcRefusal):
+            return {"outcome": outcome.reason.value, "issuer_error": outcome.idp_error}
+        return {"outcome": "token", "issuer_error": None}
 
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
