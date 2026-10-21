@@ -165,7 +165,9 @@ _UNRANKED: Final = -1
 class EverySubject(Enum):
     """Admit every subject of the bound issuer, whatever their groups.
 
-    That includes the issuer's people who belong to other apps."""
+    That includes the issuer's people who belong to other apps, so a host
+    states it on purpose and only when the issuer already limits who can sign
+    in."""
 
     OF_THE_BOUND_ISSUER = "every-subject"
 
@@ -686,6 +688,10 @@ def admit_identity(
     ``SubjectUserStore.get`` must compare exactly. A host that migrates legacy
     accounts makes sure that no legacy ``id`` can equal a subject of the bound
     issuer.
+
+    A groups claim that is not a list of strings never reaches this function:
+    ``OidcRelyingParty.complete_login`` refuses it as ``INVALID_IDENTITY_CLAIM``.
+    A missing claim is an empty list of groups.
 
     The order of refusals is ``FOREIGN_ISSUER``, then ``NOT_A_MEMBER`` (the
     identity's groups hold no path of ``admission.login_group``, or are

@@ -579,8 +579,9 @@ issuer's subject. The app names a group path such as `/apps/notes`:
 members come in, members of `admin_group` get the admin role, and both are
 decided again at every login, so a change at the issuer takes effect at the
 next sign-in while an open session runs on. Only the issuer's groups decide the
-role. `EverySubject` and `NoAdmins` state on purpose that groups decide nothing
-or that the app has no admins. A second service that verifies the issuer's token
+role. `EverySubject` states on purpose that admission needs no group, and `NoAdmins`
+that the app has no admins; `EverySubject` leaves `admin_group` deciding who is
+admin. A second service that verifies the issuer's token
 itself calls `app_role` instead of copying the rule.
 
 The rules, the order of refusals, and what is written are in the docstrings of

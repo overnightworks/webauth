@@ -4,8 +4,9 @@ and the ID token hint.
 A pending login is the OpenID Connect login a browser began and has not yet
 brought back. It travels in a cookie of its own, named after its state, so
 two tabs can each have one; the value is versioned, bounded field by field and
-signed under the session signing key with a prefix no other cookie uses, and
-at most 896 characters. Its name is ``__Host-oidc_pending_`` followed by the
+signed with HMAC-SHA256 under the session signing key with a prefix no other
+cookie uses, the signature compared in constant time, and at most 896
+characters. Its name is ``__Host-oidc_pending_`` followed by the
 first 16 hex characters of the SHA-256 of the login's state; with
 ``cookie_secure=False`` it is the plain ``oidc_pending_`` form and the cookie is
 not ``Secure``, which is for plain http on a loopback host, where a sibling
@@ -27,11 +28,11 @@ judges it, and the reader checks only its shape and size: a sole cookie of
 that name shaped like a compact JWS within ``MAX_ID_TOKEN_HINT_CHARS``, else
 it counts as missing. The cookie is ``__Secure-oidc_id_token_hint``, or the
 plain ``oidc_id_token_hint`` with ``cookie_secure=False``; it cannot be
-``__Host-``, which demands ``Path=/``. It is ``HttpOnly``, always
-``SameSite=Strict``, ``Max-Age`` as the session cookie and ``Path`` the
-``logout_path`` of the ``OidcClientConfig``, so the browser sends it to every
-path beneath that prefix: the narrowest prefix covering the logout routes keeps
-it off every other request, and behind a path-rewriting proxy it is the path
+``__Host-``, which demands ``Path=/``. It is ``HttpOnly``, ``Secure`` exactly when
+``cookie_secure`` is true, always ``SameSite=Strict``, ``Max-Age`` as the
+session cookie and ``Path`` the ``logout_path`` of the ``OidcClientConfig``, so
+the browser sends it to every path beneath that prefix: the narrowest prefix
+covering the logout routes keeps it off every other request, and behind a path-rewriting proxy it is the path
 the browser sees. A new login overwrites the old hint, and a token over the
 bound is not kept and clears it instead. Changing ``logout_path`` between
 deployments leaves the old cookie in the browser, which a logout clears only at
