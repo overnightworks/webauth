@@ -332,8 +332,8 @@ issuer's end-session URL. That URL carries the client ID, the configured
 `post_logout_redirect_uri` and the `id_token_hint` that `finish_login` handed
 the browser at sign-in (see [The ID token hint](#the-id-token-hint)), so
 Keycloak ends the session without asking the person to confirm. Without a
-usable hint the URL leaves it out and Keycloak asks once; the app's own store keeps the
-session's refresh token, which no logout step sends to Keycloak. The logout is a GET to Keycloak, so the hint lands in that
+usable hint the URL leaves it out and Keycloak asks once. While the session lives, its row
+holds the refresh token; no logout step sends it to Keycloak, and deleting the row removes it. The logout is a GET to Keycloak, so the hint lands in that
 device's browser history and is visible to a TLS-terminating edge; in the
 fetch shape it also reaches the page's own script. Once the session has
 ended, the hint has no logout power left. `log_out` makes no outbound call

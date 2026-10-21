@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
@@ -619,6 +619,7 @@ class OidcHost:
     relying_party: OidcRelyingParty
     issued_id_tokens: list[str]
     returned_to: list[str | None]
+    admitted_logins: list[AdmittedLogin]
 
     def start(self, *, return_to: str | None = None) -> str:
         """Visit the start route; answer the authorization URL it sends the browser to."""
@@ -698,6 +699,7 @@ def an_oidc_host(
     wall_clock = FakeClock(float(NOW))
     issued_id_tokens: list[str] = []
     returned_to: list[str | None] = []
+    admitted_logins: list[AdmittedLogin] = []
 
     def mint_id_token(nonce: str) -> str:
         issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
@@ -764,6 +766,7 @@ def an_oidc_host(
             response.status_code = 403
             return {"refusal": outcome.value}
         returned_to.append(outcome.return_to)
+        admitted_logins.append(outcome)
         with sessions.transaction():
             session = open_session(
                 request, config, outcome,
@@ -832,6 +835,7 @@ def an_oidc_host(
         relying_party=relying_party,
         issued_id_tokens=issued_id_tokens,
         returned_to=returned_to,
+        admitted_logins=admitted_logins,
     )
 
 
@@ -901,9 +905,23 @@ def test_an_admitted_callback_stores_the_refresh_token_and_nothing_of_the_access
     record = host.sessions.record
     assert record is not None
     assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
-    visible = repr(record) + repr(host.sessions.list_active()) + str(response.headers)
+    [admitted] = host.admitted_logins
+    visible = (
+        repr(record) + repr(host.sessions.list_active()) + repr(admitted)
+        + str(response.headers)
+    )
     assert ISSUED_ACCESS_TOKEN_CANARY not in visible
     assert ISSUED_REFRESH_TOKEN not in visible
+    assert not [
+        value for value in public_values(admitted) + public_values(record)
+        if ISSUED_ACCESS_TOKEN_CANARY in value
+    ]
+    assert [value for value in public_values(admitted) if ISSUED_REFRESH_TOKEN in value] == [
+        ISSUED_REFRESH_TOKEN,
+    ]
+    assert [value for value in public_values(record) if ISSUED_REFRESH_TOKEN in value] == [
+        ISSUED_REFRESH_TOKEN,
+    ]
 
 
 @pytest.mark.parametrize(("members", "stored"), [
@@ -1732,6 +1750,19 @@ def a_host_with_sessions(
     open_sessions(host, SUBJECT, subject_sessions)
     open_sessions(host, OTHER_SUBJECT, other_sessions)
     return host
+
+
+def public_values(subject: object) -> list[str]:
+    """Every value the public fields of a record hold, a secret unwrapped, as text."""
+    if isinstance(subject, SecretStr):
+        return [subject.get_secret_value()]
+    if is_dataclass(subject) and not isinstance(subject, type):
+        return [
+            text
+            for member in fields(subject)
+            for text in public_values(getattr(subject, member.name))
+        ]
+    return [repr(subject)]
 
 
 def stored_refresh_tokens(host: OidcHost) -> list[str]:
