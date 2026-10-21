@@ -1,0 +1,8 @@
+claim_id = "69d7d2639dc34e5bbcecf38b72ed2de9"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "af0090ff09d2b7b44d72b1fe3391f72fe78fa6a4"
+branch = "claude/issue-355-login-stores-refresh-token"
+scope = ["CHANGELOG.md", "README.md", "e2e/oidc/host_app.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/oidc_arrangement.py", "tests/test_oidc.py", "tests/test_oidc_login.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "798f0647d19f8248fba1dee69636fea0c70031ca"
+whole_reason = "The refresh token's path from the issuer's answer into the session row is one behaviour; the identity field without the store column lands a token nothing keeps (#348, Why this cut)."
