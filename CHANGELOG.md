@@ -35,6 +35,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Added**
 
+- `webauth.oidc_login.app_role(groups, admission)` and `AppRole` name the app role a list of
+  groups carries (`ADMIN`, `USER`, or `None` for no member) by the rule `admit_identity` applies,
+  so a second service that verifies the issuer's token itself calls it with the same
+  `AdmissionConfig` instead of copying the rule. It reads nothing but its arguments and does
+  not check the issuer.
 - `OidcRelyingParty.renew_access(refresh_token: SecretStr)` posts a refresh grant and answers a
   `RenewedAccess` (the new access token and the rotated refresh token, or `None`) or an
   `OidcRefusal`.
