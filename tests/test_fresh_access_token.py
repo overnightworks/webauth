@@ -459,8 +459,10 @@ class TestAFailingStore:
     ) -> None:
         arrangement = an_arrangement(lambda record: SessionsAnsweringReplace(record, answer))
 
+        provider = provider_of(arrangement.sessions)
+
         with pytest.raises(TypeError, match="replace_refresh_token"):
-            arrangement.fresh_access_token(provider_of(arrangement.sessions))
+            arrangement.fresh_access_token(provider)
 
     @_SHAPES
     @pytest.mark.parametrize("fails_in_transaction", [1, 2])
@@ -476,8 +478,10 @@ class TestAFailingStore:
             sessions.failing = False
             arrangement.issuer.before_exchange = lambda: setattr(sessions, "failing", True)
 
+        provider = provider_of(sessions)
+
         with pytest.raises(ConnectionError):
-            arrangement.fresh_access_token(provider_of(sessions))
+            arrangement.fresh_access_token(provider)
 
     def test_a_commit_of_the_second_transaction_that_fails_reaches_the_caller(self) -> None:
         arrangement = an_arrangement()
