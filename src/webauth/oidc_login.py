@@ -498,16 +498,25 @@ class AccessTokenRefusalReason(StrEnum):
     """Why a session yields no access token."""
 
     SESSION_ENDED = "session-ended"
+    """The session is gone or outside its lifetime: the person is signed out.
+    The host treats them as signed out, as after a refused request."""
     SIGN_IN_AGAIN = "sign-in-again"
+    """The session holds no refresh token (it began before the host stored them,
+    or the issuer gave none), or the issuer refused it as ``invalid_grant``,
+    which includes a realm SSO session that ended while the app session stands.
+    The host sends the person to sign in again; the app session itself stands,
+    and only this call is refused."""
     ISSUER_UNAVAILABLE = "issuer-unavailable"
+    """The issuer is unreachable, answered something unusable, or refused for a
+    reason other than ``invalid_grant``; ``AccessTokenRefusal.issuer_refusal``
+    says which. The host fails the call and logs it; the person stays signed in."""
 
 
 @dataclass(frozen=True)
 class AccessTokenRefusal:
-    """``SESSION_ENDED``: the session is gone or outside its lifetime, so the
-    person is signed out. ``SIGN_IN_AGAIN``: it holds no refresh token, or the
-    issuer ended the person's own session. ``ISSUER_UNAVAILABLE``: the issuer
-    did not answer usefully, and ``issuer_refusal`` says how."""
+    """A session that yields no access token. ``issuer_refusal`` is the issuer's
+    answer for ``ISSUER_UNAVAILABLE`` (``invalid_client`` shows its cause here),
+    and ``None`` otherwise."""
 
     reason: AccessTokenRefusalReason
     issuer_refusal: OidcRefusal | None = None
@@ -531,13 +540,31 @@ def fresh_access_token(
     Reads the session in one transaction, sends its refresh token to the issuer
     with no transaction and no lock open, then reads the session again in a
     second transaction and stores the issuer's new refresh token when it
-    differs from the one sent. The token is handed out only when the second
-    transaction has been left and the session still stood in it. Admission's
-    own decision judges the session both times, and nothing renews it: asking
-    for a token is not the person's request.
+    differs from the one sent (not the one read again). The token is handed
+    out only when the second transaction has been left and the session still
+    stood in it; a session gone by then is ``SESSION_ENDED`` whatever the
+    issuer returned. Admission's own decision judges the session both times,
+    and nothing renews it: asking for a token is not the person's request.
+
+    A call that finds the session ended or without a refresh token answers
+    before the issuer is contacted; every other call costs one refresh grant at
+    the issuer. The host holds the token in memory for the one call it serves
+    and stores it nowhere. No session row or lock is held during the grant, so
+    a slow issuer holds only the caller's thread, for as long as the
+    transport's documented bounds allow (its deadline excludes the host name
+    lookup and connecting).
+
+    The second transaction is the last check: a token handed out stays valid at the
+    service it is sent to, and at the issuer's own endpoints, until its own
+    ``exp``, even after a logout or an expiry that lands later. No revocation
+    call is made. Where the issuer lets a refresh token be used again, two
+    overlapping calls for one session each get a valid token and the later
+    write wins; where it revokes the token on use, the second is refused as
+    ``invalid_grant`` and answers a false ``SIGN_IN_AGAIN``.
 
     Call it from a worker thread, outside any open session transaction and
-    outside the host's write lock. It raises when the store fails, when
+    outside the host's write lock, with a ``session_id`` that
+    ``session_id_from_request`` bounded. It raises when the store fails, when
     ``replace_refresh_token`` answers anything but a ``bool``, or when the
     transaction's exit fails; no token is handed out then.
     """
@@ -590,8 +617,16 @@ def _stored(sessions: SessionRecordStore, session_id: str, refresh_token: Secret
 
 
 class BackchannelLogoutResult(Enum):
+    """The host's route answers 200 for ``ACCEPTED`` only after it has committed,
+    and 400 for ``REFUSED`` and for any failure. The function deletes sessions
+    before it emits its audit event and rolls nothing back, so a failure leaves
+    every session in place only when the host's transaction rolls back."""
+
     ACCEPTED = "accepted"
+    """The token held: the subject's sessions, if any, are deleted in the
+    host's transaction."""
     REFUSED = "refused"
+    """The form or the token did not hold; nothing was changed."""
 
 
 def receive_backchannel_logout(
@@ -606,8 +641,30 @@ def receive_backchannel_logout(
 ) -> BackchannelLogoutResult:
     """End every session of the subject a verified Logout Token names.
 
-    A request that is not one URL-encoded form with exactly one non-empty
-    ``logout_token`` is refused before anything is verified or locked.
+    The issuer posts the Logout Token to the client's ``backchannel.logout.url``
+    when a person's session at the issuer ends. A request that is not one
+    URL-encoded form with exactly one non-empty ``logout_token`` is refused
+    before anything is verified or locked. The token is verified before the
+    lock is taken. Under the lock, a subject with no account is accepted and
+    creates none; a known subject loses every session in every browser, and one
+    ``backchannel_logout`` audit event with ``actor_id=None`` is emitted when
+    at least one session ended. It never commits, rolls back, clears a cookie
+    or calls the issuer. Run it inside one host transaction that rolls back
+    when it raises, including when the audit sink fails after the deletion, and
+    commits only after it returns ``ACCEPTED``.
+
+    The verification, the lock and the stores are synchronous: run it in a
+    worker thread that creates and uses its stores there.
+
+    The route is open to anyone who can reach it, and the token is its only
+    control, so set it up for the issuer alone. The issuer sends neither an
+    Origin nor a cookie, so list the exact path (never a prefix) in ``exempt``
+    of both CSRF policies. It posts from shared server addresses, so exempt the
+    exact path from the rate limit too, or one budget refuses a real logout.
+    Give it a ``BodySizeRule`` that admits a Logout Token, which the default
+    may not, and a ``CacheControlRule`` of ``no-store``, and
+    register the URL on the client by an internal name, never through the
+    public hostname or an access proxy in front of it.
     """
     logout_token = _logout_token_of(form_body, content_type)
     if logout_token is None:

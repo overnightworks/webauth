@@ -44,9 +44,10 @@ issuer posts (OpenID Connect Back-Channel Logout 1.0, section 2.6) with the
 same verifier and key cache, and answers the `VerifiedLogout` naming the
 subject whose sessions end, or an `OidcRefusal`. The token must be an RS256
 `logout+jwt` of the configured issuer whose one audience is the client ID,
-issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway ago, with
-an `exp` after its `iat`, the back-channel logout event, a `sub` and no
-`nonce`. Its `sid` is never read. There is no replay store: the age bound is
+issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway ago and
+not more than the leeway ahead, with an `exp` after its `iat`, an `events`
+member holding exactly the back-channel logout event and no other, a `sub` and
+no `nonce`. Its `sid` is never read. There is no replay store: the age bound is
 what limits a copy.
 
 `OidcRelyingParty.logout_url` answers the issuer's end-session URL, which
@@ -168,8 +169,10 @@ class OidcClientConfig:
     `jwks_url` are https, because the library connects to them or trusts what
     they sign. `redirect_uri` and `post_logout_redirect_uri` are only values
     the browser is sent to, so they may also be http when the host is exactly
-    `localhost`, `127.0.0.1` or `[::1]`, for local and CI test stacks.
-    `scopes` includes `openid`. `leeway_seconds`
+    `localhost`, `127.0.0.1` or `[::1]`, for local and CI test stacks. Browsers
+    differ in whether they keep a `Secure` cookie over http on a loopback host,
+    so a stack that must work in each sets `cookie_secure=False` on its
+    `WebAuthConfig`. `scopes` includes `openid`. `leeway_seconds`
     is checked by the `JwtVerifier` the relying party builds from it."""
 
     issuer: str
@@ -349,6 +352,9 @@ class OidcRelyingParty:
         )
 
     def begin_login(self) -> AuthorizationRequest:
+        """The authorization URL to send the browser to, and the `PendingLogin`
+        (state, nonce, PKCE verifier and `issued_at`, the wall-clock second it
+        began) the host keeps until the callback returns."""
         pending = PendingLogin(
             state=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             nonce=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
@@ -388,6 +394,15 @@ class OidcRelyingParty:
     def complete_login(
         self, pending: PendingLogin, callback_query: str
     ) -> OidcIdentity | OidcRefusal:
+        """The identity the callback `callback_query` (its raw query string)
+        proves for `pending`, or the refusal naming why it does not.
+
+        A `code` longer than `MAX_AUTHORIZATION_CODE_CHARS` is
+        `MALFORMED_CALLBACK`. The ID token must name this client as its `azp` when it is for several
+        audiences, and any `azp` it names must be this client. A refresh token
+        in the answer that is `null` or outside `1*VSCHAR` is
+        `TOKEN_ENDPOINT_FAILED`. A token answer that names a member twice keeps
+        its last value."""
         try:
             return self._identity(pending, callback_query)
         except _RefusalError as refusal:
@@ -427,6 +442,12 @@ class OidcRelyingParty:
         return 0 <= age_seconds <= PENDING_LOGIN_MAX_AGE_SECONDS
 
     def renew_access(self, refresh_token: SecretStr) -> RenewedAccess | OidcRefusal:
+        """Posts `refresh_token` as a `refresh_token` grant, so each call is one
+        POST and a fresh access token.
+
+        A refresh token outside `1*VSCHAR` reaches no request. The issuer's
+        `error` is carried as `idp_error`: `invalid_grant` for a refresh token it
+        no longer accepts."""
         try:
             return self._renewed_access(refresh_token.get_secret_value())
         except _RefusalError as refusal:
@@ -441,6 +462,12 @@ class OidcRelyingParty:
         return RenewedAccess(_bearer_access_token(document), _issued_refresh_token(document))
 
     def workload_access_token(self) -> SecretStr | OidcRefusal:
+        """The client's own access token, from a `client_credentials` grant that
+        names no scope, so the issuer applies the client's default scopes.
+
+        The realm must give the client a service account holding the role the
+        receiver demands; an issuer `error` such as `unauthorized_client` (a
+        client with no service account) is carried as `idp_error`."""
         try:
             document = self._token_answer(self._grant_request({"grant_type": "client_credentials"}))
             return _bearer_access_token(document)
@@ -489,6 +516,16 @@ class OidcRelyingParty:
         raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
 
     def verify_logout_token(self, logout_token: str) -> VerifiedLogout | OidcRefusal:
+        """The subject whose sessions end, or the refusal.
+
+        Stricter than the Back-Channel Logout profile asks: `iat` must be an
+        integer and no more than the leeway in the future, `events` must hold
+        the logout event and no other key, that event's member an object, `sub`
+        non-empty (a token naming only a `sid` is refused) and `nonce` absent,
+        even as `null`. The token, its claims and its `sid` are never returned,
+        so no session id is stored. A copy of a valid token ends the subject's
+        sessions again until it ages out, and a person who signed in again in
+        that time is signed out once more."""
         outcome = self._jwt_verifier.verify(logout_token, expected_type=_LOGOUT_TOKEN_TYPE)
         if isinstance(outcome, Rejected):
             return OidcRefusal(
