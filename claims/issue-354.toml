@@ -1,8 +1,0 @@
-claim_id = "68a787be78804406b5ccc1b0c27281bc"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "887e508dccad74767cee1f3b3065de9a53d985c0"
-branch = "claude/issue-354-edge-pin-2b125b8"
-scope = ["e2e/oidc/EDGE_SHA", "e2e/oidc/README.md", "e2e/oidc/prove.py", "e2e/oidc/stack.py"]
-opened_commit = "61ffd4741a9ea4ca6f21ee7757ea6d9435be7512"
-whole_reason = "The pin and the harness lines the pinned realm changes are one bump; the pin alone fails its own proof."
