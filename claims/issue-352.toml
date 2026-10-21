@@ -1,8 +1,0 @@
-claim_id = "76c398c20ed34e3ba3d4772a4fac9962"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "887e508dccad74767cee1f3b3065de9a53d985c0"
-branch = "claude/issue-352-hsts-header-fixed"
-scope = ["CHANGELOG.md", "README.md", "src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "tests/test_security_headers.py", "tests/webauth_arrangement.py"]
-opened_commit = "a65ecaf03521b8da2ca12ef872310faedd6c40ca"
-whole_reason = "Removing a public field and its documentation and tests is one change; a part alone leaves the README or the suite naming a field that no longer exists."
