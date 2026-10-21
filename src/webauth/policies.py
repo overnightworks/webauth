@@ -297,11 +297,6 @@ DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
 class SecurityHeadersPolicy:
     """The policy headers every response carries out of this deployment.
 
-    The headers also reach the 500 of an unhandled exception, which still
-    reaches the server: a host's 500 handler runs, but the response it returns
-    is not sent, and with ``debug=True`` Starlette's traceback page is not sent
-    either.
-
     ``permissions_policy`` replaces the whole header, so a host that records
     audio names every feature it still wants off, for example
     ``"camera=(), microphone=(self), geolocation=()"``. This policy, its
@@ -444,7 +439,9 @@ def default_content_security_policy(
     Forms post only to this origin and a ``<base>`` may point only at it.
     Scripts, styles, connections, fonts, manifests and workers load from
     ``'self'``, images also from ``data:`` and ``blob:``, media also from
-    ``blob:``, and ``frame-ancestors`` is ``'none'``.
+    ``blob:``, and ``frame-ancestors`` is ``'none'``. Every kind of resource
+    the policy does not name falls back to ``default-src 'none'`` and loads
+    from nowhere, not even this origin.
 
     The default holds no host fact. Inline scripts a build emits into its own
     document are admitted by bare hash (``sha256-<base64>``), which this function
