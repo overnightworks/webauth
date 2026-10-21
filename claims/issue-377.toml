@@ -1,0 +1,7 @@
+claim_id = "67abdaae43cc45ec8590d486abbd8a3c"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "5db855f28e5af601924d9f5be16735c5c5986e2f"
+branch = "claude/issue-377-configuration-details-in-webauthconfig"
+scope = ["README.md", "src/webauth/config.py", "src/webauth/policies.py"]
+opened_commit = "4fa14a2d505e5fc5c0add8912de487526c2a5e0e"
