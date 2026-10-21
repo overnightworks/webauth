@@ -1,8 +1,0 @@
-claim_id = "e0eeea59c3a747db8c8f94ca3fb99514"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "5db855f28e5af601924d9f5be16735c5c5986e2f"
-branch = "claude/issue-378-pipeline-details-in-middleware"
-scope = ["README.md", "src/webauth/middleware/body_size.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/rate_limit.py", "src/webauth/middleware/stack.py", "src/webauth/ports.py", "src/webauth/rate_limit.py"]
-opened_commit = "a91c7c632484820a8cfe8da98a4196b6c2e2912f"
-whole_reason = "The README region and the docstrings across the pipeline's modules that receive its facts are one move; a part alone leaves a fact in two places or in none."
