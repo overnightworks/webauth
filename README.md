@@ -768,7 +768,9 @@ the app, calls `webauth.oidc_login.app_role(groups, admission)` with the same
 `None` for a person outside `login_group`; `EverySubject` makes every set of
 groups a member and `NoAdmins` never yields `ADMIN`. The answer is the kind of
 role, not the host's spelling of it. It reads nothing but its arguments, so
-checking that the groups come from `bound_issuer` stays with the caller.
+checking that the groups come from `bound_issuer` stays with the caller, and so
+does checking that the claim is a list of strings: webauth's login refuses any
+other shape, and so should the caller.
 
 ## Reading the session
 

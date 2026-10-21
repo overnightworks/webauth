@@ -237,7 +237,8 @@ def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | Non
 
     It reads nothing but its arguments. It does not look at
     ``admission.bound_issuer``: the caller has checked that the groups come from
-    that issuer, as ``admit_identity`` does.
+    that issuer, as ``admit_identity`` does, and passes the groups claim as a
+    list of strings, refusing any other shape, as webauth's login refuses it.
     """
     login_group = admission.login_group
     if isinstance(login_group, str) and not _is_member_of(login_group, groups):
