@@ -29,6 +29,7 @@ __all__ = [
     "CsrfPolicy",
     "PathRules",
     "PathShape",
+    "PublicRule",
     "RateLimitBudget",
     "RateLimitPolicy",
     "RateLimitRule",
@@ -237,6 +238,20 @@ class BodySizeRule:
     max_bytes: int
     methods: frozenset[str] | None = None
     """The methods the larger budget applies to; ``None`` means every method."""
+
+    def applies_to(self, path: str, method: str) -> bool:
+        if self.methods is not None and method.upper() not in self.methods:
+            return False
+        return self.paths.matches(path)
+
+
+@dataclass(frozen=True)
+class PublicRule:
+    """Paths the session gate lets through without a session."""
+
+    paths: PathRules
+    methods: frozenset[str] | None = None
+    """The methods the rule opens; ``None`` means every method."""
 
     def applies_to(self, path: str, method: str) -> bool:
         if self.methods is not None and method.upper() not in self.methods:
