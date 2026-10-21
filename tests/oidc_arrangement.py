@@ -23,11 +23,11 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from functools import cache
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import pytest
 from cryptography import x509
@@ -35,6 +35,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import RSAAlgorithm
+from pydantic import SecretStr
 
 from webauth.https_client import MAX_KEY_SET_BYTES
 from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointAnswer, TokenRequest
@@ -71,6 +72,10 @@ def jws(header: dict[str, Any] | str, claims: dict[str, Any] | str, sign: Callab
     signing_input = f"{segment(header)}.{segment(claims)}"
     signature = base64.urlsafe_b64encode(sign(signing_input.encode())).rstrip(b"=").decode()
     return f"{signing_input}.{signature}"
+
+
+ISSUED_REFRESH_TOKEN = "refresh-token-rt-1"  # noqa: S105
+ISSUED_ACCESS_TOKEN_CANARY = "access-token-canary-never-stored"  # noqa: S105
 
 
 def changed(base: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
@@ -201,11 +206,21 @@ class FakeIssuer:
     answers each code once, and only to the verifier of that challenge, with
     the ID token `mint_id_token` makes for the nonce; `before_exchange` runs
     before a code is looked up, so a test can hold two exchanges together.
+    `code_answer_members` are the members besides `id_token` of a code
+    exchange's 200 answer: a refresh token, and an access token with its type
+    as the canary no store may hold. `ABSENT` removes a member.
     """
 
     mint_id_token: Callable[[str], str]
     requests: list[TokenRequest] = field(default_factory=list)
     before_exchange: Callable[[], None] = lambda: None
+    code_answer_members: dict[str, Any] = field(
+        default_factory=lambda: {
+            "refresh_token": ISSUED_REFRESH_TOKEN,
+            "access_token": ISSUED_ACCESS_TOKEN_CANARY,
+            "token_type": "Bearer",
+        }
+    )
     _codes: dict[str, _IssuedCode] = field(default_factory=dict)
     _codes_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -223,7 +238,10 @@ class FakeIssuer:
         verifier = request.form["code_verifier"]
         if issued is None or s256_code_challenge(verifier) != issued.code_challenge:
             return token_endpoint_answer(400, {"error": "invalid_grant"})
-        return token_endpoint_answer(200, {"id_token": self.mint_id_token(issued.nonce)})
+        return token_endpoint_answer(
+            200,
+            changed({"id_token": self.mint_id_token(issued.nonce)}, self.code_answer_members),
+        )
 
 
 def s256_code_challenge(code_verifier: str) -> str:
@@ -468,3 +486,37 @@ def _self_signed_loopback_certificate(directory: Path) -> tuple[Path, Path]:
         )
     )
     return certificate_path, key_path
+
+
+def leaf_texts(
+    subject: object, path: tuple[str, ...] = (),
+) -> Iterator[tuple[tuple[str, ...], str]]:
+    """Every leaf a value holds as text with its field path, a secret unwrapped."""
+    if isinstance(subject, SecretStr):
+        yield path, subject.get_secret_value()
+    elif is_dataclass(subject) and not isinstance(subject, type):
+        for member in fields(subject):
+            yield from leaf_texts(getattr(subject, member.name), (*path, member.name))
+    elif isinstance(subject, Mapping):
+        for key, member in subject.items():
+            yield from leaf_texts(key, path)
+            yield from leaf_texts(member, (*path, str(key)))
+    elif isinstance(subject, list | tuple | set | frozenset):
+        for index, member in enumerate(subject):
+            yield from leaf_texts(member, (*path, str(index)))
+    else:
+        yield path, str(subject)
+
+
+class HoldsRefreshToken(Protocol):
+    @property
+    def refresh_token(self) -> SecretStr | None: ...
+
+
+def assert_holds_only_the_refresh_token(subject: HoldsRefreshToken) -> None:
+    """The issued refresh token is in the `refresh_token` field alone, the access token nowhere."""
+    leaves = list(leaf_texts(subject))
+    assert not [path for path, text in leaves if ISSUED_ACCESS_TOKEN_CANARY in text]
+    assert [path for path, text in leaves if ISSUED_REFRESH_TOKEN in text] == [("refresh_token",)]
+    assert subject.refresh_token is not None
+    assert subject.refresh_token.get_secret_value() == ISSUED_REFRESH_TOKEN

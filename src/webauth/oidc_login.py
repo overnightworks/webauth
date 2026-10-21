@@ -38,8 +38,8 @@ missing or empty claim means no membership.
 
 After ``finish_login`` admits an account, ``open_session`` under the host's lock
 ends the session the request's cookie names, prunes the account to a cap, creates
-its new one at the configured clock's instant, never committing and setting no cookie, so the host
-commits and then issues the cookies.
+its new one, holding the login's refresh token, at the configured clock's instant, never
+committing and setting no cookie, so the host commits and then issues the cookies.
 
 ``log_out`` is the third route's whole sequence: it ends the session the
 request's cookie names, if any, clears the session cookies, and answers the
@@ -108,6 +108,7 @@ from webauth.oidc import (
 from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 
 if TYPE_CHECKING:
+    from pydantic import SecretStr
     from starlette.requests import Request
     from starlette.responses import Response
 
@@ -225,11 +226,14 @@ class AdmissionRefusal(StrEnum):
 
 @dataclass(frozen=True)
 class AdmittedLogin:
-    """An admitted account and the path of this app to send the browser to, or
-    ``None`` for the host's default page."""
+    """An admitted account, the path of this app to send the browser to (or
+    ``None`` for the host's default page), and the refresh token the login's
+    code exchange issued (``None`` when the issuer gave none), which
+    ``open_session`` stores in the new session's row."""
 
     account: UserRecord
     return_to: str | None
+    refresh_token: SecretStr | None
 
 
 def start_login(
@@ -313,20 +317,22 @@ def finish_login(
         config=config,
     )
     return AdmittedLogin(
-        account=admitted, return_to=same_app_path(request, pending.return_to),
+        account=admitted,
+        return_to=same_app_path(request, pending.return_to),
+        refresh_token=identity.refresh_token,
     )
 
 
 def open_session(
     request: Request,
     config: WebAuthConfig,
-    account: UserRecord,
+    admitted: AdmittedLogin,
     *,
     sessions: SessionRecordStore,
     lock: WriteLock,
     max_sessions: int | None,
 ) -> SessionRecord:
-    """Open the new session of an admitted ``account``, ending the one the request carries.
+    """Open the new session of an ``admitted`` login, ending the one the request carries.
 
     Under one ``lock.hold()``, reads ``config.wall_clock`` once, the same
     whole-second instant the session decider reads, and in this order: the session the
@@ -334,7 +340,7 @@ def open_session(
     is a number, the account's newest ``max_sessions - 1`` sessions are kept and
     the rest ended, so neither the replaced session nor the new one counts
     against the cap; the new session is created at that instant, expiring one
-    idle period later. ``None``
+    idle period later, and holds ``admitted.refresh_token``. ``None``
     states that the host sets no cap; any other value must be a positive whole
     number. A forged, oversized or duplicated cookie ends nothing.
 
@@ -349,11 +355,12 @@ def open_session(
         if replaced_session_id is not None:
             sessions.delete(replaced_session_id)
         if max_sessions is not None:
-            sessions.prune_overflow(account.id, max_sessions - 1)
+            sessions.prune_overflow(admitted.account.id, max_sessions - 1)
         return sessions.create(
-            account.id,
+            admitted.account.id,
             now=now,
             expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
+            refresh_token=admitted.refresh_token,
         )
 
 

@@ -103,7 +103,7 @@ owning section, it links there.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
    - Availability: every connection and read is bounded.
 3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed.
-4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty.
+4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret.
 5. **Host infrastructure** (`WallClock`, `WriteLock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
 7. **Named residues:**
@@ -242,7 +242,7 @@ def callback(request: Request, response: Response) -> dict[str, str]:
         response.status_code = 403
         return describe_the_hosts_refusal(outcome)
     session = open_session(
-        request, config, outcome.account,
+        request, config, outcome,
         sessions=sessions, lock=lock,
         max_sessions=3,
     )
@@ -258,7 +258,7 @@ login, sets its pending-login cookie on `response` and returns the
 authorization URL. The keyword is required, so a host cannot forget it; pass
 `None` for none.
 `finish_login(...)` answers an `AdmittedLogin` (the `account` to open a session
-for and the `return_to` path or `None`), or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
+for, the `return_to` path or `None`, and the login's `refresh_token` or `None`), or the `OidcRefusal` or `AdmissionRefusal` that stopped it;
 on an `AdmittedLogin` the host calls [`open_session`](#opening-a-session), commits, and
 only then issues the cookies. `finish_login`
 sets the header that clears the pending-login cookie on `response`, so the
@@ -295,16 +295,20 @@ fragment is lost, because browsers never send it.
 
 #### Opening a session
 
-`open_session(request, config, account, sessions=..., lock=...,
+`open_session(request, config, admitted, sessions=..., lock=...,
 max_sessions=...)` is the whole sequence between admission and the cookies. It
 reads `WebAuthConfig.wall_clock` once, as the same whole seconds the session
 decision reads, and inside one `lock.hold()` it ends the session the request's
 cookie names (signed, sole and within the length bound, whichever account it
 belongs to; any other cookie ends nothing), then, with a cap, ends all but the
 account's newest `max_sessions - 1` sessions, then creates the account's new
-session through `create(user_id, *, now, expires_at)`
-with `created_at` equal to that `now` and `expires_at` one idle period later.
-The host passes no expiry, and the store writes the instants it is given. The
+session through `create(user_id, *, now, expires_at, refresh_token)`
+with `created_at` equal to that `now`, `expires_at` one idle period later and the
+`refresh_token` of `admitted`, a `SecretStr` or `None`.
+The host passes no expiry, and the store writes the instants and the token it is given.
+The store writes the token with `get_secret_value()` into one nullable text column of the session
+row; the library bounds it only by the 64 KiB token response, so the column takes no smaller
+length. A session stored before the host held refresh tokens answers `None`. The
 new session is created last, so it is never the one the cap ends, and the
 replaced session never counts against the cap. With a cap of 2 and sessions
 `{S1, S2}`, a login whose cookie names `S2` leaves `{S1, S3}`; two logins in
@@ -329,8 +333,8 @@ issuer's end-session URL. That URL carries the client ID, the configured
 `post_logout_redirect_uri` and the `id_token_hint` that `finish_login` handed
 the browser at sign-in (see [The ID token hint](#the-id-token-hint)), so
 Keycloak ends the session without asking the person to confirm. Without a
-usable hint the URL leaves it out and Keycloak asks once; the app's own store keeps no
-Keycloak token. The logout is a GET to Keycloak, so the hint lands in that
+usable hint the URL leaves it out and Keycloak asks once. While the session lives, its row
+holds the refresh token; no logout step sends it to Keycloak, and deleting the row removes it. The logout is a GET to Keycloak, so the hint lands in that
 device's browser history and is visible to a TLS-terminating edge; in the
 fetch shape it also reaches the page's own script. Once the session has
 ended, the hint has no logout power left. `log_out` makes no outbound call
@@ -600,8 +604,9 @@ answers the URL to send the browser to and a `PendingLogin` — its state,
 nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
 `complete_login(pending, callback_query)` takes that pending login and the
 callback's raw query string and answers an `OidcIdentity` (subject, issuer,
-full group paths, `sid`, `preferred_username`, and the verified `id_token`
-as received, which stays out of its repr) or an `OidcRefusal` naming its
+full group paths, `sid`, `preferred_username`, the verified `id_token`
+as received, which stays out of its repr, and the `refresh_token` the code exchange
+issued as a `SecretStr`, or `None` when the issuer gave none) or an `OidcRefusal` naming its
 reason. The state is checked before anything else the callback says; then
 the pending login's age: one older than `PENDING_LOGIN_MAX_AGE_SECONDS`
 (600) or dated in the future is `PENDING_LOGIN_EXPIRED`, and no token
@@ -612,7 +617,10 @@ that names a member twice keeps its last value. The code is exchanged through
 the `post_token_request` the host injects, and the ID token is verified by a
 `JwtVerifier` whose one accepted audience is the client ID, then checked for
 the pending nonce and an authorized party: a token for several audiences must
-name the client as its `azp`, and any `azp` a token names must be the client.
+name the client as its `azp`, and any `azp` a token names must be the client. The exchange's access token is never read
+or kept. A `refresh_token` in the answer must be a string of RFC 6749 Appendix A.17's
+`1*VSCHAR` (printable ASCII); anything else, `null` included, is
+`TOKEN_ENDPOINT_FAILED`.
 
 For a Keycloak client the host builds one `OidcClientConfig`. The client id and secret come
 from the host's secret channel, never from source:
@@ -1138,7 +1146,8 @@ config = WebAuthConfig(
 
 ## Ending a session
 
-Ending a session is a call on the host's store: `delete(session_id)`,
+The refresh token is part of the session row: whatever ends the row ends it, and no other row
+or table holds it. Ending a session is a call on the host's store: `delete(session_id)`,
 `delete_for_user(user_id)` or `prune_overflow(user_id, keep_newest)`, where `0` keeps none. The
 library makes that call in three places only: [`log_out`](#logging-out),
 [`open_session`](#opening-a-session) (the session an incoming cookie replaced,
@@ -1351,7 +1360,7 @@ It owns the machinery an application should not rebuild:
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: PyJWT reads the token behind a bound of 8,192 characters on the token and 512 on its header segment (longer is `TOKEN_TOO_LONG` or `MALFORMED_TOKEN`), its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` or a `kid` that is not a string is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity |
-| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
+| `webauth.oidc_login` | Whether a verified identity of the bound issuer becomes, reuses, or is refused an account, the role that account holds (`admin_role` or `user_role`, set from the admin group at every login), `open_session`, which ends the replaced session, prunes the account to its cap and then creates the new one, holding the login's refresh token, at the configured clock's instant, `log_out`, which ends the browser's session and returns the issuer's end-session URL, and `receive_backchannel_logout`, which reads the back-channel form and ends every session of the subject its verified Logout Token names. Takes its identity from `webauth.oidc` |
 | `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost`: the token request sent through `webauth.https_client` |
 
 It leaves the application everything that touches the application's own truth:

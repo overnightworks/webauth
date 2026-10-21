@@ -16,6 +16,17 @@ Versions before 0.3.0 and releases without an entry here are described in the
   `webauth.middleware.security_headers.STRICT_TRANSPORT_SECURITY`), sent exactly when
   `cookie_secure` is on. Migrate by dropping the two arguments; a host that set neither is
   unchanged.
+- `SessionRecordStore.create` takes a required keyword `refresh_token: SecretStr | None`, and
+  `SessionRecord` gains the property `refresh_token -> SecretStr | None`. Migrate by adding one
+  nullable text column to the session table, writing the token with `get_secret_value()` and
+  returning it from the record; nothing is deleted, and existing rows answer `None`.
+- `open_session(request, config, admitted, *, sessions, lock, max_sessions)` takes the
+  `AdmittedLogin` instead of its account, and stores its refresh token in the new session.
+- `OidcIdentity` and `AdmittedLogin` gain a required `refresh_token: SecretStr | None`, which
+  breaks every caller that constructs one. The code exchange's access token is still never read
+  or kept.
+- A code-exchange answer carrying a `refresh_token` outside RFC 6749 Appendix A.17's `1*VSCHAR`
+  (printable ASCII) is `TOKEN_ENDPOINT_FAILED`; that login used to be admitted.
 - `SessionRecordStore.load` no longer promises to hold the session against concurrent
   writers until the caller commits. The library relies on `touch`'s update-only answer
   instead, which a store that applies each call at once meets too. A host's store needs no
