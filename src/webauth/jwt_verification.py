@@ -42,8 +42,9 @@ token: a refresh is skipped for `KEY_SET_REFRESH_COOLDOWN_SECONDS` after the
 last attempt and while another request is refreshing. The refusal then depends
 on the last refresh attempt: `UNKNOWN_KEY_ID` when it succeeded and the key set
 it fetched lacks the `kid`, `KEY_SET_UNAVAILABLE` when it failed, because the
-`kid` may belong to a rotated key. Without a current key set every token is
-refused as `KEY_SET_UNAVAILABLE`.
+`kid` may belong to a rotated key. A token that passes the header checks while
+no current key set remains after the refresh attempt is refused as
+`KEY_SET_UNAVAILABLE`.
 """
 
 from __future__ import annotations
