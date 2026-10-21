@@ -1,7 +1,6 @@
 """Proves login and logout of a webauth host in a real browser against a real Keycloak.
 
-    flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \\
-        uv run --group dev --group e2e python e2e/oidc/prove.py --edge PATH --scratch EMPTY_DIR
+    scripts/e2e-oidc.sh prove --edge PATH
 
 Read ``README.md`` beside this file first. Nothing of the OIDC path is faked:
 the browser fills Keycloak's own form, the host's library talks to the real
