@@ -489,99 +489,16 @@ taken before the callback is stopped by the issuer refusing the spent code
 
 ### Back-channel logout
 
-When a person's Keycloak session ends, for example after they sign out of
-one app, Keycloak posts a Logout Token to the `backchannel.logout.url` of
-every client that session signed in to. `receive_backchannel_logout(relying_party,
-form_body, content_type, *, accounts, sessions, lock, audit)` reads the POSTed
-form (one non-empty `logout_token` field, `application/x-www-form-urlencoded`),
-verifies the token and ends every session of its subject, in every browser, and
-answers `BackchannelLogoutResult.ACCEPTED` or `REFUSED`; a malformed form is
-`REFUSED` before anything is verified or locked. The host's route passes the
-raw body and the content type:
-
-```python
-import logging
-
-import anyio.to_thread
-from fastapi import Request, Response
-
-from webauth.oidc_login import BackchannelLogoutResult, receive_backchannel_logout
-
-logger = logging.getLogger(__name__)
-
-
-def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
-    with the_hosts_transaction() as work:
-        return receive_backchannel_logout(
-            relying_party, form_body, content_type,
-            accounts=work.accounts, sessions=work.sessions, lock=work.lock, audit=work.audit,
-        )
-
-
-@app.post("/auth/backchannel-logout")
-async def backchannel_logout(request: Request) -> Response:
-    form_body = await request.body()
-    content_type = request.headers.get("content-type")
-    try:
-        result = await anyio.to_thread.run_sync(end_the_sessions_of, form_body, content_type)
-    except Exception:
-        logger.exception("back-channel logout failed")
-        return Response(status_code=400)
-    return Response(status_code=200 if result is BackchannelLogoutResult.ACCEPTED else 400)
-```
-
-`the_hosts_transaction()` opens the host's stores on one connection and
-commits when the block ends. The verification, the lock and the stores are
-synchronous, so they run in a worker thread and create and use their stores
-there. The route answers 200 only after the commit; a refusal or a failure,
-the commit's included, leaves every session in place and answers 400.
-
-The function runs in this order. It reads the form, then verifies the token
-before it takes the lock; a malformed form or a refusal does nothing more. Under `lock.hold()` it looks up
-`accounts.get(subject)`. An unknown subject is accepted and creates no
-account. A known subject loses every session
-through the store's `delete_for_user`, and one `backchannel_logout` audit event with
-`actor_id=None` is emitted when at least one session ended. It never commits,
-clears a cookie or calls Keycloak.
-
-`OidcRelyingParty.verify_logout_token(logout_token)` answers a
-`VerifiedLogout(subject)` or an `OidcRefusal`. It is stricter than the OpenID
-Connect Back-Channel Logout profile asks, and it never returns the token, its
-claims or its `sid`, so no session id is stored. The token must be:
-
-- RS256, signed by a key of the configured issuer, with the JOSE header
-  `typ` exactly `logout+jwt` (`JwtVerifier.verify(token, expected_type=...)`);
-- for exactly this client: `aud` is the client ID, as a string or an array of
-  one;
-- issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS` (120) plus the
-  configured leeway ago, and not in the future beyond the leeway, with an
-  integer `iat`;
-- unexpired, with an `exp` after its `iat`;
-- carrying `events` with exactly the key
-  `http://schemas.openid.net/event/backchannel-logout`, whose value is an
-  object;
-- carrying a non-empty `sub`, so a token naming only a `sid` is refused, and
-  no `nonce`, not even `null`.
-
-There is no replay store: a copy of a valid token ends the subject's sessions
-again, as the first did, for at most those two minutes plus the leeway. A
-person who signed in again in that time is signed out once more.
-
-Set the route up so that only the issuer can reach it:
-
-- **Body.** A `BodySizeRule` of 32 KiB for the exact path in `body_size`,
-  under a smaller default.
-- **Headers.** A `CacheControlRule` for the exact path with `no-store`, so
-  every answer, 400 and 413 included, carries it.
-- **CSRF.** Keycloak sends neither an Origin nor a cookie: list the exact path
-  in `exempt` of both `csrf_origin` and `csrf_token`. Never a prefix, and
-  `/logout` stays `token_exempt` only.
-- **Rate limit.** List the exact path in `RateLimitPolicy.exempt`, because
-  Keycloak posts from shared server addresses and one budget would otherwise
-  refuse a real logout.
-- **Reachability.** Register `backchannel.logout.url` on the client by an
-  internal name, never through the public hostname or a Cloudflare Access
-  application.
+When a person's session ends at the issuer, for example after they sign out of
+one app, the issuer posts a Logout Token to every client that session signed in
+to. `webauth.oidc_login.receive_backchannel_logout` reads that form, has
+`OidcRelyingParty.verify_logout_token` check the token, and ends every session
+of its subject, in every browser. The host owns the route and the transaction;
+the route answers 200 only after its commit. The worked route is `build_app`
+in `e2e/oidc/host_app.py`. The token's signature is the only control, so the
+route must be reachable by the issuer alone. The docstrings of those two
+names hold the token rules, the order of the steps, and the CSRF, rate-limit,
+body-size and reachability setup the route needs.
 
 ### The host's duties at login
 
@@ -599,200 +516,32 @@ callback route, around [`open_session`](#opening-a-session):
 
 ### The relying party
 
-`webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE
-for one client at one issuer, described by an `OidcClientConfig` whose issuer URLs
-are all https and whose `client_secret` is a `SecretStr`. The two app URLs,
-`redirect_uri` and `post_logout_redirect_uri`, may instead be http on a loopback host
-(`localhost`, `127.0.0.1` or `[::1]`) for local and CI test stacks; every issuer URL
-stays https. Browsers differ in whether they keep a `Secure` cookie over http on a
-loopback host, so a stack that must work in each runs with
-[`cookie_secure=False`](#configuration) and the plain cookie names. `begin_login()`
-answers the URL to send the browser to and a `PendingLogin` — its state,
-nonce and PKCE verifier, and `issued_at`, the wall-clock second it began.
-`complete_login(pending, callback_query)` takes that pending login and the
-callback's raw query string and answers an `OidcIdentity` (subject, issuer,
-full group paths, `sid`, `preferred_username`, the verified `id_token`
-as received, which stays out of its repr, and the `refresh_token` the code exchange
-issued as a `SecretStr`, or `None` when the issuer gave none) or an `OidcRefusal` naming its
-reason. The state is checked before anything else the callback says; then
-the pending login's age: one older than `PENDING_LOGIN_MAX_AGE_SECONDS`
-(600) or dated in the future is `PENDING_LOGIN_EXPIRED`, and no token
-request is sent. An error the issuer reports is carried as its short error
-code only, never its description, and a `code` longer than
-`MAX_AUTHORIZATION_CODE_CHARS` (2048) is `MALFORMED_CALLBACK`. A token answer
-that names a member twice keeps its last value. The code is exchanged through
-the `post_token_request` the host injects, and the ID token is verified by a
-`JwtVerifier` whose one accepted audience is the client ID, then checked for
-the pending nonce and an authorized party: a token for several audiences must
-name the client as its `azp`, and any `azp` a token names must be the client. The exchange's access token is never read
-or kept. A `refresh_token` in the answer must be a string of RFC 6749 Appendix A.17's
-`1*VSCHAR` (printable ASCII); anything else, `null` included, is
-`TOKEN_ENDPOINT_FAILED`.
-
-Two more calls post a grant to the same token endpoint, with the same Basic
-authorization, no cache and no lock, so each call is one POST and a fresh
-token. `renew_access(refresh_token)` posts `grant_type=refresh_token` with the
-refresh token a `SecretStr` holds and answers a `RenewedAccess`: the new
-`access_token` and the `refresh_token` the issuer rotated to, or `None` when it
-sent none. `workload_access_token()` posts `grant_type=client_credentials` and
-nothing else, so the issuer applies the client's default scopes, and answers
-the client's own access token. Both answers need a `token_type` that is
-`Bearer` in ASCII, any case, and an `access_token` of RFC 6750's `b64token`
-shape, so it can sit in an `Authorization` header; anything else is
-`TOKEN_ENDPOINT_FAILED`. A refresh token outside the grammar above, sent or
-received, is `TOKEN_ENDPOINT_FAILED` too, and a sent one reaches no request.
-An issuer's `error` on a 400 or 401 is `TOKEN_REQUEST_REFUSED` carrying
-`idp_error`, as in the code exchange (`invalid_grant` for a refresh token the
-issuer no longer accepts, `unauthorized_client` for a client with no service
-account); any other failure is `TOKEN_ENDPOINT_FAILED`. Neither call decodes
-a token: its claims are for whoever receives it to judge. The realm must give
-the client a service account holding the role the receiver demands; that is
-the realm's duty, not the library's.
-
-For a Keycloak client the host builds one `OidcClientConfig`. The client id and secret come
-from the host's secret channel, never from source:
-
-```python
-import os
-
-from pydantic import SecretStr
-
-from webauth.oidc import OidcClientConfig
-
-realm = "https://auth.example.test/realms/example"
-client_config = OidcClientConfig(
-    issuer=realm,
-    authorization_endpoint=f"{realm}/protocol/openid-connect/auth",
-    token_endpoint=f"{realm}/protocol/openid-connect/token",
-    jwks_url=f"{realm}/protocol/openid-connect/certs",
-    end_session_endpoint=f"{realm}/protocol/openid-connect/logout",
-    client_id=os.environ["OIDC_CLIENT_ID"],
-    client_secret=SecretStr(os.environ["OIDC_CLIENT_SECRET"]),
-    redirect_uri="https://app.example.test/auth/callback",
-    post_logout_redirect_uri="https://app.example.test/",
-    logout_path="/logout",
-    leeway_seconds=30,
-)
-```
-
-In production both outbound calls go through `webauth.https_client`, the one
-module that imports urllib3:
-
-```python
-import time
-
-from webauth.https_client import fetch_key_set_over_https
-from webauth.oidc import OidcRelyingParty
-from webauth.oidc_transport import post_token_request_over_https
-
-relying_party = OidcRelyingParty(
-    client_config,
-    post_token_request=post_token_request_over_https,
-    fetch_key_set=fetch_key_set_over_https,
-    wall_clock=time.time,
-    monotonic_clock=time.monotonic,
-)
-```
-
-Each request is HTTPS only, under the system's trusted certificates
-(`SSL_CERT_FILE` included), with a connect and a read timeout of five seconds
-each and a total deadline of ten seconds — `KEY_SET_FETCH_DEADLINE_SECONDS`
-and `TOKEN_EXCHANGE_DEADLINE_SECONDS` — over the TLS handshake and the
-whole answer, so an origin that drips its answer is cut off as a timeout;
-connecting, which urllib3 bounds by the connect timeout once per resolved
-address, and the host name lookup, which the resolver offers no way to bound,
-run outside it. No retry, no redirect followed and
-no content decoding. The key-set
-fetch reads at most one byte past `MAX_KEY_SET_BYTES` and refuses any answer
-but 200. The token POST is a form POST with the client's Basic authorization
-and `Accept: application/json`; it hands back any answer but a redirect —
-an issuer's `400 invalid_grant` included — and raises `TokenEndpointError`
-for a redirect, an answer past `MAX_TOKEN_RESPONSE_BYTES`, a TLS failure, a
-timeout or an unreachable origin. Its message is the library's own and never
-quotes the URL, the client secret, the code, the verifier or a refresh token. urllib3 logs
-nothing during either call, since its records quote the URL and whatever
-malformed header text the origin sends back. A `timeout_seconds` or
-`deadline_seconds` of zero or less raises `ValueError`, and
-`post_token_request_over_https` raises `ValueError` when `timeout_seconds`
-exceeds `deadline_seconds` instead of capping it. `TokenEndpointError.failure`
-names the `ExchangeFailure` that ended the request, so a caller can tell
-`TIMED_OUT` from other transport failures.
+`webauth.oidc.OidcRelyingParty` runs the authorization-code flow with PKCE for
+one client at one issuer, described by an `OidcClientConfig` that the host
+builds with its secrets from its own secret channel. `begin_login` starts a
+login, `complete_login` turns the callback into an `OidcIdentity` or an
+`OidcRefusal`, `renew_access` and `workload_access_token` post a refresh and a
+client-credentials grant, and `verify_logout_token` judges a Logout Token.
+Every outbound call goes through the two transports the host injects
+(`webauth.oidc_transport.post_token_request_over_https` and
+`webauth.https_client.fetch_key_set_over_https`), which speak https only, bound
+every request in time and size, follow no redirect and log nothing.
+`build_app` in `e2e/oidc/host_app.py` composes them in a worked host. The docstrings of those names hold the order in which a callback is
+judged, the token rules and the transports' bounds.
 
 ### The person's access token
 
-`webauth.oidc_login.fresh_access_token(relying_party, session_id, *,
-session_transaction, config)` turns a signed-in session into a new access token
-for one call to another service (an agent service, say). It answers a
-`SecretStr`, or an `AccessTokenRefusal` whose `reason` is one of three:
-
-| `AccessTokenRefusalReason` | Meaning | The host |
-|---|---|---|
-| `SESSION_ENDED` | The session is gone or outside its lifetime: the person is signed out. | Treats the person as signed out, as it does after a refused request. |
-| `SIGN_IN_AGAIN` | The session holds no refresh token (it began before the host stored them, or the issuer gave none), or the issuer refused it as `invalid_grant`. | Sends the person to sign in again. The app session itself still stands: only this call is refused. |
-| `ISSUER_UNAVAILABLE` | The issuer is unreachable, answered something unusable, or refused for another reason. `issuer_refusal` carries the `OidcRefusal`, so `invalid_client` shows its cause. | Fails the call and logs `issuer_refusal`; the person stays signed in. |
-
-The session holds only the refresh token; the access token is never stored. Each
-call costs one refresh grant at the issuer and hands the new access token to the
-host in memory, for the one call it serves. Keep it nowhere. When the issuer
-answers a refresh token different from the one the call sent, the call
-stores it with `SessionRecordStore.replace_refresh_token`. It renews nothing:
-asking for a token is not the person's request, so the session's expiry does not
-move.
-
-The call has four phases, and admission's own decision judges the session in
-the first and the third:
-
-1. **Read.** In one `session_transaction`, `load` the session. No row, or one
-   outside its lifetime, is `SESSION_ENDED`; a row without a refresh token is
-   `SIGN_IN_AGAIN`. Either way the issuer is not asked. The block is left,
-   which releases every row lock `load` took.
-2. **Grant.** With no transaction and no `WriteLock` open, send the stored
-   refresh token. `invalid_grant` is `SIGN_IN_AGAIN`; every other refusal is
-   `ISSUER_UNAVAILABLE`. A refusal writes nothing.
-3. **Decide.** In a second `session_transaction`, `load` the session again at a
-   new clock reading. A session that is gone or outside its lifetime now is
-   `SESSION_ENDED` and the token is dropped, whatever refresh token the issuer
-   returned. Otherwise a refresh token that differs from the one **sent**
-   (not the one re-read) is stored; `replace_refresh_token` answering `False`
-   is `SESSION_ENDED`.
-4. **Return.** The token is handed out only after the second block was left
-   without an exception.
-
-So a slow issuer holds only the host's worker thread, never a session row, a login
-or a logout. That thread is bounded as [The relying party](#the-relying-party)
-describes for the token POST. A logout, a back-channel logout, an overflow prune
-or a lifetime expiry that happens during the grant is seen in phase 3.
-
-What it cannot do: the final decision is the last check. A token it authorized may
-be returned after a logout or an expiry that lands later, and it stays valid at the
-service it is sent to, and at the issuer's own endpoints, until its own `exp`
-(300 s in a Keycloak realm with the default access-token lifespan). webauth makes no revocation call. With a store that
-commits every statement, a deletion landing between the second `load` and the end of
-the block is seen only through `replace_refresh_token` answering `False`, so an issuer
-that echoes or omits the refresh token leaves that window open ([Security
-model](#security-model), item 7).
-
-The host's duties:
-
-- Call it from a worker thread (a sync route, or `run_in_threadpool`), outside any
-  open session transaction and outside its `WriteLock`.
-- Pass an id the cookie reader bounded, or bound it first, as `admit_session` asks.
-- Pass the `SessionTransaction` it hands the session gate, or
-  `lambda: nullcontext(store)` for a store that commits each statement. The call
-  commits nothing beyond the two transactions it opens and leaves, neither held
-  across the grant.
-- Store the refresh token in the session row and answer `replace_refresh_token` with
-  a strict `bool`: `True` when the stored row now holds the token, `False` when the
-  row is gone. It only updates an existing row, never creates one.
-
-Two assumptions follow from the realm. The app session and the realm's SSO session
-end separately: an app session that outlives the realm's SSO session (the realm sets
-its idle and maximum lifetimes, for example 7 days and 30 days) gets `SIGN_IN_AGAIN`
-for these calls while the person stays signed in to the app. And the issuer lets a refresh token be used again
-after it issued a new one (Keycloak's `revokeRefreshToken` unset): two overlapping
-calls for one session each get a valid token, and the later write wins. If the issuer
-revokes a refresh token on use, the second of two overlapping calls is refused as
-`invalid_grant` and answers a false `SIGN_IN_AGAIN`.
+`webauth.oidc_login.fresh_access_token` turns a signed-in session into a new
+access token for one call to another service (an agent service, say). The
+session holds only the refresh token, so each call is one refresh grant, and
+the access token goes to the host in memory only. It answers a `SecretStr`, or
+an `AccessTokenRefusal` whose `AccessTokenRefusalReason` says what the host
+does: treat the person as signed out, send them to sign in again, or fail the
+call. A slow issuer holds only the caller's thread, never a session row, a
+login or a logout. A token handed out stays valid until its own `exp` after a
+later logout, and webauth makes no revocation call ([Security
+model](#security-model), item 7). The docstrings of `fresh_access_token` and
+the reasons hold the phases, the host's duties and the realm's assumptions.
 
 ### Admitting an identity
 
