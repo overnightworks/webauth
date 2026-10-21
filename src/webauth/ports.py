@@ -312,7 +312,8 @@ class AuditSink(Protocol):
     def account_event(self, event: AccountEvent) -> None:
         """Map an account operation to the host's audit, optionally doing nothing.
 
-        An event with ``actor_id=None`` means the issuer's groups decided, not
-        a person.
+        On an admission event (``USER_CREATED`` or ``ROLE_CHANGED``),
+        ``actor_id=None`` means the issuer's groups decided, not a person. A
+        ``BACKCHANNEL_LOGOUT`` also has ``actor_id=None``, with no group decision.
         """
         ...

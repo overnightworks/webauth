@@ -73,7 +73,9 @@ def install_web_auth_middleware(
 
     A route that raises, or an app without an installed ``WebAuthConfig``,
     answers the library 500 with the headers (no HSTS without a config), and
-    the exception still reaches the server.
+    the exception still reaches the server. Once the response has started no
+    500 follows, because a second start cannot be sent; the exception reaches
+    the server alone.
 
     Where a host's own middleware goes: added before this call it sits inside
     the library stack, so a request the library refuses early (413 by
