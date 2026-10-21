@@ -183,6 +183,9 @@ class AdmissionConfig:
     the group path of the app (or ``EverySubject.OF_THE_BOUND_ISSUER``), and the
     group path of its admins (or ``NoAdmins.IN_THIS_APP``).
 
+    ``bound_issuer`` is the ``issuer`` of the host's ``OidcClientConfig``. Whether
+    a group exists at the issuer is not checked.
+
     ``ValueError`` at construction names a ``login_group`` or ``admin_group``
     that is not a group path: one that does not start with ``/``, ends with
     ``/``, has an empty segment, whitespace around a segment, or a control,
@@ -291,9 +294,22 @@ def start_login(
     """Begin a login: set its pending-login cookie on ``response`` and return
     the authorization URL the host redirects the browser to.
 
-    ``return_to`` is the raw path and query, ``root_path`` included, that
-    ``finish_login`` hands back after the login. A value that is not a path of
-    this app is dropped and the login lands on the host's default page.
+    ``return_to`` is the raw path and query as the app sees them, ``root_path``
+    included and not the percent-decoded ``request.url.path``, that
+    ``finish_login`` hands back after the login. It is kept only as a
+    same-origin path of this app, ASCII (other characters are percent-encoded)
+    and at most 512 bytes once encoded; anything else is dropped and the login
+    still succeeds, landing on the host's default page. Dropped are a path a
+    browser reads as another host (``//x``, ``/\\x``, a tab, CR or LF between
+    the slashes), an absolute URL, a bare host, a control character, the empty
+    string, a ``.`` or ``..`` segment (also as ``%2e``), a literal ``#`` and a
+    path outside ``root_path``. Under a ``root_path`` the path must already lie
+    below it at a segment boundary and nothing is prepended: with
+    ``root_path="/app"``, ``/app/albums/42`` is kept and ``/albums/42`` is
+    dropped; a ``root_path`` with a character other than ASCII letters, digits,
+    ``-._~`` and ``/`` keeps no return path. A login route inside a mounted
+    sub-app is judged against that mount's ``root_path``. The fragment is lost,
+    because browsers never send it.
     """
     authorization = relying_party.begin_login()
     pending = authorization.pending.returning_to(same_app_path(request, return_to))
@@ -324,13 +340,31 @@ def finish_login(
     The callback's state selects exactly one pending-login cookie, which is
     cleared on ``response`` whatever the outcome, so the host answers with
     ``response`` on every outcome, refusals included; every other tab's
-    cookie stays. A callback naming no state or naming it twice, or whose state
-    names no single genuine cookie, is refused before any token request. On
-    an admitted login, the host opens its session for ``account`` with
+    cookie stays. FastAPI copies an injected ``response``'s headers only when
+    the route returns a value that is not itself a ``Response``: a returned
+    ``JSONResponse`` is sent as is and a raised ``HTTPException`` gets a new
+    response, so neither would clear the cookie.
+
+    A callback names a usable state when it carries ``state`` exactly once,
+    non-empty and decodable. Every refusal below comes before any token
+    request. With a usable state, a malformed rest (a parameter named twice,
+    one that does not decode, or a pair strict query parsing refuses, such as a
+    trailing ``&`` or a name without ``=``) is ``MALFORMED_CALLBACK`` when that
+    state's cookie is genuine and ``STATE_MISMATCH`` otherwise. Without one,
+    the same malformed rest is ``MALFORMED_CALLBACK`` and anything else
+    ``STATE_MISMATCH``. A well-formed callback whose cookie is missing, forged,
+    oversized, of an unknown version, duplicated or of another login is
+    ``STATE_MISMATCH``.
+
+    On an admitted login, the host opens its session for ``account`` with
     ``open_session``, commits, calls ``issue_session_cookies`` and sends the
-    browser to ``return_to``, or to its default page when that is ``None``;
-    ``response`` also carries the ID token hint cookie for the logout path,
-    replacing an older one (see ``log_out``).
+    browser to ``return_to``, the path judged again on its way back, or to its
+    default page when that is ``None``. ``response`` also carries the ID token
+    hint cookie for the logout path, replacing an older one; a refused callback
+    sets none (see ``log_out``). When the issuer is on another registrable
+    domain than the app, ``cookie_samesite`` must be ``"lax"``: with
+    ``"strict"`` the browser withholds the session cookie from the first page
+    after the redirect and that page is signed out.
     """
     callback_query = request.url.query
     state = _callback_state(callback_query)
@@ -386,10 +420,13 @@ def open_session(
     against the cap; the new session is created at that instant, expiring one
     idle period later, and holds ``admitted.refresh_token``. ``None``
     states that the host sets no cap; any other value must be a positive whole
-    number. A forged, oversized or duplicated cookie ends nothing.
+    number, or ``ValueError`` is raised before anything is written. A forged,
+    oversized or duplicated cookie ends nothing.
 
-    Never commits and sets no cookie: the host commits, then calls
-    ``issue_session_cookies`` with the returned id.
+    Never commits, sets no cookie and records no audit event: the host commits,
+    then calls ``issue_session_cookies`` with the returned id. The host's
+    ``WriteLock`` must allow a second hold in the same request, one for
+    admission and one here.
     """
     if max_sessions is not None:
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
@@ -421,8 +458,30 @@ def log_out(
 
     The session the request's cookie names is deleted under ``lock`` and the
     session cookies are cleared on ``response`` in every case; the host then
-    commits and sends the browser to the returned URL. The ID token hint the
-    request carries goes into that URL, and its cookie is cleared in every case."""
+    commits and sends the browser to the returned URL. The URL carries the
+    client ID, the configured ``post_logout_redirect_uri`` and the ID token
+    hint the request carries, whose cookie is cleared in every case; without a
+    usable hint the issuer asks the person once, as it also does for a hint of
+    another issuer session, and for a hint whose realm signing key has since
+    been deleted it shows an error page. The session's stored refresh token goes
+    to the issuer nowhere; deleting the row removes it.
+
+    A form logs out through a route that builds the ``Response`` itself and
+    passes it in: a returned ``RedirectResponse`` would be sent as is and lose
+    the cookie deletions on ``response``. A page that logs out through ``fetch``
+    returns the URL as JSON and navigates itself, because ``fetch`` would
+    follow a cross-origin 303, and in that shape the hint also reaches the
+    page's own script. The route needs no ``current_user`` dependency, so a
+    request without a session still reaches the issuer.
+
+    The origin check protects the route, not the CSRF token, which is bound to
+    the session and fails once it has expired, and which a plain form cannot
+    send. So the host keeps the route POST only (the origin check runs on
+    mutating methods alone) and lists its exact path, never a prefix, in
+    ``CsrfPolicy.token_exempt`` and not in ``exempt``. A form logout redirects
+    the browser to the issuer, and Chromium checks ``form-action`` on that
+    redirect, so the host adds the end-session endpoint's origin to
+    ``CspDirective.FORM_ACTION``; a ``fetch`` logout is not subject to it."""
     session_id = session_id_from_request(request, config)
     if session_id is not None:
         with lock.hold():
@@ -616,7 +675,9 @@ def admit_identity(
 ) -> UserRecord | AdmissionRefusal:
     """The account ``identity`` signs in as, created on its first visit.
 
-    A known subject keeps its account and username, whatever username the
+    A new subject gets an account with the issuer's ``preferred_username``, or
+    the subject when it suggests none or only whitespace, and ``USER_CREATED``
+    is recorded with no actor. A known subject keeps its account and username, whatever username the
     issuer now suggests, but its role follows the groups: ``admin_role`` when
     the identity is a member of ``admission.admin_group`` (or below it),
     otherwise ``user_role``, whatever role the account stored and whatever
@@ -630,7 +691,13 @@ def admit_identity(
     identity's groups hold no path of ``admission.login_group``, or are
     missing or empty), then ``USERNAME_TAKEN`` when the store refuses a new
     account's username. The first two write nothing and look up no account.
-    No username is looked up and no local flag locks an account.
+    No username is looked up, so a store without a unique username admits a
+    second subject whose ``preferred_username`` another account holds; disabling
+    a person is done at the issuer. No local flag locks an account.
+
+    Only the derived role is stored, never the groups. A host that migrates from
+    a store with its own admins puts them into the admin group first, or they are
+    demoted at their next login.
     """
     if identity.issuer != admission.bound_issuer:
         return AdmissionRefusal.FOREIGN_ISSUER

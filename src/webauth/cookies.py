@@ -4,13 +4,40 @@ and the ID token hint.
 A pending login is the OpenID Connect login a browser began and has not yet
 brought back. It travels in a cookie of its own, named after its state, so
 two tabs can each have one; the value is versioned, bounded field by field and
-signed under the session signing key with a prefix no other cookie uses.
+signed under the session signing key with a prefix no other cookie uses, and
+at most 896 characters. Its name is ``__Host-oidc_pending_`` followed by the
+first 16 hex characters of the SHA-256 of the login's state; with
+``cookie_secure=False`` it is the plain ``oidc_pending_`` form and the cookie is
+not ``Secure``, which is for plain http on a loopback host, where a sibling
+host or a network observer can set or read it. It is ``HttpOnly``, ``Path=/``,
+``Max-Age=600`` and always ``SameSite=Lax``, whatever ``cookie_samesite`` says,
+because the callback is a top-level navigation from the issuer's site, which a
+``Strict`` cookie would not accompany. A browser holds at most five: a start
+beyond them clears the oldest by ``issued_at``, a cookie that does not verify
+or whose name appears twice counting as oldest, so repeated starts never crowd
+out the session and CSRF cookies. Only names of exactly that shape count; any
+other cookie whose name merely starts with the prefix is neither counted nor
+cleared.
 
 The ID token hint is the issuer's ID token from the last login, kept in a
 cookie of its own that only the logout path receives, so the issuer can end
 that login's session without asking the person. It is not signed, and it is
 never decoded, verified, logged or accepted as a credential: the issuer
-judges it, and the reader checks only its shape and size.
+judges it, and the reader checks only its shape and size: a sole cookie of
+that name shaped like a compact JWS within ``MAX_ID_TOKEN_HINT_CHARS``, else
+it counts as missing. The cookie is ``__Secure-oidc_id_token_hint``, or the
+plain ``oidc_id_token_hint`` with ``cookie_secure=False``; it cannot be
+``__Host-``, which demands ``Path=/``. It is ``HttpOnly``, always
+``SameSite=Strict``, ``Max-Age`` as the session cookie and ``Path`` the
+``logout_path`` of the ``OidcClientConfig``, so the browser sends it to every
+path beneath that prefix: the narrowest prefix covering the logout routes keeps
+it off every other request, and behind a path-rewriting proxy it is the path
+the browser sees. A new login overwrites the old hint, and a token over the
+bound is not kept and clears it instead. Changing ``logout_path`` between
+deployments leaves the old cookie in the browser, which a logout clears only at
+the new path; where the old path still matches the logout route, a second
+cookie of the same name makes the logout omit the hint, and the issuer asks
+until the old one expires or the person removes it.
 """
 
 from __future__ import annotations
