@@ -419,7 +419,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         call_userinfo(settings, current)
         with current.sessions.transaction():
             session = open_session(
-                request, config, outcome.account,
+                request, config, outcome,
                 sessions=current.sessions, lock=current.lock,
                 max_sessions=None,
             )

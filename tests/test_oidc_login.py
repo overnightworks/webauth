@@ -29,11 +29,14 @@ from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from oidc_arrangement import (
     ABSENT,
+    ISSUED_ACCESS_TOKEN_CANARY,
+    ISSUED_REFRESH_TOKEN,
     FakeClock,
     FakeIssuer,
     FakeKeySetEndpoint,
     a_fake_id_token,
     a_logout_token,
+    assert_holds_only_the_refresh_token,
     jws,
     key_set_document,
     public_jwk,
@@ -88,6 +91,7 @@ from webauth.oidc import (
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
+    AdmittedLogin,
     AppRole,
     BackchannelLogoutResult,
     EverySubject,
@@ -134,6 +138,7 @@ LENA = OidcIdentity(
     session_id=None,
     preferred_username="lena",
     id_token=a_fake_id_token("lena"),
+    refresh_token=None,
 )
 
 
@@ -637,6 +642,7 @@ class OidcHost:
     relying_party: OidcRelyingParty
     issued_id_tokens: list[str]
     returned_to: list[str | None]
+    admitted_logins: list[AdmittedLogin]
 
     def start(self, *, return_to: str | None = None) -> str:
         """Visit the start route; answer the authorization URL it sends the browser to."""
@@ -716,6 +722,7 @@ def an_oidc_host(
     wall_clock = FakeClock(float(NOW))
     issued_id_tokens: list[str] = []
     returned_to: list[str | None] = []
+    admitted_logins: list[AdmittedLogin] = []
 
     def mint_id_token(nonce: str) -> str:
         issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
@@ -782,9 +789,10 @@ def an_oidc_host(
             response.status_code = 403
             return {"refusal": outcome.value}
         returned_to.append(outcome.return_to)
+        admitted_logins.append(outcome)
         with sessions.transaction():
             session = open_session(
-                request, config, outcome.account,
+                request, config, outcome,
                 sessions=sessions, lock=lock,
                 max_sessions=max_sessions,
             )
@@ -850,6 +858,7 @@ def an_oidc_host(
         relying_party=relying_party,
         issued_id_tokens=issued_id_tokens,
         returned_to=returned_to,
+        admitted_logins=admitted_logins,
     )
 
 
@@ -909,6 +918,70 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
     assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
     assert set_cookies(response)[host.config.csrf_cookie_name] == configured
     assert host.client.get("/me").json() == {"username": "lena"}
+
+
+def test_an_admitted_callback_stores_the_refresh_token_and_nothing_of_the_access_token() -> None:
+    host = an_oidc_host()
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    record = host.sessions.record
+    assert record is not None
+    assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
+    [admitted] = host.admitted_logins
+    visible = (
+        repr(record) + repr(host.sessions.list_active()) + repr(admitted)
+        + str(response.headers)
+    )
+    assert ISSUED_ACCESS_TOKEN_CANARY not in visible
+    assert ISSUED_REFRESH_TOKEN not in visible
+    assert_holds_only_the_refresh_token(admitted)
+    assert_holds_only_the_refresh_token(record)
+
+
+@pytest.mark.parametrize(("members", "stored"), [
+    pytest.param({"refresh_token": ABSENT}, [], id="an-answer-without-a-refresh-token"),
+    pytest.param(
+        {"access_token": ABSENT, "token_type": ABSENT}, [ISSUED_REFRESH_TOKEN],
+        id="an-answer-without-an-access-token",
+    ),
+    pytest.param({"refresh_token": " ~"}, [" ~"], id="a-refresh-token-at-the-grammars-ends"),
+])
+def test_an_admitted_callback_stores_what_the_code_answer_issued(
+    members: dict[str, object], stored: list[str],
+) -> None:
+    host = an_oidc_host()
+    host.issuer.code_answer_members.update(members)
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert response.status_code == 200
+    assert stored_refresh_tokens(host) == stored
+    assert host.sessions.count_active() == 1
+
+
+@pytest.mark.parametrize("refresh_token", [
+    pytest.param("", id="empty"),
+    pytest.param(42, id="a-number"),
+    pytest.param(None, id="null"),
+    pytest.param("rt\x00", id="with-a-nul"),
+    pytest.param("rt\r", id="with-a-carriage-return"),
+    pytest.param("rt\n", id="with-a-line-feed"),
+    pytest.param("rt\x7f", id="with-a-del"),
+    pytest.param("rté", id="non-ascii"),
+    pytest.param("rt\ud800", id="a-lone-surrogate"),
+])
+def test_a_refresh_token_outside_the_grammar_refuses_the_login_and_provisions_nothing(
+    refresh_token: object,
+) -> None:
+    host = an_oidc_host()
+    host.issuer.code_answer_members["refresh_token"] = refresh_token
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert (response.status_code, response.json()) == (403, {"refusal": "token-endpoint-failed"})
+    assert host.sessions.count_active() == 0
+    assert host.accounts.list() == []
 
 
 @pytest.mark.parametrize(("seconds_into_the_instant", "seconds_per_reading"), [
@@ -1414,7 +1487,7 @@ SAME_ORIGIN_FORM = {
 def signed_in_host() -> OidcHost:
     host = an_oidc_host()
     host.callback(host.sign_in_at_issuer())
-    assert host.sessions.count_active() == 1
+    assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
     return host
 
 
@@ -1480,6 +1553,7 @@ def test_a_logout_ends_the_session_clears_both_cookies_and_sends_the_browser_to_
     assert both_session_cookies_are_cleared(host, response)
     assert the_hint_cookie_is_cleared_for_the_logout_path(response)
     assert host.sessions.count_active() == 0
+    assert stored_refresh_tokens(host) == []
 
 
 @dataclass(frozen=True)
@@ -1693,6 +1767,14 @@ def a_host_with_sessions(
     return host
 
 
+def stored_refresh_tokens(host: OidcHost) -> list[str]:
+    return [
+        record.refresh_token.get_secret_value()
+        for record in host.sessions.list_active()
+        if record.refresh_token is not None
+    ]
+
+
 def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
     first_created_at = datetime.now(UTC) - timedelta(minutes=30)
     for minute in range(count):
@@ -1700,6 +1782,7 @@ def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
         seeded_session(
             host.sessions, host.lock.hold_uncounted(), user_id,
             created_at, created_at + timedelta(seconds=SESSION_IDLE_SECONDS),
+            SecretStr(f"{user_id}-refresh-token-{minute}"),
         )
 
 
@@ -1728,6 +1811,7 @@ def test_a_valid_logout_token_ends_every_session_of_its_subject_and_keeps_anothe
 
     assert response.status_code == 200
     assert (sessions_of(host, SUBJECT), sessions_of(host, OTHER_SUBJECT)) == (0, 2)
+    assert not [token for token in stored_refresh_tokens(host) if token.startswith(SUBJECT)]
 
 
 def the_cookie_header_of(host: OidcHost, session_id: str) -> dict[str, str]:
@@ -1757,6 +1841,9 @@ def test_after_a_session_ends_its_cookie_is_refused_and_every_other_sessions_coo
 ) -> None:
     host = a_host_with_sessions(subject_sessions=3, other_sessions=1, max_sessions=3)
     session_ids = [record.id for record in host.sessions.list_active()]
+    ended_tokens = [
+        host.sessions.list_active()[index].refresh_token.get_secret_value() for index in ended
+    ]
 
     ending(host, session_ids)
 
@@ -1765,6 +1852,7 @@ def test_after_a_session_ends_its_cookie_is_refused_and_every_other_sessions_coo
         for session_id in session_ids
     ]
     assert statuses == [401 if index in ended else 200 for index in range(len(session_ids))]
+    assert not set(ended_tokens) & set(stored_refresh_tokens(host))
 
 
 def test_a_logout_for_an_unknown_subject_is_accepted_without_provisioning_an_account() -> None:
@@ -2076,6 +2164,7 @@ class OpeningStore:
 
     def open_session(
         self, *cookie_values: str, max_sessions: int | None = None,
+        refresh_token: SecretStr | None = None,
     ) -> SessionRecord:
         app = FastAPI()
         install_web_auth_config(app, OPENING_CONFIG)
@@ -2083,7 +2172,8 @@ class OpeningStore:
         if cookie_values:
             headers.append((b"cookie", session_cookie_header(*cookie_values).encode()))
         return open_session(
-            Request(an_http_scope(app, headers=headers)), OPENING_CONFIG, ACCOUNT,
+            Request(an_http_scope(app, headers=headers)), OPENING_CONFIG,
+            AdmittedLogin(account=ACCOUNT, return_to=None, refresh_token=refresh_token),
             sessions=self.sessions, lock=self.lock,
             max_sessions=max_sessions,
         )
@@ -2091,6 +2181,15 @@ class OpeningStore:
 
 def signed(session_id: str) -> str:
     return sign_session_id(session_id, OPENING_CONFIG.signing_key)
+
+
+def test_a_new_session_holds_the_refresh_token_of_the_admitted_login() -> None:
+    store = OpeningStore.holding()
+
+    session = store.open_session(refresh_token=SecretStr("rt-1"))
+
+    assert session.refresh_token == SecretStr("rt-1")
+    assert store.sessions.load(session.id) == session
 
 
 def test_a_new_session_has_a_fresh_id() -> None:
