@@ -393,6 +393,13 @@ class SessionRecordsInMemory:
         record.expires_at = expires_at
         return True
 
+    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
+        record = self._records.get(session_id)
+        if record is None:
+            return False
+        record.refresh_token = refresh_token
+        return True
+
     def delete(self, session_id: str) -> None:
         _require_held_lock(self._lock)
         self._remove_record(session_id)
@@ -428,7 +435,8 @@ class SessionRecordsInMemory:
 
 class SessionsRecordingTheirTransaction(SessionRecordsInMemory):
     """A store that records, with the thread each ran on, the factory call (``open``),
-    ``load``, ``touch``, a clean exit (``commit``) and an exit by exception (``rollback``)."""
+    ``load``, ``touch``, ``replace``, a clean exit (``commit``) and an exit by exception
+    (``rollback``)."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -464,6 +472,10 @@ class SessionsRecordingTheirTransaction(SessionRecordsInMemory):
         self.events.append(("touch", get_ident()))
         return super().touch(session_id, expires_at=expires_at)
 
+    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
+        self.events.append(("replace", get_ident()))
+        return super().replace_refresh_token(session_id, refresh_token=refresh_token)
+
 
 class SessionsFailingToLoad(SessionRecordsInMemory):
     """A store whose ``load`` raises, as a database that went away does."""
@@ -480,6 +492,14 @@ class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
         if record is not None:
             self.delete(session_id)
         return record
+
+
+class SessionsEndedBeforeReplacingTheRefreshToken(SessionRecordsInMemory):
+    """A store whose session is ended by another request right before the replace lands."""
+
+    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
+        self._remove_record(session_id)
+        return super().replace_refresh_token(session_id, refresh_token=refresh_token)
 
 
 class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
@@ -514,6 +534,17 @@ class SessionsAnsweringTouch(SessionRecordsInMemory):
         expires_at: datetime,
     ) -> bool:
         return self.touch_answer
+
+
+class SessionsAnsweringReplace(SessionRecordsInMemory):
+    """A store whose ``replace_refresh_token`` writes nothing and gives a fixed answer."""
+
+    def __init__(self, record: FakeSessionRecord, replace_answer: Any) -> None:
+        super().__init__(record)
+        self.replace_answer = replace_answer
+
+    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
+        return self.replace_answer
 
 
 @dataclass

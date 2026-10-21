@@ -122,6 +122,7 @@ if TYPE_CHECKING:
         AuditSink,
         SessionRecord,
         SessionRecordStore,
+        SessionTransaction,
         SubjectUserStore,
         UserRecord,
         WriteLock,
@@ -130,6 +131,8 @@ if TYPE_CHECKING:
 __all__ = [
     "AdmissionConfig",
     "AdmissionRefusal",
+    "AccessTokenRefusal",
+    "AccessTokenRefusalReason",
     "AdmittedLogin",
     "AppRole",
     "BackchannelLogoutResult",
@@ -138,6 +141,7 @@ __all__ = [
     "admit_identity",
     "app_role",
     "finish_login",
+    "fresh_access_token",
     "log_out",
     "open_session",
     "receive_backchannel_logout",
@@ -421,6 +425,28 @@ def log_out(
     id_token_hint = _id_token_hint_from_request(request, config)
     _clear_id_token_hint_cookie(response, logout_path=relying_party.logout_path, config=config)
     return relying_party.logout_url(id_token_hint=id_token_hint)
+
+
+class AccessTokenRefusalReason(StrEnum):
+    SESSION_ENDED = "session-ended"
+    SIGN_IN_AGAIN = "sign-in-again"
+    ISSUER_UNAVAILABLE = "issuer-unavailable"
+
+
+@dataclass(frozen=True)
+class AccessTokenRefusal:
+    reason: AccessTokenRefusalReason
+    issuer_refusal: OidcRefusal | None = None
+
+
+def fresh_access_token(
+    relying_party: OidcRelyingParty,
+    session_id: str,
+    *,
+    session_transaction: SessionTransaction,
+    config: WebAuthConfig,
+) -> SecretStr | AccessTokenRefusal:
+    raise NotImplementedError
 
 
 class BackchannelLogoutResult(Enum):
