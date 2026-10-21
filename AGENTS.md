@@ -20,7 +20,8 @@ Nobody pushes to `main`.
 The root holds the package manifest and its lockfile, the scanner
 configuration, the licence, and the entry documents `README.md`, `AGENTS.md`,
 `CLAUDE.md`, `CHANGELOG.md` and `SECURITY.md`. The library lives under
-`src/webauth/`, its suite under `tests/`.
+`src/webauth/`, its suite under `tests/`. `scripts/` holds the commands an
+operator or agent runs.
 
 `e2e/` is the proof harness: real-browser scripts that drive a host application
 built on the library against a real issuer. It owns nothing shipped, the
@@ -71,16 +72,9 @@ CI, which only lints it.
 
 ## Checks
 
-```bash
-uv sync --group dev
-uv run pytest tests -q
-uv run ruff check src tests e2e
-uv run lint-imports
-uv run --locked deptry src
-uv run --group e2e pyright
-uv run --group dev pyright --verifytypes webauth --ignoreexternal
-tests/typing/check_against_wheel.sh
-```
+`scripts/check.sh` runs every static check CI's `checks` job runs, from any
+directory, and stops at the first failure. The suite runs in CI; locally run it
+only targeted, as `uv run pytest <files>`.
 
 `tests/typing/` holds the static typing hosts. The script type-checks them with
 the pinned pyright against the built wheel, from a directory without `src`, so
@@ -118,19 +112,13 @@ release workflow's `verify` job checks both and refuses anything else. If
 once CI is green. Never move or re-create the tag (the tag ruleset forbids
 updating and deleting tags) and never bump the version for it.
 
-Both builds (`ci.yml` and `release.yml`) run
-`uv build --build-constraint .github/requirements-build.txt --require-hashes`, so the
-attested wheel is built by the setuptools pinned there, and a hash that does not match
-fails the build. Regenerate the file from the repository root with
-
-```bash
-echo "setuptools>=77" | uv pip compile - --generate-hashes --python-version 3.12 --no-annotate --custom-compile-command 'See AGENTS.md "Releasing"' --output-file .github/requirements-build.txt
-```
-
-The input floor matches the `[build-system]` floor in `pyproject.toml`. A setuptools
-bump is an ordinary Dependabot pull request (`pip` entry, directory `/.github`).
+Both builds (`ci.yml` and `release.yml`) use the hash-pinned build constraints in
+`.github/requirements-build.txt`, so the attested wheel is built by the setuptools
+pinned there, and a hash that does not match fails the build.
+`scripts/regenerate-build-constraints.sh` regenerates the file from the setuptools
+floor in `[build-system]` of `pyproject.toml`. A setuptools bump is an ordinary
+Dependabot pull request (`pip` entry, directory `/.github`).
 
 The release carries the wheel, the sdist, `SHA256SUMS` and build-provenance
-attestations. Check a downloaded file with
-`gh attestation verify <file> -R overnightworks/webauth` and
-`sha256sum -c --ignore-missing SHA256SUMS`.
+attestations. `scripts/verify-release.sh TAG` downloads a release and checks the
+checksums and the attestations of the wheel and the sdist.
