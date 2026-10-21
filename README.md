@@ -73,12 +73,12 @@ A test that needs a signed-in person needs no issuer. It creates the account and
 a session inside the configured lifetime in the host's own store, then calls
 `issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
 a `Response` and copies both cookies it sets (read them from
-`response.headers.getlist("set-cookie")`) into its client. That covers read-only
-and state-changing requests alike. A state-changing request also sends the
-value of the CSRF cookie in the header named `config.csrf_header_name`, and a
-form POST also needs `Sec-Fetch-Site: same-origin`, or an `Origin` the config
-allows ([CSRF origin](#csrf-origin)); a JSON POST needs neither. With
-`cookie_secure` on, the client's base URL must be `https`.
+`response.headers.getlist("set-cookie")`) into its client. The cookies cover a
+read-only request; a state-changing request also sends the value of the CSRF
+cookie in the header named `config.csrf_header_name`, and a form POST also needs
+`Sec-Fetch-Site: same-origin`, or an `Origin` the config allows ([CSRF
+origin](#csrf-origin)); a JSON POST needs neither. When the client keeps the
+cookies' attributes and `cookie_secure` is on, use an `https` base URL.
 
 A test of the host's own start, callback and logout routes gives
 `OidcRelyingParty` its own `post_token_request` (a `TokenRequestPost`, from
