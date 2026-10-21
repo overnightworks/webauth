@@ -1,0 +1,7 @@
+claim_id = "b37ec4842fd14a5b96b8332c3d45fedc"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "5db855f28e5af601924d9f5be16735c5c5986e2f"
+branch = "claude/issue-374-relying-party-details-in-oidc"
+scope = ["README.md", "src/webauth/oidc.py", "src/webauth/oidc_login.py"]
+opened_commit = "e1ee83aea05569d27eef592342ff03b4818319e4"
