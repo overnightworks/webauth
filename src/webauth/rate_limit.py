@@ -40,6 +40,12 @@ class RedisRateLimitBackend:
     ``key_prefix`` namespaces this host's keys inside the shared store, so two
     applications on one Redis do not spend each other's budgets. The host
     supplies its own prefix when it constructs the backend.
+
+    It needs the client library, so a host that uses it installs
+    ``overnightworks-webauth[redis]``, and Redis 5.0 or later, or Valkey: the
+    script reads ``TIME`` and so relies on script effects replication. A check
+    holds its worker thread until the Redis client gives up, so give the client
+    short timeouts and few retries; its defaults can hold a thread for a minute.
     """
 
     def __init__(self, redis: Redis, key_prefix: str) -> None:

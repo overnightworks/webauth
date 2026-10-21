@@ -433,191 +433,61 @@ session with [`log_out`](#logging-out).
 
 ## Middleware order
 
-`install_web_auth_middleware(app, *, security_headers, body_size=None,
-rate_limit=None, csrf_origin=None, csrf_token=None, session_gate=None)` adds the library's
-middleware in the one order below, outermost first. Starlette inserts at the
-front, so the installer adds them in reverse.
+`install_web_auth_middleware` adds the library's middleware in one order,
+outermost first, and refuses a stack that would break it:
 
-1. `SecurityHeadersMiddleware` (required): outside everything, so the
-   library's own refusals carry the headers: the 413s, the
-   429 and 503 with `Retry-After`, the CSRF 403s, and the 500.
-2. `BodySizeLimitMiddleware`: a body whose Content-Length is over the limit
-   is refused before it costs a rate-limit budget or a session lookup. A
-   streamed body found over the limit while the route reads it comes after the
-   session gate's admission.
+1. `SecurityHeadersMiddleware` (required): outside everything, so the library's
+   own refusals (the 413s, the 429 and 503, the CSRF 403s and the 500) carry
+   the headers.
+2. `BodySizeLimitMiddleware`: a body declared too large is refused before it
+   costs a rate-limit budget or a session lookup.
 3. `IpRateLimitMiddleware`: outside CSRF, so forged requests spend the
    address's budget.
 4. `CsrfOriginMiddleware`.
 5. `CsrfTokenMiddleware`.
-6. `SessionGateMiddleware`: innermost, so a request the others refuse before
-   admission never costs a session lookup, and a forged state-changing request is refused
+6. `SessionGateMiddleware`: innermost, so a request refused before admission
+   never costs a session lookup, and a forged state-changing request is refused
    before it renews a session.
 
-`csrf_origin` and `csrf_token` take separate `CsrfPolicy` values. The
-installer refuses, before it touches the app, three things:
-
-- A `csrf_token` without a `csrf_origin` (`ValueError`).
-- A `csrf_token` whose `token_exempt` paths the origin check does not fully
-  cover (`ValueError`): login routes skip the token on the promise that the
-  origin check protects them. An exact path must require the origin check; a
-  prefix must have every path below it checked, so an origin exemption inside
-  it, or an origin policy that protects only the prefix string, is refused;
-  shapes and patterns are refused as unverifiable.
-- An app that already carries any of the six library middleware or a
-  subclass of one, from an earlier installer call or added by hand
-  (`RuntimeError`).
-
-Install once, and add no library middleware yourself.
-
-**Placement of host middleware.** Added before the call, a host middleware
-sits inside the library stack: a request the library refuses early (413 by
-Content-Length, 429, 503, the CSRF 403s, the session gate's 302 and 401)
-never reaches it.
-Added after the call, it sits outside: it sees every library refusal with the
-headers already set. Put a middleware that must see only admitted requests
-(session lookups, audit) before the call; put one that must observe every
-response (access logs, metrics) after it. A response or exception produced by a host
-middleware added after the call (outside the stack) does not carry the
-library headers. A host `BaseHTTPMiddleware` or `@app.middleware("http")` makes a
-response that fails mid-stream look complete wherever it sits, and added before
-the call it also turns the 413 for a streamed body the route reads into the
-library 500; write a middleware that must see admitted requests as pure ASGI.
-The library middlewares run the app in the caller's task, so a `ContextVar` that
-the app or an inner middleware sets is visible to an outer host middleware after
-the call returns; a host that relied on `BaseHTTPMiddleware`'s task isolation
-restores its own context, for example by resetting the token it set.
-
-**Budget semantics.** When the limiter is enabled, the path is not exempt and
-the limiter is reached:
-
-| Refusal | Rate budget |
-|---|---|
-| 413 by Content-Length | spends nothing |
-| 413 for a streamed body the route reads | spends one |
-| CSRF 403 | spends one |
-| library 500 | spends one; a missing-config 500 fails before rate admission |
-
-**A body over the limit.**
-
-| Body | Answer | Rate budget |
-|---|---|---|
-| Any Content-Length header over the limit | 413 before the route | spends nothing |
-| Streamed (no Content-Length), and the response has already started when the limit trips: a streaming response that reads the body, or any `StreamingResponse` under ASGI spec < 2.4 (uvicorn reports 2.3), whose disconnect listener reads it | Never a second start and never a 413: the response is cut off at its next await, and one that already finished stays complete. The `RequestBodyTooLarge` error reaches the server either way | spends one |
-| Streamed (no Content-Length), read by the route through `request.body()` or `request.stream()` before the response starts | 413 with the headers | spends one |
-| Streamed, parsed by FastAPI (a typed body, `Form()`, `File()`/`UploadFile`) | FastAPI's 400 "There was an error parsing the body" through the host's `HTTPException` handler; the route never runs | spends one |
-| Streamed, never read, and the response is not a `StreamingResponse` under spec < 2.4 | Not size-checked; answers normally | spends one |
-
-The library sends a response's start whole: a cancellation inside the app waits until the start is sent, and so does a host deadline that cancels through an anyio cancel scope outside the stack; asyncio cancellation (`asyncio.timeout`, server shutdown) still interrupts it. The wait is bounded: a start the app hands over that has not been sent after `BodySizePolicy.start_send_seconds` (default 10 seconds) is cut off with an error that reaches the server; no 413 and no second start follow.
-
-**The 500 cases.**
-
-| Cause | Response | Budget |
-|---|---|---|
-| A route raises | The library 500 with the headers; the exception still reaches the server | spends one |
-| No `WebAuthConfig` installed | The library 500 with the headers (no HSTS); the exception still reaches the server | spends nothing |
+Install it once and add no library middleware yourself. Where a host's own
+middleware goes, what each refusal spends from the rate-limit budget, and the
+cases of a body over the limit are in the docstrings of
+`install_web_auth_middleware`, `IpRateLimitMiddleware` and
+`BodySizeLimitMiddleware`. A host whose own middleware is the session authority
+answers a request without a session with `webauth.dependencies.unauthenticated_response`.
 
 ## CSRF origin
 
-`CsrfOriginMiddleware` reads `Sec-Fetch-Site` first on a state-changing
-request: the header overrides the Origin allowlist for `same-origin`
-(passes) and `cross-site` (refused), while `same-site` is decided by the
-allowlist; when the header is absent the allowlist decides.
-When both are absent, a form POST is refused — a JSON POST with neither
-header still passes. An `Origin` or `Referer` that is `null`, empty, has no
-host, carries userinfo or a non-numeric port, or cannot be parsed is refused
-like a foreign origin; an empty `Origin` is not replaced by the `Referer`.
-An exact host matches the parsed host with or without a numeric port. A
-configured host pattern is matched against the whole host plus numeric port,
-so anchor it and allow the port, e.g. `app\.example(:\d+)?`.
-
-`CsrfPolicy` defaults to fail-closed: with `protected` left unset, every
-state-changing request is checked, and `exempt` names the path prefixes that
-carry no session and therefore no token — a sessionless payment-provider
-webhook, say. A deployment that lists every mutating route in
-`protected` has exactly those routes checked and must leave
-`exempt` empty: combining an explicit `protected` list with any exemption is
-refused at startup, because the exemption cannot change that list.
-
-`webauth.dependencies.unauthenticated_response(request, login_redirect)`
-answers what `current_user_dependency` answers for a request without a usable
-session cookie — the login redirect or the 401 `Authentication required` — as a
-real `Response` rather than a raised exception, for a host whose own middleware
-is the session authority and cannot rely on FastAPI's dependency-injection or
-exception-handling machinery to reach it. For a forged, doubled or ended
-session the dependency and the session gate answer `Invalid session` or
-`Session expired`, with the same redirect.
+`CsrfOriginMiddleware` refuses a state-changing request that a foreign page
+originated. It trusts `Sec-Fetch-Site` where a browser sends it and otherwise
+compares `Origin` (or `Referer`) with the hosts in `WebAuthConfig`. A request
+that names no origin passes when it is a JSON POST and is refused when it is a
+form. `CsrfPolicy` decides which paths are checked and defaults to fail-closed;
+the middleware's docstring holds how a malformed origin and an allowed host
+pattern are matched.
 
 ## Rate limiting, and the optional Redis extra
 
-`WebAuthConfig` requires a `rate_limits`, a `webauth.ports.RateLimitBackend`
-with one method — `is_allowed(key, *, limit, window_seconds) -> bool` — that
-counts the current event against a sliding window and raises rather than
-guessing when it cannot answer, so the middleware fails the request closed.
+`WebAuthConfig.rate_limits` is a `webauth.ports.RateLimitBackend`: a sliding
+window per key that counts the current event and raises rather than guessing
+when it cannot answer, so the middleware fails the request closed. The host
+names its budgets in a `webauth.policies.RateLimitPolicy`: a default budget,
+rules that give some paths another, and paths that spend nothing.
 
-The middleware calls `is_allowed` from a worker thread, so a slow limiter does
-not stall the event loop, and calls may overlap: a backend of your own must be
-thread-safe (both backends below are). A check holds its worker thread until the
-backend gives up, so give a Redis client short timeouts and few retries; the
-client defaults can hold a thread for a minute.
-
-The host names its budgets in a `webauth.policies.RateLimitPolicy`. Exempt
-paths spend nothing. The first `RateLimitRule` whose paths match decides which
-budget a request spends from, and every other path spends from `default`. A
-budget name starts with a lowercase letter, holds only lowercase letters,
-digits, `-` and `_`, and is unique in the policy. The limiter key is
-`<name>:<address>` inside the Redis `key_prefix`, so renaming a budget starts
-it fresh. A budget whose `max_requests` or `window_seconds` is not a positive
-whole number is refused at construction. A backend of your own receives only
-such values: `limit` and `window_seconds` are positive integers, excluding
-booleans, and the caller validates them before invoking the backend.
-
-```python
-from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
-
-RateLimitPolicy(
-    default=RateLimitBudget("api", max_requests=300, window_seconds=60),
-    rules=(
-        RateLimitRule(
-            paths=PathRules(prefixes=("/files/",)),
-            budget=RateLimitBudget("downloads", max_requests=1200, window_seconds=60),
-        ),
-    ),
-    exempt=PathRules(exact=frozenset({"/robots.txt"}), prefixes=("/static/",)),
-)
-```
-
-Two backends implement `RateLimitBackend`:
-
-- `webauth.rate_limit.RedisRateLimitBackend` shares one window across every
-  process that reaches the same Redis. It needs the client library, so a host
-  that uses it installs `overnightworks-webauth[redis]`. It measures the
-  window on the Redis server's own clock (`TIME`), so hosts with differing
-  clocks share one budget, and it needs Redis 5.0 or later, or Valkey: the
-  script reads `TIME` and so relies on script effects replication. If the
-  server refuses the script, the middleware answers every rate-limited request
-  with 503, failing closed.
-- `webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
-  process's memory and needs no Redis — for a single-node host that runs one
-  worker. Two processes or two hosts count independently, so a multi-worker
-  deployment uses the Redis backend instead.
-
-Redis is therefore an optional dependency: a deployment that supplies the
-in-process backend installs `overnightworks-webauth` without the `redis` extra.
+Two backends implement the port. `webauth.rate_limit.RedisRateLimitBackend`
+shares one window across every process that reaches the same Redis and needs
+the optional extra, `overnightworks-webauth[redis]`.
+`webauth.rate_limit.SingleProcessRateLimitBackend` keeps the window in this
+process's memory, for a single-node host that runs one worker, and needs no
+Redis.
 
 ## Audit events
 
-Map `AuditSink.account_event(event)` to the host's audit system, or
-explicitly implement a no-op. Every event carries `kind`, `actor_id`, and
-`subject_id`; optional fields default to `None`:
-
-| Event kind | Additional fields |
-|---|---|
-| `user_created` | `role` |
-| `role_changed` | `previous_role`, `role` |
-| `backchannel_logout` | none; `subject_id` is the account whose sessions the issuer ended |
-
-Events contain no raw session identifiers or usernames. An admission event
-with `actor_id=None` means the issuer's groups decided, not a person.
+The library reports an account operation (a user created, a role changed, a
+back-channel logout) to the host's `AuditSink.account_event`. The host maps it
+to its audit system or implements a no-op. An event carries no session
+identifier or username; the fields each `AccountEventKind` adds are in its
+docstring.
 
 ## What it owns, and what it leaves to the host
 

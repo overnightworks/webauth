@@ -113,7 +113,14 @@ class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
     allowlist for same-origin (passes) and cross-site (refused), while
     same-site is decided by the allowlist; when the header is absent
     the allowlist is applied as before. When both are absent, a form
-    POST is refused.
+    POST is refused and a JSON POST passes.
+
+    An ``Origin`` or ``Referer`` that is ``null``, empty, has no host, carries
+    userinfo or a non-numeric port, or cannot be parsed is refused like a
+    foreign origin; an empty ``Origin`` is not replaced by the ``Referer``. An
+    exact allowed host matches the parsed host with or without a numeric port.
+    An allowed host pattern is matched against the whole host plus numeric
+    port, so anchor it and allow the port.
     """
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
