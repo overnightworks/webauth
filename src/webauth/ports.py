@@ -1,10 +1,15 @@
 """What the host supplies: its users, sessions, audit, and rate limiter.
 
 Each port is a Protocol the application implements over the persistence it
-already owns, so the library needs no schema and no ORM of its own. None of
-them commits: the caller owns the transaction boundary, so a request that
-fails leaves nothing behind that the auth machinery wrote — except the
-rate-limit budget, which counts attempts whether or not the request succeeds.
+already owns, so the library needs no schema and no ORM of its own. The
+library commits nothing: a store either applies each of its calls at once or
+writes into a transaction the host opens and commits, and `SessionTransaction`
+is that transaction when the host hands it to the library. Whether a request
+that fails leaves the auth machinery's writes behind is the host's: a
+transaction that rolls back on an exception leaves none, a store that applies
+each call keeps them, and the rate-limit budget counts attempts either way.
+Behind the session gate, the session renewal is durable before the route runs,
+so a route that fails afterwards leaves it in place.
 
 It also holds the records the library hands out and the clock type the host
 supplies, so a module that needs only those need not import the FastAPI-bound
@@ -33,6 +38,7 @@ __all__ = [
     "RateLimitBackend",
     "SessionRecord",
     "SessionRecordStore",
+    "SessionTransaction",
     "SubjectUserStore",
     "UserRecord",
     "UsernameTakenError",
@@ -170,14 +176,18 @@ class SessionRecordStore(Protocol):
         ...
 
     def load(self, session_id: str) -> SessionRecord | None:
-        """The session held against concurrent writers until the caller commits.
+        """The stored session, or ``None`` when the store holds none under this id.
 
         The library hands it the id as the cookie reader bounded it. A host
         that passes ``admit_session`` an id from elsewhere bounds the length
         first.
 
-        A concurrent ``delete`` of the same session waits until the caller of
-        ``load`` commits, so a revocation never interleaves with a renewal.
+        The library asks no lock of ``load``: a renewal goes through ``touch``,
+        which updates only a row that still exists. A ``delete`` that lands
+        before ``touch`` updates the row refuses the request, and a renewal
+        never brings a deleted session back. A ``delete`` that lands after
+        ``touch`` ends the session for every later request, not for the one
+        already admitted.
         """
         ...
 
@@ -213,6 +223,27 @@ class SessionRecordStore(Protocol):
         ``0`` keeps none.
         """
         ...
+
+
+class SessionTransaction(Protocol):
+    """The host's own transaction around the library's calls to its session store.
+
+    Calling it, entering the context manager, the store calls inside the block
+    and leaving it all run in one call on one worker thread, so a thread-bound
+    connection is safe. Calls for concurrent requests run on several worker
+    threads at once, so a store shared between calls is thread-safe.
+
+    Leaving the block without an exception makes the writes made inside it
+    durable. A store that commits each of its own calls meets this with
+    ``lambda: nullcontext(store)``.
+
+    An exception raised inside the block, by the store or by the library,
+    passes through the context manager's exit, and what that exit rolls back is
+    the host's decision: the library promises no rollback. That exception, like
+    one the exit raises itself (a failing commit), reaches the caller.
+    """
+
+    def __call__(self) -> AbstractContextManager[SessionRecordStore]: ...
 
 
 class RateLimitBackend(Protocol):

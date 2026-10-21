@@ -61,7 +61,7 @@ def same_app_path(connection: HTTPConnection, candidate: str | None) -> str | No
     root_path = connection.scope.get("root_path", "")
     if not _PLAIN_ROOT.fullmatch(root_path) or not _is_under(root_path, encoded):
         return None
-    if _has_dot_segment(encoded):
+    if _has_dot_segment(encoded.partition("?")[0]):
         return None
     return encoded if len(encoded) <= MAX_RETURN_PATH_BYTES else None
 
@@ -89,7 +89,7 @@ def _carries_root(raw_path: bytes, root: bytes) -> bool:
 
 
 def _has_dot_segment(path: str) -> bool:
-    segments = _SEGMENT_SEPARATORS.split(path.partition("?")[0])
+    segments = _SEGMENT_SEPARATORS.split(path)
     return any(_DOT_SEGMENT.fullmatch(segment) for segment in segments)
 
 

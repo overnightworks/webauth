@@ -97,7 +97,7 @@ install.
 Who the library defends against, and what it trusts. Where a line has an
 owning section, it links there.
 
-1. **Browser to library** (cookies, [CSRF](#csrf-origin), Origin, [return path](#the-return-path), body size, [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that ([Configuration](#configuration)).
+1. **Browser to library** (cookies, [CSRF](#csrf-origin), Origin, [return path](#the-return-path), body size, [the session gate](#the-session-gate), [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that ([Configuration](#configuration)).
 2. **Library to issuer:** the configured issuer is trusted for what it signs and serves over TLS, and gets no defence beyond the JOSE and OpenID Connect specifications and PyJWT.
    - In scope: anyone presenting a token that lacks the issuer's signature or carries the wrong `alg`, `aud`, `iss`, type or time.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
@@ -160,7 +160,8 @@ that token has been deleted since, Keycloak shows an error page instead. See
 #### Signed out and refused
 
 Every app shows signed-out and refused people the same way. This is the rule
-every app follows; the library does not enforce it.
+every app follows; [the session gate](#the-session-gate) enforces it, and a
+host without the gate follows it itself.
 
 - **A page without a session** sends the browser straight to the app's start
   route, with `next` naming the page, so the person lands there after signing
@@ -810,6 +811,57 @@ id other than through `session_id_from_request` bounds its length itself, becaus
 other entry points it never commits: the host finishes its transaction right
 after the call.
 
+## The session gate
+
+`install_web_auth_middleware(..., session_gate=SessionGate(...))` makes the rule
+of "Signed out and refused" hold for every route: a request needs a live
+session unless the host names it. A route that forgets a dependency is gated,
+not public.
+
+```python
+SessionGate(
+    session_transaction=lambda: nullcontext(sessions),
+    login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
+    public=(PublicRule(PathRules(exact=frozenset({"/login", "/health"}))),),
+    optional=PathRules(exact=frozenset({"/privacy"})),
+)
+```
+
+- **Fail closed.** `public` rules (`PublicRule`, by path and optionally by
+  `methods`) let a request through untouched, with no store read. `optional`
+  paths admit and renew a live session and let every other request through as
+  signed out. A `methods` set opens only the methods it names: `HEAD` and
+  `OPTIONS` stay gated unless listed.
+- **Paths.** Gate rules are router paths, written as the routes are:
+  `root_path` is stripped when it starts the path at a segment boundary. The
+  CSRF, rate-limit and security-header rules are full paths, `root_path`
+  included. A host under a `root_path` keeps each rule in its own convention.
+  A path with a `.` or `..` segment is never public or optional.
+- **WebSocket and lifespan scopes** pass; `authenticate_websocket` decides a
+  handshake.
+- **`SessionTransaction`** is the host's transaction around the gate's store
+  calls: one call from construction to exit, on one worker thread, with
+  concurrent calls for concurrent requests. A clean exit makes the renewal
+  durable before the route runs (`lambda: nullcontext(store)` for a store that
+  commits each call); rolling back on an exception is the host's decision. A
+  failing store or commit answers the library 500, on optional paths too, and a
+  route that fails afterwards leaves the renewal in place.
+- **Refusals** are what `current_user_dependency` answers, under FastAPI's
+  default exception handler: the 302 to `login_redirect` for a navigation,
+  otherwise 401 `Authentication required`, `Invalid session` or
+  `Session expired`.
+- **Behind the gate**, `current_user`, `admin_user` and `verified_session_id`
+  return the gate's admission for the request's own session cookie, so a
+  request costs one `load` and one `touch`. A public route that uses them admits
+  by itself, and so does a mounted app with another `WebAuthConfig` instance.
+  The admission vouches for one request: host code that carries it into another
+  request with the same cookie carries that request's decision along, which the
+  library does not defend against ([Security model](#security-model), item 3).
+- **`webauth.middleware.admitted_user(request)`** returns the account where no
+  dependency is used, and `None` on public paths and on optional paths without a
+  live session. It raises `RuntimeError` when no gate decided the request. For
+  the session id use `session_id_from_request`.
+
 ## WebSocket handshakes
 
 A browser sends the session cookie on a cross-site WebSocket handshake too,
@@ -864,9 +916,9 @@ async def room(websocket: WebSocket) -> None:
 ```
 
 - Authenticate, and finish the transaction, before `accept` and before waiting
-  for a message. `load` holds the session against a concurrent deletion until
-  the transaction ends, so one kept open for the socket's life would block a
-  logout.
+  for a message. A transactional store holds the session's row until its
+  transaction ends, so a transaction kept open for the socket's life would block
+  a logout.
 - A refusal closes with code 1008 before `accept`. A real server answers the
   handshake with HTTP 403; the browser does not receive a close frame.
 - A synchronous store runs in a worker, as above, not in the receive loop.
@@ -1019,7 +1071,9 @@ is ignored ([CSP3, Paths and Redirects](https://w3c.github.io/webappsec-csp/#sou
 
 The library caches no sessions. Every authenticated request costs one
 `SessionRecordStore.load` and one `touch`, so a session the host ended is
-refused on its next request, with 401 or the login redirect. Whether a loaded
+refused on its next request, with 401 or the login redirect. The exception is a
+gated request whose route runs in a mounted app with another `WebAuthConfig`:
+[the session gate](#the-session-gate) admits it under each. Whether a loaded
 session still stands is decided by the library alone, against
 `WebAuthConfig.session_lifetime` (see "Session lifetime"). `SessionRecordStore.touch`
 takes the session id and the `expires_at` the library computed; the store writes it
@@ -1104,7 +1158,7 @@ an ended session's cookie is refused.
 ## Middleware order
 
 `install_web_auth_middleware(app, *, security_headers, body_size=None,
-rate_limit=None, csrf_origin=None, csrf_token=None)` adds the library's
+rate_limit=None, csrf_origin=None, csrf_token=None, session_gate=None)` adds the library's
 middleware in the one order below, outermost first. Starlette inserts at the
 front, so the installer adds them in reverse.
 
@@ -1112,11 +1166,16 @@ front, so the installer adds them in reverse.
    library's own refusals carry the headers: the 413s, the
    429 and 503 with `Retry-After`, the CSRF 403s, and the 500.
 2. `BodySizeLimitMiddleware`: a body whose Content-Length is over the limit
-   is refused before it costs a rate-limit budget or a session lookup.
+   is refused before it costs a rate-limit budget or a session lookup. A
+   streamed body found over the limit while the route reads it comes after the
+   session gate's admission.
 3. `IpRateLimitMiddleware`: outside CSRF, so forged requests spend the
    address's budget.
 4. `CsrfOriginMiddleware`.
 5. `CsrfTokenMiddleware`.
+6. `SessionGateMiddleware`: innermost, so a request the others refuse before
+   admission never costs a session lookup, and a forged state-changing request is refused
+   before it renews a session.
 
 `csrf_origin` and `csrf_token` take separate `CsrfPolicy` values. The
 installer refuses, before it touches the app, three things:
@@ -1128,7 +1187,7 @@ installer refuses, before it touches the app, three things:
   prefix must have every path below it checked, so an origin exemption inside
   it, or an origin policy that protects only the prefix string, is refused;
   shapes and patterns are refused as unverifiable.
-- An app that already carries any of the five library middleware or a
+- An app that already carries any of the six library middleware or a
   subclass of one, from an earlier installer call or added by hand
   (`RuntimeError`).
 
@@ -1136,7 +1195,8 @@ Install once, and add no library middleware yourself.
 
 **Placement of host middleware.** Added before the call, a host middleware
 sits inside the library stack: a request the library refuses early (413 by
-Content-Length, 429, 503, the CSRF 403s) never reaches it.
+Content-Length, 429, 503, the CSRF 403s, the session gate's 302 and 401)
+never reaches it.
 Added after the call, it sits outside: it sees every library refusal with the
 headers already set. Put a middleware that must see only admitted requests
 (session lookups, audit) before the call; put one that must observe every
@@ -1203,11 +1263,13 @@ webhook, say. A deployment that lists every mutating route in
 refused at startup, because the exemption cannot change that list.
 
 `webauth.dependencies.unauthenticated_response(request, login_redirect)`
-answers exactly what `current_user_dependency` would for the same request —
-the same login redirect or the same 401 — as a real `Response` rather than a
-raised exception, for a host whose own middleware is the session authority
-and cannot rely on FastAPI's dependency-injection or exception-handling
-machinery to reach it.
+answers what `current_user_dependency` answers for a request without a usable
+session cookie — the login redirect or the 401 `Authentication required` — as a
+real `Response` rather than a raised exception, for a host whose own middleware
+is the session authority and cannot rely on FastAPI's dependency-injection or
+exception-handling machinery to reach it. For a forged, doubled or ended
+session the dependency and the session gate answer `Invalid session` or
+`Session expired`, with the same redirect.
 
 ## Rate limiting, and the optional Redis extra
 
@@ -1293,8 +1355,8 @@ It owns the machinery an application should not rebuild:
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with — Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `WriteLock`, `AuditSink` and `RateLimitBackend` |
-| `webauth.middleware` | Body-size, CSRF, rate-limit, and security-header middleware, and `install_web_auth_middleware`, which installs them in the one order |
+| `webauth.ports` | What the host supplies, as Protocols, and what the library hands out (`AuthenticatedUser`) or reads from the host (`WallClock`): the record shapes `UserRecord` and `SessionRecord`, the stores `SubjectUserStore` and `SessionRecordStore`, and `SessionTransaction`, `WriteLock`, `AuditSink` and `RateLimitBackend` |
+| `webauth.middleware` | Body-size, CSRF, rate-limit, security-header and session-gate middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds: PyJWT reads the token behind a bound of 8,192 characters on the token and 512 on its header segment (longer is `TOKEN_TOO_LONG` or `MALFORMED_TOKEN`), its signature against the issuer's cached key set, issuer, audience and time claims. A key set may publish at most `MAX_KEY_SET_KEYS` (10) RS256 signing keys; keys for other purposes are passed over, bounded only by the key set's size. A token without a `kid` member verifies against the key set's only RS256 verification key, which may lack `kid`, and is refused as `INVALID_KEY_ID` against several eligible keys; a key without `kid` beside others is admitted but unreachable, `MAX_KEY_SET_KEYS` counts it, an explicit `"kid": null` or a `kid` that is not a string is malformed, and a rotation of a sole key, or a change between one and several keys, can stay unseen until the one-hour TTL expires, unless a token naming an unfamiliar `kid` triggers an earlier refresh. A token naming an unknown `kid` is refused as `KEY_SET_UNAVAILABLE` when the key-set refresh it triggered failed or is cooling down after a failure, and as `UNKNOWN_KEY_ID` only when the refresh succeeded without that key. |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the form POST the token request is sent with, under per-operation timeouts and a total deadline, a size cap, no redirect followed and the system's trusted certificates |
 | `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged and the ID token verified into an identity |
@@ -1310,10 +1372,14 @@ It leaves the application everything that touches the application's own truth:
 - **Persistence.** It holds no schema and no ORM, and an import-linter contract
   keeps it that way. What it needs reaches it through the Protocols in
   `webauth.ports`.
-- **Transactions.** None of the stores commits; the caller owns the
-  transaction, so a request that fails leaves nothing behind that the auth
-  machinery wrote, except the rate-limit budget, which counts attempts whether or
-  not the request succeeds.
+- **Transactions.** The library commits nothing; a store either applies each of
+  its calls at once or writes into a transaction the host commits. Whether a
+  request that fails leaves the auth machinery's writes behind is the host's: a
+  transaction that rolls back on an exception leaves none, a store that applies
+  each call keeps them, and the rate-limit budget counts attempts either way.
+  Behind [the session gate](#the-session-gate), the gate makes the session
+  renewal durable through the host's `SessionTransaction` before the route runs,
+  so a route that fails afterwards does not undo it.
 - **Routes.** It defines none. The only responses it writes are its own
   refusals: 401, 403, 413, 429, 503 and the 500, and the 302 to the host's login
   path. Once a response has started it writes nothing more: a streamed body over

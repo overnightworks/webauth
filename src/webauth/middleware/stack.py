@@ -10,6 +10,7 @@ from webauth.middleware.body_size import BodySizeLimitMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
+from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -31,6 +32,7 @@ _LIBRARY_MIDDLEWARE = (
     IpRateLimitMiddleware,
     CsrfOriginMiddleware,
     CsrfTokenMiddleware,
+    SessionGateMiddleware,
 )
 
 
@@ -42,12 +44,15 @@ def install_web_auth_middleware(
     rate_limit: RateLimitPolicy | None = None,
     csrf_origin: CsrfPolicy | None = None,
     csrf_token: CsrfPolicy | None = None,
+    session_gate: SessionGate | None = None,
 ) -> None:
     """Install the library's middleware outermost first: security headers, body
-    size, rate limit, CSRF origin, CSRF token.
+    size, rate limit, CSRF origin, CSRF token, session gate.
 
     Security headers sit outside everything so the library's own refusals carry
-    them; the rate limit sits outside CSRF so a refused forgery spends budget.
+    them; the rate limit sits outside CSRF so a refused forgery spends budget;
+    the session gate sits inside all of them, so a request refused before
+    admission never costs a session lookup.
     Refuses, before touching ``app``: a token policy without an origin policy;
     a token policy whose ``token_exempt`` paths (login routes skip the token on
     the promise that origin checking protects them) are not all covered by the
@@ -89,5 +94,7 @@ def install_web_auth_middleware(
         entries.append(Middleware(CsrfOriginMiddleware, policy=csrf_origin))
     if csrf_token is not None:
         entries.append(Middleware(CsrfTokenMiddleware, policy=csrf_token))
+    if session_gate is not None:
+        entries.append(Middleware(SessionGateMiddleware, policy=session_gate))
     for entry in reversed(entries):
         app.add_middleware(entry.cls, *entry.args, **entry.kwargs)

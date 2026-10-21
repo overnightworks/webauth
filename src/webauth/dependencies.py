@@ -1,10 +1,15 @@
 """Turning a signed session cookie into the account that made the request.
 
-The application binds these two dependencies once, over the stores it
-supplies, and every protected route asks for them. Nothing here commits:
-the session renewal lands in whatever transaction the
-application's stores write into, and become durable only when the endpoint
-commits it.
+The application binds these dependencies once, over the stores it supplies,
+and every protected route asks for them. Nothing here commits. Without the
+session gate, the session renewal is durable when the store applies it, or,
+for a store that writes into the transaction the application's
+`session_store` dependency opens, when the host commits that transaction.
+Behind the gate, on a gated or optional path, `current_user` returns the
+gate's admission when it was made for the request's own session cookie, and
+on a public path it admits by itself; the gate committed its renewal through
+the host's `SessionTransaction` before the route ran, and a route that fails
+afterwards does not undo it.
 """
 
 from __future__ import annotations
@@ -97,8 +102,13 @@ def current_user_dependency(
 ) -> AuthDependencies:
     """Bind the auth dependencies to one application's stores.
 
-    ``session_store`` is the application's own dependency, so whatever
-    transaction it puts it on is the one the session renewal is written into.
+    ``session_store`` is the application's own dependency. When
+    ``current_user`` admits a request itself, the session renewal is written
+    into whatever transaction that dependency puts the store on. Behind the
+    session gate it returns the gate's admission instead, when that was made
+    for this request's own session cookie under this application's
+    ``WebAuthConfig``; the gate committed the renewal before the route ran, and
+    the store ``session_store`` builds is not asked.
     ``on_authenticated`` is handed the account once the request's identity is
     established, so the application can bind it into its own log context.
     ``login_redirect`` is unset by default: a missing or dead session then
@@ -109,7 +119,7 @@ def current_user_dependency(
         request: Request,
         sessions: SessionRecordStore = Depends(session_store),
     ) -> ports.AuthenticatedUser:
-        user = _resolve_session(request, sessions)
+        user = _gate_or_own_admission(request, sessions)
         if isinstance(user, ConnectionRefusal):
             raise _http_refusal(request, user, login_redirect)
         on_authenticated(user)
@@ -181,18 +191,17 @@ def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
 def unauthenticated_response(
     request: Request, login_redirect: LoginRedirect | None,
 ) -> Response:
-    """The refusal ``current_user_dependency`` answers with for no live session.
+    """The refusal ``current_user_dependency`` answers with for no session cookie.
 
     A host whose own middleware is the session authority calls this directly
-    to answer exactly as the dependency would for the same request: the same
-    login redirect (``Location``, ``next`` carrying path and query) a browser
-    navigation gets, the same 401 every other request gets. This is the one
-    place that decision is made; ``current_user_dependency`` raises the
-    identical status, headers and body as an ``HTTPException`` so FastAPI's
-    own handler reaches it byte-for-byte.
+    to answer what the dependency answers for a request without a usable
+    session cookie (``ConnectionRefusal.NO_SESSION``): the login redirect
+    (``Location``, ``next`` carrying path and query) a browser navigation
+    gets, the 401 ``Authentication required`` every other request gets. For a
+    forged, doubled or ended session the dependency and the session gate
+    answer ``Invalid session`` or ``Session expired``, with the same redirect.
     """
-    exc = _unauthenticated(request, _AUTHENTICATION_REQUIRED_DETAIL, login_redirect)
-    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+    return _refusal_response(request, ConnectionRefusal.NO_SESSION, login_redirect)
 
 
 def _unauthenticated(
@@ -276,6 +285,17 @@ def _http_refusal(
 ) -> HTTPException:
     detail = _HTTP_DETAIL_OF_SESSION_REFUSAL[refusal]
     return _unauthenticated(request, detail, login_redirect)
+
+
+def _refusal_response(
+    request: Request, refusal: ConnectionRefusal, login_redirect: LoginRedirect | None,
+) -> Response:
+    """``_http_refusal`` as the response FastAPI's default handler builds from it.
+
+    For a caller that runs outside the exception handlers: a middleware.
+    """
+    exc = _http_refusal(request, refusal, login_redirect)
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
 
 
 _HTTP_DETAIL_OF_SESSION_REFUSAL: Final = {
@@ -376,3 +396,49 @@ def _resolve_session(
     if isinstance(session_id, ConnectionRefusal):
         return session_id
     return admit_session(session_id, sessions=sessions, config=config)
+
+
+_GATE_ADMISSION_SCOPE_KEY: Final = "webauth.session_gate"
+
+
+@dataclass(frozen=True)
+class _GateAdmission:
+    """What the session gate decided for one request, and what it was decided from.
+
+    ``admission`` is the account on a gated or optional path with a live
+    session, the refusal on an optional path without one, and ``None`` on a
+    public path, where the gate asked no store.
+    """
+
+    config: WebAuthConfig
+    cookie_reading: str | ConnectionRefusal
+    admission: ports.AuthenticatedUser | ConnectionRefusal | None
+
+
+def _record_gate_admission(connection: HTTPConnection, record: _GateAdmission) -> None:
+    connection.scope[_GATE_ADMISSION_SCOPE_KEY] = record
+
+
+def _gate_admission(connection: HTTPConnection) -> _GateAdmission | None:
+    """The gate's decision, only when it was made for this very request.
+
+    Same configuration instance and a session cookie that reads as the one
+    admitted; anything else, a value other code wrote included, is no decision.
+    """
+    record = connection.scope.get(_GATE_ADMISSION_SCOPE_KEY)
+    if type(record) is not _GateAdmission:
+        return None
+    if record.config is not web_auth_config(connection):
+        return None
+    if record.cookie_reading != _read_session_cookie(connection, record.config):
+        return None
+    return record
+
+
+def _gate_or_own_admission(
+    connection: HTTPConnection, sessions: SessionRecordStore,
+) -> ports.AuthenticatedUser | ConnectionRefusal:
+    decided = _gate_admission(connection)
+    if decided is None or decided.admission is None:
+        return _resolve_session(connection, sessions)
+    return decided.admission

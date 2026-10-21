@@ -13,10 +13,10 @@ import hmac
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from itertools import count
-from threading import RLock
+from threading import RLock, get_ident
 from typing import TYPE_CHECKING, Any, Final
 
 import anyio
@@ -45,7 +45,12 @@ from webauth.dependencies import (
     session_id_from_request,
     unauthenticated_response,
 )
-from webauth.middleware import IpRateLimitMiddleware
+from webauth.middleware import (
+    IpRateLimitMiddleware,
+    SessionGate,
+    admitted_user,
+    install_web_auth_middleware,
+)
 from webauth.middleware.security_headers import (
     CONTENT_TYPE_OPTIONS,
     FRAME_OPTIONS,
@@ -53,6 +58,8 @@ from webauth.middleware.security_headers import (
     STRICT_TRANSPORT_SECURITY,
 )
 from webauth.policies import (
+    PathRules,
+    PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
     SecurityHeadersPolicy,
@@ -62,6 +69,7 @@ from webauth.ports import (
     AuthenticatedUser,
     RateLimitBackend,
     SessionRecordStore,
+    SessionTransaction,
     UsernameTakenError,
 )
 from webauth.proxies import TrustedProxies
@@ -352,7 +360,7 @@ class SessionRecordsInMemory:
     def transaction(self) -> Iterator[None]:
         """The host's transaction: leaving the block commits unless ``commit_failure``
         is set, and an exception rolls back."""
-        committed = dict(self._records)
+        committed = {session_id: replace(record) for session_id, record in self._records.items()}
         try:
             yield
             if self.commit_failure is not None:
@@ -360,6 +368,15 @@ class SessionRecordsInMemory:
         except BaseException:
             self._records = committed
             raise
+
+    def in_transaction(self) -> AbstractContextManager[SessionRecordStore]:
+        """The store inside its ``transaction``: a ``SessionTransaction`` provider."""
+        return self._store_in_transaction()
+
+    @contextmanager
+    def _store_in_transaction(self) -> Iterator[SessionRecordStore]:
+        with self.transaction():
+            yield self
 
     def load(self, session_id: str) -> FakeSessionRecord | None:
         return self._records.get(session_id)
@@ -407,6 +424,52 @@ class SessionRecordsInMemory:
         )
         for record in records[keep_newest:]:
             self._remove_record(record.id)
+
+
+class SessionsRecordingTheirTransaction(SessionRecordsInMemory):
+    """A store that records, with the thread each ran on, the factory call (``open``),
+    ``load``, ``touch``, a clean exit (``commit``) and an exit by exception (``rollback``)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.events: list[tuple[str, int]] = []
+
+    @property
+    def event_names(self) -> list[str]:
+        return [name for name, _thread in self.events]
+
+    @property
+    def threads(self) -> set[int]:
+        return {thread for _name, thread in self.events}
+
+    def in_transaction(self) -> AbstractContextManager[SessionRecordStore]:
+        self.events.append(("open", get_ident()))
+        return self._recorded_transaction()
+
+    @contextmanager
+    def _recorded_transaction(self) -> Iterator[SessionRecordStore]:
+        try:
+            with super().in_transaction() as store:
+                yield store
+        except BaseException:
+            self.events.append(("rollback", get_ident()))
+            raise
+        self.events.append(("commit", get_ident()))
+
+    def load(self, session_id: str) -> FakeSessionRecord | None:
+        self.events.append(("load", get_ident()))
+        return super().load(session_id)
+
+    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
+        self.events.append(("touch", get_ident()))
+        return super().touch(session_id, expires_at=expires_at)
+
+
+class SessionsFailingToLoad(SessionRecordsInMemory):
+    """A store whose ``load`` raises, as a database that went away does."""
+
+    def load(self, session_id: str) -> FakeSessionRecord | None:
+        raise ConnectionError("session store down")
 
 
 class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
@@ -462,6 +525,11 @@ class RecordingAuditSink:
 
 
 WEBSOCKET_PATH = "/ws"
+WEBSOCKET_ADMITTED_PATH = "/ws-admitted"
+OPEN_PATHS = ("/health", "/login", "/hooks/x", "/static/x.css", "/optional")
+ALL_DEPENDENCIES_PATH = "/all"
+GATED_APP_HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 WEBSOCKET_DEPENDENCY_PATH = "/ws-dependency"
 POLICY_VIOLATION_CLOSE_CODE = 1008
 
@@ -475,6 +543,10 @@ class AuthApp:
     authenticated: list[AuthenticatedUser]
     websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal]
     signing_key: bytes
+    app: FastAPI
+    config: WebAuthConfig
+    route_runs: list[str]
+    route_threads: list[int]
 
     def get(
         self, path: str, *, cookie: str | None = None, accept: str | None = None,
@@ -577,6 +649,12 @@ def _add_websocket_routes(
         except WebSocketDisconnect:
             return
 
+    @app.websocket(WEBSOCKET_ADMITTED_PATH)
+    async def reading_admission(websocket: WebSocket) -> None:
+        admitted_user(websocket)
+        await websocket.accept()
+        await websocket.close()
+
     @app.websocket(WEBSOCKET_DEPENDENCY_PATH)
     async def through_a_dependency(
         websocket: WebSocket,
@@ -595,18 +673,32 @@ def an_auth_app(
     *,
     login_redirect: LoginRedirect | None = None,
     sessions: SessionRecordsInMemory | None = None,
+    config: WebAuthConfig | None = None,
+    gate: bool = False,
+    public: tuple[PublicRule, ...] = (),
+    optional: PathRules | None = None,
+    session_transaction: SessionTransaction | None = None,
+    root_path: str = "",
+    raise_server_exceptions: bool = True,
+    stack_policies: Mapping[str, Any] | None = None,
     **config_overrides: Any,
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route.
 
-    It also serves the two WebSocket routes of ``_add_websocket_routes``; a
-    keyword replaces the configuration field it names.
+    It also serves the WebSocket routes of ``_add_websocket_routes`` and, at
+    ``OPEN_PATHS``, a route that reads ``admitted_user``. A keyword replaces
+    the configuration field it names; ``config`` is an existing instance
+    instead (no overrides then). ``gate`` installs the library middleware with
+    a ``SessionGate`` over ``public`` and ``optional``, its transaction
+    ``session_transaction`` or else the store's ``in_transaction``;
+    ``stack_policies`` adds the other policies the installer takes.
 
     ``UNAUTHENTICATED_RESPONSE_PATH`` answers with ``unauthenticated_response``
     called directly, over the same ``login_redirect``, so a test can compare
     it against a dependency-guarded route for the same request.
     """
-    config = a_web_auth_config(admin_role=ADMIN_ROLE, **config_overrides)
+    if config is None:
+        config = a_web_auth_config(admin_role=ADMIN_ROLE, **config_overrides)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
     authenticated: list[AuthenticatedUser] = []
@@ -618,12 +710,51 @@ def an_auth_app(
         login_redirect=login_redirect,
     )
 
-    app = FastAPI()
+    route_runs: list[str] = []
+    route_threads: list[int] = []
+
+    app = FastAPI(root_path=root_path)
     install_web_auth_config(app, config)
+    if gate:
+        install_web_auth_middleware(
+            app,
+            security_headers=GATED_APP_HEADERS_POLICY,
+            **(stack_policies or {}),
+            session_gate=SessionGate(
+                session_transaction=session_transaction or sessions.in_transaction,
+                login_redirect=login_redirect,
+                public=public,
+                optional=optional or PathRules(),
+            ),
+        )
 
     @app.get("/me")
-    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
+    def me(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str]:
+        route_runs.append(request.url.path)
         return {"username": user.username, "role": user.role}
+
+    @app.get(ALL_DEPENDENCIES_PATH)
+    def all_dependencies(
+        user: AuthenticatedUser = Depends(dependencies.current_user),
+        admin: AuthenticatedUser = Depends(dependencies.admin_user),
+        verified: str = Depends(dependencies.verified_session_id),
+    ) -> dict[str, str]:
+        return {"username": user.username, "admin": admin.username, "session_id": verified}
+
+    async def reading_admission(request: Request) -> dict[str, str | None]:
+        route_runs.append(request.url.path)
+        route_threads.append(get_ident())
+        if isinstance(sessions, SessionsRecordingTheirTransaction):
+            sessions.events.append(("route", get_ident()))
+        user = admitted_user(request)
+        return {"username": None if user is None else user.username}
+
+    for path in OPEN_PATHS:
+        app.add_api_route(
+            path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"],
+        )
 
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
@@ -646,11 +777,16 @@ def an_auth_app(
             app,
             base_url=HTTPS_TEST_SERVER,
             cookies={},
+            raise_server_exceptions=raise_server_exceptions,
         ),
         sessions=sessions,
         authenticated=authenticated,
         websocket_outcomes=websocket_outcomes,
         signing_key=config.signing_key,
+        app=app,
+        config=config,
+        route_runs=route_runs,
+        route_threads=route_threads,
     )
 
 
@@ -677,15 +813,18 @@ def an_http_scope(
     method: str = "GET",
     headers: Iterable[tuple[bytes, bytes]] = (),
     spec_version: str | None = None,
+    raw_path: bytes | None = None,
+    root_path: str = "",
 ) -> Scope:
     asgi = {"version": "3.0"}
     if spec_version is not None:
         asgi["spec_version"] = spec_version
     return {
         "type": "http", "asgi": asgi, "http_version": "1.1", "method": method,
-        "scheme": "https", "path": path, "raw_path": path.encode(), "query_string": b"",
+        "scheme": "https", "path": path,
+        "raw_path": path.encode() if raw_path is None else raw_path, "query_string": b"",
         "headers": list(headers), "client": ("203.0.113.7", 1234), "server": ("testserver", 443),
-        "root_path": "", "app": app,
+        "root_path": root_path, "app": app,
     }
 
 
