@@ -150,9 +150,8 @@ every app follows; the library does not enforce it.
 - **Public paths** are the exception. Each app names its own, and they need
   no session and do not redirect.
 - **The page after signing out** is the app's `post_logout_redirect_uri`. It
-  shows one "Log in" button and never redirects by itself. See
-  [Logging out](#logging-out).
-- **A refusal page shows one way out.** "No access" is for
+  never redirects by itself. See [Logging out](#logging-out).
+- **Which refusal shows which page.** "No access" is for
   `AdmissionRefusal.NOT_A_MEMBER`; "sign-in failed" is for an `OidcRefusal`
   and for `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are
   setup errors, not missing rights.
@@ -163,8 +162,10 @@ every app follows; the library does not enforce it.
   access" makes Keycloak ask once, unless the browser still holds a hint from
   an earlier sign-in (see
   [The ID token hint](#the-id-token-hint)).
-- **Look.** Structure and wording are identical in every app. The colours
-  come from each app's own tokens.
+- **Look.** The three pages (signed out, no access, sign-in failed), their
+  wording and their ways out are the sign-in pattern of
+  [ui-console](https://github.com/overnightworks/ui-console); each app takes
+  the colours from its own tokens.
 
 ### The host's start, callback and logout routes
 
