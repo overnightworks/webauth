@@ -1,7 +1,0 @@
-claim_id = "66fb944eaa8d4003ba9a0034d36560b0"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "ebee90a5407284b0b4e84f60007743a8b48a2505"
-branch = "claude/issue-386-readme-conceptual-entry"
-scope = ["AGENTS.md", "README.md", "src/webauth/jwt_verification.py"]
-opened_commit = "2a4bd8a1b02f0a061b39829fd1e2cf47d8fdaf07"
