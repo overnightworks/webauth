@@ -30,7 +30,7 @@ Playwright browser, and takes a few minutes. CI only lints `e2e/`.
 
 Read the 1-minute load average first; above 18 on a 12-core machine, wait.
 
-The cap is 900 s (`timeout 900`). The full run, with the refresh phase, measured 128 s at edge `2b125b8`
+The cap is 900 s (`timeout 900`). The full run, with the refresh phase, measured 134 s at edge `2b125b8`
 (21.10.2026, load 3 to 5; 136 s and 153 s on 19.10.2026), so the cap leaves a factor of about 6 of room.
 
     flock -o /tmp/probe-stack.lock timeout --kill-after=240 900 \
