@@ -12,7 +12,7 @@
 "src/webauth/oidc_login.py" = 819
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1297
-"tests/test_oidc_login.py" = 2349
+"tests/test_oidc_login.py" = 2324
 "tests/webauth_arrangement.py" = 942
 
 [function_lines."e2e/oidc/host_app.py"]

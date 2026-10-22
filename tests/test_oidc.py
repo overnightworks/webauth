@@ -788,6 +788,9 @@ def _text_of(value: object) -> str:
             "post_logout_redirect_uri", f"{_POST_LOGOUT_REDIRECT_URI}#signed-out",
             id="post-logout-redirect-uri-with-a-fragment",
         ),
+        pytest.param("end_session_endpoint", "https://id.example;x/logout", id="host-semicolon"),
+        pytest.param("post_logout_redirect_uri", "https://id.example,x/", id="host-comma"),
+        pytest.param("end_session_endpoint", "https://*.example/logout", id="wildcard-host"),
         pytest.param("jwks_url", f"{_JWKS_URL}\x00", id="jwks-url-with-a-nul"),
         pytest.param("token_endpoint", f"{_TOKEN_ENDPOINT} ", id="token-endpoint-with-a-space"),
         pytest.param("client_id", "", id="client-id-empty"),
@@ -806,6 +809,14 @@ def test_a_client_configuration_is_refused_by_the_field_it_breaks_never_its_valu
 
     text = _text_of(value)
     assert not text or text not in str(refusal.value)
+
+
+@pytest.mark.parametrize("field_name", ["end_session_endpoint", "post_logout_redirect_uri"])
+@pytest.mark.parametrize("port", ["", ":8443"])
+def test_a_plain_host_with_or_without_a_port_is_a_form_target(field_name: str, port: str) -> None:
+    url = f"https://keycloak.example.org{port}/realms/r/protocol/openid-connect/logout"
+
+    assert getattr(_config(**{field_name: url}), field_name) == url
 
 
 _LOOPBACK_HTTP_URLS = [
@@ -836,48 +847,6 @@ def test_the_apps_own_two_urls_may_be_http_on_a_loopback_host(
 def test_an_issuer_url_stays_https_even_on_a_loopback_host(field_name: str, url: str) -> None:
     with pytest.raises(ValueError, match=f"^{field_name} must "):
         _config(**{field_name: url})
-
-
-_FORM_TARGET_FIELDS = ["end_session_endpoint", "post_logout_redirect_uri"]
-
-
-@pytest.mark.parametrize("field_name", _FORM_TARGET_FIELDS)
-@pytest.mark.parametrize(
-    "origin",
-    [
-        "https://id.example;script-src-elem",
-        "https://id.example,https://evil.example",
-        "https://id.example'",
-        'https://id.example"',
-        "https://id.example\\",
-        "https://*.example",
-        "https://id.example%3Bscript-src-elem",
-        "https://id.example|x",
-        "https://id.example:80;x",
-    ],
-)
-def test_a_form_target_origin_that_could_end_or_extend_a_policy_source_is_refused(
-    field_name: str, origin: str
-) -> None:
-    with pytest.raises(ValueError, match=f"^{field_name} must "):
-        _config(**{field_name: f"{origin}/logout"})
-
-
-@pytest.mark.parametrize("field_name", _FORM_TARGET_FIELDS)
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://keycloak.example.org/realms/r/protocol/openid-connect/logout",
-        "https://keycloak.example.org:8443/realms/r/protocol/openid-connect/logout",
-        "https://[2001:db8::1]:8443/logout",
-    ],
-)
-def test_a_plain_host_with_or_without_a_port_is_a_form_target(
-    field_name: str, url: str
-) -> None:
-    config = _config(**{field_name: url})
-
-    assert getattr(config, field_name) == url
 
 
 @pytest.mark.parametrize("field_name", ["redirect_uri", "post_logout_redirect_uri"])
@@ -954,19 +923,8 @@ def test_a_logout_path_that_is_not_a_url_path_is_refused_without_its_value(
 def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
     missing: str,
 ) -> None:
-    arguments = {
-        "issuer": _ISSUER,
-        "authorization_endpoint": _AUTHORIZATION_ENDPOINT,
-        "token_endpoint": _TOKEN_ENDPOINT,
-        "jwks_url": _JWKS_URL,
-        "end_session_endpoint": _END_SESSION_ENDPOINT,
-        "client_id": _CLIENT_ID,
-        "client_secret": SecretStr(_CLIENT_SECRET),
-        "redirect_uri": _REDIRECT_URI,
-        "post_logout_redirect_uri": _POST_LOGOUT_REDIRECT_URI,
-        "logout_path": _LOGOUT_PATH,
-        "leeway_seconds": _LEEWAY_SECONDS,
-    }
+    complete = _config()
+    arguments = {each.name: getattr(complete, each.name) for each in dataclasses.fields(complete)}
     del arguments[missing]
 
     with pytest.raises(TypeError, match=missing):

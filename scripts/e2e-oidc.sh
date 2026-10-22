@@ -22,7 +22,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/e2e-oidc.sh VERB [ARGS]
 
-  prepare            install the pinned Chromium and pull the relay and suite images
+  prepare            install Chromium, Firefox and WebKit and pull the relay and suite images
   prove --edge DIR   run e2e/oidc/prove.py against the edge checkout DIR
   conformance        run e2e/oidc/conformance.py
   cleanup            remove what a killed run left behind

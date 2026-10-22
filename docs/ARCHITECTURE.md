@@ -206,7 +206,7 @@ owning section, it links there.
    - WebSocket scopes are not gated;
    - host code that reads the cookie itself (`session_id_from_request`) on a machine path trusts it.
 8. **Named residues:**
-   - the ID token hint reaches the browser in the one `no-store` logout page; what a browser's session restore keeps of a `no-store` page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
+   - the ID token hint reaches the browser in its cookie and in the `no-store` logout page; what a browser's session restore keeps of a `no-store` page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
    - with a `WriteLock` that is released before the host commits (an in-process lock), a back-channel logout of the same account that runs between `finish_login`'s admission and the host's commit after `open_session` deletes nothing of that login, so the session it opens survives; a lock that the request's first `hold` takes and only the host's commit or rollback releases (a transaction-scoped lock) closes that window;
    - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
    - a clock reading past year 9999 fails closed;

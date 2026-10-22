@@ -884,7 +884,7 @@ def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
         assert expiry - time.time() <= SHORT_TOKEN_LIFESPAN_SECONDS, "the ID token is long-lived"
         past = wait_until_past(expiry)
         log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
-        end_session_request = end_session_requests[0]
+        (end_session_request,) = end_session_requests
         assert end_session_hint_is(
             end_session_request, token
         ), "the end-session request did not carry the ID token whose expiry was measured"
@@ -901,6 +901,7 @@ def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
 def back_button_shows(proof: Proof, page: Page) -> str:
     page.go_back()
     page_text = page.inner_text("h1") if page.query_selector("h1") else "no page"
+    assert not page.query_selector("input[name=id_token_hint]"), "the back button restored the hint"
     return f"{page_text} (the host's last sign-in refusal: {proof.host_state()['last_refusal']})"
 
 
@@ -1440,10 +1441,9 @@ def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width)
         log_out_through_keycloak(
             proof, page_a, scenario, app_a.origin, asks_for_confirmation=True
         )
-        end_session_request = end_session_requests[0]
-        sent_hint = cookie_name_and_value(hint_of_first_session)[1]
+        (end_session_request,) = end_session_requests
         assert end_session_hint_is(
-            end_session_request, sent_hint
+            end_session_request, cookie_name_and_value(hint_of_first_session)[1]
         ), "A's logout did not send the first session's ID token"
         wait_for_accepted_callbacks(app_b, 1)
         assert_signed_out(proof, page_b, app_b.origin)
