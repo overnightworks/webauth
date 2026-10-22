@@ -100,6 +100,7 @@ from webauth.oidc_login import (
     admit_identity,
     app_role,
     finish_login,
+    fresh_access_token,
     log_out,
     open_session,
     receive_backchannel_logout,
@@ -1018,6 +1019,25 @@ def test_an_admitted_callback_hands_the_id_token_to_the_logout_path_alone(
     assert host.client.cookies[name] == host.issued_id_tokens[-1]
 
 
+@pytest.mark.parametrize("cookie_secure", [
+    pytest.param(True, id="secure"),
+    pytest.param(False, id="insecure-development"),
+])
+def test_an_admitted_callback_sets_no_cookie_carrying_the_id_token_and_the_row_holds_it(
+    *, cookie_secure: bool,
+) -> None:
+    host = an_oidc_host(cookie_secure=cookie_secure)
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    cookie_headers = [
+        value for header, value in response.headers.multi_items() if header == "set-cookie"
+    ]
+    assert host.issued_id_tokens[-1] not in " ".join(cookie_headers)
+    assert not [name for name in set_cookies(response) if "id_token" in name]
+    assert stored_id_tokens(host) == [host.issued_id_tokens[-1]]
+
+
 def test_a_second_login_replaces_the_hint_of_the_first() -> None:
     host = an_oidc_host()
     host.callback(host.sign_in_at_issuer())
@@ -1543,6 +1563,47 @@ def the_hint_cookie_is_cleared_for_the_logout_path(response: HttpxResponse) -> b
     )
 
 
+def test_the_logout_page_carries_the_rows_token_byte_for_byte_and_the_row_is_gone() -> None:
+    host = signed_in_host()
+    record = host.sessions.record
+    assert record is not None
+    record.id_token = SecretStr(a_fake_id_token("held-by-the-row"))
+    [rows_token] = stored_id_tokens(host)
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert hint_of(response) == rows_token
+    assert stored_id_tokens(host) == []
+
+
+def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None:
+    host = signed_in_host()
+
+    post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert host.issued_id_tokens[-1] not in stored_id_tokens(host)
+
+
+def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
+    host = signed_in_host()
+    login_token = host.issued_id_tokens[-1]
+    host.issuer.refresh_answer_members = {"id_token": a_fake_id_token("issued-by-the-refresh")}
+    [session] = host.sessions.list_active()
+    host.wall_clock.now += SESSION_IDLE_SECONDS / 2
+
+    renewed = host.client.get("/me")
+    rotated = fresh_access_token(
+        host.relying_party, session.id,
+        session_transaction=host.sessions.in_transaction, config=host.config,
+    )
+    held_after_rotation = stored_id_tokens(host)
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert (renewed.status_code, isinstance(rotated, SecretStr)) == (200, True)
+    assert held_after_rotation == [login_token]
+    assert hint_of(response) == login_token
+
+
 def both_session_cookies_are_cleared(host: OidcHost, response: HttpxResponse) -> bool:
     return is_cleared(response, host.config.session_cookie_name) and is_cleared(
         response, host.config.csrf_cookie_name,
@@ -1746,6 +1807,14 @@ def stored_refresh_tokens(host: OidcHost) -> list[str]:
         record.refresh_token.get_secret_value()
         for record in host.sessions.list_active()
         if record.refresh_token is not None
+    ]
+
+
+def stored_id_tokens(host: OidcHost) -> list[str]:
+    return [
+        record.id_token.get_secret_value()
+        for record in host.sessions.list_active()
+        if record.id_token is not None
     ]
 
 

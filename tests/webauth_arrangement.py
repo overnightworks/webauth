@@ -304,6 +304,7 @@ class FakeSessionRecord:
     created_at: datetime
     expires_at: datetime
     refresh_token: SecretStr | None = None
+    id_token: SecretStr | None = None
 
 
 class SessionRecordsInMemory:
@@ -338,6 +339,7 @@ class SessionRecordsInMemory:
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
+        id_token: SecretStr | None = None,
     ) -> FakeSessionRecord:
         _require_held_lock(self._lock)
         user = self._users.get(user_id)
@@ -347,11 +349,7 @@ class SessionRecordsInMemory:
         while session_id in self._records:
             session_id = f"session-{next(self._ids)}"
         record = FakeSessionRecord(
-            id=session_id,
-            user=user,
-            created_at=now,
-            expires_at=expires_at,
-            refresh_token=refresh_token,
+            session_id, user, now, expires_at, refresh_token, id_token,
         )
         self._records[record.id] = record
         return record
