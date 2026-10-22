@@ -413,9 +413,9 @@ def open_session(
     the rest ended, so neither the replaced session nor the new one counts
     against the cap; the new session is created at that instant, expiring one
     idle period later, and holds ``admitted.refresh_token`` and
-    ``admitted.id_token``. ``None`` states that the host sets no cap; any other value must be a positive whole
-    number, or ``ValueError`` is raised before anything is written. A forged,
-    oversized or duplicated cookie ends nothing.
+    ``admitted.id_token``. ``None`` states that the host sets no cap; any other
+    value must be a positive whole number, or ``ValueError`` is raised before
+    anything is written. A forged, oversized or duplicated cookie ends nothing.
 
     Never commits, sets no cookie and records no audit event: the host commits,
     then calls ``issue_session_cookies`` with the returned id. The host's

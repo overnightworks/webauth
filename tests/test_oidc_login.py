@@ -37,6 +37,7 @@ from oidc_arrangement import (
     LogoutPage,
     a_fake_id_token,
     a_logout_token,
+    a_token_of_length,
     assert_holds_only_the_refresh_token,
     jws,
     key_set_document,
@@ -80,6 +81,7 @@ from webauth.cookies import (
     sign_session_id,
 )
 from webauth.dependencies import current_user_dependency
+from webauth.jwt_verification import MAX_TOKEN_CHARACTERS
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
@@ -88,7 +90,6 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRelyingParty,
 )
-from webauth.jwt_verification import MAX_TOKEN_CHARACTERS
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
@@ -676,9 +677,7 @@ class OidcHost:
         return f"{name}={self.client.cookies[name]}"
 
 
-def an_id_token(
-    nonce: str, wall_clock: FakeClock, groups_claim: object, header_padding: str = "",
-) -> str:
+def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding: str = "") -> str:
     now = int(wall_clock.now)
     claims = {
         "iss": BOUND_ISSUER,
@@ -691,24 +690,9 @@ def an_id_token(
         "groups": groups_claim,
     }
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
-    if header_padding:
-        header["padding"] = header_padding
+    if padding:
+        header["padding"] = padding
     return jws(header, claims, rs256(rsa_key("issuer")))
-
-
-def an_id_token_of_length(nonce: str, wall_clock: FakeClock, length: int) -> str:
-    """The signed token of exactly ``length`` characters: base64url has no encoding
-    of some payload lengths, so the header's padding is the second knob."""
-    for header_padding in ("", "h", "hh"):
-        shortest = len(an_id_token(nonce, wall_clock, [LOGIN_GROUP], header_padding))
-        estimate = (length - shortest) * 3 // 4
-        for padding in range(estimate - 12, estimate + 1):
-            token = an_id_token(
-                nonce, wall_clock, [LOGIN_GROUP, "/" + "p" * padding], header_padding,
-            )
-            if len(token) == length:
-                return token
-    raise AssertionError(f"no token of {length} characters")
 
 
 def a_logout_token_of_the_issuer(
@@ -1016,55 +1000,35 @@ def test_an_admitted_callback_opens_the_session_for_one_idle_from_one_whole_seco
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
-@pytest.mark.parametrize("cookie_secure", [
-    pytest.param(True, id="secure"),
-    pytest.param(False, id="insecure-development"),
-])
-def test_an_admitted_callback_sets_no_cookie_carrying_the_id_token_and_the_row_holds_it(
+@pytest.mark.parametrize("cookie_secure", [True, False])
+def test_the_callback_hands_the_browser_no_id_token_and_each_login_replaces_the_rows_token(
     *, cookie_secure: bool,
 ) -> None:
     host = an_oidc_host(cookie_secure=cookie_secure)
+    host.callback(host.sign_in_at_issuer())
 
     response = host.callback(host.sign_in_at_issuer())
 
-    cookie_headers = [
-        value for header, value in response.headers.multi_items() if header == "set-cookie"
-    ]
-    assert host.issued_id_tokens[-1] not in " ".join(cookie_headers)
-    assert not [name for name in set_cookies(response) if "id_token" in name]
-    assert stored_id_tokens(host) == [host.issued_id_tokens[-1]]
-
-
-def test_the_id_token_appears_in_no_repr_and_no_header_of_the_callback() -> None:
-    host = an_oidc_host()
-
-    response = host.callback(host.sign_in_at_issuer())
-
-    [login] = host.admitted_logins
+    first, second = host.issued_id_tokens
+    [login] = host.admitted_logins[1:]
     shown = " ".join([
-        repr(host.sessions.record),
         repr(host.sessions.list_active()),
         repr(login),
         *(value for _, value in response.headers.multi_items()),
     ])
-    assert host.issued_id_tokens[-1] not in shown
-
-
-def test_a_second_login_replaces_the_row_and_its_token() -> None:
-    host = an_oidc_host()
-    host.callback(host.sign_in_at_issuer())
-
-    host.callback(host.sign_in_at_issuer())
-
-    first, second = host.issued_id_tokens
     assert first != second
+    assert second not in shown
+    assert not [name for name in set_cookies(response) if "id_token" in name]
     assert stored_id_tokens(host) == [second]
 
 
 def test_an_id_token_of_the_verifiers_longest_length_is_stored_and_sent_whole() -> None:
     host = an_oidc_host()
-    host.issuer.mint_id_token = lambda nonce: an_id_token_of_length(
-        nonce, host.wall_clock, MAX_TOKEN_CHARACTERS,
+    host.issuer.mint_id_token = lambda nonce: a_token_of_length(
+        MAX_TOKEN_CHARACTERS,
+        lambda header_padding, groups_padding: an_id_token(
+            nonce, host.wall_clock, [LOGIN_GROUP, groups_padding], header_padding,
+        ),
     )
     host.callback(host.sign_in_at_issuer())
     [stored] = stored_id_tokens(host)
@@ -1557,19 +1521,6 @@ def hint_of(response: HttpxResponse) -> str | None:
     return LogoutPage(response.text).hidden_fields.get("id_token_hint")
 
 
-def test_the_logout_page_carries_the_rows_token_byte_for_byte_and_the_row_is_gone() -> None:
-    host = signed_in_host()
-    record = host.sessions.record
-    assert record is not None
-    record.id_token = SecretStr(a_fake_id_token("held-by-the-row"))
-    [rows_token] = stored_id_tokens(host)
-
-    response = post_logout(host, SAME_ORIGIN_FORM)
-
-    assert hint_of(response) == rows_token
-    assert stored_id_tokens(host) == []
-
-
 def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None:
     host = signed_in_host()
 
@@ -1604,8 +1555,12 @@ def both_session_cookies_are_cleared(host: OidcHost, response: HttpxResponse) ->
     )
 
 
-def test_the_answer_ends_the_session_and_holds_the_token_in_its_body_and_only_clearings() -> None:
+def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings() -> None:
     host = signed_in_host()
+    record = host.sessions.record
+    assert record is not None
+    record.id_token = SecretStr(a_fake_id_token("held-by-the-row"))
+    [rows_token] = stored_id_tokens(host)
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
@@ -1615,9 +1570,11 @@ def test_the_answer_ends_the_session_and_holds_the_token_in_its_body_and_only_cl
     }
     assert both_session_cookies_are_cleared(host, response)
     assert "location" not in response.headers
-    assert host.issued_id_tokens[-1] not in header_values
-    assert hint_of(response) == host.issued_id_tokens[-1]
-    assert (host.sessions.count_active(), stored_refresh_tokens(host)) == (0, [])
+    assert rows_token not in header_values
+    assert hint_of(response) == rows_token
+    assert (host.sessions.count_active(), stored_id_tokens(host), stored_refresh_tokens(host)) == (
+        0, [], [],
+    )
 
 
 def _no_session(_host: OidcHost) -> dict[str, str]:
@@ -1649,7 +1606,7 @@ def _session_expired_but_stored(host: OidcHost) -> dict[str, str]:
     return {}
 
 
-def _session_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
+def _row_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
     record = host.sessions.record
     assert record is not None
     record.id_token = None
@@ -1662,9 +1619,7 @@ def _session_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
     pytest.param(_session_cookies_dropped, 1, False, False, id="session-cookies-gone"),
     pytest.param(_session_ended_in_the_store, 0, False, True, id="session-already-ended"),
     pytest.param(_session_expired_but_stored, 0, True, True, id="session-expired-but-stored"),
-    pytest.param(
-        _session_stored_before_the_upgrade, 0, False, True, id="row-stored-before-the-upgrade",
-    ),
+    pytest.param(_row_stored_before_the_upgrade, 0, False, True, id="stored-before-upgrade"),
 ])
 def test_a_same_origin_logout_needs_no_csrf_token_and_still_answers_the_page(
     arrange: Callable[[OidcHost], dict[str, str]],
@@ -1690,10 +1645,7 @@ def test_a_same_origin_logout_needs_no_csrf_token_and_still_answers_the_page(
     assert host.lock.times_taken - taken_before == lock_taken
 
 
-@pytest.mark.parametrize("signed_in", [
-    pytest.param(True, id="with-a-session"),
-    pytest.param(False, id="without-a-session"),
-])
+@pytest.mark.parametrize("signed_in", [True, False])
 def test_an_old_hint_cookie_is_neither_read_nor_cleared(*, signed_in: bool) -> None:
     host = an_oidc_host()
     if signed_in:
@@ -2193,7 +2145,8 @@ class OpeningStore:
         return open_session(
             Request(an_http_scope(app, headers=headers)), OPENING_CONFIG,
             AdmittedLogin(
-                account=ACCOUNT, return_to=None, refresh_token=refresh_token, id_token=id_token or SecretStr("id-token-of-the-login"),
+                account=ACCOUNT, return_to=None, refresh_token=refresh_token,
+                id_token=id_token or SecretStr("id-token-of-the-login"),
             ),
             sessions=self.sessions, lock=self.lock,
             max_sessions=max_sessions,
@@ -2204,21 +2157,12 @@ def signed(session_id: str) -> str:
     return sign_session_id(session_id, OPENING_CONFIG.signing_key)
 
 
-def test_a_new_session_holds_the_refresh_token_of_the_admitted_login() -> None:
+def test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_login() -> None:
     store = OpeningStore.holding()
 
-    session = store.open_session(refresh_token=SecretStr("rt-1"))
+    session = store.open_session(refresh_token=SecretStr("rt-1"), id_token=SecretStr("id-1"))
 
-    assert session.refresh_token == SecretStr("rt-1")
-    assert store.sessions.load(session.id) == session
-
-
-def test_a_new_session_holds_the_id_token_of_the_admitted_login() -> None:
-    store = OpeningStore.holding()
-
-    session = store.open_session(id_token=SecretStr("id-token-1"))
-
-    assert session.id_token == SecretStr("id-token-1")
+    assert (session.refresh_token, session.id_token) == (SecretStr("rt-1"), SecretStr("id-1"))
     assert store.sessions.load(session.id) == session
 
 
