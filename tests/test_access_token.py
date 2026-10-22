@@ -124,8 +124,11 @@ def a_jwt_verifier() -> JwtVerifier:
     ],
 )
 def test_the_verifier_refuses_media_types_it_cannot_compare(keywords: dict[str, Any]) -> None:
+    verifier = a_jwt_verifier()
+    token = an_access_token()
+
     with pytest.raises(ValueError):
-        a_jwt_verifier().verify(an_access_token(), **keywords)
+        verifier.verify(token, **keywords)
 
 
 @pytest.mark.parametrize(
@@ -192,9 +195,10 @@ def test_verifying_with_anything_but_authorized_parties_raises_before_any_fetch(
     parties: Any,
 ) -> None:
     key_sets = a_key_set()
+    token = an_access_token()
 
     with pytest.raises(TypeError):
-        verified(an_access_token(), key_sets=key_sets, parties=parties)
+        verified(token, key_sets=key_sets, parties=parties)
 
     assert key_sets.fetched_urls == []
 

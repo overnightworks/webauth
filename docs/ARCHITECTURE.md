@@ -81,8 +81,7 @@ position and where a host's own middleware goes. A host whose own middleware is 
 
 ### The bearer gate
 
-`install_web_auth_middleware(..., bearer_gate=BearerGate(...))` declares the host's machine paths once. On every request a path selects (the decoded ASGI path,
-`scope["path"]`, every method), the gate verifies that request's own `Authorization: Bearer` token with `OidcRelyingParty.verify_access_token` (off the event loop):
+`install_web_auth_middleware(..., bearer_gate=BearerGate(...))` declares the host's machine paths once. On every request a path selects (written as `PathRules` says, every method), the gate verifies that request's own `Authorization: Bearer` token with `OidcRelyingParty.verify_access_token` (off the event loop):
 an RS256 `at+jwt` of the issuer whose only `aud` is the app's client, whose `azp` is among `AuthorizedParties`, and whose `groups` give `AppRole.ADMIN` as at login.
 Nothing is provisioned. Only then does it record an admission for this app, this path and a SHA-256 digest of the one header value; the digest lives in request
 memory and the token is never stored. `CsrfOriginMiddleware`, `CsrfTokenMiddleware` and the session gate read that record strictly and step aside, so no cookie decides

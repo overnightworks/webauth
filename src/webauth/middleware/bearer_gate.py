@@ -21,6 +21,7 @@ from webauth.dependencies import (
     _record_bearer_admission,
 )
 from webauth.middleware._refusal import RefusalMiddleware
+from webauth.middleware._route_path import route_path
 from webauth.oidc import _ACCESS_TOKEN, OidcRefusal, OidcRelyingParty
 from webauth.oidc_login import AdmissionConfig, AppRole, NoAdmins, app_role
 from webauth.policies import AuthorizedParties, PathRules
@@ -48,13 +49,12 @@ _ACCESS_TOKEN_QUERY_PARAMETER: Final = "access_token"  # noqa: S105
 class BearerGate:
     """Which paths take hal's bearer access token alone, and whose tokens count.
 
-    ``paths`` are written as the decoded ASGI path the server delivers
-    (``PathRules``). The token must come from ``relying_party``'s issuer, name
-    its client as the only audience, carry an ``azp`` among ``authorized_parties``
-    and hold ``admission.admin_group`` or a group below it. ``ValueError`` for
-    no paths, for ``NoAdmins`` (no token could pass) and for an ``admission``
-    bound to another issuer; ``TypeError`` for ``authorized_parties`` that is
-    not an ``AuthorizedParties``.
+    ``paths`` are written as ``PathRules`` says. The token must come from
+    ``relying_party``'s issuer, name its client as the only audience, carry an
+    ``azp`` among ``authorized_parties`` and hold ``admission.admin_group`` or a
+    group below it. ``ValueError`` for no paths, for ``NoAdmins`` (no token could
+    pass) and for an ``admission`` bound to another issuer; ``TypeError`` for
+    ``authorized_parties`` that is not an ``AuthorizedParties``.
     """
 
     paths: PathRules
@@ -108,7 +108,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     """
 
     async def _refusal(self, request: Request) -> Response | None:
-        if not self._policy.paths.matches(request.scope["path"]):
+        if not self._policy.paths.matches(route_path(request.scope)):
             return None
         credential = _credential_of(request)
         if isinstance(credential, _Refusal):

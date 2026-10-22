@@ -219,8 +219,8 @@ account and no role.
   `verified_session_id`) on a gated path raises, so the library answers 500,
   and `session_id_from_request` reads the cookie, which is the host's duty not to
   trust there.
-- **The paths** are the decoded path the server delivers, as the CSRF, rate-limit
-  and cache-control rules write them (`PathRules` says how a `root_path` enters).
+- **The paths** are written as every other policy's are; the `PathRules`
+  docstring says how.
   They must cover every machine route, a prefix being the safe form. Every method
   is gated, `OPTIONS` included; a CORS preflight is the host's own layer outside
   the stack.

@@ -547,7 +547,7 @@ def the_cookie(app: BearerApp) -> list[tuple[bytes, bytes]]:
     return [(b"cookie", app.cookie.encode())]
 
 
-class TestThePathIsTheDecodedPathTheRouterMatches:
+class TestThePathIsTheOneTheRouterRoutes:
     @pytest.mark.parametrize("encoded", ["%3F", "%23"], ids=["P01a-question", "P01b-hash"])
     def test_an_encoded_delimiter_does_not_hide_a_path_from_the_gate(self, encoded: str) -> None:
         shape = PathRules(shapes=(PathShape("/api/admin/people/", "/export"),))
@@ -577,38 +577,51 @@ class TestThePathIsTheDecodedPathTheRouterMatches:
     @pytest.mark.parametrize(
         ("rule", "gated"),
         [
-            pytest.param("/app/api/admin/", True, id="P03a-rule-with-the-root-path"),
-            pytest.param("/api/admin/", False, id="P03b-rule-without-the-root-path"),
+            pytest.param("/api/admin/", True, id="P03a-rule-below-the-root-path"),
+            pytest.param("/app/api/admin/", False, id="P03b-rule-with-the-root-path"),
         ],
     )
-    def test_a_root_path_the_server_supplies_is_part_of_the_path(
+    def test_a_root_path_the_server_supplies_is_stripped_from_the_path(
         self, rule: str, gated: bool,
     ) -> None:
         app = a_bearer_app(paths=PathRules(prefixes=(rule,)))
 
-        status, _headers = an_answer_to(
+        status, headers = an_answer_to(
             app, f"/app{UNDECLARED_PATH}", root_path="/app", headers=the_cookie(app),
         )
 
-        assert (status, app.auth.route_runs == []) == ((401, True) if gated else (200, False))
+        outcome = (status, app.auth.route_runs == [])
+        expected = (401, True) if gated else (200, False)
+        assert outcome == expected
+        if gated:
+            assert headers["www-authenticate"] == REALM
+            assert_no_store_and_no_cookie(headers)
 
     @pytest.mark.parametrize(
-        ("rule", "gated"),
+        ("rule", "path", "gated"),
         [
-            pytest.param("/api/admin/", True, id="P03c-rule-without-the-root-path"),
-            pytest.param("/app/api/admin/", False, id="P03d-rule-with-the-root-path"),
+            pytest.param("/api/admin/", UNDECLARED_PATH, True, id="P03c-rule-below-the-root-path"),
+            pytest.param(
+                "/api/admin/", f"/app{UNDECLARED_PATH}", True, id="P03d-the-unstripped-path",
+            ),
+            pytest.param(
+                "/app/api/admin/", UNDECLARED_PATH, False, id="P03e-rule-with-the-root-path",
+            ),
         ],
     )
-    def test_a_root_path_the_application_supplies_is_not_part_of_the_path(
-        self, rule: str, gated: bool,
+    def test_a_root_path_the_application_supplies_is_stripped_from_the_path(
+        self, rule: str, path: str, gated: bool,
     ) -> None:
         app = a_bearer_app(paths=PathRules(prefixes=(rule,)), root_path="/app")
 
-        response = app.ask(UNDECLARED_PATH, cookie=True)
+        response = app.ask(path, cookie=True)
 
-        assert (response.status_code, app.auth.route_runs == []) == (
-            (401, True) if gated else (200, False)
-        )
+        outcome = (response.status_code, app.auth.route_runs == [])
+        expected = (401, True) if gated else (200, False)
+        assert outcome == expected
+        if gated:
+            assert response.headers["www-authenticate"] == REALM
+            assert_answers_no_store(response)
 
 
 PREFLIGHT = {"origin": "https://evil.test", "access-control-request-method": "DELETE"}
