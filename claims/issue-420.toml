@@ -1,0 +1,8 @@
+claim_id = "b4c6ba746ea94bdbbf9ea87b8b90c232"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "7238f71c8146815dbb027af47374601fb63841be"
+branch = "claude/issue-420-logout-post-page"
+scope = ["CHANGELOG.md", "README.md", "docs/ARCHITECTURE.md", "e2e/oidc/README.md", "e2e/oidc/engines.py", "e2e/oidc/harness.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "e2e/oidc/shim.py", "quality/baseline.toml", "scripts/e2e-oidc.sh", "src/webauth/_end_session_page.py", "src/webauth/middleware/security_headers.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/policies.py", "tests/test_oidc.py", "tests/test_oidc_login.py", "tests/test_public_api.py", "tests/test_security_headers.py", "tests/typing/oidc_host.py"]
+opened_commit = "e2eb8e6010d2222491b92bd0114705a6eb7caf8e"
+whole_reason = "One mechanism: the page, its own policy and the middleware's step-aside work only together, with the tests, typing host, e2e harness in three engines and docs that pin them."
