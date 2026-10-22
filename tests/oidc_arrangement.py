@@ -39,7 +39,15 @@ from jwt.algorithms import RSAAlgorithm
 from pydantic import SecretStr
 
 from webauth.https_client import MAX_KEY_SET_BYTES
-from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointAnswer, TokenRequest
+from webauth.jwt_verification import KeySetFetch, MonotonicClock
+from webauth.oidc import (
+    MAX_TOKEN_RESPONSE_BYTES,
+    OidcClientConfig,
+    OidcRelyingParty,
+    TokenEndpointAnswer,
+    TokenRequest,
+)
+from webauth.ports import WallClock
 
 ABSENT = object()
 """A claim or header change that removes the member instead of setting it."""
@@ -184,6 +192,84 @@ class FakeTokenEndpoint:
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
+
+
+REALM_ISSUER = "https://login.example.org/realms/workshop"
+REALM_JWKS_URL = f"{REALM_ISSUER}/protocol/openid-connect/certs"
+APP_CLIENT_ID = "notes-app"
+ACCESS_TOKEN_SUBJECT = "operator-account-1"
+ACCESS_TOKEN_LEEWAY_SECONDS = 30
+ACCESS_TOKEN_NOW = 1_800_000_000
+ACCESS_TOKEN_LIFETIME_SECONDS = 300
+
+
+def an_access_token(
+    *,
+    issuer: str = REALM_ISSUER,
+    client_id: str = APP_CLIENT_ID,
+    subject: str = ACCESS_TOKEN_SUBJECT,
+    now: int = ACCESS_TOKEN_NOW,
+    key_id: str = "current-key",
+    key_name: str = "current",
+    claims: dict[str, Any] | None = None,
+    header: dict[str, Any] | None = None,
+) -> str:
+    """An access token as Keycloak signs it for hal acting on `client_id`'s behalf:
+    an `at+jwt` living 300 seconds whose `azp` is hal and whose groups hold the
+    app's admin group; `claims` and `header` change or, with `ABSENT`, remove members."""
+    token_claims = {
+        "iss": issuer,
+        "aud": client_id,
+        "sub": subject,
+        "azp": "hal",
+        "iat": now,
+        "exp": now + ACCESS_TOKEN_LIFETIME_SECONDS,
+        "jti": "access-token-1",
+        "groups": ["/apps/x/admin"],
+    }
+    token_header = {"alg": "RS256", "kid": key_id, "typ": "at+jwt"}
+    return jws(
+        changed(token_header, header or {}),
+        changed(token_claims, claims or {}),
+        rs256(rsa_key(key_name)),
+    )
+
+
+def a_relying_party(
+    *,
+    fetch_key_set: KeySetFetch | None = None,
+    wall_clock: WallClock | None = None,
+    monotonic_clock: MonotonicClock | None = None,
+) -> OidcRelyingParty:
+    """The relying party of `APP_CLIENT_ID` at `REALM_ISSUER`, publishing the
+    "current" key by default, that makes no token request."""
+
+    def post_no_token_request(request: TokenRequest) -> TokenEndpointAnswer:
+        raise AssertionError(f"a token request was posted to {request.url}")
+
+    endpoint = f"{REALM_ISSUER}/protocol/openid-connect"
+    config = OidcClientConfig(
+        issuer=REALM_ISSUER,
+        authorization_endpoint=f"{endpoint}/auth",
+        token_endpoint=f"{endpoint}/token",
+        jwks_url=REALM_JWKS_URL,
+        end_session_endpoint=f"{endpoint}/logout",
+        client_id=APP_CLIENT_ID,
+        client_secret=SecretStr(secrets.token_urlsafe(16)),
+        redirect_uri="https://notes.example.org/auth/callback",
+        post_logout_redirect_uri="https://notes.example.org/",
+        logout_path="/auth/logout",
+        scopes=("openid", "profile"),
+        leeway_seconds=ACCESS_TOKEN_LEEWAY_SECONDS,
+    )
+    return OidcRelyingParty(
+        config,
+        post_token_request=post_no_token_request,
+        fetch_key_set=fetch_key_set
+        or FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key"))),
+        wall_clock=wall_clock or FakeClock(float(ACCESS_TOKEN_NOW)),
+        monotonic_clock=monotonic_clock or FakeClock(5_000.0),
+    )
 
 
 def token_endpoint_answer(status: int, document: dict[str, Any] | bytes) -> TokenEndpointAnswer:
