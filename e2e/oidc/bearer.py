@@ -17,8 +17,7 @@ header ``typ`` of the first minted token. Each scenario's id is the matrix id of
 - 31 (E04) D with the admin token, another person's session cookie and a wrong CSRF token.
 - 32 to 34 (E05 to E07) a session cookie alone opens no machine route.
 - 35 (E08) the admin token and a cookie on P: a host mistake, answered 500.
-- 36 and 38 (E09 and E11) an ID token and a refresh token; 37 (E10) is retired, its subject, the
-  ID token in a browser cookie, being gone.
+- 36 and 38 (E09 and E11) an ID token and a refresh token; 37 is unused.
 - 39 to 41 (E12 to E14) audiences: the foreign one, two of them, ``account``.
 - 42 (E15) a token of ``d1-other``.
 - 43, 44 (E16, E17) a member without the admin group, and a person in no group.

@@ -461,10 +461,8 @@ def log_out(
     security-headers middleware leaves that policy and ``Cache-Control`` in
     place, so no host policy needs a source for the issuer. Without a stored
     row, or with one stored before the host held ID tokens, the issuer asks the
-    person once, as it also does for a hint of another issuer session, and for a
-    hint whose realm signing key has since been deleted it shows an error page.
-    The session's stored refresh token goes to the issuer nowhere; deleting the
-    row removes it.
+    person once. The session's stored refresh token goes to the issuer nowhere;
+    deleting the row removes it.
 
     The host commits and returns the answer as it is, and a single-page app
     logs out by a top-level form POST to the route. The route needs no
@@ -489,8 +487,9 @@ def log_out(
 
 def _id_token_of_ended_session(sessions: SessionRecordStore, session_id: str) -> SecretStr | None:
     record = sessions.load(session_id)
+    id_token = None if record is None else record.id_token
     sessions.delete(session_id)
-    return None if record is None else record.id_token
+    return id_token
 
 
 class AccessTokenRefusalReason(StrEnum):
