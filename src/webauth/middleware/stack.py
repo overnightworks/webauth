@@ -36,6 +36,34 @@ _LIBRARY_MIDDLEWARE = (
 )
 
 
+def _refuse_an_unsound_stack(
+    app: Starlette,
+    *,
+    csrf_origin: CsrfPolicy | None,
+    csrf_token: CsrfPolicy | None,
+) -> None:
+    if csrf_token is not None and csrf_origin is None:
+        raise ValueError(
+            "csrf_token needs csrf_origin: login routes skip the token on the "
+            "promise that the origin check protects them.",
+        )
+    if csrf_token is not None and csrf_origin is not None:
+        uncovered = csrf_origin.token_exemptions_outside_origin_check(csrf_token)
+        if uncovered:
+            raise ValueError(
+                "csrf_token exempts paths the csrf_origin policy does not check: "
+                f"{', '.join(uncovered)}.",
+            )
+    if any(
+        isinstance(entry.cls, type) and issubclass(entry.cls, _LIBRARY_MIDDLEWARE)
+        for entry in app.user_middleware
+    ):
+        raise RuntimeError(
+            "The app already carries library middleware; install the stack once "
+            "and add no library middleware by hand.",
+        )
+
+
 def install_web_auth_middleware(
     app: Starlette,
     *,
@@ -95,26 +123,7 @@ def install_web_auth_middleware(
     task isolation restores its own context, for example by resetting the
     token it set.
     """
-    if csrf_token is not None and csrf_origin is None:
-        raise ValueError(
-            "csrf_token needs csrf_origin: login routes skip the token on the "
-            "promise that the origin check protects them.",
-        )
-    if csrf_token is not None and csrf_origin is not None:
-        uncovered = csrf_origin.token_exemptions_outside_origin_check(csrf_token)
-        if uncovered:
-            raise ValueError(
-                "csrf_token exempts paths the csrf_origin policy does not check: "
-                f"{', '.join(uncovered)}.",
-            )
-    if any(
-        isinstance(entry.cls, type) and issubclass(entry.cls, _LIBRARY_MIDDLEWARE)
-        for entry in app.user_middleware
-    ):
-        raise RuntimeError(
-            "The app already carries library middleware; install the stack once "
-            "and add no library middleware by hand.",
-        )
+    _refuse_an_unsound_stack(app, csrf_origin=csrf_origin, csrf_token=csrf_token)
     entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
     if body_size is not None:
         entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
