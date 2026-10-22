@@ -85,7 +85,7 @@ position and where a host's own middleware goes. A host whose own middleware is 
 an RS256 `at+jwt` of the issuer whose only `aud` is the app's client, whose `azp` is among `AuthorizedParties`, and whose `groups` give `AppRole.ADMIN` as at login.
 Nothing is provisioned. Only then does it record an admission for this app, this path and a SHA-256 digest of the one header value; the digest lives in request
 memory and the token is never stored. `CsrfOriginMiddleware`, `CsrfTokenMiddleware` and the session gate read that record strictly and step aside, so no cookie decides
-a machine path; `bearer_caller` reads it strictly too, and the loose reader makes `current_user` raise (500) and `admitted_user` answer `None`. A copy of the record
+a machine path; `bearer_caller` reads it strictly too, and the loose reader makes `current_user` and `admitted_admin` raise (500) and `admitted_user` answer `None`. A copy of the record
 carried to another path, app or header is no admission. The gate sits inside the rate limit, so a bearer request spends the same budget, and the installer puts a
 `no-store` rule first in the security-headers policy for the gated paths, so every answer there is `no-store`, and webauth sets no cookie there. The README holds the refusal table.
 
@@ -98,7 +98,7 @@ reads the signed session cookie and `admit_session` decides a session id that th
 ### The session gate
 
 `install_web_auth_middleware(..., session_gate=SessionGate(...))` makes the rule of "Signed out and refused" hold for every route: a request needs a live session
-unless the host names it, so a route that forgets a dependency is gated, not public. `admitted_user` reads the gate's admission where no dependency is used.
+unless the host names it, so a route that forgets a dependency is gated, not public. `admitted_user` reads the gate's admission where no dependency is used, and `admitted_admin` adds the admin check to that reading.
 
 ### WebSocket handshakes
 

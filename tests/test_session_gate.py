@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request, WebSocket
 from httpx import Response
 from starlette.websockets import WebSocketDisconnect
 from webauth_arrangement import (
@@ -31,6 +31,7 @@ from webauth_arrangement import (
     UsersInMemory,
     a_csrf_passing_request_headers,
     a_session,
+    a_web_auth_config,
     an_auth_app,
     an_http_scope,
     assert_carries_policy_headers,
@@ -39,7 +40,8 @@ from webauth_arrangement import (
     starts,
 )
 
-from webauth.dependencies import ConnectionRefusal
+from webauth.dependencies import ConnectionRefusal, current_user_dependency
+from webauth.middleware import admitted_admin
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
@@ -370,6 +372,144 @@ class TestAdmittedUser:
             ask(app, "/health", cookie=cookie)
 
 
+ADMITTED_ADMIN_PATH = "/admitted-admin"
+ADMITTED_ADMIN_DEPENDENCY_PATH = "/admitted-admin-dependency"
+ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH = "/admitted-admin-after-current-user"
+ADMITTED_ADMIN_PATHS = (ADMITTED_ADMIN_PATH, ADMITTED_ADMIN_DEPENDENCY_PATH)
+WEBSOCKET_ADMITTED_ADMIN_PATH = "/ws-admitted-admin"
+AUTHENTICATION_REQUIRED = {"detail": "Authentication required"}
+ADMIN_REQUIRED = {"detail": "Admin access required"}
+OPERATOR_ROLE = "operator"
+
+
+def with_admitted_admin_routes(app: AuthApp) -> AuthApp:
+    """The routes that read ``admitted_admin``, added to an application of the arrangement."""
+    dependencies = current_user_dependency(
+        session_store=lambda: app.sessions, on_authenticated=app.authenticated.append,
+    )
+
+    @app.app.get(ADMITTED_ADMIN_PATH)
+    def reading_admitted_admin(request: Request) -> dict[str, str]:
+        app.route_runs.append(request.url.path)
+        return {"username": admitted_admin(request).username}
+
+    @app.app.get(ADMITTED_ADMIN_DEPENDENCY_PATH)
+    def depending_on_admitted_admin(
+        request: Request, admin: AuthenticatedUser = Depends(admitted_admin),
+    ) -> dict[str, str]:
+        app.route_runs.append(request.url.path)
+        return {"username": admin.username}
+
+    @app.app.get(ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH)
+    def reading_admitted_admin_after_current_user(
+        request: Request, _account: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str]:
+        return {"username": admitted_admin(request).username}
+
+    @app.app.websocket(WEBSOCKET_ADMITTED_ADMIN_PATH)
+    async def reading_admitted_admin_of_a_websocket(websocket: WebSocket) -> None:
+        admitted_admin(websocket)
+        await websocket.accept()
+        await websocket.close()
+
+    return app
+
+
+def a_gated_app_of(role: str, **keywords: Any) -> AuthApp:
+    return with_admitted_admin_routes(a_gated_app(a_session(user=FakeUser(role=role)), **keywords))
+
+
+class TestAdmittedAdmin:
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    def test_a_session_with_the_admin_role_gets_its_account(self, path: str) -> None:
+        app = a_gated_app_of(ADMIN_ROLE)
+        response = ask(app, path, cookie=signed_in(app))
+        assert (response.status_code, response.json()) == (200, {"username": "alice"})
+
+    @pytest.mark.parametrize("path", [*ADMITTED_ADMIN_PATHS, "/admin"])
+    def test_a_session_with_another_role_is_refused_as_admin_user_refuses_it(
+        self, path: str,
+    ) -> None:
+        app = a_gated_app_of(MEMBER_ROLE)
+        response = ask(app, path, cookie=signed_in(app))
+        assert (response.status_code, response.json()) == (403, ADMIN_REQUIRED)
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize(
+        ("role", "expected_status"),
+        [(OPERATOR_ROLE, 200), (ADMIN_ROLE, 403)],
+        ids=["the-configured-role", "the-literal-admin"],
+    )
+    def test_the_configured_admin_role_is_the_one_judged(
+        self, path: str, role: str, expected_status: int,
+    ) -> None:
+        config = a_web_auth_config(admin_role=OPERATOR_ROLE)
+        app = a_gated_app_of(role, config=config)
+        response = ask(app, path, cookie=signed_in(app))
+        assert response.status_code == expected_status
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize(
+        ("accept", "expected_status"), [(HTML, 302), (None, 401)], ids=["page", "fetch"],
+    )
+    def test_the_gate_refuses_a_signed_out_request_on_a_gated_path_before_the_route(
+        self, path: str, accept: str | None, expected_status: int,
+    ) -> None:
+        app = with_admitted_admin_routes(a_gated_app())
+        response = ask(app, path, accept=accept)
+        assert response.status_code == expected_status
+        assert app.route_runs == []
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize("accept", [HTML, None], ids=["page", "fetch"])
+    def test_where_the_gate_admitted_no_account_it_answers_401_and_never_redirects(
+        self, path: str, accept: str | None,
+    ) -> None:
+        app = with_admitted_admin_routes(
+            a_gated_app(optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS))),
+        )
+        response = ask(app, path, accept=accept)
+        assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
+        assert "location" not in response.headers
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize("dead", ["expired", "deleted"])
+    def test_a_dead_admin_session_on_an_optional_path_is_401_and_asked_once_by_the_gate(
+        self, path: str, dead: str,
+    ) -> None:
+        record = a_session(
+            user=FakeUser(role=ADMIN_ROLE),
+            remaining=OUTSIDE_LIFETIME if dead == "expired" else timedelta(minutes=30),
+        )
+        sessions = SessionsRecordingTheirTransaction(None if dead == "deleted" else record)
+        app = with_admitted_admin_routes(a_gated_app(
+            optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS)), sessions=sessions,
+        ))
+        response = ask(app, path, cookie=signed_in(app))
+        assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
+        assert counted(sessions, "load") == 1
+
+    def test_the_admission_a_dependency_makes_on_a_public_path_is_not_the_gates(self) -> None:
+        public = PublicRule(PathRules(exact=frozenset({ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH})))
+        app = a_gated_app_of(ADMIN_ROLE, public=(public,))
+        response = ask(app, ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH, cookie=signed_in(app))
+        assert [user.username for user in app.authenticated] == ["alice"]
+        assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
+
+    def test_it_is_an_error_where_no_gate_is_installed(self) -> None:
+        app = with_admitted_admin_routes(an_auth_app(a_session(user=FakeUser(role=ADMIN_ROLE))))
+        cookie = signed_in(app)
+        with pytest.raises(RuntimeError):
+            ask(app, ADMITTED_ADMIN_PATH, cookie=cookie)
+
+    def test_the_admitted_admin_of_a_websocket_is_an_error_behind_the_gate(self) -> None:
+        app = a_gated_app_of(ADMIN_ROLE)
+        with pytest.raises(RuntimeError), app.connect(
+            WEBSOCKET_ADMITTED_ADMIN_PATH, cookie=app.signed_cookie(),
+        ):
+            pass
+
+
 class Rule(Enum):
     GATED = "gated"
     OPTIONAL = "optional"
@@ -568,7 +708,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
     def test_a_replay_on_an_app_with_its_own_config_is_ignored(
         self, arrangement: Arrangement, planted: str,
     ) -> None:
-        other = an_auth_app(None, login_redirect=LOGIN_REDIRECT)
+        other = with_admitted_admin_routes(an_auth_app(None, login_redirect=LOGIN_REDIRECT))
         relay = relayed(other)
         relay.replay = (
             arrangement.gate_entries if planted == "replayed" else {
@@ -580,14 +720,16 @@ class TestARecordedAdmissionBelongsToItsRequest:
         assert ask(other, "/me", cookie=cookie).json() == {"detail": "Session expired"}
         with pytest.raises(RuntimeError):
             ask(other, "/health", cookie=cookie)
+        with pytest.raises(RuntimeError):
+            ask(other, ADMITTED_ADMIN_PATH, cookie=cookie)
 
     def test_a_replay_on_a_shared_config_is_ignored_for_another_sessions_cookie(
         self, arrangement: Arrangement,
     ) -> None:
-        shared = an_auth_app(
+        shared = with_admitted_admin_routes(an_auth_app(
             None, sessions=arrangement.sessions, config=arrangement.first.config,
             login_redirect=LOGIN_REDIRECT,
-        )
+        ))
         relay = relayed(shared)
         relay.replay = arrangement.gate_entries
         arrangement.sessions.events.clear()
@@ -599,6 +741,8 @@ class TestARecordedAdmissionBelongsToItsRequest:
         assert ask(shared, "/me").json() == {"detail": "Authentication required"}
         with pytest.raises(RuntimeError):
             ask(shared, "/health", cookie=arrangement.second_cookie)
+        with pytest.raises(RuntimeError):
+            ask(shared, ADMITTED_ADMIN_PATH, cookie=arrangement.second_cookie)
         with pytest.raises(RuntimeError):
             ask(shared, "/health")
 

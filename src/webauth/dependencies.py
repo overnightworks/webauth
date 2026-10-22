@@ -143,9 +143,7 @@ def current_user_dependency(
         request: Request,
         user: ports.AuthenticatedUser = Depends(current_user),
     ) -> ports.AuthenticatedUser:
-        if user.role != web_auth_config(request).admin_role:
-            raise HTTPException(403, _ADMIN_REQUIRED_DETAIL)
-        return user
+        return _require_admin(request, user)
 
     def verified_session_id(
         request: Request,
@@ -550,14 +548,28 @@ def _is_bearer_admitted(connection: HTTPConnection) -> bool:
     return type(connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)) is _BearerAdmission
 
 
-def _gate_or_own_admission(
-    connection: HTTPConnection, sessions: SessionRecordStore,
-) -> ports.AuthenticatedUser | ConnectionRefusal:
+def _raise_for_bearer_admission(connection: HTTPConnection) -> None:
     if _is_bearer_admitted(connection):
         raise RuntimeError(
             "A bearer-admitted request carries no session: a machine route takes "
-            "Depends(bearer_caller), not current_user, admin_user or verified_session_id.",
+            "Depends(bearer_caller), not current_user, admin_user, admitted_admin "
+            "or verified_session_id.",
         )
+
+
+def _require_admin(
+    connection: HTTPConnection, user: ports.AuthenticatedUser,
+) -> ports.AuthenticatedUser:
+    """The account itself when its role is the configured admin role; else the 403."""
+    if user.role != web_auth_config(connection).admin_role:
+        raise HTTPException(403, _ADMIN_REQUIRED_DETAIL)
+    return user
+
+
+def _gate_or_own_admission(
+    connection: HTTPConnection, sessions: SessionRecordStore,
+) -> ports.AuthenticatedUser | ConnectionRefusal:
+    _raise_for_bearer_admission(connection)
     decided = _gate_admission(connection)
     if decided is None or decided.admission is None:
         return _resolve_session(connection, sessions)

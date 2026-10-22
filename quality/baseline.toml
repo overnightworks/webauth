@@ -19,7 +19,7 @@
 "build_app" = 165
 
 [function_lines."src/webauth/dependencies.py"]
-"current_user_dependency" = 62
+"current_user_dependency" = 60
 
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63

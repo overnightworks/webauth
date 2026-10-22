@@ -6,7 +6,7 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
-## 0.21.0 - Unreleased
+## 0.21.0
 
 **Breaking**
 
@@ -26,6 +26,10 @@ Versions before 0.3.0 and releases without an entry here are described in the
   it. The cookie counts for nothing, CSRF and the session gate step aside, no account is created,
   every answer is `no-store`, and a route reads the caller with `Depends(bearer_caller)`
   (`BearerCaller`). A session dependency on such a request raises.
+- `webauth.middleware.admitted_admin`. Behind the session gate, a route refuses with webauth's own
+  answers and needs no session store dependency: 403 `Admin access required` for a signed-in
+  non-admin, 401 `Authentication required` where the gate admitted no account. On a bearer-admitted
+  request it raises, like the session dependencies.
 - `AuthorizedParties`, the allowlist of `azp` values a host admits, `OidcRelyingParty.verify_access_token`
   and `.issuer`, `VerifiedAccessToken`, `OidcRefusalReason.ACCESS_TOKEN_REJECTED` and
   `INVALID_ACCESS_CLAIM`, and `JwtVerifier.verify(expected_media_types=...)`, which compares the

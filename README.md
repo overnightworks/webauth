@@ -216,7 +216,7 @@ account and no role.
   session gate decide nothing, and every answer is `no-store`. The same rate
   limit applies where a rate policy covers the path; a flood of invalid tokens
   is bounded only by it. A session dependency (`current_user`, `admin_user`,
-  `verified_session_id`) on a gated path raises, so the library answers 500,
+  `admitted_admin`, `verified_session_id`) on a gated path raises, so the library answers 500,
   and `session_id_from_request` reads the cookie, which is the host's duty not to
   trust there.
 - **The paths** are written as every other policy's are; the `PathRules`
