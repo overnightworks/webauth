@@ -260,8 +260,9 @@ class TestAPathNextToTheRootPathIsNotStripped:
 
         response = client.post(NEXT_TO_THE_ROOT_PATH, headers=headers)
 
+        outcome = (response.status_code, len(route_runs))
         expected = (403, 0) if selected else (200, 1)
-        assert (response.status_code, len(route_runs)) == expected
+        assert outcome == expected
 
 
 class TestACacheControlRuleOfTheParentSelectsThroughAMount:
