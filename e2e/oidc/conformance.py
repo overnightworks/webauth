@@ -2,10 +2,70 @@
 
     scripts/e2e-oidc.sh conformance
 
-Read ``README.md`` beside this file first. The run lists the plan's modules as
-the suite names them, drives each one the expectation table does not skip through
-the host app in a real browser, writes one row per module (the suite's verdict
-beside webauth's own decision) and exports the plan into the run directory's ``export/``."""
+``README.md`` beside this file is the runbook. The run creates
+``oidcc-client-basic-certification-test-plan`` (OpenID Foundation conformance
+suite release v5.3.3, server and mongo images pinned by digest in
+``suite-compose.yaml``) with a throwaway client secret, lists the plan's 14
+modules as the suite names them (a count other than 14 fails the run), and
+drives every module the expectation table does not skip, with the host app
+(``host_app.py``) as the relying party under test and a real Chromium following
+the redirects. A module without a table row, or a row without a module, fails
+the run. It writes one row per module and exports the plan into the run
+directory's ``export/`` (``README.md`` says how to handle it). It needs Docker
+and no edge checkout. The host's ``login_group`` and ``admin_group`` do not apply:
+the suite's tokens carry no ``groups`` claim, so this driver states the value of
+``EverySubject.OF_THE_BOUND_ISSUER`` and of ``NoAdmins.IN_THIS_APP``.
+
+The suite's own nginx is not used: its certificate has no subject alternative
+name, which webauth's HTTPS client rightly refuses. The driver puts the
+``TlsShim`` with a throwaway certificate in front of the server's port, which
+is published on ``127.0.0.1`` only (the dev-mode API has no login).
+
+The suite's verdict alone proves nothing: a refusing module passes when no
+further request arrives, whatever the reason. So every row sets the suite's
+status/result beside webauth's own decision, read from the host's ``/state``
+(``token_rejection``, ``logins_admitted``, ``userinfo_calls``,
+``userinfo_answered``, ``access_tokens_refused``, the last refusal), and beside
+the decision expected, which the table takes from the library's enums::
+
+    module | suite status/result | webauth decision | expected | verdict | why
+
+- ``held`` needs the decision and the suite state to agree with the table: an
+  accepting module is admitted with UserInfo answered, and every module ends in
+  the suite state its row names (FINISHED/PASSED, or FINISHED/SKIPPED for
+  sig-none).
+- ``skipped`` is a justified row that is not driven; its justification is in
+  the table.
+- ``FAILED-as-found`` (a finding, not a failed run) is only for a named known
+  finding on its own module, and needs all three: the decision equals the
+  finding's signature, the key set at the host's ``jwks_url`` holds the
+  finding's number of keys that webauth's own RS256 check admits, and the suite
+  is in the state the finding predicts (WAITING with no result for an accepting
+  module, since the UserInfo request never comes).
+- Every other row that is not ``held`` fails the run, so a wrong ``jwks_url``, a
+  missing CA trust or a clock skew cannot pass as the finding.
+
+The access token never leaves the host process except in the one UserInfo
+request through the shim: it reaches no ``/state``, log or table, a token no
+header can carry is not sent (and counted as refused), and a failing UserInfo
+call is logged by exception type only. The host runs with the shipped default
+``cookie_samesite="strict"``; the pending-login cookie is lax in any case and
+the app and suite hosts are same-site.
+
+The suite finishes an accepting module only on a UserInfo request, which
+webauth never sends. The host therefore keeps the access token of the token
+answer in memory and makes one UserInfo request after, and only after,
+``finish_login`` admitted the login. ``/reset`` builds the relying parties
+again, as a host restarted per module would, because the suite generates new
+keys per module.
+
+Each expectation is built from the module's class in the suite's sources
+(``net/openid/conformance/openid/client`` at release-v5.3.3), named in its
+justification. No screenshots are kept. On every exit path the suite project is
+taken down with its volumes and the run lists the containers, volumes and
+networks still carrying its compose project label; every failure or timeout,
+with its stderr tail, is reported as a leftover line, and the result table
+still follows."""
 
 from __future__ import annotations
 

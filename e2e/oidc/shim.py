@@ -1,14 +1,34 @@
 """A TLS front for the edge's plain-http Traefik, standing in for Cloudflare's tunnel.
 
 It terminates TLS with a throwaway certificate and forwards every request to
-the upstream with the public ``Host`` and ``X-Forwarded-Proto: https``. It
-keeps no log and writes nothing.
+the upstream with the public ``Host`` and ``X-Forwarded-Proto: https``, as
+Cloudflare's tunnel does. It keeps no log and writes nothing.
 
-``CallbackBridge`` is the other direction. Keycloak's container cannot reach a host
-that binds loopback, and the machine's firewall drops its TCP to the network's gateway
-(measured, every port), so the bridge is a relay container on Keycloak's network that
-forwards bytes to a unix socket, where the host side passes exactly one request,
-Keycloak's back-channel logout, on to the host app."""
+How the browser reaches this shim, and which certificate it trusts, is
+``harness.py``'s (``launch_pinned_chromium``); ``edge_url`` is the READY line's
+address of the probe's Traefik, which the shim forwards to.
+
+How Keycloak reaches the apps: Keycloak's back-channel logout is a request from
+its container to the app, and the apps bind loopback, which the browser's host
+mapping reaches but a container does not. The machine's firewall also drops a
+container's TCP to the host, including the ``keycloak`` network's gateway on
+every port (measured with a listener bound to the gateway and a container on a
+network of the same shape), so a listener on the host would never be called.
+``CallbackBridge`` therefore puts a relay container on the stack's ``keycloak``
+network (``stack.py`` finds it by the compose labels and fails on an absent or
+ambiguous one): it listens on the container network and passes the bytes to a
+unix socket in a private directory, where the host side accepts exactly ``POST
+/auth/backchannel-logout``, at most 32 KiB, and forwards it to the app's
+loopback HTTPS endpoint, verifying the throwaway CA. Anything else (``/state``,
+``/reset``, another path) is answered 404 (an unknown method 501) and reaches
+nothing. Every answer carries ``Connection: close``: Keycloak's HTTP client
+keeps connections in a pool and does not retry a POST on one the bridge already
+closed. Every read waits at most 10 s, no body or header is logged, and the
+relay holds no secret (read-only, no capabilities, the caller's user id). The
+bridge is shut down, its container removed, before the held stack is released,
+and ``edge-kc-probe`` leftovers are listed at the end. The container's name
+stands in for production's internal DNS name of the app: it shows that the
+route works behind an internal name, not that production's name resolves."""
 
 from __future__ import annotations
 
