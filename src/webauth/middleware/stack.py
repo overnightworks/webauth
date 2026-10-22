@@ -162,12 +162,8 @@ def install_web_auth_middleware(
     """
     _refuse_an_unsound_stack(app, csrf_origin=csrf_origin, csrf_token=csrf_token)
     entries = _library_middleware(
-        security_headers=security_headers,
-        body_size=body_size,
-        rate_limit=rate_limit,
-        bearer_gate=bearer_gate,
-        csrf_origin=csrf_origin,
-        csrf_token=csrf_token,
+        security_headers=security_headers, body_size=body_size, rate_limit=rate_limit,
+        bearer_gate=bearer_gate, csrf_origin=csrf_origin, csrf_token=csrf_token,
         session_gate=session_gate,
     )
     for entry in reversed(entries):

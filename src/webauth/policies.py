@@ -51,7 +51,14 @@ class PathShape:
 
 @dataclass(frozen=True)
 class PathRules:
-    """The paths a rule selects, named exactly or by shape."""
+    """The paths a rule selects, named exactly or by shape.
+
+    Rules are written as the decoded ASGI path the server delivers
+    (``scope["path"]``), the path the router matches. A ``root_path`` the server
+    supplies (Uvicorn ``--root-path``) is part of it; one the application
+    supplies (``FastAPI(root_path=...)``) is not. Only the session gate's rules
+    are written as the router sees them, ``root_path`` stripped.
+    """
 
     exact: frozenset[str] = frozenset()
     prefixes: tuple[str, ...] = ()

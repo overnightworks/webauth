@@ -120,6 +120,39 @@ class BearerApp:
         return self.auth.client.request(method, path, headers=sent, **request)
 
 
+def add_machine_routes(auth: AuthApp) -> None:
+    def ran(request: Request) -> None:
+        auth.route_runs.append(request.scope["path"])
+
+    @auth.app.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
+    def export(
+        request: Request, caller: BearerCaller = Depends(bearer_caller),
+    ) -> dict[str, str]:
+        ran(request)
+        return {"subject": caller.subject}
+
+    @auth.app.api_route(UNDECLARED_PATH, methods=["GET", "DELETE"])
+    def forgotten(request: Request) -> dict[str, str]:
+        ran(request)
+        return {"ran": "without bearer_caller"}
+
+    @auth.app.api_route(PEOPLE_PATH, methods=["GET"])
+    def person(request: Request, subject: str) -> dict[str, str]:
+        ran(request)
+        return {"subject": subject}
+
+    @auth.app.api_route(UNGATED_EXPORT_PATH, methods=["GET", "DELETE"])
+    def ungated_export(
+        request: Request, caller: BearerCaller = Depends(bearer_caller),
+    ) -> dict[str, str]:
+        ran(request)
+        return {"subject": caller.subject}
+
+    @auth.app.get(RAISING_PATH)
+    def raising(_caller: BearerCaller = Depends(bearer_caller)) -> None:
+        raise RuntimeError("the route failed")
+
+
 def a_bearer_app(
     *,
     paths: PathRules = MACHINE_PATHS,
@@ -151,36 +184,7 @@ def a_bearer_app(
 
     auth.app.user_middleware.extend(inner_middleware)
 
-    def ran(request: Request) -> None:
-        auth.route_runs.append(request.scope["path"])
-
-    @auth.app.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
-    def export(
-        request: Request, caller: BearerCaller = Depends(bearer_caller),
-    ) -> dict[str, str]:
-        ran(request)
-        return {"subject": caller.subject}
-
-    @auth.app.api_route(UNDECLARED_PATH, methods=["GET", "DELETE"])
-    def forgotten(request: Request) -> dict[str, str]:
-        ran(request)
-        return {"ran": "without bearer_caller"}
-
-    @auth.app.api_route(PEOPLE_PATH, methods=["GET"])
-    def person(request: Request, subject: str) -> dict[str, str]:
-        ran(request)
-        return {"subject": subject}
-
-    @auth.app.api_route(UNGATED_EXPORT_PATH, methods=["GET", "DELETE"])
-    def ungated_export(
-        request: Request, caller: BearerCaller = Depends(bearer_caller),
-    ) -> dict[str, str]:
-        ran(request)
-        return {"subject": caller.subject}
-
-    @auth.app.get(RAISING_PATH)
-    def raising(_caller: BearerCaller = Depends(bearer_caller)) -> None:
-        raise RuntimeError("the route failed")
+    add_machine_routes(auth)
 
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),

@@ -6,6 +6,22 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.21.0 - Unreleased
+
+**Added**
+
+- `BearerGate`, `BearerGateMiddleware` and `bearer_caller`, and the parameter
+  `install_web_auth_middleware(bearer_gate=...)`: a host declares its machine paths once, and
+  there webauth admits only the realm's RS256 `at+jwt` access token whose only audience is the
+  app's client, whose `azp` the host allows and whose `groups` hold the admin group or one below
+  it. The cookie counts for nothing, CSRF and the session gate step aside, no account is created,
+  every answer is `no-store`, and a route reads the caller with `Depends(bearer_caller)`
+  (`BearerCaller`). A session dependency on such a request raises.
+- `AuthorizedParties`, the allowlist of `azp` values a host admits, `OidcRelyingParty.verify_access_token`
+  and `.issuer`, `VerifiedAccessToken`, `OidcRefusalReason.ACCESS_TOKEN_REJECTED` and
+  `INVALID_ACCESS_CLAIM`, and `JwtVerifier.verify(expected_media_types=...)`, which compares the
+  header `typ` as a media type.
+
 ## 0.20.1
 
 **Added**

@@ -25,7 +25,7 @@
 "_exchange" = 63
 
 [function_lines."src/webauth/middleware/stack.py"]
-"install_web_auth_middleware" = 73
+"install_web_auth_middleware" = 72
 
 [function_lines."src/webauth/oidc_login.py"]
 "finish_login" = 75
