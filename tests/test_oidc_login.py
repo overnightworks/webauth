@@ -10,7 +10,6 @@ fake issuer that answers each code once.
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
 import secrets
 import threading
@@ -21,7 +20,6 @@ from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
-from html.parser import HTMLParser
 from typing import NoReturn
 
 import anyio.to_thread
@@ -36,6 +34,7 @@ from oidc_arrangement import (
     FakeClock,
     FakeIssuer,
     FakeKeySetEndpoint,
+    LogoutPage,
     a_fake_id_token,
     a_logout_token,
     assert_holds_only_the_refresh_token,
@@ -1489,35 +1488,6 @@ def post_logout(host: OidcHost, headers: dict[str, str]) -> HttpxResponse:
     return host.client.post(FORM_LOGOUT_PATH, headers=headers, follow_redirects=False)
 
 
-class LogoutPage(HTMLParser):
-    """The logout answer as a browser parses it."""
-
-    def __init__(self, markup: str) -> None:
-        super().__init__()
-        self.elements: list[tuple[str, dict[str, str | None]]] = []
-        self.texts: dict[str, str] = {}
-        self.feed(markup)
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.elements.append((tag, dict(attrs)))
-
-    def handle_data(self, data: str) -> None:
-        tag = self.elements[-1][0]
-        self.texts[tag] = self.texts.get(tag, "") + data
-
-    def attributes_of(self, tag: str) -> list[dict[str, str | None]]:
-        return [attributes for name, attributes in self.elements if name == tag]
-
-    @property
-    def hidden_fields(self) -> dict[str | None, str | None]:
-        return {field["name"]: field["value"] for field in self.attributes_of("input")}
-
-
-def the_script_source_of(page: LogoutPage) -> str:
-    digest = hashlib.sha256(page.texts["script"].encode()).digest()
-    return f"'sha256-{base64.b64encode(digest).decode()}'"
-
-
 def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
     directives = (
         directive.split() for directive in response.headers["content-security-policy"].split("; ")
@@ -1534,11 +1504,16 @@ def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoi
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/html; charset=utf-8"
     assert page.attributes_of("form") == [{"method": "post", "action": END_SESSION_ENDPOINT}]
-    assert page.hidden_fields == {
-        "client_id": CLIENT_ID,
-        "post_logout_redirect_uri": a_client_config().post_logout_redirect_uri,
-        "id_token_hint": host.issued_id_tokens[-1],
-    }
+    assert page.attributes_of("input") == [
+        {"type": "hidden", "name": "client_id", "value": CLIENT_ID},
+        {
+            "type": "hidden",
+            "name": "post_logout_redirect_uri",
+            "value": a_client_config().post_logout_redirect_uri,
+        },
+        {"type": "hidden", "name": "id_token_hint", "value": host.issued_id_tokens[-1]},
+    ]
+    assert page.attributes_of("button") == [{"type": "submit"}]
     assert (page.texts["button"], page.texts["title"]) == (LOGOUT_BUTTON_LABEL, LOGOUT_BUTTON_LABEL)
     assert {tag for tag, _ in page.elements} == {
         "html", "head", "meta", "title", "body", "form", "input", "button", "script",
@@ -1552,7 +1527,7 @@ def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two
 
     page = LogoutPage(response.text)
     policy = content_security_policy_of(response)
-    assert policy["script-src"] == [the_script_source_of(page)]
+    assert policy["script-src"] == [page.script_source]
     assert policy["form-action"] == [BOUND_ISSUER_ORIGIN, HTTPS_TEST_SERVER]
     assert [name for _, attributes in page.elements for name in attributes
             if name.startswith("on")] == []

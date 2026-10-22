@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -12,7 +9,7 @@ import pytest
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
-from oidc_arrangement import a_relying_party
+from oidc_arrangement import LogoutPage, a_relying_party
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 from webauth_arrangement import (
@@ -495,11 +492,9 @@ def the_logout_page(
 
 
 def the_logout_policy_of(page: HttpxResponse) -> str:
-    [script] = re.findall(r"<script>(.*?)</script>", page.text)
-    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
     return "; ".join((
         "default-src 'none'",
-        f"script-src 'sha256-{digest}'",
+        f"script-src {LogoutPage(page.text).script_source}",
         "form-action https://login.example.org https://notes.example.org",
         "base-uri 'none'",
         "frame-ancestors 'none'",
