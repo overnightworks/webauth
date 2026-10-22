@@ -15,8 +15,10 @@ from webauth.config import WebAuthConfig, web_auth_config
 from webauth.dependencies import (
     ConnectionRefusal,
     LoginRedirect,
+    _bearer_admission,
     _gate_admission,
     _GateAdmission,
+    _is_bearer_admitted,
     _read_session_cookie,
     _record_gate_admission,
     _refusal_response,
@@ -45,9 +47,11 @@ class SessionGate:
 
     Every request needs a live session unless a ``public`` rule names it;
     an ``optional`` path admits a live session and lets every other request
-    through. Its paths are written as ``PathRules`` says. A path with a ``.`` or
-    ``..`` segment is never public or optional. WebSocket and lifespan scopes
-    pass; ``authenticate_websocket`` decides a handshake.
+    through. Its paths are written as ``PathRules`` says. A request the bearer gate
+    admitted passes untouched: the gate reads no cookie and opens no
+    ``session_transaction`` for it. A path with a ``.`` or ``..`` segment is never
+    public or optional. WebSocket and lifespan scopes pass; ``authenticate_websocket``
+    decides a handshake.
 
     The gate calls ``session_transaction`` once per request that carries a
     validly signed session cookie on a gated or optional path, never on a public
@@ -75,6 +79,8 @@ class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
     """
 
     async def _refusal(self, request: Request) -> Response | None:
+        if _bearer_admission(request) is not None:
+            return None
         config = web_auth_config(request)
         reading = _read_session_cookie(request, config)
         routed_path = route_path(request.scope)
@@ -122,13 +128,15 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
     """The account the session gate admitted for this request, or ``None``.
 
     ``None`` on a public path, and on an optional path without a live session.
-    Raises ``RuntimeError`` when no gate decided this request: the gate is not
-    installed, the connection is a WebSocket, the route runs under another
-    ``WebAuthConfig`` instance, or the decision was made for another session
-    cookie. A forgotten gate never reads as signed out. For the session id use
-    ``session_id_from_request``. The account is this request's own: a host must
-    not hand it to another request.
+    ``None`` on a request the bearer gate admitted. Raises ``RuntimeError`` when
+    no gate decided this request: the gate is not installed, the connection is a
+    WebSocket, the route runs under another ``WebAuthConfig`` instance, or the
+    decision was made for another session cookie. A forgotten gate never reads as
+    signed out. For the session id use ``session_id_from_request``. The account is
+    this request's own: a host must not hand it to another request.
     """
+    if _is_bearer_admitted(connection):
+        return None
     decided = _gate_admission(connection)
     if decided is None:
         raise RuntimeError(

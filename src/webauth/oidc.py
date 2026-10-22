@@ -31,6 +31,12 @@ token outside `1*VSCHAR`, is `TOKEN_ENDPOINT_FAILED`. The status handling is
 the code exchange's, so an issuer's `error` is `TOKEN_REQUEST_REFUSED`. No
 token is decoded: judging its claims belongs to whoever receives it.
 
+`OidcRelyingParty.verify_access_token` judges an access token presented to the
+app (RFC 9068 section 4) with the same verifier: an RS256 `at+jwt` of the
+configured issuer whose one audience is the client ID and whose `azp` the
+caller allows, with a `sub` and `groups` absent or a list of strings. It
+answers a `VerifiedAccessToken` or an `OidcRefusal`.
+
 The state, nonce and verifier are each `_PENDING_SECRET_BYTES` random bytes,
 and the received state and nonce are compared in constant time. A pending
 login is stamped with the wall clock when it begins and stands for
@@ -87,6 +93,7 @@ from webauth.jwt_verification import (
     VerifiedClaims,
     _json_object,
 )
+from webauth.policies import AuthorizedParties
 
 if TYPE_CHECKING:
     from webauth.ports import WallClock
@@ -107,6 +114,7 @@ __all__ = [
     "TokenEndpointError",
     "TokenRequest",
     "TokenRequestPost",
+    "VerifiedAccessToken",
     "VerifiedLogout",
 ]
 
@@ -116,6 +124,7 @@ PENDING_LOGIN_MAX_AGE_SECONDS = 600
 LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
 
 _LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105
+_ACCESS_TOKEN_MEDIA_TYPES = frozenset({"at+jwt", "application/at+jwt"})
 # An identifier fixed by OpenID Connect Back-Channel Logout 1.0 section 2.4, never fetched.
 _BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR(S5332)
 
@@ -271,6 +280,8 @@ class OidcRefusalReason(StrEnum):
     INVALID_IDENTITY_CLAIM = "invalid-identity-claim"
     LOGOUT_TOKEN_REJECTED = "logout-token-rejected"  # noqa: S105
     INVALID_LOGOUT_CLAIM = "invalid-logout-claim"
+    ACCESS_TOKEN_REJECTED = "access-token-rejected"  # noqa: S105
+    INVALID_ACCESS_CLAIM = "invalid-access-claim"
 
 
 @dataclass(frozen=True)
@@ -319,6 +330,14 @@ class VerifiedLogout:
     subject: str
 
 
+@dataclass(frozen=True)
+class VerifiedAccessToken:
+    """An access token that held: the issuer's `subject` and its full group paths."""
+
+    subject: str
+    groups: tuple[str, ...]
+
+
 class _RefusalError(Exception):
     def __init__(self, refusal: OidcRefusal) -> None:
         super().__init__(refusal.reason)
@@ -350,6 +369,10 @@ class OidcRelyingParty:
             wall_clock=wall_clock,
             monotonic_clock=monotonic_clock,
         )
+
+    @property
+    def issuer(self) -> str:
+        return self._config.issuer
 
     def begin_login(self) -> AuthorizationRequest:
         """The authorization URL to send the browser to, and the `PendingLogin`
@@ -535,6 +558,38 @@ class OidcRelyingParty:
             return OidcRefusal(OidcRefusalReason.INVALID_LOGOUT_CLAIM)
         return VerifiedLogout(subject=outcome.subject)
 
+    def verify_access_token(
+        self, access_token: str, *, authorized_parties: AuthorizedParties,
+    ) -> VerifiedAccessToken | OidcRefusal:
+        """The subject and groups of an access token presented to this app, or the refusal.
+
+        Stricter than RFC 9068 section 4: the token's only audience is the
+        client ID and its `azp` is one `authorized_parties` admits. `client_id`,
+        `jti` and `scope` are not read. `TypeError` for anything but
+        `AuthorizedParties`."""
+        if not isinstance(authorized_parties, AuthorizedParties):
+            raise TypeError("authorized_parties must be an AuthorizedParties")
+        outcome = self._jwt_verifier.verify(
+            access_token, expected_media_types=_ACCESS_TOKEN_MEDIA_TYPES
+        )
+        if isinstance(outcome, Rejected):
+            return OidcRefusal(
+                OidcRefusalReason.ACCESS_TOKEN_REJECTED, token_rejection=outcome.reason
+            )
+        return self._access_token_profile(outcome, authorized_parties)
+
+    def _access_token_profile(
+        self, token: VerifiedClaims, authorized_parties: AuthorizedParties,
+    ) -> VerifiedAccessToken | OidcRefusal:
+        if token.subject is None or token.audiences != (self._config.client_id,):
+            return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
+        if not authorized_parties.admits(token.claims.get("azp")):
+            return OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH)
+        groups = _group_paths(token.claims)
+        if groups is None:
+            return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
+        return VerifiedAccessToken(subject=token.subject, groups=groups)
+
     def _is_logout_profile(self, token: VerifiedClaims) -> bool:
         age_seconds = self._wall_clock() - token.issued_at
         return (
@@ -712,12 +767,13 @@ def _bearer_access_token(document: Mapping[str, object]) -> SecretStr:
 def _identity_of(
     id_token: VerifiedClaims, raw_id_token: str, refresh_token: SecretStr | None
 ) -> OidcIdentity:
-    if id_token.subject is None:
+    groups = _group_paths(id_token.claims)
+    if id_token.subject is None or groups is None:
         raise _RefusalError(OidcRefusal(OidcRefusalReason.INVALID_IDENTITY_CLAIM))
     return OidcIdentity(
         subject=id_token.subject,
         issuer=id_token.issuer,
-        groups=_groups(id_token.claims),
+        groups=groups,
         session_id=_optional_string_claim(id_token.claims, "sid"),
         preferred_username=_optional_string_claim(id_token.claims, "preferred_username"),
         id_token=raw_id_token,
@@ -725,10 +781,10 @@ def _identity_of(
     )
 
 
-def _groups(claims: Mapping[str, object]) -> tuple[str, ...]:
+def _group_paths(claims: Mapping[str, object]) -> tuple[str, ...] | None:
     groups = claims.get("groups", [])
     if not isinstance(groups, list) or not all(isinstance(group, str) for group in groups):
-        raise _RefusalError(OidcRefusal(OidcRefusalReason.INVALID_IDENTITY_CLAIM))
+        return None
     return tuple(groups)
 
 

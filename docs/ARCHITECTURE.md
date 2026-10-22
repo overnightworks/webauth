@@ -9,6 +9,7 @@ to the OpenID Connect issuer over https. The library persists nothing, holds no 
 ```mermaid
 flowchart LR
     browser["Browser<br/>(any visitor, in scope)"]
+    hal["hal<br/>(machine caller, Authorization: Bearer)"]
     issuer["OpenID Connect issuer<br/>(trusted for what it signs)"]
     subgraph process["Host process"]
         host["Host application<br/>routes, user model, transactions"]
@@ -20,6 +21,7 @@ flowchart LR
         audit["Audit sink, clock, write lock"]
     end
     browser -- "cookies, CSRF, Origin" --> lib
+    hal -- "Authorization: Bearer" --> lib
     lib --> host
     lib -- "https only, no redirects" --> issuer
     browser -- "sign-in redirects" --> issuer
@@ -36,15 +38,15 @@ The library owns the machinery an application should not rebuild:
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
 | `webauth.cookies` | The signed session cookie, the CSRF token bound to it, the pending-login cookie and the ID token hint cookie, issued and cleared |
-| `webauth.dependencies` | Turning a signed cookie, or a session id, into the account that made the request or opened a WebSocket handshake |
-| `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, and how |
+| `webauth.dependencies` | Turning a signed cookie, or a session id, into the account that made the request or opened a WebSocket handshake, and the record of a bearer admission the CSRF checks and the session gate step aside for |
+| `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, how, and which `azp` values (`AuthorizedParties`) a host admits |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with, Redis or in-process |
-| `webauth.ports` | What the host supplies, as Protocols, and `AuthenticatedUser`, which the library hands out |
-| `webauth.middleware` | Body-size, CSRF, rate-limit, security-header and session-gate middleware, and `install_web_auth_middleware`, which installs them in the one order |
+| `webauth.ports` | What the host supplies, as Protocols, `AuthenticatedUser`, which the library hands out, and `BearerCaller`, the machine a bearer admission names |
+| `webauth.middleware` | Body-size, CSRF, rate-limit, security-header, bearer-gate and session-gate middleware, and `install_web_auth_middleware`, which installs them in the one order |
 | `webauth.jwt_verification` | Whether an RS256 token from a remote issuer holds, against the issuer's cached key set |
 | `webauth.https_client` | The one owner of outbound HTTPS: the key-set fetch and the token-request form POST |
-| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged, the ID token verified, and the refresh and client-credentials grants |
+| `webauth.oidc` | Logging a browser in at an OpenID Connect issuer: the authorization URL with PKCE, the callback judged, the code exchanged, the ID token verified, an access token presented to the app verified, and the refresh and client-credentials grants |
 | `webauth.oidc_login` | The login from the host's routes: admission and role, `open_session`, `log_out`, `fresh_access_token` and `receive_backchannel_logout` |
 | `webauth.oidc_transport` | `post_token_request_over_https`, the production `TokenRequestPost` |
 
@@ -58,7 +60,7 @@ It leaves the application everything that touches the application's own truth:
   the route runs.
 - **Routes.** It defines none. The only responses it writes are its own refusals: 401, 403, 413, 429, 503 and the 500, and
   the 302 to the host's login path.
-- **Identity.** It issues no access or ID tokens: it is no identity provider, and it verifies the ID tokens an issuer made.
+- **Identity.** It issues no access or ID tokens: it is no identity provider, and it verifies the ID tokens an issuer made and the access tokens presented on a host's machine paths.
 - **HTTP framing** is the ASGI server's job. uvicorn's two parsers, h11 and httptools, answer some framing conflicts
   differently, and HTTP allows either answer. webauth never re-parses framing: its body-size limit counts the streamed bytes
   whatever the headers say.
@@ -73,9 +75,19 @@ alone decides whether a loaded session still stands; the store writes the expiry
 ### Middleware order
 
 `install_web_auth_middleware` adds the library's middleware in one order, outermost first, and refuses a stack that would break it: security headers, body size
-limit, per-address rate limit, CSRF origin, CSRF token, session gate. Install it once and add no library middleware yourself. Its docstring holds the reason for each
+limit, per-address rate limit, bearer gate, CSRF origin, CSRF token, session gate. Install it once and add no library middleware yourself. Its docstring holds the reason for each
 position and where a host's own middleware goes. A host whose own middleware is the session authority answers a request without a session with
 `webauth.dependencies.unauthenticated_response`.
+
+### The bearer gate
+
+`install_web_auth_middleware(..., bearer_gate=BearerGate(...))` declares the host's machine paths once. On every request a path selects (written as `PathRules` says, every method), the gate verifies that request's own `Authorization: Bearer` token with `OidcRelyingParty.verify_access_token` (off the event loop):
+an RS256 `at+jwt` of the issuer whose only `aud` is the app's client, whose `azp` is among `AuthorizedParties`, and whose `groups` give `AppRole.ADMIN` as at login.
+Nothing is provisioned. Only then does it record an admission for this app, this path and a SHA-256 digest of the one header value; the digest lives in request
+memory and the token is never stored. `CsrfOriginMiddleware`, `CsrfTokenMiddleware` and the session gate read that record strictly and step aside, so no cookie decides
+a machine path; `bearer_caller` reads it strictly too, and the loose reader makes `current_user` raise (500) and `admitted_user` answer `None`. A copy of the record
+carried to another path, app or header is no admission. The gate sits inside the rate limit, so a bearer request spends the same budget, and the installer puts a
+`no-store` rule first in the security-headers policy for the gated paths, so every answer there is `no-store`, and webauth sets no cookie there. The README holds the refusal table.
 
 ### Reading the session
 
@@ -125,7 +137,7 @@ names the issuer's authorization, token, key-set and end-session URLs itself; th
 
 `webauth.oidc_login.fresh_access_token` turns a signed-in session into a new access token for one call to another service, in memory only. It answers a `SecretStr`,
 or an `AccessTokenRefusal` whose `AccessTokenRefusalReason` says what the host does. A token handed out stays valid until its own `exp` after a later logout, and
-webauth makes no revocation call ([Trust](#trust), item 7). `OidcRelyingParty.workload_access_token` answers the client's own token.
+webauth makes no revocation call ([Trust](#trust), item 8). `OidcRelyingParty.workload_access_token` answers the client's own token.
 
 ### Admitting an identity
 
@@ -154,7 +166,7 @@ logout](#back-channel-logout).
 ### CSRF origin
 
 `CsrfOriginMiddleware` refuses a state-changing request that a foreign page originated, by `Sec-Fetch-Site` where a browser sends it and otherwise by comparing
-`Origin` (or `Referer`) with the hostnames in `WebAuthConfig`; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` decides which paths are
+`Origin` (or `Referer`) with the hostnames in `WebAuthConfig`; a request the bearer gate admitted is not checked, because those routes ignore ambient cookies and need an explicitly supplied credential; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` decides which paths are
 checked and defaults to fail-closed.
 
 ### Rate limiting, and the optional Redis extra
@@ -182,12 +194,21 @@ owning section, it links there.
 4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret.
 5. **Host infrastructure** (`WallClock`, `WriteLock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
-7. **Named residues:**
+7. **Bearer caller to library** ([The bearer gate](#the-bearer-gate)): anyone who can reach a gated path is untrusted. The token's signature, issuer, type, audience, `azp` and groups are the control; the admission record keeps a SHA-256 digest of the header in request memory, never the token. Named residues:
+   - a block at the issuer reaches the gate only when the token expires, plus the leeway;
+   - a browser sign-out leaves the token valid;
+   - an admin token opens every machine route; there is no sender constraint (no DPoP or mTLS);
+   - only the realm keeps a service account out of the admin group;
+   - an unavailable key set answers 401, not 503;
+   - WebSocket scopes are not gated;
+   - host code that reads the cookie itself (`session_id_from_request`) on a machine path trusts it.
+8. **Named residues:**
    - with a `WriteLock` that is released before the host commits (an in-process lock), a back-channel logout of the same account that runs between `finish_login`'s admission and the host's commit after `open_session` deletes nothing of that login, so the session it opens survives; a lock that the request's first `hold` takes and only the host's commit or rollback releases (a transaction-scoped lock) closes that window;
    - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
    - a clock reading past year 9999 fails closed;
    - name resolution is bounded by the system resolver, not by the library; connecting is bounded per resolved address, outside the total deadline ([The relying party](#the-relying-party));
    - an access token that [`fresh_access_token`](#the-persons-access-token) handed out stays valid at the service it is sent to, and at the issuer's own endpoints, until its own `exp`, even after a logout or an expiry that lands once the call has decided; webauth revokes nothing;
+   - a copy of a logout token replays within its age bound (`LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway), so it ends the sessions of a login made after the first delivery; webauth keeps no `jti` store, as the `webauth.oidc` module docstring says;
    - with a store that commits every statement, a session deleted between `fresh_access_token`'s second `load` and the end of its block is seen only through `replace_refresh_token` answering `False`, and an issuer that echoes or omits the refresh token never reaches that call, so the call then hands out a token for the session deleted in that window.
 
 To report a vulnerability, see [SECURITY.md](../SECURITY.md).

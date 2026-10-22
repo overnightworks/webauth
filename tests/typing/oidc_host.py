@@ -13,7 +13,7 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import FastAPI, Request, Response, WebSocket
+from fastapi import Depends, FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
 
 from webauth import WebAuthError
@@ -61,6 +61,8 @@ from webauth.jwt_verification import (
     VerifiedClaims,
 )
 from webauth.middleware import (
+    BearerGate,
+    BearerGateMiddleware,
     BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
     CsrfTokenMiddleware,
@@ -69,6 +71,7 @@ from webauth.middleware import (
     SessionGate,
     SessionGateMiddleware,
     admitted_user,
+    bearer_caller,
     install_web_auth_middleware,
 )
 from webauth.oidc import (
@@ -82,6 +85,7 @@ from webauth.oidc import (
     OidcRelyingParty,
     TokenEndpointError,
     TokenRequestPost,
+    VerifiedAccessToken,
     VerifiedLogout,
 )
 from webauth.oidc_login import (
@@ -106,6 +110,7 @@ from webauth.oidc_login import (
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     DEFAULT_PERMISSIONS_POLICY,
+    AuthorizedParties,
     BodySizePolicy,
     CspDirective,
     CsrfPolicy,
@@ -122,6 +127,7 @@ from webauth.ports import (
     AccountEventKind,
     AuditSink,
     AuthenticatedUser,
+    BearerCaller,
     RateLimitBackend,
     SessionRecord,
     SessionRecordStore,
@@ -300,6 +306,37 @@ def a_host_verifies_a_typed_token(verifier: JwtVerifier, token: str) -> Verified
     return verifier.verify(token, expected_type="logout+jwt")
 
 
+def a_host_verifies_a_token_of_several_media_types(
+    verifier: JwtVerifier, token: str,
+) -> VerifiedClaims | Rejected:
+    return verifier.verify(token, expected_media_types=frozenset({"at+jwt", "application/at+jwt"}))
+
+
+def a_host_verifies_an_access_token(
+    relying_party: OidcRelyingParty, access_token: str,
+) -> VerifiedAccessToken | OidcRefusal:
+    return relying_party.verify_access_token(
+        access_token, authorized_parties=AuthorizedParties(frozenset({"hal"})),
+    )
+
+
+def a_host_declares_its_machine_paths(
+    relying_party: OidcRelyingParty, config: AdmissionConfig,
+) -> BearerGate:
+    return BearerGate(
+        paths=PathRules(prefixes=("/api/admin/",)),
+        relying_party=relying_party,
+        admission=config,
+        authorized_parties=AuthorizedParties(frozenset({"hal"})),
+    )
+
+
+def a_host_serves_a_machine_route(app: FastAPI) -> None:
+    @app.get("/api/admin/export")
+    def export(caller: BearerCaller = Depends(bearer_caller)) -> str:
+        return caller.subject
+
+
 def a_host_admits_an_identity(
     identity: OidcIdentity, config: WebAuthConfig,
 ) -> UserRecord | AdmissionRefusal:
@@ -361,9 +398,10 @@ def a_host_admits_a_session_without_a_request(
     return admit_session(session_id, sessions=HostSessions(), config=config)
 
 
-def a_host_installs_the_middleware(app: FastAPI) -> None:
+def a_host_installs_the_middleware(app: FastAPI, bearer_gate: BearerGate) -> None:
     install_web_auth_middleware(
         app,
+        bearer_gate=bearer_gate,
         security_headers=SecurityHeadersPolicy(
             content_security_policy=default_content_security_policy(
                 added_sources={
@@ -411,8 +449,9 @@ def a_host_ends_a_session() -> None:
 
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
-        BodySizeLimitMiddleware, BodySizePolicy, CsrfOriginMiddleware,
-        CsrfTokenMiddleware, DEFAULT_CSRF_COOKIE_NAME, DEFAULT_PERMISSIONS_POLICY,
+        AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
+        BodySizePolicy, CsrfOriginMiddleware, CsrfTokenMiddleware, DEFAULT_CSRF_COOKIE_NAME,
+        DEFAULT_PERMISSIONS_POLICY,
         DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,
         KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
         MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
@@ -427,7 +466,8 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
-        VerifiedClaims, VerifiedLogout, WallClock, admit_session, install_web_auth_config,
+        VerifiedAccessToken, VerifiedClaims, VerifiedLogout, WallClock, admit_session,
+        bearer_caller, install_web_auth_config,
         is_https_url, session_id_from_request,
         unauthenticated_response,
     )

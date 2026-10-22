@@ -15,6 +15,7 @@ import pytest
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
+from oidc_arrangement import a_relying_party
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
@@ -41,6 +42,9 @@ from webauth_arrangement import (
 
 from webauth.config import install_web_auth_config
 from webauth.middleware import (
+    BearerGate,
+    BearerGateMiddleware,
+    BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
     CsrfTokenMiddleware,
     IpRateLimitMiddleware,
@@ -49,7 +53,9 @@ from webauth.middleware import (
     SessionGateMiddleware,
     install_web_auth_middleware,
 )
+from webauth.oidc_login import AdmissionConfig
 from webauth.policies import (
+    AuthorizedParties,
     BodySizePolicy,
     CsrfPolicy,
     PathRules,
@@ -74,6 +80,14 @@ A_SESSION_GATE = SessionGate(
     session_transaction=lambda: nullcontext(SessionRecordsInMemory()),
     login_redirect=None,
     public=(),
+)
+A_BEARER_GATE = BearerGate(
+    paths=PathRules(prefixes=("/api/admin/",)),
+    relying_party=a_relying_party(),
+    admission=AdmissionConfig(
+        bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
+    ),
+    authorized_parties=AuthorizedParties(frozenset({"hal"})),
 )
 SAME_ORIGIN = {"origin": ALLOWED_ORIGIN, "sec-fetch-site": "same-origin"}
 FOREIGN = {"origin": FOREIGN_ORIGIN}
@@ -158,7 +172,11 @@ def an_app_without_config() -> FastAPI:
 
 
 def install_full_stack(
-    app: FastAPI, *, max_requests: int = 100, session_gate: SessionGate | None = None,
+    app: FastAPI,
+    *,
+    max_requests: int = 100,
+    session_gate: SessionGate | None = None,
+    bearer_gate: BearerGate | None = None,
 ) -> None:
     install_web_auth_middleware(
         app,
@@ -167,6 +185,7 @@ def install_full_stack(
         rate_limit=a_rate_limit_policy(max_requests),
         csrf_origin=CsrfPolicy(),
         csrf_token=CsrfPolicy(),
+        bearer_gate=bearer_gate,
         session_gate=session_gate,
     )
 
@@ -360,6 +379,14 @@ class TestRefusedInstallation:
         [
             pytest.param(install_full_stack, id="second-installer-call"),
             pytest.param(
+                lambda app: install_full_stack(app, bearer_gate=A_BEARER_GATE),
+                id="second-installer-call-with-a-bearer-gate",
+            ),
+            pytest.param(
+                lambda app: app.add_middleware(BearerGateMiddleware, policy=A_BEARER_GATE),
+                id="hand-added-bearer-gate",
+            ),
+            pytest.param(
                 lambda app: app.add_middleware(SecurityHeadersMiddleware, policy=HEADERS_POLICY),
                 id="hand-added-library-middleware",
             ),
@@ -368,8 +395,10 @@ class TestRefusedInstallation:
     def test_repeated_installation_is_refused(self, arrange: Callable[[FastAPI], None]) -> None:
         app = a_fresh_app()
         arrange(app)
+        before = list(app.user_middleware)
         with pytest.raises(RuntimeError, match="already carries"):
             install_full_stack(app)
+        assert app.user_middleware == before
 
     @pytest.mark.parametrize(
         "subclass",
@@ -379,6 +408,7 @@ class TestRefusedInstallation:
             pytest.param(type("OwnOriginCheck", (CsrfOriginMiddleware,), {}), id="csrf-origin"),
             pytest.param(type("OwnTokenCheck", (CsrfTokenMiddleware,), {}), id="csrf-token"),
             pytest.param(type("OwnGate", (SessionGateMiddleware,), {}), id="session-gate"),
+            pytest.param(type("OwnBearerGate", (BearerGateMiddleware,), {}), id="bearer-gate"),
         ],
     )
     def test_hand_added_subclass_of_library_middleware_is_refused_and_leaves_the_app_alone(
@@ -395,7 +425,7 @@ class TestRefusedInstallation:
         self,
     ) -> None:
         installed = a_fresh_app()
-        install_full_stack(installed, session_gate=A_SESSION_GATE)
+        install_full_stack(installed, session_gate=A_SESSION_GATE, bearer_gate=A_BEARER_GATE)
         accepted = []
         for entry in installed.user_middleware:
             carrier = a_fresh_app()
@@ -406,6 +436,21 @@ class TestRefusedInstallation:
                 continue
             accepted.append(entry.cls.__name__)
         assert accepted == []
+
+    def test_a_full_install_with_a_bearer_gate_runs_it_after_the_rate_limit_and_before_csrf(
+        self,
+    ) -> None:
+        app = a_fresh_app()
+        install_full_stack(app, session_gate=A_SESSION_GATE, bearer_gate=A_BEARER_GATE)
+        assert [entry.cls for entry in app.user_middleware] == [
+            SecurityHeadersMiddleware,
+            BodySizeLimitMiddleware,
+            IpRateLimitMiddleware,
+            BearerGateMiddleware,
+            CsrfOriginMiddleware,
+            CsrfTokenMiddleware,
+            SessionGateMiddleware,
+        ]
 
     def test_refused_repeat_leaves_the_budget_charged_once(self) -> None:
         app = a_fresh_app()

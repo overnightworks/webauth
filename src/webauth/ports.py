@@ -35,6 +35,7 @@ __all__ = [
     "AccountEventKind",
     "AuditSink",
     "AuthenticatedUser",
+    "BearerCaller",
     "RateLimitBackend",
     "SessionRecord",
     "SessionRecordStore",
@@ -59,6 +60,16 @@ class AuthenticatedUser:
     id: str
     username: str
     role: str
+
+
+@dataclass(frozen=True)
+class BearerCaller:
+    """The machine behind a request the bearer gate admitted: the token's ``sub``.
+
+    No account, no role and no token: the host owns what the subject may do.
+    """
+
+    subject: str
 
 
 class UserRecord(Protocol):

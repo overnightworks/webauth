@@ -130,6 +130,12 @@ the sign-in stop at the app's callback, on the host's refusal page. webauth
 offers no local fallback login. See
 [The store decides every request](docs/ARCHITECTURE.md#the-store-decides-every-request).
 
+**hal on the admin routes.** The host's machine (admin) routes take hal's
+Keycloak access token alone, in `Authorization: Bearer`; the cookie counts for
+nothing there. A block in Keycloak reaches hal when the token expires, plus
+the leeway, and signing out of a browser leaves the token valid. See
+[The host's machine routes](#the-hosts-machine-routes).
+
 **Signing out.** Signing out of an app ends its session in that browser at once
 and takes the browser to Keycloak, which ends the person's Keycloak session in
 that browser without asking anything. Keycloak then tells each app the
@@ -159,6 +165,17 @@ host without the gate follows it itself.
   [The return path](docs/ARCHITECTURE.md#the-return-path). For a
   server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
   [Reading the session](docs/ARCHITECTURE.md#reading-the-session).
+- **A machine route** (see [The host's machine routes](#the-hosts-machine-routes))
+  answers 401 with a `WWW-Authenticate: Bearer realm="admin"` challenge, never a
+  redirect, and 403 for a valid token without the admin group:
+
+  | Case | Status | `WWW-Authenticate` | `detail` |
+  |---|---|---|---|
+  | no credentials | 401 | `Bearer realm="admin"` | `Authentication required` |
+  | malformed request (repeated or combined `Authorization`, or `access_token` in the query beside an `Authorization: Bearer`; in the query alone it is no credential) | 401 | `Bearer realm="admin", error="invalid_request"` | `Invalid request` |
+  | invalid token (any verification failure, an unavailable key set included) | 401 | `Bearer realm="admin", error="invalid_token"` | `Invalid token` |
+  | valid token, not an admin | 403 | `Bearer realm="admin", error="insufficient_scope"` | `Admin access required` |
+
 - **Public paths** are the exception. Each app names its own, and they need
   no session and do not redirect.
 - **The page after signing out** is the app's `post_logout_redirect_uri`. It
@@ -178,6 +195,38 @@ host without the gate follows it itself.
   wording and their ways out are the sign-in pattern of
   [ui-console](https://github.com/overnightworks/ui-console); each app takes
   the colours from its own tokens.
+
+### The host's machine routes
+
+A host declares its machine (admin) paths once, and hal calls them with the
+access token Keycloak issued it. `BearerGate` is passed to
+`install_web_auth_middleware(bearer_gate=...)`; it holds the paths
+(`PathRules`), the app's own `OidcRelyingParty`, the app's `AdmissionConfig` and
+`AuthorizedParties`, the `azp` values (hal's client ids) the host admits, read
+from configuration. A route reads the admitted caller with
+`Depends(bearer_caller)`; `BearerCaller.subject` is the token's `sub`, with no
+account and no role.
+
+- **What passes.** Only an RS256 `at+jwt` of the app's issuer whose only
+  `aud` is the app's client, whose `azp` is allowed and whose `groups` hold the
+  admin group or a group below it. Nothing is created or provisioned, and webauth
+  emits no event: the host audits the admitted call itself (subject, route,
+  outcome).
+- **What it replaces.** On a gated path the cookie, the CSRF checks and the
+  session gate decide nothing, and every answer is `no-store`. The same rate
+  limit applies where a rate policy covers the path; a flood of invalid tokens
+  is bounded only by it. A session dependency (`current_user`, `admin_user`,
+  `verified_session_id`) on a gated path raises, so the library answers 500,
+  and `session_id_from_request` reads the cookie, which is the host's duty not to
+  trust there.
+- **The paths** are written as every other policy's are; the `PathRules`
+  docstring says how.
+  They must cover every machine route, a prefix being the safe form. Every method
+  is gated, `OPTIONS` included; a CORS preflight is the host's own layer outside
+  the stack.
+- **Mounts and sockets.** Install the gate on the app that serves the machine
+  routes. A sub-app mounted below a gated path keeps its own CSRF and session
+  gate, and its `bearer_caller` raises. WebSocket scopes are not gated.
 
 ### The host's start, callback and logout routes
 

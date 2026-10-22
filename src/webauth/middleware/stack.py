@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from starlette.middleware import Middleware
 
+from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
 from webauth.middleware.body_size import BodySizeLimitMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
 from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware
+from webauth.policies import CacheControlRule, SecurityHeadersPolicy
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
 
-    from webauth.policies import (
-        BodySizePolicy,
-        CsrfPolicy,
-        RateLimitPolicy,
-        SecurityHeadersPolicy,
-    )
+    from webauth.policies import BodySizePolicy, CsrfPolicy, RateLimitPolicy
 
 __all__ = [
     "install_web_auth_middleware",
@@ -30,10 +28,44 @@ _LIBRARY_MIDDLEWARE = (
     SecurityHeadersMiddleware,
     BodySizeLimitMiddleware,
     IpRateLimitMiddleware,
+    BearerGateMiddleware,
     CsrfOriginMiddleware,
     CsrfTokenMiddleware,
     SessionGateMiddleware,
 )
+
+
+def _library_middleware(
+    *,
+    security_headers: SecurityHeadersPolicy,
+    body_size: BodySizePolicy | None,
+    rate_limit: RateLimitPolicy | None,
+    bearer_gate: BearerGate | None,
+    csrf_origin: CsrfPolicy | None,
+    csrf_token: CsrfPolicy | None,
+    session_gate: SessionGate | None,
+) -> list[Middleware]:
+    """The middleware to install, outermost first, for the policies the host named."""
+    if bearer_gate is not None:
+        no_store = CacheControlRule(bearer_gate.paths, "no-store")
+        security_headers = replace(
+            security_headers,
+            cache_control_rules=(no_store, *security_headers.cache_control_rules),
+        )
+    entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
+    if body_size is not None:
+        entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
+    if rate_limit is not None:
+        entries.append(Middleware(IpRateLimitMiddleware, policy=rate_limit))
+    if bearer_gate is not None:
+        entries.append(Middleware(BearerGateMiddleware, policy=bearer_gate))
+    if csrf_origin is not None:
+        entries.append(Middleware(CsrfOriginMiddleware, policy=csrf_origin))
+    if csrf_token is not None:
+        entries.append(Middleware(CsrfTokenMiddleware, policy=csrf_token))
+    if session_gate is not None:
+        entries.append(Middleware(SessionGateMiddleware, policy=session_gate))
+    return entries
 
 
 def _refuse_an_unsound_stack(
@@ -70,12 +102,13 @@ def install_web_auth_middleware(
     security_headers: SecurityHeadersPolicy,
     body_size: BodySizePolicy | None = None,
     rate_limit: RateLimitPolicy | None = None,
+    bearer_gate: BearerGate | None = None,
     csrf_origin: CsrfPolicy | None = None,
     csrf_token: CsrfPolicy | None = None,
     session_gate: SessionGate | None = None,
 ) -> None:
     """Install the library's middleware outermost first: security headers, body
-    size, rate limit, CSRF origin, CSRF token, session gate.
+    size, rate limit, bearer gate, CSRF origin, CSRF token, session gate.
 
     Security headers sit outside everything so the library's own refusals (the
     413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500)
@@ -84,6 +117,10 @@ def install_web_auth_middleware(
     CSRF so a refused forgery spends budget; the session gate sits inside all
     of them, so a request refused before admission never costs a session lookup
     and a forged state-changing request is refused before it renews a session.
+    The bearer gate sits inside the rate limit, so a machine request spends the
+    same budget, and outside CSRF and the session gate, so neither decides a
+    machine path by a cookie. With a bearer gate the installed security-headers
+    policy carries the gate's ``no-store`` rule first, so it beats a host rule.
 
     Refuses, before touching ``app``: a token policy without an origin policy
     (``ValueError``); a token policy whose ``token_exempt`` paths (login routes
@@ -124,16 +161,10 @@ def install_web_auth_middleware(
     token it set.
     """
     _refuse_an_unsound_stack(app, csrf_origin=csrf_origin, csrf_token=csrf_token)
-    entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
-    if body_size is not None:
-        entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
-    if rate_limit is not None:
-        entries.append(Middleware(IpRateLimitMiddleware, policy=rate_limit))
-    if csrf_origin is not None:
-        entries.append(Middleware(CsrfOriginMiddleware, policy=csrf_origin))
-    if csrf_token is not None:
-        entries.append(Middleware(CsrfTokenMiddleware, policy=csrf_token))
-    if session_gate is not None:
-        entries.append(Middleware(SessionGateMiddleware, policy=session_gate))
+    entries = _library_middleware(
+        security_headers=security_headers, body_size=body_size, rate_limit=rate_limit,
+        bearer_gate=bearer_gate, csrf_origin=csrf_origin, csrf_token=csrf_token,
+        session_gate=session_gate,
+    )
     for entry in reversed(entries):
         app.add_middleware(entry.cls, *entry.args, **entry.kwargs)

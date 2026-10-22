@@ -10,10 +10,15 @@ gate's admission when it was made for the request's own session cookie, and
 on a public path it admits by itself; the gate committed its renewal through
 the host's `SessionTransaction` before the route ran, and a route that fails
 afterwards does not undo it.
+
+A request the bearer gate admitted carries no session: the records below let
+the CSRF checks and the session gate step aside for it, and `current_user`
+raises on it, because a machine route asks for `bearer_caller` instead.
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
@@ -486,9 +491,73 @@ def _gate_admission(connection: HTTPConnection) -> _GateAdmission | None:
     return record
 
 
+_BEARER_ADMISSION_SCOPE_KEY: Final = "webauth.bearer_gate"
+
+
+@dataclass(frozen=True)
+class _BearerAdmission:
+    """What the bearer gate admitted: this app's gate, this path, this one header.
+
+    Only a SHA-256 digest of the `Authorization` value is kept, in request
+    memory, so the record does not store the token. It says the gate admitted
+    the request; it is not a freshness proof, and the gate verifies the header
+    again on every request it selects.
+    """
+
+    app: object
+    path: str
+    authorization_digest: bytes
+    caller: ports.BearerCaller
+
+
+def _authorization_digest(authorization: str) -> bytes:
+    return hashlib.sha256(authorization.encode("latin-1")).digest()
+
+
+def _record_bearer_admission(connection: HTTPConnection, caller: ports.BearerCaller) -> None:
+    (authorization,) = connection.headers.getlist("authorization")
+    connection.scope[_BEARER_ADMISSION_SCOPE_KEY] = _BearerAdmission(
+        app=connection.scope["app"],
+        path=connection.scope["path"],
+        authorization_digest=_authorization_digest(authorization),
+        caller=caller,
+    )
+
+
+def _bearer_admission(connection: HTTPConnection) -> _BearerAdmission | None:
+    """The bearer gate's admission, only when it was made for this very request.
+
+    The strict reader: the same app, the same decoded path and exactly one
+    `Authorization` line with the digest admitted. Anything else, a value other
+    code wrote included, is no admission.
+    """
+    record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
+    if type(record) is not _BearerAdmission:
+        return None
+    authorizations = connection.headers.getlist("authorization")
+    if (
+        record.app is not connection.scope.get("app")
+        or record.path != connection.scope["path"]
+        or len(authorizations) != 1
+        or record.authorization_digest != _authorization_digest(authorizations[0])
+    ):
+        return None
+    return record
+
+
+def _is_bearer_admitted(connection: HTTPConnection) -> bool:
+    """The loose reader: any admission in the scope. Refusing more can only fail closed."""
+    return type(connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)) is _BearerAdmission
+
+
 def _gate_or_own_admission(
     connection: HTTPConnection, sessions: SessionRecordStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
+    if _is_bearer_admitted(connection):
+        raise RuntimeError(
+            "A bearer-admitted request carries no session: a machine route takes "
+            "Depends(bearer_caller), not current_user, admin_user or verified_session_id.",
+        )
     decided = _gate_admission(connection)
     if decided is None or decided.admission is None:
         return _resolve_session(connection, sessions)
