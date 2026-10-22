@@ -13,7 +13,8 @@ are registered in ``run_default_scenarios``, ``run_hint_scenarios``,
 ``SCENARIO <number> <width> <origin>`` for each, except that the back-channel scenarios
 (10 to 13, 22 and 23) print both app origins after the width and scenario 5 prints
 ``SCENARIO 5 <origin> <cookie_samesite>``; there are no scenarios 3, 16 and 18 to 20.
-Scenarios 28 onwards are the bearer phase: ``bearer.py`` states each of them.
+Scenarios 52 to 54 are the engine phase (``engines.py``), which runs before the back-channel
+phase. Scenarios 28 onwards are the bearer phase: ``bearer.py`` states each of them.
 
 Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
@@ -192,6 +193,7 @@ from typing import Any, cast
 import httpx
 from bearer import drive_bearer_phase
 from certificates import ThrowawayTls, issue_throwaway_tls
+from engines import EngineRun, drive_engine_phase
 from harness import (
     STOP_SIGNALS,
     Host,
@@ -404,10 +406,10 @@ class Proof(RunRecord):
         return True
 
     @contextlib.contextmanager
-    def browsing(self, width: Width = DESKTOP) -> Iterator[Page]:
+    def browsing(self, width: Width = DESKTOP, **options: Any) -> Iterator[Page]:
         assert self.browser is not None
         self.width = width
-        with browser_context(self.browser, **width.context_options) as context:
+        with browser_context(self.browser, **width.context_options, **options) as context:
             yield context.new_page()
 
     def shot(self, page: Page, scenario: str | None, moment: str) -> None:
@@ -848,9 +850,9 @@ def id_token_expiry(hint: Cookie) -> float:
     return float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
 
 
-def end_session_hint_is(end_session_url: str, token: str) -> bool:
-    query = urllib.parse.parse_qs(urllib.parse.urlsplit(end_session_url).query)
-    return query.get("id_token_hint") == [token]
+def end_session_hint_is(end_session_request: Request, token: str) -> bool:
+    form = urllib.parse.parse_qs(end_session_request.post_data or "")
+    return end_session_request.method == "POST" and form.get("id_token_hint") == [token]
 
 
 def wait_until_past(expiry: float) -> float:
@@ -869,11 +871,11 @@ def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
         short_lived_tokens(proof.fresh_admin, proof.client_uuid, SHORT_TOKEN_LIFESPAN_SECONDS),
         proof.browsing(width) as page,
     ):
-        end_session_urls: list[str] = []
+        end_session_requests: list[Request] = []
         page.context.on(
             "request",
-            lambda request: end_session_urls.extend(
-                [request.url] if is_end_session_request(request.url) else []
+            lambda request: end_session_requests.extend(
+                [request] if request.url == END_SESSION_ENDPOINT else []
             ),
         )
         hint = signed_in_with_a_hint(proof, page, scenario)
@@ -882,9 +884,9 @@ def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
         assert expiry - time.time() <= SHORT_TOKEN_LIFESPAN_SECONDS, "the ID token is long-lived"
         past = wait_until_past(expiry)
         log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
-        (end_session_url,) = end_session_urls
+        (end_session_request,) = end_session_requests
         assert end_session_hint_is(
-            end_session_url, token
+            end_session_request, token
         ), "the end-session request did not carry the ID token whose expiry was measured"
         assert not hints_anywhere(page), "an ID token hint remains after the logout"
         assert proof.host_state()["sessions"] == 0, "the host still holds a session"
@@ -899,6 +901,7 @@ def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
 def back_button_shows(proof: Proof, page: Page) -> str:
     page.go_back()
     page_text = page.inner_text("h1") if page.query_selector("h1") else "no page"
+    assert not page.query_selector("input[name=id_token_hint]"), "the back button restored the hint"
     return f"{page_text} (the host's last sign-in refusal: {proof.host_state()['last_refusal']})"
 
 
@@ -961,13 +964,6 @@ def assert_signed_out(proof: Proof, page: Page, origin: str) -> None:
     assert me_status == 401, f"{origin} /me answered {me_status}"
 
 
-END_SESSION_REQUESTS = f"{END_SESSION_ENDPOINT}?**"
-
-
-def is_end_session_request(url: str) -> bool:
-    return url.startswith(f"{END_SESSION_ENDPOINT}?")
-
-
 def press_logout(
     proof: Proof, page: Page, at_end_session: Callable[[], None] | None = None
 ) -> Response:
@@ -980,14 +976,14 @@ def press_logout(
         route.continue_()
 
     if at_end_session is not None:
-        page.route(END_SESSION_REQUESTS, hold_end_session)
+        page.route(END_SESSION_ENDPOINT, hold_end_session)
     try:
-        with page.expect_response(lambda answer: is_end_session_request(answer.url)) as answer:
+        with page.expect_response(END_SESSION_ENDPOINT) as answer:
             proof.press(page, "#logout")
         return answer.value
     finally:
         if at_end_session is not None:
-            page.unroute(END_SESSION_REQUESTS, hold_end_session)
+            page.unroute(END_SESSION_ENDPOINT, hold_end_session)
 
 
 def log_out_through_keycloak(
@@ -1267,6 +1263,11 @@ def drive_browser(
                     )
             finally:
                 proof.browser.close()
+        default_host = next(h for h in hosts if h.cookie_samesite == SHIPPED_COOKIE_SAMESITE)
+        drive_engine_phase(
+            EngineRun(proof, APP_ORIGIN, KEYCLOAK_LOGOUT_CONFIRMATION), playwright, runtime, tls,
+            {IDP_HOST: shim_port, APP_HOST: default_host.app_port}, default_host, WIDTHS,
+        )
         drive_backchannel_phase(proof, playwright, runtime, tls, shim_port, untrusted_port)
         drive_bearer_phase(
             proof, playwright, runtime, tls, shim_port,
@@ -1420,11 +1421,11 @@ def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width)
     app_a.reset()
     app_b.reset()
     with proof.browsing(width) as page_a:
-        end_session_urls: list[str] = []
+        end_session_requests: list[Request] = []
         page_a.context.on(
             "request",
-            lambda request: end_session_urls.extend(
-                [request.url] if is_end_session_request(request.url) else []
+            lambda request: end_session_requests.extend(
+                [request] if request.url == END_SESSION_ENDPOINT else []
             ),
         )
         hint_of_first_session = signed_in_with_a_hint(proof, page_a, scenario, app_a.origin)
@@ -1440,10 +1441,9 @@ def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width)
         log_out_through_keycloak(
             proof, page_a, scenario, app_a.origin, asks_for_confirmation=True
         )
-        (end_session_url,) = end_session_urls
-        sent_hint = cookie_name_and_value(hint_of_first_session)[1]
+        (end_session_request,) = end_session_requests
         assert end_session_hint_is(
-            end_session_url, sent_hint
+            end_session_request, cookie_name_and_value(hint_of_first_session)[1]
         ), "A's logout did not send the first session's ID token"
         wait_for_accepted_callbacks(app_b, 1)
         assert_signed_out(proof, page_b, app_b.origin)

@@ -4,8 +4,8 @@ It terminates TLS with a throwaway certificate and forwards every request to
 the upstream with the public ``Host`` and ``X-Forwarded-Proto: https``, as
 Cloudflare's tunnel does. It keeps no log and writes nothing.
 
-How the browser reaches this shim, and which certificate it trusts, is
-``harness.py``'s (``launch_pinned_chromium``); ``edge_url`` is the READY line's
+How a browser reaches this shim, and which certificate it trusts, is
+``harness.py``'s, for each engine; ``edge_url`` is the READY line's
 address of the probe's Traefik, which the shim forwards to.
 
 How Keycloak reaches the apps: Keycloak's back-channel logout is a request from

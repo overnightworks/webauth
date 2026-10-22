@@ -55,13 +55,6 @@ not more than the leeway ahead, with an `exp` after its `iat`, an `events`
 member holding exactly the back-channel logout event and no other, a `sub` and
 no `nonce`. Its `sid` is never read. There is no replay store: the age bound is
 what limits a copy.
-
-`OidcRelyingParty.logout_url` answers the issuer's end-session URL, which
-carries the client ID, the configured post-logout redirect URI and, when the
-caller has one, the `id_token_hint` of the login being ended. With the hint
-the issuer ends the session without asking the person to confirm; without it
-the issuer asks. The hint is only passed along, never decoded or verified
-here, and no target is taken from a request. It makes no outbound call.
 """
 
 from __future__ import annotations
@@ -82,6 +75,7 @@ from typing import TYPE_CHECKING, TypeGuard
 from pydantic import SecretStr
 
 from webauth import WebAuthError
+from webauth._end_session_page import EndSessionForm
 from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.https_client import ExchangeFailure, is_https_url
 from webauth.jwt_verification import (
@@ -153,6 +147,10 @@ _ENDPOINT_URL_FIELDS = (
     "end_session_endpoint",
 )
 _APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
+# The logout page posts to `end_session_endpoint`; the issuer then redirects to
+# `post_logout_redirect_uri`; both are `form-action` sources: a plain host and optional port.
+_FORM_TARGET_FIELDS = ("end_session_endpoint", "post_logout_redirect_uri")
+_PLAIN_AUTHORITY = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d+)?", re.ASCII)
 # RFC 8252 sections 7.3 and 8.3: the loopback literals and localhost.
 # `urlsplit` lowercases the hostname and drops the brackets of an IPv6 literal.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -174,7 +172,9 @@ class OidcClientConfig:
     is scoped to it. It starts with `/` and holds only RFC 3986 path characters
     other than `;`.
     Every URL names a host and carries no control character, space,
-    credentials, query or fragment. The issuer, the three endpoints and
+    credentials, query or fragment. The host of `end_session_endpoint` and
+    `post_logout_redirect_uri` is letters, digits, `.` and `-`, or a bracketed IPv6 literal,
+    so it can stand as a source in the logout page's policy. The issuer, the three endpoints and
     `jwks_url` are https, because the library connects to them or trusts what
     they sign. `redirect_uri` and `post_logout_redirect_uri` are only values
     the browser is sent to, so they may also be http when the host is exactly
@@ -198,15 +198,7 @@ class OidcClientConfig:
     leeway_seconds: int
 
     def __post_init__(self) -> None:
-        for name in _ENDPOINT_URL_FIELDS:
-            if not _is_endpoint_url(getattr(self, name)):
-                raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
-        for name in _APP_URL_FIELDS:
-            if not _is_app_url(getattr(self, name)):
-                raise ValueError(
-                    f"{name} must be an https URL, or an http URL whose host is"
-                    f" localhost, 127.0.0.1 or [::1], naming {_URL_RULE}"
-                )
+        self._check_urls()
         if (
             not isinstance(self.logout_path, str)
             or not _LOGOUT_PATH_CHARACTERS.fullmatch(self.logout_path)
@@ -225,6 +217,20 @@ class OidcClientConfig:
             raise ValueError("client_secret must be a non-empty SecretStr")
         if not _is_scope_list_with_openid(self.scopes):
             raise ValueError("scopes must be a tuple of scope tokens that includes openid")
+
+    def _check_urls(self) -> None:
+        for name in _ENDPOINT_URL_FIELDS:
+            if not _is_endpoint_url(getattr(self, name)):
+                raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
+        for name in _APP_URL_FIELDS:
+            if not _is_app_url(getattr(self, name)):
+                raise ValueError(
+                    f"{name} must be an https URL, or an http URL whose host is"
+                    f" localhost, 127.0.0.1 or [::1], naming {_URL_RULE}"
+                )
+        for name in _FORM_TARGET_FIELDS:
+            if not _PLAIN_AUTHORITY.fullmatch(urllib.parse.urlsplit(getattr(self, name)).netloc):
+                raise ValueError(f"{name} must name a plain host and optional port")
 
 
 @dataclass(frozen=True)
@@ -404,15 +410,13 @@ class OidcRelyingParty:
     def logout_path(self) -> str:
         return self._config.logout_path
 
-    def logout_url(self, *, id_token_hint: str | None = None) -> str:
-        parameters = {
-            "client_id": self._config.client_id,
-            "post_logout_redirect_uri": self._config.post_logout_redirect_uri,
-        }
-        if id_token_hint is not None:
-            parameters["id_token_hint"] = id_token_hint
-        query = urllib.parse.urlencode(parameters)
-        return f"{self._config.end_session_endpoint}?{query}"
+    def _end_session_form(self, *, id_token_hint: SecretStr | None) -> EndSessionForm:
+        return EndSessionForm(
+            end_session_endpoint=self._config.end_session_endpoint,
+            client_id=self._config.client_id,
+            post_logout_redirect_uri=self._config.post_logout_redirect_uri,
+            id_token_hint=id_token_hint,
+        )
 
     def complete_login(
         self, pending: PendingLogin, callback_query: str

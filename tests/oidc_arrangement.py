@@ -26,6 +26,7 @@ import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from functools import cache
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Protocol
@@ -659,3 +660,33 @@ def assert_holds_only_the_refresh_token(subject: HoldsRefreshToken) -> None:
     assert [path for path, text in leaves if ISSUED_REFRESH_TOKEN in text] == [("refresh_token",)]
     assert subject.refresh_token is not None
     assert subject.refresh_token.get_secret_value() == ISSUED_REFRESH_TOKEN
+
+
+class LogoutPage(HTMLParser):
+    """The logout answer as a browser parses it."""
+
+    def __init__(self, markup: str) -> None:
+        super().__init__()
+        self.elements: list[tuple[str, dict[str, str | None]]] = []
+        self.texts: dict[str, str] = {}
+        self.feed(markup)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.elements.append((tag, dict(attrs)))
+
+    def handle_data(self, data: str) -> None:
+        tag = self.elements[-1][0]
+        self.texts[tag] = self.texts.get(tag, "") + data
+
+    def attributes_of(self, tag: str) -> list[dict[str, str | None]]:
+        return [attributes for name, attributes in self.elements if name == tag]
+
+    @property
+    def hidden_fields(self) -> dict[str | None, str | None]:
+        return {field["name"]: field["value"] for field in self.attributes_of("input")}
+
+    @property
+    def script_source(self) -> str:
+        """The CSP source that admits exactly the page's one inline script."""
+        digest = hashlib.sha256(self.texts["script"].encode()).digest()
+        return f"'sha256-{base64.b64encode(digest).decode()}'"

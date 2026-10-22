@@ -11,12 +11,12 @@
 "e2e/oidc/prove.py" = 1593
 "src/webauth/oidc_login.py" = 819
 "tests/test_jwt_verification.py" = 1278
-"tests/test_oidc.py" = 1334
-"tests/test_oidc_login.py" = 2350
+"tests/test_oidc.py" = 1297
+"tests/test_oidc_login.py" = 2324
 "tests/webauth_arrangement.py" = 942
 
 [function_lines."e2e/oidc/host_app.py"]
-"build_app" = 165
+"build_app" = 163
 
 [function_lines."src/webauth/dependencies.py"]
 "current_user_dependency" = 60
@@ -37,7 +37,7 @@
 "_defective_key_sets" = 121
 
 [function_lines."tests/test_oidc_login.py"]
-"an_oidc_host" = 154
+"an_oidc_host" = 145
 
 [function_lines."tests/webauth_arrangement.py"]
 "an_auth_app" = 120

@@ -9,6 +9,7 @@ from starlette.responses import PlainTextResponse
 
 from webauth.config import installed_web_auth_config
 from webauth.middleware._route_path import route_path
+from webauth.policies import _OWN_POLICY_HEADER
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -43,6 +44,13 @@ class SecurityHeadersMiddleware:
     server: a host's 500 handler runs, but the response it returns is not
     sent, and with ``debug=True`` Starlette's traceback page is not sent
     either. After the response started, nothing more is sent.
+
+    One answer keeps its own ``Content-Security-Policy`` and ``Cache-Control``:
+    the logout page ``webauth.oidc_login.log_out`` builds, which carries a
+    private marker header that this middleware removes. Every other header,
+    HSTS included, is applied to it as to any answer. Behind a host that does
+    not install this middleware the page still carries its own policy and
+    ``no-store``, and the marker reaches the browser, which ignores it.
     """
 
     def __init__(self, app: ASGIApp, policy: SecurityHeadersPolicy) -> None:
@@ -80,12 +88,15 @@ class SecurityHeadersMiddleware:
             raise
 
     def _apply_policy(self, headers: MutableHeaders, path: str, cookie_secure: bool) -> None:
-        cache_control = self._policy.cache_control(path)
-        if cache_control is not None:
-            headers["Cache-Control"] = cache_control
+        if _OWN_POLICY_HEADER in headers:
+            del headers[_OWN_POLICY_HEADER]
+        else:
+            cache_control = self._policy.cache_control(path)
+            if cache_control is not None:
+                headers["Cache-Control"] = cache_control
+            headers["Content-Security-Policy"] = self._policy.content_security_policy
         headers["X-Content-Type-Options"] = CONTENT_TYPE_OPTIONS
         headers["X-Frame-Options"] = FRAME_OPTIONS
-        headers["Content-Security-Policy"] = self._policy.content_security_policy
         headers["Referrer-Policy"] = REFERRER_POLICY
         headers["Permissions-Policy"] = self._policy.permissions_policy
         if cookie_secure:

@@ -22,7 +22,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/e2e-oidc.sh VERB [ARGS]
 
-  prepare            install the pinned Chromium and pull the relay and suite images
+  prepare            install Chromium, Firefox and WebKit and pull the relay and suite images
   prove --edge DIR   run e2e/oidc/prove.py against the edge checkout DIR
   conformance        run e2e/oidc/conformance.py
   cleanup            remove what a killed run left behind
@@ -78,7 +78,7 @@ harness_constant() {
 }
 
 prepare() {
-  uv run --locked --project "$root" --group e2e playwright install chromium
+  uv run --locked --project "$root" --group e2e playwright install chromium firefox webkit
   docker pull "$(harness_constant shim RELAY_IMAGE)"
   SUITE_HOST="$suite_host" docker compose -f "$root/e2e/oidc/suite-compose.yaml" pull
 }

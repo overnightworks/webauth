@@ -488,6 +488,12 @@ def test_every_module_imports_and_the_single_process_backend_counts_without_redi
     assert not backend.is_allowed("address", limit=1, window_seconds=60)
 
 
+@pytest.mark.usefixtures("webauth_modules_imported_afresh_without_redis")
+def test_every_module_imports_when_the_login_module_is_imported_first() -> None:
+    for module_name in ["webauth.oidc_login", *WEBAUTH_MODULES]:
+        importlib.import_module(module_name)
+
+
 @pytest.mark.parametrize(
     ("error", "failure"),
     [

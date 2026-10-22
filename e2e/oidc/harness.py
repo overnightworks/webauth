@@ -2,9 +2,13 @@
 directory, the host app process, the first-signal handling, the browser
 worker thread and the result table. Nothing here knows a scenario.
 
-It owns the pinned Chromium (``launch_pinned_chromium``: each host name mapped to
-a loopback port, one certificate trusted by its public-key hash) and the browser
-context every scenario drives (``browser_context``).
+It owns how a browser reaches the apps and Keycloak, and the browser context every
+scenario drives (``browser_context``). The pinned Chromium (``launch_pinned_chromium``)
+maps each host name to a loopback port and trusts one certificate by its public-key
+hash. Firefox and WebKit take neither Chromium flag, so ``launch_behind_host_mapping``
+routes them through a small CONNECT proxy that only maps the names to the loopback
+ports and terminates no TLS, and their contexts ignore the certificate errors of the
+throwaway certificate.
 
 The browser keeps the canonical URLs (port 443); only the connection is
 redirected, by ``--host-resolver-rules="MAP name 127.0.0.1:port"``. Trust is
@@ -19,9 +23,11 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+import selectors
 import shutil
 import signal
 import socket
+import socketserver
 import subprocess
 import sys
 import threading
@@ -29,11 +35,11 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from host_app import HostSettings
-from playwright.sync_api import Browser, BrowserContext, Cookie, Playwright
+from playwright.sync_api import Browser, BrowserContext, BrowserType, Cookie, Playwright
 from shim import LOOPBACK
 from stack import StackError
 
@@ -148,6 +154,59 @@ def launch_pinned_chromium(
         f"--host-resolver-rules={rules}",
         f"--ignore-certificate-errors-spki-list={spki_sha256_base64}",
     ])
+
+
+class HostMappingProxy(socketserver.ThreadingTCPServer):
+    """A CONNECT proxy that sends each mapped host name to its loopback port."""
+
+    daemon_threads = True
+
+    def __init__(self, mapped_hosts: dict[str, int]) -> None:
+        super().__init__((LOOPBACK, 0), _Tunnel)
+        self.mapped_hosts = mapped_hosts
+
+
+class _Tunnel(socketserver.BaseRequestHandler):
+    def handle(self) -> None:
+        mapped_hosts = cast(HostMappingProxy, self.server).mapped_hosts
+        request_line = self.request.recv(65536).split(b"\r\n", 1)[0].decode("ascii", "replace")
+        method, _, rest = request_line.partition(" ")
+        name = rest.partition(" ")[0].rpartition(":")[0]
+        if method != "CONNECT" or name not in mapped_hosts:
+            self.request.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            return
+        with socket.create_connection((LOOPBACK, mapped_hosts[name])) as upstream:
+            self.request.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            self._relay(upstream)
+
+    def _relay(self, upstream: socket.socket) -> None:
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.request, selectors.EVENT_READ, upstream)
+            selector.register(upstream, selectors.EVENT_READ, self.request)
+            while True:
+                for key, _ in selector.select():
+                    data = cast(socket.socket, key.fileobj).recv(65536)
+                    if not data:
+                        return
+                    key.data.sendall(data)
+
+
+@contextlib.contextmanager
+def launch_behind_host_mapping(
+    engine: BrowserType, mapped_hosts: dict[str, int]
+) -> Iterator[Browser]:
+    """Firefox or WebKit reaching each host name at its loopback port.
+
+    Open its contexts with ``ignore_https_errors=True``: the apps and the shim answer
+    with the throwaway certificate, which neither engine can be told to trust by hash."""
+    with HostMappingProxy(mapped_hosts) as proxy:
+        threading.Thread(target=proxy.serve_forever, daemon=True).start()
+        browser = engine.launch(proxy={"server": f"http://{LOOPBACK}:{proxy.server_address[1]}"})
+        try:
+            yield browser
+        finally:
+            browser.close()
+            proxy.shutdown()
 
 
 def without_query_values(text: str) -> str:

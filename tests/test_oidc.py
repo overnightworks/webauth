@@ -788,6 +788,9 @@ def _text_of(value: object) -> str:
             "post_logout_redirect_uri", f"{_POST_LOGOUT_REDIRECT_URI}#signed-out",
             id="post-logout-redirect-uri-with-a-fragment",
         ),
+        pytest.param("end_session_endpoint", "https://id.example;x/logout", id="host-semicolon"),
+        pytest.param("post_logout_redirect_uri", "https://id.example,x/", id="host-comma"),
+        pytest.param("end_session_endpoint", "https://*.example/logout", id="wildcard-host"),
         pytest.param("jwks_url", f"{_JWKS_URL}\x00", id="jwks-url-with-a-nul"),
         pytest.param("token_endpoint", f"{_TOKEN_ENDPOINT} ", id="token-endpoint-with-a-space"),
         pytest.param("client_id", "", id="client-id-empty"),
@@ -806,6 +809,14 @@ def test_a_client_configuration_is_refused_by_the_field_it_breaks_never_its_valu
 
     text = _text_of(value)
     assert not text or text not in str(refusal.value)
+
+
+@pytest.mark.parametrize("field_name", ["end_session_endpoint", "post_logout_redirect_uri"])
+@pytest.mark.parametrize("port", ["", ":8443"])
+def test_a_plain_host_with_or_without_a_port_is_a_form_target(field_name: str, port: str) -> None:
+    url = f"https://keycloak.example.org{port}/realms/r/protocol/openid-connect/logout"
+
+    assert getattr(_config(**{field_name: url}), field_name) == url
 
 
 _LOOPBACK_HTTP_URLS = [
@@ -867,43 +878,6 @@ def test_the_apps_own_two_urls_refuse_http_unless_the_host_is_loopback_and_the_r
         _config(**{field_name: url})
 
 
-@pytest.mark.parametrize("client_id", [
-    pytest.param(_CLIENT_ID, id="plain-client-id"),
-    pytest.param("lab app&x=1/\u00e9", id="client-id-needing-encoding"),
-])
-def test_the_logout_url_carries_exactly_the_client_id_and_the_post_logout_redirect_uri(
-    client_id: str,
-) -> None:
-    scenario = LoginScenario(FakeTokenEndpoint(), config=_config(client_id=client_id))
-
-    parts = urllib.parse.urlsplit(scenario.relying_party.logout_url())
-
-    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == _END_SESSION_ENDPOINT
-    assert urllib.parse.parse_qs(parts.query) == {
-        "client_id": [client_id],
-        "post_logout_redirect_uri": [_POST_LOGOUT_REDIRECT_URI],
-    }
-
-
-@pytest.mark.parametrize("client_id", [
-    pytest.param(_CLIENT_ID, id="plain-client-id"),
-    pytest.param("lab app&x=1/\u00e9", id="client-id-needing-encoding"),
-])
-def test_the_logout_url_carries_the_id_token_hint_after_the_other_parameters(
-    client_id: str,
-) -> None:
-    scenario = LoginScenario(FakeTokenEndpoint(), config=_config(client_id=client_id))
-    hint = a_fake_id_token("the-hint")
-
-    parts = urllib.parse.urlsplit(scenario.relying_party.logout_url(id_token_hint=hint))
-
-    assert list(urllib.parse.parse_qsl(parts.query)) == [
-        ("client_id", client_id),
-        ("post_logout_redirect_uri", _POST_LOGOUT_REDIRECT_URI),
-        ("id_token_hint", hint),
-    ]
-
-
 def test_the_relying_party_exposes_the_configured_logout_path(login: LoginScenario) -> None:
     assert login.relying_party.logout_path == _LOGOUT_PATH
 
@@ -949,19 +923,8 @@ def test_a_logout_path_that_is_not_a_url_path_is_refused_without_its_value(
 def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
     missing: str,
 ) -> None:
-    arguments = {
-        "issuer": _ISSUER,
-        "authorization_endpoint": _AUTHORIZATION_ENDPOINT,
-        "token_endpoint": _TOKEN_ENDPOINT,
-        "jwks_url": _JWKS_URL,
-        "end_session_endpoint": _END_SESSION_ENDPOINT,
-        "client_id": _CLIENT_ID,
-        "client_secret": SecretStr(_CLIENT_SECRET),
-        "redirect_uri": _REDIRECT_URI,
-        "post_logout_redirect_uri": _POST_LOGOUT_REDIRECT_URI,
-        "logout_path": _LOGOUT_PATH,
-        "leeway_seconds": _LEEWAY_SECONDS,
-    }
+    complete = _config()
+    arguments = {each.name: getattr(complete, each.name) for each in dataclasses.fields(complete)}
     del arguments[missing]
 
     with pytest.raises(TypeError, match=missing):
