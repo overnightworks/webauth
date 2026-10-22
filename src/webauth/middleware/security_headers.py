@@ -8,6 +8,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.responses import PlainTextResponse
 
 from webauth.config import installed_web_auth_config
+from webauth.middleware._route_path import route_path
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -53,6 +54,7 @@ class SecurityHeadersMiddleware:
             await self._app(scope, receive, send)
             return
 
+        path = route_path(scope)
         cookie_secure = False
         response_started = False
 
@@ -60,7 +62,7 @@ class SecurityHeadersMiddleware:
             nonlocal response_started
             if message["type"] == "http.response.start":
                 message.setdefault("headers", [])
-                self._apply_policy(MutableHeaders(scope=message), scope["path"], cookie_secure)
+                self._apply_policy(MutableHeaders(scope=message), path, cookie_secure)
                 response_started = True
             await send(message)
 

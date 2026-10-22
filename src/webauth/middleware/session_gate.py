@@ -23,12 +23,12 @@ from webauth.dependencies import (
     admit_session,
 )
 from webauth.middleware._refusal import RefusalMiddleware
+from webauth.middleware._route_path import route_path
 from webauth.policies import PathRules, PublicRule
 
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
-    from starlette.types import Scope
 
     from webauth.ports import AuthenticatedUser, SessionTransaction
 
@@ -45,13 +45,9 @@ class SessionGate:
 
     Every request needs a live session unless a ``public`` rule names it;
     an ``optional`` path admits a live session and lets every other request
-    through. Paths are the router's: ``root_path`` stripped at a segment boundary
-    (under ``/app``, ``/app/x`` is ``/x`` but ``/apple`` stays ``/apple``),
-    written as the routes are; the CSRF, rate-limit and security-header rules
-    are full paths, ``root_path`` included, so a host under a ``root_path``
-    keeps each rule in its own convention. A path with a ``.`` or ``..`` segment
-    is never public or optional. WebSocket and lifespan scopes pass; ``authenticate_websocket``
-    decides a handshake.
+    through. Its paths are written as ``PathRules`` says. A path with a ``.`` or
+    ``..`` segment is never public or optional. WebSocket and lifespan scopes
+    pass; ``authenticate_websocket`` decides a handshake.
 
     The gate calls ``session_transaction`` once per request that carries a
     validly signed session cookie on a gated or optional path, never on a public
@@ -81,11 +77,11 @@ class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
     async def _refusal(self, request: Request) -> Response | None:
         config = web_auth_config(request)
         reading = _read_session_cookie(request, config)
-        route_path = _route_path(request.scope)
-        if self._is_public(route_path, request.method):
+        routed_path = route_path(request.scope)
+        if self._is_public(routed_path, request.method):
             _record_gate_admission(request, _GateAdmission(config, reading, None))
             return None
-        optional = self._is_optional(route_path)
+        optional = self._is_optional(routed_path)
         if isinstance(reading, ConnectionRefusal):
             return self._refused_or_passed(request, config, reading, reading, optional)
         try:
@@ -113,13 +109,13 @@ class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
         with self._policy.session_transaction() as sessions:
             return admit_session(session_id, sessions=sessions, config=config)
 
-    def _is_public(self, route_path: str, method: str) -> bool:
-        return not _has_dot_segment(route_path) and any(
-            rule.applies_to(route_path, method) for rule in self._policy.public
+    def _is_public(self, routed_path: str, method: str) -> bool:
+        return not _has_dot_segment(routed_path) and any(
+            rule.applies_to(routed_path, method) for rule in self._policy.public
         )
 
-    def _is_optional(self, route_path: str) -> bool:
-        return not _has_dot_segment(route_path) and self._policy.optional.matches(route_path)
+    def _is_optional(self, routed_path: str) -> bool:
+        return not _has_dot_segment(routed_path) and self._policy.optional.matches(routed_path)
 
 
 def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
@@ -140,14 +136,3 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
             "install_web_auth_middleware(session_gate=...) on the app that serves the route.",
         )
     return None if isinstance(decided.admission, ConnectionRefusal | None) else decided.admission
-
-
-def _route_path(scope: Scope) -> str:
-    """The path the app's router matches: ``root_path`` stripped at a segment boundary."""
-    path: str = scope["path"]
-    root_path: str = scope.get("root_path", "")
-    if not root_path or not path.startswith(root_path):
-        return path
-    if path == root_path:
-        return ""
-    return path[len(root_path):] if path[len(root_path)] == "/" else path

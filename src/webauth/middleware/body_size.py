@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 import anyio
 from starlette.responses import JSONResponse
 
+from webauth.middleware._route_path import route_path
+
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -89,7 +91,7 @@ class BodySizeLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        limit = self._policy.max_bytes(scope.get("path", ""), scope.get("method", ""))
+        limit = self._policy.max_bytes(route_path(scope), scope.get("method", ""))
 
         if _declares_over(scope, limit):
             await _too_large()(scope, receive, send)
