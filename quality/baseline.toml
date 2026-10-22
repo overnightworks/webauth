@@ -1,0 +1,43 @@
+# Measured by `quality baseline write`. Entries only ever go down.
+
+[ccn."tests/oidc_arrangement.py"]
+"loopback_https_server.LoopbackHandler._receive" = 16
+
+[ccn."tests/test_public_api.py"]
+"_names_taken_from_webauth" = 16
+"_surface_of_source" = 20
+
+[file_lines]
+"e2e/oidc/prove.py" = 1666
+"src/webauth/oidc_login.py" = 819
+"tests/test_jwt_verification.py" = 1278
+"tests/test_oidc.py" = 1334
+"tests/test_oidc_login.py" = 2350
+"tests/webauth_arrangement.py" = 942
+
+[function_lines."e2e/oidc/host_app.py"]
+"build_app" = 197
+
+[function_lines."src/webauth/dependencies.py"]
+"current_user_dependency" = 62
+
+[function_lines."src/webauth/https_client.py"]
+"_exchange" = 63
+
+[function_lines."src/webauth/middleware/stack.py"]
+"install_web_auth_middleware" = 92
+
+[function_lines."src/webauth/oidc_login.py"]
+"finish_login" = 75
+
+[function_lines."tests/oidc_arrangement.py"]
+"loopback_https_server" = 115
+
+[function_lines."tests/test_jwt_verification.py"]
+"_defective_key_sets" = 121
+
+[function_lines."tests/test_oidc_login.py"]
+"an_oidc_host" = 154
+
+[function_lines."tests/webauth_arrangement.py"]
+"an_auth_app" = 120
