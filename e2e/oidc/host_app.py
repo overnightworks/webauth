@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -51,7 +52,12 @@ from webauth.dependencies import (
     session_id_from_request,
 )
 from webauth.https_client import fetch_key_set_over_https
-from webauth.middleware import install_web_auth_middleware
+from webauth.middleware import (
+    BearerGate,
+    SessionGate,
+    bearer_caller,
+    install_web_auth_middleware,
+)
 from webauth.oidc import (
     OidcClientConfig,
     OidcRefusal,
@@ -75,20 +81,25 @@ from webauth.oidc_login import (
 )
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
+    AuthorizedParties,
     BodySizePolicy,
     BodySizeRule,
     CacheControlRule,
     CspDirective,
     CsrfPolicy,
     PathRules,
+    PublicRule,
+    RateLimitBudget,
+    RateLimitPolicy,
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
-from webauth.ports import AuthenticatedUser
+from webauth.ports import AuthenticatedUser, BearerCaller, SessionRecordStore
 
 logger = logging.getLogger(__name__)
 
 LOOPBACK = "127.0.0.1"
+LOGIN_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
@@ -99,6 +110,9 @@ DEFAULT_MAX_BODY_BYTES = 1024
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 REPOSITORY = Path(__file__).resolve().parents[2]
 SCOPES = ("openid", "profile", "groups")
+MACHINE_ROUTES_PREFIX = "/api/admin/"
+BEARER_GATE_LOGGER = "webauth.middleware.bearer_gate"
+BEARER_HOST_REQUESTS_PER_MINUTE = 10_000
 LEEWAY_SECONDS = 30
 USERINFO_TIMEOUT_SECONDS = 10
 BEARER_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")  # RFC 6750 b64token: fit for a header
@@ -152,11 +166,21 @@ class HostSettings:
     session_secret: str
     cookie_samesite: Literal["strict", "lax"] = "strict"
     userinfo_endpoint: str | None = None
+    bearer_authorized_parties: tuple[str, ...] = ()
+    """The client ids whose access tokens open the machine routes; none means no such routes."""
+
+    @property
+    def is_bearer_host(self) -> bool:
+        return bool(self.bearer_authorized_parties)
 
     @staticmethod
     def read(path: Path) -> HostSettings:
         fields = json.loads(path.read_text())
-        return HostSettings(**{**fields, "app_origins": tuple(fields["app_origins"])})
+        return HostSettings(**{
+            **fields,
+            "app_origins": tuple(fields["app_origins"]),
+            "bearer_authorized_parties": tuple(fields["bearer_authorized_parties"]),
+        })
 
     def write(self, path: Path) -> None:
         path.touch(mode=0o600)
@@ -213,6 +237,7 @@ class World:
         self.last_token_rejection: str | None = None
         self.userinfo_calls = 0
         self.userinfo_answered = 0
+        self.session_transactions = 0
         self.stored_refresh_tokens: set[str] = set()
 
     def remember_refresh_token_of(self, session_id: str) -> None:
@@ -234,6 +259,7 @@ class World:
             "userinfo_calls": self.userinfo_calls,
             "userinfo_answered": self.userinfo_answered,
             "access_tokens_refused": self.token_requests.refused,
+            "session_transactions": self.session_transactions,
         }
 
 
@@ -309,12 +335,12 @@ def call_userinfo(settings: HostSettings, current: World) -> None:
             timeout=USERINFO_TIMEOUT_SECONDS,
         ).raise_for_status()
     except httpx.HTTPError as error:
-        print(f"the UserInfo call failed: {type(error).__name__}", flush=True)
+        logger.warning("the UserInfo call failed: %s", type(error).__name__)
         return
     current.userinfo_answered += 1
 
 
-def _install_stack(app: FastAPI, settings: HostSettings) -> None:
+def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]) -> None:
     issuer = urlsplit(settings.end_session_endpoint)
     issuer_origin = f"{issuer.scheme}://{issuer.netloc}"
     backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
@@ -337,6 +363,57 @@ def _install_stack(app: FastAPI, settings: HostSettings) -> None:
             exempt=backchannel_path,
             token_exempt=PathRules(exact=frozenset({LOGOUT_PATH})),
         ),
+        **_bearer_policies(settings, world),
+    )
+
+
+def _bearer_policies(settings: HostSettings, world: dict[str, World]) -> dict[str, Any]:
+    """The policies only the bearer host installs; the host without the setting has none."""
+    if not settings.is_bearer_host:
+        return {}
+
+    def counted_session_transaction() -> AbstractContextManager[SessionRecordStore]:
+        current = world["world"]  # `/reset` replaces the world, so it is read at call time
+        current.session_transactions += 1
+        return current.sessions.in_transaction()
+
+    (origin,) = settings.app_origins
+    return {
+        "rate_limit": RateLimitPolicy(
+            default=RateLimitBudget("bearer-host", BEARER_HOST_REQUESTS_PER_MINUTE, 60)
+        ),
+        "session_gate": SessionGate(
+            session_transaction=counted_session_transaction,
+            login_redirect=None,
+            public=(PublicRule(PathRules(exact=frozenset(
+                {LOGIN_PATH, CALLBACK_PATH, BACKCHANNEL_LOGOUT_PATH}
+            ))),),
+            optional=PathRules(exact=frozenset({"/"})),
+        ),
+        "bearer_gate": BearerGate(
+            paths=PathRules(prefixes=(MACHINE_ROUTES_PREFIX,)),
+            relying_party=_relying_party(
+                settings, f"{origin}{CALLBACK_PATH}", f"{origin}/", post_token_request_over_https
+            ),
+            admission=_admission_of(settings),
+            authorized_parties=AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
+        ),
+    }
+
+
+def _admission_of(settings: HostSettings) -> AdmissionConfig:
+    return AdmissionConfig(
+        bound_issuer=settings.issuer,
+        login_group=(
+            EverySubject.OF_THE_BOUND_ISSUER
+            if settings.login_group == EverySubject.OF_THE_BOUND_ISSUER.value
+            else settings.login_group
+        ),
+        admin_group=(
+            NoAdmins.IN_THIS_APP
+            if settings.admin_group == NoAdmins.IN_THIS_APP.value
+            else settings.admin_group
+        ),
     )
 
 
@@ -351,19 +428,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         allowed_hosts_patterns=(),
     )
 
-    admission = AdmissionConfig(
-        bound_issuer=settings.issuer,
-        login_group=(
-            EverySubject.OF_THE_BOUND_ISSUER
-            if settings.login_group == EverySubject.OF_THE_BOUND_ISSUER.value
-            else settings.login_group
-        ),
-        admin_group=(
-            NoAdmins.IN_THIS_APP
-            if settings.admin_group == NoAdmins.IN_THIS_APP.value
-            else settings.admin_group
-        ),
-    )
+    admission = _admission_of(settings)
 
     def relying_party_of(request: Request) -> OidcRelyingParty:
         return world["world"].relying_parties[f"https://{request.headers['host']}"]
@@ -375,11 +440,11 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     redirecting_dependencies = current_user_dependency(
         session_store=lambda: world["world"].sessions,
         on_authenticated=lambda user: None,
-        login_redirect=LoginRedirect(path="/login/oidc", redirect_query_param="next"),
+        login_redirect=LoginRedirect(path=LOGIN_PATH, redirect_query_param="next"),
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     install_web_auth_config(app, config)
-    _install_stack(app, settings)
+    _install_stack(app, settings, world)
 
     @app.middleware("http")
     async def count_callbacks(request: Request, call_next: Any) -> Response:
@@ -410,7 +475,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     ) -> str:
         return PAGE.substitute(headline=f"Album {html.escape(album_id)}", body=LOGOUT_BUTTON)
 
-    @app.get("/login/oidc")
+    @app.get(LOGIN_PATH)
     def start(request: Request, next: str | None = None) -> Response:  # noqa: A002
         response = Response(status_code=303)
         response.headers["location"] = start_login(
@@ -514,7 +579,42 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         current.backchannel_refused += 1
         return Response(status_code=400)
 
+    if settings.is_bearer_host:
+        _add_machine_routes(app, dependencies.current_user)
     return app
+
+
+def _add_machine_routes(
+    app: FastAPI, current_user: Callable[..., AuthenticatedUser]
+) -> None:
+    """The routes under the bearer gate; they echo the caller and change nothing."""
+
+    @app.get(f"{MACHINE_ROUTES_PREFIX}people/{{subject}}/export")
+    def export_person(
+        subject: str, caller: BearerCaller = Depends(bearer_caller)
+    ) -> dict[str, str]:
+        return {"caller": caller.subject, "subject": subject}
+
+    @app.delete(f"{MACHINE_ROUTES_PREFIX}people/{{subject}}")
+    def delete_person(
+        subject: str, caller: BearerCaller = Depends(bearer_caller)
+    ) -> dict[str, str]:
+        return {"caller": caller.subject, "subject": subject}
+
+    @app.get(f"{MACHINE_ROUTES_PREFIX}session-probe")
+    def session_probe(
+        user: AuthenticatedUser = Depends(current_user)
+    ) -> dict[str, str]:
+        return {"username": user.username}
+
+
+def log_the_bearer_gate() -> None:
+    """Uvicorn leaves this logger at WARNING, which would lose the gate's INFO refusals."""
+    gate_logger = logging.getLogger(BEARER_GATE_LOGGER)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(name)s %(levelname)s %(message)s"))
+    gate_logger.addHandler(handler)
+    gate_logger.setLevel(logging.INFO)
 
 
 def die_with_parent(parent_pid: int) -> None:
@@ -533,6 +633,8 @@ def main() -> None:
     arguments = parser.parse_args()
     die_with_parent(arguments.parent_pid)
     settings = HostSettings.read(arguments.settings)
+    if settings.is_bearer_host:
+        log_the_bearer_gate()
     world = {"world": World(settings)}
     _Observation(settings.observe_port, world, lambda: World(settings))
     uvicorn.run(

@@ -6,7 +6,9 @@ Keycloak (edge's `hold` stack) against a small host application whose routes are
 conformance suite against the same host. The OIDC path is not faked. What each
 driver proves, scenario by scenario, is stated in the docstring of `prove.py` and
 `conformance.py`; how the browser and Keycloak reach the apps is stated in
-`harness.py` and `shim.py`.
+`harness.py` and `shim.py`. `bearer.py` is the bearer proof: it plays hal, the machine
+caller, against the same Keycloak (scenarios 28 onwards of `prove.py`); `realm.py` holds the
+realm's facts and the admin calls that shape it.
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
 Playwright browser, and takes a few minutes. CI only lints `e2e/`. Every terminal
