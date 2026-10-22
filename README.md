@@ -60,7 +60,10 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
 `admin_user`, `verified_session_id`) and its docstring says what `session_store`
 and `on_authenticated` are. `trusted_proxies` names the peers whose
-`X-Forwarded-For` and `X-Forwarded-Proto` are believed. The sign-in routes are
+`X-Forwarded-For` and `X-Forwarded-Proto` are believed, and it decides alone only
+when the ASGI server rewrites neither header, so the host turns the server's own
+forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
+`proxy_headers=False` or `--no-proxy-headers`). The sign-in routes are
 under [OpenID Connect login](#openid-connect-login); [`tests/typing/oidc_host.py`](tests/typing/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
