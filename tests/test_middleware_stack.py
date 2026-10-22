@@ -32,6 +32,7 @@ from webauth_arrangement import (
     SessionRecordsInMemory,
     a_csrf_passing_request_headers,
     a_web_auth_config,
+    an_auth_app,
     an_http_scope,
     assert_carries_policy_headers,
     completed,
@@ -58,8 +59,11 @@ from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
     PathRules,
+    PathShape,
+    PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
+    RateLimitRule,
     SecurityHeadersPolicy,
 )
 from webauth.ports import RateLimitBackend
@@ -485,6 +489,36 @@ class TestBudgetSemantics:
         assert get_api(client).status_code == 500
         install_web_auth_config(app, a_web_auth_config())
         assert get_api(client).status_code == 200
+
+
+class TestARateLimitRuleIsChosenByThePathTheRouterRoutes:
+    @pytest.mark.parametrize("encoded", ["%3F", "%23"])
+    def test_a_shape_budget_is_spent_for_an_encoded_delimiter_in_a_path_parameter(
+        self, encoded: str,
+    ) -> None:
+        policy = RateLimitPolicy(
+            default=RateLimitBudget("default", max_requests=1, window_seconds=60),
+            rules=(RateLimitRule(
+                PathRules(shapes=(PathShape("/api/people/", "/export"),)),
+                RateLimitBudget("export", max_requests=2, window_seconds=60),
+            ),),
+        )
+        auth = an_auth_app(
+            None,
+            gate=True,
+            public=(PublicRule(PathRules(prefixes=("/api/",))),),
+            stack_policies={"rate_limit": policy},
+        )
+        auth.app.add_api_route(
+            "/api/people/{subject}/export", lambda: {"status": "ok"}, methods=["GET"],
+        )
+
+        statuses = [
+            auth.client.get(f"/api/people/alice{encoded}x/export").status_code
+            for _ in range(3)
+        ]
+
+        assert statuses == [200, 200, 429]
 
 
 class BarrierRateLimitBackend:

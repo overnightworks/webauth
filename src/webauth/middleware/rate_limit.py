@@ -52,7 +52,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
-        path = request.url.path
+        path = request.scope["path"]
         if self._policy.is_exempt(path):
             return None
         config = web_auth_config(request)

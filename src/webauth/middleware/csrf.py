@@ -49,7 +49,7 @@ class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
     async def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
-            and self._policy.requires_token(request.url.path)
+            and self._policy.requires_token(request.scope["path"])
             and _bearer_admission(request) is None
         ):
             config = web_auth_config(request)
@@ -125,7 +125,7 @@ class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
     async def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
-            and self._policy.requires_same_origin(request.url.path)
+            and self._policy.requires_same_origin(request.scope["path"])
             and _bearer_admission(request) is None
         ):
             return _origin_check_refusal(request)
