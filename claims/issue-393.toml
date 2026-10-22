@@ -1,0 +1,7 @@
+claim_id = "09451b590e3c41d6875c0309eabf0781"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "049d26364c7b74927d6de7172d1696c1630e6419"
+branch = "claude/issue-393-asgi-forwarded-header-rewrite"
+scope = ["README.md"]
+opened_commit = "067ed8035762970407c9146d2d48d8a67bbbae4b"
