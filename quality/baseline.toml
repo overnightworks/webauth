@@ -8,7 +8,7 @@
 "_surface_of_source" = 20
 
 [file_lines]
-"e2e/oidc/prove.py" = 1605
+"e2e/oidc/prove.py" = 1593
 "src/webauth/oidc_login.py" = 819
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1334
@@ -16,7 +16,7 @@
 "tests/webauth_arrangement.py" = 942
 
 [function_lines."e2e/oidc/host_app.py"]
-"build_app" = 175
+"build_app" = 165
 
 [function_lines."src/webauth/dependencies.py"]
 "current_user_dependency" = 62

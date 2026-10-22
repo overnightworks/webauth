@@ -6,11 +6,50 @@ import contextlib
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from host_app import CALLBACK_PATH
+from certificates import ThrowawayTls
+from harness import free_port
+from host_app import CALLBACK_PATH, HostSettings
 from stack import Admin
 
+from webauth.cookies import CookieSameSite
+
 REALM = "hallucinai"
+IDP_HOST = "auth.hallucinai.de"
+ISSUER = f"https://{IDP_HOST}/realms/{REALM}"
+OIDC_PATH = f"{ISSUER}/protocol/openid-connect"
+END_SESSION_ENDPOINT = f"{OIDC_PATH}/logout"
+CLIENT_ID = "d1-host"
+USER_NAME = "d1-user"
+USER_GROUP = "/apps/songmaker"
+OUTSIDER_NAME = "d1-outsider"
+ADMIN_NAME = "d1-admin"
+ADMIN_GROUP = f"{USER_GROUP}/admin"
 LIFESPAN_ATTRIBUTE = "access.token.lifespan"
+ACCESS_TOKEN_TYPE_ATTRIBUTE = "access.token.header.type.rfc9068"  # noqa: S105  # an attribute name
+
+
+def host_settings(
+    tls: ThrowawayTls, shim_port: int, app_origins: tuple[str, ...], client_id: str,
+    client_secret: str, session_secret: str, cookie_samesite: CookieSameSite,
+) -> HostSettings:
+    return HostSettings(
+        app_origins=app_origins,
+        port=free_port(),
+        observe_port=free_port(),
+        tls_certificate=str(tls.leaf_certificate),
+        tls_key=str(tls.leaf_key),
+        issuer=ISSUER,
+        login_group=USER_GROUP,
+        admin_group=ADMIN_GROUP,
+        authorization_endpoint=f"{OIDC_PATH}/auth",
+        end_session_endpoint=END_SESSION_ENDPOINT,
+        token_endpoint=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/token",
+        jwks_url=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/certs",
+        client_id=client_id,
+        client_secret=client_secret,
+        session_secret=session_secret,
+        cookie_samesite=cookie_samesite,
+    )
 
 
 def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
@@ -54,6 +93,53 @@ def client_representation(
         "attributes": attributes,
         "redirectUris": [f"{origin}{CALLBACK_PATH}" for origin in origins],
         "defaultClientScopes": ["basic", "profile", "groups"],
+    }
+
+
+def public_client_representation(
+    client_id: str, redirect_uri: str, optional_scopes: tuple[str, ...]
+) -> dict[str, Any]:
+    """A public client with PKCE whose access tokens carry the ``at+jwt`` header type."""
+    return {
+        "clientId": client_id,
+        "enabled": True,
+        "publicClient": True,
+        "standardFlowEnabled": True,
+        "directAccessGrantsEnabled": False,
+        "serviceAccountsEnabled": False,
+        "frontchannelLogout": False,
+        "attributes": {
+            "pkce.code.challenge.method": "S256",
+            ACCESS_TOKEN_TYPE_ATTRIBUTE: "true",
+        },
+        "redirectUris": [redirect_uri],
+        "defaultClientScopes": ["basic", "groups"],
+        "optionalClientScopes": list(optional_scopes),
+    }
+
+
+def audience_scope_representation(name: str, audience: str) -> dict[str, Any]:
+    """A client scope that adds the client ``audience`` to the access token's ``aud``."""
+    return {
+        "name": name,
+        "protocol": "openid-connect",
+        "attributes": {
+            "include.in.token.scope": "false",
+            "display.on.consent.screen": "false",
+        },
+        "protocolMappers": [{
+            "name": name,
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "consentRequired": False,
+            "config": {
+                "included.client.audience": audience,
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "false",
+                "introspection.token.claim": "true",
+            },
+        }],
     }
 
 

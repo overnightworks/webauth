@@ -9,10 +9,11 @@ the one throwaway certificate key the browser is told to accept.
 
 The host application is ``build_app`` in ``host_app.py``. The scenarios below
 are registered in ``run_default_scenarios``, ``run_hint_scenarios``,
-``drive_backchannel_phase`` and ``run_proof``, which print ``SCENARIO <number>
-<width> <origin>`` for each, except that the back-channel scenarios (10 to 13, 22
-and 23) print both app origins after the width and scenario 5 prints ``SCENARIO 5
-<origin> <cookie_samesite>``; there are no scenarios 3, 16 and 18 to 20.
+``drive_backchannel_phase``, ``drive_bearer_phase`` and ``run_proof``, which print
+``SCENARIO <number> <width> <origin>`` for each, except that the back-channel scenarios
+(10 to 13, 22 and 23) print both app origins after the width and scenario 5 prints
+``SCENARIO 5 <origin> <cookie_samesite>``; there are no scenarios 3, 16 and 18 to 20.
+Scenarios 28 onwards are the bearer phase: ``bearer.py`` states each of them.
 
 Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
@@ -189,6 +190,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
+from bearer import drive_bearer_phase
 from certificates import ThrowawayTls, issue_throwaway_tls
 from harness import (
     STOP_SIGNALS,
@@ -198,7 +200,6 @@ from harness import (
     browser_context,
     cookie_name_and_value,
     drive_browser_off_the_main_thread,
-    free_port,
     host_state,
     keep_results,
     launch_pinned_chromium,
@@ -215,7 +216,6 @@ from host_app import (
     CALLBACK_PATH,
     LOGOUT_PATH,
     WORKLOAD_TOKEN_PATH,
-    HostSettings,
 )
 from playwright.sync_api import (
     Browser,
@@ -227,7 +227,22 @@ from playwright.sync_api import (
     Route,
     sync_playwright,
 )
-from realm import REALM, client_representation, create_user, short_lived_tokens
+from realm import (
+    ADMIN_GROUP,
+    ADMIN_NAME,
+    CLIENT_ID,
+    END_SESSION_ENDPOINT,
+    IDP_HOST,
+    ISSUER,
+    OUTSIDER_NAME,
+    REALM,
+    USER_GROUP,
+    USER_NAME,
+    client_representation,
+    create_user,
+    host_settings,
+    short_lived_tokens,
+)
 from shim import CallbackBridge, TlsShim
 from stack import Admin, HeldStack, require_pinned_clean_edge
 
@@ -249,23 +264,13 @@ SHIPPED_COOKIE_SAMESITE = cast(
     ),
 )
 
-IDP_HOST = "auth.hallucinai.de"
 APP_HOST = "demo.hallucinai.de"
 SECOND_APP_HOST = "demo.example.test"
 UNTRUSTED_HOST = "untrusted.hallucinai.de"
 EDGE_CONTAINER_FILTER = "edge-kc-probe"
-ISSUER = f"https://{IDP_HOST}/realms/{REALM}"
-OIDC_PATH = f"{ISSUER}/protocol/openid-connect"
-END_SESSION_ENDPOINT = f"{OIDC_PATH}/logout"
 APP_ORIGIN = f"https://{APP_HOST}"
 SECOND_APP_ORIGIN = f"https://{SECOND_APP_HOST}"
-CLIENT_ID = "d1-host"
-USER_NAME = "d1-user"
-USER_GROUP = "/apps/songmaker"
 DISABLED_USER_NAME = "d1-disabled"
-OUTSIDER_NAME = "d1-outsider"
-ADMIN_NAME = "d1-admin"
-ADMIN_GROUP = f"{USER_GROUP}/admin"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
 KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
 ID_TOKEN_HINT_COOKIE_NAME = _id_token_hint_cookie_name(secure=True)
@@ -1158,30 +1163,6 @@ def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
     create_user(admin, ADMIN_NAME, proof.admin_password, (ADMIN_GROUP,))
 
 
-def host_settings(
-    tls: ThrowawayTls, shim_port: int, app_origins: tuple[str, ...], client_id: str,
-    client_secret: str, session_secret: str, cookie_samesite: CookieSameSite,
-) -> HostSettings:
-    return HostSettings(
-        app_origins=app_origins,
-        port=free_port(),
-        observe_port=free_port(),
-        tls_certificate=str(tls.leaf_certificate),
-        tls_key=str(tls.leaf_key),
-        issuer=ISSUER,
-        login_group=USER_GROUP,
-        admin_group=ADMIN_GROUP,
-        authorization_endpoint=f"{OIDC_PATH}/auth",
-        end_session_endpoint=END_SESSION_ENDPOINT,
-        token_endpoint=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/token",
-        jwks_url=f"https://localhost:{shim_port}/realms/{REALM}/protocol/openid-connect/certs",
-        client_id=client_id,
-        client_secret=client_secret,
-        session_secret=session_secret,
-        cookie_samesite=cookie_samesite,
-    )
-
-
 @contextlib.contextmanager
 def backchannel_apps(
     proof: Proof, runtime: Path, tls: ThrowawayTls, shim_port: int
@@ -1287,6 +1268,13 @@ def drive_browser(
             finally:
                 proof.browser.close()
         drive_backchannel_phase(proof, playwright, runtime, tls, shim_port, untrusted_port)
+        drive_bearer_phase(
+            proof, playwright, runtime, tls, shim_port,
+            host_settings(
+                tls, shim_port, (APP_ORIGIN,), CLIENT_ID, proof.client_secret,
+                secrets.token_urlsafe(48), SHIPPED_COOKIE_SAMESITE,
+            ),
+        )
 
 
 def session_cookie(page: Page) -> Cookie:
