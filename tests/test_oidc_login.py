@@ -47,7 +47,6 @@ from oidc_arrangement import (
 from pydantic import SecretStr
 from webauth_arrangement import (
     ADMIN_ROLE,
-    DOCUMENTED_ID_TOKEN_HINT_BOUND,
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     HTTPS_TEST_SERVER,
@@ -89,6 +88,7 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRelyingParty,
 )
+from webauth.jwt_verification import MAX_TOKEN_CHARACTERS
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
@@ -592,7 +592,7 @@ END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_PATH = "/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
 FORM_LOGOUT_PATH = LOGOUT_PATH
-ID_TOKEN_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
+OLD_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
@@ -609,7 +609,6 @@ def a_client_config() -> OidcClientConfig:
         client_secret=SecretStr("client-secret"),
         redirect_uri=f"{HTTPS_TEST_SERVER}{CALLBACK_PATH}",
         post_logout_redirect_uri=f"{HTTPS_TEST_SERVER}/",
-        logout_path=LOGOUT_PATH,
         leeway_seconds=30,
     )
 
@@ -677,7 +676,9 @@ class OidcHost:
         return f"{name}={self.client.cookies[name]}"
 
 
-def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object) -> str:
+def an_id_token(
+    nonce: str, wall_clock: FakeClock, groups_claim: object, header_padding: str = "",
+) -> str:
     now = int(wall_clock.now)
     claims = {
         "iss": BOUND_ISSUER,
@@ -690,7 +691,24 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object) -> str:
         "groups": groups_claim,
     }
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
+    if header_padding:
+        header["padding"] = header_padding
     return jws(header, claims, rs256(rsa_key("issuer")))
+
+
+def an_id_token_of_length(nonce: str, wall_clock: FakeClock, length: int) -> str:
+    """The signed token of exactly ``length`` characters: base64url has no encoding
+    of some payload lengths, so the header's padding is the second knob."""
+    for header_padding in ("", "h", "hh"):
+        shortest = len(an_id_token(nonce, wall_clock, [LOGIN_GROUP], header_padding))
+        estimate = (length - shortest) * 3 // 4
+        for padding in range(estimate - 12, estimate + 1):
+            token = an_id_token(
+                nonce, wall_clock, [LOGIN_GROUP, "/" + "p" * padding], header_padding,
+            )
+            if len(token) == length:
+                return token
+    raise AssertionError(f"no token of {length} characters")
 
 
 def a_logout_token_of_the_issuer(
@@ -998,27 +1016,6 @@ def test_an_admitted_callback_opens_the_session_for_one_idle_from_one_whole_seco
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
-@pytest.mark.parametrize(("cookie_secure", "name", "secure_attribute"), [
-    pytest.param(True, "__Secure-oidc_id_token_hint", {"secure"}, id="secure"),
-    pytest.param(False, "oidc_id_token_hint", set(), id="insecure-development"),
-])
-def test_an_admitted_callback_hands_the_id_token_to_the_logout_path_alone(
-    *, cookie_secure: bool, name: str, secure_attribute: set[str],
-) -> None:
-    host = an_oidc_host(cookie_secure=cookie_secure)
-
-    response = host.callback(host.sign_in_at_issuer())
-
-    assert set_cookies(response)[name] == {
-        "httponly",
-        f"max-age={host.config.session_lifetime.absolute_max_age_seconds}",
-        f"path={LOGOUT_PATH}",
-        "samesite=strict",
-        *secure_attribute,
-    }
-    assert host.client.cookies[name] == host.issued_id_tokens[-1]
-
-
 @pytest.mark.parametrize("cookie_secure", [
     pytest.param(True, id="secure"),
     pytest.param(False, id="insecure-development"),
@@ -1038,7 +1035,22 @@ def test_an_admitted_callback_sets_no_cookie_carrying_the_id_token_and_the_row_h
     assert stored_id_tokens(host) == [host.issued_id_tokens[-1]]
 
 
-def test_a_second_login_replaces_the_hint_of_the_first() -> None:
+def test_the_id_token_appears_in_no_repr_and_no_header_of_the_callback() -> None:
+    host = an_oidc_host()
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    [login] = host.admitted_logins
+    shown = " ".join([
+        repr(host.sessions.record),
+        repr(host.sessions.list_active()),
+        repr(login),
+        *(value for _, value in response.headers.multi_items()),
+    ])
+    assert host.issued_id_tokens[-1] not in shown
+
+
+def test_a_second_login_replaces_the_row_and_its_token() -> None:
     host = an_oidc_host()
     host.callback(host.sign_in_at_issuer())
 
@@ -1046,31 +1058,20 @@ def test_a_second_login_replaces_the_hint_of_the_first() -> None:
 
     first, second = host.issued_id_tokens
     assert first != second
-    assert host.client.cookies[ID_TOKEN_HINT_COOKIE_NAME] == second
+    assert stored_id_tokens(host) == [second]
 
 
-def test_an_oversized_id_token_clears_the_old_hint_and_still_signs_the_person_in() -> None:
+def test_an_id_token_of_the_verifiers_longest_length_is_stored_and_sent_whole() -> None:
     host = an_oidc_host()
+    host.issuer.mint_id_token = lambda nonce: an_id_token_of_length(
+        nonce, host.wall_clock, MAX_TOKEN_CHARACTERS,
+    )
     host.callback(host.sign_in_at_issuer())
-    padded_groups = [LOGIN_GROUP, *(f"/apps/padding-{number:04}" for number in range(120))]
-    host.issuer.mint_id_token = lambda nonce: an_id_token(nonce, host.wall_clock, padded_groups)
+    [stored] = stored_id_tokens(host)
 
-    response = host.callback(host.sign_in_at_issuer())
+    response = post_logout(host, SAME_ORIGIN_FORM)
 
-    assert response.status_code == 200
-    assert is_cleared(response, ID_TOKEN_HINT_COOKIE_NAME)
-    assert ID_TOKEN_HINT_COOKIE_NAME not in host.client.cookies
-    assert host.client.get("/me").json() == {"username": "lena"}
-
-
-def test_a_request_carrying_only_the_hint_is_not_signed_in() -> None:
-    host = an_oidc_host()
-    host.client.cookies.clear()
-    hint = f"{ID_TOKEN_HINT_COOKIE_NAME}={a_fake_id_token('only-the-hint')}"
-
-    response = host.client.get("/me", headers={"cookie": hint})
-
-    assert response.status_code == 401
+    assert (len(stored), hint_of(response)) == (MAX_TOKEN_CHARACTERS, stored)
 
 
 @dataclass(frozen=True)
@@ -1144,7 +1145,6 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
 
     assert (response.status_code, response.json()) == (403, {"refusal": refused.refusal})
     assert host.config.session_cookie_name not in set_cookies(response)
-    assert ID_TOKEN_HINT_COOKIE_NAME not in set_cookies(response)
     assert host.sessions.count_active() == 0
     assert host.accounts.list() == []
     assert is_cleared(response, host.pending_cookie_name(query))
@@ -1557,12 +1557,6 @@ def hint_of(response: HttpxResponse) -> str | None:
     return LogoutPage(response.text).hidden_fields.get("id_token_hint")
 
 
-def the_hint_cookie_is_cleared_for_the_logout_path(response: HttpxResponse) -> bool:
-    return {"max-age=0", f"path={LOGOUT_PATH}", "secure"} <= set_cookies(response).get(
-        ID_TOKEN_HINT_COOKIE_NAME, set(),
-    )
-
-
 def test_the_logout_page_carries_the_rows_token_byte_for_byte_and_the_row_is_gone() -> None:
     host = signed_in_host()
     record = host.sessions.record
@@ -1617,10 +1611,9 @@ def test_the_answer_ends_the_session_and_holds_the_token_in_its_body_and_only_cl
 
     header_values = " ".join(value for _, value in response.headers.multi_items())
     assert set(set_cookies(response)) == {
-        host.config.session_cookie_name, host.config.csrf_cookie_name, ID_TOKEN_HINT_COOKIE_NAME,
+        host.config.session_cookie_name, host.config.csrf_cookie_name,
     }
     assert both_session_cookies_are_cleared(host, response)
-    assert the_hint_cookie_is_cleared_for_the_logout_path(response)
     assert "location" not in response.headers
     assert host.issued_id_tokens[-1] not in header_values
     assert hint_of(response) == host.issued_id_tokens[-1]
@@ -1656,12 +1649,22 @@ def _session_expired_but_stored(host: OidcHost) -> dict[str, str]:
     return {}
 
 
+def _session_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
+    record = host.sessions.record
+    assert record is not None
+    record.id_token = None
+    return {}
+
+
 @pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent", "lock_taken"), [
     pytest.param(_no_session, 0, False, False, id="no-session"),
     pytest.param(_forged_session_cookie, 1, False, False, id="forged-cookie-ends-nothing"),
-    pytest.param(_session_cookies_dropped, 1, True, False, id="session-cookies-gone-hint-kept"),
-    pytest.param(_session_ended_in_the_store, 0, True, True, id="session-already-ended"),
+    pytest.param(_session_cookies_dropped, 1, False, False, id="session-cookies-gone"),
+    pytest.param(_session_ended_in_the_store, 0, False, True, id="session-already-ended"),
     pytest.param(_session_expired_but_stored, 0, True, True, id="session-expired-but-stored"),
+    pytest.param(
+        _session_stored_before_the_upgrade, 0, False, True, id="row-stored-before-the-upgrade",
+    ),
 ])
 def test_a_same_origin_logout_needs_no_csrf_token_and_still_answers_the_page(
     arrange: Callable[[OidcHost], dict[str, str]],
@@ -1687,48 +1690,20 @@ def test_a_same_origin_logout_needs_no_csrf_token_and_still_answers_the_page(
     assert host.lock.times_taken - taken_before == lock_taken
 
 
-def _a_compact_jws_of_length(length: int) -> str:
-    segment_length = (length - 2) // 3
-    return ".".join(["A" * segment_length] * 2 + ["A" * (length - 2 - 2 * segment_length)])
-
-
-def _hint_cookies(*values: str) -> dict[str, str]:
-    return {"cookie": "; ".join(f"{ID_TOKEN_HINT_COOKIE_NAME}={value}" for value in values)}
-
-
-@pytest.mark.parametrize(("hint_cookies", "forwarded_hint"), [
-    pytest.param({}, None, id="missing"),
-    pytest.param(
-        _hint_cookies(a_fake_id_token("first"), a_fake_id_token("second")), None, id="duplicated",
-    ),
-    pytest.param(
-        _hint_cookies(_a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND + 1)), None,
-        id="one-character-over-the-bound",
-    ),
-    pytest.param(_hint_cookies("not-a-jws"), None, id="not-compact-jws-shaped"),
-    pytest.param(_hint_cookies("two.segments"), None, id="two-segments"),
-    pytest.param(_hint_cookies("bad+char.in.token"), None, id="outside-the-base64url-alphabet"),
-    pytest.param(
-        _hint_cookies("AAAA.AAAA.AAAA"), "AAAA.AAAA.AAAA", id="segments-that-are-no-json",
-    ),
-    pytest.param(
-        _hint_cookies("bm90LWpzb24.bm90LWpzb24.c2ln"), "bm90LWpzb24.bm90LWpzb24.c2ln",
-        id="segments-that-decode-to-text",
-    ),
-    pytest.param(
-        _hint_cookies(_a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND)),
-        _a_compact_jws_of_length(DOCUMENTED_ID_TOKEN_HINT_BOUND), id="exactly-the-bound",
-    ),
+@pytest.mark.parametrize("signed_in", [
+    pytest.param(True, id="with-a-session"),
+    pytest.param(False, id="without-a-session"),
 ])
-def test_a_logout_forwards_a_sole_jws_shaped_hint_byte_for_byte_and_otherwise_leaves_it_out(
-    hint_cookies: dict[str, str], forwarded_hint: str | None,
-) -> None:
+def test_an_old_hint_cookie_is_neither_read_nor_cleared(*, signed_in: bool) -> None:
     host = an_oidc_host()
+    if signed_in:
+        host.callback(host.sign_in_at_issuer())
+    host.client.cookies.set(OLD_HINT_COOKIE_NAME, a_fake_id_token("set-before-the-upgrade"))
 
-    response = post_logout(host, {**SAME_ORIGIN_FORM, **hint_cookies})
+    response = post_logout(host, SAME_ORIGIN_FORM)
 
-    assert hint_of(response) == forwarded_hint
-    assert the_hint_cookie_is_cleared_for_the_logout_path(response)
+    assert hint_of(response) == (host.issued_id_tokens[-1] if signed_in else None)
+    assert OLD_HINT_COOKIE_NAME not in set_cookies(response)
 
 
 @pytest.mark.parametrize("headers", [
@@ -2208,6 +2183,7 @@ class OpeningStore:
     def open_session(
         self, *cookie_values: str, max_sessions: int | None = None,
         refresh_token: SecretStr | None = None,
+        id_token: SecretStr | None = None,
     ) -> SessionRecord:
         app = FastAPI()
         install_web_auth_config(app, OPENING_CONFIG)
@@ -2216,7 +2192,9 @@ class OpeningStore:
             headers.append((b"cookie", session_cookie_header(*cookie_values).encode()))
         return open_session(
             Request(an_http_scope(app, headers=headers)), OPENING_CONFIG,
-            AdmittedLogin(account=ACCOUNT, return_to=None, refresh_token=refresh_token),
+            AdmittedLogin(
+                account=ACCOUNT, return_to=None, refresh_token=refresh_token, id_token=id_token or SecretStr("id-token-of-the-login"),
+            ),
             sessions=self.sessions, lock=self.lock,
             max_sessions=max_sessions,
         )
@@ -2232,6 +2210,15 @@ def test_a_new_session_holds_the_refresh_token_of_the_admitted_login() -> None:
     session = store.open_session(refresh_token=SecretStr("rt-1"))
 
     assert session.refresh_token == SecretStr("rt-1")
+    assert store.sessions.load(session.id) == session
+
+
+def test_a_new_session_holds_the_id_token_of_the_admitted_login() -> None:
+    store = OpeningStore.holding()
+
+    session = store.open_session(id_token=SecretStr("id-token-1"))
+
+    assert session.id_token == SecretStr("id-token-1")
     assert store.sessions.load(session.id) == session
 
 

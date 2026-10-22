@@ -259,7 +259,6 @@ def a_relying_party(
         client_secret=SecretStr(secrets.token_urlsafe(16)),
         redirect_uri="https://notes.example.org/auth/callback",
         post_logout_redirect_uri="https://notes.example.org/",
-        logout_path="/auth/logout",
         scopes=("openid", "profile"),
         leeway_seconds=ACCESS_TOKEN_LEEWAY_SECONDS,
     )

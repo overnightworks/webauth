@@ -129,9 +129,6 @@ _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
 # A strict subset of RFC 6749's error code characters: every registered code
 # fits, and nothing that could carry markup or a sentence does.
 _IDP_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
-# RFC 3986 pchar and "/", without ";" which would end a cookie's Path attribute.
-_LOGOUT_PATH_CHARACTERS = re.compile(r"/[A-Za-z0-9\-._~!$&'()*+,=:@/%]*")
-_UNFINISHED_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 # RFC 6749 Appendix A.17: refresh-token = 1*VSCHAR, printable ASCII.
 _REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
 # RFC 6750 section 2.1: a bearer token is a b64token, so it can sit in an
@@ -167,10 +164,6 @@ class OidcClientConfig:
     `end_session_endpoint` is the issuer's logout page and
     `post_logout_redirect_uri` the app page it sends the browser back to; the
     issuer checks the latter against the client's registered post-logout URIs.
-    `logout_path` is the browser-visible path of the host's logout route, or a
-    parent of all its logout routes; the cookie that carries the ID token hint
-    is scoped to it. It starts with `/` and holds only RFC 3986 path characters
-    other than `;`.
     Every URL names a host and carries no control character, space,
     credentials, query or fragment. The host of `end_session_endpoint` and
     `post_logout_redirect_uri` is letters, digits, `.` and `-`, or a bracketed IPv6 literal,
@@ -193,21 +186,11 @@ class OidcClientConfig:
     client_secret: SecretStr
     redirect_uri: str
     post_logout_redirect_uri: str
-    logout_path: str
     scopes: tuple[str, ...] = (_OPENID_SCOPE,)
     leeway_seconds: int
 
     def __post_init__(self) -> None:
         self._check_urls()
-        if (
-            not isinstance(self.logout_path, str)
-            or not _LOGOUT_PATH_CHARACTERS.fullmatch(self.logout_path)
-            or _UNFINISHED_PERCENT_ESCAPE.search(self.logout_path)
-        ):
-            raise ValueError(
-                "logout_path must start with / and hold only URL path characters"
-                " other than ;"
-            )
         if not isinstance(self.client_id, str) or not self.client_id:
             raise ValueError("client_id must be a non-empty string")
         if (
@@ -405,10 +388,6 @@ class OidcRelyingParty:
         return AuthorizationRequest(
             url=f"{self._config.authorization_endpoint}?{query}", pending=pending
         )
-
-    @property
-    def logout_path(self) -> str:
-        return self._config.logout_path
 
     def _end_session_form(self, *, id_token_hint: SecretStr | None) -> EndSessionForm:
         return EndSessionForm(

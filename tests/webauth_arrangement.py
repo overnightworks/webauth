@@ -90,7 +90,6 @@ SPEC_WITH_CONCURRENT_READER = "2.3"
 SPEC_WITHOUT_CONCURRENT_READER = "2.4"
 SESSION_IDLE_SECONDS = 3600
 SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
-DOCUMENTED_ID_TOKEN_HINT_BOUND = 3_072
 SEVEN_DAYS_SECONDS = 7 * 24 * 3600
 THIRTY_DAYS_SECONDS = 30 * 24 * 3600
 FIXED_INSTANT = datetime(2030, 1, 1, 12, tzinfo=UTC)
@@ -339,7 +338,7 @@ class SessionRecordsInMemory:
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
-        id_token: SecretStr | None = None,
+        id_token: SecretStr | None,
     ) -> FakeSessionRecord:
         _require_held_lock(self._lock)
         user = self._users.get(user_id)
@@ -620,6 +619,7 @@ def seeded_session(
             now=now,
             expires_at=expires_at,
             refresh_token=refresh_token,
+            id_token=None,
         )
 
 

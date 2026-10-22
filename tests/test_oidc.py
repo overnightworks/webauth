@@ -71,7 +71,6 @@ _CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
 _END_SESSION_ENDPOINT = f"{_ISSUER}/protocol/openid-connect/logout"
 _REDIRECT_URI = "https://notes.example.org/auth/callback"
 _POST_LOGOUT_REDIRECT_URI = "https://notes.example.org/"
-_LOGOUT_PATH = "/auth/logout"
 _LEEWAY_SECONDS = 30
 _NOW = 1_800_000_000
 _CODE = "authorization-code-from-the-callback"
@@ -117,7 +116,6 @@ def _config(**changes: Any) -> OidcClientConfig:
         "client_secret": SecretStr(_CLIENT_SECRET),
         "redirect_uri": _REDIRECT_URI,
         "post_logout_redirect_uri": _POST_LOGOUT_REDIRECT_URI,
-        "logout_path": _LOGOUT_PATH,
         "scopes": ("openid", "profile"),
         "leeway_seconds": _LEEWAY_SECONDS,
     }
@@ -878,47 +876,13 @@ def test_the_apps_own_two_urls_refuse_http_unless_the_host_is_loopback_and_the_r
         _config(**{field_name: url})
 
 
-def test_the_relying_party_exposes_the_configured_logout_path(login: LoginScenario) -> None:
-    assert login.relying_party.logout_path == _LOGOUT_PATH
-
-
-@pytest.mark.parametrize("logout_path", [
-    pytest.param("/", id="the-root"),
-    pytest.param("/logout", id="a-route"),
-    pytest.param("/app/log-out_1.2~x/", id="unreserved-characters-and-a-trailing-slash"),
-    pytest.param("/a%20b/c:d@e!$&'()*+,=", id="percent-encoding-and-sub-delimiters"),
-])
-def test_a_logout_path_of_url_path_characters_is_accepted(logout_path: str) -> None:
-    assert _config(logout_path=logout_path).logout_path == logout_path
-
-
-@pytest.mark.parametrize("logout_path", [
-    pytest.param("", id="empty"),
-    pytest.param("relative-route", id="not-absolute"),
-    pytest.param("https://notes.example.org/logout", id="a-url"),
-    pytest.param("/semi;colon", id="semicolon"),
-    pytest.param("/with?query=1", id="query"),
-    pytest.param("/with#fragment", id="fragment"),
-    pytest.param("/with space", id="space"),
-    pytest.param("/log\nout", id="newline"),
-    pytest.param("/log\x00out", id="nul"),
-    pytest.param("/log%zzout", id="bad-percent-encoding"),
-    pytest.param("/log%", id="trailing-percent"),
-    pytest.param("/log%2", id="percent-with-one-hex-digit"),
-    pytest.param("/log\u00e9out", id="non-ascii"),
-    pytest.param(None, id="not-a-string"),
-])
-def test_a_logout_path_that_is_not_a_url_path_is_refused_without_its_value(
-    logout_path: object,
-) -> None:
-    with pytest.raises(ValueError, match="^logout_path must ") as refusal:
-        _config(logout_path=logout_path)
-
-    assert not logout_path or str(logout_path) not in str(refusal.value)
+def test_a_client_configuration_given_a_logout_path_is_refused() -> None:
+    with pytest.raises(TypeError, match="logout_path"):
+        _config(logout_path="/logout")
 
 
 @pytest.mark.parametrize(
-    "missing", ["end_session_endpoint", "post_logout_redirect_uri", "logout_path"],
+    "missing", ["end_session_endpoint", "post_logout_redirect_uri"],
 )
 def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
     missing: str,

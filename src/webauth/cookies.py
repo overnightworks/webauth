@@ -1,5 +1,4 @@
-"""The cookies webauth sets: the session, the CSRF token bound to it, a pending login,
-and the ID token hint.
+"""The cookies webauth sets: the session, the CSRF token bound to it, and a pending login.
 
 A pending login is the OpenID Connect login a browser began and has not yet
 brought back. It travels in a cookie of its own, named after its state, so
@@ -19,26 +18,6 @@ or whose name appears twice counting as oldest, so repeated starts never crowd
 out the session and CSRF cookies. Only names of exactly that shape count; any
 other cookie whose name merely starts with the prefix is neither counted nor
 cleared.
-
-The ID token hint is the issuer's ID token from the last login, kept in a
-cookie of its own that only the logout path receives, so the issuer can end
-that login's session without asking the person. It is not signed, and it is
-never decoded, verified, logged or accepted as a credential: the issuer
-judges it, and the reader checks only its shape and size: a sole cookie of
-that name shaped like a compact JWS within ``MAX_ID_TOKEN_HINT_CHARS``, else
-it counts as missing. The cookie is ``__Secure-oidc_id_token_hint``, or the
-plain ``oidc_id_token_hint`` with ``cookie_secure=False``; it cannot be
-``__Host-``, which demands ``Path=/``. It is ``HttpOnly``, ``Secure`` exactly when
-``cookie_secure`` is true, always ``SameSite=Strict``, ``Max-Age`` as the
-session cookie and ``Path`` the ``logout_path`` of the ``OidcClientConfig``, so
-the browser sends it to every path beneath that prefix: the narrowest prefix
-covering the logout routes keeps it off every other request, and behind a
-path-rewriting proxy it is the path the browser sees. A new login overwrites the
-old hint, and a token over the bound is not kept and clears it instead. Changing
-``logout_path`` between deployments leaves the old cookie in the browser, which
-a logout clears only at the new path; where the old path still matches the
-logout route, a second cookie of the same name makes the logout omit the hint,
-and the issuer asks until the old one expires or the person removes it.
 """
 
 from __future__ import annotations
@@ -65,7 +44,6 @@ __all__ = [
     "COOKIE_PATH",
     "DEFAULT_CSRF_COOKIE_NAME",
     "DEFAULT_SESSION_COOKIE_NAME",
-    "MAX_ID_TOKEN_HINT_CHARS",
     "MAX_SESSION_COOKIE_CHARS",
     "PLAIN_CSRF_COOKIE_NAME",
     "PLAIN_SESSION_COOKIE_NAME",
@@ -81,14 +59,11 @@ _SECURE_COOKIE_PREFIX: Final = "__Secure-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 _PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
-_PLAIN_LOGOUT_HINT_COOKIE_NAME: Final = "oidc_id_token_hint"
 _DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
 _MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 896
 # A signed session cookie is an identifier plus a hex digest; anything much
 # longer was not issued here, so the reader rejects it before any HMAC is computed.
 MAX_SESSION_COOKIE_CHARS: Final = 200
-MAX_ID_TOKEN_HINT_CHARS: Final = 3072
-"""Characters of ID token the hint cookie carries; a longer token is not kept."""
 _PENDING_SECRET_BYTES: Final = 32
 """Random bytes in each of a pending login's state, nonce and verifier,
 which are minted with ``secrets.token_urlsafe``."""
@@ -100,8 +75,6 @@ _CSRF_SIGNING_PREFIX: Final = b"csrf:"
 # The callback is a top-level navigation from the issuer's site, which a
 # Strict cookie would not accompany.
 _PENDING_LOGIN_SAMESITE: Final = "lax"
-_LOGOUT_HINT_SAMESITE: Final = "strict"
-_COMPACT_JWS: Final = re.compile(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 _COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
@@ -167,8 +140,7 @@ def _is_reserved_cookie_name(name: str) -> bool:
     sets there, and the browser would send both.
     """
     return any(
-        name == _id_token_hint_cookie_name(secure=secure)
-        or name.startswith(_pending_login_cookie_prefix(secure=secure))
+        name.startswith(_pending_login_cookie_prefix(secure=secure))
         for secure in (True, False)
     )
 
@@ -261,10 +233,9 @@ def issue_session_cookies(
     """Hand the browser its signed session and the CSRF token bound to it.
 
     Both cookies live as long as
-    ``session_lifetime.absolute_max_age_seconds``, the cap, and so does the
-    ID-token hint cookie that ``finish_login`` sets. They are issued once at login:
-    renewing a session reissues none of them, so the browser keeps them exactly
-    as long as the session may last.
+    ``session_lifetime.absolute_max_age_seconds``, the cap. They are issued once
+    at login: renewing a session reissues neither, so the browser keeps them
+    exactly as long as the session may last.
 
     Only the session cookie is kept from scripts: the CSRF token has to be
     readable, because the double-submit check compares it against a header the
@@ -313,59 +284,6 @@ def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     response.delete_cookie(
         config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite, secure=secure,
     )
-
-
-def _id_token_hint_cookie_name(*, secure: bool) -> str:
-    """``__Host-`` would demand ``Path=/``, so the hint takes ``__Secure-``."""
-    plain_name = _PLAIN_LOGOUT_HINT_COOKIE_NAME
-    return f"{_SECURE_COOKIE_PREFIX}{plain_name}" if secure else plain_name
-
-
-def _issue_id_token_hint_cookie(
-    response: Response, id_token: str, *, logout_path: str, config: WebAuthConfig,
-) -> None:
-    """Hand the browser the ID token, for the logout path alone.
-
-    A token longer than ``MAX_ID_TOKEN_HINT_CHARS`` is not kept, and the hint
-    of an earlier login is cleared instead, so a logout never carries it.
-    """
-    if len(id_token) > MAX_ID_TOKEN_HINT_CHARS:
-        _clear_id_token_hint_cookie(response, logout_path=logout_path, config=config)
-        return
-    response.set_cookie(
-        _id_token_hint_cookie_name(secure=config.cookie_secure),
-        id_token,
-        max_age=config.session_lifetime.absolute_max_age_seconds,
-        httponly=True,
-        samesite=_LOGOUT_HINT_SAMESITE,
-        secure=config.cookie_secure,
-        path=logout_path,
-    )
-
-
-def _clear_id_token_hint_cookie(
-    response: Response, *, logout_path: str, config: WebAuthConfig,
-) -> None:
-    """Take the hint back, repeating the attributes it was set with."""
-    response.delete_cookie(
-        _id_token_hint_cookie_name(secure=config.cookie_secure),
-        path=logout_path,
-        secure=config.cookie_secure,
-        httponly=True,
-        samesite=_LOGOUT_HINT_SAMESITE,
-    )
-
-
-def _id_token_hint_from_request(connection: HTTPConnection, config: WebAuthConfig) -> str | None:
-    """The hint the request carries: its sole cookie of that name, when it has the
-    shape of a compact JWS within ``MAX_ID_TOKEN_HINT_CHARS``; otherwise ``None``."""
-    values = _cookie_values(connection, _id_token_hint_cookie_name(secure=config.cookie_secure))
-    if len(values) != 1:
-        return None
-    hint = values[0]
-    if len(hint) > MAX_ID_TOKEN_HINT_CHARS or _COMPACT_JWS.fullmatch(hint) is None:
-        return None
-    return hint
 
 
 @dataclass(frozen=True)

@@ -39,8 +39,9 @@ missing or empty claim means no membership.
 
 After ``finish_login`` admits an account, ``open_session`` under the host's lock
 ends the session the request's cookie names, prunes the account to a cap, creates
-its new one, holding the login's refresh token, at the configured clock's instant, never
-committing and setting no cookie, so the host commits and then issues the cookies.
+its new one, holding the login's refresh token and ID token (the browser keeps none),
+at the configured clock's instant, never committing and setting no cookie, so the host
+commits and then issues the cookies.
 
 ``log_out`` is the third route's whole sequence: it ends the session the
 request's cookie names, if any, and answers a page that posts the ID token hint
@@ -51,12 +52,11 @@ the issuer. A forged, oversized or duplicated cookie counts as missing: it ends
 no stored session, which leaves a duplicated cookie's session until it expires,
 while the browser's own cookies are still cleared.
 
-``finish_login`` hands the browser the login's ID token in a cookie that only
-the logout path receives, and ``log_out`` passes it to the issuer as
-``id_token_hint`` and clears it, so the issuer ends its session without asking
-the person to confirm. The hint is never decoded or verified here and is no
-credential; without a usable one (missing, duplicated, oversized or not shaped
-like a compact JWS) the issuer asks.
+``log_out`` reads the login's ID token from the session row before it deletes
+the row and passes it to the issuer as ``id_token_hint``, so the issuer ends its
+session without asking the person to confirm. The hint is never decoded or
+verified here and is no credential; without a row to read (ended, swept,
+pruned or stored before the host held ID tokens) the issuer asks.
 
 ``receive_backchannel_logout`` is the issuer's back-channel logout: it reads the
 form body (one non-empty ``logout_token`` field, as the issuer posts it) and
@@ -87,13 +87,10 @@ from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
 from webauth._validation import require_positive_whole_number
 from webauth.cookies import (
-    _clear_id_token_hint_cookie,
     _clear_pending_login_cookie,
     _cookie_pairs,
     _cookie_values,
-    _id_token_hint_from_request,
     _is_pending_login_cookie_name,
-    _issue_id_token_hint_cookie,
     _issue_pending_login_cookie,
     _pending_login_cookie_name,
     _verify_pending_login,
@@ -275,13 +272,14 @@ class AdmissionRefusal(StrEnum):
 @dataclass(frozen=True)
 class AdmittedLogin:
     """An admitted account, the path of this app to send the browser to (or
-    ``None`` for the host's default page), and the refresh token the login's
-    code exchange issued (``None`` when the issuer gave none), which
-    ``open_session`` stores in the new session's row."""
+    ``None`` for the host's default page), the refresh token the login's code
+    exchange issued (``None`` when the issuer gave none) and the login's ID
+    token, which ``open_session`` stores in the new session's row."""
 
     account: UserRecord
     return_to: str | None
     refresh_token: SecretStr | None
+    id_token: SecretStr
 
 
 def start_login(
@@ -360,12 +358,12 @@ def finish_login(
     On an admitted login, the host opens its session for ``account`` with
     ``open_session``, commits, calls ``issue_session_cookies`` and sends the
     browser to ``return_to``, the path judged again on its way back, or to its
-    default page when that is ``None``. ``response`` also carries the ID token
-    hint cookie for the logout path, replacing an older one; a refused callback
-    sets none (see ``log_out``). When the issuer is on another registrable
-    domain than the app, ``cookie_samesite`` must be ``"lax"``: with
-    ``"strict"`` the browser withholds the session cookie from the first page
-    after the redirect and that page is signed out.
+    default page when that is ``None``. The login's ID token is on the
+    ``AdmittedLogin`` for ``open_session`` to store; no cookie carries it.
+    When the issuer is on another registrable domain than the app,
+    ``cookie_samesite`` must be ``"lax"``: with ``"strict"`` the browser
+    withholds the session cookie from the first page after the redirect and
+    that page is signed out.
     """
     callback_query = request.url.query
     state = _callback_state(callback_query)
@@ -389,16 +387,11 @@ def finish_login(
     )
     if isinstance(admitted, AdmissionRefusal):
         return admitted
-    _issue_id_token_hint_cookie(
-        response,
-        identity.id_token,
-        logout_path=relying_party.logout_path,
-        config=config,
-    )
     return AdmittedLogin(
         account=admitted,
         return_to=same_app_path(request, pending.return_to),
         refresh_token=identity.refresh_token,
+        id_token=SecretStr(identity.id_token),
     )
 
 
@@ -419,8 +412,8 @@ def open_session(
     is a number, the account's newest ``max_sessions - 1`` sessions are kept and
     the rest ended, so neither the replaced session nor the new one counts
     against the cap; the new session is created at that instant, expiring one
-    idle period later, and holds ``admitted.refresh_token``. ``None``
-    states that the host sets no cap; any other value must be a positive whole
+    idle period later, and holds ``admitted.refresh_token`` and
+    ``admitted.id_token``. ``None`` states that the host sets no cap; any other value must be a positive whole
     number, or ``ValueError`` is raised before anything is written. A forged,
     oversized or duplicated cookie ends nothing.
 
@@ -443,6 +436,7 @@ def open_session(
             now=now,
             expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
             refresh_token=admitted.refresh_token,
+            id_token=admitted.id_token,
         )
 
 
@@ -457,19 +451,20 @@ def log_out(
 ) -> Response:
     """End this browser's app session and answer the page that ends the issuer's.
 
-    The session the request's cookie names is deleted under ``lock`` and the
-    session cookies and the ID token hint cookie are cleared on the answer in
-    every case. The answer is a ``no-store`` HTML page under its own
-    Content-Security-Policy that posts the client ID, the configured
-    ``post_logout_redirect_uri`` and the ID token hint the request carries to
-    the end-session endpoint, and submits itself; ``button_label`` is the text
-    of the button shown where no script runs. The security-headers middleware
-    leaves that policy and ``Cache-Control`` in place, so no host policy needs a
-    source for the issuer. Without a usable hint the issuer asks the person
-    once, as it also does for a hint of another issuer session, and for a hint
-    whose realm signing key has since been deleted it shows an error page. The
-    session's stored refresh token goes to the issuer nowhere; deleting the row
-    removes it.
+    The session the request's cookie names is read and then deleted under
+    ``lock``, and the session cookies are cleared on the answer in every case.
+    An expired row that still stands is read too, and neither renewed nor admitted.
+    The answer is a ``no-store`` HTML page under its own Content-Security-Policy
+    that posts the client ID, the configured ``post_logout_redirect_uri`` and the
+    ID token hint the row holds to the end-session endpoint, and submits itself;
+    ``button_label`` is the text of the button shown where no script runs. The
+    security-headers middleware leaves that policy and ``Cache-Control`` in
+    place, so no host policy needs a source for the issuer. Without a stored
+    row, or with one stored before the host held ID tokens, the issuer asks the
+    person once, as it also does for a hint of another issuer session, and for a
+    hint whose realm signing key has since been deleted it shows an error page.
+    The session's stored refresh token goes to the issuer nowhere; deleting the
+    row removes it.
 
     The host commits and returns the answer as it is, and a single-page app
     logs out by a top-level form POST to the route. The route needs no
@@ -482,16 +477,20 @@ def log_out(
     mutating methods alone) and lists its exact path, never a prefix, in
     ``CsrfPolicy.token_exempt`` and not in ``exempt``."""
     session_id = session_id_from_request(request, config)
+    id_token: SecretStr | None = None
     if session_id is not None:
         with lock.hold():
-            sessions.delete(session_id)
-    id_token_hint = _id_token_hint_from_request(request, config)
-    hint = None if id_token_hint is None else SecretStr(id_token_hint)
-    form = relying_party._end_session_form(id_token_hint=hint)
+            id_token = _id_token_of_ended_session(sessions, session_id)
+    form = relying_party._end_session_form(id_token_hint=id_token)
     answer = end_session_page(form, button_label=button_label)
     clear_session_cookies(answer, config)
-    _clear_id_token_hint_cookie(answer, logout_path=relying_party.logout_path, config=config)
     return answer
+
+
+def _id_token_of_ended_session(sessions: SessionRecordStore, session_id: str) -> SecretStr | None:
+    record = sessions.load(session_id)
+    sessions.delete(session_id)
+    return None if record is None else record.id_token
 
 
 class AccessTokenRefusalReason(StrEnum):
