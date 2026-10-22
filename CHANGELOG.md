@@ -12,8 +12,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 - CSRF and rate-limit rules now match the path the router routes. A `%3F` or `%23` inside a path
   parameter used to cut the path the rules saw short, so a `protected` shape or pattern could miss a
-  state-changing route and an `exempt` rule could cover a path it does not name, and a rate-limit
-  rule could fall back to the default budget.
+  state-changing route and an `exempt` rule could cover a path it does not name, a rate-limit
+  exemption could apply to a path it does not name, and a rate-limit rule could fall back to the
+  default budget.
 
 ## 0.20.1
 

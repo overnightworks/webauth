@@ -509,34 +509,34 @@ def a_stack_with_parametrised_post_routes(**stack_policies: CsrfPolicy) -> AuthA
     return auth
 
 
-@pytest.mark.parametrize(
-    ("policy", "sent_path", "routed_path", "refused"),
-    [
-        pytest.param(
-            PERSON_EXPORT_SHAPE, "/api/people/alice/export", "/api/people/alice/export", True,
-            id="shape-plain",
-        ),
-        pytest.param(
-            PERSON_EXPORT_SHAPE, "/api/people/alice%3Fx/export", "/api/people/alice?x/export",
-            True, id="shape-encoded-question-mark",
-        ),
-        pytest.param(
-            PERSON_EXPORT_SHAPE, "/api/people/alice%23x/export", "/api/people/alice#x/export",
-            True, id="shape-encoded-hash",
-        ),
-        pytest.param(
-            HOOK_EXEMPTION, HOOK_EXEMPT_PATH, HOOK_EXEMPT_PATH, False, id="exempt-exact",
-        ),
-        pytest.param(
-            HOOK_EXEMPTION, "/hooks/stripe%3Fx", "/hooks/stripe?x", True,
-            id="exempt-exact-encoded-question-mark",
-        ),
-        pytest.param(
-            HOOK_EXEMPTION, "/hooks/stripe%23x", "/hooks/stripe#x", True,
-            id="exempt-exact-encoded-hash",
-        ),
-    ],
-)
+ROUTED_PATH_CASES = [
+    pytest.param(
+        PERSON_EXPORT_SHAPE, "/api/people/alice/export", "/api/people/alice/export", True,
+        id="shape-plain",
+    ),
+    pytest.param(
+        PERSON_EXPORT_SHAPE, "/api/people/alice%3Fx/export", "/api/people/alice?x/export",
+        True, id="shape-encoded-question-mark",
+    ),
+    pytest.param(
+        PERSON_EXPORT_SHAPE, "/api/people/alice%23x/export", "/api/people/alice#x/export",
+        True, id="shape-encoded-hash",
+    ),
+    pytest.param(
+        HOOK_EXEMPTION, HOOK_EXEMPT_PATH, HOOK_EXEMPT_PATH, False, id="exempt-exact",
+    ),
+    pytest.param(
+        HOOK_EXEMPTION, "/hooks/stripe%3Fx", "/hooks/stripe?x", True,
+        id="exempt-exact-encoded-question-mark",
+    ),
+    pytest.param(
+        HOOK_EXEMPTION, "/hooks/stripe%23x", "/hooks/stripe#x", True,
+        id="exempt-exact-encoded-hash",
+    ),
+]
+
+
+@pytest.mark.parametrize(("policy", "sent_path", "routed_path", "refused"), ROUTED_PATH_CASES)
 def test_the_csrf_token_rule_is_chosen_by_the_path_the_router_routes(
     policy: CsrfPolicy, sent_path: str, routed_path: str, refused: bool,
 ) -> None:
@@ -546,39 +546,11 @@ def test_the_csrf_token_rule_is_chosen_by_the_path_the_router_routes(
 
     response = auth.client.post(sent_path)
 
-    assert (response.status_code, auth.route_runs) == (
-        (403, []) if refused else (200, [routed_path])
-    )
+    assert response.status_code == (403 if refused else 200)
+    assert auth.route_runs == ([] if refused else [routed_path])
 
 
-@pytest.mark.parametrize(
-    ("policy", "sent_path", "routed_path", "refused"),
-    [
-        pytest.param(
-            PERSON_EXPORT_SHAPE, "/api/people/alice/export", "/api/people/alice/export", True,
-            id="shape-plain",
-        ),
-        pytest.param(
-            PERSON_EXPORT_SHAPE, "/api/people/alice%3Fx/export", "/api/people/alice?x/export",
-            True, id="shape-encoded-question-mark",
-        ),
-        pytest.param(
-            PERSON_EXPORT_SHAPE, "/api/people/alice%23x/export", "/api/people/alice#x/export",
-            True, id="shape-encoded-hash",
-        ),
-        pytest.param(
-            HOOK_EXEMPTION, HOOK_EXEMPT_PATH, HOOK_EXEMPT_PATH, False, id="exempt-exact",
-        ),
-        pytest.param(
-            HOOK_EXEMPTION, "/hooks/stripe%3Fx", "/hooks/stripe?x", True,
-            id="exempt-exact-encoded-question-mark",
-        ),
-        pytest.param(
-            HOOK_EXEMPTION, "/hooks/stripe%23x", "/hooks/stripe#x", True,
-            id="exempt-exact-encoded-hash",
-        ),
-    ],
-)
+@pytest.mark.parametrize(("policy", "sent_path", "routed_path", "refused"), ROUTED_PATH_CASES)
 def test_the_csrf_origin_rule_is_chosen_by_the_path_the_router_routes(
     policy: CsrfPolicy, sent_path: str, routed_path: str, refused: bool,
 ) -> None:
@@ -586,6 +558,5 @@ def test_the_csrf_origin_rule_is_chosen_by_the_path_the_router_routes(
 
     response = auth.client.post(sent_path, headers={"origin": FOREIGN_ORIGIN})
 
-    assert (response.status_code, auth.route_runs) == (
-        (403, []) if refused else (200, [routed_path])
-    )
+    assert response.status_code == (403 if refused else 200)
+    assert auth.route_runs == ([] if refused else [routed_path])
