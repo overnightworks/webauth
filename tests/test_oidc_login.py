@@ -10,6 +10,7 @@ fake issuer that answers each code once.
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import secrets
 import threading
@@ -18,7 +19,8 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
+from html.parser import HTMLParser
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
@@ -125,6 +127,7 @@ MAX_PENDING_LOGIN_COOKIE_CHARS = 896
 MAX_PENDING_LOGINS = 5
 
 BOUND_ISSUER = "https://id.example/realms/lab"
+BOUND_ISSUER_ORIGIN = "https://id.example"
 LOGIN_GROUP = "/apps/lab"
 ADMIN_GROUP = f"{LOGIN_GROUP}/admin"
 ADMISSION = AdmissionConfig(
@@ -587,6 +590,7 @@ CLIENT_ID = "lab-app"
 CALLBACK_PATH = "/auth/callback"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_PATH = "/logout"
+LOGOUT_BUTTON_LABEL = "Sign out"
 FORM_LOGOUT_PATH = LOGOUT_PATH
 FETCH_LOGOUT_PATH = f"{LOGOUT_PATH}/fetch"
 ID_TOKEN_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
@@ -801,11 +805,10 @@ def an_oidc_host(
 
     @app.post(FORM_LOGOUT_PATH)
     def form_logout(request: Request) -> Response:
-        response = Response(status_code=303)
-        response.headers["location"] = log_out(
-            relying_party, request, response, config, sessions=sessions, lock=lock,
+        return log_out(
+            relying_party, request, config,
+            sessions=sessions, lock=lock, button_label=LOGOUT_BUTTON_LABEL,
         )
-        return response
 
     @app.post(FETCH_LOGOUT_PATH)
     def fetch_logout(request: Request, response: Response) -> dict[str, str]:
@@ -1495,6 +1498,99 @@ def post_logout(
     host: OidcHost, headers: dict[str, str], path: str = FORM_LOGOUT_PATH,
 ) -> HttpxResponse:
     return host.client.post(path, headers=headers, follow_redirects=False)
+
+
+@dataclass
+class LogoutPage:
+    """What a browser parses out of the logout answer."""
+
+    tags: list[str] = field(default_factory=list)
+    forms: list[dict[str, str | None]] = field(default_factory=list)
+    hidden_fields: dict[str, str | None] = field(default_factory=dict)
+    scripts: list[str] = field(default_factory=list)
+    button_labels: list[str] = field(default_factory=list)
+    title: str = ""
+    handler_attributes: list[str] = field(default_factory=list)
+
+
+class _LogoutPageParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.page = LogoutPage()
+        self._open_text: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        self.page.tags.append(tag)
+        self.page.handler_attributes += [name for name in attributes if name.startswith("on")]
+        if tag == "form":
+            self.page.forms.append(attributes)
+        if tag == "input":
+            self.page.hidden_fields[attributes["name"] or ""] = attributes["value"]
+        if tag in {"script", "button", "title"}:
+            self._open_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._open_text is not None:
+            self._open_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._open_text is None:
+            return
+        text = "".join(self._open_text)
+        if tag == "script":
+            self.page.scripts.append(text)
+        elif tag == "button":
+            self.page.button_labels.append(text)
+        elif tag == "title":
+            self.page.title = text
+        self._open_text = None
+
+
+def the_page_of(response: HttpxResponse) -> LogoutPage:
+    parser = _LogoutPageParser()
+    parser.feed(response.text)
+    return parser.page
+
+
+def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
+    directives = (
+        directive.split() for directive in response.headers["content-security-policy"].split("; ")
+    )
+    return {name: sources for name, *sources in directives}
+
+
+def test_a_logout_answers_a_page_that_posts_the_client_and_the_hint_to_the_end_session_endpoint(
+) -> None:
+    host = signed_in_host()
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    page = the_page_of(response)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/html; charset=utf-8"
+    assert page.forms == [{"method": "post", "action": END_SESSION_ENDPOINT}]
+    assert page.hidden_fields == {
+        "client_id": CLIENT_ID,
+        "post_logout_redirect_uri": a_client_config().post_logout_redirect_uri,
+        "id_token_hint": host.issued_id_tokens[-1],
+    }
+    assert page.button_labels == [LOGOUT_BUTTON_LABEL]
+
+
+def test_the_logout_policy_admits_the_one_inline_script_by_its_hash_and_posts_to_two_origins(
+) -> None:
+    host = signed_in_host()
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    page = the_page_of(response)
+    [script] = page.scripts
+    script_hash = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    policy = content_security_policy_of(response)
+    assert policy["script-src"] == [f"'sha256-{script_hash}'"]
+    assert policy["form-action"] == [BOUND_ISSUER_ORIGIN, HTTPS_TEST_SERVER]
+    assert page.handler_attributes == []
 
 
 def is_the_issuers_logout_url(url: str, *, id_token_hint: str | None) -> bool:

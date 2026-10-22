@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -378,3 +379,50 @@ def test_hsts_is_sent_when_cookies_are_secure() -> None:
 
 def test_hsts_is_absent_without_secure_cookies() -> None:
     assert the_hsts_header_of(POLICY, cookie_secure=False) is None
+
+
+OWN_POLICY_ANSWER_HEADERS = {
+    "webauth-own-policy": "1",
+    "content-security-policy": "default-src 'none'",
+    "cache-control": "no-store",
+}
+
+
+@pytest.mark.parametrize(
+    ("answer_headers", "expected_policy", "expected_cache_control"),
+    [
+        pytest.param(
+            {"content-security-policy": "default-src *", "cache-control": "public"},
+            POLICY.content_security_policy,
+            "max-age=60",
+            id="without-the-marker-the-policy-overwrites",
+        ),
+        pytest.param(
+            OWN_POLICY_ANSWER_HEADERS,
+            "default-src 'none'",
+            "no-store",
+            id="with-the-marker-the-answers-own-stand",
+        ),
+    ],
+)
+def test_an_answer_with_the_own_policy_marker_keeps_its_policy_and_loses_the_marker(
+    answer_headers: dict[str, str], expected_policy: str, expected_cache_control: str,
+) -> None:
+    policy = SecurityHeadersPolicy(
+        POLICY.content_security_policy,
+        cache_control_rules=(CacheControlRule(PathRules(exact=frozenset({"/page"})), "max-age=60"),),
+    )
+    app = an_app(policy=policy)
+
+    @app.get("/page")
+    def page() -> Response:
+        return Response("page", headers=answer_headers)
+
+    response = TestClient(app).get("/page")
+
+    assert response.headers["content-security-policy"] == expected_policy
+    assert response.headers["cache-control"] == expected_cache_control
+    assert "webauth-own-policy" not in response.headers
+    assert_carries_policy_headers(
+        response.headers, replace(policy, content_security_policy=expected_policy), hsts=True,
+    )
