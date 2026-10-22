@@ -31,12 +31,13 @@ from webauth.dependencies import (
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.policies import PathRules, PublicRule
+from webauth.ports import AuthenticatedUser
 
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
-    from webauth.ports import AuthenticatedUser, SessionTransaction
+    from webauth.ports import SessionTransaction
 
 __all__ = [
     "SessionGate",

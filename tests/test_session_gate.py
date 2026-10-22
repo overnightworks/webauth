@@ -395,8 +395,9 @@ def with_admitted_admin_routes(app: AuthApp) -> AuthApp:
 
     @app.app.get(ADMITTED_ADMIN_DEPENDENCY_PATH)
     def depending_on_admitted_admin(
-        admin: AuthenticatedUser = Depends(admitted_admin),
+        request: Request, admin: AuthenticatedUser = Depends(admitted_admin),
     ) -> dict[str, str]:
+        app.route_runs.append(request.url.path)
         return {"username": admin.username}
 
     @app.app.get(ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH)
