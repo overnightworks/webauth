@@ -63,6 +63,7 @@ from playwright.sync_api import Page, Playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from realm import (
     ADMIN_NAME,
+    CLIENT_ID,
     IDP_HOST,
     OUTSIDER_NAME,
     REALM,
@@ -80,7 +81,7 @@ if TYPE_CHECKING:
 HAL = "d1-hal"
 OTHER_HAL = "d1-other"
 AUDIENCE_APP = "d1-app-c"
-HOST_AUDIENCE = "d1-host"
+HOST_AUDIENCE = CLIENT_ID
 HOST_SCOPE = "openid aud-d1-host"
 SHORT_LIFESPAN_SECONDS = 15
 EXPIRY_MARGIN_SECONDS = 2
@@ -130,7 +131,6 @@ class BearerRun:
     host: Host
     settings: HostSettings
     ca_certificate: Path
-    log_file: Path
     people: dict[str, Person]
     client_uuids: dict[str, str]
     redirect_uris: dict[str, str]
@@ -163,7 +163,8 @@ class BearerRun:
         return host_state(self.host)
 
     def gate_lines(self) -> list[str]:
-        return [line for line in self.log_file.read_text().splitlines() if GATE_LINE.search(line)]
+        lines = self.host.log_file.read_text().splitlines()
+        return [line for line in lines if GATE_LINE.search(line)]
 
     def last_gate_reason(self) -> str:
         match = GATE_LINE.search(self.gate_lines()[-1])
@@ -405,6 +406,8 @@ def outsider_is_refused_and_recorded(run: BearerRun) -> str:
 def disabled_person_keeps_the_token(run: BearerRun) -> str:
     run.proof.set_user_enabled(run.admin_id, False)
     try:
+        person = run.proof.fresh_admin().get(f"/{REALM}/users/{run.admin_id}")
+        assert person["enabled"] is False, "Keycloak did not disable d1-admin"
         answer = run.send(Call("GET", EXPORT, run.tokens["admin"]))
     finally:
         run.proof.set_user_enabled(run.admin_id, True)
@@ -461,7 +464,7 @@ def answers_are_not_stored_and_set_no_cookie(run: BearerRun) -> str:
 
 
 def no_token_is_shown_and_refusals_are_logged(run: BearerRun) -> str:
-    texts = [run.log_file.read_text()] + [
+    texts = [run.host.log_file.read_text()] + [
         f"{answer.headers}{answer.text}" for answer in run.answers
     ]
     secrets_sent = {token for token in run.sent} | {token.split(".")[2] for token in run.sent}
@@ -530,6 +533,7 @@ def mint_tokens(run: BearerRun) -> str:
     for name, audiences in EXPECTED_AUDIENCES.items():
         claims = claims_of(run.tokens[name])
         assert set(as_list(claims["aud"])) == audiences, f"{name} names {claims['aud']!r}"
+    assert claims_of(run.tokens["id_token"])["aud"] == HAL, "the ID token's aud is not d1-hal"
     assert claims_of(run.tokens["other_client"])["azp"] == OTHER_HAL, "azp is not d1-other"
     return f"{len(run.tokens)} tokens minted for {HAL} and {OTHER_HAL} with PKCE"
 
@@ -602,7 +606,7 @@ def drive_bearer_phase(
             with contextlib.ExitStack() as stack:
                 drive_scenarios(BearerRun(
                     proof, host, settings, tls.ca_certificate,
-                    runtime / f"host-{settings.port}.log", people, client_uuids, redirect_uris,
+                    people, client_uuids, redirect_uris,
                     stack, admin_id=admin_id,
                 ))
         finally:

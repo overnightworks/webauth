@@ -169,6 +169,10 @@ class HostSettings:
     bearer_authorized_parties: tuple[str, ...] = ()
     """The client ids whose access tokens open the machine routes; none means no such routes."""
 
+    @property
+    def is_bearer_host(self) -> bool:
+        return bool(self.bearer_authorized_parties)
+
     @staticmethod
     def read(path: Path) -> HostSettings:
         fields = json.loads(path.read_text())
@@ -365,7 +369,7 @@ def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]
 
 def _bearer_policies(settings: HostSettings, world: dict[str, World]) -> dict[str, Any]:
     """The policies only the bearer host installs; the host without the setting has none."""
-    if not settings.bearer_authorized_parties:
+    if not settings.is_bearer_host:
         return {}
 
     def counted_session_transaction() -> AbstractContextManager[SessionRecordStore]:
@@ -575,7 +579,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         current.backchannel_refused += 1
         return Response(status_code=400)
 
-    if settings.bearer_authorized_parties:
+    if settings.is_bearer_host:
         _add_machine_routes(app, dependencies.current_user)
     return app
 
@@ -629,7 +633,7 @@ def main() -> None:
     arguments = parser.parse_args()
     die_with_parent(arguments.parent_pid)
     settings = HostSettings.read(arguments.settings)
-    if settings.bearer_authorized_parties:
+    if settings.is_bearer_host:
         log_the_bearer_gate()
     world = {"world": World(settings)}
     _Observation(settings.observe_port, world, lambda: World(settings))

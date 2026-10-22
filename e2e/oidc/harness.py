@@ -83,6 +83,7 @@ class Host:
     cookie_samesite: CookieSameSite
     app_port: int
     observe_port: int
+    log_file: Path
 
 
 @contextlib.contextmanager
@@ -106,7 +107,8 @@ def start_host(run: RunRecord, runtime: Path, settings: HostSettings, ca_certifi
     cookie_samesite = settings.cookie_samesite
     settings_file = runtime / f"host-settings-{settings.port}.json"
     settings.write(settings_file)
-    log_file = (runtime / f"host-{settings.port}.log").open("wb")
+    log_path = runtime / f"host-{settings.port}.log"
+    log_file = log_path.open("wb")
     # Fixed command list
     process = subprocess.Popen(  # noqa: S603
         [sys.executable, str(Path(__file__).with_name("host_app.py")),
@@ -119,7 +121,7 @@ def start_host(run: RunRecord, runtime: Path, settings: HostSettings, ca_certifi
     except BaseException:
         stop_host(process)
         raise
-    return Host(process, cookie_samesite, settings.port, settings.observe_port)
+    return Host(process, cookie_samesite, settings.port, settings.observe_port, log_path)
 
 
 def host_state(host: Host) -> dict[str, Any]:
