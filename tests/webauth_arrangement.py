@@ -726,7 +726,8 @@ def an_auth_app(
     instead (no overrides then). ``gate`` installs the library middleware with
     a ``SessionGate`` over ``public`` and ``optional``, its transaction
     ``session_transaction`` or else the store's ``in_transaction``;
-    ``stack_policies`` adds the other policies the installer takes.
+    ``stack_policies`` adds the other policies the installer takes, or replaces
+    the headers.
 
     ``UNAUTHENTICATED_RESPONSE_PATH`` answers with ``unauthenticated_response``
     called directly, over the same ``login_redirect``, so a test can compare
@@ -753,8 +754,7 @@ def an_auth_app(
     if gate:
         install_web_auth_middleware(
             app,
-            security_headers=GATED_APP_HEADERS_POLICY,
-            **(stack_policies or {}),
+            **{"security_headers": GATED_APP_HEADERS_POLICY, **(stack_policies or {})},
             session_gate=SessionGate(
                 session_transaction=session_transaction or sessions.in_transaction,
                 login_redirect=login_redirect,

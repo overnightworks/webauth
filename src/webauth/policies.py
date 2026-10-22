@@ -53,11 +53,14 @@ class PathShape:
 class PathRules:
     """The paths a rule selects, named exactly or by shape.
 
-    Rules are written as the decoded ASGI path the server delivers
-    (``scope["path"]``), the path the router matches. A ``root_path`` the server
-    supplies (Uvicorn ``--root-path``) is part of it; one the application
-    supplies (``FastAPI(root_path=...)``) is not. Only the session gate's rules
-    are written as the router sees them, ``root_path`` stripped.
+    Every webauth policy writes its paths as the application's router routes
+    them: below the application's own ``root_path``, with the prefix of every
+    mount between the policy and the route included. Under
+    ``FastAPI(root_path="/app")`` the rule ``/api/admin/`` selects ``/api/admin/x``
+    and ``/app/api/admin/x`` alike, and behind a server that delivers
+    ``--root-path /app`` it selects ``/app/api/admin/x``. The prefix is
+    stripped at a segment boundary, so ``/application/x`` stays whole. The
+    rule ``/app/api/admin/`` selects none of them.
     """
 
     exact: frozenset[str] = frozenset()

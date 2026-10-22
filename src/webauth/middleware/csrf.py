@@ -12,6 +12,7 @@ from webauth.config import web_auth_config
 from webauth.cookies import _verify_csrf_token
 from webauth.dependencies import _bearer_admission, session_id_from_request
 from webauth.middleware._refusal import RefusalMiddleware
+from webauth.middleware._route_path import route_path
 from webauth.policies import CsrfPolicy
 
 if TYPE_CHECKING:
@@ -49,7 +50,7 @@ class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
     async def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
-            and self._policy.requires_token(request.scope["path"])
+            and self._policy.requires_token(route_path(request.scope))
             and _bearer_admission(request) is None
         ):
             config = web_auth_config(request)
@@ -125,7 +126,7 @@ class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
     async def _refusal(self, request: Request) -> JSONResponse | None:
         if (
             request.method in _MUTATING_METHODS
-            and self._policy.requires_same_origin(request.scope["path"])
+            and self._policy.requires_same_origin(route_path(request.scope))
             and _bearer_admission(request) is None
         ):
             return _origin_check_refusal(request)
