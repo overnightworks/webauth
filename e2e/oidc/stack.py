@@ -18,7 +18,6 @@ import httpx
 
 EDGE_SHA_FILE = Path(__file__).with_name("EDGE_SHA")
 PROBE_FILES = "compose.yaml keycloak probe/keycloak src/edge traefik.yml dynamic".split()
-REALM = "hallucinai"
 PROBE_PROJECT = "edge-kc-probe"
 KEYCLOAK_NETWORK = "keycloak"
 READY_MARK = "READY "

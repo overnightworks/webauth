@@ -210,7 +210,13 @@ from harness import (
     stop_on_first_signal,
     without_query_values,
 )
-from host_app import ACCESS_TOKEN_PATH, LOGOUT_PATH, WORKLOAD_TOKEN_PATH, HostSettings
+from host_app import (
+    ACCESS_TOKEN_PATH,
+    CALLBACK_PATH,
+    LOGOUT_PATH,
+    WORKLOAD_TOKEN_PATH,
+    HostSettings,
+)
 from playwright.sync_api import (
     Browser,
     Cookie,
@@ -221,6 +227,7 @@ from playwright.sync_api import (
     Route,
     sync_playwright,
 )
+from realm import REALM, client_representation, create_user, short_lived_tokens
 from shim import CallbackBridge, TlsShim
 from stack import Admin, HeldStack, require_pinned_clean_edge
 
@@ -246,13 +253,11 @@ IDP_HOST = "auth.hallucinai.de"
 APP_HOST = "demo.hallucinai.de"
 SECOND_APP_HOST = "demo.example.test"
 UNTRUSTED_HOST = "untrusted.hallucinai.de"
-REALM = "hallucinai"
 EDGE_CONTAINER_FILTER = "edge-kc-probe"
 ISSUER = f"https://{IDP_HOST}/realms/{REALM}"
 OIDC_PATH = f"{ISSUER}/protocol/openid-connect"
 END_SESSION_ENDPOINT = f"{OIDC_PATH}/logout"
 APP_ORIGIN = f"https://{APP_HOST}"
-CALLBACK_PATH = "/auth/callback"
 SECOND_APP_ORIGIN = f"https://{SECOND_APP_HOST}"
 CLIENT_ID = "d1-host"
 USER_NAME = "d1-user"
@@ -269,7 +274,6 @@ CALLBACK_WAIT_SECONDS = 15
 CALLBACK_POLL_SECONDS = 0.2
 SHORT_TOKEN_LIFESPAN_SECONDS = 15
 EXPIRY_MARGIN_SECONDS = 2
-LIFESPAN_ATTRIBUTE = "access.token.lifespan"
 
 
 @dataclass(frozen=True)
@@ -839,30 +843,6 @@ def id_token_expiry(hint: Cookie) -> float:
     return float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
 
 
-@contextlib.contextmanager
-def short_lived_id_tokens(proof: Proof, seconds: int) -> Iterator[None]:
-    """The default host's client issues tokens that live `seconds`; its previous setting returns."""
-    path = f"/{REALM}/clients/{proof.client_uuid}"
-    before = proof.fresh_admin().get(path)
-    previous = before["attributes"].get(LIFESPAN_ATTRIBUTE)
-    try:
-        proof.fresh_admin().put(
-            path,
-            {**before, "attributes": {**before["attributes"], LIFESPAN_ATTRIBUTE: str(seconds)}},
-        )
-        yield
-    finally:
-        admin = proof.fresh_admin()
-        current = admin.get(path)
-        attributes = {
-            name: value for name, value in current["attributes"].items()
-            if name != LIFESPAN_ATTRIBUTE
-        }
-        if previous is not None:
-            attributes[LIFESPAN_ATTRIBUTE] = previous
-        admin.put(path, {**current, "attributes": attributes})
-
-
 def end_session_hint_is(end_session_url: str, token: str) -> bool:
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(end_session_url).query)
     return query.get("id_token_hint") == [token]
@@ -880,7 +860,10 @@ def wait_until_past(expiry: float) -> float:
 def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
     scenario = f"21-{width.label}"
     proof.reset_host()
-    with short_lived_id_tokens(proof, SHORT_TOKEN_LIFESPAN_SECONDS), proof.browsing(width) as page:
+    with (
+        short_lived_tokens(proof.fresh_admin, proof.client_uuid, SHORT_TOKEN_LIFESPAN_SECONDS),
+        proof.browsing(width) as page,
+    ):
         end_session_urls: list[str] = []
         page.context.on(
             "request",
@@ -1160,50 +1143,6 @@ def disabled_account_is_logged_out_everywhere(proof: Proof, width: Width) -> str
         "so the disable itself sent none: 0 sessions and /me 401 in each; a fresh sign in met "
         f"{KEYCLOAK_DISABLED_MESSAGE!r} at Keycloak and reached no app"
     )
-
-
-def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
-    user_id = admin.create(f"/{REALM}/users", {
-        "username": username,
-        "enabled": True,
-        "email": f"{username}@d1.invalid",
-        "emailVerified": True,
-        "firstName": "D1",
-        "lastName": "User",
-        "credentials": [{"type": "password", "value": password, "temporary": False}],
-    })
-    for path in groups:
-        group = admin.get(f"/{REALM}/group-by-path{path}")
-        admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")
-    return user_id
-
-
-def client_representation(
-    client_id: str, client_secret: str, origins: tuple[str, ...],
-    backchannel_logout_url: str | None = None,
-) -> dict[str, Any]:
-    attributes = {"post.logout.redirect.uris": "##".join(f"{origin}/" for origin in origins)}
-    if backchannel_logout_url is not None:
-        attributes |= {
-            "backchannel.logout.url": backchannel_logout_url,
-            "backchannel.logout.session.required": "false",
-            "backchannel.logout.revoke.offline.tokens": "false",
-            "id.token.signed.response.alg": "RS256",
-        }
-    return {
-        "clientId": client_id,
-        "enabled": True,
-        "publicClient": False,
-        "clientAuthenticatorType": "client-secret",
-        "secret": client_secret,
-        "standardFlowEnabled": True,
-        "directAccessGrantsEnabled": False,
-        "serviceAccountsEnabled": False,
-        "frontchannelLogout": False,
-        "attributes": attributes,
-        "redirectUris": [f"{origin}{CALLBACK_PATH}" for origin in origins],
-        "defaultClientScopes": ["basic", "profile", "groups"],
-    }
 
 
 def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
