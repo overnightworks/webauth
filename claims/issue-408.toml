@@ -1,0 +1,8 @@
+claim_id = "627b39514aa74756b9dda78deec149aa"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "b230871ffb8afcf4ab2098a21d273bc50de91f34"
+branch = "claude/issue-408-e2e-realm-helpers-installers"
+scope = ["e2e/oidc/host_app.py", "e2e/oidc/prove.py", "e2e/oidc/realm.py", "e2e/oidc/stack.py", "quality/baseline.toml", "src/webauth/middleware/stack.py"]
+opened_commit = "0ee4de0d11f616597ae8fd5aeba2ba3c4350c5c1"
+whole_reason = "One behaviour-neutral refactor: give the e2e realm helpers one module both drivers can import, and extract two helpers so the baselined build_app and install_web_auth_middleware shrink before #350's later slices grow them."
