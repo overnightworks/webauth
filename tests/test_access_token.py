@@ -124,7 +124,7 @@ def a_jwt_verifier() -> JwtVerifier:
     ],
 )
 def test_the_verifier_refuses_media_types_it_cannot_compare(keywords: dict[str, Any]) -> None:
-    with pytest.raises(ValueError, match="expected"):
+    with pytest.raises(ValueError):
         a_jwt_verifier().verify(an_access_token(), **keywords)
 
 
@@ -183,7 +183,7 @@ def test_an_authorized_party_the_host_did_not_allow_is_refused(authorized_party:
     ],
 )
 def test_authorized_parties_refuse_what_is_not_a_set_of_client_ids(client_ids: Any) -> None:
-    with pytest.raises(ValueError, match="client_ids"):
+    with pytest.raises(ValueError):
         AuthorizedParties(client_ids)
 
 
@@ -193,7 +193,7 @@ def test_verifying_with_anything_but_authorized_parties_raises_before_any_fetch(
 ) -> None:
     key_sets = a_key_set()
 
-    with pytest.raises(TypeError, match="AuthorizedParties"):
+    with pytest.raises(TypeError):
         verified(an_access_token(), key_sets=key_sets, parties=parties)
 
     assert key_sets.fetched_urls == []

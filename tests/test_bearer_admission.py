@@ -110,6 +110,7 @@ def test_an_admin_cookie_alone_opens_no_machine_path_even_without_a_declared_dep
     response = app.ask(path, cookie=True)
 
     assert (response.status_code, response.headers["www-authenticate"]) == (401, REALM)
+    assert_answers_no_store(response)
     assert app.auth.route_runs == []
 
 
@@ -136,6 +137,7 @@ def test_the_admitted_user_of_a_bearer_request_is_nobody() -> None:
     response = app.ask(HEALTH_PATH, authorization=bearing(A_TOKEN))
 
     assert (response.status_code, response.json()) == (200, {"username": None})
+    assert_answers_no_store(response)
 
 
 @pytest.mark.parametrize(
@@ -152,6 +154,7 @@ class TestAMachinePrefixTheSessionGateAlsoOpens:
         response = app.ask()
 
         assert (response.status_code, response.headers["www-authenticate"]) == (401, REALM)
+        assert_answers_no_store(response)
 
     def test_with_a_token_the_session_store_is_not_asked(self, opened: dict[str, Any]) -> None:
         app = a_bearer_app(**opened, sessions=SessionsThatMustNotBeAsked())
@@ -159,6 +162,7 @@ class TestAMachinePrefixTheSessionGateAlsoOpens:
         response = app.ask(authorization=bearing(A_TOKEN))
 
         assert response.status_code == 200
+        assert_answers_no_store(response)
 
 
 def a_sub_app(auth: BearerApp, *, csrf: bool) -> FastAPI:
@@ -198,6 +202,7 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
         response = app.ask(f"/sub{EXPORT_PATH}", method="DELETE", authorization=bearing(A_TOKEN))
 
         assert response.status_code == 403
+        assert_answers_no_store(response)
 
     @pytest.mark.parametrize(
         "path", [EXPORT_PATH, ALL_DEPENDENCIES_PATH], ids=["bearer_caller", "current_user"],
@@ -208,6 +213,7 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
         response = app.ask(f"/sub{path}", method="DELETE", authorization=bearing(A_TOKEN))
 
         assert response.status_code == 500
+        assert_answers_no_store(response)
 
 
 class Relay:
@@ -267,6 +273,7 @@ class TestAnAdmissionBelongsToItsPathAppAndHeader:
         assert (response.status_code, response.headers["www-authenticate"]) == (
             401, REALM_INVALID_TOKEN,
         )
+        assert_answers_no_store(response)
         assert app.auth.route_runs == []
 
     def test_a_replay_without_the_header_is_refused(self) -> None:
@@ -276,6 +283,7 @@ class TestAnAdmissionBelongsToItsPathAppAndHeader:
         response = app.ask()
 
         assert (response.status_code, response.headers["www-authenticate"]) == (401, REALM)
+        assert_answers_no_store(response)
         assert app.auth.route_runs == []
 
 
@@ -317,6 +325,7 @@ def test_a_header_changed_after_admission_voids_the_caller(
     response = app.ask(authorization=bearing(A_TOKEN))
 
     assert response.status_code == 500
+    assert_answers_no_store(response)
 
 
 class TestTheGateSitsInsideTheRateLimitAndBodyLimitAndBehindTheHeaders:
@@ -364,3 +373,4 @@ class TestTheGateSitsInsideTheRateLimitAndBodyLimitAndBehindTheHeaders:
         response = client.get(EXPORT_PATH, headers={"authorization": f"Bearer {A_TOKEN}"})
 
         assert (response.status_code, response.headers["cache-control"]) == (200, "no-store")
+        assert "set-cookie" not in response.headers

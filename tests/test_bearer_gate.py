@@ -11,6 +11,7 @@ import base64
 import hashlib
 import logging
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -218,72 +219,77 @@ INSUFFICIENT_SCOPE = Answer(
     ("insufficient-scope",),
 )
 A_TOKEN = a_token()
+PLAIN_GET: dict[str, Any] = {}
+FORM_BODY_DELETE: dict[str, Any] = {"method": "DELETE", "data": {"access_token": "throwaway"}}
 ONLY_THE_APP_GROUP = a_token(groups=["/apps/x"])
 KEY_SET_DOWN = KeySetFetchError("the issuer is down")
 
-# (id, Authorization lines, query string, key-set response, answer)
+# (Authorization lines, query string, key-set response, answer, sent, id)
 REFUSED = [
-    pytest.param((), "", None, NO_CREDENTIALS, id="H01a-no-header"),
-    pytest.param(("",), "", None, NO_CREDENTIALS, id="H01b-empty-value"),
-    pytest.param(("Basic dXNlcjpwYXNz",), "", None, NO_CREDENTIALS, id="H01c-basic"),
-    pytest.param(("Bearerx abc",), "", None, NO_CREDENTIALS, id="H01d-another-scheme"),
-    pytest.param((), "?access_token=throwaway", None, NO_CREDENTIALS, id="H01e-query-alone"),
-    pytest.param((f"Bearer {A_TOKEN}", f"Bearer {A_TOKEN}"), "", None, INVALID_REQUEST,
+    pytest.param((), "", None, NO_CREDENTIALS, PLAIN_GET, id="H01a-no-header"),
+    pytest.param(("",), "", None, NO_CREDENTIALS, PLAIN_GET, id="H01b-empty-value"),
+    pytest.param(("Basic dXNlcjpwYXNz",), "", None, NO_CREDENTIALS, PLAIN_GET, id="H01c-basic"),
+    pytest.param(("Bearerx abc",), "", None, NO_CREDENTIALS, PLAIN_GET, id="H01d-another-scheme"),
+    pytest.param((), "?access_token=throwaway", None, NO_CREDENTIALS, PLAIN_GET,
+                 id="H01e-query-alone"),
+    pytest.param((), "", None, NO_CREDENTIALS, FORM_BODY_DELETE, id="H01f-form-body"),
+    pytest.param((f"Bearer {A_TOKEN}", f"Bearer {A_TOKEN}"), "", None, INVALID_REQUEST, PLAIN_GET,
                  id="H02a-two-lines"),
-    pytest.param((f"Bearer {A_TOKEN}, Basic x",), "", None, INVALID_REQUEST,
+    pytest.param((f"Bearer {A_TOKEN}, Basic stray",), "", None, INVALID_REQUEST, PLAIN_GET,
                  id="H02b-combined-credentials"),
-    pytest.param(("Bearer",), "", None, INVALID_REQUEST, id="H02c-no-credential"),
-    pytest.param(("=abc",), "", None, INVALID_REQUEST, id="H02d-no-scheme"),
-    pytest.param((f"Bearer\t{A_TOKEN}",), "", None, INVALID_REQUEST, id="H02e-tab"),
-    pytest.param((f"Bearer {A_TOKEN} x",), "", None, INVALID_REQUEST, id="H02f-second-word"),
-    pytest.param(bearing(A_TOKEN), "?access_token=throwaway", None, INVALID_REQUEST,
+    pytest.param(("Bearer",), "", None, INVALID_REQUEST, PLAIN_GET, id="H02c-no-credential"),
+    pytest.param(("=abc",), "", None, INVALID_REQUEST, PLAIN_GET, id="H02d-no-scheme"),
+    pytest.param((f"Bearer\t{A_TOKEN}",), "", None, INVALID_REQUEST, PLAIN_GET, id="H02e-tab"),
+    pytest.param((f"Bearer {A_TOKEN} stray",), "", None, INVALID_REQUEST, PLAIN_GET,
+                 id="H02f-second-word"),
+    pytest.param(bearing(A_TOKEN), "?access_token=throwaway", None, INVALID_REQUEST, PLAIN_GET,
                  id="H02g-two-methods"),
-    pytest.param(("Bearer abc!def",), "", None, NOT_A_TOKEN, id="H04-not-a-b64token"),
+    pytest.param(("Bearer abc!def",), "", None, NOT_A_TOKEN, PLAIN_GET, id="H04-not-a-b64token"),
     pytest.param(bearing(an_access_token(header={"typ": "JWT"})), "", None,
-                 a_refused_token("access-token-rejected", "invalid-token-type"),
+                 a_refused_token("access-token-rejected", "invalid-token-type"), PLAIN_GET,
                  id="T02a-another-type"),
     pytest.param(bearing(a_token(aud=["notes-app", "another-app"])), "", None,
-                 a_refused_token("invalid-access-claim"), id="T02b-two-audiences"),
+                 a_refused_token("invalid-access-claim"), PLAIN_GET, id="T02b-two-audiences"),
     pytest.param(bearing(A_TOKEN), "", KEY_SET_DOWN,
-                 a_refused_token("access-token-rejected", "key-set-unavailable"),
+                 a_refused_token("access-token-rejected", "key-set-unavailable"), PLAIN_GET,
                  id="T02c-key-set-unavailable"),
     pytest.param(bearing(a_token(azp="another-client")), "", None,
-                 a_refused_token("authorized-party-mismatch"), id="T02d-another-client"),
-    pytest.param(bearing(ONLY_THE_APP_GROUP), "", None, INSUFFICIENT_SCOPE,
-                 id="T03b-a-member-who-is-no-admin"),
+                 a_refused_token("authorized-party-mismatch"), PLAIN_GET, id="T02d-another-client"),
+    pytest.param(bearing(ONLY_THE_APP_GROUP), "", None, INSUFFICIENT_SCOPE, PLAIN_GET,
+                 id="T03d-a-member-who-is-no-admin"),
     pytest.param(bearing(a_token(groups=["/apps/x", "/apps/x/administrators"])), "", None,
-                 INSUFFICIENT_SCOPE, id="T03b-a-group-that-is-not-below-admin"),
-    pytest.param(bearing(a_token(groups=ABSENT)), "", None, INSUFFICIENT_SCOPE,
+                 INSUFFICIENT_SCOPE, PLAIN_GET, id="T03b-a-group-that-is-not-below-admin"),
+    pytest.param(bearing(a_token(groups=ABSENT)), "", None, INSUFFICIENT_SCOPE, PLAIN_GET,
                  id="T03c-no-groups"),
 ]
 
 
+def assert_no_store_and_no_cookie(headers: Mapping[str, str]) -> None:
+    assert headers["cache-control"] == "no-store"
+    assert "set-cookie" not in headers
+
+
 def assert_answers_no_store(response: Response) -> None:
-    assert response.headers["cache-control"] == "no-store"
-    assert "set-cookie" not in response.headers
+    assert_no_store_and_no_cookie(response.headers)
 
 
-@pytest.mark.parametrize(("lines", "query", "key_set_response", "answer"), REFUSED)
+@pytest.mark.parametrize(("lines", "query", "key_set_response", "answer", "sent"), REFUSED)
 def test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge(
-    lines: tuple[str, ...], query: str, key_set_response: Exception | None, answer: Answer,
+    lines: tuple[str, ...],
+    query: str,
+    key_set_response: Exception | None,
+    answer: Answer,
+    sent: dict[str, Any],
 ) -> None:
     app = a_bearer_app(key_sets=a_key_set_answering(key_set_response))
 
-    response = app.ask(EXPORT_PATH + query, authorization=lines, cookie=True)
+    response = app.ask(EXPORT_PATH + query, authorization=lines, cookie=True, **sent)
 
     assert (response.status_code, response.headers["www-authenticate"], response.json()) == (
         answer.status, answer.challenge, {"detail": answer.detail},
     )
     assert_answers_no_store(response)
     assert app.auth.route_runs == []
-
-
-def test_a_form_body_token_is_no_credential_at_all() -> None:
-    app = a_bearer_app()
-
-    response = app.ask(method="DELETE", data={"access_token": "throwaway"})
-
-    assert (response.status_code, response.headers["www-authenticate"]) == (401, REALM)
 
 
 def test_a_not_a_b64token_credential_reaches_no_key_set() -> None:
@@ -294,33 +300,70 @@ def test_a_not_a_b64token_credential_reaches_no_key_set() -> None:
     assert app.key_sets.fetched_urls == []
 
 
-@pytest.mark.parametrize(("lines", "query", "key_set_response", "answer"), REFUSED)
+@pytest.mark.parametrize(("lines", "query", "key_set_response", "answer", "sent"), REFUSED)
 def test_every_refusal_is_logged_once_with_its_case_or_reason(
     lines: tuple[str, ...],
     query: str,
     key_set_response: Exception | None,
     answer: Answer,
+    sent: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     app = a_bearer_app(key_sets=a_key_set_answering(key_set_response))
 
     with caplog.at_level(logging.DEBUG):
-        app.ask(EXPORT_PATH + query, authorization=lines)
+        app.ask(EXPORT_PATH + query, authorization=lines, **sent)
 
-    records = [record for record in caplog.records if record.name == GATE_LOGGER]
+    records = gate_records(caplog)
     assert [record.levelno for record in records] == [answer.level]
     assert all(word in records[0].getMessage() for word in answer.logged)
 
 
-def leaks_of(secrets: tuple[str, ...], *haystacks: str) -> list[str]:
-    return [secret for secret in secrets for haystack in haystacks if secret in haystack]
+def gate_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.name == GATE_LOGGER]
+
+
+SCHEMES = {"bearer", "basic"}
+
+
+def secrets_of(
+    lines: tuple[str, ...], query: str = "", sent: dict[str, Any] | None = None,
+) -> tuple[str, ...]:
+    """What the scenario sends that must never be echoed: every word besides a scheme,
+    every header value that carries one, the query's and the form's values, and the
+    digests of each header value in every encoding a record could carry."""
+    words = {
+        word for line in lines for word in line.replace(",", " ").split()
+        if word.lower() not in SCHEMES
+    }
+    carrying = {line for line in lines if any(word in line for word in words)}
+    values = {part.partition("=")[2] for part in query[1:].split("&")}
+    values |= set((sent or {}).get("data", {}).values())
+    plain = (words | carrying | values) - {""}
+    return (*sorted(plain), *(d for line in lines if line for d in digests_of(line)))
 
 
 def digests_of(value: str) -> tuple[str, ...]:
     digest = hashlib.sha256(value.encode("latin-1")).digest()
-    return (
-        digest.hex(), base64.b64encode(digest).decode(), base64.urlsafe_b64encode(digest).decode(),
+    padded = (base64.b64encode(digest).decode(), base64.urlsafe_b64encode(digest).decode())
+    return (digest.hex(), *padded, *(encoded.rstrip("=") for encoded in padded))
+
+
+def assert_nothing_leaks(
+    secrets: tuple[str, ...], caplog: pytest.LogCaptureFixture, *responses: Response,
+) -> None:
+    headers = [
+        f"{name}: {value}" for response in responses for name, value in response.headers.items()
+    ]
+    library_log = "\n".join(
+        caplog.handler.format(record) for record in caplog.records
+        if record.name.split(".")[0] == "webauth"
     )
+    haystacks = (library_log, *(response.text for response in responses), *headers)
+    assert [secret for secret in secrets for haystack in haystacks if secret in haystack] == []
+    for record in gate_records(caplog):
+        assert EXPORT_PATH not in record.getMessage()
+        assert OPERATOR_SUBJECT not in record.getMessage()
 
 
 ADMITTED = [
@@ -344,36 +387,34 @@ def test_an_admin_token_is_admitted_and_its_subject_is_the_caller(line: str) -> 
     assert_answers_no_store(response)
 
 
-@pytest.mark.parametrize(("lines", "query", "key_set_response", "answer"), REFUSED)
-def test_no_log_record_or_answer_holds_the_token_the_header_or_its_digest(
+@pytest.mark.parametrize(("lines", "query", "key_set_response", "answer", "sent"), REFUSED)
+def test_no_refusal_holds_the_token_the_header_or_its_digest_in_a_record_or_an_answer(
     lines: tuple[str, ...],
     query: str,
     key_set_response: Exception | None,
     answer: Answer,
+    sent: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     del answer
     app = a_bearer_app(key_sets=a_key_set_answering(key_set_response))
-    credentials = tuple(word for line in lines for word in line.replace(",", " ").split()[1:])
-    secrets = (*lines, *credentials, *(d for line in lines for d in digests_of(line)))
 
     with caplog.at_level(logging.DEBUG):
-        response = app.ask(EXPORT_PATH + query, authorization=lines)
+        response = app.ask(EXPORT_PATH + query, authorization=lines, **sent)
 
-    headers = " ".join(f"{name}: {value}" for name, value in response.headers.items())
-    significant = tuple(secret for secret in secrets if len(secret) > 8)
-    assert leaks_of(significant, caplog.text, response.text, headers) == []
+    assert_nothing_leaks(secrets_of(lines, query, sent), caplog, response)
 
 
-def test_an_admitted_request_leaks_the_token_into_no_log_record(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize("line", ADMITTED)
+def test_no_admission_holds_the_token_the_header_or_its_digest_in_a_record_or_an_answer(
+    line: str, caplog: pytest.LogCaptureFixture,
 ) -> None:
     app = a_bearer_app()
 
     with caplog.at_level(logging.DEBUG):
-        response = app.ask(authorization=bearing(A_TOKEN))
+        response = app.ask(authorization=(line,))
 
-    assert leaks_of((A_TOKEN, *digests_of(f"Bearer {A_TOKEN}")), caplog.text, response.text) == []
+    assert_nothing_leaks(secrets_of((line,)), caplog, response)
 
 
 def test_a_member_without_the_admin_group_is_refused_with_insufficient_scope_only() -> None:
@@ -385,38 +426,57 @@ def test_a_member_without_the_admin_group_is_refused_with_insufficient_scope_onl
     assert app.auth.route_runs == []
 
 
-def test_a_failing_key_set_fetch_is_the_library_500() -> None:
+def test_a_failing_key_set_fetch_is_the_library_500(caplog: pytest.LogCaptureFixture) -> None:
     app = a_bearer_app(key_sets=a_key_set_answering(RuntimeError("the fetch crashed")))
 
-    response = app.ask(authorization=bearing(A_TOKEN))
+    with caplog.at_level(logging.DEBUG):
+        response = app.ask(authorization=bearing(A_TOKEN))
 
     assert response.status_code == 500
     assert_answers_no_store(response)
+    assert_nothing_leaks(secrets_of(bearing(A_TOKEN)), caplog, response)
+
+
+FETCH_BOUND_SECONDS = 3
 
 
 @pytest.mark.anyio
-async def test_a_blocked_key_set_fetch_stalls_no_other_request() -> None:
-    released = threading.Event()
+async def test_a_blocked_key_set_fetch_stalls_no_other_request(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fetch_started = threading.Event()
+    release_fetch = threading.Event()
+    fetch_returned = threading.Event()
+
+    def block_until_released() -> None:
+        fetch_started.set()
+        release_fetch.wait(timeout=FETCH_BOUND_SECONDS)
+        fetch_returned.set()
+
     key_sets = a_key_set_answering()
-    key_sets.before_answer = lambda: released.wait(timeout=5)
+    key_sets.before_answer = block_until_released
     app = a_bearer_app(
         key_sets=key_sets, public=(PublicRule(PathRules(exact=frozenset({HEALTH_PATH}))),),
     )
     transport = httpx.ASGITransport(app=app.auth.app)
 
-    async with httpx.AsyncClient(transport=transport, base_url=HTTPS_TEST_SERVER) as client:
-        blocked = asyncio.create_task(
-            client.get(EXPORT_PATH, headers={"authorization": f"Bearer {A_TOKEN}"}),
-        )
-        try:
-            while not key_sets.fetched_urls:
-                await asyncio.sleep(0.01)
-            health = await asyncio.wait_for(client.get(HEALTH_PATH), timeout=3)
-        finally:
-            released.set()
-        admitted = await blocked
+    with caplog.at_level(logging.DEBUG):
+        async with httpx.AsyncClient(transport=transport, base_url=HTTPS_TEST_SERVER) as client:
+            blocked = asyncio.create_task(
+                client.get(EXPORT_PATH, headers={"authorization": f"Bearer {A_TOKEN}"}),
+            )
+            try:
+                started = await asyncio.to_thread(fetch_started.wait, FETCH_BOUND_SECONDS)
+                health = await asyncio.wait_for(client.get(HEALTH_PATH), FETCH_BOUND_SECONDS)
+                fetch_still_blocked = not fetch_returned.is_set()
+            finally:
+                release_fetch.set()
+                admitted = await asyncio.wait_for(blocked, FETCH_BOUND_SECONDS)
 
-    assert (health.status_code, admitted.status_code) == (200, 200)
+    assert (started, health.status_code, fetch_still_blocked, admitted.status_code) == (
+        True, 200, True, 200,
+    )
+    assert_nothing_leaks(secrets_of(bearing(A_TOKEN)), caplog, health, admitted)
 
 
 class TestAGateIsBuiltFromSoundParts:
@@ -496,6 +556,7 @@ class TestThePathIsTheDecodedPathTheRouterMatches:
         response = app.ask(f"/api/admin/people/alice{encoded}x/export", cookie=True)
 
         assert (response.status_code, response.headers["www-authenticate"]) == (401, REALM)
+        assert_answers_no_store(response)
         assert app.auth.route_runs == []
 
     @pytest.mark.parametrize(
@@ -511,6 +572,7 @@ class TestThePathIsTheDecodedPathTheRouterMatches:
         status, headers = an_answer_to(app, path, headers=the_cookie(app))
 
         assert (status, headers["www-authenticate"]) == (401, REALM)
+        assert_no_store_and_no_cookie(headers)
 
     @pytest.mark.parametrize(
         ("rule", "gated"),
@@ -549,15 +611,18 @@ class TestThePathIsTheDecodedPathTheRouterMatches:
         )
 
 
+PREFLIGHT = {"origin": "https://evil.test", "access-control-request-method": "DELETE"}
+
+
 class TestEveryMethodIsGated:
     @pytest.mark.parametrize("method", ["HEAD", "OPTIONS"])
     def test_head_and_options_without_a_token_are_refused(self, method: str) -> None:
         app = a_bearer_app()
-        preflight = {"origin": "https://evil.test", "access-control-request-method": "DELETE"}
 
-        response = app.ask(method=method, headers=preflight)
+        response = app.ask(method=method, headers=PREFLIGHT)
 
         assert (response.status_code, response.headers["www-authenticate"]) == (401, REALM)
+        assert_answers_no_store(response)
 
     @pytest.mark.parametrize("method", ["HEAD", "OPTIONS"])
     def test_head_and_options_with_a_token_reach_the_router_that_knows_neither(
@@ -565,6 +630,7 @@ class TestEveryMethodIsGated:
     ) -> None:
         app = a_bearer_app()
 
-        response = app.ask(method=method, authorization=bearing(A_TOKEN))
+        response = app.ask(method=method, authorization=bearing(A_TOKEN), headers=PREFLIGHT)
 
         assert response.status_code == 405
+        assert_answers_no_store(response)

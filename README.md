@@ -172,7 +172,7 @@ host without the gate follows it itself.
   | Case | Status | `WWW-Authenticate` | `detail` |
   |---|---|---|---|
   | no credentials | 401 | `Bearer realm="admin"` | `Authentication required` |
-  | malformed request (repeated or combined `Authorization`, `access_token` in the query) | 401 | `Bearer realm="admin", error="invalid_request"` | `Invalid request` |
+  | malformed request (repeated or combined `Authorization`, or `access_token` in the query beside an `Authorization: Bearer`; in the query alone it is no credential) | 401 | `Bearer realm="admin", error="invalid_request"` | `Invalid request` |
   | invalid token (any verification failure, an unavailable key set included) | 401 | `Bearer realm="admin", error="invalid_token"` | `Invalid token` |
   | valid token, not an admin | 403 | `Bearer realm="admin", error="insufficient_scope"` | `Admin access required` |
 

@@ -395,8 +395,10 @@ class TestRefusedInstallation:
     def test_repeated_installation_is_refused(self, arrange: Callable[[FastAPI], None]) -> None:
         app = a_fresh_app()
         arrange(app)
+        before = list(app.user_middleware)
         with pytest.raises(RuntimeError, match="already carries"):
             install_full_stack(app)
+        assert app.user_middleware == before
 
     @pytest.mark.parametrize(
         "subclass",
