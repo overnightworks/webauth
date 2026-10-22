@@ -663,8 +663,10 @@ def receive_backchannel_logout(
     exact path from the rate limit too, or one budget refuses a real logout.
     Give it a ``BodySizeRule`` that admits a Logout Token, which the default
     may not, and a ``CacheControlRule`` of ``no-store``, and
-    register the URL on the client by an internal name, never through the
-    public hostname or an access proxy in front of it.
+    register a back-channel URL that the issuer reaches over an internal
+    network alone, never through the public route (a tunnel, CDN or access
+    proxy) in front of the app; the URL may name the public hostname where an
+    internal network alias resolves it to the app.
     """
     logout_token = _logout_token_of(form_body, content_type)
     if logout_token is None:
