@@ -1,7 +1,0 @@
-claim_id = "5cae91c4a6fe4f028bab9b31f7161aa6"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "c7c9f4b4c8c6f17f9ba94e9c604ee5ffda704b92"
-branch = "claude/issue-395-trusted-proxies-every-hop"
-scope = ["README.md"]
-opened_commit = "99895aeb5e49caf7699f1b4daea39ccca6d9d429"
