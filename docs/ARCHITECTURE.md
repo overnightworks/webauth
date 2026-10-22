@@ -154,7 +154,8 @@ logout](#back-channel-logout).
 ### CSRF origin
 
 `CsrfOriginMiddleware` refuses a state-changing request that a foreign page originated, by `Sec-Fetch-Site` where a browser sends it and otherwise by comparing
-`Origin` (or `Referer`) with the hosts in `WebAuthConfig`. `CsrfPolicy` decides which paths are checked and defaults to fail-closed.
+`Origin` (or `Referer`) with the hostnames in `WebAuthConfig`; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` decides which paths are
+checked and defaults to fail-closed.
 
 ### Rate limiting, and the optional Redis extra
 

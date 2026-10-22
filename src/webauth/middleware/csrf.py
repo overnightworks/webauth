@@ -117,10 +117,8 @@ class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
 
     An ``Origin`` or ``Referer`` that is ``null``, empty, has no host, carries
     userinfo or a non-numeric port, or cannot be parsed is refused like a
-    foreign origin; an empty ``Origin`` is not replaced by the ``Referer``. An
-    exact allowed host matches the parsed host with or without a numeric port.
-    An allowed host pattern is matched against the whole host plus numeric
-    port, so anchor it and allow the port.
+    foreign origin; an empty ``Origin`` is not replaced by the ``Referer``.
+    How allowed hosts match is described on ``WebAuthConfig``.
     """
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
