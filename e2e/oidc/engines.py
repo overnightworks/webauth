@@ -12,7 +12,8 @@ Keycloak's redirect to the app, the app saying "Signed out" and no confirmation 
   button after the script's run.
 - 54 WebKit at 390x844: as 53. It is the Linux port of the engine, not Safari.
 
-The back button's page is recorded, and it fails when it holds the ID token again.
+The back button's page is recorded, and it is a ``FAILED-as-found`` finding when it holds
+the ID token again.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from harness import Host, launch_behind_host_mapping, launch_pinned_chromium
+from harness import Finding, Host, launch_behind_host_mapping, launch_pinned_chromium
 from host_app import LOGOUT_PATH
 from realm import END_SESSION_ENDPOINT
 
@@ -81,7 +82,8 @@ def logout_through_the_page(
         back_shows = ""
         if back_button:
             page.go_back()
-            assert token not in page.content(), "the page holding the ID token came back"
+            if token in page.content():
+                raise Finding("the page holding the ID token came back")
             back_shows = f"; the back button shows {page.title()!r}"
     mode = "its script" if javascript else "no JavaScript, the button"
     return (
