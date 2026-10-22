@@ -1461,8 +1461,8 @@ SAME_ORIGIN_FORM = {
 }
 
 
-def signed_in_host() -> OidcHost:
-    host = an_oidc_host()
+def signed_in_host(**config_overrides: object) -> OidcHost:
+    host = an_oidc_host(**config_overrides)
     host.callback(host.sign_in_at_issuer())
     assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
     return host
@@ -1530,11 +1530,13 @@ def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None
 
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
-    host = signed_in_host()
+    session_clock = FakeClock(float(NOW))
+    host = signed_in_host(wall_clock=session_clock)
     login_token = host.issued_id_tokens[-1]
     host.issuer.refresh_answer_members = {"id_token": a_fake_id_token("issued-by-the-refresh")}
     [session] = host.sessions.list_active()
-    host.wall_clock.now += SESSION_IDLE_SECONDS / 2
+    expiry_before_renewal = session.expires_at
+    session_clock.now += SESSION_IDLE_SECONDS / 2
 
     renewed = host.client.get("/me")
     rotated = fresh_access_token(
@@ -1545,6 +1547,7 @@ def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
     response = post_logout(host, SAME_ORIGIN_FORM)
 
     assert (renewed.status_code, isinstance(rotated, SecretStr)) == (200, True)
+    assert session.expires_at > expiry_before_renewal
     assert held_after_rotation == [login_token]
     assert hint_of(response) == login_token
 
@@ -1730,19 +1733,13 @@ def a_host_with_sessions(
 
 
 def stored_refresh_tokens(host: OidcHost) -> list[str]:
-    return [
-        record.refresh_token.get_secret_value()
-        for record in host.sessions.list_active()
-        if record.refresh_token is not None
-    ]
+    return [record.refresh_token.get_secret_value()
+            for record in host.sessions.list_active() if record.refresh_token is not None]
 
 
 def stored_id_tokens(host: OidcHost) -> list[str]:
-    return [
-        record.id_token.get_secret_value()
-        for record in host.sessions.list_active()
-        if record.id_token is not None
-    ]
+    return [record.id_token.get_secret_value()
+            for record in host.sessions.list_active() if record.id_token is not None]
 
 
 def open_sessions(host: OidcHost, user_id: str, count: int) -> None:

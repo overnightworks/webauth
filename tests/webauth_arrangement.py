@@ -307,10 +307,8 @@ class FakeSessionRecord:
 
 
 class SessionRecordsInMemory:
-    """Stored sessions, renewed in place and never committed.
-
-    ``create`` and ``touch`` write the instants they are given.
-    """
+    """Stored sessions, renewed in place and never committed. ``create`` and ``touch``
+    write the instants they are given; a deleted record yields no ID token."""
 
     def __init__(
         self,
@@ -402,8 +400,7 @@ class SessionRecordsInMemory:
         self._remove_record(session_id)
 
     def _remove_record(self, session_id: str) -> None:
-        removed = self._records.pop(session_id, None)
-        if removed is not None:
+        if (removed := self._records.pop(session_id, None)) is not None:
             removed.id_token = None
 
     def delete_for_user(self, user_id: str) -> int:
