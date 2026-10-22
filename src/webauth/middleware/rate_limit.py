@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
 from webauth.middleware._refusal import RefusalMiddleware
+from webauth.middleware._route_path import route_path
 from webauth.policies import RateLimitBudget, RateLimitPolicy
 from webauth.proxies import _budget_address, resolve_client_ip
 
@@ -52,7 +53,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
-        path = request.scope["path"]
+        path = route_path(request.scope)
         if self._policy.is_exempt(path):
             return None
         config = web_auth_config(request)

@@ -50,7 +50,17 @@ class PathShape:
 
 @dataclass(frozen=True)
 class PathRules:
-    """The paths a rule selects, named exactly or by shape."""
+    """The paths a rule selects, named exactly or by shape.
+
+    Every webauth policy writes its paths as the application's router routes
+    them: below the application's own ``root_path``, with the prefix of every
+    mount between the policy and the route included. Under
+    ``FastAPI(root_path="/app")`` the rule ``/api/admin/`` selects ``/api/admin/x``
+    and ``/app/api/admin/x`` alike, and behind a server that delivers
+    ``--root-path /app`` it selects ``/app/api/admin/x``. The prefix is
+    stripped at a segment boundary, so ``/application/x`` stays whole. The
+    rule ``/app/api/admin/`` selects none of them.
+    """
 
     exact: frozenset[str] = frozenset()
     prefixes: tuple[str, ...] = ()
