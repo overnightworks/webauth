@@ -331,7 +331,8 @@ def secrets_of(
 ) -> tuple[str, ...]:
     """What the scenario sends that must never be echoed: every word besides a scheme,
     every header value that carries one, the query's and the form's values, and the
-    digests of each header value in every encoding a record could carry."""
+    digests of each header value in every encoding a record could carry, the raw bytes'
+    repr included."""
     words = {
         word for line in lines for word in line.replace(",", " ").split()
         if word.lower() not in SCHEMES
@@ -346,7 +347,7 @@ def secrets_of(
 def digests_of(value: str) -> tuple[str, ...]:
     digest = hashlib.sha256(value.encode("latin-1")).digest()
     padded = (base64.b64encode(digest).decode(), base64.urlsafe_b64encode(digest).decode())
-    return (digest.hex(), *padded, *(encoded.rstrip("=") for encoded in padded))
+    return (digest.hex(), repr(digest), *padded, *(encoded.rstrip("=") for encoded in padded))
 
 
 def assert_nothing_leaks(
@@ -476,6 +477,7 @@ async def test_a_blocked_key_set_fetch_stalls_no_other_request(
     assert (started, health.status_code, fetch_still_blocked, admitted.status_code) == (
         True, 200, True, 200,
     )
+    assert_answers_no_store(admitted)
     assert_nothing_leaks(secrets_of(bearing(A_TOKEN)), caplog, health, admitted)
 
 

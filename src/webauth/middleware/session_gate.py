@@ -132,9 +132,8 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
     no gate decided this request: the gate is not installed, the connection is a
     WebSocket, the route runs under another ``WebAuthConfig`` instance, or the
     decision was made for another session cookie. A forgotten gate never reads as
-    signed out. For the session id use
-    ``session_id_from_request``. The account is this request's own: a host must
-    not hand it to another request.
+    signed out. For the session id use ``session_id_from_request``. The account is
+    this request's own: a host must not hand it to another request.
     """
     if _is_bearer_admitted(connection):
         return None
