@@ -164,6 +164,19 @@ class TestEveryPolicySelectsByThePathTheRouterRoutes:
 
         assert statuses == [200, 429]
 
+    def test_a_rate_limit_exemption_for_the_routed_path_spends_no_budget(
+        self, form: RootPathForm,
+    ) -> None:
+        policy = RateLimitPolicy(
+            default=RateLimitBudget("default", max_requests=1, window_seconds=60),
+            exempt=THE_ROUTED_PATH,
+        )
+        auth = a_routed_app(form, rate_limit=policy)
+
+        statuses = [auth.client.get(form.asked_for).status_code for _ in range(3)]
+
+        assert statuses == [200, 200, 200]
+
     def test_a_body_size_rule_for_the_routed_path_applies_its_limit(
         self, form: RootPathForm,
     ) -> None:
@@ -186,23 +199,68 @@ class TestEveryPolicySelectsByThePathTheRouterRoutes:
         assert (response.status_code, response.headers["cache-control"]) == (200, NO_STORE)
 
 
+NEXT_TO_THE_ROOT_PATH = "/application/api/x/y"
+
+
 class TestAPathNextToTheRootPathIsNotStripped:
-    @pytest.mark.parametrize(("rule_path", "cache_control"), [
-        pytest.param("/application/health", NO_STORE, id="written-as-the-router-routes"),
-        pytest.param(ROUTED_PATH, None, id="written-below-a-root-path-it-does-not-have"),
-    ])
-    def test_a_rule_selects_the_path_only_when_it_names_it(
-        self, rule_path: str, cache_control: str | None,
-    ) -> None:
-        form = RootPathForm("", "/app", "/application/health")
-        auth = a_routed_app(
-            form,
-            security_headers=a_no_store_policy(PathRules(exact=frozenset({rule_path}))),
+    """The server root ``/app`` does not own ``/application/...``; a rule names the whole path."""
+
+    @staticmethod
+    def an_app_serving_next_to_the_root_path(
+        **stack_policies: object,
+    ) -> tuple[TestClient, list[str]]:
+        route_runs: list[str] = []
+        app = FastAPI()
+        install_web_auth_config(app, a_web_auth_config())
+        install_web_auth_middleware(
+            app,
+            **{"security_headers": a_no_store_policy(PathRules()), **stack_policies},
         )
 
-        response = auth.client.get(form.asked_for)
+        @app.api_route(NEXT_TO_THE_ROOT_PATH, methods=["GET", "POST"])
+        def route() -> dict[str, bool]:
+            route_runs.append(NEXT_TO_THE_ROOT_PATH)
+            return {"ok": True}
 
-        assert response.headers.get("cache-control") == cache_control
+        client = TestClient(app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path="/app")
+        return client, route_runs
+
+    @pytest.mark.parametrize(("rule_prefix", "cache_control"), [
+        pytest.param("/application/api/x/", NO_STORE, id="written-as-the-router-routes"),
+        pytest.param("/api/x/", None, id="written-below-a-root-path-it-does-not-have"),
+    ])
+    def test_a_cache_control_rule_selects_the_path_only_when_it_names_it(
+        self, rule_prefix: str, cache_control: str | None,
+    ) -> None:
+        client, route_runs = self.an_app_serving_next_to_the_root_path(
+            security_headers=a_no_store_policy(PathRules(prefixes=(rule_prefix,))),
+        )
+
+        response = client.get(NEXT_TO_THE_ROOT_PATH)
+
+        assert (response.status_code, response.headers.get("cache-control"), len(route_runs)) == (
+            200, cache_control, 1,
+        )
+
+    @pytest.mark.parametrize(("rule_prefix", "selected"), [
+        pytest.param("/application/api/x/", True, id="written-as-the-router-routes"),
+        pytest.param("/api/x/", False, id="written-below-a-root-path-it-does-not-have"),
+    ])
+    @pytest.mark.parametrize(("headers", "checked"), [
+        pytest.param(SAME_ORIGIN, ("csrf_origin", "csrf_token"), id="token-without-one"),
+        pytest.param(FOREIGN, ("csrf_origin",), id="origin-foreign"),
+    ])
+    def test_a_csrf_rule_protects_the_path_only_when_it_names_it(
+        self, rule_prefix: str, selected: bool, headers: dict[str, str],
+        checked: tuple[str, ...],
+    ) -> None:
+        protecting = CsrfPolicy(protected=PathRules(prefixes=(rule_prefix,)))
+        policies = {"csrf_origin": CsrfPolicy()} | dict.fromkeys(checked, protecting)
+        client, route_runs = self.an_app_serving_next_to_the_root_path(**policies)
+
+        response = client.post(NEXT_TO_THE_ROOT_PATH, headers=headers)
+
+        assert (response.status_code, len(route_runs)) == ((403, 0) if selected else (200, 1))
 
 
 class TestACacheControlRuleOfTheParentSelectsThroughAMount:

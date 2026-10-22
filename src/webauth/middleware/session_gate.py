@@ -136,4 +136,3 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
             "install_web_auth_middleware(session_gate=...) on the app that serves the route.",
         )
     return None if isinstance(decided.admission, ConnectionRefusal | None) else decided.admission
-
