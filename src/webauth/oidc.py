@@ -147,10 +147,10 @@ _ENDPOINT_URL_FIELDS = (
     "end_session_endpoint",
 )
 _APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
-# The two URLs the logout page posts its form to; their origins become
-# `form-action` sources, so the authority is a plain host and optional port.
+# The logout page posts to `end_session_endpoint`; the issuer then redirects to
+# `post_logout_redirect_uri`; both are `form-action` sources: a plain host and optional port.
 _FORM_TARGET_FIELDS = ("end_session_endpoint", "post_logout_redirect_uri")
-_PLAIN_AUTHORITY = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]+)?")
+_PLAIN_AUTHORITY = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d+)?", re.ASCII)
 # RFC 8252 sections 7.3 and 8.3: the loopback literals and localhost.
 # `urlsplit` lowercases the hostname and drops the brackets of an IPv6 literal.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -198,18 +198,7 @@ class OidcClientConfig:
     leeway_seconds: int
 
     def __post_init__(self) -> None:
-        for name in _ENDPOINT_URL_FIELDS:
-            if not _is_endpoint_url(getattr(self, name)):
-                raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
-        for name in _APP_URL_FIELDS:
-            if not _is_app_url(getattr(self, name)):
-                raise ValueError(
-                    f"{name} must be an https URL, or an http URL whose host is"
-                    f" localhost, 127.0.0.1 or [::1], naming {_URL_RULE}"
-                )
-        for name in _FORM_TARGET_FIELDS:
-            if not _PLAIN_AUTHORITY.fullmatch(urllib.parse.urlsplit(getattr(self, name)).netloc):
-                raise ValueError(f"{name} must name a plain host and optional port")
+        self._check_urls()
         if (
             not isinstance(self.logout_path, str)
             or not _LOGOUT_PATH_CHARACTERS.fullmatch(self.logout_path)
@@ -228,6 +217,20 @@ class OidcClientConfig:
             raise ValueError("client_secret must be a non-empty SecretStr")
         if not _is_scope_list_with_openid(self.scopes):
             raise ValueError("scopes must be a tuple of scope tokens that includes openid")
+
+    def _check_urls(self) -> None:
+        for name in _ENDPOINT_URL_FIELDS:
+            if not _is_endpoint_url(getattr(self, name)):
+                raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
+        for name in _APP_URL_FIELDS:
+            if not _is_app_url(getattr(self, name)):
+                raise ValueError(
+                    f"{name} must be an https URL, or an http URL whose host is"
+                    f" localhost, 127.0.0.1 or [::1], naming {_URL_RULE}"
+                )
+        for name in _FORM_TARGET_FIELDS:
+            if not _PLAIN_AUTHORITY.fullmatch(urllib.parse.urlsplit(getattr(self, name)).netloc):
+                raise ValueError(f"{name} must name a plain host and optional port")
 
 
 @dataclass(frozen=True)
