@@ -1,0 +1,7 @@
+claim_id = "f165018c72ce43c5aef5cc2e7f4c3845"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "ee1f09a16115ebe1eb58d83dc27c2866034ebbbc"
+branch = "claude/issue-401-allowed-hosts-docstring"
+scope = ["docs/ARCHITECTURE.md", "src/webauth/config.py"]
+opened_commit = "4aa7386fdb919b26b7b0e98a0f261bd14686f4ad"
