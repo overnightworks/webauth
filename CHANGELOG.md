@@ -17,6 +17,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
   out by a top-level form POST. `button_label` is the text of the button shown when the script does not run. No host
   CSP needs a new source, and the end-session origin may leave `CspDirective.FORM_ACTION`.
 - `OidcRelyingParty.logout_url` is removed; `log_out` builds the end-session form itself.
+- `OidcClientConfig` refuses an `end_session_endpoint` or `post_logout_redirect_uri` whose host is not a plain host and
+  optional port, because the logout page's policy names those origins.
 
 ## 0.21.0
 

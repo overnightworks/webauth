@@ -147,6 +147,10 @@ _ENDPOINT_URL_FIELDS = (
     "end_session_endpoint",
 )
 _APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
+# The two URLs the logout page posts its form to; their origins become
+# `form-action` sources, so the authority is a plain host and optional port.
+_FORM_TARGET_FIELDS = ("end_session_endpoint", "post_logout_redirect_uri")
+_PLAIN_AUTHORITY = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]+)?")
 # RFC 8252 sections 7.3 and 8.3: the loopback literals and localhost.
 # `urlsplit` lowercases the hostname and drops the brackets of an IPv6 literal.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -168,7 +172,9 @@ class OidcClientConfig:
     is scoped to it. It starts with `/` and holds only RFC 3986 path characters
     other than `;`.
     Every URL names a host and carries no control character, space,
-    credentials, query or fragment. The issuer, the three endpoints and
+    credentials, query or fragment. The host of `end_session_endpoint` and
+    `post_logout_redirect_uri` is letters, digits, `.` and `-`, or a bracketed IPv6 literal,
+    so it can stand as a source in the logout page's policy. The issuer, the three endpoints and
     `jwks_url` are https, because the library connects to them or trusts what
     they sign. `redirect_uri` and `post_logout_redirect_uri` are only values
     the browser is sent to, so they may also be http when the host is exactly
@@ -201,6 +207,9 @@ class OidcClientConfig:
                     f"{name} must be an https URL, or an http URL whose host is"
                     f" localhost, 127.0.0.1 or [::1], naming {_URL_RULE}"
                 )
+        for name in _FORM_TARGET_FIELDS:
+            if not _PLAIN_AUTHORITY.fullmatch(urllib.parse.urlsplit(getattr(self, name)).netloc):
+                raise ValueError(f"{name} must name a plain host and optional port")
         if (
             not isinstance(self.logout_path, str)
             or not _LOGOUT_PATH_CHARACTERS.fullmatch(self.logout_path)
