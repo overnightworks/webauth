@@ -1,8 +1,0 @@
-claim_id = "6247ba0cb0ce440996b02790ed80ee7a"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "dfc0cf5e5e0dd00709d727e75299fa4b399a3b63"
-branch = "claude/issue-409-bearer-gate"
-scope = ["CHANGELOG.md", "README.md", "docs/ARCHITECTURE.md", "quality/baseline.toml", "quality/config.toml", "src/webauth/dependencies.py", "src/webauth/jwt_verification.py", "src/webauth/middleware/__init__.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/session_gate.py", "src/webauth/middleware/stack.py", "src/webauth/oidc.py", "src/webauth/policies.py", "src/webauth/ports.py", "tests/oidc_arrangement.py", "tests/test_access_token.py", "tests/test_bearer_admission.py", "tests/test_bearer_gate.py", "tests/test_middleware_stack.py", "tests/typing/oidc_host.py"]
-opened_commit = "57730e55d8a63d4b5af4154651ec1070761dc87f"
-whole_reason = "One vertical capability: verifying, admitting and recording a bearer request and stepping CSRF and the session gate around it under one install, with its tests and docs; no part is reachable alone. The real-token proof is #410."
