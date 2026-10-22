@@ -10,14 +10,11 @@ Please do not open a public issue or pull request for a vulnerability.
 
 ## Scope
 
-What the library defends against, and what it trusts, is the README's [Security model](README.md#security-model).
+What the library defends against, and what it trusts, is the [Trust](docs/ARCHITECTURE.md#trust) section of the architecture document.
 
 ## Supported versions
 
-Only the latest minor release receives security fixes. By policy, the 0.14
-line receives none: from 0.15.0 on, a fix ships in a patch of the latest minor
-release or in the next minor. A host on 0.14.x moves to the OpenID Connect
-login to receive fixes.
+Only the latest minor release receives security fixes.
 
 ## What to expect
 

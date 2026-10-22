@@ -791,7 +791,7 @@ This is the last release with password parts.
   through the host's `HTTPException` handler. A response that fails after it
   started streaming now ends incomplete, and its exception reaches the server; it
   used to end as a complete response.
-- `install_web_auth_middleware` (see [Middleware order](README.md#middleware-order))
+- `install_web_auth_middleware` (see [Middleware order](docs/ARCHITECTURE.md#middleware-order))
   installs the whole stack in the order that makes every library refusal carry
   the headers. It refuses, before touching the app, a token policy without an
   origin policy, a token policy that exempts paths the origin policy does not
@@ -851,7 +851,7 @@ when `timeout_seconds` exceeds it instead of capping it silently.
 v0.12.0 adds the RS256 verifier `webauth.jwt_verification` (install the
 `jwt` extra), a cookie lifetime separate from the idle window
 (`cookie_max_age_seconds`), and an absolute cap for `IdleWindowLiveness`
-(`absolute_max_age_seconds`) — see [Session lifetime](README.md#session-lifetime). It
+(`absolute_max_age_seconds`) — see [Session lifetime](docs/ARCHITECTURE.md#session-lifetime). It
 also refuses at construction what used to fail later: every lifetime —
 `session_max_age_seconds`, `cookie_max_age_seconds`, and the windows and caps
 of both liveness policies — must be a positive whole number of seconds, so a
