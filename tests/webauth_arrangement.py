@@ -402,7 +402,9 @@ class SessionRecordsInMemory:
         self._remove_record(session_id)
 
     def _remove_record(self, session_id: str) -> None:
-        self._records.pop(session_id, None)
+        removed = self._records.pop(session_id, None)
+        if removed is not None:
+            removed.id_token = None
 
     def delete_for_user(self, user_id: str) -> int:
         sessions = self.sessions_of(user_id)
