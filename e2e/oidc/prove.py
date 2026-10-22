@@ -82,6 +82,9 @@ Sign-in outcomes:
   only (the subgroup the pinned realm declares under ``/apps/songmaker``): it
   is admitted, ``/admin`` answers 200 and the host holds 1 account.
 
+``CHECK untrusted-certificate`` proves that the browser refuses a certificate with
+another key, signed by a CA nobody trusts, with a ``net::ERR_*CERT*`` error.
+
 Scenarios 1, 2, 4, 6 and 7 run at 390x844 (mobile emulation, touch) and
 1280x800; the scenarios not listed otherwise run at 1280x800. The run stays
 inside its 900 s budget (``run_cap_seconds`` in ``scripts/e2e-oidc.sh``).

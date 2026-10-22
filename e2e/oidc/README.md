@@ -33,10 +33,9 @@ step is a verb of `scripts/e2e-oidc.sh`, which holds the commands, the caps and 
    why).
 2. Read the result table the run prints. A scenario or check that is not `held`
    fails the run, with one exception: a measurement that comes out unfavourably is
-   reported as `FAILED-as-found` and leaves the exit status 0. Scenario 5 (the
-   session cookie after the callback redirect) reports it for a logged-out first
-   page, and scenarios 2, 9 and 21 for a second "Sign in" that passes through
-   Keycloak's live session without a form. File each as a finding.
+   reported as `FAILED-as-found` and leaves the exit status 0. File each such row
+   as a finding. `prove.py`'s module docstring says which scenarios report it and
+   under what condition.
 
 Verify: the exit status is 0; a `FAILED-as-found` row is a finding to file, not a
 failed run. The run directory then holds `evidence/` only:
