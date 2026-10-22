@@ -143,9 +143,10 @@ person signed in to through that Keycloak session, and each of those apps ends
 all of the person's sessions, on every device. An app they used only on another
 device is not told and keeps them signed in there. On their other devices, the
 next sign-in asks for no password while that device's own Keycloak session
-lasts. If the app cannot send the ID token of the browser's latest Keycloak
-sign-in, Keycloak asks once to confirm instead; if the realm key that signed
-that token has been deleted since, Keycloak shows an error page instead. See
+lasts. Without the session's row (ended, swept, pruned or ended by
+back-channel logout), the app has no ID token to send, and Keycloak asks once
+to confirm while its own session lives; if the realm key that signed that
+token has been deleted since, Keycloak shows an error page instead. See
 [The ID token hint](docs/ARCHITECTURE.md#logging-out-and-the-id-token-hint), [Logging out](docs/ARCHITECTURE.md#logging-out-and-the-id-token-hint) and
 [Back-channel logout](docs/ARCHITECTURE.md#back-channel-logout).
 
@@ -187,9 +188,8 @@ host without the gate follows it itself.
   Both types are returned by `finish_login`, see
   [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes).
   A refusal carries no identity, so the page shows no name. A
-  `NOT_A_MEMBER` login sets no ID token hint, so signing out from "no
-  access" makes Keycloak ask once, unless the browser still holds a hint from
-  an earlier sign-in (see
+  `NOT_A_MEMBER` login stores no session, so signing out from "no access"
+  makes Keycloak ask once while its own session lives (see
   [The ID token hint](docs/ARCHITECTURE.md#logging-out-and-the-id-token-hint)).
 - **Look.** The three pages (logged out, no access, login failed), their
   wording and their ways out are the sign-in pattern of

@@ -17,6 +17,21 @@ Versions before 0.3.0 and releases without an entry here are described in the
   out by a top-level form POST. `button_label` is the text of the button shown when the script does not run. No host
   CSP needs a new source, and the end-session origin may leave `CspDirective.FORM_ACTION`.
 - `OidcRelyingParty.logout_url` is removed; `log_out` builds the end-session form itself.
+- The browser no longer holds the login's ID token. `finish_login` sets no `__Secure-oidc_id_token_hint`
+  (`oidc_id_token_hint`) cookie; `open_session` stores the token in the session row, and `log_out` sends it from there
+  before it deletes the row.
+  - `SessionRecordStore.create` takes a required keyword `id_token: SecretStr`, and `SessionRecord` gains the property
+    `id_token -> SecretStr | None`. Migrate as follows: add one nullable text column of at least 8192 characters
+    (`MAX_TOKEN_CHARACTERS`) to the session table; write the token with `get_secret_value()` and return it from the
+    record wrapped in `SecretStr`; keep `touch` and `replace_refresh_token` from changing it. Rows stored before the
+    upgrade answer `None`, so their logout makes Keycloak ask once.
+  - `AdmittedLogin` gains a required `id_token: SecretStr`.
+  - `webauth.cookies.MAX_ID_TOKEN_HINT_CHARS` is removed; no ID token is cut off.
+  - `OidcClientConfig.logout_path` and `OidcRelyingParty.logout_path` are removed: drop the argument.
+  - A cookie set by an earlier version stays in the browser until its own `Max-Age` (at most the session's absolute
+    cap after the upgrade). It is neither read nor cleared, and a host need not clear it.
+  - A logout after the row is gone (swept, deleted by the host, ended by back-channel logout or pruned) sends no hint,
+    and Keycloak asks once while its own session lives.
 - `OidcClientConfig` refuses an `end_session_endpoint` or `post_logout_redirect_uri` whose host is not a plain host and
   optional port, because the logout page's policy names those origins.
 
