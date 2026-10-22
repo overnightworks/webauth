@@ -34,6 +34,8 @@ from test_bearer_gate import (
 )
 from test_session_gate import relayed
 from webauth_arrangement import (
+    ADMITTED_ADMIN_PATH,
+    ADMITTED_ADMIN_PATHS,
     ALL_DEPENDENCIES_PATH,
     HTTPS_TEST_SERVER,
     LOGIN_REDIRECT,
@@ -64,7 +66,7 @@ if TYPE_CHECKING:
 
 EXPIRY = ACCESS_TOKEN_NOW + ACCESS_TOKEN_LIFETIME_SECONDS
 HEALTH_PATH = "/health"
-SESSION_PATHS = ("/me", "/admin", "/session-id")
+SESSION_PATHS = ("/me", "/admin", "/session-id", *ADMITTED_ADMIN_PATHS)
 FOREIGN_PAGE = {
     "origin": "https://evil.example.test",
     "sec-fetch-site": "cross-site",
@@ -129,6 +131,15 @@ def test_a_session_dependency_on_a_bearer_admitted_request_is_a_host_mistake(
 
     assert response.status_code == 500
     assert_answers_no_store(response)
+
+
+def test_the_admitted_admin_of_a_bearer_request_is_an_error_the_public_reader_raises() -> None:
+    app = a_bearer_app(paths=PathRules(exact=frozenset({ADMITTED_ADMIN_PATH})))
+    client = TestClient(app.auth.app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=True)
+    headers = {"authorization": bearing(A_TOKEN)[0]}
+
+    with pytest.raises(RuntimeError):
+        client.get(ADMITTED_ADMIN_PATH, headers=headers)
 
 
 def test_the_admitted_user_of_a_bearer_request_is_nobody() -> None:

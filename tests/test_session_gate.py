@@ -15,11 +15,16 @@ from httpx import Response
 from starlette.websockets import WebSocketDisconnect
 from webauth_arrangement import (
     ADMIN_ROLE,
+    ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH,
+    ADMITTED_ADMIN_DEPENDENCY_PATH,
+    ADMITTED_ADMIN_PATH,
+    ADMITTED_ADMIN_PATHS,
     ALL_DEPENDENCIES_PATH,
     ALLOWED_ORIGIN,
     GATED_APP_HEADERS_POLICY,
     LOGIN_REDIRECT,
     MEMBER_ROLE,
+    WEBSOCKET_ADMITTED_ADMIN_PATH,
     WEBSOCKET_ADMITTED_PATH,
     WEBSOCKET_PATH,
     AuthApp,
@@ -31,6 +36,7 @@ from webauth_arrangement import (
     UsersInMemory,
     a_csrf_passing_request_headers,
     a_session,
+    a_web_auth_config,
     an_auth_app,
     an_http_scope,
     assert_carries_policy_headers,
@@ -370,6 +376,104 @@ class TestAdmittedUser:
             ask(app, "/health", cookie=cookie)
 
 
+AUTHENTICATION_REQUIRED = {"detail": "Authentication required"}
+ADMIN_REQUIRED = {"detail": "Admin access required"}
+OPERATOR_ROLE = "operator"
+
+
+def a_gated_app_of(role: str, **keywords: Any) -> AuthApp:
+    return a_gated_app(a_session(user=FakeUser(role=role)), **keywords)
+
+
+class TestAdmittedAdmin:
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    def test_a_session_with_the_admin_role_gets_its_account(self, path: str) -> None:
+        app = a_gated_app_of(ADMIN_ROLE)
+        response = ask(app, path, cookie=signed_in(app))
+        assert (response.status_code, response.json()) == (200, {"username": "alice"})
+
+    @pytest.mark.parametrize("path", [*ADMITTED_ADMIN_PATHS, "/admin"])
+    def test_a_session_with_another_role_is_refused_as_admin_user_refuses_it(
+        self, path: str,
+    ) -> None:
+        app = a_gated_app_of(MEMBER_ROLE)
+        response = ask(app, path, cookie=signed_in(app))
+        assert (response.status_code, response.json()) == (403, ADMIN_REQUIRED)
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize(
+        ("role", "expected_status"),
+        [(OPERATOR_ROLE, 200), (ADMIN_ROLE, 403)],
+        ids=["the-configured-role", "the-literal-admin"],
+    )
+    def test_the_configured_admin_role_is_the_one_judged(
+        self, path: str, role: str, expected_status: int,
+    ) -> None:
+        config = a_web_auth_config(admin_role=OPERATOR_ROLE)
+        app = a_gated_app_of(role, config=config)
+        response = ask(app, path, cookie=signed_in(app))
+        assert response.status_code == expected_status
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize(
+        ("accept", "expected_status"), [(HTML, 302), (None, 401)], ids=["page", "fetch"],
+    )
+    def test_the_gate_refuses_a_signed_out_request_on_a_gated_path_before_the_route(
+        self, path: str, accept: str | None, expected_status: int,
+    ) -> None:
+        app = a_gated_app()
+        response = ask(app, path, accept=accept)
+        assert response.status_code == expected_status
+        assert app.route_runs == []
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize("accept", [HTML, None], ids=["page", "fetch"])
+    def test_where_the_gate_admitted_no_account_it_answers_401_and_never_redirects(
+        self, path: str, accept: str | None,
+    ) -> None:
+        app = a_gated_app(optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS)))
+        response = ask(app, path, accept=accept)
+        assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
+        assert "location" not in response.headers
+
+    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
+    @pytest.mark.parametrize("dead", ["expired", "deleted"])
+    def test_a_dead_admin_session_on_an_optional_path_is_401_and_asked_once_by_the_gate(
+        self, path: str, dead: str,
+    ) -> None:
+        record = a_session(
+            user=FakeUser(role=ADMIN_ROLE),
+            remaining=OUTSIDE_LIFETIME if dead == "expired" else timedelta(minutes=30),
+        )
+        sessions = SessionsRecordingTheirTransaction(None if dead == "deleted" else record)
+        app = a_gated_app(
+            optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS)), sessions=sessions,
+        )
+        response = ask(app, path, cookie=signed_in(app))
+        assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
+        assert counted(sessions, "load") == 1
+
+    def test_the_admission_a_dependency_makes_on_a_public_path_is_not_the_gates(self) -> None:
+        public = PublicRule(PathRules(exact=frozenset({ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH})))
+        app = a_gated_app_of(ADMIN_ROLE, public=(public,))
+        response = ask(app, ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH, cookie=signed_in(app))
+        assert [user.username for user in app.authenticated] == ["alice"]
+        assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
+
+    def test_it_is_an_error_where_no_gate_is_installed(self) -> None:
+        app = an_auth_app(a_session(user=FakeUser(role=ADMIN_ROLE)))
+        cookie = signed_in(app)
+        with pytest.raises(RuntimeError):
+            ask(app, ADMITTED_ADMIN_PATH, cookie=cookie)
+
+    def test_the_admitted_admin_of_a_websocket_is_an_error_behind_the_gate(self) -> None:
+        app = a_gated_app_of(ADMIN_ROLE)
+        with pytest.raises(RuntimeError), app.connect(
+            WEBSOCKET_ADMITTED_ADMIN_PATH, cookie=app.signed_cookie(),
+        ):
+            pass
+
+
 class Rule(Enum):
     GATED = "gated"
     OPTIONAL = "optional"
@@ -580,6 +684,8 @@ class TestARecordedAdmissionBelongsToItsRequest:
         assert ask(other, "/me", cookie=cookie).json() == {"detail": "Session expired"}
         with pytest.raises(RuntimeError):
             ask(other, "/health", cookie=cookie)
+        with pytest.raises(RuntimeError):
+            ask(other, ADMITTED_ADMIN_PATH, cookie=cookie)
 
     def test_a_replay_on_a_shared_config_is_ignored_for_another_sessions_cookie(
         self, arrangement: Arrangement,
@@ -599,6 +705,8 @@ class TestARecordedAdmissionBelongsToItsRequest:
         assert ask(shared, "/me").json() == {"detail": "Authentication required"}
         with pytest.raises(RuntimeError):
             ask(shared, "/health", cookie=arrangement.second_cookie)
+        with pytest.raises(RuntimeError):
+            ask(shared, ADMITTED_ADMIN_PATH, cookie=arrangement.second_cookie)
         with pytest.raises(RuntimeError):
             ask(shared, "/health")
 
