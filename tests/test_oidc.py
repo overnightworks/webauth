@@ -867,43 +867,6 @@ def test_the_apps_own_two_urls_refuse_http_unless_the_host_is_loopback_and_the_r
         _config(**{field_name: url})
 
 
-@pytest.mark.parametrize("client_id", [
-    pytest.param(_CLIENT_ID, id="plain-client-id"),
-    pytest.param("lab app&x=1/\u00e9", id="client-id-needing-encoding"),
-])
-def test_the_logout_url_carries_exactly_the_client_id_and_the_post_logout_redirect_uri(
-    client_id: str,
-) -> None:
-    scenario = LoginScenario(FakeTokenEndpoint(), config=_config(client_id=client_id))
-
-    parts = urllib.parse.urlsplit(scenario.relying_party.logout_url())
-
-    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == _END_SESSION_ENDPOINT
-    assert urllib.parse.parse_qs(parts.query) == {
-        "client_id": [client_id],
-        "post_logout_redirect_uri": [_POST_LOGOUT_REDIRECT_URI],
-    }
-
-
-@pytest.mark.parametrize("client_id", [
-    pytest.param(_CLIENT_ID, id="plain-client-id"),
-    pytest.param("lab app&x=1/\u00e9", id="client-id-needing-encoding"),
-])
-def test_the_logout_url_carries_the_id_token_hint_after_the_other_parameters(
-    client_id: str,
-) -> None:
-    scenario = LoginScenario(FakeTokenEndpoint(), config=_config(client_id=client_id))
-    hint = a_fake_id_token("the-hint")
-
-    parts = urllib.parse.urlsplit(scenario.relying_party.logout_url(id_token_hint=hint))
-
-    assert list(urllib.parse.parse_qsl(parts.query)) == [
-        ("client_id", client_id),
-        ("post_logout_redirect_uri", _POST_LOGOUT_REDIRECT_URI),
-        ("id_token_hint", hint),
-    ]
-
-
 def test_the_relying_party_exposes_the_configured_logout_path(login: LoginScenario) -> None:
     assert login.relying_party.logout_path == _LOGOUT_PATH
 

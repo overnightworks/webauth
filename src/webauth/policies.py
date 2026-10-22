@@ -37,6 +37,12 @@ __all__ = [
     "default_content_security_policy",
 ]
 
+# An answer carrying this header keeps its own Content-Security-Policy and
+# Cache-Control; the security-headers middleware drops the header. It lives
+# here because ``webauth.middleware`` imports the modules whose pages carry it.
+_OWN_POLICY_HEADER: Final = "webauth-own-policy"
+_OWN_POLICY_HEADER_VALUE: Final = "1"
+
 
 @dataclass(frozen=True)
 class PathShape:
@@ -496,9 +502,8 @@ def default_content_security_policy(
     ``form-action``. Chromium and Safari also check ``form-action`` on the
     redirect that answers a submission and Firefox does not (see
     `MDN <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action>`_),
-    so a form answered by a redirect to another origin, such as an issuer's
-    logout endpoint, adds that origin as well: the origin, not a path, because
-    a path is ignored after a redirect.
+    so a form answered by a redirect to another origin adds that origin as
+    well: the origin, not a path, because a path is ignored after a redirect.
     """
     quoted_hashes = tuple(
         _validated_hash(script_hash)

@@ -1,8 +1,8 @@
 # How to run the real-browser proof of the OIDC relying party
 
-`prove.py` drives a real Chromium through a real login and logout at a real
-Keycloak (edge's `hold` stack) against a small host application whose routes are
-`build_app` in `host_app.py`; `conformance.py` runs the OpenID Foundation's
+`prove.py` drives a real Chromium, and `engines.py` also Firefox and WebKit, through a real
+login and logout at a real Keycloak (edge's `hold` stack) against a small host
+application whose routes are `build_app` in `host_app.py`; `conformance.py` runs the OpenID Foundation's
 conformance suite against the same host. The OIDC path is not faked. What each
 driver proves, scenario by scenario, is stated in the docstring of `prove.py` and
 `conformance.py`; how the browser and Keycloak reach the apps is stated in
@@ -20,7 +20,8 @@ step is a verb of `scripts/e2e-oidc.sh`, which holds the commands, the caps and 
 - An edge checkout at the commit in `EDGE_SHA`, with no change in any path its
   probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/edge`, `traefik.yml`,
   `dynamic`). The run refuses otherwise.
-- Playwright's Chromium for the pinned version, the relay image of the back-channel
+- Playwright's Chromium, Firefox and WebKit for the pinned version (WebKit needs system
+  libraries that `prepare` cannot install), the relay image of the back-channel
   phase (`RELAY_IMAGE` in `shim.py`) and the conformance suite's images. The verb
   `prepare` installs and pulls them; run it first, because it needs no lock.
 

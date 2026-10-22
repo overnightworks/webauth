@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
+from oidc_arrangement import a_relying_party
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 from webauth_arrangement import (
+    SessionRecordsInMemory,
+    UsersInMemory,
+    WriteLockInMemory,
     a_web_auth_config,
     an_http_scope,
     assert_carries_policy_headers,
@@ -21,7 +28,8 @@ from webauth_arrangement import (
 )
 
 from webauth.config import install_web_auth_config
-from webauth.middleware import SecurityHeadersMiddleware
+from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
+from webauth.oidc_login import log_out
 from webauth.policies import (
     CacheControlRule,
     CspDirective,
@@ -31,9 +39,11 @@ from webauth.policies import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
-    from starlette.types import Message, Receive, Scope, Send
+    from httpx import Response as HttpxResponse
+    from starlette.middleware.base import RequestResponseEndpoint
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 POLICY = SecurityHeadersPolicy(default_content_security_policy([]))
 SERVER_ERROR_BODY = "Internal Server Error"
@@ -410,7 +420,9 @@ def test_an_answer_with_the_own_policy_marker_keeps_its_policy_and_loses_the_mar
 ) -> None:
     policy = SecurityHeadersPolicy(
         POLICY.content_security_policy,
-        cache_control_rules=(CacheControlRule(PathRules(exact=frozenset({"/page"})), "max-age=60"),),
+        cache_control_rules=(
+            CacheControlRule(PathRules(exact=frozenset({"/page"})), "max-age=60"),
+        ),
     )
     app = an_app(policy=policy)
 
@@ -426,3 +438,107 @@ def test_an_answer_with_the_own_policy_marker_keeps_its_policy_and_loses_the_mar
     assert_carries_policy_headers(
         response.headers, replace(policy, content_security_policy=expected_policy), hsts=True,
     )
+
+
+LOGOUT_PATH = "/logout"
+HOST_POLICY = SecurityHeadersPolicy(
+    "default-src 'self'",
+    cache_control_rules=(
+        CacheControlRule(PathRules(exact=frozenset({LOGOUT_PATH})), "public, max-age=600"),
+    ),
+)
+
+
+def add_a_base_http_host_middleware(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def pass_through(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        return await call_next(request)
+
+
+class PureAsgiHostMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await self._app(scope, receive, send)
+
+
+def add_a_pure_asgi_host_middleware(app: FastAPI) -> None:
+    app.add_middleware(PureAsgiHostMiddleware)
+
+
+def the_logout_page(
+    *,
+    cookie_secure: bool = True,
+    host_middleware: Callable[[FastAPI], None] | None = None,
+    installed: bool = True,
+) -> HttpxResponse:
+    """What a browser gets from a logout route behind this stack."""
+    config = a_web_auth_config(cookie_secure=cookie_secure)
+    lock = WriteLockInMemory()
+    sessions = SessionRecordsInMemory(users=UsersInMemory(lock=lock), lock=lock)
+    relying_party = a_relying_party()
+    app = FastAPI()
+    if host_middleware is not None:
+        host_middleware(app)
+    install_web_auth_config(app, config)
+    if installed:
+        install_web_auth_middleware(app, security_headers=HOST_POLICY)
+
+    @app.post(LOGOUT_PATH)
+    def log_out_route(request: Request) -> Response:
+        return log_out(
+            relying_party, request, config, sessions=sessions, lock=lock, button_label="Sign out",
+        )
+
+    return TestClient(app).post(LOGOUT_PATH)
+
+
+def the_logout_policy_of(page: HttpxResponse) -> str:
+    [script] = re.findall(r"<script>(.*?)</script>", page.text)
+    digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    return "; ".join((
+        "default-src 'none'",
+        f"script-src 'sha256-{digest}'",
+        "form-action https://login.example.org https://notes.example.org",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+    ))
+
+
+@pytest.mark.parametrize("cookie_secure", HSTS_SETTINGS)
+def test_the_logout_page_keeps_its_policy_and_no_store_and_gets_the_other_headers(
+    cookie_secure: bool,
+) -> None:
+    page = the_logout_page(cookie_secure=cookie_secure)
+
+    assert page.headers["cache-control"] == "no-store"
+    assert "webauth-own-policy" not in page.headers
+    assert_carries_policy_headers(
+        page.headers,
+        replace(HOST_POLICY, content_security_policy=the_logout_policy_of(page)),
+        hsts=cookie_secure,
+    )
+
+
+@pytest.mark.parametrize("host_middleware", [
+    pytest.param(add_a_base_http_host_middleware, id="base-http-middleware"),
+    pytest.param(add_a_pure_asgi_host_middleware, id="pure-asgi-middleware"),
+])
+def test_a_host_middleware_inside_the_stack_does_not_cost_the_page_its_policy(
+    host_middleware: Callable[[FastAPI], None],
+) -> None:
+    page = the_logout_page(host_middleware=host_middleware)
+
+    assert page.headers["content-security-policy"] == the_logout_policy_of(page)
+    assert page.headers["cache-control"] == "no-store"
+    assert "webauth-own-policy" not in page.headers
+
+
+def test_without_the_middleware_the_page_carries_its_policy_no_store_and_the_marker() -> None:
+    page = the_logout_page(installed=False)
+
+    assert page.headers["content-security-policy"] == the_logout_policy_of(page)
+    assert page.headers["cache-control"] == "no-store"
+    assert page.headers["webauth-own-policy"] == "1"
+    assert "strict-transport-security" not in page.headers

@@ -137,7 +137,7 @@ the leeway, and signing out of a browser leaves the token valid. See
 [The host's machine routes](#the-hosts-machine-routes).
 
 **Signing out.** Signing out of an app ends its session in that browser at once
-and takes the browser to Keycloak, which ends the person's Keycloak session in
+and shows a short page that posts to Keycloak, which ends the person's Keycloak session in
 that browser without asking anything. Keycloak then tells each app the
 person signed in to through that Keycloak session, and each of those apps ends
 all of the person's sessions, on every device. An app they used only on another
@@ -232,7 +232,8 @@ account and no role.
 
 The host serves three routes over its one `OidcRelyingParty`: start
 (`start_login`), callback (`finish_login`, then `open_session`) and logout
-(`log_out`). `webauth.oidc_login` carries the pending login in a signed cookie of
+(`log_out`), whose answer, a page that posts to Keycloak, the route returns as it is; a
+single-page app logs out by a top-level form POST to that route. `webauth.oidc_login` carries the pending login in a signed cookie of
 its own, one per login, so the host keeps no server-side store and
 `WebAuthConfig` knows nothing of OpenID Connect. Each function's docstring holds
 its contract, the `webauth.oidc_login` and `webauth.cookies` module docstrings

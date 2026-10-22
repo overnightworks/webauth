@@ -6,6 +6,18 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.22.0 - Unreleased
+
+**Breaking**
+
+- `log_out(relying_party, request, config, *, sessions, lock, button_label)` returns the answer itself: a page
+  that posts `id_token_hint` to the end-session endpoint and submits itself, `no-store`, under its own
+  Content-Security-Policy, which the security-headers middleware leaves in place. It no longer takes `response` or
+  returns a URL, and there is no JSON shape: the host commits and returns the answer as it is. A single-page app logs
+  out by a top-level form POST. `button_label` is the text of the button shown when the script does not run. No host
+  CSP needs a new source, and the end-session origin may leave `CspDirective.FORM_ACTION`.
+- `OidcRelyingParty.logout_url` is removed; `log_out` builds the end-session form itself.
+
 ## 0.21.0
 
 **Breaking**

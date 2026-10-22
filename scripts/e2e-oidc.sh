@@ -78,7 +78,7 @@ harness_constant() {
 }
 
 prepare() {
-  uv run --locked --project "$root" --group e2e playwright install chromium
+  uv run --locked --project "$root" --group e2e playwright install chromium firefox webkit
   docker pull "$(harness_constant shim RELAY_IMAGE)"
   SUITE_HOST="$suite_host" docker compose -f "$root/e2e/oidc/suite-compose.yaml" pull
 }

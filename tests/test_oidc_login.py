@@ -19,9 +19,9 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field, replace
-from html.parser import HTMLParser
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
 from typing import NoReturn
 
 import anyio.to_thread
@@ -586,13 +586,12 @@ def test_a_store_without_unique_usernames_admits_two_subjects_sharing_one() -> N
 
 
 NOW = 1_800_000_000
-CLIENT_ID = "lab-app"
+CLIENT_ID = "lab-app <\"&'>"
 CALLBACK_PATH = "/auth/callback"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_PATH = "/logout"
-LOGOUT_BUTTON_LABEL = "Sign out"
+LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
 FORM_LOGOUT_PATH = LOGOUT_PATH
-FETCH_LOGOUT_PATH = f"{LOGOUT_PATH}/fetch"
 ID_TOKEN_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
@@ -768,7 +767,7 @@ def an_oidc_host(
         csrf_origin=CsrfPolicy(exempt=backchannel_path),
         csrf_token=CsrfPolicy(
             exempt=backchannel_path,
-            token_exempt=PathRules(exact=frozenset({FORM_LOGOUT_PATH, FETCH_LOGOUT_PATH})),
+            token_exempt=PathRules(exact=frozenset({FORM_LOGOUT_PATH})),
         ),
     )
 
@@ -809,14 +808,6 @@ def an_oidc_host(
             relying_party, request, config,
             sessions=sessions, lock=lock, button_label=LOGOUT_BUTTON_LABEL,
         )
-
-    @app.post(FETCH_LOGOUT_PATH)
-    def fetch_logout(request: Request, response: Response) -> dict[str, str]:
-        return {
-            "logout_url": log_out(
-                relying_party, request, response, config, sessions=sessions, lock=lock,
-            ),
-        }
 
     def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
         with sessions.transaction():
@@ -1494,63 +1485,37 @@ def signed_in_host() -> OidcHost:
     return host
 
 
-def post_logout(
-    host: OidcHost, headers: dict[str, str], path: str = FORM_LOGOUT_PATH,
-) -> HttpxResponse:
-    return host.client.post(path, headers=headers, follow_redirects=False)
+def post_logout(host: OidcHost, headers: dict[str, str]) -> HttpxResponse:
+    return host.client.post(FORM_LOGOUT_PATH, headers=headers, follow_redirects=False)
 
 
-@dataclass
-class LogoutPage:
-    """What a browser parses out of the logout answer."""
+class LogoutPage(HTMLParser):
+    """The logout answer as a browser parses it."""
 
-    tags: list[str] = field(default_factory=list)
-    forms: list[dict[str, str | None]] = field(default_factory=list)
-    hidden_fields: dict[str, str | None] = field(default_factory=dict)
-    scripts: list[str] = field(default_factory=list)
-    button_labels: list[str] = field(default_factory=list)
-    title: str = ""
-    handler_attributes: list[str] = field(default_factory=list)
-
-
-class _LogoutPageParser(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(self, markup: str) -> None:
         super().__init__()
-        self.page = LogoutPage()
-        self._open_text: list[str] | None = None
+        self.elements: list[tuple[str, dict[str, str | None]]] = []
+        self.texts: dict[str, str] = {}
+        self.feed(markup)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attributes = dict(attrs)
-        self.page.tags.append(tag)
-        self.page.handler_attributes += [name for name in attributes if name.startswith("on")]
-        if tag == "form":
-            self.page.forms.append(attributes)
-        if tag == "input":
-            self.page.hidden_fields[attributes["name"] or ""] = attributes["value"]
-        if tag in {"script", "button", "title"}:
-            self._open_text = []
+        self.elements.append((tag, dict(attrs)))
 
     def handle_data(self, data: str) -> None:
-        if self._open_text is not None:
-            self._open_text.append(data)
+        tag = self.elements[-1][0]
+        self.texts[tag] = self.texts.get(tag, "") + data
 
-    def handle_endtag(self, tag: str) -> None:
-        if self._open_text is None:
-            return
-        text = "".join(self._open_text)
-        if tag == "script":
-            self.page.scripts.append(text)
-        elif tag == "button":
-            self.page.button_labels.append(text)
-        elif tag == "title":
-            self.page.title = text
-        self._open_text = None
+    def attributes_of(self, tag: str) -> list[dict[str, str | None]]:
+        return [attributes for name, attributes in self.elements if name == tag]
+
+    @property
+    def hidden_fields(self) -> dict[str | None, str | None]:
+        return {field["name"]: field["value"] for field in self.attributes_of("input")}
 
 
-def the_page_of(response: HttpxResponse) -> LogoutPage:
-    parser = _LogoutPageParser()
-    parser.feed(response.text)
-    return parser.page
+def the_script_source_of(page: LogoutPage) -> str:
+    digest = hashlib.sha256(page.texts["script"].encode()).digest()
+    return f"'sha256-{base64.b64encode(digest).decode()}'"
 
 
 def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
@@ -1560,51 +1525,41 @@ def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
     return {name: sources for name, *sources in directives}
 
 
-def test_a_logout_answers_a_page_that_posts_the_client_and_the_hint_to_the_end_session_endpoint(
-) -> None:
+def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint() -> None:
     host = signed_in_host()
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
-    page = the_page_of(response)
+    page = LogoutPage(response.text)
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/html; charset=utf-8"
-    assert page.forms == [{"method": "post", "action": END_SESSION_ENDPOINT}]
+    assert page.attributes_of("form") == [{"method": "post", "action": END_SESSION_ENDPOINT}]
     assert page.hidden_fields == {
         "client_id": CLIENT_ID,
         "post_logout_redirect_uri": a_client_config().post_logout_redirect_uri,
         "id_token_hint": host.issued_id_tokens[-1],
     }
-    assert page.button_labels == [LOGOUT_BUTTON_LABEL]
+    assert (page.texts["button"], page.texts["title"]) == (LOGOUT_BUTTON_LABEL, LOGOUT_BUTTON_LABEL)
+    assert {tag for tag, _ in page.elements} == {
+        "html", "head", "meta", "title", "body", "form", "input", "button", "script",
+    }
 
 
-def test_the_logout_policy_admits_the_one_inline_script_by_its_hash_and_posts_to_two_origins(
-) -> None:
+def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two_origins() -> None:
     host = signed_in_host()
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
-    page = the_page_of(response)
-    [script] = page.scripts
-    script_hash = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
+    page = LogoutPage(response.text)
     policy = content_security_policy_of(response)
-    assert policy["script-src"] == [f"'sha256-{script_hash}'"]
+    assert policy["script-src"] == [the_script_source_of(page)]
     assert policy["form-action"] == [BOUND_ISSUER_ORIGIN, HTTPS_TEST_SERVER]
-    assert page.handler_attributes == []
+    assert [name for _, attributes in page.elements for name in attributes
+            if name.startswith("on")] == []
 
 
-def is_the_issuers_logout_url(url: str, *, id_token_hint: str | None) -> bool:
-    parts = urllib.parse.urlsplit(url)
-    expected = {
-        "client_id": [CLIENT_ID],
-        "post_logout_redirect_uri": [a_client_config().post_logout_redirect_uri],
-    }
-    if id_token_hint is not None:
-        expected["id_token_hint"] = [id_token_hint]
-    return (
-        f"{parts.scheme}://{parts.netloc}{parts.path}" == END_SESSION_ENDPOINT
-        and urllib.parse.parse_qs(parts.query, keep_blank_values=True) == expected
-    )
+def hint_of(response: HttpxResponse) -> str | None:
+    return LogoutPage(response.text).hidden_fields.get("id_token_hint")
 
 
 def the_hint_cookie_is_cleared_for_the_logout_path(response: HttpxResponse) -> bool:
@@ -1619,56 +1574,21 @@ def both_session_cookies_are_cleared(host: OidcHost, response: HttpxResponse) ->
     )
 
 
-def a_logout_by_form(host: OidcHost) -> tuple[HttpxResponse, str]:
-    response = post_logout(host, SAME_ORIGIN_FORM)
-    assert response.status_code == 303
-    return response, response.headers["location"]
-
-
-def a_logout_by_fetch(host: OidcHost) -> tuple[HttpxResponse, str]:
-    token = host.client.cookies[host.config.csrf_cookie_name]
-    response = post_logout(
-        host, {**SAME_ORIGIN_FORM, host.config.csrf_header_name: token}, FETCH_LOGOUT_PATH,
-    )
-    assert response.status_code == 200
-    return response, response.json()["logout_url"]
-
-
-@pytest.mark.parametrize("log_out_through", [
-    pytest.param(a_logout_by_form, id="form-303"),
-    pytest.param(a_logout_by_fetch, id="fetch-json"),
-])
-def test_a_logout_ends_the_session_clears_both_cookies_and_sends_the_browser_to_the_issuer(
-    log_out_through: Callable[[OidcHost], tuple[HttpxResponse, str]],
-) -> None:
+def test_the_answer_ends_the_session_and_holds_the_token_in_its_body_and_only_clearings() -> None:
     host = signed_in_host()
 
-    response, logout_url = log_out_through(host)
+    response = post_logout(host, SAME_ORIGIN_FORM)
 
-    assert is_the_issuers_logout_url(logout_url, id_token_hint=host.issued_id_tokens[-1])
+    header_values = " ".join(value for _, value in response.headers.multi_items())
+    assert set(set_cookies(response)) == {
+        host.config.session_cookie_name, host.config.csrf_cookie_name, ID_TOKEN_HINT_COOKIE_NAME,
+    }
     assert both_session_cookies_are_cleared(host, response)
     assert the_hint_cookie_is_cleared_for_the_logout_path(response)
-    assert host.sessions.count_active() == 0
-    assert stored_refresh_tokens(host) == []
-
-
-@dataclass(frozen=True)
-class LogoutShape:
-    path: str
-    status_code: int
-    url_of: Callable[[HttpxResponse], str]
-
-
-LOGOUT_SHAPES = [
-    pytest.param(
-        LogoutShape(FORM_LOGOUT_PATH, 303, lambda response: response.headers["location"]),
-        id="form-303",
-    ),
-    pytest.param(
-        LogoutShape(FETCH_LOGOUT_PATH, 200, lambda response: response.json()["logout_url"]),
-        id="fetch-json",
-    ),
-]
+    assert "location" not in response.headers
+    assert host.issued_id_tokens[-1] not in header_values
+    assert hint_of(response) == host.issued_id_tokens[-1]
+    assert (host.sessions.count_active(), stored_refresh_tokens(host)) == (0, [])
 
 
 def _no_session(_host: OidcHost) -> dict[str, str]:
@@ -1700,35 +1620,35 @@ def _session_expired_but_stored(host: OidcHost) -> dict[str, str]:
     return {}
 
 
-@pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent"), [
-    pytest.param(_no_session, 0, False, id="no-session"),
-    pytest.param(_forged_session_cookie, 1, False, id="forged-cookie-ends-nothing"),
-    pytest.param(_session_cookies_dropped, 1, True, id="session-cookies-gone-hint-kept"),
-    pytest.param(_session_ended_in_the_store, 0, True, id="session-already-ended"),
-    pytest.param(_session_expired_but_stored, 0, True, id="session-expired-but-stored"),
+@pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent", "lock_taken"), [
+    pytest.param(_no_session, 0, False, False, id="no-session"),
+    pytest.param(_forged_session_cookie, 1, False, False, id="forged-cookie-ends-nothing"),
+    pytest.param(_session_cookies_dropped, 1, True, False, id="session-cookies-gone-hint-kept"),
+    pytest.param(_session_ended_in_the_store, 0, True, True, id="session-already-ended"),
+    pytest.param(_session_expired_but_stored, 0, True, True, id="session-expired-but-stored"),
 ])
-@pytest.mark.parametrize("shape", LOGOUT_SHAPES)
-def test_a_same_origin_logout_needs_no_csrf_token_and_still_reaches_the_issuer(
-    shape: LogoutShape,
+def test_a_same_origin_logout_needs_no_csrf_token_and_still_answers_the_page(
     arrange: Callable[[OidcHost], dict[str, str]],
     sessions_kept: int,
     *,
     hint_sent: bool,
+    lock_taken: bool,
 ) -> None:
     host = an_oidc_host()
     if arrange is not _no_session:
         host.callback(host.sign_in_at_issuer())
     extra_headers = arrange(host)
+    taken_before = host.lock.times_taken
 
-    response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers}, shape.path)
+    response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers})
 
-    assert response.status_code == shape.status_code
-    assert is_the_issuers_logout_url(
-        shape.url_of(response),
-        id_token_hint=host.issued_id_tokens[-1] if hint_sent else None,
-    )
+    page = LogoutPage(response.text)
+    assert response.status_code == 200
+    assert page.attributes_of("form") == [{"method": "post", "action": END_SESSION_ENDPOINT}]
+    assert hint_of(response) == (host.issued_id_tokens[-1] if hint_sent else None)
     assert both_session_cookies_are_cleared(host, response)
     assert host.sessions.count_active() == sessions_kept
+    assert host.lock.times_taken - taken_before == lock_taken
 
 
 def _a_compact_jws_of_length(length: int) -> str:
@@ -1771,34 +1691,19 @@ def test_a_logout_forwards_a_sole_jws_shaped_hint_byte_for_byte_and_otherwise_le
 
     response = post_logout(host, {**SAME_ORIGIN_FORM, **hint_cookies})
 
-    assert is_the_issuers_logout_url(response.headers["location"], id_token_hint=forwarded_hint)
+    assert hint_of(response) == forwarded_hint
     assert the_hint_cookie_is_cleared_for_the_logout_path(response)
 
 
-@pytest.mark.parametrize("shape", LOGOUT_SHAPES)
-def test_a_logout_without_a_session_takes_no_lock(shape: LogoutShape) -> None:
-    host = an_oidc_host()
-
-    response = post_logout(host, SAME_ORIGIN_FORM, shape.path)
-
-    assert response.status_code == shape.status_code
-    assert host.lock.times_taken == 0
-
-
-@pytest.mark.parametrize("shape", LOGOUT_SHAPES)
 @pytest.mark.parametrize("headers", [
     pytest.param({"sec-fetch-site": "cross-site"}, id="cross-site-fetch-metadata"),
     pytest.param({"origin": "https://evil.test"}, id="foreign-origin"),
     pytest.param({}, id="form-with-neither-header"),
 ])
-def test_a_cross_site_logout_is_refused_and_ends_nothing(
-    shape: LogoutShape, headers: dict[str, str],
-) -> None:
+def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]) -> None:
     host = signed_in_host()
 
-    response = post_logout(
-        host, {"content-type": "application/x-www-form-urlencoded", **headers}, shape.path,
-    )
+    response = post_logout(host, {"content-type": "application/x-www-form-urlencoded", **headers})
 
     assert response.status_code == 403
     assert host.sessions.count_active() == 1
@@ -1816,16 +1721,15 @@ def test_a_logout_reaches_no_issuer_endpoint() -> None:
     host.issuer.before_exchange = unreachable
     host.key_set.before_answer = unreachable
 
-    response, logout_url = a_logout_by_form(host)
+    response = post_logout(host, SAME_ORIGIN_FORM)
 
-    assert is_the_issuers_logout_url(logout_url, id_token_hint=host.issued_id_tokens[-1])
+    assert hint_of(response) == host.issued_id_tokens[-1]
     assert host.sessions.count_active() == 0
     assert len(host.issuer.requests) == exchanges_before
     assert len(host.key_set.fetched_urls) == fetches_before
-    assert both_session_cookies_are_cleared(host, response)
 
 
-def test_the_logout_url_ignores_any_target_the_request_names() -> None:
+def test_the_logout_form_carries_the_configured_values_whatever_the_request_names() -> None:
     host = signed_in_host()
     query = urllib.parse.urlencode({
         "post_logout_redirect_uri": "https://evil.test/",
@@ -1834,15 +1738,14 @@ def test_the_logout_url_ignores_any_target_the_request_names() -> None:
     })
 
     response = host.client.post(
-        f"{FORM_LOGOUT_PATH}?{query}",
-        headers=SAME_ORIGIN_FORM,
-        content=query,
-        follow_redirects=False,
+        f"{FORM_LOGOUT_PATH}?{query}", headers=SAME_ORIGIN_FORM, content=query,
     )
 
-    assert is_the_issuers_logout_url(
-        response.headers["location"], id_token_hint=host.issued_id_tokens[-1],
-    )
+    assert LogoutPage(response.text).hidden_fields == {
+        "client_id": CLIENT_ID,
+        "post_logout_redirect_uri": a_client_config().post_logout_redirect_uri,
+        "id_token_hint": host.issued_id_tokens[-1],
+    }
 
 
 OTHER_SUBJECT = "0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23"
@@ -1916,7 +1819,7 @@ def the_cookie_header_of(host: OidcHost, session_id: str) -> dict[str, str]:
 
 def _logged_out_holding_the_second_session(host: OidcHost, session_ids: list[str]) -> None:
     headers = {**SAME_ORIGIN_FORM, **the_cookie_header_of(host, session_ids[1])}
-    assert post_logout(host, headers).status_code == 303
+    assert post_logout(host, headers).status_code == 200
 
 
 def _logged_out_by_the_issuer(host: OidcHost, _session_ids: list[str]) -> None:

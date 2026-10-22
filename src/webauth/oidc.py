@@ -55,13 +55,6 @@ not more than the leeway ahead, with an `exp` after its `iat`, an `events`
 member holding exactly the back-channel logout event and no other, a `sub` and
 no `nonce`. Its `sid` is never read. There is no replay store: the age bound is
 what limits a copy.
-
-`OidcRelyingParty.logout_url` answers the issuer's end-session URL, which
-carries the client ID, the configured post-logout redirect URI and, when the
-caller has one, the `id_token_hint` of the login being ended. With the hint
-the issuer ends the session without asking the person to confirm; without it
-the issuer asks. The hint is only passed along, never decoded or verified
-here, and no target is taken from a request. It makes no outbound call.
 """
 
 from __future__ import annotations
@@ -82,6 +75,7 @@ from typing import TYPE_CHECKING, TypeGuard
 from pydantic import SecretStr
 
 from webauth import WebAuthError
+from webauth._end_session_page import EndSessionForm
 from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.https_client import ExchangeFailure, is_https_url
 from webauth.jwt_verification import (
@@ -404,15 +398,13 @@ class OidcRelyingParty:
     def logout_path(self) -> str:
         return self._config.logout_path
 
-    def logout_url(self, *, id_token_hint: str | None = None) -> str:
-        parameters = {
-            "client_id": self._config.client_id,
-            "post_logout_redirect_uri": self._config.post_logout_redirect_uri,
-        }
-        if id_token_hint is not None:
-            parameters["id_token_hint"] = id_token_hint
-        query = urllib.parse.urlencode(parameters)
-        return f"{self._config.end_session_endpoint}?{query}"
+    def _end_session_form(self, *, id_token_hint: SecretStr | None) -> EndSessionForm:
+        return EndSessionForm(
+            end_session_endpoint=self._config.end_session_endpoint,
+            client_id=self._config.client_id,
+            post_logout_redirect_uri=self._config.post_logout_redirect_uri,
+            id_token_hint=id_token_hint,
+        )
 
     def complete_login(
         self, pending: PendingLogin, callback_query: str

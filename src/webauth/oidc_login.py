@@ -43,23 +43,20 @@ its new one, holding the login's refresh token, at the configured clock's instan
 committing and setting no cookie, so the host commits and then issues the cookies.
 
 ``log_out`` is the third route's whole sequence: it ends the session the
-request's cookie names, if any, clears the session cookies, and answers the
-issuer's end-session URL for the host to send the browser to, as a 303 for a
-form or as JSON for ``fetch``. It makes no outbound call and never commits,
-so the person is signed out of the app even when the issuer is down, and a
-request without a usable session still reaches the issuer. A forged,
-oversized or duplicated cookie counts as missing: it ends no stored session,
-which leaves a duplicated cookie's session until it expires, while the
-browser's own cookies are still cleared.
+request's cookie names, if any, and answers a page that posts the ID token hint
+to the issuer's end-session endpoint, clearing the session cookies. It makes no
+outbound call and never commits, so the person is signed out of the app even
+when the issuer is down, and a request without a usable session still reaches
+the issuer. A forged, oversized or duplicated cookie counts as missing: it ends
+no stored session, which leaves a duplicated cookie's session until it expires,
+while the browser's own cookies are still cleared.
 
 ``finish_login`` hands the browser the login's ID token in a cookie that only
 the logout path receives, and ``log_out`` passes it to the issuer as
 ``id_token_hint`` and clears it, so the issuer ends its session without asking
 the person to confirm. The hint is never decoded or verified here and is no
 credential; without a usable one (missing, duplicated, oversized or not shaped
-like a compact JWS) the issuer asks. Because the logout is a GET to the
-issuer, the hint reaches the browser's history and any TLS-terminating edge;
-once the session has ended it has no power left.
+like a compact JWS) the issuer asks.
 
 ``receive_backchannel_logout`` is the issuer's back-channel logout: it reads the
 form body (one non-empty ``logout_token`` field, as the issuer posts it) and
@@ -83,6 +80,9 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Final
 
+from pydantic import SecretStr
+
+from webauth._end_session_page import end_session_page
 from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
 from webauth._validation import require_positive_whole_number
@@ -116,7 +116,6 @@ from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from pydantic import SecretStr
     from starlette.requests import Request
     from starlette.responses import Response
 
@@ -450,48 +449,49 @@ def open_session(
 def log_out(
     relying_party: OidcRelyingParty,
     request: Request,
-    response: Response,
     config: WebAuthConfig,
     *,
     sessions: SessionRecordStore,
     lock: WriteLock,
-) -> str:
-    """End this browser's app session and return the issuer's end-session URL.
+    button_label: str,
+) -> Response:
+    """End this browser's app session and answer the page that ends the issuer's.
 
     The session the request's cookie names is deleted under ``lock`` and the
-    session cookies are cleared on ``response`` in every case; the host then
-    commits and sends the browser to the returned URL. The URL carries the
-    client ID, the configured ``post_logout_redirect_uri`` and the ID token
-    hint the request carries, whose cookie is cleared in every case; without a
-    usable hint the issuer asks the person once, as it also does for a hint of
-    another issuer session, and for a hint whose realm signing key has since
-    been deleted it shows an error page. The session's stored refresh token goes
-    to the issuer nowhere; deleting the row removes it.
+    session cookies and the ID token hint cookie are cleared on the answer in
+    every case. The answer is a ``no-store`` HTML page under its own
+    Content-Security-Policy that posts the client ID, the configured
+    ``post_logout_redirect_uri`` and the ID token hint the request carries to
+    the end-session endpoint, and submits itself; ``button_label`` is the text
+    of the button shown where no script runs. The security-headers middleware
+    leaves that policy and ``Cache-Control`` in place, so no host policy needs a
+    source for the issuer. Without a usable hint the issuer asks the person
+    once, as it also does for a hint of another issuer session, and for a hint
+    whose realm signing key has since been deleted it shows an error page. The
+    session's stored refresh token goes to the issuer nowhere; deleting the row
+    removes it.
 
-    A form logs out through a route that builds the ``Response`` itself and
-    passes it in: a returned ``RedirectResponse`` would be sent as is and lose
-    the cookie deletions on ``response``. A page that logs out through ``fetch``
-    returns the URL as JSON and navigates itself, because ``fetch`` would
-    follow a cross-origin 303, and in that shape the hint also reaches the
-    page's own script. The route needs no ``current_user`` dependency, so a
-    request without a session still reaches the issuer.
+    The host commits and returns the answer as it is, and a single-page app
+    logs out by a top-level form POST to the route. The route needs no
+    ``current_user`` dependency, so a request without a session still reaches
+    the issuer.
 
     The origin check protects the route, not the CSRF token, which is bound to
     the session and fails once it has expired, and which a plain form cannot
     send. So the host keeps the route POST only (the origin check runs on
     mutating methods alone) and lists its exact path, never a prefix, in
-    ``CsrfPolicy.token_exempt`` and not in ``exempt``. A form logout redirects
-    the browser to the issuer, and Chromium checks ``form-action`` on that
-    redirect, so the host adds the end-session endpoint's origin to
-    ``CspDirective.FORM_ACTION``; a ``fetch`` logout is not subject to it."""
+    ``CsrfPolicy.token_exempt`` and not in ``exempt``."""
     session_id = session_id_from_request(request, config)
     if session_id is not None:
         with lock.hold():
             sessions.delete(session_id)
-    clear_session_cookies(response, config)
     id_token_hint = _id_token_hint_from_request(request, config)
-    _clear_id_token_hint_cookie(response, logout_path=relying_party.logout_path, config=config)
-    return relying_party.logout_url(id_token_hint=id_token_hint)
+    hint = None if id_token_hint is None else SecretStr(id_token_hint)
+    form = relying_party._end_session_form(id_token_hint=hint)
+    answer = end_session_page(form, button_label=button_label)
+    clear_session_cookies(answer, config)
+    _clear_id_token_hint_cookie(answer, logout_path=relying_party.logout_path, config=config)
+    return answer
 
 
 class AccessTokenRefusalReason(StrEnum):

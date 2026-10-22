@@ -35,7 +35,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
 import anyio.to_thread
 import httpx
@@ -85,7 +84,6 @@ from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
     CacheControlRule,
-    CspDirective,
     CsrfPolicy,
     PathRules,
     PublicRule,
@@ -102,6 +100,7 @@ LOOPBACK = "127.0.0.1"
 LOGIN_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
+LOGOUT_BUTTON_LABEL = "Log out"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
 WORKLOAD_TOKEN_PATH = "/workload-token"  # noqa: S105  # a route, not a credential
@@ -341,15 +340,11 @@ def call_userinfo(settings: HostSettings, current: World) -> None:
 
 
 def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]) -> None:
-    issuer = urlsplit(settings.end_session_endpoint)
-    issuer_origin = f"{issuer.scheme}://{issuer.netloc}"
     backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
     install_web_auth_middleware(
         app,
         security_headers=SecurityHeadersPolicy(
-            default_content_security_policy(
-                added_sources={CspDirective.FORM_ACTION: [issuer_origin]},
-            ),
+            default_content_security_policy(),
             cache_control_rules=(CacheControlRule(paths=backchannel_path, value="no-store"),),
         ),
         body_size=BodySizePolicy(
@@ -547,12 +542,10 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     @app.post(LOGOUT_PATH)
     def logout(request: Request) -> Response:
         current = world["world"]
-        response = Response(status_code=303)
-        response.headers["location"] = log_out(
-            relying_party_of(request), request, response, config,
-            sessions=current.sessions, lock=current.lock,
+        return log_out(
+            relying_party_of(request), request, config,
+            sessions=current.sessions, lock=current.lock, button_label=LOGOUT_BUTTON_LABEL,
         )
-        return response
 
     def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
         current = world["world"]

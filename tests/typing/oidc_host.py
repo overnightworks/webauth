@@ -275,12 +275,13 @@ def a_host_gets_a_fresh_access_token(
 
 
 def a_host_logs_out(
-    relying_party: OidcRelyingParty, request: Request, response: Response,
-    config: WebAuthConfig,
-) -> str:
+    relying_party: OidcRelyingParty, request: Request, config: WebAuthConfig,
+) -> Response:
     sessions: SessionRecordStore = HostSessions()
     lock: WriteLock = HostLock()
-    return log_out(relying_party, request, response, config, sessions=sessions, lock=lock)
+    return log_out(
+        relying_party, request, config, sessions=sessions, lock=lock, button_label="Sign out",
+    )
 
 
 def a_host_receives_a_backchannel_logout(
