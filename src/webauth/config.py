@@ -149,10 +149,11 @@ class WebAuthConfig:
     ``Origin``, or of ``Referer`` when ``Origin`` is absent. An exact entry
     without a port matches that hostname on every port; ``host:port`` matches
     only that port. A pattern must match ``host`` or ``host:port`` in full. The
-    scheme is never compared. That is sound because cookies do not isolate
-    ports, so a service on another port receives the session cookie anyway, and
-    a plain-http page cannot read the ``Secure`` ``__Host-`` CSRF cookie while
-    schemeful ``SameSite`` withholds the session cookie from its requests. A
+    scheme is never compared. That is sound because cookies do not isolate ports,
+    so a service on another port of that hostname, served over https, receives
+    the session cookie anyway, and a plain-http page cannot read the ``Secure``
+    ``__Host-`` CSRF cookie while schemeful ``SameSite`` (``strict`` or ``lax``)
+    withholds the session cookie from its state-changing requests. A
     deployment must therefore never hand another party another port or scheme
     of an allowed hostname.
     """
