@@ -1,0 +1,8 @@
+claim_id = "2341d38a700448d88c2478e5a84490ca"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "0ff688473d1c45e5030b3c2d253b31385ea7044e"
+branch = "claude/issue-397-architecture-document"
+scope = ["AGENTS.md", "CHANGELOG.md", "README.md", "SECURITY.md", "docs/ARCHITECTURE.md"]
+opened_commit = "339f77a03ef5084589002abb6b5847bd5db8a138"
+whole_reason = "One move: the trust model, the module table and the concepts leave the README for docs/ARCHITECTURE.md, and the three documents that link into them change with it."
