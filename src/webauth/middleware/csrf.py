@@ -10,7 +10,7 @@ from webauth._media_types import media_type_of
 from webauth._origins import origin_is_allowed
 from webauth.config import web_auth_config
 from webauth.cookies import _verify_csrf_token
-from webauth.dependencies import session_id_from_request
+from webauth.dependencies import _bearer_admission, session_id_from_request
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.policies import CsrfPolicy
 
@@ -50,6 +50,7 @@ class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
         if (
             request.method in _MUTATING_METHODS
             and self._policy.requires_token(request.url.path)
+            and _bearer_admission(request) is None
         ):
             config = web_auth_config(request)
             header_token = request.headers.get(config.csrf_header_name)
@@ -125,6 +126,7 @@ class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
         if (
             request.method in _MUTATING_METHODS
             and self._policy.requires_same_origin(request.url.path)
+            and _bearer_admission(request) is None
         ):
             return _origin_check_refusal(request)
         return None

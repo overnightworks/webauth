@@ -197,7 +197,7 @@ class FakeTokenEndpoint:
 REALM_ISSUER = "https://login.example.org/realms/workshop"
 REALM_JWKS_URL = f"{REALM_ISSUER}/protocol/openid-connect/certs"
 APP_CLIENT_ID = "notes-app"
-ACCESS_TOKEN_SUBJECT = "operator-account-1"
+OPERATOR_SUBJECT = "operator-account-1"
 ACCESS_TOKEN_LEEWAY_SECONDS = 30
 ACCESS_TOKEN_NOW = 1_800_000_000
 ACCESS_TOKEN_LIFETIME_SECONDS = 300
@@ -207,7 +207,7 @@ def an_access_token(
     *,
     issuer: str = REALM_ISSUER,
     client_id: str = APP_CLIENT_ID,
-    subject: str = ACCESS_TOKEN_SUBJECT,
+    subject: str = OPERATOR_SUBJECT,
     now: int = ACCESS_TOKEN_NOW,
     key_id: str = "current-key",
     key_name: str = "current",

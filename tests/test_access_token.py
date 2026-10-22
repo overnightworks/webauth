@@ -14,8 +14,8 @@ from oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
     ACCESS_TOKEN_NOW,
-    ACCESS_TOKEN_SUBJECT,
     APP_CLIENT_ID,
+    OPERATOR_SUBJECT,
     REALM_ISSUER,
     REALM_JWKS_URL,
     FakeClock,
@@ -66,7 +66,7 @@ NOT_AN_AUTHORIZED_PARTY = OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATC
 
 def test_a_perfect_access_token_yields_its_subject_and_groups() -> None:
     assert verified(an_access_token()) == VerifiedAccessToken(
-        subject=ACCESS_TOKEN_SUBJECT, groups=("/apps/x/admin",),
+        subject=OPERATOR_SUBJECT, groups=("/apps/x/admin",),
     )
 
 
@@ -216,7 +216,7 @@ def test_a_token_whose_subject_or_groups_are_unusable_is_an_invalid_claim(
 def test_a_token_without_groups_is_accepted_with_none() -> None:
     outcome = verified(an_access_token(claims={"groups": ABSENT}))
 
-    assert outcome == VerifiedAccessToken(subject=ACCESS_TOKEN_SUBJECT, groups=())
+    assert outcome == VerifiedAccessToken(subject=OPERATOR_SUBJECT, groups=())
 
 
 def test_a_token_of_another_issuer_signed_with_the_right_key_is_refused() -> None:

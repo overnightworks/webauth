@@ -18,11 +18,10 @@ import httpx
 import pytest
 from fastapi import Depends, Request
 from httpx import Response
-from starlette.middleware import Middleware
 from oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_NOW,
-    ACCESS_TOKEN_SUBJECT,
+    OPERATOR_SUBJECT,
     FakeClock,
     FakeKeySetEndpoint,
     a_relying_party,
@@ -31,6 +30,7 @@ from oidc_arrangement import (
     public_jwk,
     rsa_key,
 )
+from starlette.middleware import Middleware
 from webauth_arrangement import (
     ADMIN_ROLE,
     HTTPS_TEST_SERVER,
@@ -139,7 +139,8 @@ def a_bearer_app(
     key_sets = key_sets or a_key_set_answering()
     clock = FakeClock(float(ACCESS_TOKEN_NOW))
     record = a_session(user=FakeUser(role=ADMIN_ROLE))
-    stack = {"bearer_gate": a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock)} if gated else {}
+    gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock)
+    stack = {"bearer_gate": gate} if gated else {}
     auth = an_auth_app(
         record,
         gate=True,
@@ -313,7 +314,9 @@ def leaks_of(secrets: tuple[str, ...], *haystacks: str) -> list[str]:
 
 def digests_of(value: str) -> tuple[str, ...]:
     digest = hashlib.sha256(value.encode("latin-1")).digest()
-    return (digest.hex(), base64.b64encode(digest).decode(), base64.urlsafe_b64encode(digest).decode())
+    return (
+        digest.hex(), base64.b64encode(digest).decode(), base64.urlsafe_b64encode(digest).decode(),
+    )
 
 
 ADMITTED = [
@@ -332,7 +335,7 @@ def test_an_admin_token_is_admitted_and_its_subject_is_the_caller(line: str) -> 
 
     response = app.ask(authorization=(line,))
 
-    assert (response.status_code, response.json()) == (200, {"subject": ACCESS_TOKEN_SUBJECT})
+    assert (response.status_code, response.json()) == (200, {"subject": OPERATOR_SUBJECT})
     assert "www-authenticate" not in response.headers
     assert_answers_no_store(response)
 
@@ -354,7 +357,8 @@ def test_no_log_record_or_answer_holds_the_token_the_header_or_its_digest(
         response = app.ask(EXPORT_PATH + query, authorization=lines)
 
     headers = " ".join(f"{name}: {value}" for name, value in response.headers.items())
-    assert leaks_of(tuple(s for s in secrets if len(s) > 8), caplog.text, response.text, headers) == []
+    significant = tuple(secret for secret in secrets if len(secret) > 8)
+    assert leaks_of(significant, caplog.text, response.text, headers) == []
 
 
 def test_an_admitted_request_leaks_the_token_into_no_log_record(

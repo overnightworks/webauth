@@ -413,7 +413,9 @@ def _require_comparable_types(
         and media_type == media_type.lower()
         for media_type in expected_media_types
     ):
-        raise ValueError("expected_media_types must be a frozenset of non-empty lowercase ASCII strings")
+        raise ValueError(
+            "expected_media_types must be a frozenset of non-empty lowercase ASCII strings"
+        )
 
 
 def _has_expected_type(

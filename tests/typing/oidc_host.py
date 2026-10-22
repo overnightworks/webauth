@@ -450,7 +450,8 @@ def a_host_ends_a_session() -> None:
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
         AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
-        BodySizePolicy, CsrfOriginMiddleware, CsrfTokenMiddleware, DEFAULT_CSRF_COOKIE_NAME, DEFAULT_PERMISSIONS_POLICY,
+        BodySizePolicy, CsrfOriginMiddleware, CsrfTokenMiddleware, DEFAULT_CSRF_COOKIE_NAME,
+        DEFAULT_PERMISSIONS_POLICY,
         DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,
         KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
         MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,

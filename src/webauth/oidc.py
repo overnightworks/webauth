@@ -93,7 +93,6 @@ from webauth.jwt_verification import (
     VerifiedClaims,
     _json_object,
 )
-
 from webauth.policies import AuthorizedParties
 
 if TYPE_CHECKING:

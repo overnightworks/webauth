@@ -9,13 +9,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
     ACCESS_TOKEN_NOW,
-    ACCESS_TOKEN_SUBJECT,
+    OPERATOR_SUBJECT,
 )
 from starlette.middleware import Middleware
 from test_bearer_gate import (
@@ -39,6 +39,7 @@ from webauth_arrangement import (
     LOGIN_REDIRECT,
     SessionsThatMustNotBeAsked,
     a_web_auth_config,
+    session_cookie_header,
 )
 
 from webauth.config import install_web_auth_config
@@ -59,7 +60,6 @@ from webauth.ports import BearerCaller
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from httpx import Response
     from starlette.types import ASGIApp, Receive, Scope, Send
 
 EXPIRY = ACCESS_TOKEN_NOW + ACCESS_TOKEN_LIFETIME_SECONDS
@@ -80,7 +80,7 @@ def test_a_bearer_request_needs_no_csrf_origin_header_or_cookie() -> None:
 
     response = app.ask(method="DELETE", authorization=bearing(A_TOKEN), headers=FOREIGN_PAGE)
 
-    assert (response.status_code, response.json()) == (200, {"subject": ACCESS_TOKEN_SUBJECT})
+    assert (response.status_code, response.json()) == (200, {"subject": OPERATOR_SUBJECT})
     assert_answers_no_store(response)
 
 
@@ -89,7 +89,7 @@ def test_the_cookie_and_the_csrf_token_count_for_nothing_beside_a_token() -> Non
     app = a_bearer_app(
         sessions=SessionsThatMustNotBeAsked(), session_transaction=never_asked,
     )
-    other_accounts_cookie = f"{app.cookie.split('=')[0]}={app.auth.signed_cookie('another-account')}"
+    other_accounts_cookie = session_cookie_header(app.auth.signed_cookie("another-account"))
 
     response = app.ask(
         method="DELETE",
@@ -97,7 +97,7 @@ def test_the_cookie_and_the_csrf_token_count_for_nothing_beside_a_token() -> Non
         headers={**auth_headers, "cookie": other_accounts_cookie},
     )
 
-    assert (response.status_code, response.json()) == (200, {"subject": ACCESS_TOKEN_SUBJECT})
+    assert (response.status_code, response.json()) == (200, {"subject": OPERATOR_SUBJECT})
     assert_answers_no_store(response)
 
 
@@ -219,6 +219,7 @@ class Relay:
         control_relay = relayed(control.auth)
         app.ask(authorization=bearing(A_TOKEN))
         control.ask(authorization=bearing(A_TOKEN), cookie=True)
+        app.auth.route_runs.clear()
         self.entries = {
             key: value
             for key, value in self.relay.added.items()
