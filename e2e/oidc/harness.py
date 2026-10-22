@@ -4,7 +4,15 @@ worker thread and the result table. Nothing here knows a scenario.
 
 It owns the pinned Chromium (``launch_pinned_chromium``: each host name mapped to
 a loopback port, one certificate trusted by its public-key hash) and the browser
-context every scenario drives (``browser_context``)."""
+context every scenario drives (``browser_context``).
+
+The browser keeps the canonical URLs (port 443); only the connection is
+redirected, by ``--host-resolver-rules="MAP name 127.0.0.1:port"``. Trust is
+per browser process: ``--ignore-certificate-errors-spki-list`` names the hash of
+the throwaway leaf's public key, and nothing is installed in any profile or
+store. The host app process trusts the throwaway CA through ``SSL_CERT_FILE``.
+``shim.py`` owns the TLS front for Keycloak and the callback bridge from
+Keycloak's container to the apps."""
 
 from __future__ import annotations
 
