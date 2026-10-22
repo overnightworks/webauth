@@ -838,6 +838,48 @@ def test_an_issuer_url_stays_https_even_on_a_loopback_host(field_name: str, url:
         _config(**{field_name: url})
 
 
+_FORM_TARGET_FIELDS = ["end_session_endpoint", "post_logout_redirect_uri"]
+
+
+@pytest.mark.parametrize("field_name", _FORM_TARGET_FIELDS)
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://id.example;script-src-elem",
+        "https://id.example,https://evil.example",
+        "https://id.example'",
+        'https://id.example"',
+        "https://id.example\\",
+        "https://*.example",
+        "https://id.example%3Bscript-src-elem",
+        "https://id.example|x",
+        "https://id.example:80;x",
+    ],
+)
+def test_a_form_target_origin_that_could_end_or_extend_a_policy_source_is_refused(
+    field_name: str, origin: str
+) -> None:
+    with pytest.raises(ValueError, match=f"^{field_name} must "):
+        _config(**{field_name: f"{origin}/logout"})
+
+
+@pytest.mark.parametrize("field_name", _FORM_TARGET_FIELDS)
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://keycloak.example.org/realms/r/protocol/openid-connect/logout",
+        "https://keycloak.example.org:8443/realms/r/protocol/openid-connect/logout",
+        "https://[2001:db8::1]:8443/logout",
+    ],
+)
+def test_a_plain_host_with_or_without_a_port_is_a_form_target(
+    field_name: str, url: str
+) -> None:
+    config = _config(**{field_name: url})
+
+    assert getattr(config, field_name) == url
+
+
 @pytest.mark.parametrize("field_name", ["redirect_uri", "post_logout_redirect_uri"])
 @pytest.mark.parametrize(
     "url",
