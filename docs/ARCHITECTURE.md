@@ -192,4 +192,3 @@ owning section, it links there.
 To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 
 The operator's account and environment are trusted. A same-user race between listing and removal in `scripts/e2e-oidc.sh` is out of scope.
-
