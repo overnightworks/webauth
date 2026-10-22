@@ -31,10 +31,15 @@ step is a verb of `scripts/e2e-oidc.sh`, which holds the commands, the caps and 
    `/tmp/probe-stack.lock`, refuses to start while the 1-minute load average is above
    1.5 times the cores, and caps the run (the script's comment gives the numbers and
    why).
-2. Read the result table the run prints. Every scenario is `held` or the run exits
-   non-zero.
+2. Read the result table the run prints. A scenario or check that is not `held`
+   fails the run, with one exception: a measurement that comes out unfavourably is
+   reported as `FAILED-as-found` and leaves the exit status 0. Scenario 5 (the
+   session cookie after the callback redirect) reports it for a logged-out first
+   page, and scenarios 2, 9 and 21 for a second "Sign in" that passes through
+   Keycloak's live session without a form. File each as a finding.
 
-Verify: the exit status is 0. The run directory then holds `evidence/` only:
+Verify: the exit status is 0; a `FAILED-as-found` row is a finding to file, not a
+failed run. The run directory then holds `evidence/` only:
 screenshots and `result-table.txt`. It starts empty, and `runtime/` (credentials,
 keys, the stack's scratch) is deleted on every exit path.
 

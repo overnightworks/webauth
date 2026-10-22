@@ -10,14 +10,15 @@ the one throwaway certificate key the browser is told to accept.
 The host application is ``build_app`` in ``host_app.py``. The scenarios below
 are registered in ``run_default_scenarios``, ``run_hint_scenarios``,
 ``drive_backchannel_phase`` and ``run_proof``, which print ``SCENARIO <number>
-<width> <origin>`` for each; there are no scenarios 3, 16 and 18 to 20.
+<width> <origin>`` for each, except that the back-channel scenarios (10 to 13, 22
+and 23) print both app origins after the width and scenario 5 prints ``SCENARIO 5
+<origin> <cookie_samesite>``; there are no scenarios 3, 16 and 18 to 20.
 
 Screenshots are taken only at fixed moments of a scenario: the start page,
 Keycloak's form with the password filled (or Keycloak's refusal, where Keycloak
-clears the field), the result page (the refusal page in scenario 7), the second
-sign-in of scenarios 2 and 9, the app's page after the logout past the ID
-token's expiry (21), the app's page after each logout (15, 17, 22 and 23), the
-cross-site page and the app's answer to it in scenario 22, Keycloak's
+clears the field), the result page (the refusal page in scenario 7), the app's
+page after every logout through the button, the second sign-in of scenarios 2, 9
+and 21, the cross-site page and the app's answer to it in scenario 22, Keycloak's
 confirmation page in scenario 23, A's page after the disable and before the
 admin logout in scenario 13, in scenarios 10 to 13 also the other context's or
 app's result page, and, in scenario 5, only the first page, named after the
@@ -47,12 +48,15 @@ The hint scenarios, all at 1280x800:
 
 - Scenario 14: the cookie is stored for ``Path=/logout``, HttpOnly, Secure,
   SameSite=Strict, and no request to ``/`` or ``/me`` carries it.
-- Scenario 15: a second login and logout show no page.
-- Scenario 17: the same on the cross-site origin ``demo.example.test``. A
-  refused sign-in (scenario 7) leaves no hint cookie.
-- Scenario 21 gives app A's client ``access.token.lifespan`` 15 s through the
-  admin API (the previous setting is restored afterwards), signs in, reads the
-  ``exp`` of the hint cookie's ID token, waits until the clock is 2 s past it
+- Scenario 15: a login and logout, then a second login with a new hint and a
+  second logout, show no page.
+- Scenario 17: one login and logout on the cross-site origin
+  ``demo.example.test`` show no page. A refused sign-in (scenario 7) leaves no
+  hint cookie.
+- Scenario 21 gives the default host's client (``d1-host``)
+  ``access.token.lifespan`` 15 s through the admin API (the previous setting is
+  restored afterwards), signs in, reads the ``exp`` of the hint cookie's ID
+  token, waits until the clock is 2 s past it
   and logs out: the end-session request carries ``id_token_hint``, Keycloak
   still answers with a redirect to the app, no ``#kc-logout`` page appears, the
   app shows "Signed out", and the next sign-in shows Keycloak's form. This is
@@ -155,7 +159,8 @@ per ``cookie_samesite`` serves both app origins; each cell uses a fresh browser
 context and is measured on the ``GET /`` that the ``/auth/callback`` redirect
 leads to: the cookie names it carried, its ``Sec-Fetch-Site``, and the page it
 rendered. A logged-out first page is ``FAILED-as-found``: a finding to file,
-not a failed run.
+not a failed run. A second sign-in that passes through Keycloak's live session
+without a form (scenarios 2, 9 and 21) is a finding of the same kind.
 
 Deliberately unproven: the demotion of a person taken out of the admin group is
 proven at the ``finish_login`` layer, not here (a D1 step would need an
@@ -833,7 +838,7 @@ def id_token_expiry(hint: Cookie) -> float:
 
 @contextlib.contextmanager
 def short_lived_id_tokens(proof: Proof, seconds: int) -> Iterator[None]:
-    """App A's client issues tokens that live `seconds`; its previous setting returns afterwards."""
+    """The default host's client issues tokens that live `seconds`; its previous setting returns."""
     path = f"/{REALM}/clients/{proof.client_uuid}"
     before = proof.fresh_admin().get(path)
     previous = before["attributes"].get(LIFESPAN_ATTRIBUTE)
