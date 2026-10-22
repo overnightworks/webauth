@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
 from webauth_arrangement import (
@@ -17,7 +17,9 @@ from webauth_arrangement import (
     API_PATH,
     SESSION_COOKIE_NAME,
     SESSION_ID,
+    AuthApp,
     a_web_auth_config,
+    an_auth_app,
     session_cookie_header,
     signed_without_bound,
 )
@@ -25,7 +27,7 @@ from webauth_arrangement import (
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import MAX_SESSION_COOKIE_CHARS, _generate_csrf_token, sign_session_id
 from webauth.middleware import CsrfOriginMiddleware, CsrfTokenMiddleware
-from webauth.policies import CsrfPolicy, PathRules
+from webauth.policies import CsrfPolicy, PathRules, PathShape, PublicRule
 
 FOREIGN_ORIGIN = "https://evil.test"
 OK = {"status": "ok"}
@@ -477,3 +479,84 @@ def test_a_csrf_token_with_non_ascii_characters_is_refused_like_a_forged_one() -
 
     assert response.status_code == 403
     assert response.json() == INVALID_TOKEN_DETAIL
+
+
+PERSON_EXPORT_ROUTE = "/api/people/{subject}/export"
+HOOK_ROUTE = "/hooks/{name}"
+HOOK_EXEMPT_PATH = "/hooks/stripe"
+PERSON_EXPORT_SHAPE = CsrfPolicy(
+    protected=PathRules(shapes=(PathShape("/api/people/", "/export"),)),
+)
+HOOK_EXEMPTION = CsrfPolicy(exempt=PathRules(exact=frozenset({HOOK_EXEMPT_PATH})))
+NOTHING_PROTECTED = CsrfPolicy(protected=PathRules())
+
+
+def a_stack_with_parametrised_post_routes(**stack_policies: CsrfPolicy) -> AuthApp:
+    """The full stack over POST routes whose path parameter the router decodes."""
+    auth = an_auth_app(
+        None,
+        gate=True,
+        public=(PublicRule(PathRules(prefixes=("/api/", "/hooks/"))),),
+        stack_policies=stack_policies,
+    )
+
+    def run(request: Request) -> dict[str, str]:
+        auth.route_runs.append(request.scope["path"])
+        return OK
+
+    auth.app.add_api_route(PERSON_EXPORT_ROUTE, run, methods=["POST"])
+    auth.app.add_api_route(HOOK_ROUTE, run, methods=["POST"])
+    return auth
+
+
+ROUTED_PATH_CASES = [
+    pytest.param(
+        PERSON_EXPORT_SHAPE, "/api/people/alice/export", "/api/people/alice/export", True,
+        id="shape-plain",
+    ),
+    pytest.param(
+        PERSON_EXPORT_SHAPE, "/api/people/alice%3Fx/export", "/api/people/alice?x/export",
+        True, id="shape-encoded-question-mark",
+    ),
+    pytest.param(
+        PERSON_EXPORT_SHAPE, "/api/people/alice%23x/export", "/api/people/alice#x/export",
+        True, id="shape-encoded-hash",
+    ),
+    pytest.param(
+        HOOK_EXEMPTION, HOOK_EXEMPT_PATH, HOOK_EXEMPT_PATH, False, id="exempt-exact",
+    ),
+    pytest.param(
+        HOOK_EXEMPTION, "/hooks/stripe%3Fx", "/hooks/stripe?x", True,
+        id="exempt-exact-encoded-question-mark",
+    ),
+    pytest.param(
+        HOOK_EXEMPTION, "/hooks/stripe%23x", "/hooks/stripe#x", True,
+        id="exempt-exact-encoded-hash",
+    ),
+]
+
+
+@pytest.mark.parametrize(("policy", "sent_path", "routed_path", "refused"), ROUTED_PATH_CASES)
+def test_the_csrf_token_rule_is_chosen_by_the_path_the_router_routes(
+    policy: CsrfPolicy, sent_path: str, routed_path: str, refused: bool,
+) -> None:
+    auth = a_stack_with_parametrised_post_routes(
+        csrf_origin=NOTHING_PROTECTED, csrf_token=policy,
+    )
+
+    response = auth.client.post(sent_path)
+
+    assert response.status_code == (403 if refused else 200)
+    assert auth.route_runs == ([] if refused else [routed_path])
+
+
+@pytest.mark.parametrize(("policy", "sent_path", "routed_path", "refused"), ROUTED_PATH_CASES)
+def test_the_csrf_origin_rule_is_chosen_by_the_path_the_router_routes(
+    policy: CsrfPolicy, sent_path: str, routed_path: str, refused: bool,
+) -> None:
+    auth = a_stack_with_parametrised_post_routes(csrf_origin=policy)
+
+    response = auth.client.post(sent_path, headers={"origin": FOREIGN_ORIGIN})
+
+    assert response.status_code == (403 if refused else 200)
+    assert auth.route_runs == ([] if refused else [routed_path])
