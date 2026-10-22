@@ -1,8 +1,0 @@
-claim_id = "62c21b26b1ae43a7b9fc2d7138a05d41"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "f57522f4dba954e628c466a4bc707c87fcb2bdeb"
-branch = "claude/issue-410-bearer-real-keycloak-proof"
-scope = ["e2e/oidc/README.md", "e2e/oidc/bearer.py", "e2e/oidc/harness.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "e2e/oidc/realm.py", "quality/baseline.toml"]
-opened_commit = "6c0922b29ab779b4e7960dee5fa4c676800c0f04"
-whole_reason = "One e2e proof: a harness that plays hal against real Keycloak and a bearer host that installs the gate, so every ruled sentence is shown with real access tokens; only e2e/ and the size baseline change."
