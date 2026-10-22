@@ -1,8 +1,0 @@
-claim_id = "baf3d9b5fc6542ca938d953e421022a7"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "0ff688473d1c45e5030b3c2d253b31385ea7044e"
-branch = "claude/issue-398-e2e-runbook"
-scope = ["e2e/oidc/README.md", "e2e/oidc/conformance.py", "e2e/oidc/harness.py", "e2e/oidc/prove.py", "e2e/oidc/shim.py"]
-opened_commit = "eb273c8e1c646fb871f34eef1dcd6e7c56c47747"
-whole_reason = "One move: the e2e README's inventory and explanation go to the docstrings of the four drivers that own them, in the same pull request, so no fact stands twice."
