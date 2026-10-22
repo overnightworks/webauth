@@ -1,8 +1,0 @@
-claim_id = "8193071c4807495cb1428eb77e484685"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "b230871ffb8afcf4ab2098a21d273bc50de91f34"
-branch = "claude/issue-406-csrf-rate-limit-routed-path"
-scope = ["CHANGELOG.md", "src/webauth/middleware/csrf.py", "src/webauth/middleware/rate_limit.py", "tests/test_csrf.py", "tests/test_middleware_stack.py"]
-opened_commit = "5ca6a917a69ce0765303a0170377f4299a245a0e"
-whole_reason = "One fix of one path notion across two middlewares; its tests live where those middlewares are tested, and the CHANGELOG line belongs to the same change."
