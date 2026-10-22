@@ -662,9 +662,9 @@ def receive_backchannel_logout(
     of both CSRF policies. It posts from shared server addresses, so exempt the
     exact path from the rate limit too, or one budget refuses a real logout.
     Give it a ``BodySizeRule`` that admits a Logout Token, which the default
-    may not, and a ``CacheControlRule`` of ``no-store``, and
-    register the URL on the client by an internal name, never through the
-    public hostname or an access proxy in front of it.
+    may not, and a ``CacheControlRule`` of ``no-store``. Let the issuer reach
+    it over an internal network alone, never the public route (tunnel, CDN,
+    access proxy); its URL may name the public hostname via an internal alias.
     """
     logout_token = _logout_token_of(form_body, content_type)
     if logout_token is None:
