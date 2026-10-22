@@ -15,7 +15,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
   the session gate's. A host whose policy sees a non-empty `root_path` drops that prefix from those
   rules, behind a server-supplied `root_path`, behind a proxy that keeps an application's own
   `root_path` in the path, or with the library installed on a mounted sub-application; a rule still
-  written with that prefix now selects nothing. The session gate is unchanged.
+  written with that prefix no longer selects the intended route. The session gate is unchanged.
 
 **Fixed**
 
