@@ -1,8 +1,0 @@
-claim_id = "d70a9289aa8547449c21d2f49bca42af"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "02a7a3da8b81c26ed8087ec44961cc88aff8cba0"
-branch = "claude/issue-422-id-token-in-session-row"
-scope = ["CHANGELOG.md", "README.md", "docs/ARCHITECTURE.md", "e2e/oidc/bearer.py", "e2e/oidc/engines.py", "e2e/oidc/harness.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "quality/baseline.toml", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/oidc.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/oidc_arrangement.py", "tests/test_cookies.py", "tests/test_fresh_access_token.py", "tests/test_oidc.py", "tests/test_oidc_login.py", "tests/test_session_gate.py", "tests/test_web_auth_config.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "fa0d320fbfe0fe3a852519eac6f54d1ee0757e65"
-whole_reason = "The token moves into the row and its predecessor goes in one step: the port, the cookie code, the config field only the cookie needed, and the fakes, typing host, e2e harness and docs that pin them."
