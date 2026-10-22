@@ -59,13 +59,22 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
 
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
 `admin_user`, `verified_session_id`) and its docstring says what `session_store`
-and `on_authenticated` are. `trusted_proxies` names the peers whose
-`X-Forwarded-For` and `X-Forwarded-Proto` are believed, and it decides alone only
-when the ASGI server does not rewrite the client address or scheme from those
-headers, so the host turns the server's own forwarded-header handling off (uvicorn's
-`proxy_headers`, on by default: `proxy_headers=False` or `--no-proxy-headers`). The
-sign-in routes are under [OpenID Connect login](#openid-connect-login); [`tests/typing/oidc_host.py`](tests/typing/oidc_host.py)
+and `on_authenticated` are. The sign-in routes are under [OpenID Connect login](#openid-connect-login); [`tests/typing/oidc_host.py`](tests/typing/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
+
+`trusted_proxies` lists the app's direct peer and every proxy whose address the
+`X-Forwarded-For` chain carries; listing every proxy between the client and the
+app is the simple way to be sure. webauth reads `X-Forwarded-For` and
+`X-Forwarded-Proto` and never RFC 7239 `Forwarded`. It reads the chain from the
+right and takes the first address it does not trust as the client, so a proxy
+whose address the chain carries but which the list lacks becomes the client
+address, and every visitor that reaches the app through it shares that address
+and its rate-limit budget. With a CDN, a tunnel and a reverse proxy in front of
+the app, list whichever of their addresses appear in the chain.
+`trusted_proxies` decides alone only when the ASGI server does not rewrite the
+client address or scheme from those headers, so the host turns the server's own
+forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
+`proxy_headers=False` or `--no-proxy-headers`).
 
 ## Testing a host
 
