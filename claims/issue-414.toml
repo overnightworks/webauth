@@ -1,0 +1,8 @@
+claim_id = "d582f78d99ac417880f43fe5fe85d664"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "dfd7c190cbf30e0fa9c11906a4e6074aa1297e06"
+branch = "claude/issue-414-policies-select-by-router-path"
+scope = ["CHANGELOG.md", "README.md", "docs/ARCHITECTURE.md", "src/webauth/middleware/_route_path.py", "src/webauth/middleware/body_size.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/rate_limit.py", "src/webauth/middleware/security_headers.py", "src/webauth/middleware/session_gate.py", "src/webauth/policies.py", "tests/test_csrf.py", "tests/test_middleware_stack.py", "tests/test_route_path.py", "tests/test_session_gate.py", "tests/webauth_arrangement.py"]
+opened_commit = "1b7649e4fcabfd3a65988ebe9c14e6221214358b"
+whole_reason = "One path notion for every policy: a partial switch leaves two, and each reader is one line whose proof lives with that middleware's tests."
