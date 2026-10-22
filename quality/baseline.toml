@@ -41,5 +41,3 @@
 
 [function_lines."tests/webauth_arrangement.py"]
 "an_auth_app" = 120
-
-[clones]
