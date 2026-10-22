@@ -21,6 +21,7 @@ from webauth._validation import require_positive_whole_number
 
 __all__ = [
     "DEFAULT_PERMISSIONS_POLICY",
+    "AuthorizedParties",
     "BodySizePolicy",
     "BodySizeRule",
     "CacheControlRule",
@@ -64,6 +65,30 @@ class PathRules:
             or any(shape.matches(path) for shape in self.shapes)
             or any(pattern.match(path) for pattern in self.patterns)
         )
+
+
+@dataclass(frozen=True)
+class AuthorizedParties:
+    """The OAuth clients whose access tokens the host admits, by their ``azp``.
+
+    ``client_ids`` is a non-empty ``frozenset`` of non-empty ``str``; a ``str``
+    or a mutable ``set`` is refused with ``ValueError``. The value comes from
+    the host's configuration.
+    """
+
+    client_ids: frozenset[str]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.client_ids) is not frozenset
+            or not self.client_ids
+            or not all(isinstance(client_id, str) and client_id for client_id in self.client_ids)
+        ):
+            raise ValueError("client_ids must be a non-empty frozenset of non-empty strings")
+
+    def admits(self, authorized_party: object) -> bool:
+        """Whether a token's ``azp`` claim names one of the clients, exactly."""
+        return isinstance(authorized_party, str) and authorized_party in self.client_ids
 
 
 _BUDGET_NAME: Final = re.compile(r"[a-z][a-z0-9_-]*")

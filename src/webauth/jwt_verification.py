@@ -230,21 +230,36 @@ class JwtVerifier:
         self._last_refresh_failed = False
         self._refresh_lock = threading.Lock()
 
-    def verify(self, token: str, *, expected_type: str | None = None) -> VerifiedClaims | Rejected:
+    def verify(
+        self,
+        token: str,
+        *,
+        expected_type: str | None = None,
+        expected_media_types: frozenset[str] | None = None,
+    ) -> VerifiedClaims | Rejected:
         """Verify ``token``; when ``expected_type`` is given, its header's
-        ``typ`` must equal it exactly.
+        ``typ`` must equal it exactly. ``expected_media_types`` instead compares
+        ``typ`` as a media type (RFC 7515 section 4.1.9): an ASCII string whose
+        ASCII-lowercase form is a member. It must be a ``frozenset`` of non-empty
+        lowercase ASCII strings and exclude ``expected_type``, or ``ValueError``.
 
         A token over ``MAX_TOKEN_CHARACTERS`` is refused as ``TOKEN_TOO_LONG``.
         A token whose encoded header segment, the part before the first dot,
         exceeds 512 characters is refused as ``MALFORMED_TOKEN`` even when the
         whole token fits that limit; an issuer whose headers carry more than
         that cannot be verified."""
+        _require_comparable_types(expected_type, expected_media_types)
         try:
-            return self._verified_claims(token, expected_type)
+            return self._verified_claims(token, expected_type, expected_media_types)
         except _VerificationRefusal as refusal:
             return Rejected(refusal.reason)
 
-    def _verified_claims(self, token: str, expected_type: str | None) -> VerifiedClaims:
+    def _verified_claims(
+        self,
+        token: str,
+        expected_type: str | None,
+        expected_media_types: frozenset[str] | None,
+    ) -> VerifiedClaims:
         if len(token) > MAX_TOKEN_CHARACTERS:
             raise _VerificationRefusal(RejectionReason.TOKEN_TOO_LONG)
         # RFC 7515's compact serialization is ASCII; PyJWT raises on a lone surrogate.
@@ -261,7 +276,7 @@ class JwtVerifier:
             raise _VerificationRefusal(RejectionReason.MALFORMED_TOKEN) from error
         if header.get("alg") != _ALGORITHM:
             raise _VerificationRefusal(RejectionReason.UNSUPPORTED_ALGORITHM)
-        if expected_type is not None and header.get("typ") != expected_type:
+        if not _has_expected_type(header, expected_type, expected_media_types):
             raise _VerificationRefusal(RejectionReason.INVALID_TOKEN_TYPE)
         key_id = _header_key_id(header)
         claims = self._verified_payload(token, self._signing_key(key_id))
@@ -382,6 +397,38 @@ def _library_checks() -> Options:
         "verify_sub": False,
         "verify_jti": False,
     }
+
+
+def _require_comparable_types(
+    expected_type: str | None, expected_media_types: frozenset[str] | None,
+) -> None:
+    if expected_media_types is None:
+        return
+    if expected_type is not None:
+        raise ValueError("expected_type and expected_media_types exclude each other")
+    if type(expected_media_types) is not frozenset or not all(
+        isinstance(media_type, str)
+        and media_type
+        and media_type.isascii()
+        and media_type == media_type.lower()
+        for media_type in expected_media_types
+    ):
+        raise ValueError("expected_media_types must be a frozenset of non-empty lowercase ASCII strings")
+
+
+def _has_expected_type(
+    header: Mapping[str, object],
+    expected_type: str | None,
+    expected_media_types: frozenset[str] | None,
+) -> bool:
+    declared = header.get("typ")
+    if expected_media_types is not None:
+        return (
+            isinstance(declared, str)
+            and declared.isascii()
+            and declared.lower() in expected_media_types
+        )
+    return expected_type is None or declared == expected_type
 
 
 def _header_key_id(header: Mapping[str, object]) -> str | None:
