@@ -314,6 +314,32 @@ def call_userinfo(settings: HostSettings, current: World) -> None:
     current.userinfo_answered += 1
 
 
+def _install_stack(app: FastAPI, settings: HostSettings) -> None:
+    issuer = urlsplit(settings.end_session_endpoint)
+    issuer_origin = f"{issuer.scheme}://{issuer.netloc}"
+    backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
+    install_web_auth_middleware(
+        app,
+        security_headers=SecurityHeadersPolicy(
+            default_content_security_policy(
+                added_sources={CspDirective.FORM_ACTION: [issuer_origin]},
+            ),
+            cache_control_rules=(CacheControlRule(paths=backchannel_path, value="no-store"),),
+        ),
+        body_size=BodySizePolicy(
+            default_max_bytes=DEFAULT_MAX_BODY_BYTES,
+            rules=(BodySizeRule(
+                paths=backchannel_path, max_bytes=BACKCHANNEL_LOGOUT_MAX_BODY_BYTES
+            ),),
+        ),
+        csrf_origin=CsrfPolicy(exempt=backchannel_path),
+        csrf_token=CsrfPolicy(
+            exempt=backchannel_path,
+            token_exempt=PathRules(exact=frozenset({LOGOUT_PATH})),
+        ),
+    )
+
+
 def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     arrangement = _arrangement()
     config: WebAuthConfig = arrangement.a_web_auth_config(
@@ -353,29 +379,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     install_web_auth_config(app, config)
-    issuer = urlsplit(settings.end_session_endpoint)
-    issuer_origin = f"{issuer.scheme}://{issuer.netloc}"
-    backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
-    install_web_auth_middleware(
-        app,
-        security_headers=SecurityHeadersPolicy(
-            default_content_security_policy(
-                added_sources={CspDirective.FORM_ACTION: [issuer_origin]},
-            ),
-            cache_control_rules=(CacheControlRule(paths=backchannel_path, value="no-store"),),
-        ),
-        body_size=BodySizePolicy(
-            default_max_bytes=DEFAULT_MAX_BODY_BYTES,
-            rules=(BodySizeRule(
-                paths=backchannel_path, max_bytes=BACKCHANNEL_LOGOUT_MAX_BODY_BYTES
-            ),),
-        ),
-        csrf_origin=CsrfPolicy(exempt=backchannel_path),
-        csrf_token=CsrfPolicy(
-            exempt=backchannel_path,
-            token_exempt=PathRules(exact=frozenset({LOGOUT_PATH})),
-        ),
-    )
+    _install_stack(app, settings)
 
     @app.middleware("http")
     async def count_callbacks(request: Request, call_next: Any) -> Response:
