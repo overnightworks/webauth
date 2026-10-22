@@ -90,7 +90,6 @@ SPEC_WITH_CONCURRENT_READER = "2.3"
 SPEC_WITHOUT_CONCURRENT_READER = "2.4"
 SESSION_IDLE_SECONDS = 3600
 SESSION_ABSOLUTE_MAX_AGE_SECONDS = 86400
-DOCUMENTED_ID_TOKEN_HINT_BOUND = 3_072
 SEVEN_DAYS_SECONDS = 7 * 24 * 3600
 THIRTY_DAYS_SECONDS = 30 * 24 * 3600
 FIXED_INSTANT = datetime(2030, 1, 1, 12, tzinfo=UTC)
@@ -304,13 +303,12 @@ class FakeSessionRecord:
     created_at: datetime
     expires_at: datetime
     refresh_token: SecretStr | None = None
+    id_token: SecretStr | None = None
 
 
 class SessionRecordsInMemory:
-    """Stored sessions, renewed in place and never committed.
-
-    ``create`` and ``touch`` write the instants they are given.
-    """
+    """Stored sessions, renewed in place and never committed. ``create`` and ``touch``
+    write the instants they are given; a deleted record yields no ID token."""
 
     def __init__(
         self,
@@ -338,6 +336,7 @@ class SessionRecordsInMemory:
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
+        id_token: SecretStr | None,
     ) -> FakeSessionRecord:
         _require_held_lock(self._lock)
         user = self._users.get(user_id)
@@ -347,11 +346,7 @@ class SessionRecordsInMemory:
         while session_id in self._records:
             session_id = f"session-{next(self._ids)}"
         record = FakeSessionRecord(
-            id=session_id,
-            user=user,
-            created_at=now,
-            expires_at=expires_at,
-            refresh_token=refresh_token,
+            session_id, user, now, expires_at, refresh_token, id_token,
         )
         self._records[record.id] = record
         return record
@@ -405,7 +400,8 @@ class SessionRecordsInMemory:
         self._remove_record(session_id)
 
     def _remove_record(self, session_id: str) -> None:
-        self._records.pop(session_id, None)
+        if (removed := self._records.pop(session_id, None)) is not None:
+            removed.id_token = None
 
     def delete_for_user(self, user_id: str) -> int:
         sessions = self.sessions_of(user_id)
@@ -622,6 +618,7 @@ def seeded_session(
             now=now,
             expires_at=expires_at,
             refresh_token=refresh_token,
+            id_token=None,
         )
 
 

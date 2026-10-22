@@ -675,6 +675,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
         sessions = SessionsRecordingTheirTransaction(record, users=users)
         second = sessions.create(
             second_user.id, now=now, expires_at=now + timedelta(minutes=30), refresh_token=None,
+            id_token=None,
         )
         first = a_gated_app(
             record, sessions=sessions, public=ONLY_LOGIN_AND_HEALTH,

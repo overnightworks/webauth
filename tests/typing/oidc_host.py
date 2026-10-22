@@ -157,6 +157,7 @@ class HostSession:
     created_at: datetime
     expires_at: datetime
     refresh_token: SecretStr | None
+    id_token: SecretStr | None
 
 
 class HostAccounts:
@@ -173,10 +174,10 @@ class HostAccounts:
 class HostSessions:
     def create(
         self, user_id: str, *, now: datetime, expires_at: datetime,
-        refresh_token: SecretStr | None,
+        refresh_token: SecretStr | None, id_token: SecretStr,
     ) -> HostSession:
         user = HostAccount(user_id, "someone", "user")
-        return HostSession("id", user, now, expires_at, refresh_token)
+        return HostSession("id", user, now, expires_at, refresh_token, id_token)
 
     def load(self, session_id: str) -> HostSession | None:
         return None

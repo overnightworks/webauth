@@ -17,7 +17,7 @@ header ``typ`` of the first minted token. Each scenario's id is the matrix id of
 - 31 (E04) D with the admin token, another person's session cookie and a wrong CSRF token.
 - 32 to 34 (E05 to E07) a session cookie alone opens no machine route.
 - 35 (E08) the admin token and a cookie on P: a host mistake, answered 500.
-- 36 to 38 (E09 to E11) an ID token, the ID token hint cookie and a refresh token.
+- 36 and 38 (E09 and E11) an ID token and a refresh token; 37 is unused.
 - 39 to 41 (E12 to E14) audiences: the foreign one, two of them, ``account``.
 - 42 (E15) a token of ``d1-other``.
 - 43, 44 (E16, E17) a member without the admin group, and a person in no group.
@@ -57,7 +57,7 @@ from harness import (
     start_host,
     stop_host,
 )
-from host_app import LEEWAY_SECONDS, LOGOUT_PATH, LOOPBACK, HostSettings
+from host_app import LEEWAY_SECONDS, LOOPBACK, HostSettings
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, Playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -268,15 +268,6 @@ def session_cookies(page: Page, origin: str) -> dict[str, str]:
     return {name: value for name, value in pairs if name in wanted}
 
 
-def hint_cookie_value(page: Page, origin: str) -> str:
-    """The ID token the host keeps for the logout, the only cookie scoped to the logout path."""
-    (hint,) = (
-        cookie for cookie in page.context.cookies([f"{origin}{LOGOUT_PATH}"])
-        if cookie.get("path") == LOGOUT_PATH
-    )
-    return cookie_name_and_value(hint)[1]
-
-
 # --- the admitted and the cookie-only scenarios ---
 
 def admin_token_opens_export(run: BearerRun) -> str:
@@ -384,18 +375,6 @@ def token_is_refused(refused: Refused) -> Callable[[BearerRun], str]:
     return refuse
 
 
-def hint_cookie_is_no_access_token(run: BearerRun) -> str:
-    origin = run.settings.app_origins[0]
-    hint = hint_cookie_value(run.host_page(run.people["admin"]), origin)
-    assert claims_of(hint)["aud"] == HOST_AUDIENCE, "the hint is not an ID token for the host"
-    answer = run.send(Call("GET", EXPORT, hint))
-    assert_answer(answer, 401, "invalid_token", "Invalid token")
-    return (
-        f"the ID token hint cookie of d1-admin's host login (aud d1-host): 401, "
-        f"log: {run.last_gate_reason()}"
-    )
-
-
 def outsider_is_refused_and_recorded(run: BearerRun) -> str:
     answer = run.send(Call("GET", EXPORT, run.tokens["outsider"]))
     assert_answer(answer, 403, "insufficient_scope", "Admin access required")
@@ -488,7 +467,6 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (34, a_cookie_alone_is_refused("probe")),
     (35, a_cookie_cannot_save_the_session_route),
     (36, token_is_refused(Refused("id_token", "d1-hal's ID token (typ JWT, aud d1-hal)"))),
-    (37, hint_cookie_is_no_access_token),
     (38, token_is_refused(Refused("refresh_token", "d1-hal's refresh token"))),
     (39, token_is_refused(Refused("audience_app", "a token for d1-app-c only"))),
     (40, token_is_refused(Refused("audience_host_and_app", "a token for d1-host and d1-app-c"))),

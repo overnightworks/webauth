@@ -37,7 +37,7 @@ The library owns the machinery an application should not rebuild:
 | Module | Owns |
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
-| `webauth.cookies` | The signed session cookie, the CSRF token bound to it, the pending-login cookie and the ID token hint cookie, issued and cleared |
+| `webauth.cookies` | The signed session cookie, the CSRF token bound to it, and the pending-login cookie, issued and cleared |
 | `webauth.dependencies` | Turning a signed cookie, or a session id, into the account that made the request or opened a WebSocket handshake, and the record of a bearer admission the CSRF checks and the session gate step aside for |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, how, and which `azp` values (`AuthorizedParties`) a host admits |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
@@ -118,9 +118,11 @@ Where a script cannot run, the page shows one button. The page carries its own C
 the end-session and post-logout origins, and the security-headers middleware leaves that policy and its `Cache-Control` in place ([Trust](#trust)). It makes
 no outbound call, so an issuer that is down still leaves the person signed out of the app. Its docstring holds the rest.
 
-`finish_login` hands the browser the login's ID token in a cookie of its own, and `log_out` passes it to Keycloak as `id_token_hint`, so Keycloak can end its session
-without asking the person to confirm. The hint is never a credential: webauth does not sign, decode, verify or log it, and Keycloak judges it. Its cookie name, scope
-and flags are in the `webauth.cookies` module docstring.
+The login's ID token lives in the session row, next to the refresh token, and ends with it; the browser holds no copy. `open_session` stores it, `log_out` reads it from
+the row it is about to delete, whatever the row's lifetime says, and passes it to Keycloak as `id_token_hint`, so Keycloak can end its session without asking the person
+to confirm. The hint is never a credential: webauth does not sign, decode, verify or log it, and Keycloak judges it. A logout after the row is gone (ended by the host,
+swept, pruned, ended by back-channel logout, or stored before the host held ID tokens) sends no hint, and Keycloak asks once while its own session lives. Renewing a
+session and rotating its refresh token leave the login's token as it was.
 
 ### Back-channel logout
 
@@ -194,7 +196,7 @@ owning section, it links there.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
    - Availability: every connection and read is bounded.
 3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only `log_out`'s page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
-4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret.
+4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. It also holds the login's ID token, which is the person's identity claims and no credential, but whose copy lets its holder end that Keycloak session without asking.
 5. **Host infrastructure** (`WallClock`, `WriteLock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
 7. **Bearer caller to library** ([The bearer gate](#the-bearer-gate)): anyone who can reach a gated path is untrusted. The token's signature, issuer, type, audience, `azp` and groups are the control; the admission record keeps a SHA-256 digest of the header in request memory, never the token. Named residues:
@@ -206,7 +208,7 @@ owning section, it links there.
    - WebSocket scopes are not gated;
    - host code that reads the cookie itself (`session_id_from_request`) on a machine path trusts it.
 8. **Named residues:**
-   - the ID token hint reaches the browser in its cookie and in the `no-store` logout page; what a browser's session restore keeps of a `no-store` page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
+   - the ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of a `no-store` page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
    - with a `WriteLock` that is released before the host commits (an in-process lock), a back-channel logout of the same account that runs between `finish_login`'s admission and the host's commit after `open_session` deletes nothing of that login, so the session it opens survives; a lock that the request's first `hold` takes and only the host's commit or rollback releases (a transaction-scoped lock) closes that window;
    - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
    - a clock reading past year 9999 fails closed;

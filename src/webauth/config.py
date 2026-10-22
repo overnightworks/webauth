@@ -139,8 +139,8 @@ class WebAuthConfig:
     - different from the other cookie's name;
     - not a ``__Host-`` or ``__Secure-`` name with ``cookie_secure=False``,
       which a browser drops and which would end in a silent login loop;
-    - not a name webauth's own cookies use: the pending-login cookies and the
-      ID token hint cookie, in both variants whatever ``cookie_secure`` is.
+    - not a name webauth's own cookies use: the pending-login cookies, in
+      both variants whatever ``cookie_secure`` is.
 
     A client that reads the CSRF cookie by name reads ``csrf_cookie_name``.
 

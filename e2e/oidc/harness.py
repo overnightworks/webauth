@@ -57,6 +57,10 @@ class Interrupted(BaseException):
     """The first stop signal, raised wherever the main thread stands."""
 
 
+class Finding(Exception):
+    """A measurement that came out unfavourably: reported as found, not as a failed run."""
+
+
 @dataclass
 class RunRecord:
     """What every run keeps: its lines, its failures and its stop state."""

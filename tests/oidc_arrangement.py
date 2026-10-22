@@ -74,6 +74,20 @@ def a_fake_id_token(label: str) -> str:
     return f"{segment({'typ': 'JWT'})}.{segment({'sub': label})}.{segment(label)}"
 
 
+def a_token_of_length(length: int, make: Callable[[str, str], str]) -> str:
+    """The token ``make(header_padding, claim_padding)`` builds with exactly ``length``
+    characters. Base64url cannot spell some payload lengths, so the header's padding is the
+    second knob."""
+    for header_padding in ("", "h", "hh"):
+        shortest = len(make(header_padding, ""))
+        estimate = (length - shortest) * 3 // 4
+        for claim_padding in range(estimate - 12, estimate + 1):
+            token = make(header_padding, "/" + "p" * claim_padding)
+            if len(token) == length:
+                return token
+    raise AssertionError(f"no token of {length} characters")
+
+
 def rs256(key: rsa.RSAPrivateKey) -> Callable[[bytes], bytes]:
     return lambda signing_input: key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
 
@@ -259,7 +273,6 @@ def a_relying_party(
         client_secret=SecretStr(secrets.token_urlsafe(16)),
         redirect_uri="https://notes.example.org/auth/callback",
         post_logout_redirect_uri="https://notes.example.org/",
-        logout_path="/auth/logout",
         scopes=("openid", "profile"),
         leeway_seconds=ACCESS_TOKEN_LEEWAY_SECONDS,
     )

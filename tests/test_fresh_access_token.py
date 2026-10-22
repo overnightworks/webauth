@@ -138,7 +138,6 @@ def an_arrangement(
             client_secret=SecretStr("client-secret"),
             redirect_uri="https://notes.example.org/auth/callback",
             post_logout_redirect_uri="https://notes.example.org/",
-            logout_path="/auth/logout",
             leeway_seconds=30,
         ),
         post_token_request=issuer if token_endpoint is None else token_endpoint,

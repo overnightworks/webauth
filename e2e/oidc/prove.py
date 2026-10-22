@@ -8,7 +8,7 @@ token and key-set endpoints, and the only seams are the connection routing and
 the one throwaway certificate key the browser is told to accept.
 
 The host application is ``build_app`` in ``host_app.py``. The scenarios below
-are registered in ``run_default_scenarios``, ``run_hint_scenarios``,
+are registered in ``run_default_scenarios``, ``run_token_scenarios``,
 ``drive_backchannel_phase``, ``drive_bearer_phase`` and ``run_proof``, which print
 ``SCENARIO <number> <width> <origin>`` for each, except that the back-channel scenarios
 (10 to 13, 22 and 23) print both app origins after the width and scenario 5 prints
@@ -38,32 +38,32 @@ Login and logout (the host's ``login_group`` is ``/apps/songmaker`` and its
   reaches Keycloak's end-session request, where the host already holds 0
   sessions and the browser no app cookie; Keycloak answers with a redirect to
   the app's ``/`` and ``#kc-logout`` never attaches, because the host sent the
-  login's ID token as ``id_token_hint`` (the hint cookie, stored for the
-  ``/logout`` path, is gone afterwards, read through ``cookies([origin, origin
-  + /logout])``); the app shows "Signed out", and a second "Sign in" shows
+  login's ID token, held in the session row, as ``id_token_hint`` (the POST
+  carries one); the app shows "Signed out", and a second "Sign in" shows
   Keycloak's form again (a silent sign-in is a failure).
 - Scenario 9 (1280x800) ends the app session in the host while the page still
-  shows the button: the logout shows no page either, and the next sign-in shows
-  Keycloak's form.
+  shows the button: the logout sends no hint, so Keycloak asks once; after
+  confirming, the app shows "Signed out" and the next sign-in shows Keycloak's
+  form.
 
-The hint scenarios, all at 1280x800:
+The token scenarios, all at 1280x800:
 
-- Scenario 14: the cookie is stored for ``Path=/logout``, HttpOnly, Secure,
-  SameSite=Strict, and no request to ``/`` or ``/me`` carries it.
-- Scenario 15: a login and logout, then a second login with a new hint and a
-  second logout, show no page.
+- Scenario 14: after the sign-in the browser holds exactly the session and CSRF
+  cookies for the app, and no cookie of the app on any path parses as a JWS.
+- Scenario 15: a login and logout, then a second login and a second logout,
+  show no page, and the second logout's hint differs from the first's.
 - Scenario 17: one login and logout on the cross-site origin
   ``demo.example.test`` show no page. A refused sign-in (scenario 7) leaves no
-  hint cookie.
+  session cookie and no cookie that parses as a JWS.
 - Scenario 21 gives the default host's client (``d1-host``)
   ``access.token.lifespan`` 15 s through the admin API (the previous setting is
-  restored afterwards), signs in, reads the ``exp`` of the hint cookie's ID
-  token, waits until the clock is 2 s past it
-  and logs out: the end-session request carries ``id_token_hint``, Keycloak
-  still answers with a redirect to the app, no ``#kc-logout`` page appears, the
-  app shows "Signed out", and the next sign-in shows Keycloak's form. This is
-  the production case: Keycloak's ID token lasts 5 minutes by default, the
-  session cookie 12 hours.
+  restored afterwards), signs in, waits from the callback until the clock is 2 s
+  past the token's lifespan and logs out: the end-session request carries
+  ``id_token_hint`` and, at the send, the clock is at least 2 s past the hint's
+  ``exp``; Keycloak still answers with a redirect to the app, no ``#kc-logout``
+  page appears, the app shows "Signed out", and the next sign-in shows
+  Keycloak's form. This is the production case: Keycloak's ID token lasts 5
+  minutes by default, the session cookie 12 hours.
 
 Sign-in outcomes:
 
@@ -130,15 +130,14 @@ result is counts, response outcomes and screenshots, never a Logout Token.
   hosts' policies would not let a served page post across origins), submits a
   form to A's ``/logout``. A answers 403 ``Cross-origin request rejected`` from
   the origin check; ``/`` still says signed in, ``/me`` answers 200, the host
-  holds 1 session and the hint cookie is unchanged. The person's own logout
-  then ends the session with no page.
-- Scenario 23, the hint of another Keycloak session (proves a sentence of the
-  ``log_out`` docstring): a person signs in to A (hint T1, Keycloak session
-  S1), Keycloak's admin logout ends S1 (A's back-channel call ends A's session,
-  its hint cookie stays), a sign-in to B in the same browser opens S2, and A's
-  page, still showing its button, posts the logout, which sends T1. Keycloak
-  asks "Do you want to log out?" (status 200 and ``#kc-logout``), as the
-  docstring says; after confirming, it ends S2 and calls B back.
+  holds 1 session. The person's own logout then ends the session with no page.
+- Scenario 23, a logout after the back-channel logout ended the row (proves a
+  sentence of the ``log_out`` docstring): a person signs in to A (Keycloak
+  session S1), Keycloak's admin logout ends S1 (A's back-channel call ends A's
+  row), a sign-in to B in the same browser opens S2, and A's page, still showing
+  its button, posts the logout, which sends no hint. Keycloak asks "Do you want
+  to log out?" (status 200 and ``#kc-logout``), as the docstring says; after
+  confirming, it ends S2 and calls B back.
 
 The refresh phase, scenarios 25 to 27 on the default host at 1280x800. The
 host's ``GET /access-token`` calls ``fresh_access_token`` for the request's
@@ -149,7 +148,8 @@ reset.
 
 - Scenario 25, rotation: after a sign-in two calls both answer ``token``, and
   the host has stored a different refresh token after each (Keycloak rotates
-  the string on every refresh).
+  the string on every refresh); the logout after them still sends an
+  ``id_token_hint`` and Keycloak answers with a redirect to the app.
 - Scenario 26, the issuer ends the person: Keycloak's admin logout of the
   user's sessions (the ``d1-host`` client has no back-channel URL, so the app
   session stands) makes the next call answer ``sign-in-again`` while ``/me``
@@ -196,6 +196,7 @@ from certificates import ThrowawayTls, issue_throwaway_tls
 from engines import EngineRun, drive_engine_phase
 from harness import (
     STOP_SIGNALS,
+    Finding,
     Host,
     Interrupted,
     RunRecord,
@@ -250,9 +251,9 @@ from stack import Admin, HeldStack, require_pinned_clean_edge
 
 from webauth.config import WebAuthConfig
 from webauth.cookies import (
+    DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
     CookieSameSite,
-    _id_token_hint_cookie_name,
     _is_pending_login_cookie_name,
     _pending_login_cookie_prefix,
 )
@@ -275,7 +276,7 @@ SECOND_APP_ORIGIN = f"https://{SECOND_APP_HOST}"
 DISABLED_USER_NAME = "d1-disabled"
 KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
 KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
-ID_TOKEN_HINT_COOKIE_NAME = _id_token_hint_cookie_name(secure=True)
+COMPACT_JWS = re.compile(r"[\w-]+\.[\w-]+\.[\w-]*", re.ASCII)
 SAMESITE_VALUES: tuple[CookieSameSite, ...] = ("strict", "lax")
 CALLBACK_WAIT_SECONDS = 15
 CALLBACK_POLL_SECONDS = 0.2
@@ -342,26 +343,20 @@ DESKTOP = Width(1280, 800, touch=False)
 WIDTHS = (PHONE, DESKTOP)
 
 
-class Finding(Exception):
-    """A measurement that came out unfavourably: reported as found, not as a failed run."""
-
-
 def app_cookies(page: Page, origin: str = APP_ORIGIN) -> list[Cookie]:
-    """What the browser sends the app, including the cookie that lives at the logout path."""
-    return page.context.cookies([origin, f"{origin}{LOGOUT_PATH}"])
-
-
-def hint_cookies(page: Page, origin: str = APP_ORIGIN) -> list[Cookie]:
+    """Every cookie the browser holds for the app's host, on every path."""
+    host = urllib.parse.urlsplit(origin).hostname
     return [
-        cookie for cookie in app_cookies(page, origin)
-        if cookie_name_and_value(cookie)[0] == ID_TOKEN_HINT_COOKIE_NAME
+        cookie for cookie in page.context.cookies()
+        if cookie.get("domain", "").lstrip(".") == host
     ]
 
 
-def hints_anywhere(page: Page) -> list[Cookie]:
+def jws_cookies(page: Page, origin: str = APP_ORIGIN) -> list[str]:
+    """The names of the app's cookies whose value has the shape of a compact JWS."""
     return [
-        cookie for cookie in page.context.cookies()
-        if cookie_name_and_value(cookie)[0] == ID_TOKEN_HINT_COOKIE_NAME
+        name for name, value in map(cookie_name_and_value, app_cookies(page, origin))
+        if COMPACT_JWS.fullmatch(value)
     ]
 
 
@@ -586,13 +581,14 @@ def outsider_is_refused(proof: Proof, width: Width) -> str:
         proof.shot(page, scenario, "result")
         carried = {cookie_name_and_value(c)[0] for c in app_cookies(page)}
         assert DEFAULT_SESSION_COOKIE_NAME not in carried, "a session cookie was issued"
-        assert not hints_anywhere(page), "a refused sign-in left an ID token hint"
+        assert not jws_cookies(page), "a refused sign-in left a cookie shaped like a JWS"
     held = proof.host_state()
     assert (held["accounts"], held["sessions"]) == (0, 0), f"the host holds {held}"
     assert held["last_refusal"] == "not-a-member", f"the host refused {held}"
     return (
         f"{OUTSIDER_NAME}, in no group, signed in at Keycloak and the callback was refused with "
-        "'not-a-member': host accounts 0, sessions 0, no session cookie and no ID token hint"
+        "'not-a-member': host accounts 0, sessions 0, no session cookie and no cookie shaped "
+        "like a JWS"
     )
 
 
@@ -723,18 +719,19 @@ def logout(proof: Proof, width: Width) -> str:
         assert proof.headline(page) == f"Signed in as {USER_NAME}"
         cookies = app_cookies(page)
         held_names = {cookie_name_and_value(c)[0] for c in cookies}
-        assert ID_TOKEN_HINT_COOKIE_NAME in held_names, "the sign-in left no ID token hint"
         session = next(
             c for c in cookies if cookie_name_and_value(c)[0] == DEFAULT_SESSION_COOKIE_NAME
         )
 
-        def nothing_of_the_app_is_left() -> None:
+        def nothing_of_the_app_is_left(_end_session_request: Request) -> None:
             left = held_names & {cookie_name_and_value(c)[0] for c in app_cookies(page)}
             assert not left, f"cookies survived: {sorted(left)}"
             assert proof.host_state()["sessions"] == 0, "the host still holds a session"
 
-        log_out_through_keycloak(proof, page, scenario, APP_ORIGIN, nothing_of_the_app_is_left)
-        assert not hints_anywhere(page), "an ID token hint remains after the logout"
+        end_session_request = log_out_through_keycloak(
+            proof, page, scenario, APP_ORIGIN, nothing_of_the_app_is_left
+        )
+        assert sent_hint(end_session_request), "the end-session request carried no ID token hint"
         page.reload()
         assert proof.headline(page) == "Signed out", "a reload of '/' did not show Sign in"
         proof.shot(page, scenario, "result")
@@ -747,8 +744,8 @@ def logout(proof: Proof, width: Width) -> str:
     return (
         f"the button led straight back to the app with no confirmation page (the end-session "
         f"answer was a redirect to '/' and {KEYCLOAK_LOGOUT_CONFIRMATION} never attached), the "
-        f"host already at 0 sessions and no app cookie, the hint cookie included; the app "
-        f"showed Signed out and /me answered 401; "
+        f"host already at 0 sessions and no app cookie, and the POST carried an id_token_hint; "
+        f"the app showed Signed out and /me answered 401; "
         f"the back button shows {back_shows!r} but the old session cookie replayed over HTTPS "
         f"to /me is refused ({replay}); a second Sign in {again}"
     )
@@ -769,99 +766,70 @@ def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
         assert proof.headline(page) == f"Signed in as {USER_NAME}"
         proof.reset_host()
         assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-        log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
+        end_session_request = log_out_through_keycloak(
+            proof, page, scenario, APP_ORIGIN, asks_for_confirmation=True
+        )
+        assert sent_hint(end_session_request) is None, "the end-session request carried a hint"
         proof.shot(page, scenario, "result")
         again = second_sign_in(proof, page, scenario)
     return (
-        f"with the app session already gone, the button still led back to the app, signed out, "
-        f"with no confirmation page; a second Sign in {again}"
+        "with the app session already gone, the logout sent no hint, Keycloak asked once and, "
+        f"after confirming, led back to the app, signed out; a second Sign in {again}"
     )
 
 
-def signed_in_with_a_hint(
-    proof: Proof, page: Page, scenario: str, origin: str = APP_ORIGIN
-) -> Cookie:
+def signed_in(proof: Proof, page: Page, scenario: str, origin: str = APP_ORIGIN) -> None:
     proof.sign_in(page, scenario, origin)
     page.goto(f"{origin}/")
     assert proof.headline(page) == f"Signed in as {USER_NAME}"
-    (hint,) = hint_cookies(page, origin)
-    return hint
 
 
-def hint_cookie_stays_at_the_logout_path(proof: Proof, width: Width) -> str:
+def the_browser_holds_no_id_token(proof: Proof, width: Width) -> str:
     scenario = f"14-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
-        requests: list[Any] = []
-        page.context.on("request", lambda request: requests.append(request))
-        hint = signed_in_with_a_hint(proof, page, scenario)
+        signed_in(proof, page, scenario)
         assert proof.status_of(page, "/me") == 200
-        attributes = (
-            hint.get("path"), hint.get("httpOnly"), hint.get("secure"), hint.get("sameSite")
-        )
-        assert attributes == (LOGOUT_PATH, True, True, "Strict"), (
-            f"the hint is stored as {attributes}"
-        )
-        assert hint.get("expires", 0) > time.time(), "the hint is a session cookie or expired"
-        ordinary = [
-            cookie_names(r) for r in requests
-            if urllib.parse.urlsplit(r.url).path in ("/", "/me") and r.url.startswith(APP_ORIGIN)
-        ]
-        assert any(DEFAULT_SESSION_COOKIE_NAME in names for names in ordinary), (
-            "no request to / or /me carried the session; request cookies are not measured"
-        )
-        assert not any(ID_TOKEN_HINT_COOKIE_NAME in names for names in ordinary), (
-            "a request to / or /me carried the ID token hint"
-        )
-    return (
-        f"the hint cookie is stored for Path={LOGOUT_PATH}, HttpOnly, Secure, SameSite=Strict, "
-        f"with an expiry; {len(ordinary)} requests to / and /me carried the session and never "
-        "the hint"
-    )
+        held = sorted(cookie_name_and_value(cookie)[0] for cookie in app_cookies(page))
+        expected = sorted([DEFAULT_SESSION_COOKIE_NAME, DEFAULT_CSRF_COOKIE_NAME])
+        assert held == expected, f"the browser holds {held}"
+        assert not jws_cookies(page), f"cookies shaped like a JWS: {jws_cookies(page)}"
+    return f"after the sign-in the browser holds exactly {held} for the app, none shaped like a JWS"
 
 
 def second_login_and_logout_show_no_page(proof: Proof, width: Width) -> str:
     scenario = f"15-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
-        first = signed_in_with_a_hint(proof, page, scenario)
-        log_out_through_keycloak(proof, page, f"{scenario}-first", APP_ORIGIN)
-        second = signed_in_with_a_hint(proof, page, f"{scenario}-second")
-        assert cookie_name_and_value(second)[1] != cookie_name_and_value(first)[1], (
-            "the second login kept the first login's hint"
-        )
-        log_out_through_keycloak(proof, page, f"{scenario}-second", APP_ORIGIN)
-        assert not hints_anywhere(page), "an ID token hint remains after the second logout"
-    return "after a logout and a second login, the second logout, with the new hint, showed no page"
+        signed_in(proof, page, scenario)
+        first = log_out_through_keycloak(proof, page, f"{scenario}-first", APP_ORIGIN)
+        signed_in(proof, page, f"{scenario}-second")
+        second = log_out_through_keycloak(proof, page, f"{scenario}-second", APP_ORIGIN)
+        assert sent_hint(second), "the second logout carried no ID token hint"
+        assert sent_hint(second) != sent_hint(first), "the second logout sent the first hint"
+    return "after a logout and a second login, the second logout, with a new hint, showed no page"
 
 
 def logout_on_the_cross_site_origin(proof: Proof, width: Width) -> str:
     scenario = f"17-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
-        signed_in_with_a_hint(proof, page, scenario, SECOND_APP_ORIGIN)
+        signed_in(proof, page, scenario, SECOND_APP_ORIGIN)
         log_out_through_keycloak(proof, page, scenario, SECOND_APP_ORIGIN)
-        assert not hints_anywhere(page), "an ID token hint remains after the logout"
-    return f"at {SECOND_APP_ORIGIN} the hint was stored and the logout showed no page"
+        assert not jws_cookies(page, SECOND_APP_ORIGIN), "a cookie shaped like a JWS remains"
+    return f"at {SECOND_APP_ORIGIN} the logout showed no page"
 
 
-def id_token_expiry(hint: Cookie) -> float:
-    payload = cookie_name_and_value(hint)[1].split(".")[1]
+def id_token_expiry(token: str) -> float:
+    payload = token.split(".")[1]
     return float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
 
 
-def end_session_hint_is(end_session_request: Request, token: str) -> bool:
+def sent_hint(end_session_request: Request) -> str | None:
+    """The `id_token_hint` the end-session POST carried, or None."""
     form = urllib.parse.parse_qs(end_session_request.post_data or "")
-    return end_session_request.method == "POST" and form.get("id_token_hint") == [token]
-
-
-def wait_until_past(expiry: float) -> float:
-    """Waits until the clock is the margin past `expiry`; returns how far past it stands."""
-    deadline = time.monotonic() + SHORT_TOKEN_LIFESPAN_SECONDS + 2 * EXPIRY_MARGIN_SECONDS
-    while time.time() < expiry + EXPIRY_MARGIN_SECONDS:
-        assert time.monotonic() < deadline, "the clock did not pass the ID token's expiry in time"
-        time.sleep(CALLBACK_POLL_SECONDS)
-    return time.time() - expiry
+    hints = form.get("id_token_hint", []) if end_session_request.method == "POST" else []
+    return hints[0] if hints else None
 
 
 def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
@@ -871,37 +839,35 @@ def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
         short_lived_tokens(proof.fresh_admin, proof.client_uuid, SHORT_TOKEN_LIFESPAN_SECONDS),
         proof.browsing(width) as page,
     ):
-        end_session_requests: list[Request] = []
-        page.context.on(
-            "request",
-            lambda request: end_session_requests.extend(
-                [request] if request.url == END_SESSION_ENDPOINT else []
-            ),
+        signed_in(proof, page, scenario)
+        time.sleep(SHORT_TOKEN_LIFESPAN_SECONDS + EXPIRY_MARGIN_SECONDS)
+        margins_at_the_send: list[float] = []
+
+        def record_the_clock_past_the_expiry(end_session_request: Request) -> None:
+            hint = sent_hint(end_session_request)
+            if hint is not None:
+                margins_at_the_send.append(time.time() - id_token_expiry(hint))
+
+        log_out_through_keycloak(
+            proof, page, scenario, APP_ORIGIN, record_the_clock_past_the_expiry
         )
-        hint = signed_in_with_a_hint(proof, page, scenario)
-        token = cookie_name_and_value(hint)[1]
-        expiry = id_token_expiry(hint)
-        assert expiry - time.time() <= SHORT_TOKEN_LIFESPAN_SECONDS, "the ID token is long-lived"
-        past = wait_until_past(expiry)
-        log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
-        (end_session_request,) = end_session_requests
-        assert end_session_hint_is(
-            end_session_request, token
-        ), "the end-session request did not carry the ID token whose expiry was measured"
-        assert not hints_anywhere(page), "an ID token hint remains after the logout"
+        assert margins_at_the_send, "the end-session request carried no ID token hint"
+        [past] = margins_at_the_send
+        assert past >= EXPIRY_MARGIN_SECONDS, f"the clock was only {past:.1f} s past the exp"
         assert proof.host_state()["sessions"] == 0, "the host still holds a session"
         again = second_sign_in(proof, page, scenario)
     return (
         f"with an ID token {SHORT_TOKEN_LIFESPAN_SECONDS} s long, logged out {past:.1f} s past "
-        f"its exp, the end-session request carried the hint and Keycloak answered with a redirect "
-        f"to the app with no confirmation page; a second Sign in {again}"
+        f"its exp at the send, the end-session request carried the hint and Keycloak answered "
+        f"with a redirect to the app with no confirmation page; a second Sign in {again}"
     )
 
 
 def back_button_shows(proof: Proof, page: Page) -> str:
     page.go_back()
     page_text = page.inner_text("h1") if page.query_selector("h1") else "no page"
-    assert not page.query_selector("input[name=id_token_hint]"), "the back button restored the hint"
+    if page.query_selector("input[name=id_token_hint]"):
+        raise Finding("the back button restored the hint")
     return f"{page_text} (the host's last sign-in refusal: {proof.host_state()['last_refusal']})"
 
 
@@ -965,14 +931,14 @@ def assert_signed_out(proof: Proof, page: Page, origin: str) -> None:
 
 
 def press_logout(
-    proof: Proof, page: Page, at_end_session: Callable[[], None] | None = None
+    proof: Proof, page: Page, at_end_session: Callable[[Request], None] | None = None
 ) -> Response:
-    """Press the app's button; run `at_end_session` while the browser stands at Keycloak's
-    end-session request, before Keycloak has seen it; return Keycloak's answer to it."""
+    """Press the app's button; run `at_end_session` with the end-session request while the
+    browser stands at it, before Keycloak has seen it; return Keycloak's answer to it."""
 
     def hold_end_session(route: Route) -> None:
         assert at_end_session is not None
-        at_end_session()
+        at_end_session(route.request)
         route.continue_()
 
     if at_end_session is not None:
@@ -988,9 +954,10 @@ def press_logout(
 
 def log_out_through_keycloak(
     proof: Proof, page: Page, scenario: str, origin: str,
-    at_end_session: Callable[[], None] | None = None, *, asks_for_confirmation: bool = False,
-) -> None:
-    """The one logout step: the button, Keycloak's end-session, and back to the app.
+    at_end_session: Callable[[Request], None] | None = None, *, asks_for_confirmation: bool = False,
+) -> Request:
+    """The one logout step: the button, Keycloak's end-session, and back to the app;
+    answers the end-session request.
 
     With the ID token hint Keycloak answers with a redirect to the app and shows no page;
     without a usable hint it asks first."""
@@ -1010,6 +977,7 @@ def log_out_through_keycloak(
     proof.shot(page, scenario, "logout-result")
     if not asks_for_confirmation:
         assert page.locator(KEYCLOAK_LOGOUT_CONFIRMATION).count() == 0, "Keycloak's page showed"
+    return answer.request
 
 
 def logout_ends_every_session_of_the_subject(proof: Proof, width: Width) -> str:
@@ -1022,7 +990,7 @@ def logout_ends_every_session_of_the_subject(proof: Proof, width: Width) -> str:
         assert proof.status_of(second, "/me") == 200, "the second context is not signed in"
         assert app.state()["sessions"] == 2, f"the host holds {app.state()}"
 
-        def second_session_still_stands() -> None:
+        def second_session_still_stands(_end_session_request: Request) -> None:
             assert_callbacks(app, accepted=0, sessions=1)
 
         log_out_through_keycloak(proof, first, scenario, app.origin, second_session_still_stands)
@@ -1052,7 +1020,7 @@ def logout_in_one_app_ends_the_sessions_of_the_other(proof: Proof, width: Width)
         assert (app_a.state()["sessions"], app_b.state()["sessions"]) == (1, 2), "setup"
         first.goto(f"{app_a.origin}/")
 
-        def both_apps_still_hold_their_sessions() -> None:
+        def both_apps_still_hold_their_sessions(_end_session_request: Request) -> None:
             assert_callbacks(app_a, accepted=0, sessions=0)
             assert_callbacks(app_b, accepted=0, sessions=2)
 
@@ -1298,6 +1266,8 @@ def keycloak_rotates_the_refresh_token(proof: Proof, width: Width) -> str:
         session = session_cookie(page)
         first = access_token_answer(proof, session)
         second = access_token_answer(proof, session)
+        end_session_request = log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
+    assert sent_hint(end_session_request), "the logout after the rotation carried no hint"
     assert first["outcome"] == "token", f"the first call answered {first}"
     assert second["outcome"] == "token", f"the second call answered {second}"
     assert (first["refresh_tokens_stored"], second["refresh_tokens_stored"]) == (1, 2), (
@@ -1305,7 +1275,8 @@ def keycloak_rotates_the_refresh_token(proof: Proof, width: Width) -> str:
     )
     return (
         "after a sign-in two calls of fresh_access_token both answered token, and the host "
-        "stored a different refresh token after each: Keycloak rotates the string on every refresh"
+        "stored a different refresh token after each: Keycloak rotates the string on every "
+        "refresh; the logout after them sent an id_token_hint and Keycloak redirected to the app"
     )
 
 
@@ -1377,7 +1348,7 @@ def logout_from_a_page_of_another_site_is_refused(proof: Proof, width: Width) ->
     app_a, app_b = proof.apps
     app_a.reset()
     with proof.browsing(width) as page:
-        hint = signed_in_with_a_hint(proof, page, scenario, app_a.origin)
+        signed_in(proof, page, scenario, app_a.origin)
         page.route(
             f"{app_b.origin}{CROSS_SITE_LOGOUT_PATH}",
             lambda route: route.fulfill(
@@ -1402,62 +1373,46 @@ def logout_from_a_page_of_another_site_is_refused(proof: Proof, width: Width) ->
         proof.shot(page, scenario, "result")
         me_status = proof.status_of(page, "/me")
         assert me_status == 200, f"/me answered {me_status}"
-        assert hint_cookies(page, app_a.origin) == [hint], "the ID token hint cookie changed"
         assert_callbacks(app_a, accepted=0, sessions=1)
         log_out_through_keycloak(proof, page, scenario, app_a.origin)
         wait_for_accepted_callbacks(app_a, 1)
     return (
         f"a form on {app_b.origin} posting to {app_a.origin}{LOGOUT_PATH} was answered 403 "
         f"({CROSS_ORIGIN_REFUSAL!r}) with Sec-Fetch-Site {site}; the session stood (/me 200, "
-        "host at 1 session) and the ID token hint cookie was not cleared, so the person's own "
-        "logout then showed no page"
+        "host at 1 session), so the person's own logout then showed no page"
     )
 
 
-def logout_with_the_hint_of_another_keycloak_session(proof: Proof, width: Width) -> str:
+def logout_after_the_back_channel_logout_ended_the_row(proof: Proof, width: Width) -> str:
     scenario = f"23-{width.label}"
     app_a, app_b = proof.apps
     proof.log_out_user_everywhere(proof.user_id)
     app_a.reset()
     app_b.reset()
     with proof.browsing(width) as page_a:
-        end_session_requests: list[Request] = []
-        page_a.context.on(
-            "request",
-            lambda request: end_session_requests.extend(
-                [request] if request.url == END_SESSION_ENDPOINT else []
-            ),
-        )
-        hint_of_first_session = signed_in_with_a_hint(proof, page_a, scenario, app_a.origin)
+        signed_in(proof, page_a, scenario, app_a.origin)
         proof.log_out_user_everywhere(proof.user_id)
         wait_for_accepted_callbacks(app_a, 1)
         assert_callbacks(app_a, accepted=1, sessions=0)
         page_b = page_a.context.new_page()
-        hint_of_second_session = signed_in_with_a_hint(proof, page_b, f"{scenario}-b", app_b.origin)
-        assert cookie_name_and_value(hint_of_second_session)[1] != cookie_name_and_value(
-            hint_of_first_session
-        )[1], "the second Keycloak session issued the first session's ID token"
-        assert hint_cookies(page_a, app_a.origin) == [hint_of_first_session], "A's hint changed"
-        log_out_through_keycloak(
+        signed_in(proof, page_b, f"{scenario}-b", app_b.origin)
+        end_session_request = log_out_through_keycloak(
             proof, page_a, scenario, app_a.origin, asks_for_confirmation=True
         )
-        (end_session_request,) = end_session_requests
-        assert end_session_hint_is(
-            end_session_request, cookie_name_and_value(hint_of_first_session)[1]
-        ), "A's logout did not send the first session's ID token"
+        assert sent_hint(end_session_request) is None, "A's logout sent a hint"
         wait_for_accepted_callbacks(app_b, 1)
         assert_signed_out(proof, page_b, app_b.origin)
     return (
-        "A's session was ended through Keycloak's admin logout (A's hint cookie stayed), a sign-in "
-        "to B opened a second Keycloak session, and A's logout, sending the first session's ID "
-        "token (asserted in the end-session request), led to Keycloak's confirmation page; after "
-        "confirming, Keycloak called B back and B says Signed out"
+        "A's row was ended by Keycloak's back-channel logout, a sign-in to B opened a second "
+        "Keycloak session, and A's logout sent no hint (asserted in the end-session request) and "
+        "led to Keycloak's confirmation page; after confirming, Keycloak called B back and B "
+        "says Signed out"
     )
 
 
 BACKCHANNEL_DESKTOP_SCENARIOS = (
     (22, logout_from_a_page_of_another_site_is_refused),
-    (23, logout_with_the_hint_of_another_keycloak_session),
+    (23, logout_after_the_back_channel_logout_ended_the_row),
 )
 
 
@@ -1530,7 +1485,7 @@ def run_default_scenarios(proof: Proof) -> bool:
         f"SCENARIO 24 {DESKTOP.label} {APP_ORIGIN}",
         lambda: deep_link_survives_the_login(proof, DESKTOP),
     )
-    run_hint_scenarios(proof)
+    run_token_scenarios(proof)
     for number, scenario in REFRESH_SCENARIOS:
         proof.held_or_failed(
             f"SCENARIO {number} {DESKTOP.label} {APP_ORIGIN}",
@@ -1539,9 +1494,9 @@ def run_default_scenarios(proof: Proof) -> bool:
     return True
 
 
-def run_hint_scenarios(proof: Proof) -> None:
+def run_token_scenarios(proof: Proof) -> None:
     for number, origin, scenario in (
-        (14, APP_ORIGIN, hint_cookie_stays_at_the_logout_path),
+        (14, APP_ORIGIN, the_browser_holds_no_id_token),
         (15, APP_ORIGIN, second_login_and_logout_show_no_page),
         (17, SECOND_APP_ORIGIN, logout_on_the_cross_site_origin),
         (21, APP_ORIGIN, logout_after_the_id_token_expired),

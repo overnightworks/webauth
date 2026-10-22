@@ -112,6 +112,16 @@ class SessionRecord(Protocol):
         tokens."""
         ...
 
+    @property
+    def id_token(self) -> SecretStr | None:
+        """The login's ID token, a secret of the session that goes back only to
+        the issuer as the logout hint. It is part of the row and ends with it.
+        The host writes it with ``get_secret_value()`` and returns it wrapped in
+        ``SecretStr``; it is at most ``MAX_TOKEN_CHARACTERS`` (8192) ASCII
+        characters, the verifier's bound, so the column takes no less. ``None``
+        for a row stored before the host held ID tokens."""
+        ...
+
 
 class SubjectUserStore(Protocol):
     """Accounts an identity provider vouches for, keyed by its subject.
@@ -184,13 +194,15 @@ class SessionRecordStore(Protocol):
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
+        id_token: SecretStr,
     ) -> SessionRecord:
         """Create the session and return it.
 
         The refresh token is part of the session row: whatever ends the row
         ends it, and no other row or table holds it. The host writes it with
         ``get_secret_value()``; the library bounds the value only by the 64 KiB
-        token response, so the column takes no smaller length.
+        token response, so the column takes no smaller length. The ID token is
+        part of the row the same way, as ``SessionRecord.id_token`` says.
 
         The store mints the new session's id with at least 128 bits from a
         CSPRNG, in at most 135 characters. The cookie signs the id alone, so a
@@ -231,6 +243,7 @@ class SessionRecordStore(Protocol):
 
         The store writes the ``expires_at`` it is given and computes none of
         its own: the library alone applies ``WebAuthConfig.session_lifetime``.
+        It leaves the refresh token and the ID token untouched.
         """
         ...
 
@@ -246,7 +259,7 @@ class SessionRecordStore(Protocol):
         gone and nothing was written. Like ``touch``, it only updates an existing
         row and never creates one, so a session deleted meanwhile stays deleted.
         Any other answer raises ``TypeError``: answer ``rowcount == 1``, not
-        ``rowcount``.
+        ``rowcount``. The ID token stays untouched: it is the login's own.
         """
         ...
 
