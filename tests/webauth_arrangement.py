@@ -714,6 +714,7 @@ def an_auth_app(
     optional: PathRules | None = None,
     session_transaction: SessionTransaction | None = None,
     root_path: str = "",
+    server_root_path: str = "",
     raise_server_exceptions: bool = True,
     stack_policies: Mapping[str, Any] | None = None,
     **config_overrides: Any,
@@ -726,7 +727,10 @@ def an_auth_app(
     instead (no overrides then). ``gate`` installs the library middleware with
     a ``SessionGate`` over ``public`` and ``optional``, its transaction
     ``session_transaction`` or else the store's ``in_transaction``;
-    ``stack_policies`` adds the other policies the installer takes.
+    ``stack_policies`` adds the other policies the installer takes, or replaces
+    ``security_headers``. ``root_path`` is the prefix the application declares;
+    ``server_root_path`` is the one the server delivers, as Uvicorn's
+    ``--root-path`` does, with the prefix left in the request path.
 
     ``UNAUTHENTICATED_RESPONSE_PATH`` answers with ``unauthenticated_response``
     called directly, over the same ``login_redirect``, so a test can compare
@@ -753,8 +757,7 @@ def an_auth_app(
     if gate:
         install_web_auth_middleware(
             app,
-            security_headers=GATED_APP_HEADERS_POLICY,
-            **(stack_policies or {}),
+            **{"security_headers": GATED_APP_HEADERS_POLICY, **(stack_policies or {})},
             session_gate=SessionGate(
                 session_transaction=session_transaction or sessions.in_transaction,
                 login_redirect=login_redirect,
@@ -812,6 +815,7 @@ def an_auth_app(
             app,
             base_url=HTTPS_TEST_SERVER,
             cookies={},
+            root_path=server_root_path,
             raise_server_exceptions=raise_server_exceptions,
         ),
         sessions=sessions,
