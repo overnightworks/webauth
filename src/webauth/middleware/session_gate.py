@@ -8,20 +8,24 @@ from typing import TYPE_CHECKING
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
+from fastapi import HTTPException
 from starlette.requests import HTTPConnection
 
 from webauth._paths import _has_dot_segment
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.dependencies import (
+    _AUTHENTICATION_REQUIRED_DETAIL,
     ConnectionRefusal,
     LoginRedirect,
     _bearer_admission,
     _gate_admission,
     _GateAdmission,
     _is_bearer_admitted,
+    _raise_for_bearer_admission,
     _read_session_cookie,
     _record_gate_admission,
     _refusal_response,
+    _require_admin,
     admit_session,
 )
 from webauth.middleware._refusal import RefusalMiddleware
@@ -37,6 +41,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SessionGate",
     "SessionGateMiddleware",
+    "admitted_admin",
     "admitted_user",
 ]
 
@@ -144,3 +149,23 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
             "install_web_auth_middleware(session_gate=...) on the app that serves the route.",
         )
     return None if isinstance(decided.admission, ConnectionRefusal | None) else decided.admission
+
+
+def admitted_admin(connection: HTTPConnection) -> AuthenticatedUser:
+    """The admin account the session gate admitted for this request.
+
+    Answers 403 ``Admin access required`` for an admitted account of another role,
+    as ``admin_user`` does, and 401 ``Authentication required`` where the gate
+    admitted no account (a public path, or an optional path without a live
+    session); it never redirects and never admits a session by itself. A
+    ``Depends(current_user)`` that admits the cookie on a public path does not
+    change the gate's record, so the answer there stays 401. Raises
+    ``RuntimeError`` as ``admitted_user`` does where no gate decided this request,
+    and on a request the bearer gate admitted: a machine route takes
+    ``Depends(bearer_caller)``. Usable as ``Depends(admitted_admin)``.
+    """
+    _raise_for_bearer_admission(connection)
+    user = admitted_user(connection)
+    if user is None:
+        raise HTTPException(401, _AUTHENTICATION_REQUIRED_DETAIL)
+    return _require_admin(connection, user)

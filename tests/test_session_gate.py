@@ -10,21 +10,16 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request, WebSocket
 from httpx import Response
 from starlette.websockets import WebSocketDisconnect
 from webauth_arrangement import (
     ADMIN_ROLE,
-    ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH,
-    ADMITTED_ADMIN_DEPENDENCY_PATH,
-    ADMITTED_ADMIN_PATH,
-    ADMITTED_ADMIN_PATHS,
     ALL_DEPENDENCIES_PATH,
     ALLOWED_ORIGIN,
     GATED_APP_HEADERS_POLICY,
     LOGIN_REDIRECT,
     MEMBER_ROLE,
-    WEBSOCKET_ADMITTED_ADMIN_PATH,
     WEBSOCKET_ADMITTED_PATH,
     WEBSOCKET_PATH,
     AuthApp,
@@ -45,7 +40,8 @@ from webauth_arrangement import (
     starts,
 )
 
-from webauth.dependencies import ConnectionRefusal
+from webauth.dependencies import ConnectionRefusal, current_user_dependency
+from webauth.middleware import admitted_admin
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
@@ -376,13 +372,50 @@ class TestAdmittedUser:
             ask(app, "/health", cookie=cookie)
 
 
+ADMITTED_ADMIN_PATH = "/admitted-admin"
+ADMITTED_ADMIN_DEPENDENCY_PATH = "/admitted-admin-dependency"
+ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH = "/admitted-admin-after-current-user"
+ADMITTED_ADMIN_PATHS = (ADMITTED_ADMIN_PATH, ADMITTED_ADMIN_DEPENDENCY_PATH)
+WEBSOCKET_ADMITTED_ADMIN_PATH = "/ws-admitted-admin"
 AUTHENTICATION_REQUIRED = {"detail": "Authentication required"}
 ADMIN_REQUIRED = {"detail": "Admin access required"}
 OPERATOR_ROLE = "operator"
 
 
+def with_admitted_admin_routes(app: AuthApp) -> AuthApp:
+    """The routes that read ``admitted_admin``, added to an application of the arrangement."""
+    dependencies = current_user_dependency(
+        session_store=lambda: app.sessions, on_authenticated=app.authenticated.append,
+    )
+
+    @app.app.get(ADMITTED_ADMIN_PATH)
+    def reading_admitted_admin(request: Request) -> dict[str, str]:
+        app.route_runs.append(request.url.path)
+        return {"username": admitted_admin(request).username}
+
+    @app.app.get(ADMITTED_ADMIN_DEPENDENCY_PATH)
+    def depending_on_admitted_admin(
+        admin: AuthenticatedUser = Depends(admitted_admin),
+    ) -> dict[str, str]:
+        return {"username": admin.username}
+
+    @app.app.get(ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH)
+    def reading_admitted_admin_after_current_user(
+        request: Request, _account: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str]:
+        return {"username": admitted_admin(request).username}
+
+    @app.app.websocket(WEBSOCKET_ADMITTED_ADMIN_PATH)
+    async def reading_admitted_admin_of_a_websocket(websocket: WebSocket) -> None:
+        admitted_admin(websocket)
+        await websocket.accept()
+        await websocket.close()
+
+    return app
+
+
 def a_gated_app_of(role: str, **keywords: Any) -> AuthApp:
-    return a_gated_app(a_session(user=FakeUser(role=role)), **keywords)
+    return with_admitted_admin_routes(a_gated_app(a_session(user=FakeUser(role=role)), **keywords))
 
 
 class TestAdmittedAdmin:
@@ -421,7 +454,7 @@ class TestAdmittedAdmin:
     def test_the_gate_refuses_a_signed_out_request_on_a_gated_path_before_the_route(
         self, path: str, accept: str | None, expected_status: int,
     ) -> None:
-        app = a_gated_app()
+        app = with_admitted_admin_routes(a_gated_app())
         response = ask(app, path, accept=accept)
         assert response.status_code == expected_status
         assert app.route_runs == []
@@ -431,7 +464,9 @@ class TestAdmittedAdmin:
     def test_where_the_gate_admitted_no_account_it_answers_401_and_never_redirects(
         self, path: str, accept: str | None,
     ) -> None:
-        app = a_gated_app(optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS)))
+        app = with_admitted_admin_routes(
+            a_gated_app(optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS))),
+        )
         response = ask(app, path, accept=accept)
         assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
         assert "location" not in response.headers
@@ -446,9 +481,9 @@ class TestAdmittedAdmin:
             remaining=OUTSIDE_LIFETIME if dead == "expired" else timedelta(minutes=30),
         )
         sessions = SessionsRecordingTheirTransaction(None if dead == "deleted" else record)
-        app = a_gated_app(
+        app = with_admitted_admin_routes(a_gated_app(
             optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS)), sessions=sessions,
-        )
+        ))
         response = ask(app, path, cookie=signed_in(app))
         assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
         assert counted(sessions, "load") == 1
@@ -461,7 +496,7 @@ class TestAdmittedAdmin:
         assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
 
     def test_it_is_an_error_where_no_gate_is_installed(self) -> None:
-        app = an_auth_app(a_session(user=FakeUser(role=ADMIN_ROLE)))
+        app = with_admitted_admin_routes(an_auth_app(a_session(user=FakeUser(role=ADMIN_ROLE))))
         cookie = signed_in(app)
         with pytest.raises(RuntimeError):
             ask(app, ADMITTED_ADMIN_PATH, cookie=cookie)
@@ -672,7 +707,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
     def test_a_replay_on_an_app_with_its_own_config_is_ignored(
         self, arrangement: Arrangement, planted: str,
     ) -> None:
-        other = an_auth_app(None, login_redirect=LOGIN_REDIRECT)
+        other = with_admitted_admin_routes(an_auth_app(None, login_redirect=LOGIN_REDIRECT))
         relay = relayed(other)
         relay.replay = (
             arrangement.gate_entries if planted == "replayed" else {
@@ -690,10 +725,10 @@ class TestARecordedAdmissionBelongsToItsRequest:
     def test_a_replay_on_a_shared_config_is_ignored_for_another_sessions_cookie(
         self, arrangement: Arrangement,
     ) -> None:
-        shared = an_auth_app(
+        shared = with_admitted_admin_routes(an_auth_app(
             None, sessions=arrangement.sessions, config=arrangement.first.config,
             login_redirect=LOGIN_REDIRECT,
-        )
+        ))
         relay = relayed(shared)
         relay.replay = arrangement.gate_entries
         arrangement.sessions.events.clear()

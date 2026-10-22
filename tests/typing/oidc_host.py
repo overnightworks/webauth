@@ -70,6 +70,7 @@ from webauth.middleware import (
     SecurityHeadersMiddleware,
     SessionGate,
     SessionGateMiddleware,
+    admitted_admin,
     admitted_user,
     bearer_caller,
     install_web_auth_middleware,
@@ -438,6 +439,10 @@ def a_host_reads_the_admitted_user(request: Request) -> str | None:
     return None if user is None else user.username
 
 
+def a_host_reads_the_admitted_admin(request: Request) -> str:
+    return admitted_admin(request).username
+
+
 def a_host_signs_a_session_in_and_out(response: Response, config: WebAuthConfig) -> None:
     issue_session_cookies(response, "session-id", config)
     clear_session_cookies(response, config)
@@ -462,7 +467,7 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionLifetime,
         MAX_SESSION_LIFETIME_SECONDS,
         SessionGate, SessionGateMiddleware, SessionRecordStore, SessionTransaction,
-        PublicRule, admitted_user,
+        PublicRule, admitted_admin, admitted_user,
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
         TokenEndpointError, WebAuthError,
         AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,

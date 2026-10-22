@@ -7,7 +7,12 @@ from webauth.middleware.body_size import BodySizeLimitMiddleware, RequestBodyToo
 from webauth.middleware.csrf import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
-from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware, admitted_user
+from webauth.middleware.session_gate import (
+    SessionGate,
+    SessionGateMiddleware,
+    admitted_admin,
+    admitted_user,
+)
 from webauth.middleware.stack import install_web_auth_middleware
 
 __all__ = [
@@ -21,6 +26,7 @@ __all__ = [
     "SecurityHeadersMiddleware",
     "SessionGate",
     "SessionGateMiddleware",
+    "admitted_admin",
     "admitted_user",
     "bearer_caller",
     "install_web_auth_middleware",

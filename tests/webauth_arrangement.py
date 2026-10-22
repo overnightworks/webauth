@@ -48,7 +48,6 @@ from webauth.dependencies import (
 from webauth.middleware import (
     IpRateLimitMiddleware,
     SessionGate,
-    admitted_admin,
     admitted_user,
     install_web_auth_middleware,
 )
@@ -562,13 +561,8 @@ class RecordingAuditSink:
 
 WEBSOCKET_PATH = "/ws"
 WEBSOCKET_ADMITTED_PATH = "/ws-admitted"
-WEBSOCKET_ADMITTED_ADMIN_PATH = "/ws-admitted-admin"
 OPEN_PATHS = ("/health", "/login", "/hooks/x", "/static/x.css", "/optional")
 ALL_DEPENDENCIES_PATH = "/all"
-ADMITTED_ADMIN_PATH = "/admitted-admin"
-ADMITTED_ADMIN_DEPENDENCY_PATH = "/admitted-admin-dependency"
-ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH = "/admitted-admin-after-current-user"
-ADMITTED_ADMIN_PATHS = (ADMITTED_ADMIN_PATH, ADMITTED_ADMIN_DEPENDENCY_PATH)
 GATED_APP_HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
 LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 WEBSOCKET_DEPENDENCY_PATH = "/ws-dependency"
@@ -696,12 +690,6 @@ def _add_websocket_routes(
         await websocket.accept()
         await websocket.close()
 
-    @app.websocket(WEBSOCKET_ADMITTED_ADMIN_PATH)
-    async def reading_admitted_admin(websocket: WebSocket) -> None:
-        admitted_admin(websocket)
-        await websocket.accept()
-        await websocket.close()
-
     @app.websocket(WEBSOCKET_DEPENDENCY_PATH)
     async def through_a_dependency(
         websocket: WebSocket,
@@ -733,8 +721,7 @@ def an_auth_app(
     """An application serving one protected, one admin, one session-id route.
 
     It also serves the WebSocket routes of ``_add_websocket_routes`` and, at
-    ``OPEN_PATHS``, a route that reads ``admitted_user``, and the routes at
-    ``ADMITTED_ADMIN_PATHS`` that read ``admitted_admin``. A keyword replaces
+    ``OPEN_PATHS``, a route that reads ``admitted_user``. A keyword replaces
     the configuration field it names; ``config`` is an existing instance
     instead (no overrides then). ``gate`` installs the library middleware with
     a ``SessionGate`` over ``public`` and ``optional``, its transaction
@@ -807,23 +794,6 @@ def an_auth_app(
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
-
-    @app.get(ADMITTED_ADMIN_PATH)
-    def reading_admitted_admin(request: Request) -> dict[str, str]:
-        route_runs.append(request.url.path)
-        return {"username": admitted_admin(request).username}
-
-    @app.get(ADMITTED_ADMIN_DEPENDENCY_PATH)
-    def depending_on_admitted_admin(
-        admin: AuthenticatedUser = Depends(admitted_admin),
-    ) -> dict[str, str]:
-        return {"username": admin.username}
-
-    @app.get(ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH)
-    def reading_admitted_admin_after_current_user(
-        request: Request, _account: AuthenticatedUser = Depends(dependencies.current_user),
-    ) -> dict[str, str]:
-        return {"username": admitted_admin(request).username}
 
     @app.get("/session-id")
     def session_id(
