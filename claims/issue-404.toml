@@ -1,8 +1,0 @@
-claim_id = "166001a009574c02b66629de4c0c55f1"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "1f9b378a1ccb30937099e20d2ec76f3f0bb73171"
-branch = "claude/issue-404-admitted-admin"
-scope = ["CHANGELOG.md", "README.md", "docs/ARCHITECTURE.md", "quality/baseline.toml", "src/webauth/__init__.py", "src/webauth/dependencies.py", "src/webauth/middleware/__init__.py", "src/webauth/middleware/session_gate.py", "tests/test_bearer_admission.py", "tests/test_session_gate.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
-opened_commit = "0b5f0f7107051355fc9d46a1fb71d9a88649812f"
-whole_reason = "One public reader and the one private admin rule it shares with admin_user; the docs, changelog and typing host name the new export, the tests prove it through the real stack, and the release commit for 0.21.0 rides on it."
