@@ -366,10 +366,15 @@ def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> Non
 
 
 @pytest.mark.parametrize("samesite", ["strict", "lax"])
-def test_issuing_sets_exactly_the_session_cookie_http_only_with_the_configured_samesite(
-    samesite: str,
+@pytest.mark.parametrize("cookie_secure", [True, False])
+def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
+    *, cookie_secure: bool, samesite: str,
 ) -> None:
-    app = a_cookie_app(cookie_samesite=samesite)
+    app = a_cookie_app(
+        base_url=OVER_HTTPS if cookie_secure else PLAIN_HTTP,
+        cookie_secure=cookie_secure,
+        cookie_samesite=samesite,
+    )
 
     response = app.issue()
 
@@ -378,6 +383,7 @@ def test_issuing_sets_exactly_the_session_cookie_http_only_with_the_configured_s
     assert header.split("=", 1)[0] == app.config.session_cookie_name
     assert "HttpOnly" in attributes
     assert f"SameSite={samesite}" in attributes
+    assert ("Secure" in attributes) is cookie_secure
 
 
 @pytest.mark.parametrize(("base_url", "config_overrides", "session_name"), [

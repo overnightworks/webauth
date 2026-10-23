@@ -420,7 +420,8 @@ def test_protect_everything_checks_every_route_but_the_exempt_ones(
     response = client.post(path, json={"n": 1}, headers=headers)
 
     answer = (200, OK) if exempt else checked_answer
-    assert (response.status_code, response.json()) == answer
+    outcome = (response.status_code, response.json())
+    assert outcome == answer
     assert route_runs == ([path] if answer[0] == 200 else [])
 
 
@@ -496,7 +497,8 @@ def test_a_session_request_is_decided_by_its_provenance_whatever_token_material_
         "/optional", json={"n": 1}, headers={"cookie": cookie, **provenance, **extra_headers},
     )
 
-    assert (response.status_code, response.json()) == answer
+    outcome = (response.status_code, response.json())
+    assert outcome == answer
     assert auth.route_runs == (["/optional"] if answer[0] == 200 else [])
 
 
@@ -562,3 +564,51 @@ def test_the_csrf_origin_rule_is_chosen_by_the_path_the_router_routes(
 
     assert response.status_code == (403 if refused else 200)
     assert auth.route_runs == ([] if refused else [routed_path])
+
+
+AUTHENTICATION_REQUIRED_DETAIL = {"detail": "Authentication required"}
+
+
+@pytest.mark.parametrize(
+    ("signed_in", "provenance", "answer"),
+    [
+        pytest.param(
+            True, {"sec-fetch-site": "same-origin"}, (200, ADMITTED_ALICE),
+            id="signed in, same-origin",
+        ),
+        pytest.param(
+            True, {"sec-fetch-site": "cross-site"}, (403, CROSS_ORIGIN_DETAIL),
+            id="signed in, cross-site",
+        ),
+        pytest.param(True, {}, (403, MISSING_ORIGIN_DETAIL), id="signed in, no provenance"),
+        pytest.param(
+            False, {"sec-fetch-site": "same-origin"}, (401, AUTHENTICATION_REQUIRED_DETAIL),
+            id="signed out, same-origin",
+        ),
+        pytest.param(
+            False, {"sec-fetch-site": "cross-site"}, (403, CROSS_ORIGIN_DETAIL),
+            id="signed out, cross-site",
+        ),
+        pytest.param(False, {}, (403, MISSING_ORIGIN_DETAIL), id="signed out, no provenance"),
+    ],
+)
+def test_an_old_csrf_cookie_changes_no_decision_signed_in_or_out(
+    *, signed_in: bool, provenance: dict[str, str], answer: tuple[int, dict[str, str]],
+) -> None:
+    def decision(*, carrying_old_cookie: bool) -> tuple[int, dict[str, str], list[str]]:
+        auth = an_auth_app(
+            a_session() if signed_in else None,
+            gate=True,
+            stack_policies={"csrf_origin": CsrfPolicy()},
+        )
+        cookie = session_cookie_header(auth.signed_cookie()) if signed_in else ""
+        if carrying_old_cookie:
+            cookie += f"; {OLD_CSRF_COOKIE_NAME}={OLD_CSRF_TOKEN}"
+        response = auth.client.post(
+            "/optional", json={"n": 1}, headers={"cookie": cookie, **provenance},
+        )
+        return response.status_code, response.json(), auth.route_runs
+
+    ran = ["/optional"] if answer[0] == 200 else []
+    expected = (*answer, ran)
+    assert decision(carrying_old_cookie=True) == decision(carrying_old_cookie=False) == expected

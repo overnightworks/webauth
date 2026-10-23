@@ -1640,17 +1640,17 @@ def test_a_same_origin_logout_still_answers_the_page(
 def test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared(
     *, signed_in: bool, old_cookie_name: str,
 ) -> None:
-    def decisions(*, carrying_old_cookie: bool) -> tuple[int, int, bool, int]:
+    def decisions(*, carrying_old_cookie: bool) -> tuple[int, object, int, int, int]:
         host = signed_in_host() if signed_in else an_oidc_host()
         if carrying_old_cookie:
             host.client.cookies.set(old_cookie_name, a_fake_id_token("set-before-the-upgrade"))
-        post_logout(host, {**SAME_ORIGIN_FORM, "sec-fetch-site": "cross-site"})
-        kept = host.sessions.count_active()
+        refused = post_logout(host, {**SAME_ORIGIN_FORM, "sec-fetch-site": "cross-site"})
+        refusal = (refused.status_code, refused.json(), host.sessions.count_active())
         reply = post_logout(host, SAME_ORIGIN_FORM)
         assert old_cookie_name not in set_cookies(reply)
-        return kept, reply.status_code, hint_of(reply) is not None, host.sessions.count_active()
-
-    expected = (int(signed_in), 200, signed_in, 0)
+        assert hint_of(reply) == (host.issued_id_tokens[-1] if signed_in else None)
+        return (*refusal, reply.status_code, host.sessions.count_active())
+    expected = (403, {"detail": "Cross-origin request rejected"}, int(signed_in), 200, 0)
     assert decisions(carrying_old_cookie=True) == decisions(carrying_old_cookie=False) == expected
 
 
