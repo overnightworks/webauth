@@ -40,9 +40,8 @@ missing or empty claim means no membership.
 After ``finish_login`` admits an account, ``open_session`` under the host's lock
 ends the session the request's cookie names, prunes the account to a cap, creates
 its new one, holding the login's refresh token and, when the host logs out, its ID
-token (the browser keeps none),
-at the configured clock's instant, never committing and setting no cookie, so the host
-commits and then issues the cookies.
+token (the browser keeps none), at the configured clock's instant, never committing
+and setting no cookie, so the host commits and then issues the cookies.
 
 ``log_out`` is the third route's whole sequence: it ends the session the
 request's cookie names, if any, and answers a page that posts the ID token hint
@@ -272,11 +271,9 @@ class AdmissionRefusal(StrEnum):
 
 @dataclass(frozen=True)
 class AdmittedLogin:
-    """An admitted account, the path of this app to send the browser to (or
-    ``None`` for the host's default page), the refresh token the login's code
-    exchange issued (``None`` when the issuer gave none) and the login's ID
-    token, which ``open_session`` stores in the new session's row when the host keeps
-    one."""
+    """An admitted account, the path of this app to send the browser to (or ``None`` for the host's
+    default page), the refresh token the login's code exchange issued (``None`` when the issuer
+    gave none) and the login's ID token, which ``open_session`` stores when the host keeps it."""
 
     account: UserRecord
     return_to: str | None
@@ -361,7 +358,7 @@ def finish_login(
     ``open_session``, commits, calls ``issue_session_cookies`` and sends the
     browser to ``return_to``, the path judged again on its way back, or to its
     default page when that is ``None``. The login's ID token is on the
-    ``AdmittedLogin`` for ``open_session`` to store if the host keeps it; no cookie carries it.
+    ``AdmittedLogin`` for ``open_session`` to store if the host keeps it, not a cookie.
     When the issuer is on another registrable domain than the app,
     ``cookie_samesite`` must be ``"lax"``: with ``"strict"`` the browser
     withholds the session cookie from the first page after the redirect and
@@ -409,20 +406,16 @@ def open_session(
 ) -> SessionRecord:
     """Open the new session of an ``admitted`` login, ending the one the request carries.
 
-    Under one ``lock.hold()``, reads ``config.wall_clock`` once, the same
-    whole-second instant the session decider reads, and in this order: the session the
-    request's cookie names is ended, whoever it belongs to; when ``max_sessions``
-    is a number, the account's newest ``max_sessions - 1`` sessions are kept and
-    the rest ended, so neither the replaced session nor the new one counts
-    against the cap; the new session is created at that instant, expiring one
-    idle period later, and holds ``admitted.refresh_token`` and, when
-    ``keeps_id_token`` is true, ``admitted.id_token``. A host that never calls
-    ``log_out`` passes ``False``: nothing would read the ID token, so the row
-    holds ``None`` and ``log_out`` posts no hint. ``keeps_id_token`` has no
-    default, so every host states its choice. ``max_sessions=None`` states that the
-    host sets no cap; any other value must be a positive whole number, or
-    ``ValueError`` is raised before anything is written. A forged, oversized or duplicated cookie
-    ends nothing.
+    Under one ``lock.hold()``, reads ``config.wall_clock`` once, the same whole-second instant the
+    session decider reads, and in this order: the session the request's cookie names is ended,
+    whoever it belongs to; when ``max_sessions`` is a number, the account's newest ``max_sessions -
+    1`` sessions are kept and the rest ended, so neither the replaced session nor the new one counts
+    against the cap; the new session is created at that instant, expiring one idle period later, and
+    holds ``admitted.refresh_token`` and, when the required ``keeps_id_token`` is true,
+    ``admitted.id_token``. A host that never calls ``log_out`` passes ``False``: the row holds
+    ``None`` and ``log_out`` posts no hint. ``max_sessions=None`` states that the host sets no cap;
+    any other value must be a positive whole number, or ``ValueError`` is raised before anything is
+    written. A forged, oversized or duplicated cookie ends nothing.
 
     Never commits, sets no cookie and records no audit event: the host commits,
     then calls ``issue_session_cookies`` with the returned id. The host's
@@ -467,10 +460,9 @@ def log_out(
     ``button_label`` is the text of the button shown where no script runs. The
     security-headers middleware leaves that policy and ``Cache-Control`` in
     place, so no host policy needs a source for the issuer. Without a stored
-    row, or with a row that holds no ID token (stored before the host held them, or
+    row, or with a row holding no ID token (stored before the host held them, or
     opened with ``keeps_id_token=False``), the issuer asks the person once. The
-    session's stored refresh token goes to the issuer nowhere; deleting the row
-    removes it.
+    session's stored refresh token goes to the issuer nowhere; deleting the row removes it.
 
     The host commits and returns the answer as it is, and a single-page app
     logs out by a top-level form POST to the route. The route needs no
