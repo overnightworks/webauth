@@ -1581,8 +1581,12 @@ def test_rotation_and_renewal_keep_no_id_token_for_a_host_that_keeps_none() -> N
     )
 
     assert (renewed.status_code, isinstance(rotated, SecretStr)) == (200, True)
-    assert stored_id_tokens(host) == []
-    assert stored_refresh_tokens(host) != [ISSUED_REFRESH_TOKEN]
+    [after] = host.sessions.list_active()
+    assert (after.id, after.id_token) == (session.id, None)
+    assert after.refresh_token is not None
+    stored_refresh_token = after.refresh_token.get_secret_value()
+    assert stored_refresh_token != ISSUED_REFRESH_TOKEN
+    assert stored_refresh_token in host.issuer.refresh_tokens
 
 
 def both_session_cookies_are_cleared(host: OidcHost, response: HttpxResponse) -> bool:
@@ -2209,7 +2213,8 @@ def test_a_host_that_keeps_no_id_token_stores_the_refresh_token_and_no_id_token(
 
 
 def test_opening_a_session_without_stating_whether_the_host_keeps_the_id_token_raises() -> None:
-    store = OpeningStore.holding()
+    store = OpeningStore.holding(ACCOUNT)
+    [held] = store.ids()
     app = FastAPI()
     install_web_auth_config(app, OPENING_CONFIG)
     admitted = AdmittedLogin(
@@ -2222,7 +2227,7 @@ def test_opening_a_session_without_stating_whether_the_host_keeps_the_id_token_r
             sessions=store.sessions, lock=store.lock, max_sessions=None,
         )
 
-    assert store.ids() == []
+    assert store.ids() == [held]
 
 
 def test_a_new_session_has_a_fresh_id() -> None:

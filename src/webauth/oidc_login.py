@@ -419,9 +419,10 @@ def open_session(
     ``keeps_id_token`` is true, ``admitted.id_token``. A host that never calls
     ``log_out`` passes ``False``: nothing would read the ID token, so the row
     holds ``None`` and ``log_out`` posts no hint. ``keeps_id_token`` has no
-    default, so every host states its choice. ``None`` states that the host sets no cap; any other
-    value must be a positive whole number, or ``ValueError`` is raised before
-    anything is written. A forged, oversized or duplicated cookie ends nothing.
+    default, so every host states its choice. ``max_sessions=None`` states that the
+    host sets no cap; any other value must be a positive whole number, or
+    ``ValueError`` is raised before anything is written. A forged, oversized or duplicated cookie
+    ends nothing.
 
     Never commits, sets no cookie and records no audit event: the host commits,
     then calls ``issue_session_cookies`` with the returned id. The host's
