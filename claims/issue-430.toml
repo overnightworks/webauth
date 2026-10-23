@@ -1,0 +1,8 @@
+claim_id = "be872f6a73494d1d80aad9d06337a7bb"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "6bdc7283b2ecb8bd6bd060cd09190ede6c82e0c2"
+branch = "claude/issue-430-strict-origin-check"
+scope = ["CHANGELOG.md", "README.md", "docs/ARCHITECTURE.md", "e2e/oidc/host_app.py", "quality/baseline.toml", "src/webauth/_origins.py", "src/webauth/config.py", "src/webauth/middleware/csrf.py", "tests/test_bearer_admission.py", "tests/test_bearer_gate.py", "tests/test_csrf.py", "tests/test_web_auth_config.py", "tests/test_websocket_auth.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "69a5369d1ea429bc230e6be2af738c6dfffc1e76"
+whole_reason = "One rule change, the strict origin check with exact hosts and no Referer, with every test, fake, typing host, e2e pin and doc that names the lenient fallback or the host patterns; the production part stays inside the corridor."
