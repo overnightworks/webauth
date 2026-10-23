@@ -1,0 +1,8 @@
+claim_id = "234c532014a44ea0966e1bf5d1297734"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "18f583d9fbe2089009165985e674c27c37a8e3f7"
+branch = "claude/issue-433-token-retirement"
+scope = ["CHANGELOG.md", "README.md", "docs/ARCHITECTURE.md", "e2e/oidc/bearer.py", "e2e/oidc/host_app.py", "e2e/oidc/prove.py", "quality/baseline.toml", "src/webauth/_validation.py", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/middleware/__init__.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/stack.py", "src/webauth/oidc_login.py", "src/webauth/policies.py", "tests/test_bearer_admission.py", "tests/test_bearer_gate.py", "tests/test_body_size.py", "tests/test_cookies.py", "tests/test_csrf.py", "tests/test_middleware_stack.py", "tests/test_oidc_login.py", "tests/test_policies.py", "tests/test_route_path.py", "tests/test_security_headers.py", "tests/test_session_gate.py", "tests/test_web_auth_config.py", "tests/typing/oidc_host.py", "tests/webauth_arrangement.py"]
+opened_commit = "eed23e005c2b76eb3f9734dd8d042c6e69702c7e"
+whole_reason = "One layer whose parts only read each other: any cut leaves main with a callerless member, a token issued and never checked, or a docstring for a check that is gone; the single-string refusals ride along in the policies.py that CsrfPolicy already opens."
