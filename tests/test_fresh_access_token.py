@@ -20,12 +20,9 @@ from oidc_arrangement import (
     ISSUED_REFRESH_TOKEN,
     FakeClock,
     FakeIssuer,
-    FakeKeySetEndpoint,
     FakeTokenEndpoint,
     a_fake_id_token,
-    key_set_document,
-    public_jwk,
-    rsa_key,
+    a_relying_party,
     token_endpoint_answer,
 )
 from pydantic import SecretStr
@@ -46,7 +43,6 @@ from webauth_arrangement import (
 from webauth.config import WebAuthConfig
 from webauth.dependencies import admit_session
 from webauth.oidc import (
-    OidcClientConfig,
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
@@ -64,7 +60,6 @@ if TYPE_CHECKING:
 
     from webauth.ports import SessionTransaction
 
-_ISSUER = "https://login.example.org/realms/workshop"
 _SESSION_ID = "session-under-test"
 
 _SHAPES = pytest.mark.parametrize(
@@ -127,25 +122,8 @@ def an_arrangement(
         expires_at=now + timedelta(seconds=SESSION_IDLE_SECONDS),
         refresh_token=None if refresh_token is None else SecretStr(refresh_token),
     )
-    relying_party = OidcRelyingParty(
-        OidcClientConfig(
-            issuer=_ISSUER,
-            authorization_endpoint=f"{_ISSUER}/protocol/openid-connect/auth",
-            token_endpoint=f"{_ISSUER}/protocol/openid-connect/token",
-            jwks_url=f"{_ISSUER}/protocol/openid-connect/certs",
-            end_session_endpoint=f"{_ISSUER}/protocol/openid-connect/logout",
-            client_id="notes-app",
-            client_secret=SecretStr("client-secret"),
-            redirect_uri="https://notes.example.org/auth/callback",
-            post_logout_redirect_uri="https://notes.example.org/",
-            leeway_seconds=30,
-        ),
-        post_token_request=issuer if token_endpoint is None else token_endpoint,
-        fetch_key_set=FakeKeySetEndpoint(
-            key_set_document(public_jwk(rsa_key("current"), "current-key"))
-        ),
-        wall_clock=clock,
-        monotonic_clock=FakeClock(5_000.0),
+    relying_party = a_relying_party(
+        post_token_request=issuer if token_endpoint is None else token_endpoint, wall_clock=clock,
     )
     return Arrangement(
         issuer, sessions_of(record), clock, config, relying_party,

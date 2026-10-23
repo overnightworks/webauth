@@ -37,7 +37,7 @@
 "_defective_key_sets" = 121
 
 [function_lines."tests/test_oidc_login.py"]
-"an_oidc_host" = 145
+"an_oidc_host" = 144
 
 [function_lines."tests/webauth_arrangement.py"]
 "an_auth_app" = 120

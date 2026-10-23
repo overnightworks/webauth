@@ -408,14 +408,14 @@ def open_session(
 
     Under one ``lock.hold()``, reads ``config.wall_clock`` once, the same whole-second instant the
     session decider reads, and in this order: the session the request's cookie names is ended,
-    whoever it belongs to; when ``max_sessions`` is a number, the account's newest ``max_sessions -
-    1`` sessions are kept and the rest ended, so neither the replaced session nor the new one counts
-    against the cap; the new session is created at that instant, expiring one idle period later, and
-    holds ``admitted.refresh_token`` and, when the required ``keeps_id_token`` is true,
-    ``admitted.id_token``. A host that never calls ``log_out`` passes ``False``: the row holds
-    ``None`` and ``log_out`` posts no hint. ``max_sessions=None`` states that the host sets no cap;
-    any other value must be a positive whole number, or ``ValueError`` is raised before anything is
-    written. A forged, oversized or duplicated cookie ends nothing.
+    whoever it belongs to; when ``max_sessions`` is a number, the account's newest
+    ``max_sessions - 1`` sessions are kept and the rest ended, so neither the replaced session nor
+    the new one counts against the cap; the new session is created at that instant, expiring one
+    idle period later, and holds ``admitted.refresh_token`` and, when the required
+    ``keeps_id_token`` is true, ``admitted.id_token``. A host that never calls ``log_out`` passes
+    ``False``: the row holds ``None`` and ``log_out`` posts no hint. ``max_sessions=None`` states
+    that the host sets no cap; any other value must be a positive whole number, or ``ValueError`` is
+    raised before anything is written. A forged, oversized or duplicated cookie ends nothing.
 
     Never commits, sets no cookie and records no audit event: the host commits,
     then calls ``issue_session_cookies`` with the returned id. The host's

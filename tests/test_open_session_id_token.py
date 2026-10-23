@@ -11,17 +11,12 @@ from dataclasses import dataclass
 import pytest
 from fastapi import FastAPI, Request
 from oidc_arrangement import (
-    APP_CLIENT_ID,
     ISSUED_REFRESH_TOKEN,
-    REALM_ISSUER,
     FakeClock,
     FakeIssuer,
-    FakeKeySetEndpoint,
     LogoutPage,
     a_fake_id_token,
-    key_set_document,
-    public_jwk,
-    rsa_key,
+    a_relying_party,
 )
 from pydantic import SecretStr
 from webauth_arrangement import (
@@ -39,7 +34,7 @@ from webauth_arrangement import (
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import sign_session_id
 from webauth.dependencies import admit_session
-from webauth.oidc import OidcClientConfig, OidcRelyingParty
+from webauth.oidc import OidcRelyingParty
 from webauth.oidc_login import AdmittedLogin, fresh_access_token, log_out, open_session
 from webauth.ports import AuthenticatedUser, SessionRecord
 
@@ -91,27 +86,7 @@ def a_host() -> Host:
     config = a_web_auth_config(wall_clock=clock)
     lock = WriteLockInMemory()
     issuer = FakeIssuer(mint_id_token=a_fake_id_token)
-    endpoint = f"{REALM_ISSUER}/protocol/openid-connect"
-    relying_party = OidcRelyingParty(
-        OidcClientConfig(
-            issuer=REALM_ISSUER,
-            authorization_endpoint=f"{endpoint}/auth",
-            token_endpoint=f"{endpoint}/token",
-            jwks_url=f"{endpoint}/certs",
-            end_session_endpoint=f"{endpoint}/logout",
-            client_id=APP_CLIENT_ID,
-            client_secret=SecretStr("client-secret"),
-            redirect_uri="https://notes.example.org/auth/callback",
-            post_logout_redirect_uri="https://notes.example.org/",
-            leeway_seconds=30,
-        ),
-        post_token_request=issuer,
-        fetch_key_set=FakeKeySetEndpoint(
-            key_set_document(public_jwk(rsa_key("current"), "current-key")),
-        ),
-        wall_clock=clock,
-        monotonic_clock=FakeClock(5_000.0),
-    )
+    relying_party = a_relying_party(post_token_request=issuer, wall_clock=clock)
     sessions = SessionRecordsInMemory(users=UsersInMemory(ACCOUNT, lock=lock), lock=lock)
     return Host(sessions, lock, clock, config, issuer, relying_party)
 
@@ -169,16 +144,18 @@ def test_rotation_and_renewal_keep_no_id_token_for_a_host_that_keeps_none() -> N
 
 def test_opening_a_session_without_stating_whether_the_host_keeps_the_id_token_raises() -> None:
     host = a_host()
+    kept = host.open_session(keeps_id_token=True)
     app = FastAPI()
     install_web_auth_config(app, host.config)
+    request = Request(an_http_scope(app))
     admitted = AdmittedLogin(
         account=ACCOUNT, return_to=None, refresh_token=None, id_token=SecretStr(LOGIN_ID_TOKEN),
     )
 
     with pytest.raises(TypeError, match="keeps_id_token"):
         open_session(  # type: ignore[call-arg]
-            Request(an_http_scope(app)), host.config, admitted,
+            request, host.config, admitted,
             sessions=host.sessions, lock=host.lock, max_sessions=None,
         )
 
-    assert host.sessions.list_active() == []
+    assert [row.id for row in host.sessions.list_active()] == [kept.id]
