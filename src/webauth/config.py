@@ -110,9 +110,9 @@ class WebAuthConfig:
     issues. With ``"strict"``, the page the login's callback redirects to
     carries the session cookie only when the app and the issuer share a site
     (a registrable domain); across sites that first page renders signed out.
-    ``admin_role`` (``"admin"``) and
-    ``user_role`` (``"user"``) are the role names the host stores; each must be
-    non-blank and they must differ, or every new account would be an admin.
+    ``admin_role`` (``"admin"``) and ``user_role`` (``"user"``) are the role
+    names the host stores; each must be non-blank and they must differ, or
+    every new account would be an admin.
     ``wall_clock`` is the one reading of now behind every HTTP and WebSocket
     session decision, so a test fixes it. ``ipv6_budget_prefix`` (``64``, from
     ``32`` to ``128``) sizes the network whose IPv6 addresses share one
