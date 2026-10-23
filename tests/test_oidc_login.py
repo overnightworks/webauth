@@ -798,8 +798,7 @@ def an_oidc_host(
         admitted_logins.append(outcome)
         with sessions.transaction():
             session = open_session(
-                request, config, outcome,
-                sessions=sessions, lock=lock,
+                request, config, outcome, sessions=sessions, lock=lock,
                 max_sessions=max_sessions, keeps_id_token=keeps_id_token,
             )
         issue_session_cookies(response, session.id, config)
@@ -2221,9 +2220,11 @@ def test_opening_a_session_without_stating_whether_the_host_keeps_the_id_token_r
         account=ACCOUNT, return_to=None, refresh_token=None, id_token=SecretStr("id-1"),
     )
 
+    request = Request(an_http_scope(app))
+
     with pytest.raises(TypeError, match="keeps_id_token"):
         open_session(  # type: ignore[call-arg]
-            Request(an_http_scope(app)), OPENING_CONFIG, admitted,
+            request, OPENING_CONFIG, admitted,
             sessions=store.sessions, lock=store.lock, max_sessions=None,
         )
 
