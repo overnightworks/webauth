@@ -107,9 +107,12 @@ class WebAuthConfig:
     ``session_secret`` signs every session cookie and must be at least 32
     characters. ``cookie_samesite`` is ``"strict"`` (the default) or ``"lax"``;
     ``None`` is refused, because a cross-site cookie is not what this library
-    issues. ``admin_role`` (``"admin"``) and
-    ``user_role`` (``"user"``) are the role names the host stores; each must be
-    non-blank and they must differ, or every new account would be an admin.
+    issues. With ``"strict"``, the page the login's callback redirects to
+    carries the session cookie only when the app and the issuer share a site
+    (a registrable domain); across sites that first page renders signed out.
+    ``admin_role`` (``"admin"``) and ``user_role`` (``"user"``) are the role
+    names the host stores; each must be non-blank and they must differ, or
+    every new account would be an admin.
     ``wall_clock`` is the one reading of now behind every HTTP and WebSocket
     session decision, so a test fixes it. ``ipv6_budget_prefix`` (``64``, from
     ``32`` to ``128``) sizes the network whose IPv6 addresses share one
@@ -141,6 +144,8 @@ class WebAuthConfig:
     ``allowed_hosts_exact`` lists hostnames, not origins. The CSRF origin check
     compares them with the hostname of ``Origin``. An entry without a port
     matches that hostname on every port; ``host:port`` matches only that port.
+    A browser never writes the default port in ``Origin``, so an entry such as
+    ``notes.test:443`` matches no browser's https origin; list ``notes.test``.
     With ``cookie_secure`` on, an ``Origin`` is admitted only over https: an
     ``http://`` origin is refused, in the CSRF origin check and in the WebSocket
     handshake alike. With it off, a plain-http deployment such as local
