@@ -39,7 +39,8 @@ missing or empty claim means no membership.
 
 After ``finish_login`` admits an account, ``open_session`` under the host's lock
 ends the session the request's cookie names, prunes the account to a cap, creates
-its new one, holding the login's refresh token and ID token (the browser keeps none),
+its new one, holding the login's refresh token and, when the host logs out, its ID
+token (the browser keeps none),
 at the configured clock's instant, never committing and setting no cookie, so the host
 commits and then issues the cookies.
 
@@ -274,7 +275,8 @@ class AdmittedLogin:
     """An admitted account, the path of this app to send the browser to (or
     ``None`` for the host's default page), the refresh token the login's code
     exchange issued (``None`` when the issuer gave none) and the login's ID
-    token, which ``open_session`` stores in the new session's row."""
+    token, which ``open_session`` stores in the new session's row when the host keeps
+    one."""
 
     account: UserRecord
     return_to: str | None
@@ -359,7 +361,7 @@ def finish_login(
     ``open_session``, commits, calls ``issue_session_cookies`` and sends the
     browser to ``return_to``, the path judged again on its way back, or to its
     default page when that is ``None``. The login's ID token is on the
-    ``AdmittedLogin`` for ``open_session`` to store; no cookie carries it.
+    ``AdmittedLogin`` for ``open_session`` to store if the host keeps it; no cookie carries it.
     When the issuer is on another registrable domain than the app,
     ``cookie_samesite`` must be ``"lax"``: with ``"strict"`` the browser
     withholds the session cookie from the first page after the redirect and
@@ -403,6 +405,7 @@ def open_session(
     sessions: SessionRecordStore,
     lock: WriteLock,
     max_sessions: int | None,
+    keeps_id_token: bool,
 ) -> SessionRecord:
     """Open the new session of an ``admitted`` login, ending the one the request carries.
 
@@ -412,8 +415,11 @@ def open_session(
     is a number, the account's newest ``max_sessions - 1`` sessions are kept and
     the rest ended, so neither the replaced session nor the new one counts
     against the cap; the new session is created at that instant, expiring one
-    idle period later, and holds ``admitted.refresh_token`` and
-    ``admitted.id_token``. ``None`` states that the host sets no cap; any other
+    idle period later, and holds ``admitted.refresh_token`` and, when
+    ``keeps_id_token`` is true, ``admitted.id_token``. A host that never calls
+    ``log_out`` passes ``False``: nothing would read the ID token, so the row
+    holds ``None`` and ``log_out`` posts no hint. ``keeps_id_token`` has no
+    default, so every host states its choice. ``None`` states that the host sets no cap; any other
     value must be a positive whole number, or ``ValueError`` is raised before
     anything is written. A forged, oversized or duplicated cookie ends nothing.
 
@@ -436,7 +442,7 @@ def open_session(
             now=now,
             expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
             refresh_token=admitted.refresh_token,
-            id_token=admitted.id_token,
+            id_token=admitted.id_token if keeps_id_token else None,
         )
 
 
@@ -460,9 +466,10 @@ def log_out(
     ``button_label`` is the text of the button shown where no script runs. The
     security-headers middleware leaves that policy and ``Cache-Control`` in
     place, so no host policy needs a source for the issuer. Without a stored
-    row, or with one stored before the host held ID tokens, the issuer asks the
-    person once. The session's stored refresh token goes to the issuer nowhere;
-    deleting the row removes it.
+    row, or with a row that holds no ID token (stored before the host held them, or
+    opened with ``keeps_id_token=False``), the issuer asks the person once. The
+    session's stored refresh token goes to the issuer nowhere; deleting the row
+    removes it.
 
     The host commits and returns the answer as it is, and a single-page app
     logs out by a top-level form POST to the route. The route needs no

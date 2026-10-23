@@ -716,6 +716,7 @@ def an_oidc_host(
     groups_claim: object = (LOGIN_GROUP,),
     address_budget: int | None = None,
     max_sessions: int | None = None,
+    keeps_id_token: bool = True,
     root_path: str = "",
     **config_overrides: object,
 ) -> OidcHost:
@@ -799,7 +800,7 @@ def an_oidc_host(
             session = open_session(
                 request, config, outcome,
                 sessions=sessions, lock=lock,
-                max_sessions=max_sessions,
+                max_sessions=max_sessions, keeps_id_token=keeps_id_token,
             )
         issue_session_cookies(response, session.id, config)
         return {"username": outcome.account.username}
@@ -1552,6 +1553,38 @@ def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
     assert hint_of(response) == login_token
 
 
+def test_a_logout_after_a_host_kept_no_id_token_ends_the_session_and_posts_no_hint() -> None:
+    host = an_oidc_host(keeps_id_token=False)
+    host.callback(host.sign_in_at_issuer())
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert (stored_refresh_tokens(host), hint_of(response), host.sessions.list_active()) == (
+        [], None, [],
+    )
+    assert both_session_cookies_are_cleared(host, response)
+
+
+def test_rotation_and_renewal_keep_no_id_token_for_a_host_that_keeps_none() -> None:
+    session_clock = FakeClock(float(NOW))
+    host = an_oidc_host(keeps_id_token=False, wall_clock=session_clock)
+    host.callback(host.sign_in_at_issuer())
+    assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
+    host.issuer.refresh_answer_members = {"id_token": a_fake_id_token("issued-by-the-refresh")}
+    [session] = host.sessions.list_active()
+    session_clock.now += SESSION_IDLE_SECONDS / 2
+
+    renewed = host.client.get("/me")
+    rotated = fresh_access_token(
+        host.relying_party, session.id,
+        session_transaction=host.sessions.in_transaction, config=host.config,
+    )
+
+    assert (renewed.status_code, isinstance(rotated, SecretStr)) == (200, True)
+    assert stored_id_tokens(host) == []
+    assert stored_refresh_tokens(host) != [ISSUED_REFRESH_TOKEN]
+
+
 def both_session_cookies_are_cleared(host: OidcHost, response: HttpxResponse) -> bool:
     return is_cleared(response, host.config.session_cookie_name) and is_cleared(
         response, host.config.csrf_cookie_name,
@@ -2133,6 +2166,7 @@ class OpeningStore:
         self, *cookie_values: str, max_sessions: int | None = None,
         refresh_token: SecretStr | None = None,
         id_token: SecretStr | None = None,
+        keeps_id_token: bool = True,
     ) -> SessionRecord:
         app = FastAPI()
         install_web_auth_config(app, OPENING_CONFIG)
@@ -2146,7 +2180,7 @@ class OpeningStore:
                 id_token=id_token or SecretStr("id-token-of-the-login"),
             ),
             sessions=self.sessions, lock=self.lock,
-            max_sessions=max_sessions,
+            max_sessions=max_sessions, keeps_id_token=keeps_id_token,
         )
 
 
@@ -2161,6 +2195,34 @@ def test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_logi
 
     assert (session.refresh_token, session.id_token) == (SecretStr("rt-1"), SecretStr("id-1"))
     assert store.sessions.load(session.id) == session
+
+
+def test_a_host_that_keeps_no_id_token_stores_the_refresh_token_and_no_id_token() -> None:
+    store = OpeningStore.holding()
+
+    session = store.open_session(
+        refresh_token=SecretStr("rt-1"), id_token=SecretStr("id-1"), keeps_id_token=False,
+    )
+
+    assert (session.refresh_token, session.id_token) == (SecretStr("rt-1"), None)
+    assert store.sessions.load(session.id) == session
+
+
+def test_opening_a_session_without_stating_whether_the_host_keeps_the_id_token_raises() -> None:
+    store = OpeningStore.holding()
+    app = FastAPI()
+    install_web_auth_config(app, OPENING_CONFIG)
+    admitted = AdmittedLogin(
+        account=ACCOUNT, return_to=None, refresh_token=None, id_token=SecretStr("id-1"),
+    )
+
+    with pytest.raises(TypeError, match="keeps_id_token"):
+        open_session(  # type: ignore[call-arg]
+            Request(an_http_scope(app)), OPENING_CONFIG, admitted,
+            sessions=store.sessions, lock=store.lock, max_sessions=None,
+        )
+
+    assert store.ids() == []
 
 
 def test_a_new_session_has_a_fresh_id() -> None:
