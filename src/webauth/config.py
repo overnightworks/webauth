@@ -141,14 +141,14 @@ class WebAuthConfig:
     ``allowed_hosts_exact`` lists hostnames, not origins. The CSRF origin check
     compares them with the hostname of ``Origin``. An entry without a port
     matches that hostname on every port; ``host:port`` matches only that port.
-    The scheme is never compared. Cookies do not isolate ports, so a service on
-    another port of an allowed hostname, served over https, receives the session
-    cookie anyway. A page served over plain http on an allowed hostname makes a
-    schemefully cross-site request: the browser reports it as
-    ``Sec-Fetch-Site: cross-site``, and the explicit ``SameSite`` withholds the
-    session cookie. A network attacker below TLS who could serve such a page is
-    outside the trust model. A deployment must therefore never hand another
-    party another port or scheme of an allowed hostname.
+    With ``cookie_secure`` on, an ``Origin`` is admitted only over https: an
+    ``http://`` origin is refused, in the CSRF origin check and in the WebSocket
+    handshake alike. With it off, a plain-http deployment such as local
+    development, the scheme is not compared. ``Sec-Fetch-Site: same-origin``
+    still passes the CSRF origin check before the list is asked. Cookies do not
+    isolate ports, so a service on another port of an allowed hostname, served
+    over https, receives the session cookie anyway. A deployment must therefore
+    never hand another party another port of an allowed hostname.
     """
 
     session_secret: SecretStr

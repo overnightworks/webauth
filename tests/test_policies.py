@@ -6,6 +6,7 @@ import math
 import re
 from collections.abc import Callable
 from functools import partial
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -23,6 +24,7 @@ from webauth.policies import (
     PathShape,
     PublicRule,
     RateLimitBudget,
+    RateLimitPolicy,
     RateLimitRule,
     SecurityHeadersPolicy,
     default_content_security_policy,
@@ -91,6 +93,96 @@ class TestPathRules:
         assert PathRules(prefixes="/hooks/").matches("/") is False  # type: ignore[arg-type]
 
 
+class TestRateLimitPolicy:
+    def _policy(self) -> RateLimitPolicy:
+        return RateLimitPolicy(
+            default=_DEFAULT,
+            rules=(
+                _BULK_RULE,
+                RateLimitRule(paths=PathRules(exact=frozenset({"/feed"})), budget=_UPLOAD),
+            ),
+            exempt=PathRules(prefixes=("/static/",)),
+        )
+
+    @pytest.mark.parametrize(("path", "expected"), [
+        ("/bulk/item", _BULK),
+        ("/feed", _UPLOAD),
+        ("/api/items", _DEFAULT),
+        ("/nothing-serves-this", _DEFAULT),
+        ("/", _DEFAULT),
+    ])
+    def test_a_path_spends_from_the_first_matching_rule_else_the_default(
+        self, path: str, expected: RateLimitBudget,
+    ) -> None:
+        assert self._policy().budget_for(path) == expected
+
+    @pytest.mark.parametrize(("rules", "expected"), [
+        ((_BULK_RULE, _UPLOAD_RULE), _BULK),
+        ((_UPLOAD_RULE, _BULK_RULE), _UPLOAD),
+    ], ids=["bulk-first", "upload-first"])
+    def test_the_earlier_of_two_overlapping_rules_decides(
+        self, rules: tuple[RateLimitRule, ...], expected: RateLimitBudget,
+    ) -> None:
+        policy = RateLimitPolicy(default=_DEFAULT, rules=rules)
+
+        assert policy.budget_for("/bulk/upload") == expected
+
+    def test_a_policy_without_rules_spends_every_path_from_the_default(self) -> None:
+        policy = RateLimitPolicy(default=_DEFAULT)
+
+        assert policy.budget_for("/bulk/item") == _DEFAULT
+        assert policy.budget_for("/") == _DEFAULT
+
+    @pytest.mark.parametrize("name", [
+        "", "API", "Media", "1a", "-a", "a:b", "a b", "a{b}", "a*", "a/b", "api\n", "ä",
+    ])
+    def test_a_budget_name_outside_the_grammar_is_refused(self, name: str) -> None:
+        with pytest.raises(ValueError, match=re.escape(repr(name))):
+            RateLimitBudget(name, max_requests=1, window_seconds=60)
+
+    @pytest.mark.parametrize("name", ["a", "api", "bulk-2", "up_load"])
+    def test_a_budget_name_inside_the_grammar_is_accepted(self, name: str) -> None:
+        assert RateLimitBudget(name, max_requests=1, window_seconds=60).name == name
+
+    def test_a_budget_name_is_judged_before_its_numbers(self) -> None:
+        with pytest.raises(ValueError, match="Rate-limit budget name"):
+            RateLimitBudget("API", max_requests=1, window_seconds=0)
+
+    @pytest.mark.parametrize("field", ["max_requests", "window_seconds"])
+    @pytest.mark.parametrize("value", [0, -1, True, 1.5, "5", None], ids=[
+        "zero", "negative", "bool", "float", "str", "none",
+    ])
+    def test_a_budget_field_that_is_not_a_positive_whole_number_is_refused_and_named(
+        self, field: str, value: object,
+    ) -> None:
+        fields = {"max_requests": 1, "window_seconds": 60, field: value}
+
+        with pytest.raises(
+            ValueError,
+            match=re.escape(f"RateLimitBudget 'api' {field} must be a positive whole number"),
+        ):
+            RateLimitBudget("api", **fields)
+
+    @pytest.mark.parametrize(("max_requests", "window_seconds"), [(1, 1), (300, 3600)])
+    def test_a_budget_with_positive_whole_numbers_is_accepted(
+        self, max_requests: int, window_seconds: int,
+    ) -> None:
+        budget = RateLimitBudget("api", max_requests, window_seconds)
+
+        assert (budget.max_requests, budget.window_seconds) == (max_requests, window_seconds)
+
+    @pytest.mark.parametrize(("default", "rules", "expected"), [
+        (_DEFAULT, (RateLimitRule(PathRules(), _BULK), RateLimitRule(PathRules(), _BULK)), "bulk"),
+        (_DEFAULT, (RateLimitRule(PathRules(), _a_budget("default", 99)),), "default"),
+        (_DEFAULT, (RateLimitRule(PathRules(), _DEFAULT),), "default"),
+    ], ids=["two-rules", "rule-and-default", "equal-limits"])
+    def test_a_repeated_budget_name_is_refused_and_named(
+        self, default: RateLimitBudget, rules: tuple[RateLimitRule, ...], expected: str,
+    ) -> None:
+        with pytest.raises(ValueError, match=rf"repeated: {expected}\."):
+            RateLimitPolicy(default=default, rules=rules)
+
+
 METHOD_RULES = [PublicRule, partial(BodySizeRule, max_bytes=1)]
 A_PATH = PathRules(exact=frozenset({"/x"}))
 
@@ -98,15 +190,18 @@ A_PATH = PathRules(exact=frozenset({"/x"}))
 @pytest.mark.parametrize("rule", METHOD_RULES)
 class TestAMethodsFieldRefusesASingleString:
     @pytest.mark.parametrize("methods", ["POST", "XPOST"])
-    def test_a_single_string_is_refused(self, rule: Callable[..., object], methods: str) -> None:
+    def test_a_single_string_is_refused(self, rule: Callable[..., Any], methods: str) -> None:
         with pytest.raises(ValueError, match="methods"):
             rule(A_PATH, methods=methods)
 
-    @pytest.mark.parametrize("methods", [frozenset({"POST"}), None])
-    def test_a_frozenset_or_none_is_accepted(
-        self, rule: Callable[..., object], methods: frozenset[str] | None,
+    @pytest.mark.parametrize(("methods", "applies_to_get"), [(frozenset({"POST"}), False), (None, True)])
+    def test_a_frozenset_or_none_is_accepted_and_selects_its_methods(
+        self, rule: Callable[..., Any], methods: frozenset[str] | None, applies_to_get: bool,
     ) -> None:
-        assert rule(A_PATH, methods=methods) is not None
+        accepted = rule(A_PATH, methods=methods)
+
+        assert accepted.applies_to("/x", "POST") is True
+        assert accepted.applies_to("/x", "GET") is applies_to_get
 
 
 class TestBodySizePolicy:

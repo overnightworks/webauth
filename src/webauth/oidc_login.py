@@ -45,7 +45,7 @@ and setting no cookie, so the host commits and then issues the cookies.
 
 ``log_out`` is the third route's whole sequence: it ends the session the
 request's cookie names, if any, and answers a page that posts the ID token hint
-to the issuer's end-session endpoint, clearing the session cookies. It makes no
+to the issuer's end-session endpoint, clearing the session cookie. It makes no
 outbound call and never commits, so the person is signed out of the app even
 when the issuer is down, and a request without a usable session still reaches
 the issuer. A forged, oversized or duplicated cookie counts as missing: it ends
@@ -151,7 +151,7 @@ __all__ = [
 
 _MAX_PENDING_LOGINS: Final = 5
 """Pending-login cookies a browser keeps at once. A start beyond them
-evicts the oldest, so repeated starts never crowd out the session cookies."""
+evicts the oldest, so repeated starts never crowd out the session cookie."""
 
 # A cookie that does not verify, or whose name appears twice, ranks below
 # every genuine one and is evicted first.
@@ -452,7 +452,7 @@ def log_out(
     """End this browser's app session and answer the page that ends the issuer's.
 
     The session the request's cookie names is read and then deleted under
-    ``lock``, and the session cookies are cleared on the answer in every case.
+    ``lock``, and the session cookie is cleared on the answer in every case.
     An expired row that still stands is read too, and neither renewed nor admitted.
     The answer is a ``no-store`` HTML page under its own Content-Security-Policy
     that posts the client ID, the configured ``post_logout_redirect_uri`` and the

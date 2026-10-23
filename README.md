@@ -87,7 +87,7 @@ a session inside the configured lifetime in the host's own store, calls
 `issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
 a `Response` and copies the one cookie it sets into its client. A state-changing
 request also sends `Sec-Fetch-Site: same-origin` ([CSRF origin](docs/ARCHITECTURE.md#csrf-origin)).
-When the client keeps the cookies' attributes and `cookie_secure` is on, use an
+When the client keeps the cookie's attributes and `cookie_secure` is on, use an
 `https` base URL.
 
 A test of the host's own start, callback and logout routes gives

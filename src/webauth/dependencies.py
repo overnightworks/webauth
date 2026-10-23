@@ -176,8 +176,10 @@ def authenticate_websocket(
     browser sends the session cookie on a cross-site handshake, and only the
     Origin tells a foreign page from the application's own. Exactly one Origin
     naming a host the application serves is admitted; there is no ``Referer``
-    fallback and ``Sec-Fetch-Site`` does not decide. For local development list
-    ``localhost`` and ``127.0.0.1`` in ``allowed_hosts_exact``.
+    fallback and ``Sec-Fetch-Site`` does not decide. While ``cookie_secure`` is on, only an
+    https Origin is admitted. For local development over plain http list
+    ``localhost`` and ``127.0.0.1`` in ``allowed_hosts_exact`` and turn
+    ``cookie_secure`` off for that environment.
     A client that is not a browser must send an allowed Origin too. The Origin
     keeps a foreign page from using a visitor's cookie; it is no credential.
     Then the session is decided exactly as ``current_user`` decides it for an
