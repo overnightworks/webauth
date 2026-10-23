@@ -1,7 +1,0 @@
-claim_id = "21ea1d3f4e6d43bbb802c677c2d4dd19"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "300dfe6e1abc04915987fffdf513f776a46736a9"
-branch = "claude/issue-437-docstring-limits"
-scope = ["src/webauth/config.py"]
-opened_commit = "2bb04a268be11aaf2508a6fc1c44851625920542"
