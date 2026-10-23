@@ -1,4 +1,4 @@
-"""CSRF protection -- double-submit cookie and origin checking."""
+"""CSRF protection -- the origin check."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from starlette.responses import JSONResponse
 
 from webauth._origins import origin_is_allowed
 from webauth.config import web_auth_config
-from webauth.cookies import _verify_csrf_token
-from webauth.dependencies import _bearer_admission, session_id_from_request
+from webauth.dependencies import _bearer_admission
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.policies import CsrfPolicy
@@ -19,47 +18,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CsrfOriginMiddleware",
-    "CsrfTokenMiddleware",
 ]
 
 _MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-_CSRF_REFUSAL_DETAIL: Final = "CSRF token missing or invalid"
 _SEC_FETCH_SITE: Final = "sec-fetch-site"
 _SAME_ORIGIN: Final = "same-origin"
 _SAME_SITE: Final = "same-site"
-
-
-class CsrfTokenMiddleware(RefusalMiddleware[CsrfPolicy]):
-    """Reject a state-changing request whose CSRF token does not match its session.
-
-    For a state-changing request whose path the policy does not exempt, a request
-    is refused with 403 when it sends no token header, a token that does not
-    belong to its session, or no usable session cookie to bind a token to: a
-    session cookie that is missing, forged, too long or present more than once
-    reads as no session (``session_id_from_request``).
-    """
-
-    async def _refusal(self, request: Request) -> JSONResponse | None:
-        if (
-            request.method in _MUTATING_METHODS
-            and self._policy.requires_token(route_path(request.scope))
-            and _bearer_admission(request) is None
-        ):
-            config = web_auth_config(request)
-            header_token = request.headers.get(config.csrf_header_name)
-            if not header_token:
-                return JSONResponse(
-                    {"detail": _CSRF_REFUSAL_DETAIL}, status_code=403,
-                )
-            session_id = session_id_from_request(request, config)
-            if session_id is None or not _verify_csrf_token(
-                header_token, session_id, config.signing_key,
-            ):
-                return JSONResponse(
-                    {"detail": _CSRF_REFUSAL_DETAIL}, status_code=403,
-                )
-        return None
 
 
 def _sec_fetch_site_allows(fetch_site: str) -> bool | None:

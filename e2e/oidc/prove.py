@@ -34,7 +34,7 @@ Login and logout (the host's ``login_group`` is ``/apps/songmaker`` and its
   ``/admin``); its wrong-password step stays at Keycloak (screenshots
   ``1b-*``).
 - Scenario 2 is the logout, at both widths: the host's ``#logout`` is a plain
-  form POST that the origin check admits without a CSRF token; the browser
+  form POST that the origin check admits; the browser
   reaches Keycloak's end-session request, where the host already holds 0
   sessions and the browser no app cookie; Keycloak answers with a redirect to
   the app's ``/`` and ``#kc-logout`` never attaches, because the host sent the
@@ -48,8 +48,8 @@ Login and logout (the host's ``login_group`` is ``/apps/songmaker`` and its
 
 The token scenarios, all at 1280x800:
 
-- Scenario 14: after the sign-in the browser holds exactly the session and CSRF
-  cookies for the app, and no cookie of the app on any path parses as a JWS.
+- Scenario 14: after the sign-in the browser holds exactly the session cookie
+  for the app, and no cookie of the app on any path parses as a JWS.
 - Scenario 15: a login and logout, then a second login and a second logout,
   show no page, and the second logout's hint differs from the first's.
 - Scenario 17: one login and logout on the cross-site origin
@@ -251,7 +251,6 @@ from stack import Admin, HeldStack, require_pinned_clean_edge
 
 from webauth.config import WebAuthConfig
 from webauth.cookies import (
-    DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
     CookieSameSite,
     _is_pending_login_cookie_name,
@@ -791,7 +790,7 @@ def the_browser_holds_no_id_token(proof: Proof, width: Width) -> str:
         signed_in(proof, page, scenario)
         assert proof.status_of(page, "/me") == 200
         held = sorted(cookie_name_and_value(cookie)[0] for cookie in app_cookies(page))
-        expected = sorted([DEFAULT_SESSION_COOKIE_NAME, DEFAULT_CSRF_COOKIE_NAME])
+        expected = sorted([DEFAULT_SESSION_COOKIE_NAME])
         assert held == expected, f"the browser holds {held}"
         assert not jws_cookies(page), f"cookies shaped like a JWS: {jws_cookies(page)}"
     return f"after the sign-in the browser holds exactly {held} for the app, none shaped like a JWS"

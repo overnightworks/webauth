@@ -353,10 +353,6 @@ def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]
             ),),
         ),
         csrf_origin=CsrfPolicy(exempt=backchannel_path),
-        csrf_token=CsrfPolicy(
-            exempt=backchannel_path,
-            token_exempt=PathRules(exact=frozenset({LOGOUT_PATH})),
-        ),
         **_bearer_policies(settings, world),
     )
 

@@ -35,7 +35,7 @@ from webauth.config import (
     install_web_auth_config,
     web_auth_config,
 )
-from webauth.cookies import _generate_csrf_token, sign_session_id
+from webauth.cookies import sign_session_id
 from webauth.dependencies import (
     ConnectionRefusal,
     LoginRedirect,
@@ -57,6 +57,7 @@ from webauth.middleware.security_headers import (
     STRICT_TRANSPORT_SECURITY,
 )
 from webauth.policies import (
+    CsrfPolicy,
     PathRules,
     PublicRule,
     RateLimitBudget,
@@ -77,6 +78,7 @@ from webauth.rate_limit import SingleProcessRateLimitBackend
 TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 ALLOWED_HOST = "notes.example"
 ALLOWED_ORIGIN = f"https://{ALLOWED_HOST}"
+SAME_ORIGIN_REQUEST = {"origin": ALLOWED_ORIGIN, "sec-fetch-site": "same-origin"}
 # The suite reaches its applications over https, as production does, so the
 # cookie and header flags under test are the ones a deployment really sends.
 HTTPS_TEST_SERVER = "https://testserver"
@@ -558,6 +560,7 @@ WEBSOCKET_ADMITTED_PATH = "/ws-admitted"
 OPEN_PATHS = ("/health", "/login", "/hooks/x", "/static/x.css", "/optional")
 ALL_DEPENDENCIES_PATH = "/all"
 GATED_APP_HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+GATED_STACK_POLICIES = {"security_headers": GATED_APP_HEADERS_POLICY, "csrf_origin": CsrfPolicy()}
 LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 WEBSOCKET_DEPENDENCY_PATH = "/ws-dependency"
 POLICY_VIOLATION_CLOSE_CODE = 1008
@@ -749,7 +752,7 @@ def an_auth_app(
     if gate:
         install_web_auth_middleware(
             app,
-            **{"security_headers": GATED_APP_HEADERS_POLICY, **(stack_policies or {})},
+            **{**GATED_STACK_POLICIES, **(stack_policies or {})},
             session_gate=SessionGate(
                 session_transaction=session_transaction or sessions.in_transaction,
                 login_redirect=login_redirect,
@@ -910,14 +913,9 @@ async def _until_excess_is_handled(excess_handed: anyio.Event) -> None:
     await anyio.wait_all_tasks_blocked()
 
 
-def a_csrf_passing_request_headers(config: WebAuthConfig) -> list[tuple[bytes, bytes]]:
+def a_signed_in_same_origin_request(config: WebAuthConfig) -> list[tuple[bytes, bytes]]:
     cookie = f"{config.session_cookie_name}={sign_session_id(SESSION_ID, config.signing_key)}"
-    token = _generate_csrf_token(SESSION_ID, config.signing_key)
-    return [
-        (b"sec-fetch-site", b"same-origin"),
-        (b"cookie", cookie.encode()),
-        (config.csrf_header_name.encode(), token.encode()),
-    ]
+    return [(b"sec-fetch-site", b"same-origin"), (b"cookie", cookie.encode())]
 
 
 def starts(messages: list[Message]) -> list[Message]:

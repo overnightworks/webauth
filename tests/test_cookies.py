@@ -1,4 +1,4 @@
-"""The signed session cookie and the CSRF token bound to it."""
+"""The signed session cookie."""
 
 from __future__ import annotations
 
@@ -29,11 +29,9 @@ from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
     _default_cookie_name,
-    _generate_csrf_token,
     _is_valid_cookie_name,
     _pending_login_cookie_name,
     _sign_pending_login,
-    _verify_csrf_token,
     _verify_pending_login,
     _verify_session_cookie,
     clear_session_cookies,
@@ -58,7 +56,6 @@ _PENDING = PendingLogin(
     ("plain_name", "secure", "expected"),
     [
         ("session_id", True, "__Host-session_id"),
-        ("csrf_token", True, "__Host-csrf_token"),
         ("custom", True, "__Host-custom"),
         ("session_id", False, "session_id"),
         ("custom", False, "custom"),
@@ -143,10 +140,6 @@ def test_verify_rejects_another_secret() -> None:
     "borrowed_cookie",
     [
         pytest.param(
-            f"csrf:my-session-token.{_generate_csrf_token('my-session-token', _TEST_SECRET)}",
-            id="a CSRF token appended to its signing input",
-        ),
-        pytest.param(
             f"oidc-pending:{_sign_pending_login(_PENDING, _TEST_SECRET)}",
             id="a pending-login signature appended to its signing input",
         ),
@@ -156,32 +149,6 @@ def test_a_signature_made_for_another_purpose_is_no_session_cookie(
     borrowed_cookie: str,
 ) -> None:
     assert _verify_session_cookie(borrowed_cookie, _TEST_SECRET) is None
-
-
-def test_generate_csrf_token_deterministic() -> None:
-    t1 = _generate_csrf_token("session-abc", _TEST_SECRET)
-    t2 = _generate_csrf_token("session-abc", _TEST_SECRET)
-    assert t1 == t2
-
-
-def test_generate_csrf_token_differs_per_session() -> None:
-    t1 = _generate_csrf_token("session-1", _TEST_SECRET)
-    t2 = _generate_csrf_token("session-2", _TEST_SECRET)
-    assert t1 != t2
-
-
-def test_verify_csrf_token_valid() -> None:
-    token = _generate_csrf_token("my-session", _TEST_SECRET)
-    assert _verify_csrf_token(token, "my-session", _TEST_SECRET) is True
-
-
-def test_verify_csrf_token_wrong_session() -> None:
-    token = _generate_csrf_token("session-a", _TEST_SECRET)
-    assert _verify_csrf_token(token, "session-b", _TEST_SECRET) is False
-
-
-def test_verify_csrf_token_forged() -> None:
-    assert _verify_csrf_token("forged-token", "session-a", _TEST_SECRET) is False
 
 
 @pytest.mark.parametrize(
@@ -268,16 +235,10 @@ DEFAULT_SESSION_SET_COOKIE = (
     "session-1.3052044bf3b276887bd8a25118374c1f96ff3567d5ab5568d6c393505b2e891d; "
     "HttpOnly; Max-Age=86400; Path=/; SameSite=strict; Secure"
 )
-DEFAULT_CSRF_SET_COOKIE = (
-    "__Host-csrf_token=c2c5cecdd7ae3886e360411f973c9aa43a9e31840585dad8625d47ce82059851; "
-    "Max-Age=86400; Path=/; SameSite=strict; Secure"
-)
 CLEARED_SESSION_SET_COOKIE = (
     '__Host-session_id=""; HttpOnly; Max-Age=0; Path=/; SameSite=strict; Secure'
 )
-CLEARED_CSRF_SET_COOKIE = '__Host-csrf_token=""; Max-Age=0; Path=/; SameSite=strict; Secure'
 CLEARED_SESSION_WITHOUT_SECURE = 'session_id=""; HttpOnly; Max-Age=0; Path=/; SameSite=strict'
-CLEARED_CSRF_WITHOUT_SECURE = 'csrf_token=""; Max-Age=0; Path=/; SameSite=strict'
 UNTRUSTED_PROXY_SAYS_HTTPS = {"x-forwarded-proto": "https"}
 TRUSTED_PROXY_SAYS_HTTP = {"x-forwarded-proto": "http"}
 UNTRUSTED_PEER = "testclient"
@@ -390,8 +351,8 @@ def test_a_seven_day_idle_window_with_a_thirty_day_cap_gives_a_thirty_day_cookie
     )
     response = app.issue()
 
-    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
-        assert f"Max-Age={THIRTY_DAYS_SECONDS};" in app.set_cookie_header(response, name)
+    header = app.set_cookie_header(response, app.config.session_cookie_name)
+    assert f"Max-Age={THIRTY_DAYS_SECONDS};" in header
 
 
 def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> None:
@@ -401,90 +362,78 @@ def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> Non
     response = app.issue()
 
     session_header = app.set_cookie_header(response, app.config.session_cookie_name)
-    csrf_header = app.set_cookie_header(response, app.config.csrf_cookie_name)
     assert session_header == DEFAULT_SESSION_SET_COOKIE
-    assert csrf_header == DEFAULT_CSRF_SET_COOKIE
 
 
-@pytest.mark.parametrize(("base_url", "config_overrides", "session_name", "csrf_name"), [
+@pytest.mark.parametrize("samesite", ["strict", "lax"])
+@pytest.mark.parametrize("cookie_secure", [True, False])
+def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
+    *, cookie_secure: bool, samesite: str,
+) -> None:
+    app = a_cookie_app(
+        base_url=OVER_HTTPS if cookie_secure else PLAIN_HTTP,
+        cookie_secure=cookie_secure,
+        cookie_samesite=samesite,
+    )
+
+    response = app.issue()
+
+    [header] = [value for name, value in response.headers.multi_items() if name == "set-cookie"]
+    attributes = header.split("; ")
+    assert header.split("=", 1)[0] == app.config.session_cookie_name
+    assert "HttpOnly" in attributes
+    assert f"SameSite={samesite}" in attributes
+    assert ("Secure" in attributes) is cookie_secure
+
+
+@pytest.mark.parametrize(("base_url", "config_overrides", "session_name"), [
+    pytest.param(OVER_HTTPS, {}, "__Host-session_id", id="secure-default"),
     pytest.param(
-        OVER_HTTPS, {}, "__Host-session_id", "__Host-csrf_token", id="secure-default",
+        PLAIN_HTTP, {"cookie_secure": False}, "session_id",
+        id="secure-off-falls-back-to-the-plain-name",
     ),
     pytest.param(
-        PLAIN_HTTP, {"cookie_secure": False}, "session_id", "csrf_token",
-        id="secure-off-falls-back-to-plain-names",
+        OVER_HTTPS, {"session_cookie_name": "sid"}, "sid", id="own-name-stays-when-secure",
     ),
     pytest.param(
-        OVER_HTTPS, {"session_cookie_name": "sid", "csrf_cookie_name": "xsrf"}, "sid", "xsrf",
-        id="own-names-stay-when-secure",
-    ),
-    pytest.param(
-        PLAIN_HTTP,
-        {"cookie_secure": False, "session_cookie_name": "sid", "csrf_cookie_name": "xsrf"},
-        "sid", "xsrf",
-        id="own-names-stay-when-secure-off",
+        PLAIN_HTTP, {"cookie_secure": False, "session_cookie_name": "sid"}, "sid",
+        id="own-name-stays-when-secure-off",
     ),
 ])
-def test_both_cookies_are_issued_and_cleared_under_the_resolved_names(
-    base_url: str, config_overrides: dict[str, object], session_name: str, csrf_name: str,
+def test_the_cookie_is_issued_and_cleared_under_the_resolved_name(
+    base_url: str, config_overrides: dict[str, object], session_name: str,
 ) -> None:
     app = a_cookie_app(base_url=base_url, **config_overrides)
 
     for response in (app.issue(), app.clear()):
-        issued_names = {
-            value.split("=", 1)[0]
-            for header, value in response.headers.multi_items()
-            if header == "set-cookie"
-        }
-        assert issued_names == {session_name, csrf_name}
+        [header] = [value for name, value in response.headers.multi_items() if name == "set-cookie"]
+        assert header.split("=", 1)[0] == session_name
 
 
-def test_a_host_that_configures_lax_gets_lax_on_both_cookies_and_their_clearing() -> None:
+def test_a_host_that_configures_lax_gets_lax_on_the_cookie_and_its_clearing() -> None:
     app = a_cookie_app(cookie_samesite="lax")
 
-    issued = app.issue()
-    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
-        header = app.set_cookie_header(issued, name)
+    for response in (app.issue(), app.clear()):
+        header = app.set_cookie_header(response, app.config.session_cookie_name)
         assert "SameSite=lax" in header
         assert "SameSite=strict" not in header
 
-    cleared = app.clear()
-    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
-        assert "SameSite=lax" in app.set_cookie_header(cleared, name)
 
-
-@pytest.mark.parametrize(("base_url", "cookie_secure", "session_clearing", "csrf_clearing"), [
+@pytest.mark.parametrize(("base_url", "cookie_secure", "session_clearing"), [
+    pytest.param(OVER_HTTPS, True, CLEARED_SESSION_SET_COOKIE, id="secure-by-default"),
     pytest.param(
-        OVER_HTTPS, True, CLEARED_SESSION_SET_COOKIE, CLEARED_CSRF_SET_COOKIE,
-        id="secure-by-default",
-    ),
-    pytest.param(
-        PLAIN_HTTP, False, CLEARED_SESSION_WITHOUT_SECURE, CLEARED_CSRF_WITHOUT_SECURE,
-        id="switched-off-for-plain-http",
+        PLAIN_HTTP, False, CLEARED_SESSION_WITHOUT_SECURE, id="switched-off-for-plain-http",
     ),
 ])
-def test_clearing_repeats_the_attributes_each_cookie_was_set_with(
-    base_url: str, cookie_secure: bool, session_clearing: str, csrf_clearing: str,
+def test_clearing_repeats_the_attributes_the_cookie_was_set_with(
+    base_url: str, cookie_secure: bool, session_clearing: str,
 ) -> None:
     app = a_cookie_app(base_url=base_url, cookie_secure=cookie_secure)
 
     cleared = app.clear()
 
     session_header = app.set_cookie_header_without_expires(cleared, app.config.session_cookie_name)
-    csrf_header = app.set_cookie_header_without_expires(cleared, app.config.csrf_cookie_name)
     assert session_header == session_clearing
-    assert csrf_header == csrf_clearing
-
-
-def test_the_csrf_token_is_readable_by_the_client_and_bound_to_the_session(
-    cookie_app: CookieApp,
-) -> None:
-    response = cookie_app.issue()
-
-    header = cookie_app.set_cookie_header(response, cookie_app.config.csrf_cookie_name)
-    assert "HttpOnly" not in header
-    token = response.cookies[cookie_app.config.csrf_cookie_name]
-    assert _verify_csrf_token(token, SESSION_ID, cookie_app.config.signing_key)
 
 
 @pytest.mark.parametrize(("base_url", "peer", "headers"), [
@@ -503,8 +452,7 @@ def test_a_host_that_configures_nothing_gets_secure_cookies_and_hsts_however_rea
 
     response = app.issue(headers)
 
-    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
-        assert "Secure" in app.set_cookie_header(response, name).split("; ")
+    assert "Secure" in app.set_cookie_header(response, app.config.session_cookie_name).split("; ")
     assert response.headers[HSTS_HEADER] == HSTS_PINNING_HTTPS_FOR_A_YEAR
 
 
@@ -513,8 +461,8 @@ def test_a_host_that_switches_cookie_secure_off_gets_neither_secure_nor_hsts() -
 
     response = app.issue()
 
-    for name in (app.config.session_cookie_name, app.config.csrf_cookie_name):
-        assert "Secure" not in app.set_cookie_header(response, name).split("; ")
+    header = app.set_cookie_header(response, app.config.session_cookie_name)
+    assert "Secure" not in header.split("; ")
     assert HSTS_HEADER not in response.headers
 
 
@@ -528,13 +476,12 @@ def test_with_cookie_secure_off_a_plain_http_browser_signs_in_and_out() -> None:
     assert app.signed_in_session().json() == {"session_id": None}
 
 
-def test_logging_out_takes_both_cookies_back(cookie_app: CookieApp) -> None:
+def test_logging_out_takes_the_cookie_back(cookie_app: CookieApp) -> None:
     cookie_app.issue()
 
     cookie_app.clear()
 
     assert cookie_app.config.session_cookie_name not in cookie_app.client.cookies
-    assert cookie_app.config.csrf_cookie_name not in cookie_app.client.cookies
 
 
 @pytest.mark.parametrize(
@@ -543,7 +490,7 @@ def test_logging_out_takes_both_cookies_back(cookie_app: CookieApp) -> None:
         *[
             pytest.param(name, True, id=f"accepts-{name}")
             for name in (
-                "__Host-session_id", "__Host-csrf_token", "session_id", "csrf_token",
+                "__Host-session_id", "session_id",
                 "sid", "a-b", "a_b", "a.b", "A9",
                 *[f"a{char}b" for char in "!#$%&'*+^`|~"],
             )

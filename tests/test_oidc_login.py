@@ -594,6 +594,7 @@ LOGOUT_PATH = "/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
 FORM_LOGOUT_PATH = LOGOUT_PATH
 OLD_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
+OLD_CSRF_COOKIE_NAME = "__Host-csrf_token"  # noqa: S105
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
@@ -767,10 +768,6 @@ def an_oidc_host(
             default=RateLimitBudget("host", address_budget, 60), exempt=backchannel_path,
         ),
         csrf_origin=CsrfPolicy(exempt=backchannel_path),
-        csrf_token=CsrfPolicy(
-            exempt=backchannel_path,
-            token_exempt=PathRules(exact=frozenset({FORM_LOGOUT_PATH})),
-        ),
     )
 
     @app.get("/login/oidc")
@@ -911,7 +908,7 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
                   f"samesite={host.config.cookie_samesite}", "secure"}
     assert response.status_code == 200
     assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
-    assert set_cookies(response)[host.config.csrf_cookie_name] == configured
+    assert set(host.client.cookies) == {host.config.session_cookie_name}
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
@@ -1401,9 +1398,7 @@ def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_sess
         host.wall_clock.now += 1
 
     assert host.pending_cookie_names() == {host.pending_cookie_name(q) for q in queries[1:]}
-    assert {host.config.session_cookie_name, host.config.csrf_cookie_name} <= set(
-        host.client.cookies
-    )
+    assert set(host.client.cookies) >= {host.config.session_cookie_name}
     assert host.client.get("/me").json() == {"username": "lena"}
     assert host.callback(queries[0]).json() == {"refusal": "state-mismatch"}
 
@@ -1551,10 +1546,8 @@ def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
     assert hint_of(response) == login_token
 
 
-def both_session_cookies_are_cleared(host: OidcHost, response: HttpxResponse) -> bool:
-    return is_cleared(response, host.config.session_cookie_name) and is_cleared(
-        response, host.config.csrf_cookie_name,
-    )
+def the_session_cookie_is_cleared(host: OidcHost, response: HttpxResponse) -> bool:
+    return is_cleared(response, host.config.session_cookie_name)
 
 
 def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings() -> None:
@@ -1567,10 +1560,8 @@ def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings(
     response = post_logout(host, SAME_ORIGIN_FORM)
 
     header_values = " ".join(value for _, value in response.headers.multi_items())
-    assert set(set_cookies(response)) == {
-        host.config.session_cookie_name, host.config.csrf_cookie_name,
-    }
-    assert both_session_cookies_are_cleared(host, response)
+    assert set(set_cookies(response)) == {host.config.session_cookie_name}
+    assert the_session_cookie_is_cleared(host, response)
     assert "location" not in response.headers
     assert rows_token not in header_values
     assert hint_of(response) == rows_token
@@ -1590,9 +1581,8 @@ def _forged_session_cookie(host: OidcHost) -> dict[str, str]:
     return {"cookie": forged}
 
 
-def _session_cookies_dropped(host: OidcHost) -> dict[str, str]:
+def _session_cookie_dropped(host: OidcHost) -> dict[str, str]:
     host.client.cookies.delete(host.config.session_cookie_name)
-    host.client.cookies.delete(host.config.csrf_cookie_name)
     return {}
 
 
@@ -1618,12 +1608,12 @@ def _row_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
 @pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent", "lock_taken"), [
     pytest.param(_no_session, 0, False, False, id="no-session"),
     pytest.param(_forged_session_cookie, 1, False, False, id="forged-cookie-ends-nothing"),
-    pytest.param(_session_cookies_dropped, 1, False, False, id="session-cookies-gone"),
+    pytest.param(_session_cookie_dropped, 1, False, False, id="session-cookie-gone"),
     pytest.param(_session_ended_in_the_store, 0, False, True, id="session-already-ended"),
     pytest.param(_session_expired_but_stored, 0, True, True, id="session-expired-but-stored"),
     pytest.param(_row_stored_before_the_upgrade, 0, False, True, id="stored-before-upgrade"),
 ])
-def test_a_same_origin_logout_needs_no_csrf_token_and_still_answers_the_page(
+def test_a_same_origin_logout_still_answers_the_page(
     arrange: Callable[[OidcHost], dict[str, str]],
     sessions_kept: int,
     *,
@@ -1642,22 +1632,25 @@ def test_a_same_origin_logout_needs_no_csrf_token_and_still_answers_the_page(
     assert response.status_code == 200
     assert page.attributes_of("form") == [{"method": "post", "action": END_SESSION_ENDPOINT}]
     assert hint_of(response) == (host.issued_id_tokens[-1] if hint_sent else None)
-    assert both_session_cookies_are_cleared(host, response)
+    assert the_session_cookie_is_cleared(host, response)
     assert host.sessions.count_active() == sessions_kept
     assert host.lock.times_taken - taken_before == lock_taken
 
 
+@pytest.mark.parametrize("old_cookie_name", [OLD_HINT_COOKIE_NAME, OLD_CSRF_COOKIE_NAME])
 @pytest.mark.parametrize("signed_in", [True, False])
-def test_an_old_hint_cookie_is_neither_read_nor_cleared(*, signed_in: bool) -> None:
+def test_an_old_cookie_is_neither_read_nor_cleared(
+    *, signed_in: bool, old_cookie_name: str,
+) -> None:
     host = an_oidc_host()
     if signed_in:
         host.callback(host.sign_in_at_issuer())
-    host.client.cookies.set(OLD_HINT_COOKIE_NAME, a_fake_id_token("set-before-the-upgrade"))
+    host.client.cookies.set(old_cookie_name, a_fake_id_token("set-before-the-upgrade"))
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
     assert hint_of(response) == (host.issued_id_tokens[-1] if signed_in else None)
-    assert OLD_HINT_COOKIE_NAME not in set_cookies(response)
+    assert old_cookie_name not in set_cookies(response)
 
 
 @pytest.mark.parametrize("headers", [
@@ -1667,6 +1660,7 @@ def test_an_old_hint_cookie_is_neither_read_nor_cleared(*, signed_in: bool) -> N
 ])
 def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]) -> None:
     host = signed_in_host()
+    host.client.cookies.set(OLD_CSRF_COOKIE_NAME, "set-before-the-upgrade")
 
     response = post_logout(host, {"content-type": "application/x-www-form-urlencoded", **headers})
 

@@ -13,8 +13,8 @@ header ``typ`` of the first minted token. Each scenario's id is the matrix id of
 
 - 28 (E01) an admin token opens E after ``/reset``.
 - 29 (E02) E01 created no account, no session and no session transaction.
-- 30 (E03) D with the admin token, no CSRF header and a cross-site origin, no cookie.
-- 31 (E04) D with the admin token, another person's session cookie and a wrong CSRF token.
+- 30 (E03) D with the admin token and a cross-site origin, no cookie.
+- 31 (E04) D with the admin token and another person's session cookie.
 - 32 to 34 (E05 to E07) a session cookie alone opens no machine route.
 - 35 (E08) the admin token and a cookie on P: a host mistake, answered 500.
 - 36 and 38 (E09 and E11) an ID token and a refresh token; 37 is unused.
@@ -73,7 +73,7 @@ from realm import (
     short_lived_tokens,
 )
 
-from webauth.cookies import DEFAULT_CSRF_COOKIE_NAME, DEFAULT_SESSION_COOKIE_NAME
+from webauth.cookies import DEFAULT_SESSION_COOKIE_NAME
 
 if TYPE_CHECKING:
     from prove import Proof
@@ -85,7 +85,6 @@ HOST_AUDIENCE = CLIENT_ID
 HOST_SCOPE = "openid aud-d1-host"
 SHORT_LIFESPAN_SECONDS = 15
 EXPIRY_MARGIN_SECONDS = 2
-CSRF_HEADER = "x-csrf-token"
 GATE_LINE = re.compile(r"Bearer request refused: (?P<case>[a-z-]+)(?: \((?P<reason>[^)]*)\))?")
 CHALLENGE = 'Bearer realm="admin"'
 AUDIENCE_SCOPES = {
@@ -262,8 +261,8 @@ def assert_answer(
 
 
 def session_cookies(page: Page, origin: str) -> dict[str, str]:
-    """The session and CSRF cookies the browser holds for the host."""
-    wanted = (DEFAULT_SESSION_COOKIE_NAME, DEFAULT_CSRF_COOKIE_NAME)
+    """The session cookie the browser holds for the host."""
+    wanted = (DEFAULT_SESSION_COOKIE_NAME,)
     pairs = (cookie_name_and_value(cookie) for cookie in page.context.cookies([origin]))
     return {name: value for name, value in pairs if name in wanted}
 
@@ -290,7 +289,7 @@ def delete_needs_no_csrf_proof(run: BearerRun) -> str:
     }))
     assert_answer(answer, 200)
     assert answer.json()["caller"] == run.admin_id
-    return "D with no CSRF header, Origin evil.example.test, cross-site and no cookie: 200"
+    return "D with Origin evil.example.test, cross-site and no cookie: 200"
 
 
 def delete_ignores_another_persons_session(run: BearerRun) -> str:
@@ -299,7 +298,7 @@ def delete_ignores_another_persons_session(run: BearerRun) -> str:
     run.host_page(run.people["admin"])
     before = run.state()
     answer = run.send(Call(
-        "DELETE", DELETE, run.tokens["admin"], cookies, {CSRF_HEADER: "wrong"}
+        "DELETE", DELETE, run.tokens["admin"], cookies
     ))
     assert_answer(answer, 200)
     assert answer.json()["caller"] == run.admin_id, "the cookie's person became the caller"
@@ -308,7 +307,7 @@ def delete_ignores_another_persons_session(run: BearerRun) -> str:
         before["sessions"], before["session_transactions"]
     ), (before, after)
     return (
-        f"D with the admin token, {USER_NAME}'s session cookie and a wrong CSRF token: 200, caller "
+        f"D with the admin token, {USER_NAME}'s session cookie: 200, caller "
         f"d1-admin; sessions {after['sessions']} and session transactions "
         f"{after['session_transactions']} as before"
     )
@@ -318,11 +317,10 @@ def cookie_only_calls(run: BearerRun) -> dict[str, Call]:
     origin = run.settings.app_origins[0]
     page = run.host_page(run.people["admin"])
     cookies = session_cookies(page, origin)
-    csrf = cookies[DEFAULT_CSRF_COOKIE_NAME]
     return {
         "export": Call("GET", EXPORT, cookies=cookies),
         "delete": Call(
-            "DELETE", DELETE, cookies=cookies, headers={CSRF_HEADER: csrf, "Origin": origin}
+            "DELETE", DELETE, cookies=cookies, headers={"Origin": origin}
         ),
         "probe": Call("GET", PROBE, cookies=cookies),
     }

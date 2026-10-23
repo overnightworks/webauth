@@ -25,3 +25,18 @@ def require_positive_whole_number(field: str, value: object, *, unit: str) -> No
     """
     if not _is_whole_number(value) or value <= 0:
         raise ValueError(f"{field} must be a positive whole number of {unit}, not {value!r}")
+
+
+def require_collection_not_one_string(
+    field: str, value: object, *, noun: str, example: str | None = None,
+) -> None:
+    """Refuse one string where a set of ``noun`` belongs.
+
+    Membership in a string is a substring test, so ``"/hooks/stripe"`` would
+    admit ``"/"`` and ``"XPOST"`` would admit ``"POST"``.
+    """
+    if isinstance(value, str):
+        hint = f", for example {example}" if example else ""
+        raise ValueError(
+            f"{field} must be a set of {noun}s, not one string; list each {noun} in a set{hint}",
+        )

@@ -12,7 +12,7 @@ the host's `SessionTransaction` before the route ran, and a route that fails
 afterwards does not undo it.
 
 A request the bearer gate admitted carries no session: the records below let
-the CSRF checks and the session gate step aside for it, and `current_user`
+the CSRF origin check and the session gate step aside for it, and `current_user`
 raises on it, because a machine route asks for `bearer_caller` instead.
 """
 

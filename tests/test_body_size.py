@@ -14,7 +14,7 @@ from webauth_arrangement import (
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
     StartSend,
-    a_csrf_passing_request_headers,
+    a_signed_in_same_origin_request,
     a_web_auth_config,
     an_http_scope,
     assert_carries_policy_headers,
@@ -101,10 +101,11 @@ def a_body_limited_app(
             body_size=body_size,
             rate_limit=RateLimitPolicy(default=RateLimitBudget("api", 100, 60)),
             csrf_origin=CsrfPolicy(),
-            csrf_token=CsrfPolicy(),
         )
     else:
-        install_web_auth_middleware(app, security_headers=HEADERS_POLICY, body_size=body_size)
+        install_web_auth_middleware(
+            app, security_headers=HEADERS_POLICY, body_size=body_size, csrf_origin=CsrfPolicy(),
+        )
     return app
 
 
@@ -118,7 +119,10 @@ async def drive_post(
     headers: tuple[tuple[bytes, bytes], ...] = (),
 ) -> tuple[list[Message], BaseException | None]:
     app = app or a_body_limited_app()
-    scope = an_http_scope(app, path, method="POST", headers=headers, spec_version=spec_version)
+    same_origin = ((b"sec-fetch-site", b"same-origin"),)
+    scope = an_http_scope(
+        app, path, method="POST", headers=same_origin + headers, spec_version=spec_version,
+    )
     return await drive(app, scope, body_chunks=body_chunks, start_send=start_send)
 
 
@@ -260,7 +264,7 @@ async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_th
         spec_version,
         TWO_CHUNKS_UNDER_THE_LIMIT_EACH,
         app=app,
-        headers=tuple(a_csrf_passing_request_headers(A_CONFIG)),
+        headers=tuple(a_signed_in_same_origin_request(A_CONFIG)),
     )
 
     assert [start["status"] for start in starts(sent)] == [200]

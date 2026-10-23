@@ -12,8 +12,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 from webauth_arrangement import (
-    ALLOWED_ORIGIN,
     HTTPS_TEST_SERVER,
+    SAME_ORIGIN_REQUEST,
     AuthApp,
     a_web_auth_config,
     an_auth_app,
@@ -37,7 +37,6 @@ from webauth.policies import (
 )
 
 NO_STORE = "no-store"
-SAME_ORIGIN = {"origin": ALLOWED_ORIGIN, "sec-fetch-site": "same-origin"}
 FOREIGN = {"origin": "https://evil.test"}
 
 
@@ -110,36 +109,6 @@ def a_routed_app(form: RootPathForm, **stack_policies: object) -> AuthApp:
 
 @pytest.mark.parametrize("form", EVERY_ROOT_PATH_FORM)
 class TestEveryPolicySelectsByThePathTheRouterRoutes:
-    def test_a_token_rule_that_protects_the_routed_path_refuses_a_request_without_one(
-        self, form: RootPathForm,
-    ) -> None:
-        rules = CsrfPolicy(protected=THE_ROUTED_PATH)
-        auth = a_routed_app(form, csrf_origin=rules, csrf_token=rules)
-
-        response = auth.client.post(form.asked_for, headers=SAME_ORIGIN)
-
-        assert (response.status_code, auth.route_runs) == (403, [])
-
-    def test_a_token_rule_that_exempts_the_routed_path_lets_the_route_run(
-        self, form: RootPathForm,
-    ) -> None:
-        auth = a_routed_app(
-            form, csrf_origin=CsrfPolicy(), csrf_token=CsrfPolicy(exempt=THE_ROUTED_PATH),
-        )
-
-        response = auth.client.post(form.asked_for, headers=SAME_ORIGIN)
-
-        assert (response.status_code, len(auth.route_runs)) == (200, 1)
-
-    def test_an_origin_rule_that_protects_the_routed_path_refuses_a_foreign_origin(
-        self, form: RootPathForm,
-    ) -> None:
-        auth = a_routed_app(form, csrf_origin=CsrfPolicy(protected=THE_ROUTED_PATH))
-
-        response = auth.client.post(form.asked_for, headers=FOREIGN)
-
-        assert (response.status_code, auth.route_runs) == (403, [])
-
     def test_an_origin_rule_that_exempts_the_routed_path_lets_the_route_run(
         self, form: RootPathForm,
     ) -> None:
@@ -185,7 +154,9 @@ class TestEveryPolicySelectsByThePathTheRouterRoutes:
         )
         auth = a_routed_app(form, body_size=policy)
 
-        response = auth.client.post(form.asked_for, content=b"x" * 50)
+        response = auth.client.post(
+            form.asked_for, content=b"x" * 50, headers=SAME_ORIGIN_REQUEST,
+        )
 
         assert (response.status_code, len(auth.route_runs)) == (200, 1)
 
@@ -214,7 +185,11 @@ class TestAPathNextToTheRootPathIsNotStripped:
         install_web_auth_config(app, a_web_auth_config())
         install_web_auth_middleware(
             app,
-            **{"security_headers": a_no_store_policy(PathRules()), **stack_policies},
+            **{
+                "security_headers": a_no_store_policy(PathRules()),
+                "csrf_origin": CsrfPolicy(),
+                **stack_policies,
+            },
         )
 
         @app.api_route(NEXT_TO_THE_ROOT_PATH, methods=["GET", "POST"])
@@ -242,27 +217,19 @@ class TestAPathNextToTheRootPathIsNotStripped:
             200, cache_control, 1,
         )
 
-    @pytest.mark.parametrize(("rule_prefix", "selected"), [
+    @pytest.mark.parametrize(("rule_prefix", "exempted"), [
         pytest.param("/application/api/x/", True, id="written-as-the-router-routes"),
         pytest.param("/api/x/", False, id="written-below-a-root-path-it-does-not-have"),
     ])
-    @pytest.mark.parametrize(("headers", "checked"), [
-        pytest.param(SAME_ORIGIN, ("csrf_origin", "csrf_token"), id="token-without-one"),
-        pytest.param(FOREIGN, ("csrf_origin",), id="origin-foreign"),
-    ])
-    def test_a_csrf_rule_protects_the_path_only_when_it_names_it(
-        self, rule_prefix: str, selected: bool, headers: dict[str, str],
-        checked: tuple[str, ...],
+    def test_an_exempt_rule_exempts_the_path_only_when_it_names_it(
+        self, rule_prefix: str, exempted: bool,
     ) -> None:
-        protecting = CsrfPolicy(protected=PathRules(prefixes=(rule_prefix,)))
-        policies = {"csrf_origin": CsrfPolicy()} | dict.fromkeys(checked, protecting)
-        client, route_runs = self.an_app_serving_next_to_the_root_path(**policies)
+        exempting = CsrfPolicy(exempt=PathRules(prefixes=(rule_prefix,)))
+        client, route_runs = self.an_app_serving_next_to_the_root_path(csrf_origin=exempting)
 
-        response = client.post(NEXT_TO_THE_ROOT_PATH, headers=headers)
+        response = client.post(NEXT_TO_THE_ROOT_PATH, headers=FOREIGN)
 
-        outcome = (response.status_code, len(route_runs))
-        expected = (403, 0) if selected else (200, 1)
-        assert outcome == expected
+        assert (response.status_code, len(route_runs)) == ((200, 1) if exempted else (403, 0))
 
 
 class TestACacheControlRuleOfTheParentSelectsThroughAMount:
@@ -288,7 +255,9 @@ class TestACacheControlRuleOfTheParentSelectsThroughAMount:
         parent = FastAPI()
         install_web_auth_config(parent, a_web_auth_config())
         install_web_auth_middleware(
-            parent, security_headers=a_no_store_policy(PathRules(prefixes=("/api/x/",))),
+            parent,
+            security_headers=a_no_store_policy(PathRules(prefixes=("/api/x/",))),
+            csrf_origin=CsrfPolicy(),
         )
         parent.mount("/api", sub)
         client = TestClient(parent, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)

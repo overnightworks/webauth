@@ -37,8 +37,8 @@ The library owns the machinery an application should not rebuild:
 | Module | Owns |
 |---|---|
 | `webauth.config` | The deployment facts every other module reads, installed on the app |
-| `webauth.cookies` | The signed session cookie, the CSRF token bound to it, and the pending-login cookie, issued and cleared |
-| `webauth.dependencies` | Turning a signed cookie, or a session id, into the account that made the request or opened a WebSocket handshake, and the record of a bearer admission the CSRF checks and the session gate step aside for |
+| `webauth.cookies` | The signed session cookie and the pending-login cookie, issued and cleared |
+| `webauth.dependencies` | Turning a signed cookie, or a session id, into the account that made the request or opened a WebSocket handshake, and the record of a bearer admission the CSRF origin check and the session gate step aside for |
 | `webauth.policies` | Which requests are exempt, cacheable, or rate-limited, how, and which `azp` values (`AuthorizedParties`) a host admits |
 | `webauth.proxies` | Which peers may name a client, and the client identity that follows |
 | `webauth.rate_limit` | The sliding-window backends a per-address budget is measured with, Redis or in-process |
@@ -75,7 +75,7 @@ alone decides whether a loaded session still stands; the store writes the expiry
 ### Middleware order
 
 `install_web_auth_middleware` adds the library's middleware in one order, outermost first, and refuses a stack that would break it: security headers, body size
-limit, per-address rate limit, bearer gate, CSRF origin, CSRF token, session gate. Install it once and add no library middleware yourself. Its docstring holds the reason for each
+limit, per-address rate limit, bearer gate, CSRF origin, session gate. Install it once and add no library middleware yourself. Its docstring holds the reason for each
 position and where a host's own middleware goes. A host whose own middleware is the session authority answers a request without a session with
 `webauth.dependencies.unauthenticated_response`.
 
@@ -84,7 +84,7 @@ position and where a host's own middleware goes. A host whose own middleware is 
 `install_web_auth_middleware(..., bearer_gate=BearerGate(...))` declares the host's machine paths once. On every request a path selects (written as `PathRules` says, every method), the gate verifies that request's own `Authorization: Bearer` token with `OidcRelyingParty.verify_access_token` (off the event loop):
 an RS256 `at+jwt` of the issuer whose only `aud` is the app's client, whose `azp` is among `AuthorizedParties`, and whose `groups` give `AppRole.ADMIN` as at login.
 Nothing is provisioned. Only then does it record an admission for this app, this path and a SHA-256 digest of the one header value; the digest lives in request
-memory and the token is never stored. `CsrfOriginMiddleware`, `CsrfTokenMiddleware` and the session gate read that record strictly and step aside, so no cookie decides
+memory and the token is never stored. `CsrfOriginMiddleware` and the session gate read that record strictly and step aside, so no cookie decides
 a machine path; `bearer_caller` reads it strictly too, and the loose reader makes `current_user` and `admitted_admin` raise (500) and `admitted_user` answer `None`. A copy of the record
 carried to another path, app or header is no admission. The gate sits inside the rate limit, so a bearer request spends the same budget, and the installer puts a
 `no-store` rule first in the security-headers policy for the gated paths, so every answer there is `no-store`, and webauth sets no cookie there. The README holds the refusal table.
@@ -155,7 +155,7 @@ issuer, so an account's `id` is the issuer's subject. Members of `login_group` c
 ### Configuration
 
 The host builds one `WebAuthConfig` by keyword and installs it with `install_web_auth_config`; no module reads an environment variable or a global. Its docstring
-says what each field decides and what construction refuses. `cookie_secure` is the one switch for transport security: it alone decides whether both cookies carry
+says what each field decides and what construction refuses. `cookie_secure` is the one switch for transport security: it alone decides whether the session cookie carries
 `Secure` and whether HSTS is sent, whatever the request's scheme, so a host serving plain http (local development) turns it off for that environment and nowhere
 else. `SecurityHeadersPolicy` names the headers every response carries, the library's own refusals and the 500 among them, and `default_content_security_policy()`
 builds the policy a host gives it.
@@ -171,8 +171,7 @@ logout](#back-channel-logout).
 ### CSRF origin
 
 `CsrfOriginMiddleware` refuses a state-changing request that a foreign page originated, by `Sec-Fetch-Site` where a browser sends it and otherwise by comparing
-`Origin` with the hostnames in `WebAuthConfig`; a state-changing request with neither header is refused; a request the bearer gate admitted is not checked, because those routes ignore ambient cookies and need an explicitly supplied credential; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` decides which paths are
-checked and defaults to fail-closed.
+`Origin` with the hostnames in `WebAuthConfig`; a state-changing request with neither header is refused; a request the bearer gate admitted is not checked, because those routes ignore ambient cookies and need an explicitly supplied credential; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` names what it exempts: every other state-changing path is checked.
 
 webauth supports the current releases of Chrome, Edge, Firefox and Safari (macOS and iOS). On every request whose method is not GET or HEAD, each sends `Origin`, possibly `null`, and, to an https app, `Sec-Fetch-Site`. A state-changing request that carries neither is refused, whatever its content type; `Referer` is not read.
 

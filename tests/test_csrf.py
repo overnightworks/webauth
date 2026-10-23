@@ -1,7 +1,4 @@
-"""CsrfOriginMiddleware: Sec-Fetch-Site first, Origin allowlist as fallback.
-
-CsrfTokenMiddleware: the header token must match the request's one session.
-"""
+"""CsrfOriginMiddleware: Sec-Fetch-Site first, Origin allowlist as fallback."""
 
 from __future__ import annotations
 
@@ -13,19 +10,15 @@ from webauth_arrangement import (
     ALLOWED_HOST,
     ALLOWED_ORIGIN,
     API_PATH,
-    SESSION_COOKIE_NAME,
-    SESSION_ID,
     AuthApp,
     a_session,
     a_web_auth_config,
     an_auth_app,
     session_cookie_header,
-    signed_without_bound,
 )
 
 from webauth.config import WebAuthConfig, install_web_auth_config
-from webauth.cookies import MAX_SESSION_COOKIE_CHARS, _generate_csrf_token, sign_session_id
-from webauth.middleware import CsrfOriginMiddleware, CsrfTokenMiddleware
+from webauth.middleware import CsrfOriginMiddleware
 from webauth.policies import CsrfPolicy, PathRules, PathShape, PublicRule
 
 FOREIGN_ORIGIN = "https://evil.test"
@@ -33,7 +26,6 @@ SIBLING_ORIGIN = "https://evil.notes.example"
 OK = {"status": "ok"}
 CROSS_ORIGIN_DETAIL = {"detail": "Cross-origin request rejected"}
 MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header"}
-INVALID_TOKEN_DETAIL = {"detail": "CSRF token missing or invalid"}
 
 
 WEBHOOK_PREFIX = "/webhook/provider/"
@@ -46,7 +38,7 @@ def an_origin_guarded_client(config: WebAuthConfig | None = None) -> TestClient:
     install_web_auth_config(app, config or a_web_auth_config())
     app.add_middleware(
         CsrfOriginMiddleware,
-        policy=CsrfPolicy(protected=PathRules(prefixes=("/api/",))),
+        policy=CsrfPolicy(),
     )
 
     @app.api_route(API_PATH, methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
@@ -423,113 +415,11 @@ def test_a_valid_session_cookie_is_not_provenance() -> None:
     assert auth.route_runs == ["/optional"]
 
 
-def test_explicit_protected_rules_refuse_an_exempt_rule() -> None:
-    protected = PathRules(prefixes=("/api/",))
-    exempt = PathRules(prefixes=(WEBHOOK_PREFIX,))
-
-    with pytest.raises(ValueError, match="exempt"):
-        CsrfPolicy(protected=protected, exempt=exempt)
-
-
-CONFIG = a_web_auth_config()
-SESSION_COOKIE = sign_session_id(SESSION_ID, CONFIG.signing_key)
-ANOTHER_SESSION_ID = "another-session"
-ANOTHER_SESSION_COOKIE = sign_session_id(ANOTHER_SESSION_ID, CONFIG.signing_key)
-OVERLONG_SESSION_ID = "s" * MAX_SESSION_COOKIE_CHARS
-OVERLONG_SESSION_COOKIE = signed_without_bound(OVERLONG_SESSION_ID, CONFIG.signing_key)
-
-
-def a_token_guarded_client() -> TestClient:
-    app = FastAPI()
-    install_web_auth_config(app, CONFIG)
-    app.add_middleware(CsrfTokenMiddleware, policy=CsrfPolicy())
-
-    @app.post(API_PATH)
-    def ok() -> dict[str, str]:
-        return OK
-
-    return TestClient(app, base_url=ALLOWED_ORIGIN, cookies={})
-
-
-def _post_with_token(cookie_header: str, token_for: str) -> Response:
-    return a_token_guarded_client().post(
-        API_PATH,
-        headers={
-            "cookie": cookie_header,
-            CONFIG.csrf_header_name: _generate_csrf_token(token_for, CONFIG.signing_key),
-        },
-    )
-
-
-@pytest.mark.parametrize(
-    ("cookie_header", "token_for", "status", "body"),
-    [
-        pytest.param(
-            session_cookie_header(SESSION_COOKIE), SESSION_ID, 200, OK, id="one session",
-        ),
-        pytest.param(
-            f"{SESSION_COOKIE_NAME}_old={ANOTHER_SESSION_COOKIE}; "
-            f"{session_cookie_header(SESSION_COOKIE)}",
-            SESSION_ID, 200, OK,
-            id="a cookie whose name starts like the session cookie",
-        ),
-        pytest.param(
-            session_cookie_header(sign_session_id(SESSION_ID, b"another-key" * 8)),
-            SESSION_ID, 403, INVALID_TOKEN_DETAIL,
-            id="a session cookie signed under another key",
-        ),
-        pytest.param(
-            session_cookie_header(SESSION_COOKIE, SESSION_COOKIE),
-            SESSION_ID, 403, INVALID_TOKEN_DETAIL,
-            id="the same session cookie twice",
-        ),
-        pytest.param(
-            session_cookie_header(SESSION_COOKIE, ANOTHER_SESSION_COOKIE),
-            SESSION_ID, 403, INVALID_TOKEN_DETAIL,
-            id="a token for the first of two sessions",
-        ),
-        pytest.param(
-            session_cookie_header(SESSION_COOKIE, ANOTHER_SESSION_COOKIE),
-            ANOTHER_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
-            id="a token for the second of two sessions",
-        ),
-        pytest.param(
-            session_cookie_header(OVERLONG_SESSION_COOKIE),
-            OVERLONG_SESSION_ID, 403, INVALID_TOKEN_DETAIL,
-            id="a correctly signed cookie longer than the reader accepts",
-        ),
-    ],
-)
-def test_a_csrf_token_is_honoured_only_for_the_one_session_cookie(
-    cookie_header: str, token_for: str, status: int, body: dict[str, str],
-) -> None:
-    response = _post_with_token(cookie_header, token_for)
-
-    assert response.status_code == status
-    assert response.json() == body
-
-
-def test_a_csrf_token_with_non_ascii_characters_is_refused_like_a_forged_one() -> None:
-    response = a_token_guarded_client().post(
-        API_PATH,
-        headers={
-            "cookie": session_cookie_header(SESSION_COOKIE),
-            CONFIG.csrf_header_name: "é".encode("latin-1"),
-        },
-    )
-
-    assert response.status_code == 403
-    assert response.json() == INVALID_TOKEN_DETAIL
-
-
 PERSON_EXPORT_ROUTE = "/api/people/{subject}/export"
 HOOK_ROUTE = "/hooks/{name}"
 HOOK_EXEMPT_PATH = "/hooks/stripe"
-PERSON_EXPORT_SHAPE = CsrfPolicy(
-    protected=PathRules(shapes=(PathShape("/api/people/", "/export"),)),
-)
+PERSON_EXPORT_SHAPE = CsrfPolicy(exempt=PathRules(shapes=(PathShape("/api/people/", "/export"),)))
 HOOK_EXEMPTION = CsrfPolicy(exempt=PathRules(exact=frozenset({HOOK_EXEMPT_PATH})))
-NOTHING_PROTECTED = CsrfPolicy(protected=PathRules())
 
 
 def a_stack_with_parametrised_post_routes(**stack_policies: CsrfPolicy) -> AuthApp:
@@ -552,16 +442,16 @@ def a_stack_with_parametrised_post_routes(**stack_policies: CsrfPolicy) -> AuthA
 
 ROUTED_PATH_CASES = [
     pytest.param(
-        PERSON_EXPORT_SHAPE, "/api/people/alice/export", "/api/people/alice/export", True,
+        PERSON_EXPORT_SHAPE, "/api/people/alice/export", "/api/people/alice/export", False,
         id="shape-plain",
     ),
     pytest.param(
         PERSON_EXPORT_SHAPE, "/api/people/alice%3Fx/export", "/api/people/alice?x/export",
-        True, id="shape-encoded-question-mark",
+        False, id="shape-encoded-question-mark",
     ),
     pytest.param(
         PERSON_EXPORT_SHAPE, "/api/people/alice%23x/export", "/api/people/alice#x/export",
-        True, id="shape-encoded-hash",
+        False, id="shape-encoded-hash",
     ),
     pytest.param(
         HOOK_EXEMPTION, HOOK_EXEMPT_PATH, HOOK_EXEMPT_PATH, False, id="exempt-exact",
@@ -575,20 +465,6 @@ ROUTED_PATH_CASES = [
         id="exempt-exact-encoded-hash",
     ),
 ]
-
-
-@pytest.mark.parametrize(("policy", "sent_path", "routed_path", "refused"), ROUTED_PATH_CASES)
-def test_the_csrf_token_rule_is_chosen_by_the_path_the_router_routes(
-    policy: CsrfPolicy, sent_path: str, routed_path: str, refused: bool,
-) -> None:
-    auth = a_stack_with_parametrised_post_routes(
-        csrf_origin=NOTHING_PROTECTED, csrf_token=policy,
-    )
-
-    response = auth.client.post(sent_path)
-
-    assert response.status_code == (403 if refused else 200)
-    assert auth.route_runs == ([] if refused else [routed_path])
 
 
 @pytest.mark.parametrize(("policy", "sent_path", "routed_path", "refused"), ROUTED_PATH_CASES)

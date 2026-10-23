@@ -14,13 +14,13 @@ from typing import TYPE_CHECKING, Final, get_args
 
 from starlette.requests import HTTPConnection
 
-from webauth._validation import require_positive_whole_number
+from webauth._validation import (
+    require_collection_not_one_string,
+    require_positive_whole_number,
+)
 from webauth.cookies import (
     _DEFAULT_COOKIE_SAMESITE,
-    _DEFAULT_CSRF_HEADER_NAME,
-    DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
-    PLAIN_CSRF_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
     CookieSameSite,
     _default_cookie_name,
@@ -107,8 +107,7 @@ class WebAuthConfig:
     ``session_secret`` signs every session cookie and must be at least 32
     characters. ``cookie_samesite`` is ``"strict"`` (the default) or ``"lax"``;
     ``None`` is refused, because a cross-site cookie is not what this library
-    issues. ``csrf_header_name`` (default ``"x-csrf-token"``) is the request
-    header that carries the CSRF token. ``admin_role`` (``"admin"``) and
+    issues. ``admin_role`` (``"admin"``) and
     ``user_role`` (``"user"``) are the role names the host stores; each must be
     non-blank and they must differ, or every new account would be an admin.
     ``wall_clock`` is the one reading of now behind every HTTP and WebSocket
@@ -117,8 +116,8 @@ class WebAuthConfig:
     rate-limit budget, so users behind one ``/64`` limit each other; IPv4
     keeps a budget per address.
 
-    ``cookie_secure`` alone decides whether both cookies carry ``Secure``, when
-    they are set and when they are cleared, and whether
+    ``cookie_secure`` alone decides whether the session cookie carries
+    ``Secure``, when it is set and when it is cleared, and whether
     ``SecurityHeadersMiddleware`` sends HSTS. The request's scheme does not
     decide it, so a deployment behind a TLS proxy missing from
     ``trusted_proxies`` still gets both. A browser does not send a ``Secure``
@@ -126,32 +125,30 @@ class WebAuthConfig:
     works only with ``cookie_secure=False``, which drops ``Secure`` and HSTS
     together. Any value that is not a ``bool`` is refused.
 
-    ``session_cookie_name`` and ``csrf_cookie_name`` default to the ``__Host-``
-    names, or to the plain names with ``cookie_secure=False``. A ``__Host-``
+    ``session_cookie_name`` defaults to the ``__Host-`` name, or to the plain
+    name with ``cookie_secure=False``. A ``__Host-``
     cookie carries ``Secure`` and ``Path=/`` and no ``Domain``, so only this
     exact host can set it and a sibling subdomain cannot plant one with
     ``Domain=parent``. A name a host sets itself is refused at construction
     unless it is:
 
     - an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`|~``;
-    - different from the other cookie's name;
     - not a ``__Host-`` or ``__Secure-`` name with ``cookie_secure=False``,
       which a browser drops and which would end in a silent login loop;
     - not a name webauth's own cookies use: the pending-login cookies, in
       both variants whatever ``cookie_secure`` is.
 
-    A client that reads the CSRF cookie by name reads ``csrf_cookie_name``.
-
     ``allowed_hosts_exact`` lists hostnames, not origins. The CSRF origin check
     compares them with the hostname of ``Origin``. An entry without a port
     matches that hostname on every port; ``host:port`` matches only that port.
-    The scheme is never compared. That is sound because cookies do not isolate ports,
-    so a service on another port of that hostname, served over https, receives
-    the session cookie anyway, and a plain-http page cannot read the ``Secure``
-    ``__Host-`` CSRF cookie while schemeful ``SameSite`` (``strict`` or ``lax``)
-    withholds the session cookie from its state-changing requests. A
-    deployment must therefore never hand another party another port or scheme
-    of an allowed hostname.
+    The scheme is never compared. Cookies do not isolate ports, so a service on
+    another port of an allowed hostname, served over https, receives the session
+    cookie anyway. A page served over plain http on an allowed hostname makes a
+    schemefully cross-site request: the browser reports it as
+    ``Sec-Fetch-Site: cross-site``, and the explicit ``SameSite`` withholds the
+    session cookie. A network attacker below TLS who could serve such a page is
+    outside the trust model. A deployment must therefore never hand another
+    party another port or scheme of an allowed hostname.
     """
 
     session_secret: SecretStr
@@ -160,8 +157,6 @@ class WebAuthConfig:
     allowed_hosts_exact: frozenset[str]
     session_lifetime: SessionLifetime
     session_cookie_name: str = _DefaultCookieName(DEFAULT_SESSION_COOKIE_NAME)
-    csrf_cookie_name: str = _DefaultCookieName(DEFAULT_CSRF_COOKIE_NAME)
-    csrf_header_name: str = _DEFAULT_CSRF_HEADER_NAME
     cookie_samesite: CookieSameSite = _DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
     ipv6_budget_prefix: int = _DEFAULT_IPV6_BUDGET_PREFIX
@@ -185,11 +180,10 @@ class WebAuthConfig:
                 "cookie_secure must be True or False; it alone decides whether the "
                 "cookies carry Secure and responses carry HSTS",
             )
-        if isinstance(self.allowed_hosts_exact, str):
-            raise ValueError(
-                "allowed_hosts_exact must be a set of hosts, not one string; "
-                'list each host in a set, for example {"notes.example"}',
-            )
+        require_collection_not_one_string(
+            "allowed_hosts_exact", self.allowed_hosts_exact, noun="host",
+            example='{"notes.example"}',
+        )
         if not self.allowed_hosts_exact:
             raise ValueError(
                 "allowed_hosts_exact is empty, so no Origin would be admitted; "
@@ -198,8 +192,6 @@ class WebAuthConfig:
                 '"127.0.0.1"}',
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
-        self._resolve_cookie_name("csrf_cookie_name", PLAIN_CSRF_COOKIE_NAME)
-        self._require_distinct_cookie_names()
         if (
             type(self.ipv6_budget_prefix) is not int
             or self.ipv6_budget_prefix not in _IPV6_BUDGET_PREFIX_RANGE
@@ -221,13 +213,6 @@ class WebAuthConfig:
             raise ValueError(
                 "admin_role and user_role must differ; equal roles would make "
                 "every new account an admin",
-            )
-
-    def _require_distinct_cookie_names(self) -> None:
-        if self.session_cookie_name == self.csrf_cookie_name:
-            raise ValueError(
-                "session_cookie_name and csrf_cookie_name must differ; both cookies "
-                "share one path, so equal names would make one overwrite the other",
             )
 
     def _resolve_cookie_name(self, field: str, plain_name: str) -> None:
@@ -260,7 +245,7 @@ class WebAuthConfig:
 
     @property
     def signing_key(self) -> bytes:
-        """The secret in the form the cookie and CSRF signatures take."""
+        """The secret in the form the cookie signatures take."""
         return self.session_secret.get_secret_value().encode()
 
 

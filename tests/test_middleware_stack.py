@@ -26,11 +26,12 @@ from webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
     HTTPS_TEST_SERVER,
+    SAME_ORIGIN_REQUEST,
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
     AlwaysFailingRateLimitBackend,
     SessionRecordsInMemory,
-    a_csrf_passing_request_headers,
+    a_signed_in_same_origin_request,
     a_web_auth_config,
     an_auth_app,
     an_http_scope,
@@ -46,7 +47,6 @@ from webauth.middleware import (
     BearerGateMiddleware,
     BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
-    CsrfTokenMiddleware,
     IpRateLimitMiddleware,
     SecurityHeadersMiddleware,
     SessionGate,
@@ -74,7 +74,6 @@ RAISING_PATH = "/boom"
 LOGIN_PATH = "/login"
 WEBHOOK_PREFIX = "/webhook/"
 WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
-PROTECTED_PATH = "/api/protected"
 HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
 A_SESSION_GATE = SessionGate(
     session_transaction=lambda: nullcontext(SessionRecordsInMemory()),
@@ -89,7 +88,6 @@ A_BEARER_GATE = BearerGate(
     ),
     authorized_parties=AuthorizedParties(frozenset({"hal"})),
 )
-SAME_ORIGIN = {"origin": ALLOWED_ORIGIN, "sec-fetch-site": "same-origin"}
 FOREIGN = {"origin": FOREIGN_ORIGIN}
 FORM = "application/x-www-form-urlencoded"
 JSON = "application/json"
@@ -135,7 +133,7 @@ def a_fresh_app(
 def an_app_without_config() -> FastAPI:
     app = FastAPI()
     app.state.background_ran = []
-    for path in (API_PATH, PROTECTED_PATH, WEBHOOK_PATH):
+    for path in (API_PATH, WEBHOOK_PATH):
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET", "POST"])
 
     @app.get(RAISING_PATH)
@@ -184,7 +182,6 @@ def install_full_stack(
         body_size=BodySizePolicy(default_max_bytes=BODY_LIMIT_BYTES),
         rate_limit=a_rate_limit_policy(max_requests),
         csrf_origin=CsrfPolicy(),
-        csrf_token=CsrfPolicy(),
         bearer_gate=bearer_gate,
         session_gate=session_gate,
     )
@@ -202,15 +199,15 @@ def a_full_stack_client(
 
 
 def post_oversized(client: TestClient) -> Response:
-    return client.post(API_PATH, content=OVERSIZED_BODY, headers=SAME_ORIGIN)
+    return client.post(API_PATH, content=OVERSIZED_BODY, headers=SAME_ORIGIN_REQUEST)
 
 
 def post_cross_origin(client: TestClient) -> Response:
     return client.post(API_PATH, json={"n": 1}, headers=FOREIGN)
 
 
-def post_without_token(client: TestClient) -> Response:
-    return client.post(API_PATH, json={"n": 1}, headers=SAME_ORIGIN)
+def post_without_provenance(client: TestClient) -> Response:
+    return client.post(API_PATH, json={"n": 1})
 
 
 def get_api(client: TestClient) -> Response:
@@ -258,7 +255,8 @@ class TestLibraryRefusalsCarryTheSecurityHeaders:
                 a_full_stack_client, post_cross_origin, Refusal(403), id="403-foreign-origin",
             ),
             pytest.param(
-                a_full_stack_client, post_without_token, Refusal(403), id="403-missing-token",
+                a_full_stack_client, post_without_provenance, Refusal(403),
+                id="403-missing-provenance",
             ),
             pytest.param(
                 a_full_stack_client,
@@ -299,7 +297,7 @@ class TestHostMiddlewarePlacement:
             seen_outside.append((response.status_code, response.headers.get("x-frame-options")))
             return response
 
-        response = post_without_token(
+        response = post_without_provenance(
             TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False),
         )
 
@@ -308,7 +306,7 @@ class TestHostMiddlewarePlacement:
         assert seen_outside == [(403, "DENY")]
 
 
-class TestWebhookPrefixOriginExemptionWithExactTokenProtection:
+class TestAnExemptWebhookPrefix:
     @staticmethod
     def a_client() -> TestClient:
         app = a_fresh_app()
@@ -316,7 +314,6 @@ class TestWebhookPrefixOriginExemptionWithExactTokenProtection:
             app,
             security_headers=HEADERS_POLICY,
             csrf_origin=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PREFIX,))),
-            csrf_token=CsrfPolicy(protected=PathRules(exact=(PROTECTED_PATH,))),
         )
         return TestClient(app, base_url=HTTPS_TEST_SERVER)
 
@@ -324,7 +321,6 @@ class TestWebhookPrefixOriginExemptionWithExactTokenProtection:
         ("path", "headers", "content_type", "status"),
         [
             pytest.param(API_PATH, FOREIGN, FORM, 403, id="cross-origin-form"),
-            pytest.param(PROTECTED_PATH, SAME_ORIGIN, JSON, 403, id="protected-path-without-token"),
             pytest.param(WEBHOOK_PATH, FOREIGN, JSON, 200, id="exempt-webhook-passes"),
         ],
     )
@@ -339,40 +335,11 @@ class TestWebhookPrefixOriginExemptionWithExactTokenProtection:
 
 
 class TestRefusedInstallation:
-    def test_token_policy_without_origin_policy_is_refused_before_touching_the_app(self) -> None:
+    def test_an_install_without_csrf_origin_is_refused_before_touching_the_app(self) -> None:
         app = a_fresh_app()
-        token_policy = CsrfPolicy()
-        with pytest.raises(ValueError, match="csrf_origin"):
-            install_web_auth_middleware(
-                app, security_headers=HEADERS_POLICY, csrf_token=token_policy,
-            )
+        with pytest.raises(TypeError, match="csrf_origin"):
+            install_web_auth_middleware(app, security_headers=HEADERS_POLICY)  # type: ignore[call-arg]
         assert app.user_middleware == []
-
-    def test_token_exemption_outside_the_origin_check_is_refused_before_touching_the_app(
-        self,
-    ) -> None:
-        app = a_fresh_app()
-        token_policy = CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGIN_PATH})))
-        origin_policy = CsrfPolicy(protected=PathRules(prefixes=("/api",)))
-        with pytest.raises(ValueError, match="does not check"):
-            install_web_auth_middleware(
-                app,
-                security_headers=HEADERS_POLICY,
-                csrf_origin=origin_policy,
-                csrf_token=token_policy,
-            )
-        assert app.user_middleware == []
-
-    def test_token_exemption_covered_by_the_origin_check_is_installed(self) -> None:
-        app = a_fresh_app()
-        install_web_auth_middleware(
-            app,
-            security_headers=HEADERS_POLICY,
-            csrf_origin=CsrfPolicy(),
-            csrf_token=CsrfPolicy(token_exempt=PathRules(exact=frozenset({LOGIN_PATH}))),
-        )
-        client = TestClient(app)
-        assert client.post(LOGIN_PATH, json={}, headers=FOREIGN).status_code == 403
 
     @pytest.mark.parametrize(
         "arrange",
@@ -406,7 +373,6 @@ class TestRefusedInstallation:
             pytest.param(type("OwnHeaders", (SecurityHeadersMiddleware,), {}), id="headers"),
             pytest.param(type("OwnLimiter", (IpRateLimitMiddleware,), {}), id="rate-limit"),
             pytest.param(type("OwnOriginCheck", (CsrfOriginMiddleware,), {}), id="csrf-origin"),
-            pytest.param(type("OwnTokenCheck", (CsrfTokenMiddleware,), {}), id="csrf-token"),
             pytest.param(type("OwnGate", (SessionGateMiddleware,), {}), id="session-gate"),
             pytest.param(type("OwnBearerGate", (BearerGateMiddleware,), {}), id="bearer-gate"),
         ],
@@ -448,7 +414,6 @@ class TestRefusedInstallation:
             IpRateLimitMiddleware,
             BearerGateMiddleware,
             CsrfOriginMiddleware,
-            CsrfTokenMiddleware,
             SessionGateMiddleware,
         ]
 
@@ -466,7 +431,7 @@ class TestBudgetSemantics:
         ("refused_request", "refusal_status", "next_status"),
         [
             pytest.param(post_oversized, 413, 200, id="content-length-413-spends-nothing"),
-            pytest.param(post_without_token, 403, 429, id="csrf-403-spends-one"),
+            pytest.param(post_without_provenance, 403, 429, id="csrf-403-spends-one"),
             pytest.param(
                 lambda client: client.get(RAISING_PATH), 500, 429, id="raising-route-spends-one",
             ),
@@ -601,22 +566,16 @@ class TestARequestCancelledDuringItsRateLimitCheck:
         assert (route_runs, sent) == ([], [])
 
 
-class TestCompetingRefusals:
-    def test_a_request_failing_origin_and_token_gets_the_origin_refusal(self) -> None:
-        response = post_cross_origin(a_full_stack_client())
-        assert response.json() == {"detail": "Cross-origin request rejected"}
-
-
 def an_authenticated_full_stack_app(*, max_requests: int = 100) -> FastAPI:
     app = a_fresh_app()
     install_full_stack(app, max_requests=max_requests)
     return app
 
 
-def a_csrf_passing_client(app: FastAPI) -> TestClient:
+def a_signed_in_same_origin_client(app: FastAPI) -> TestClient:
     client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
     client.headers.update(
-        {name.decode(): value.decode() for name, value in a_csrf_passing_request_headers(A_CONFIG)}
+        {name.decode(): value.decode() for name, value in a_signed_in_same_origin_request(A_CONFIG)}
     )
     client.headers["origin"] = ALLOWED_ORIGIN
     return client
@@ -628,7 +587,7 @@ def streamed(*chunks: bytes) -> Iterator[bytes]:
 
 class TestAStreamedBodyOverTheLimit:
     def test_a_streamed_413_spends_exactly_one_request_of_the_budget(self) -> None:
-        client = a_csrf_passing_client(an_authenticated_full_stack_app(max_requests=2))
+        client = a_signed_in_same_origin_client(an_authenticated_full_stack_app(max_requests=2))
 
         streamed_over_the_limit = streamed(*TWO_CHUNKS_UNDER_THE_LIMIT_EACH)
         statuses = [
@@ -654,7 +613,7 @@ class TestAStreamedBodyOverTheLimit:
                 background=BackgroundTask(handled.append, "task"),
             )
 
-        response = a_csrf_passing_client(app).post(
+        response = a_signed_in_same_origin_client(app).post(
             TYPED_PATH,
             content=streamed(b'{"text":"' + b"x" * 54, b"x" * 60 + b'"}'),
             headers={"content-type": JSON},
@@ -707,7 +666,7 @@ class TestResponsesBehindThePureAsgiMiddlewares:
     def test_an_admitted_routes_background_task_runs(self) -> None:
         app = an_authenticated_full_stack_app()
 
-        response = a_csrf_passing_client(app).get(BACKGROUND_PATH)
+        response = a_signed_in_same_origin_client(app).get(BACKGROUND_PATH)
 
         assert response.status_code == 200
         assert app.state.background_ran == [BACKGROUND_PATH]

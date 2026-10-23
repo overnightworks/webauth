@@ -1,4 +1,4 @@
-"""The cookies webauth sets: the session, the CSRF token bound to it, and a pending login.
+"""The cookies webauth sets: the session and a pending login.
 
 A pending login is the OpenID Connect login a browser began and has not yet
 brought back. It travels in a cookie of its own, named after its state, so
@@ -15,7 +15,7 @@ because the callback is a top-level navigation from the issuer's site, which a
 ``Strict`` cookie would not accompany. A browser holds at most five: a start
 beyond them clears the oldest by ``issued_at``, a cookie that does not verify
 or whose name appears twice counting as oldest, so repeated starts never crowd
-out the session and CSRF cookies. Only names of exactly that shape count; any
+out the session cookie. Only names of exactly that shape count; any
 other cookie whose name merely starts with the prefix is neither counted nor
 cleared.
 """
@@ -42,10 +42,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COOKIE_PATH",
-    "DEFAULT_CSRF_COOKIE_NAME",
     "DEFAULT_SESSION_COOKIE_NAME",
     "MAX_SESSION_COOKIE_CHARS",
-    "PLAIN_CSRF_COOKIE_NAME",
     "PLAIN_SESSION_COOKIE_NAME",
     "CookieSameSite",
     "PendingLogin",
@@ -57,9 +55,7 @@ __all__ = [
 _HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
 _SECURE_COOKIE_PREFIX: Final = "__Secure-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
-PLAIN_CSRF_COOKIE_NAME: Final = "csrf_token"
 _PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
-_DEFAULT_CSRF_HEADER_NAME: Final = "x-csrf-token"
 _MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 896
 # A signed session cookie is an identifier plus a hex digest; anything much
 # longer was not issued here, so the reader rejects it before any HMAC is computed.
@@ -71,7 +67,6 @@ which are minted with ``secrets.token_urlsafe``."""
 _PENDING_LOGIN_VERSION: Final = "v2"
 _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
 _SESSION_SIGNING_PREFIX: Final = b"session:"
-_CSRF_SIGNING_PREFIX: Final = b"csrf:"
 # The callback is a top-level navigation from the issuer's site, which a
 # Strict cookie would not accompany.
 _PENDING_LOGIN_SAMESITE: Final = "lax"
@@ -109,7 +104,6 @@ def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
 
 
 DEFAULT_SESSION_COOKIE_NAME: Final = _default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=True)
-DEFAULT_CSRF_COOKIE_NAME: Final = _default_cookie_name(PLAIN_CSRF_COOKIE_NAME, secure=True)
 
 
 def _pending_login_cookie_prefix(*, secure: bool) -> str:
@@ -136,7 +130,7 @@ def _is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
 def _is_reserved_cookie_name(name: str) -> bool:
     """Whether ``name`` is one webauth's own cookies use, in either variant.
 
-    A session or CSRF cookie under such a name would meet the cookie webauth
+    A session cookie under such a name would meet the cookie webauth
     sets there, and the browser would send both.
     """
     return any(
@@ -188,7 +182,7 @@ def sign_session_id(session_id: str, secret: bytes) -> str:
     """Return ``session_id.hmac_hex`` for use as a cookie value.
 
     The session cookie is signed with HMAC-SHA256 over a prefix of its own
-    plus the id, so the signature of a CSRF token or a pending login is no
+    plus the id, so the signature of a pending login is no
     session cookie.
 
     Raises ``ValueError`` when the signed value would exceed
@@ -216,30 +210,15 @@ def _verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
     return None
 
 
-def _generate_csrf_token(session_id: str, secret: bytes) -> str:
-    """Generate a CSRF token cryptographically bound to the session."""
-    return _signature(_CSRF_SIGNING_PREFIX, session_id, secret)
-
-
-def _verify_csrf_token(token: str, session_id: str, secret: bytes) -> bool:
-    """Verify a CSRF token is valid for the given session."""
-    expected = _generate_csrf_token(session_id, secret)
-    return hmac.compare_digest(token.encode(), expected.encode())
-
-
 def issue_session_cookies(
     response: Response, session_id: str, config: WebAuthConfig,
 ) -> None:
-    """Hand the browser its signed session and the CSRF token bound to it.
+    """Hand the browser its signed session.
 
-    Both cookies live as long as
-    ``session_lifetime.absolute_max_age_seconds``, the cap. They are issued once
-    at login: renewing a session reissues neither, so the browser keeps them
-    exactly as long as the session may last.
-
-    Only the session cookie is kept from scripts: the CSRF token has to be
-    readable, because the double-submit check compares it against a header the
-    client sends back itself. Both carry ``Secure`` unless the host switched
+    The cookie lives as long as ``session_lifetime.absolute_max_age_seconds``,
+    the cap. It is issued once at login: renewing a session reissues nothing,
+    so the browser keeps it exactly as long as the session may last. It is
+    ``HttpOnly`` and carries ``Secure`` unless the host switched
     ``cookie_secure`` off: a request's scheme is not trusted to decide it,
     because behind an unlisted TLS proxy every request looks like plain http.
     """
@@ -255,21 +234,12 @@ def issue_session_cookies(
         secure=secure,
         path=COOKIE_PATH,
     )
-    response.set_cookie(  # NOSONAR The client must read this CSRF token for double-submit.
-        config.csrf_cookie_name,
-        _generate_csrf_token(session_id, config.signing_key),
-        max_age=max_age,
-        httponly=False,
-        samesite=samesite,
-        secure=secure,
-        path=COOKIE_PATH,
-    )
 
 
 def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
-    """Take both cookies back, so the browser stops carrying a dead session.
+    """Take the session cookie back, so the browser stops carrying a dead session.
 
-    Each deletion repeats the attributes its cookie was set with, so a browser
+    The deletion repeats the attributes the cookie was set with, so a browser
     that only lets a secure context overwrite a ``Secure`` cookie accepts it.
     """
     samesite = config.cookie_samesite
@@ -280,9 +250,6 @@ def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
         samesite=samesite,
         secure=secure,
         httponly=True,
-    )
-    response.delete_cookie(
-        config.csrf_cookie_name, path=COOKIE_PATH, samesite=samesite, secure=secure,
     )
 
 

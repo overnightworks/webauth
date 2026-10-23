@@ -469,11 +469,9 @@ def log_out(
     ``current_user`` dependency, so a request without a session still reaches
     the issuer.
 
-    The origin check protects the route, not the CSRF token, which is bound to
-    the session and fails once it has expired, and which a plain form cannot
-    send. So the host keeps the route POST only (the origin check runs on
-    mutating methods alone) and lists its exact path, never a prefix, in
-    ``CsrfPolicy.token_exempt`` and not in ``exempt``."""
+    The origin check protects the route, so the host keeps it POST only (the
+    origin check runs on mutating methods alone) and does not list it in
+    ``CsrfPolicy.exempt``."""
     session_id = session_id_from_request(request, config)
     id_token: SecretStr | None = None
     if session_id is not None:
@@ -656,8 +654,8 @@ def receive_backchannel_logout(
 
     The route is open to anyone who can reach it, and the token is its only
     control, so set it up for the issuer alone. The issuer sends neither an
-    Origin nor a cookie, so list the exact path (never a prefix) in ``exempt``
-    of both CSRF policies. It posts from shared server addresses, so exempt the
+    Origin nor a cookie, so list the exact path (never a prefix) in
+    ``CsrfPolicy.exempt``. It posts from shared server addresses, so exempt the
     exact path from the rate limit too, or one budget refuses a real logout.
     Give it a ``BodySizeRule`` that admits a Logout Token, which the default
     may not, and a ``CacheControlRule`` of ``no-store``. Let the issuer reach
