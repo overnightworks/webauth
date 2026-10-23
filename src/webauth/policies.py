@@ -17,7 +17,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from webauth._validation import require_positive_whole_number
+from webauth._validation import (
+    require_collection_not_one_string,
+    require_positive_whole_number,
+)
 
 __all__ = [
     "DEFAULT_PERMISSIONS_POLICY",
@@ -73,6 +76,9 @@ class PathRules:
     prefixes: tuple[str, ...] = ()
     shapes: tuple[PathShape, ...] = ()
     patterns: tuple[re.Pattern[str], ...] = ()
+
+    def __post_init__(self) -> None:
+        require_collection_not_one_string("PathRules.exact", self.exact, noun="path")
 
     def matches(self, path: str) -> bool:
         return (
@@ -186,88 +192,16 @@ class RateLimitPolicy:
 class CsrfPolicy:
     """Which requests must prove they were made from this site.
 
-    Leaving ``protected`` at its default (``None``) is the fail-closed shape:
-    every state-changing request is checked, and ``exempt`` carves out the
-    prefixes that carry no session and no token — a sessionless webhook, say.
-    Naming an explicit ``PathRules`` in ``protected`` switches to the older
-    fail-open shape, matched only against the paths it lists. That shape
-    cannot carry an ``exempt`` rule: a non-empty exemption is refused at
-    construction, rather than silently failing to change the listed paths.
-
-    A path may be exempt from the token check and still owe a same-origin
-    check: a login carries no session yet, so it has no token to submit, but
-    a foreign page must not be able to submit it either.
+    Every state-changing request is checked except ``exempt``, which lists
+    sessionless server calls whose route authenticates the caller itself and
+    must not act on the session cookie. A prefix matches literally, so it ends
+    in ``/``.
     """
 
-    protected: PathRules | None = None
     exempt: PathRules = PathRules()
-    token_exempt: PathRules = PathRules()
-
-    def __post_init__(self) -> None:
-        if self.protected is not None and any((
-            self.exempt.exact,
-            self.exempt.prefixes,
-            self.exempt.shapes,
-            self.exempt.patterns,
-        )):
-            raise ValueError(
-                "CsrfPolicy cannot combine explicit protected rules with exempt rules.",
-            )
-
-    def _is_protected(self, path: str) -> bool:
-        if self.protected is None:
-            return not self.exempt.matches(path)
-        return self.protected.matches(path)
 
     def requires_same_origin(self, path: str) -> bool:
-        return self._is_protected(path)
-
-    def requires_token(self, path: str) -> bool:
-        return self._is_protected(path) and not self.token_exempt.matches(path)
-
-    def token_exemptions_outside_origin_check(self, token_policy: CsrfPolicy) -> tuple[str, ...]:
-        """The ``token_policy`` exemptions this policy's origin check does not fully cover.
-
-        A token exemption is safe only where the origin check still runs, so
-        the decision is conservative and errs toward "uncovered":
-
-        - an exact exemption is covered when ``requires_same_origin`` holds for it;
-        - a prefix exemption is covered only when every path below it requires
-          the origin check. With the default ``protected`` that means no
-          ``exempt`` rule can match at or below the prefix: no exact path
-          beginning with it, no prefix overlapping it either way, no shape whose
-          start overlaps it, and no pattern at all (unverifiable). With explicit
-          ``protected`` rules it means some protected prefix begins the
-          exemption prefix; an exact protected path never covers a prefix;
-        - a shape or pattern exemption cannot be enumerated and is always
-          uncovered.
-        """
-        token_exempt = token_policy.token_exempt
-        uncovered = [
-            path for path in sorted(token_exempt.exact)
-            if not self.requires_same_origin(path)
-        ]
-        uncovered += [
-            prefix for prefix in token_exempt.prefixes
-            if not self._covers_every_path_under(prefix)
-        ]
-        uncovered += [f"{rule!r}" for rule in (*token_exempt.shapes, *token_exempt.patterns)]
-        return tuple(uncovered)
-
-    def _covers_every_path_under(self, prefix: str) -> bool:
-        if self.protected is not None:
-            return any(prefix.startswith(q) for q in self.protected.prefixes)
-        exempt = self.exempt
-        return not (
-            exempt.matches(prefix)
-            or exempt.patterns
-            or any(path.startswith(prefix) for path in exempt.exact)
-            or any(q.startswith(prefix) for q in exempt.prefixes)
-            or any(
-                shape.starts_with.startswith(prefix) or prefix.startswith(shape.starts_with)
-                for shape in exempt.shapes
-            )
-        )
+        return not self.exempt.matches(path)
 
 
 @dataclass(frozen=True)
@@ -278,6 +212,9 @@ class BodySizeRule:
     max_bytes: int
     methods: frozenset[str] | None = None
     """The methods the larger budget applies to; ``None`` means every method."""
+
+    def __post_init__(self) -> None:
+        require_collection_not_one_string("BodySizeRule.methods", self.methods, noun="method")
 
     def applies_to(self, path: str, method: str) -> bool:
         if self.methods is not None and method.upper() not in self.methods:
@@ -292,6 +229,9 @@ class PublicRule:
     paths: PathRules
     methods: frozenset[str] | None = None
     """The methods the rule opens; ``None`` means every method."""
+
+    def __post_init__(self) -> None:
+        require_collection_not_one_string("PublicRule.methods", self.methods, noun="method")
 
     def applies_to(self, path: str, method: str) -> bool:
         if self.methods is not None and method.upper() not in self.methods:

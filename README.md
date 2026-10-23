@@ -5,7 +5,7 @@ built for [Keycloak](https://www.keycloak.org/); any OpenID Connect issuer that
 signs ID tokens with RS256 and publishes static endpoints works. The host serves
 a start and a callback route. webauth runs the flow, then keeps the session:
 sessions the store decides on every request, HMAC-signed cookies, CSRF
-double-submit, admin checks, per-address rate limits, and the audit events they
+origin checks, admin checks, per-address rate limits, and the audit events they
 raise. The client is a confidential client: it authenticates at the token
 endpoint with HTTP Basic and sends PKCE with the `S256` method.
 
@@ -43,7 +43,6 @@ install_web_auth_middleware(
         content_security_policy=default_content_security_policy(),
     ),
     csrf_origin=CsrfPolicy(),
-    csrf_token=CsrfPolicy(),
 )
 auth = current_user_dependency(
     session_store=the_hosts_session_store,
@@ -86,10 +85,9 @@ who the library defends against and what it trusts.
 A test that needs a signed-in person needs no issuer. It creates the account and
 a session inside the configured lifetime in the host's own store, calls
 `issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
-a `Response` and copies both cookies it sets into its client. A state-changing
-request also sends the CSRF cookie's value in the header named
-`config.csrf_header_name` and sends `Sec-Fetch-Site: same-origin` ([CSRF origin](docs/ARCHITECTURE.md#csrf-origin)).
-When the client keeps the cookies' attributes and `cookie_secure` is on, use an
+a `Response` and copies the one cookie it sets into its client. A state-changing
+request also sends `Sec-Fetch-Site: same-origin` ([CSRF origin](docs/ARCHITECTURE.md#csrf-origin)).
+When the client keeps the cookie's attributes and `cookie_secure` is on, use an
 `https` base URL.
 
 A test of the host's own start, callback and logout routes gives
@@ -211,7 +209,7 @@ account and no role.
   admin group or a group below it. Nothing is created or provisioned, and webauth
   emits no event: the host audits the admitted call itself (subject, route,
   outcome).
-- **What it replaces.** On a gated path the cookie, the CSRF checks and the
+- **What it replaces.** On a gated path the cookie, the CSRF check and the
   session gate decide nothing, and every answer is `no-store`. The same rate
   limit applies where a rate policy covers the path; a flood of invalid tokens
   is bounded only by it. A session dependency (`current_user`, `admin_user`,

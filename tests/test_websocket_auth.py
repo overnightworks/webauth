@@ -47,9 +47,9 @@ from webauth.proxies import resolve_client_ip
 CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
 ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
-LOCAL_DEVELOPMENT_HOSTS = {
-    "allowed_hosts_exact": frozenset({"localhost", "127.0.0.1"}),
-}
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1"})
+PLAIN_HTTP_DEVELOPMENT = {"allowed_hosts_exact": LOOPBACK_HOSTS, "cookie_secure": False}
+HTTPS_DEVELOPMENT = {"allowed_hosts_exact": LOOPBACK_HOSTS, "cookie_secure": True}
 
 
 @pytest.fixture
@@ -125,8 +125,10 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
     [
         pytest.param(ALLOWED_ORIGIN, {}, id="an exact host"),
         pytest.param(f"{ALLOWED_ORIGIN}:8443", {}, id="an exact host on any port"),
-        pytest.param("http://localhost:8000", LOCAL_DEVELOPMENT_HOSTS, id="localhost, listed"),
-        pytest.param("http://127.0.0.1:5173", LOCAL_DEVELOPMENT_HOSTS, id="127.0.0.1, listed"),
+        pytest.param("http://localhost:8000", PLAIN_HTTP_DEVELOPMENT, id="localhost over http"),
+        pytest.param("http://127.0.0.1:5173", PLAIN_HTTP_DEVELOPMENT, id="127.0.0.1 over http"),
+        pytest.param("https://localhost:8000", HTTPS_DEVELOPMENT, id="localhost over https"),
+        pytest.param("https://127.0.0.1:5173", HTTPS_DEVELOPMENT, id="127.0.0.1 over https"),
     ],
 )
 def test_an_origin_from_the_configured_hosts_is_admitted(
@@ -272,6 +274,31 @@ def test_a_refused_origin_never_asks_the_store(
     app = an_auth_app(None, sessions=SessionsThatMustNotBeAsked(a_session()))
 
     assert the_refusal_of(app, cookie=app.signed_cookie(), origin=origin) is refusal
+
+
+@pytest.mark.parametrize("cookie_secure", [True, False], ids=["secure", "plain-http"])
+@pytest.mark.parametrize(
+    ("origin", "is_plain_http"),
+    [
+        pytest.param(f"http://{ALLOWED_HOST}", True, id="an http Origin"),
+        pytest.param(f"HTTP://{ALLOWED_HOST}", True, id="an upper-case HTTP Origin"),
+        pytest.param(ALLOWED_ORIGIN, False, id="an https Origin"),
+    ],
+)
+def test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on(
+    origin: str, is_plain_http: bool, cookie_secure: bool,
+) -> None:
+    refused = cookie_secure and is_plain_http
+    sessions = SessionsThatMustNotBeAsked(a_session()) if refused else None
+    app = an_auth_app(a_session(), sessions=sessions, cookie_secure=cookie_secure)
+
+    if refused:
+        assert the_refusal_of(app, cookie=app.signed_cookie(), origin=origin) is (
+            ConnectionRefusal.FOREIGN_ORIGIN
+        )
+    else:
+        with app.connect(cookie=app.signed_cookie(), origin=origin) as socket:
+            assert socket.receive_json()["username"] == "alice"
 
 
 @pytest.mark.parametrize("answer", [None, 1], ids=["None", "an int"])

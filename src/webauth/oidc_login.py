@@ -45,7 +45,7 @@ and setting no cookie, so the host commits and then issues the cookies.
 
 ``log_out`` is the third route's whole sequence: it ends the session the
 request's cookie names, if any, and answers a page that posts the ID token hint
-to the issuer's end-session endpoint, clearing the session cookies. It makes no
+to the issuer's end-session endpoint, clearing the session cookie. It makes no
 outbound call and never commits, so the person is signed out of the app even
 when the issuer is down, and a request without a usable session still reaches
 the issuer. A forged, oversized or duplicated cookie counts as missing: it ends
@@ -151,7 +151,7 @@ __all__ = [
 
 _MAX_PENDING_LOGINS: Final = 5
 """Pending-login cookies a browser keeps at once. A start beyond them
-evicts the oldest, so repeated starts never crowd out the session cookies."""
+evicts the oldest, so repeated starts never crowd out the session cookie."""
 
 # A cookie that does not verify, or whose name appears twice, ranks below
 # every genuine one and is evicted first.
@@ -452,7 +452,7 @@ def log_out(
     """End this browser's app session and answer the page that ends the issuer's.
 
     The session the request's cookie names is read and then deleted under
-    ``lock``, and the session cookies are cleared on the answer in every case.
+    ``lock``, and the session cookie is cleared on the answer in every case.
     An expired row that still stands is read too, and neither renewed nor admitted.
     The answer is a ``no-store`` HTML page under its own Content-Security-Policy
     that posts the client ID, the configured ``post_logout_redirect_uri`` and the
@@ -469,11 +469,9 @@ def log_out(
     ``current_user`` dependency, so a request without a session still reaches
     the issuer.
 
-    The origin check protects the route, not the CSRF token, which is bound to
-    the session and fails once it has expired, and which a plain form cannot
-    send. So the host keeps the route POST only (the origin check runs on
-    mutating methods alone) and lists its exact path, never a prefix, in
-    ``CsrfPolicy.token_exempt`` and not in ``exempt``."""
+    The origin check protects the route, so the host keeps it POST only (the
+    origin check runs on mutating methods alone) and does not list it in
+    ``CsrfPolicy.exempt``."""
     session_id = session_id_from_request(request, config)
     id_token: SecretStr | None = None
     if session_id is not None:
@@ -656,8 +654,8 @@ def receive_backchannel_logout(
 
     The route is open to anyone who can reach it, and the token is its only
     control, so set it up for the issuer alone. The issuer sends neither an
-    Origin nor a cookie, so list the exact path (never a prefix) in ``exempt``
-    of both CSRF policies. It posts from shared server addresses, so exempt the
+    Origin nor a cookie, so list the exact path (never a prefix) in
+    ``CsrfPolicy.exempt``. It posts from shared server addresses, so exempt the
     exact path from the rate limit too, or one budget refuses a real logout.
     Give it a ``BodySizeRule`` that admits a Logout Token, which the default
     may not, and a ``CacheControlRule`` of ``no-store``. Let the issuer reach

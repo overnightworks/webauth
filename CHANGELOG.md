@@ -15,6 +15,11 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `open_session` requires the keyword `keeps_id_token: bool`, with no default, so every host states its choice. A host
   that never calls `log_out` passes `False`, and its session rows then hold no ID token. `SessionRecordStore.create`
   takes `id_token: SecretStr | None`, so every typed store widens its own signature.
+- The CSRF token check is removed; the origin check is the only CSRF guard. `CsrfTokenMiddleware`, the `csrf_token` argument of `install_web_auth_middleware`, and `CsrfPolicy.token_exempt`, `requires_token` and `token_exemptions_outside_origin_check` are gone. Drop the argument and every front-end line that reads the CSRF cookie or sends `X-CSRF-Token`. A logout route stays POST only and needs no entry of its own.
+- `install_web_auth_middleware` requires `csrf_origin`. `CsrfPolicy.protected` is removed: every state-changing request outside `exempt` is checked.
+- webauth no longer issues the CSRF cookie. `issue_session_cookies` sets only the session cookie and `clear_session_cookies` clears only it. `WebAuthConfig.csrf_cookie_name` and `csrf_header_name`, and `webauth.cookies.DEFAULT_CSRF_COOKIE_NAME` and `PLAIN_CSRF_COOKIE_NAME`, are removed. A `__Host-csrf_token` (`csrf_token`) cookie set by an earlier version stays in a browser until the `Max-Age` it was given runs out, which was the absolute session cap in force when it was set. webauth neither reads nor clears it, and a host need not clear it. Until that cap has passed since the upgrade, a privacy page names it as a cookie that earlier versions set and that expires by itself.
+- `PathRules.exact`, `PublicRule.methods` and `BodySizeRule.methods` refuse a single string with `ValueError`; pass a `frozenset`.
+- With `cookie_secure` on, the CSRF origin check's allowlist and the WebSocket handshake admit an `Origin` only over https: `Origin: http://<listed host>` is refused. A plain-http front end that calls an https backend serves itself over https, or runs that environment with `cookie_secure` off.
 
 ## 0.22.0
 

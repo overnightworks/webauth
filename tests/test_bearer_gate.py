@@ -48,7 +48,7 @@ from webauth_arrangement import (
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import BearerGate, bearer_caller
 from webauth.oidc_login import AdmissionConfig, NoAdmins
-from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PathShape, PublicRule
+from webauth.policies import AuthorizedParties, PathRules, PathShape, PublicRule
 from webauth.ports import BearerCaller
 
 MACHINE_PREFIX = "/api/admin/"
@@ -67,7 +67,6 @@ ADMISSION = AdmissionConfig(
     bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
 )
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
-CSRF_STACK = {"csrf_origin": CsrfPolicy(), "csrf_token": CsrfPolicy()}
 
 
 def a_token(**claims: Any) -> str:
@@ -179,7 +178,7 @@ def a_bearer_app(
         record,
         gate=True,
         raise_server_exceptions=False,
-        stack_policies={**CSRF_STACK, **stack, **(policies or {})},
+        stack_policies={**stack, **(policies or {})},
         **auth_app_keywords,
     )
 

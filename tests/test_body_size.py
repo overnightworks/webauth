@@ -14,7 +14,7 @@ from webauth_arrangement import (
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
     StartSend,
-    a_csrf_passing_request_headers,
+    a_signed_in_same_origin_request,
     a_web_auth_config,
     an_http_scope,
     assert_carries_policy_headers,
@@ -48,6 +48,7 @@ HEADERS_POLICY = SecurityHeadersPolicy(default_content_security_policy([]))
 TWO_CHUNKS_UNDER_THE_LIMIT_EACH = (b"x" * 60, b"x" * 60)
 ONE_CHUNK_OVER_THE_LIMIT = (b"x" * 120,)
 A_CONFIG = a_web_auth_config()
+SAME_ORIGIN = ((b"sec-fetch-site", b"same-origin"),)
 TOO_LARGE_BODY = b'{"detail":"Request body too large"}'
 
 
@@ -101,10 +102,11 @@ def a_body_limited_app(
             body_size=body_size,
             rate_limit=RateLimitPolicy(default=RateLimitBudget("api", 100, 60)),
             csrf_origin=CsrfPolicy(),
-            csrf_token=CsrfPolicy(),
         )
     else:
-        install_web_auth_middleware(app, security_headers=HEADERS_POLICY, body_size=body_size)
+        install_web_auth_middleware(
+            app, security_headers=HEADERS_POLICY, body_size=body_size, csrf_origin=CsrfPolicy(),
+        )
     return app
 
 
@@ -115,7 +117,7 @@ async def drive_post(
     start_send: StartSend = StartSend.PLAIN,
     *,
     app: FastAPI | None = None,
-    headers: tuple[tuple[bytes, bytes], ...] = (),
+    headers: tuple[tuple[bytes, bytes], ...] = SAME_ORIGIN,
 ) -> tuple[list[Message], BaseException | None]:
     app = app or a_body_limited_app()
     scope = an_http_scope(app, path, method="POST", headers=headers, spec_version=spec_version)
@@ -233,7 +235,7 @@ async def test_any_content_length_over_the_limit_is_refused_before_the_route(
     headers = tuple((b"content-length", length) for length in declared_lengths)
 
     sent, raised = await drive_post(
-        "/reads", SPEC_WITHOUT_CONCURRENT_READER, (), headers=headers
+        "/reads", SPEC_WITHOUT_CONCURRENT_READER, (), headers=SAME_ORIGIN + headers
     )
 
     (start,) = starts(sent)
@@ -260,7 +262,7 @@ async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_th
         spec_version,
         TWO_CHUNKS_UNDER_THE_LIMIT_EACH,
         app=app,
-        headers=tuple(a_csrf_passing_request_headers(A_CONFIG)),
+        headers=tuple(a_signed_in_same_origin_request(A_CONFIG)),
     )
 
     assert [start["status"] for start in starts(sent)] == [200]

@@ -30,6 +30,7 @@ from webauth.oidc_login import log_out
 from webauth.policies import (
     CacheControlRule,
     CspDirective,
+    CsrfPolicy,
     PathRules,
     SecurityHeadersPolicy,
     default_content_security_policy,
@@ -480,7 +481,7 @@ def the_logout_page(
         host_middleware(app)
     install_web_auth_config(app, config)
     if installed:
-        install_web_auth_middleware(app, security_headers=HOST_POLICY)
+        install_web_auth_middleware(app, security_headers=HOST_POLICY, csrf_origin=CsrfPolicy())
 
     @app.post(LOGOUT_PATH)
     def log_out_route(request: Request) -> Response:
@@ -488,7 +489,7 @@ def the_logout_page(
             relying_party, request, config, sessions=sessions, lock=lock, button_label="Sign out",
         )
 
-    return TestClient(app).post(LOGOUT_PATH)
+    return TestClient(app).post(LOGOUT_PATH, headers={"sec-fetch-site": "same-origin"})
 
 
 def the_logout_policy_of(page: HttpxResponse) -> str:

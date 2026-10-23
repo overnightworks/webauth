@@ -89,8 +89,7 @@ def test_a_bearer_request_needs_no_csrf_origin_header_or_cookie() -> None:
     assert_answers_no_store(response)
 
 
-def test_the_cookie_and_the_csrf_token_count_for_nothing_beside_a_token() -> None:
-    auth_headers = {"x-csrf-token": "not-the-token-of-any-session"}
+def test_the_cookie_counts_for_nothing_beside_a_token() -> None:
     app = a_bearer_app(
         sessions=SessionsThatMustNotBeAsked(), session_transaction=never_asked,
     )
@@ -99,7 +98,7 @@ def test_the_cookie_and_the_csrf_token_count_for_nothing_beside_a_token() -> Non
     response = app.ask(
         method="DELETE",
         authorization=bearing(A_TOKEN),
-        headers={**auth_headers, "cookie": other_accounts_cookie},
+        headers={"cookie": other_accounts_cookie},
     )
 
     assert (response.status_code, response.json()) == (200, {"subject": OPERATOR_SUBJECT})
@@ -189,7 +188,6 @@ def a_sub_app(auth: BearerApp, *, csrf: bool) -> FastAPI:
             inner,
             security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
             csrf_origin=CsrfPolicy(),
-            csrf_token=CsrfPolicy(),
         )
     sessions = current_user_dependency(
         session_store=lambda: auth.auth.sessions, on_authenticated=lambda user: None,
@@ -383,6 +381,7 @@ class TestTheGateSitsInsideTheRateLimitAndBodyLimitAndBehindTheHeaders:
                 content_security_policy="default-src 'self'",
                 cache_control_rules=(CacheControlRule(MACHINE_PATHS, "public, max-age=60"),),
             ),
+            csrf_origin=CsrfPolicy(),
             bearer_gate=a_bearer_gate(),
         )
         app.add_api_route(EXPORT_PATH, lambda: {"ok": True}, methods=["GET"])

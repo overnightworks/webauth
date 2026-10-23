@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
+from functools import partial
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -17,9 +20,9 @@ from webauth.policies import (
     BodySizeRule,
     CacheControlRule,
     CspDirective,
-    CsrfPolicy,
     PathRules,
     PathShape,
+    PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
     RateLimitRule,
@@ -74,6 +77,20 @@ class TestPathRules:
 
     def test_a_rule_that_names_nothing_selects_nothing(self) -> None:
         assert PathRules().matches("/anything") is False
+
+    def test_a_single_string_for_exact_is_refused(self) -> None:
+        with pytest.raises(ValueError, match=r"PathRules\.exact"):
+            PathRules(exact="/hooks/stripe")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(("path", "expected"), [("/hooks/stripe", True), ("/", False)])
+    def test_a_frozenset_of_one_path_selects_that_path_only(
+        self, path: str, expected: bool,
+    ) -> None:
+        assert PathRules(exact=frozenset({"/hooks/stripe"})).matches(path) is expected
+
+    def test_a_single_string_for_prefixes_stays_a_whole_prefix(self) -> None:
+        assert PathRules(prefixes="/hooks/").matches("/hooks/stripe") is True  # type: ignore[arg-type]
+        assert PathRules(prefixes="/hooks/").matches("/") is False  # type: ignore[arg-type]
 
 
 class TestRateLimitPolicy:
@@ -166,103 +183,27 @@ class TestRateLimitPolicy:
             RateLimitPolicy(default=default, rules=rules)
 
 
-class TestCsrfPolicy:
-    def _policy(self) -> CsrfPolicy:
-        return CsrfPolicy(
-            protected=PathRules(prefixes=("/api/",)),
-            token_exempt=PathRules(exact=frozenset({"/api/auth/login"})),
-        )
+METHOD_RULES = [PublicRule, partial(BodySizeRule, max_bytes=1)]
+A_PATH = PathRules(exact=frozenset({"/x"}))
 
-    def test_a_token_exempt_path_still_owes_a_same_origin_check(self) -> None:
-        policy = self._policy()
 
-        assert policy.requires_token("/api/auth/login") is False
-        assert policy.requires_same_origin("/api/auth/login") is True
+@pytest.mark.parametrize("rule", METHOD_RULES)
+class TestAMethodsFieldRefusesASingleString:
+    @pytest.mark.parametrize("methods", ["POST", "XPOST"])
+    def test_a_single_string_is_refused(self, rule: Callable[..., Any], methods: str) -> None:
+        with pytest.raises(ValueError, match="methods"):
+            rule(A_PATH, methods=methods)
 
-    def test_an_unprotected_path_owes_neither(self) -> None:
-        policy = self._policy()
-
-        assert policy.requires_token("/shared/slug") is False
-        assert policy.requires_same_origin("/shared/slug") is False
-
-    def test_a_protected_path_owes_both(self) -> None:
-        policy = self._policy()
-
-        assert policy.requires_token("/api/songs") is True
-        assert policy.requires_same_origin("/api/songs") is True
-
-    @pytest.mark.parametrize(("origin", "token_exempt"), [
-        pytest.param(
-            CsrfPolicy(exempt=PathRules(exact=frozenset({"/api/auth/login"}))),
-            PathRules(prefixes=("/api/auth/",)),
-            id="origin-exempts-an-exact-path-below-the-prefix",
-        ),
-        pytest.param(
-            CsrfPolicy(exempt=PathRules(prefixes=("/api/auth/l",))),
-            PathRules(prefixes=("/api/auth/",)),
-            id="origin-exempts-a-prefix-below-the-prefix",
-        ),
-        pytest.param(
-            CsrfPolicy(exempt=PathRules(prefixes=("/api/",))),
-            PathRules(prefixes=("/api/auth/",)),
-            id="origin-exempts-a-prefix-above-the-prefix",
-        ),
-        pytest.param(
-            CsrfPolicy(exempt=PathRules(shapes=(PathShape("/api/auth/", "/reset"),))),
-            PathRules(prefixes=("/api/auth/",)),
-            id="origin-exempts-a-shape-below-the-prefix",
-        ),
-        pytest.param(
-            CsrfPolicy(exempt=PathRules(patterns=(re.compile(r"/x"),))),
-            PathRules(prefixes=("/api/auth/",)),
-            id="origin-exempts-by-pattern",
-        ),
-        pytest.param(
-            CsrfPolicy(protected=PathRules(exact=frozenset({"/api/internal/"}))),
-            PathRules(prefixes=("/api/internal/",)),
-            id="an-exact-protected-path-never-covers-a-prefix",
-        ),
-        pytest.param(
-            CsrfPolicy(protected=PathRules(prefixes=("/api/internal/x",))),
-            PathRules(prefixes=("/api/internal/",)),
-            id="a-protected-prefix-below-the-exemption-prefix",
-        ),
-        pytest.param(
-            CsrfPolicy(protected=PathRules(prefixes=("/api/",))),
-            PathRules(exact=frozenset({"/shared/slug"})),
-            id="exact-path-the-origin-check-skips",
-        ),
-        pytest.param(
-            CsrfPolicy(protected=PathRules(prefixes=("/api",))),
-            PathRules(prefixes=("/login",)),
-            id="prefix-the-origin-check-skips",
-        ),
-        pytest.param(
-            CsrfPolicy(),
-            PathRules(shapes=(PathShape("/log", "in"),)),
-            id="shape-is-unverifiable",
-        ),
-    ])
-    def test_a_token_exemption_the_origin_check_may_not_cover_is_reported(
-        self, origin: CsrfPolicy, token_exempt: PathRules,
+    @pytest.mark.parametrize(
+        ("methods", "applies_to_get"), [(frozenset({"POST"}), False), (None, True)],
+    )
+    def test_a_frozenset_or_none_is_accepted_and_selects_its_methods(
+        self, rule: Callable[..., Any], methods: frozenset[str] | None, applies_to_get: bool,
     ) -> None:
-        token_policy = CsrfPolicy(token_exempt=token_exempt)
+        accepted = rule(A_PATH, methods=methods)
 
-        assert origin.token_exemptions_outside_origin_check(token_policy) != ()
-
-    @pytest.mark.parametrize("origin", [
-        pytest.param(CsrfPolicy(protected=PathRules(prefixes=("/api/",))), id="fail-open"),
-        pytest.param(CsrfPolicy(exempt=PathRules(prefixes=("/webhook/",))), id="fail-closed"),
-    ])
-    def test_a_token_exemption_inside_the_origin_check_is_not_reported(
-        self, origin: CsrfPolicy,
-    ) -> None:
-        token_policy = CsrfPolicy(token_exempt=PathRules(
-            exact=frozenset({"/api/auth/login", "/api/auth/setup"}),
-            prefixes=("/api/internal/",),
-        ))
-
-        assert origin.token_exemptions_outside_origin_check(token_policy) == ()
+        assert accepted.applies_to("/x", "POST") is True
+        assert accepted.applies_to("/x", "GET") is applies_to_get
 
 
 class TestBodySizePolicy:

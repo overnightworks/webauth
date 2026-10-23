@@ -29,8 +29,8 @@ from webauth_arrangement import (
     SessionsRecordingTheirTransaction,
     SessionsThatMustNotBeAsked,
     UsersInMemory,
-    a_csrf_passing_request_headers,
     a_session,
+    a_signed_in_same_origin_request,
     a_web_auth_config,
     an_auth_app,
     an_http_scope,
@@ -129,7 +129,11 @@ class TestPublicPaths:
 
     def test_a_method_rule_opens_only_the_methods_it_names(self) -> None:
         hooks = PublicRule(PathRules(prefixes=("/hooks/",)), methods=frozenset({"POST"}))
-        app = a_gated_app(None, public=(hooks,), sessions=SessionsThatMustNotBeAsked())
+        sessionless_hook = CsrfPolicy(exempt=PathRules(prefixes=("/hooks/",)))
+        app = a_gated_app(
+            None, public=(hooks,), sessions=SessionsThatMustNotBeAsked(),
+            stack_policies={"csrf_origin": sessionless_hook},
+        )
         assert ask(app, "/hooks/x", method="POST").status_code == 200
         navigation = ask(app, "/hooks/x", accept=HTML)
         assert (navigation.status_code, navigation.headers["location"]) == (
@@ -591,14 +595,13 @@ class TestOrder:
                     "body_size": BodySizePolicy(default_max_bytes=BODY_LIMIT_BYTES),
                     "rate_limit": RateLimitPolicy(default=RateLimitBudget("api", 1, 60)),
                     "csrf_origin": CsrfPolicy(),
-                    "csrf_token": CsrfPolicy(),
                 },
             )
 
         def post(app: AuthApp, *, body: bytes = b"{}", **headers: str) -> Response:
             passing = dict(
                 (name.decode(), value.decode())
-                for name, value in a_csrf_passing_request_headers(app.config)
+                for name, value in a_signed_in_same_origin_request(app.config)
             )
             passing.update(headers)
             return app.client.post(
@@ -609,13 +612,13 @@ class TestOrder:
                     ).status_code == 403
         same_origin = {"origin": ALLOWED_ORIGIN}
         app = a_full_stack_app()
-        without_token = {
+        without_provenance = {
             name.decode(): value.decode()
-            for name, value in a_csrf_passing_request_headers(app.config)
-            if name.decode() != app.config.csrf_header_name
+            for name, value in a_signed_in_same_origin_request(app.config)
+            if name != b"sec-fetch-site"
         }
         assert app.client.post(
-            "/optional", content=b"{}", headers=without_token | same_origin,
+            "/optional", content=b"{}", headers=without_provenance,
         ).status_code == 403
         assert post(
             a_full_stack_app(), body=b"x" * (BODY_LIMIT_BYTES + 1), **same_origin,

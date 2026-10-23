@@ -23,10 +23,8 @@ from webauth.config import (
     install_web_auth_config,
 )
 from webauth.cookies import (
-    DEFAULT_CSRF_COOKIE_NAME,
     DEFAULT_SESSION_COOKIE_NAME,
     MAX_SESSION_COOKIE_CHARS,
-    PLAIN_CSRF_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
     PendingLogin,
     clear_session_cookies,
@@ -64,7 +62,6 @@ from webauth.middleware import (
     BearerGateMiddleware,
     BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
-    CsrfTokenMiddleware,
     IpRateLimitMiddleware,
     SecurityHeadersMiddleware,
     SessionGate,
@@ -421,7 +418,6 @@ def a_host_installs_the_middleware(app: FastAPI, bearer_gate: BearerGate) -> Non
             ),
         ),
         csrf_origin=CsrfPolicy(),
-        csrf_token=CsrfPolicy(),
         session_gate=SessionGate(
             session_transaction=a_host_session_transaction,
             login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
@@ -455,7 +451,7 @@ def a_host_ends_a_session() -> None:
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
         AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
-        BodySizePolicy, CsrfOriginMiddleware, CsrfTokenMiddleware, DEFAULT_CSRF_COOKIE_NAME,
+        BodySizePolicy, CsrfOriginMiddleware,
         DEFAULT_PERMISSIONS_POLICY,
         DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,
         KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
@@ -463,7 +459,7 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock,
         LOGOUT_TOKEN_MAX_AGE_SECONDS, OidcClientConfig,
         PENDING_LOGIN_MAX_AGE_SECONDS,
-        PLAIN_CSRF_COOKIE_NAME, PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
+        PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
         Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionLifetime,
         MAX_SESSION_LIFETIME_SECONDS,
         SessionGate, SessionGateMiddleware, SessionRecordStore, SessionTransaction,

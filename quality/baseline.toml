@@ -8,12 +8,12 @@
 "_surface_of_source" = 20
 
 [file_lines]
-"e2e/oidc/prove.py" = 1548
-"src/webauth/oidc_login.py" = 817
+"e2e/oidc/prove.py" = 1546
+"src/webauth/oidc_login.py" = 815
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
-"tests/test_oidc_login.py" = 2320
-"tests/webauth_arrangement.py" = 937
+"tests/test_oidc_login.py" = 2314
+"tests/webauth_arrangement.py" = 935
 
 [function_lines."e2e/oidc/host_app.py"]
 "build_app" = 162
@@ -23,9 +23,6 @@
 
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63
-
-[function_lines."src/webauth/middleware/stack.py"]
-"install_web_auth_middleware" = 72
 
 [function_lines."src/webauth/oidc_login.py"]
 "finish_login" = 70
@@ -37,7 +34,7 @@
 "_defective_key_sets" = 121
 
 [function_lines."tests/test_oidc_login.py"]
-"an_oidc_host" = 144
+"an_oidc_host" = 140
 
 [function_lines."tests/webauth_arrangement.py"]
 "an_auth_app" = 120
