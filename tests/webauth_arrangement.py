@@ -10,7 +10,6 @@ from __future__ import annotations
 import enum
 import hashlib
 import hmac
-import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
@@ -111,7 +110,6 @@ def web_auth_config_arguments() -> dict[str, Any]:
         "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
         "rate_limits": SingleProcessRateLimitBackend(),
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
-        "allowed_hosts_patterns": (re.compile(r"^[^:]+\.example(:\d+)?$"),),
         "session_lifetime": SessionLifetime(
             idle_seconds=SESSION_IDLE_SECONDS,
             absolute_max_age_seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS,

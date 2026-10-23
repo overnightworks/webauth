@@ -5,8 +5,6 @@ CsrfTokenMiddleware: the header token must match the request's one session.
 
 from __future__ import annotations
 
-import re
-
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -18,6 +16,7 @@ from webauth_arrangement import (
     SESSION_COOKIE_NAME,
     SESSION_ID,
     AuthApp,
+    a_session,
     a_web_auth_config,
     an_auth_app,
     session_cookie_header,
@@ -30,9 +29,10 @@ from webauth.middleware import CsrfOriginMiddleware, CsrfTokenMiddleware
 from webauth.policies import CsrfPolicy, PathRules, PathShape, PublicRule
 
 FOREIGN_ORIGIN = "https://evil.test"
+SIBLING_ORIGIN = "https://evil.notes.example"
 OK = {"status": "ok"}
 CROSS_ORIGIN_DETAIL = {"detail": "Cross-origin request rejected"}
-MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header on form submission"}
+MISSING_ORIGIN_DETAIL = {"detail": "Missing Origin header"}
 INVALID_TOKEN_DETAIL = {"detail": "CSRF token missing or invalid"}
 
 
@@ -49,7 +49,7 @@ def an_origin_guarded_client(config: WebAuthConfig | None = None) -> TestClient:
         policy=CsrfPolicy(protected=PathRules(prefixes=("/api/",))),
     )
 
-    @app.api_route(API_PATH, methods=["GET", "POST"])
+    @app.api_route(API_PATH, methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def ok() -> dict[str, str]:
         return OK
 
@@ -75,33 +75,19 @@ def a_protect_everything_client() -> TestClient:
     return TestClient(app, base_url=ALLOWED_ORIGIN)
 
 
-def a_client_allowing_only_pattern(pattern: str) -> TestClient:
-    return an_origin_guarded_client(a_web_auth_config(
-        allowed_hosts_exact=frozenset(),
-        allowed_hosts_patterns=(re.compile(pattern),),
-    ))
-
-
-def _call(method: str, headers: dict[str, str], *, content_type: str | None = None) -> Response:
+def _call(method: str, headers: dict[str, str]) -> Response:
     client = an_origin_guarded_client()
     if method == "GET":
         return client.get(API_PATH, headers=headers)
-    if content_type is not None:
-        return client.post(
-            API_PATH,
-            content=b"n=1",
-            headers={**headers, "content-type": content_type},
-        )
     return client.post(API_PATH, json={"n": 1}, headers=headers)
 
 
 @pytest.mark.parametrize(
-    ("method", "headers", "content_type", "status", "body"),
+    ("method", "headers", "status", "body"),
     [
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-origin"},
-            None,
             200,
             OK,
             id="same-origin-without-origin-passes",
@@ -109,7 +95,6 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-origin", "origin": FOREIGN_ORIGIN},
-            None,
             200,
             OK,
             id="same-origin-with-foreign-origin-passes",
@@ -117,7 +102,6 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
         pytest.param(
             "POST",
             {"sec-fetch-site": "cross-site", "origin": ALLOWED_ORIGIN},
-            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="cross-site-wins-over-allowlisted-origin",
@@ -125,7 +109,6 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-site", "origin": ALLOWED_ORIGIN},
-            None,
             200,
             OK,
             id="same-site-with-allowlisted-origin-passes",
@@ -133,7 +116,6 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
         pytest.param(
             "POST",
             {"sec-fetch-site": "same-site", "origin": FOREIGN_ORIGIN},
-            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="same-site-with-foreign-origin-refused",
@@ -141,7 +123,6 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
         pytest.param(
             "POST",
             {"origin": ALLOWED_ORIGIN},
-            None,
             200,
             OK,
             id="absent-header-allowlisted-origin-passes",
@@ -149,63 +130,48 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
         pytest.param(
             "POST",
             {"origin": FOREIGN_ORIGIN},
-            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="absent-header-foreign-origin-refused",
         ),
         pytest.param(
             "POST",
-            {},
-            None,
-            200,
-            OK,
-            id="absent-both-json-passes",
-        ),
-        pytest.param(
-            "POST",
-            {},
-            "application/x-www-form-urlencoded",
+            {"sec-fetch-site": "same-site"},
             403,
             MISSING_ORIGIN_DETAIL,
-            id="absent-both-form-refused",
+            id="same-site-without-origin-refused",
         ),
         pytest.param(
             "POST",
-            {},
-            "application/json",
-            200,
-            OK,
-            id="absent-both-explicit-json-passes",
-        ),
-        pytest.param(
-            "POST",
-            {},
-            "Text/Plain",
+            {"sec-fetch-site": "same-site", "referer": f"{ALLOWED_ORIGIN}/page"},
             403,
             MISSING_ORIGIN_DETAIL,
-            id="absent-both-capitalised-text-plain-refused",
+            id="same-site-without-origin-with-allowed-referer-refused",
         ),
         pytest.param(
             "POST",
-            {},
-            "APPLICATION/X-WWW-FORM-URLENCODED; charset=utf-8",
+            {"sec-fetch-site": "same-site", "origin": SIBLING_ORIGIN},
             403,
-            MISSING_ORIGIN_DETAIL,
-            id="absent-both-capitalised-urlencoded-form-refused",
+            CROSS_ORIGIN_DETAIL,
+            id="same-site-unlisted-sibling-refused",
         ),
         pytest.param(
             "POST",
-            {},
-            "MULTIPART/FORM-DATA; boundary=x",
+            {"origin": SIBLING_ORIGIN},
             403,
-            MISSING_ORIGIN_DETAIL,
-            id="absent-both-capitalised-multipart-form-refused",
+            CROSS_ORIGIN_DETAIL,
+            id="absent-header-unlisted-sibling-refused",
+        ),
+        pytest.param(
+            "POST",
+            {"sec-fetch-site": "garbage", "origin": ALLOWED_ORIGIN},
+            403,
+            CROSS_ORIGIN_DETAIL,
+            id="unknown-fetch-site-wins-over-allowlisted-origin",
         ),
         pytest.param(
             "POST",
             {"sec-fetch-site": "none"},
-            None,
             403,
             CROSS_ORIGIN_DETAIL,
             id="none-with-post-refused",
@@ -213,7 +179,6 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
         pytest.param(
             "GET",
             {"sec-fetch-site": "cross-site"},
-            None,
             200,
             OK,
             id="safe-method-cross-site-passes",
@@ -223,14 +188,67 @@ def _call(method: str, headers: dict[str, str], *, content_type: str | None = No
 def test_a_request_is_judged_by_sec_fetch_site_then_origin(
     method: str,
     headers: dict[str, str],
-    content_type: str | None,
     status: int,
     body: dict[str, str],
 ) -> None:
-    response = _call(method, headers, content_type=content_type)
+    response = _call(method, headers)
 
     assert response.status_code == status
     assert response.json() == body
+
+
+PROVENANCE_FREE_BODIES = [
+    pytest.param({}, id="no body"),
+    pytest.param({"json": {"n": 1}}, id="json"),
+    pytest.param({"data": {"n": "1"}}, id="urlencoded"),
+    pytest.param({"files": {"f": ("f.txt", b"x")}}, id="multipart"),
+    pytest.param(
+        {"content": b"n=1", "headers": {"content-type": "text/plain"}}, id="text-plain",
+    ),
+    pytest.param(
+        {"content": b"n=1", "headers": {"content-type": "application/octet-stream"}},
+        id="octet-stream",
+    ),
+]
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("body", PROVENANCE_FREE_BODIES)
+def test_a_state_changing_request_without_provenance_is_refused_whatever_its_body(
+    method: str, body: dict[str, object],
+) -> None:
+    client = an_origin_guarded_client()
+
+    response = client.request(method, API_PATH, **body)
+
+    assert response.status_code == 403
+    assert response.json() == MISSING_ORIGIN_DETAIL
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param({"referer": f"{ALLOWED_ORIGIN}/page"}, id="an allowed referer"),
+        pytest.param({"referer": "null"}, id="a null referer"),
+        pytest.param({"referer": "http://[bad"}, id="a referer that cannot be parsed"),
+        pytest.param({"referer": ""}, id="an empty referer"),
+        pytest.param(
+            {"referer": f"https://{ALLOWED_HOST}:password@evil.test/"},
+            id="a referer whose userinfo spells the allowed host",
+        ),
+    ],
+)
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("body", PROVENANCE_FREE_BODIES[1:3])
+def test_the_referer_is_not_read(
+    method: str, headers: dict[str, str], body: dict[str, object],
+) -> None:
+    client = an_origin_guarded_client()
+
+    response = client.request(method, API_PATH, headers=headers, **body)
+
+    assert response.status_code == 403
+    assert response.json() == MISSING_ORIGIN_DETAIL
 
 
 @pytest.mark.parametrize(
@@ -239,13 +257,10 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
         pytest.param({"origin": "null"}, id="a null origin"),
         pytest.param({"origin": "http://"}, id="an origin without a host"),
         pytest.param({"origin": "http://[bad"}, id="an origin that cannot be parsed"),
-        pytest.param({"referer": "null"}, id="a null referer"),
-        pytest.param({"referer": "http://[bad"}, id="a referer that cannot be parsed"),
         pytest.param(
             {"sec-fetch-site": "same-site", "origin": "null"}, id="a null origin on same-site",
         ),
         pytest.param({"origin": ""}, id="an empty origin"),
-        pytest.param({"referer": ""}, id="an empty referer"),
         pytest.param(
             {"origin": "", "referer": f"{ALLOWED_ORIGIN}/page"},
             id="an empty origin beside an allowed referer",
@@ -255,8 +270,8 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
         ),
         pytest.param({"origin": "https://[::1]:evil"}, id="an IPv6 origin with a non-numeric port"),
         pytest.param(
-            {"referer": f"https://{ALLOWED_HOST}:password@evil.test/"},
-            id="a referer whose userinfo spells the allowed host",
+            {"origin": f"https://{ALLOWED_HOST}:password@evil.test"},
+            id="an origin whose userinfo spells the allowed host",
         ),
     ],
 )
@@ -270,20 +285,17 @@ def test_an_origin_that_names_no_host_is_refused_like_a_foreign_one(
 
 
 @pytest.mark.parametrize(
-    ("referer", "status"),
+    "origin",
     [
-        pytest.param("https://app.example/page", 200, id="the host itself"),
-        pytest.param("https://app.example:8000/page", 200, id="the host with a port"),
-        pytest.param("https://app.example@evil.test/", 403, id="the host as userinfo"),
-        pytest.param("https://app.example.evil.test/", 403, id="the host as a prefix"),
+        pytest.param("https://notes.example.evil.test", id="the host as a prefix"),
+        pytest.param("https://notes.example@evil.test", id="the host as userinfo"),
     ],
 )
-def test_a_host_pattern_must_match_the_whole_host_and_port(referer: str, status: int) -> None:
-    client = a_client_allowing_only_pattern(r"app\.example(:\d+)?")
+def test_an_origin_that_only_resembles_the_exact_host_is_refused(origin: str) -> None:
+    response = _call("POST", {"origin": origin})
 
-    response = client.post(API_PATH, json={"n": 1}, headers={"referer": referer})
-
-    assert response.status_code == status
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
 
 
 @pytest.mark.parametrize(
@@ -303,33 +315,35 @@ def test_an_exact_entry_matches_a_bracketed_ipv6_origin(allowed_entry: str, orig
     assert response.status_code == 200
 
 
-def test_a_pattern_without_a_port_refuses_the_host_with_a_port() -> None:
-    client = a_client_allowing_only_pattern(r"app\.example")
-
-    response = client.post(
-        API_PATH, json={"n": 1}, headers={"referer": "https://app.example:8000/"},
-    )
-
-    assert response.status_code == 403
-
-
-def test_a_pattern_alone_admits_its_origin() -> None:
-    client = a_client_allowing_only_pattern(r"^app\.example$")
-
-    response = client.post(API_PATH, json={"n": 1}, headers={"origin": "https://app.example"})
-
-    assert response.status_code == 200
-
-
 @pytest.mark.parametrize("origin", ["http://localhost:8000", "http://127.0.0.1:5173"])
 def test_listing_localhost_and_loopback_admits_their_origins_on_any_port(origin: str) -> None:
     client = an_origin_guarded_client(a_web_auth_config(
-        allowed_hosts_exact=frozenset({"localhost", "127.0.0.1"}), allowed_hosts_patterns=(),
+        allowed_hosts_exact=frozenset({"localhost", "127.0.0.1"}),
     ))
 
     response = client.post(API_PATH, json={"n": 1}, headers={"origin": origin})
 
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("origin", "status"),
+    [
+        pytest.param("https://notes.example:8443", 200, id="the listed port"),
+        pytest.param("https://notes.example:9443", 403, id="another port"),
+        pytest.param("https://notes.example", 403, id="the bare host"),
+    ],
+)
+def test_a_host_listed_with_a_port_admits_only_that_port(origin: str, status: int) -> None:
+    client = an_origin_guarded_client(
+        a_web_auth_config(allowed_hosts_exact=frozenset({"notes.example:8443"})),
+    )
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": origin})
+
+    assert response.status_code == status
+    if status == 403:
+        assert response.json() == CROSS_ORIGIN_DETAIL
 
 
 def test_same_origin_fetch_site_passes_despite_a_null_origin() -> None:
@@ -344,42 +358,69 @@ def test_the_exact_host_with_a_port_is_allowed() -> None:
     assert response.status_code == 200
 
 
-def test_a_json_post_without_either_header_is_allowed() -> None:
-    response = _call("POST", {})
+@pytest.mark.parametrize(
+    ("path", "headers", "status", "body"),
+    [
+        pytest.param(
+            API_PATH, {"origin": FOREIGN_ORIGIN}, 403, CROSS_ORIGIN_DETAIL,
+            id="a route nobody listed is checked by default",
+        ),
+        pytest.param(
+            WEBHOOK_PATH, {"origin": FOREIGN_ORIGIN}, 200, OK,
+            id="a named exempt prefix passes a foreign origin",
+        ),
+        pytest.param(
+            WEBHOOK_SIBLING_PATH, {"origin": FOREIGN_ORIGIN}, 403, CROSS_ORIGIN_DETAIL,
+            id="a sibling of an exempt prefix stays protected",
+        ),
+        pytest.param(
+            WEBHOOK_PATH, {}, 200, OK, id="an exempt prefix passes without provenance",
+        ),
+        pytest.param(
+            WEBHOOK_SIBLING_PATH, {}, 403, MISSING_ORIGIN_DETAIL,
+            id="a sibling of an exempt prefix is refused without provenance",
+        ),
+    ],
+)
+def test_protect_everything_checks_every_route_but_the_exempt_ones(
+    path: str, headers: dict[str, str], status: int, body: dict[str, str],
+) -> None:
+    client = a_protect_everything_client()
+
+    response = client.post(path, json={"n": 1}, headers=headers)
+
+    assert response.status_code == status
+    assert response.json() == body
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
+def test_a_safe_method_without_provenance_reaches_its_route(method: str) -> None:
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config())
+    app.add_middleware(CsrfOriginMiddleware, policy=CsrfPolicy())
+    app.add_api_route(API_PATH, lambda: OK, methods=[method])
+
+    response = TestClient(app, base_url=ALLOWED_ORIGIN).request(method, API_PATH)
 
     assert response.status_code == 200
-    assert response.json() == OK
 
 
-def test_protect_everything_refuses_a_route_nobody_listed() -> None:
-    """A route added later, with no path rule naming it, is checked by default."""
-    client = a_protect_everything_client()
-
-    response = client.post(API_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN})
-
-    assert response.status_code == 403
-    assert response.json() == CROSS_ORIGIN_DETAIL
-
-
-def test_protect_everything_exempts_a_named_prefix() -> None:
-    """A sessionless webhook under the exempt prefix passes a foreign Origin."""
-    client = a_protect_everything_client()
-
-    response = client.post(WEBHOOK_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN})
-
-    assert response.status_code == 200
-    assert response.json() == OK
-
-
-def test_protect_everything_keeps_a_sibling_of_an_exempt_prefix_protected() -> None:
-    client = a_protect_everything_client()
-
-    response = client.post(
-        WEBHOOK_SIBLING_PATH, json={"n": 1}, headers={"origin": FOREIGN_ORIGIN},
+def test_a_valid_session_cookie_is_not_provenance() -> None:
+    auth = an_auth_app(
+        a_session(), gate=True, stack_policies={"csrf_origin": CsrfPolicy()},
     )
+    cookie = session_cookie_header(auth.signed_cookie())
+
+    response = auth.client.post("/optional", headers={"cookie": cookie})
 
     assert response.status_code == 403
-    assert response.json() == CROSS_ORIGIN_DETAIL
+    assert response.json() == MISSING_ORIGIN_DETAIL
+    assert auth.route_runs == []
+    passing = auth.client.post(
+        "/optional", headers={"cookie": cookie, "sec-fetch-site": "same-origin"},
+    )
+    assert passing.status_code == 200
+    assert auth.route_runs == ["/optional"]
 
 
 def test_explicit_protected_rules_refuse_an_exempt_rule() -> None:
@@ -560,3 +601,12 @@ def test_the_csrf_origin_rule_is_chosen_by_the_path_the_router_routes(
 
     assert response.status_code == (403 if refused else 200)
     assert auth.route_runs == ([] if refused else [routed_path])
+
+
+def test_an_exact_exempt_path_reaches_its_route_without_provenance() -> None:
+    auth = a_stack_with_parametrised_post_routes(csrf_origin=HOOK_EXEMPTION)
+
+    response = auth.client.post(HOOK_EXEMPT_PATH)
+
+    assert response.status_code == 200
+    assert auth.route_runs == [HOOK_EXEMPT_PATH]

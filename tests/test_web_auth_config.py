@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from dataclasses import replace
 from decimal import Decimal
@@ -446,17 +445,17 @@ def test_the_configuration_cannot_be_changed_after_it_is_installed() -> None:
     assert replace(config, cookie_secure=False).cookie_secure is False
 
 
-def test_both_host_lists_empty_are_refused_naming_the_fields_and_the_localhost_migration() -> None:
+def test_an_empty_host_list_is_refused_naming_the_field_and_the_localhost_hint() -> None:
     with pytest.raises(ValueError) as refusal:
-        a_web_auth_config(allowed_hosts_exact=frozenset(), allowed_hosts_patterns=())
+        a_web_auth_config(allowed_hosts_exact=frozenset())
 
     message = str(refusal.value)
     assert "allowed_hosts_exact" in message
-    assert "allowed_hosts_patterns" in message
     assert 'allowed_hosts_exact={"localhost", "127.0.0.1"}' in message
 
 
-def test_a_config_with_patterns_and_no_exact_hosts_is_constructed() -> None:
-    a_web_auth_config(
-        allowed_hosts_exact=frozenset(), allowed_hosts_patterns=(re.compile(r"^app\.example$"),),
-    )
+def test_a_single_string_for_the_host_list_is_refused_naming_the_field() -> None:
+    with pytest.raises(ValueError) as refusal:
+        a_web_auth_config(allowed_hosts_exact="notes.example")
+
+    assert "allowed_hosts_exact" in str(refusal.value)

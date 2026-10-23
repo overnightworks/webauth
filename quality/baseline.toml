@@ -13,10 +13,10 @@
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
 "tests/test_oidc_login.py" = 2320
-"tests/webauth_arrangement.py" = 939
+"tests/webauth_arrangement.py" = 937
 
 [function_lines."e2e/oidc/host_app.py"]
-"build_app" = 163
+"build_app" = 162
 
 [function_lines."src/webauth/dependencies.py"]
 "current_user_dependency" = 60

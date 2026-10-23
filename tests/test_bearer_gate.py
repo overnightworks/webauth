@@ -529,12 +529,14 @@ class TestWithoutAGateTheAdminPathsStayWithTheSession:
             401, {"detail": "Authentication required"},
         )
 
-    def test_a_token_alone_on_a_delete_meets_the_csrf_token_check(self) -> None:
+    def test_a_token_alone_on_a_delete_meets_the_csrf_origin_check(self) -> None:
         app = a_bearer_app(gated=False)
 
         response = app.ask(method="DELETE", authorization=bearing(A_TOKEN))
 
-        assert response.status_code == 403
+        assert (response.status_code, response.json()) == (
+            403, {"detail": "Missing Origin header"},
+        )
 
 
 def an_answer_to(app: BearerApp, path: str, **scope: Any) -> tuple[int, dict[str, str]]:

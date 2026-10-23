@@ -10,6 +10,8 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
+- The CSRF origin check refuses a POST, PUT, PATCH or DELETE that sends neither `Sec-Fetch-Site` nor `Origin`, whatever its content type or body, with 403 `Missing Origin header`. Before, only a form submission was refused, and `Referer` stood in for a missing `Origin`; it is no longer read. A sessionless server call (a worker, a webhook, the back-channel logout) goes into `CsrfPolicy.exempt`, and a bearer-admitted request is not checked. A host's test client sends `Sec-Fetch-Site: same-origin` on state-changing requests. The supported browsers are named under [CSRF origin](docs/ARCHITECTURE.md#csrf-origin).
+- `WebAuthConfig.allowed_hosts_patterns` is removed. The origin check and the WebSocket handshake admit only the hosts `allowed_hosts_exact` names, and a single string there is refused. List each host by name; a `*.suffix` entry has no replacement.
 - `open_session` requires the keyword `keeps_id_token: bool`, with no default, so every host states its choice. A host
   that never calls `log_out` passes `False`, and its session rows then hold no ID token. `SessionRecordStore.create`
   takes `id_token: SecretStr | None`, so every typed store widens its own signature.

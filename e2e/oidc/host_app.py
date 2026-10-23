@@ -419,7 +419,6 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         allowed_hosts_exact=frozenset(
             origin.removeprefix("https://") for origin in settings.app_origins
         ),
-        allowed_hosts_patterns=(),
     )
 
     admission = _admission_of(settings)

@@ -47,10 +47,8 @@ from webauth.proxies import resolve_client_ip
 CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
 ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
-NO_PATTERNS = {"allowed_hosts_patterns": ()}
 LOCAL_DEVELOPMENT_HOSTS = {
     "allowed_hosts_exact": frozenset({"localhost", "127.0.0.1"}),
-    **NO_PATTERNS,
 }
 
 
@@ -125,9 +123,8 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
 @pytest.mark.parametrize(
     ("origin", "config_overrides"),
     [
-        pytest.param(ALLOWED_ORIGIN, NO_PATTERNS, id="an exact host"),
-        pytest.param(f"{ALLOWED_ORIGIN}:8443", NO_PATTERNS, id="an exact host on any port"),
-        pytest.param("https://app.example", {}, id="a host matching a pattern"),
+        pytest.param(ALLOWED_ORIGIN, {}, id="an exact host"),
+        pytest.param(f"{ALLOWED_ORIGIN}:8443", {}, id="an exact host on any port"),
         pytest.param("http://localhost:8000", LOCAL_DEVELOPMENT_HOSTS, id="localhost, listed"),
         pytest.param("http://127.0.0.1:5173", LOCAL_DEVELOPMENT_HOSTS, id="127.0.0.1, listed"),
     ],
@@ -205,6 +202,9 @@ def test_a_handshake_without_one_valid_session_cookie_is_refused(
             ConnectionRefusal.FOREIGN_ORIGIN,
             id="a foreign Origin claiming same-origin metadata",
         ),
+        pytest.param(
+            "https://app.example", [], ConnectionRefusal.FOREIGN_ORIGIN, id="a former pattern host",
+        ),
         pytest.param("null", [], ConnectionRefusal.FOREIGN_ORIGIN, id="the null Origin"),
         pytest.param("", [], ConnectionRefusal.FOREIGN_ORIGIN, id="an empty Origin"),
         pytest.param(
@@ -237,7 +237,7 @@ def test_a_handshake_without_exactly_one_allowed_origin_is_refused(
 
 
 def test_a_sibling_host_the_application_does_not_list_is_refused_even_as_same_site() -> None:
-    app = an_auth_app(a_session(), allowed_hosts_patterns=())
+    app = an_auth_app(a_session())
 
     refusal = the_refusal_of(
         app,
