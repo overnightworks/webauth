@@ -119,7 +119,8 @@ class SessionRecord(Protocol):
         The host writes it with ``get_secret_value()`` and returns it wrapped in
         ``SecretStr``; it is at most ``MAX_TOKEN_CHARACTERS`` (8192) ASCII
         characters, the verifier's bound, so the column takes no less. ``None``
-        for a row stored before the host held ID tokens."""
+        for a row stored before the host held ID tokens, or for a session
+        opened by a host that keeps none (``open_session(keeps_id_token=False)``)."""
         ...
 
 
@@ -194,7 +195,7 @@ class SessionRecordStore(Protocol):
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
-        id_token: SecretStr,
+        id_token: SecretStr | None,
     ) -> SessionRecord:
         """Create the session and return it.
 
@@ -202,7 +203,8 @@ class SessionRecordStore(Protocol):
         ends it, and no other row or table holds it. The host writes it with
         ``get_secret_value()``; the library bounds the value only by the 64 KiB
         token response, so the column takes no smaller length. The ID token is
-        part of the row the same way, as ``SessionRecord.id_token`` says.
+        part of the row the same way, as ``SessionRecord.id_token`` says, and
+        ``None`` when the host keeps none.
 
         The store mints the new session's id with at least 128 bits from a
         CSPRNG, in at most 135 characters. The cookie signs the id alone, so a

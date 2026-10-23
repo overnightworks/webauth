@@ -797,9 +797,8 @@ def an_oidc_host(
         admitted_logins.append(outcome)
         with sessions.transaction():
             session = open_session(
-                request, config, outcome,
-                sessions=sessions, lock=lock,
-                max_sessions=max_sessions,
+                request, config, outcome, sessions=sessions, lock=lock,
+                max_sessions=max_sessions, keeps_id_token=True,
             )
         issue_session_cookies(response, session.id, config)
         return {"username": outcome.account.username}
@@ -2146,7 +2145,7 @@ class OpeningStore:
                 id_token=id_token or SecretStr("id-token-of-the-login"),
             ),
             sessions=self.sessions, lock=self.lock,
-            max_sessions=max_sessions,
+            max_sessions=max_sessions, keeps_id_token=True,
         )
 
 

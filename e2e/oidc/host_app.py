@@ -497,7 +497,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             session = open_session(
                 request, config, outcome,
                 sessions=current.sessions, lock=current.lock,
-                max_sessions=None,
+                max_sessions=None, keeps_id_token=True,
             )
         issue_session_cookies(response, session.id, config)
         response.status_code = 303

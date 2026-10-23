@@ -173,7 +173,7 @@ class HostAccounts:
 class HostSessions:
     def create(
         self, user_id: str, *, now: datetime, expires_at: datetime,
-        refresh_token: SecretStr | None, id_token: SecretStr,
+        refresh_token: SecretStr | None, id_token: SecretStr | None,
     ) -> HostSession:
         user = HostAccount(user_id, "someone", "user")
         return HostSession("id", user, now, expires_at, refresh_token, id_token)
@@ -258,7 +258,7 @@ def a_host_opens_a_session(
     lock: WriteLock = HostLock()
     return open_session(
         request, config, admitted,
-        sessions=sessions, lock=lock, max_sessions=None,
+        sessions=sessions, lock=lock, max_sessions=None, keeps_id_token=True,
     )
 
 

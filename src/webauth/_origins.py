@@ -11,14 +11,6 @@ if TYPE_CHECKING:
 __all__ = []
 
 
-def _is_allowed_host(
-    hostname: str,
-    host_and_port: str,
-    exact: frozenset[str],
-) -> bool:
-    return host_and_port in exact or hostname in exact
-
-
 def origin_is_allowed(origin: str, config: WebAuthConfig) -> bool:
     try:
         parsed = urlparse(origin)
@@ -31,4 +23,4 @@ def origin_is_allowed(origin: str, config: WebAuthConfig) -> bool:
     if ":" in hostname:
         hostname = f"[{hostname}]"
     host_and_port = hostname if port is None else f"{hostname}:{port}"
-    return _is_allowed_host(hostname, host_and_port, config.allowed_hosts_exact)
+    return host_and_port in config.allowed_hosts_exact or hostname in config.allowed_hosts_exact

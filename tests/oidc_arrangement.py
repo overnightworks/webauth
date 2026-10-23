@@ -47,6 +47,7 @@ from webauth.oidc import (
     OidcRelyingParty,
     TokenEndpointAnswer,
     TokenRequest,
+    TokenRequestPost,
 )
 from webauth.ports import WallClock
 
@@ -252,12 +253,13 @@ def an_access_token(
 
 def a_relying_party(
     *,
+    post_token_request: TokenRequestPost | None = None,
     fetch_key_set: KeySetFetch | None = None,
     wall_clock: WallClock | None = None,
     monotonic_clock: MonotonicClock | None = None,
 ) -> OidcRelyingParty:
     """The relying party of `APP_CLIENT_ID` at `REALM_ISSUER`, publishing the
-    "current" key by default, that makes no token request."""
+    "current" key by default, that makes no token request unless the caller passes a poster."""
 
     def post_no_token_request(request: TokenRequest) -> TokenEndpointAnswer:
         raise AssertionError(f"a token request was posted to {request.url}")
@@ -278,7 +280,7 @@ def a_relying_party(
     )
     return OidcRelyingParty(
         config,
-        post_token_request=post_no_token_request,
+        post_token_request=post_token_request or post_no_token_request,
         fetch_key_set=fetch_key_set
         or FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key"))),
         wall_clock=wall_clock or FakeClock(float(ACCESS_TOKEN_NOW)),

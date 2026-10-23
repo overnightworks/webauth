@@ -185,6 +185,11 @@ class WebAuthConfig:
                 "cookie_secure must be True or False; it alone decides whether the "
                 "cookies carry Secure and responses carry HSTS",
             )
+        if isinstance(self.allowed_hosts_exact, str):
+            raise ValueError(
+                "allowed_hosts_exact must be a set of hosts, not one string; "
+                'list each host in a set, for example {"notes.example"}',
+            )
         if not self.allowed_hosts_exact:
             raise ValueError(
                 "allowed_hosts_exact is empty, so no Origin would be admitted; "

@@ -452,3 +452,10 @@ def test_an_empty_host_list_is_refused_naming_the_field_and_the_localhost_hint()
     message = str(refusal.value)
     assert "allowed_hosts_exact" in message
     assert 'allowed_hosts_exact={"localhost", "127.0.0.1"}' in message
+
+
+def test_a_single_string_for_the_host_list_is_refused_naming_the_field() -> None:
+    with pytest.raises(ValueError) as refusal:
+        a_web_auth_config(allowed_hosts_exact="notes.example")
+
+    assert "allowed_hosts_exact" in str(refusal.value)
