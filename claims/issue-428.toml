@@ -3,6 +3,6 @@ agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
 role = "builder"
 base = "6bdc7283b2ecb8bd6bd060cd09190ede6c82e0c2"
 branch = "claude/issue-428-keeps-id-token"
-scope = ["CHANGELOG.md", "docs/ARCHITECTURE.md", "e2e/oidc/host_app.py", "quality/baseline.toml", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/test_oidc_login.py", "tests/test_open_session_id_token.py", "tests/typing/oidc_host.py"]
+scope = ["CHANGELOG.md", "docs/ARCHITECTURE.md", "e2e/oidc/host_app.py", "quality/baseline.toml", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests/oidc_arrangement.py", "tests/test_oidc_login.py", "tests/test_open_session_id_token.py", "tests/typing/oidc_host.py"]
 opened_commit = "835c47dd3847693172fa6add69e1583ddee741e3"
 whole_reason = "One port widening and its one writer, open_session, with every caller, the typing host, the e2e pin, the docs and the size baselines of the two grown files."
