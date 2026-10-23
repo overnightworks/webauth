@@ -6,6 +6,13 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.23.0 - Unreleased
+
+**Breaking**
+
+- The CSRF origin check refuses a POST, PUT, PATCH or DELETE that sends neither `Sec-Fetch-Site` nor `Origin`, whatever its content type or body, with 403 `Missing Origin header`. Before, only a form submission was refused, and `Referer` stood in for a missing `Origin`; it is no longer read. A sessionless server call (a worker, a webhook, the back-channel logout) goes into `CsrfPolicy.exempt`, and a bearer-admitted request is not checked. A host's test client sends `Sec-Fetch-Site: same-origin` on state-changing requests. The supported browsers are named under [CSRF origin](docs/ARCHITECTURE.md#csrf-origin).
+- `WebAuthConfig.allowed_hosts_patterns` is removed. The origin check and the WebSocket handshake admit only the hosts `allowed_hosts_exact` names. List each host by name; a `*.suffix` entry has no replacement.
+
 ## 0.22.0
 
 **Breaking**

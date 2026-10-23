@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Final
 
 from starlette.responses import JSONResponse
 
-from webauth._media_types import media_type_of
 from webauth._origins import origin_is_allowed
 from webauth.config import web_auth_config
 from webauth.cookies import _verify_csrf_token
@@ -24,12 +23,6 @@ __all__ = [
 ]
 
 _MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-
-_FORM_CONTENT_TYPES: Final = frozenset({
-    "application/x-www-form-urlencoded",
-    "multipart/form-data",
-    "text/plain",
-})
 
 _CSRF_REFUSAL_DETAIL: Final = "CSRF token missing or invalid"
 _SEC_FETCH_SITE: Final = "sec-fetch-site"
@@ -77,10 +70,6 @@ def _sec_fetch_site_allows(fetch_site: str) -> bool | None:
     return False
 
 
-def _is_form_submission(request: Request) -> bool:
-    return media_type_of(request.headers.get("content-type")) in _FORM_CONTENT_TYPES
-
-
 def _cross_origin_rejection() -> JSONResponse:
     return JSONResponse({"detail": "Cross-origin request rejected"}, status_code=403)
 
@@ -95,17 +84,10 @@ def _origin_check_refusal(request: Request) -> JSONResponse | None:
             return _cross_origin_rejection()
     origin = request.headers.get("origin")
     if origin is None:
-        origin = request.headers.get("referer")
-    if origin is not None:
-        if origin_is_allowed(origin, web_auth_config(request)):
-            return None
-        return _cross_origin_rejection()
-    if _is_form_submission(request):
-        return JSONResponse(
-            {"detail": "Missing Origin header on form submission"},
-            status_code=403,
-        )
-    return None
+        return JSONResponse({"detail": "Missing Origin header"}, status_code=403)
+    if origin_is_allowed(origin, web_auth_config(request)):
+        return None
+    return _cross_origin_rejection()
 
 
 class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
@@ -114,12 +96,11 @@ class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
     Sec-Fetch-Site is read first: the header overrides the Origin
     allowlist for same-origin (passes) and cross-site (refused), while
     same-site is decided by the allowlist; when the header is absent
-    the allowlist is applied as before. When both are absent, a form
-    POST is refused and a JSON POST passes.
+    the allowlist alone decides. A request with neither header is refused
+    whatever its content type or body, and ``Referer`` is never read.
 
-    An ``Origin`` or ``Referer`` that is ``null``, empty, has no host, carries
-    userinfo or a non-numeric port, or cannot be parsed is refused like a
-    foreign origin; an empty ``Origin`` is not replaced by the ``Referer``.
+    An ``Origin`` that is ``null``, empty, has no host, carries userinfo or a
+    non-numeric port, or cannot be parsed is refused like a foreign origin.
     How allowed hosts match is described on ``WebAuthConfig``.
     """
 

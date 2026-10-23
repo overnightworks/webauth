@@ -31,8 +31,6 @@ from webauth.cookies import (
 )
 
 if TYPE_CHECKING:
-    import re
-
     from pydantic import SecretStr
     from starlette.applications import Starlette
 
@@ -144,12 +142,10 @@ class WebAuthConfig:
 
     A client that reads the CSRF cookie by name reads ``csrf_cookie_name``.
 
-    ``allowed_hosts_exact`` and ``allowed_hosts_patterns`` list hostnames, not
-    origins. The CSRF origin check compares them with the hostname of
-    ``Origin``, or of ``Referer`` when ``Origin`` is absent. An exact entry
-    without a port matches that hostname on every port; ``host:port`` matches
-    only that port. A pattern must match ``host`` or ``host:port`` in full. The
-    scheme is never compared. That is sound because cookies do not isolate ports,
+    ``allowed_hosts_exact`` lists hostnames, not origins. The CSRF origin check
+    compares them with the hostname of ``Origin``. An entry without a port
+    matches that hostname on every port; ``host:port`` matches only that port.
+    The scheme is never compared. That is sound because cookies do not isolate ports,
     so a service on another port of that hostname, served over https, receives
     the session cookie anyway, and a plain-http page cannot read the ``Secure``
     ``__Host-`` CSRF cookie while schemeful ``SameSite`` (``strict`` or ``lax``)
@@ -162,7 +158,6 @@ class WebAuthConfig:
     trusted_proxies: TrustedProxies
     rate_limits: RateLimitBackend
     allowed_hosts_exact: frozenset[str]
-    allowed_hosts_patterns: tuple[re.Pattern[str], ...]
     session_lifetime: SessionLifetime
     session_cookie_name: str = _DefaultCookieName(DEFAULT_SESSION_COOKIE_NAME)
     csrf_cookie_name: str = _DefaultCookieName(DEFAULT_CSRF_COOKIE_NAME)
@@ -190,11 +185,11 @@ class WebAuthConfig:
                 "cookie_secure must be True or False; it alone decides whether the "
                 "cookies carry Secure and responses carry HSTS",
             )
-        if not self.allowed_hosts_exact and not self.allowed_hosts_patterns:
+        if not self.allowed_hosts_exact:
             raise ValueError(
-                "allowed_hosts_exact and allowed_hosts_patterns are both empty, so no "
-                "Origin would be admitted; list the hosts this application serves. "
-                'To admit local development as before, use allowed_hosts_exact={"localhost", '
+                "allowed_hosts_exact is empty, so no Origin would be admitted; "
+                "list the hosts this application serves. "
+                'To admit local development, use allowed_hosts_exact={"localhost", '
                 '"127.0.0.1"}',
             )
         self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)

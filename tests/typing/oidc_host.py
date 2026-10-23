@@ -7,7 +7,6 @@ export a host cannot import fails the build instead of the host's next upgrade.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
@@ -219,7 +218,6 @@ def a_host_configures_without_local_credentials() -> WebAuthConfig:
         trusted_proxies=TrustedProxies.parse("127.0.0.1"),
         rate_limits=HostRateLimits(),
         allowed_hosts_exact=frozenset({"host.example"}),
-        allowed_hosts_patterns=(re.compile(r".*\.example"),),
         session_lifetime=SessionLifetime(idle_seconds=3600, absolute_max_age_seconds=86400),
     )
 

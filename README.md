@@ -15,7 +15,7 @@ where the wheel comes from.
 ## Quick start
 
 ```python
-import os
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from pydantic import SecretStr
@@ -30,11 +30,10 @@ from webauth.rate_limit import SingleProcessRateLimitBackend
 
 app = FastAPI()
 config = WebAuthConfig(
-    session_secret=SecretStr(os.environ["SESSION_SECRET"]),
+    session_secret=SecretStr(Path("/run/secrets/session_secret").read_text().strip()),
     trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
     rate_limits=SingleProcessRateLimitBackend(),
     allowed_hosts_exact=frozenset({"app.example.com"}),
-    allowed_hosts_patterns=(),
     session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
 )
 install_web_auth_config(app, config)
@@ -89,7 +88,7 @@ a session inside the configured lifetime in the host's own store, calls
 `issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
 a `Response` and copies both cookies it sets into its client. A state-changing
 request also sends the CSRF cookie's value in the header named
-`config.csrf_header_name` and passes the origin check ([CSRF origin](docs/ARCHITECTURE.md#csrf-origin)).
+`config.csrf_header_name` and sends `Sec-Fetch-Site: same-origin` ([CSRF origin](docs/ARCHITECTURE.md#csrf-origin)).
 When the client keeps the cookies' attributes and `cookie_secure` is on, use an
 `https` base URL.
 

@@ -217,7 +217,9 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
 
         response = app.ask(f"/sub{EXPORT_PATH}", method="DELETE", authorization=bearing(A_TOKEN))
 
-        assert response.status_code == 403
+        assert (response.status_code, response.json()) == (
+            403, {"detail": "Missing Origin header"},
+        )
         assert_answers_no_store(response)
 
     @pytest.mark.parametrize(

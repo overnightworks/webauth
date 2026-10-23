@@ -171,8 +171,10 @@ logout](#back-channel-logout).
 ### CSRF origin
 
 `CsrfOriginMiddleware` refuses a state-changing request that a foreign page originated, by `Sec-Fetch-Site` where a browser sends it and otherwise by comparing
-`Origin` (or `Referer`) with the hostnames in `WebAuthConfig`; a request the bearer gate admitted is not checked, because those routes ignore ambient cookies and need an explicitly supplied credential; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` decides which paths are
+`Origin` with the hostnames in `WebAuthConfig`; a state-changing request with neither header is refused; a request the bearer gate admitted is not checked, because those routes ignore ambient cookies and need an explicitly supplied credential; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` decides which paths are
 checked and defaults to fail-closed.
+
+webauth supports the current releases of Chrome, Edge, Firefox and Safari (macOS and iOS). Each sends `Sec-Fetch-Site` to an https app, and `Origin`, possibly `null`, on every request whose method is not GET or HEAD. A state-changing request that carries neither is refused, whatever its content type; `Referer` is not read.
 
 ### Rate limiting, and the optional Redis extra
 
