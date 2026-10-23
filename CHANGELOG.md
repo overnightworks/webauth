@@ -6,6 +6,14 @@ All notable changes to `overnightworks-webauth` are recorded here, after
 Versions before 0.3.0 and releases without an entry here are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.23.0 - Unreleased
+
+**Breaking**
+
+- `open_session` requires the keyword `keeps_id_token: bool`, with no default, so every host states its choice. A host
+  that never calls `log_out` passes `False`, and its session rows then hold no ID token. `SessionRecordStore.create`
+  takes `id_token: SecretStr | None`, so every typed store widens its own signature.
+
 ## 0.22.0
 
 **Breaking**

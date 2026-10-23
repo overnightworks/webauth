@@ -12,7 +12,7 @@
 "src/webauth/oidc_login.py" = 817
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
-"tests/test_oidc_login.py" = 2321
+"tests/test_oidc_login.py" = 2320
 "tests/webauth_arrangement.py" = 939
 
 [function_lines."e2e/oidc/host_app.py"]
@@ -37,7 +37,7 @@
 "_defective_key_sets" = 121
 
 [function_lines."tests/test_oidc_login.py"]
-"an_oidc_host" = 145
+"an_oidc_host" = 144
 
 [function_lines."tests/webauth_arrangement.py"]
 "an_auth_app" = 120
