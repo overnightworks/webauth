@@ -35,8 +35,9 @@ Versions before 0.3.0 and releases without an entry here are described in the
     clear it.
   - A logout after the row is gone (swept, deleted by the host, ended by back-channel logout or pruned) sends no hint,
     and Keycloak asks once while its own session lives.
-  - The ID token is a secret of the session: a person's data export withholds it (never its value), and erasing a
-    person ends their sessions and so their stored tokens.
+  - Treat the ID token as a secret of the session, like the refresh token: the host's data export lists it under
+    `withheld` with the reason `secret` and never shows its value, and erasing a person ends their sessions and with
+    them the stored tokens.
 - `OidcClientConfig` refuses an `end_session_endpoint` or `post_logout_redirect_uri` whose host is not a plain host and
   optional port, because the logout page's policy names those origins.
 
