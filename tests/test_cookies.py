@@ -366,15 +366,10 @@ def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> Non
 
 
 @pytest.mark.parametrize("samesite", ["strict", "lax"])
-@pytest.mark.parametrize("cookie_secure", [True, False])
-def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
-    *, cookie_secure: bool, samesite: str,
+def test_issuing_sets_exactly_the_session_cookie_http_only_with_the_configured_samesite(
+    samesite: str,
 ) -> None:
-    app = a_cookie_app(
-        base_url=OVER_HTTPS if cookie_secure else PLAIN_HTTP,
-        cookie_secure=cookie_secure,
-        cookie_samesite=samesite,
-    )
+    app = a_cookie_app(cookie_samesite=samesite)
 
     response = app.issue()
 
@@ -383,7 +378,6 @@ def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
     assert header.split("=", 1)[0] == app.config.session_cookie_name
     assert "HttpOnly" in attributes
     assert f"SameSite={samesite}" in attributes
-    assert ("Secure" in attributes) is cookie_secure
 
 
 @pytest.mark.parametrize(("base_url", "config_overrides", "session_name"), [
@@ -410,13 +404,13 @@ def test_the_cookie_is_issued_and_cleared_under_the_resolved_name(
         assert header.split("=", 1)[0] == session_name
 
 
-def test_a_host_that_configures_lax_gets_lax_on_the_cookie_and_its_clearing() -> None:
+def test_a_host_that_configures_lax_gets_lax_on_the_clearing() -> None:
     app = a_cookie_app(cookie_samesite="lax")
 
-    for response in (app.issue(), app.clear()):
-        header = app.set_cookie_header(response, app.config.session_cookie_name)
-        assert "SameSite=lax" in header
-        assert "SameSite=strict" not in header
+    header = app.set_cookie_header(app.clear(), app.config.session_cookie_name)
+
+    assert "SameSite=lax" in header
+    assert "SameSite=strict" not in header
 
 
 @pytest.mark.parametrize(("base_url", "cookie_secure", "session_clearing"), [

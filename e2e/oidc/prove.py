@@ -790,8 +790,7 @@ def the_browser_holds_no_id_token(proof: Proof, width: Width) -> str:
         signed_in(proof, page, scenario)
         assert proof.status_of(page, "/me") == 200
         held = sorted(cookie_name_and_value(cookie)[0] for cookie in app_cookies(page))
-        expected = sorted([DEFAULT_SESSION_COOKIE_NAME])
-        assert held == expected, f"the browser holds {held}"
+        assert held == [DEFAULT_SESSION_COOKIE_NAME], f"the browser holds {held}"
         assert not jws_cookies(page), f"cookies shaped like a JWS: {jws_cookies(page)}"
     return f"after the sign-in the browser holds exactly {held} for the app, none shaped like a JWS"
 

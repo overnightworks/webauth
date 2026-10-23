@@ -229,7 +229,8 @@ class TestAPathNextToTheRootPathIsNotStripped:
 
         response = client.post(NEXT_TO_THE_ROOT_PATH, headers=FOREIGN)
 
-        assert (response.status_code, len(route_runs)) == ((200, 1) if exempted else (403, 0))
+        expected = (200, 1) if exempted else (403, 0)
+        assert (response.status_code, len(route_runs)) == expected
 
 
 class TestACacheControlRuleOfTheParentSelectsThroughAMount:

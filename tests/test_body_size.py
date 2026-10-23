@@ -48,6 +48,7 @@ HEADERS_POLICY = SecurityHeadersPolicy(default_content_security_policy([]))
 TWO_CHUNKS_UNDER_THE_LIMIT_EACH = (b"x" * 60, b"x" * 60)
 ONE_CHUNK_OVER_THE_LIMIT = (b"x" * 120,)
 A_CONFIG = a_web_auth_config()
+SAME_ORIGIN = ((b"sec-fetch-site", b"same-origin"),)
 TOO_LARGE_BODY = b'{"detail":"Request body too large"}'
 
 
@@ -116,13 +117,10 @@ async def drive_post(
     start_send: StartSend = StartSend.PLAIN,
     *,
     app: FastAPI | None = None,
-    headers: tuple[tuple[bytes, bytes], ...] = (),
+    headers: tuple[tuple[bytes, bytes], ...] = SAME_ORIGIN,
 ) -> tuple[list[Message], BaseException | None]:
     app = app or a_body_limited_app()
-    same_origin = ((b"sec-fetch-site", b"same-origin"),)
-    scope = an_http_scope(
-        app, path, method="POST", headers=same_origin + headers, spec_version=spec_version,
-    )
+    scope = an_http_scope(app, path, method="POST", headers=headers, spec_version=spec_version)
     return await drive(app, scope, body_chunks=body_chunks, start_send=start_send)
 
 
@@ -237,7 +235,7 @@ async def test_any_content_length_over_the_limit_is_refused_before_the_route(
     headers = tuple((b"content-length", length) for length in declared_lengths)
 
     sent, raised = await drive_post(
-        "/reads", SPEC_WITHOUT_CONCURRENT_READER, (), headers=headers
+        "/reads", SPEC_WITHOUT_CONCURRENT_READER, (), headers=SAME_ORIGIN + headers
     )
 
     (start,) = starts(sent)

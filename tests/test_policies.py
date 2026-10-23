@@ -194,7 +194,9 @@ class TestAMethodsFieldRefusesASingleString:
         with pytest.raises(ValueError, match="methods"):
             rule(A_PATH, methods=methods)
 
-    @pytest.mark.parametrize(("methods", "applies_to_get"), [(frozenset({"POST"}), False), (None, True)])
+    @pytest.mark.parametrize(
+        ("methods", "applies_to_get"), [(frozenset({"POST"}), False), (None, True)],
+    )
     def test_a_frozenset_or_none_is_accepted_and_selects_its_methods(
         self, rule: Callable[..., Any], methods: frozenset[str] | None, applies_to_get: bool,
     ) -> None:

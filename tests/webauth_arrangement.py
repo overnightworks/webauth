@@ -599,7 +599,7 @@ class AuthApp:
         """A WebSocket handshake; ``cookie`` and ``origin`` are left out when ``None``."""
         sent = list(headers)
         if cookie is not None:
-            sent.append(("cookie", f"{SESSION_COOKIE_NAME}={cookie}"))
+            sent.append(("cookie", f"{self.config.session_cookie_name}={cookie}"))
         if origin is not None:
             sent.append(("origin", origin))
         return self.client.websocket_connect(path, headers=HttpxHeaders(sent))

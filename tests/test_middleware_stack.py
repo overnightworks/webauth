@@ -71,7 +71,6 @@ from webauth.ports import RateLimitBackend
 FOREIGN_ORIGIN = "https://evil.test"
 BODY_LIMIT_BYTES = 100
 RAISING_PATH = "/boom"
-LOGIN_PATH = "/login"
 WEBHOOK_PREFIX = "/webhook/"
 WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
 HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")

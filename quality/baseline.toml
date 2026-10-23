@@ -8,7 +8,7 @@
 "_surface_of_source" = 20
 
 [file_lines]
-"e2e/oidc/prove.py" = 1547
+"e2e/oidc/prove.py" = 1546
 "src/webauth/oidc_login.py" = 815
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261

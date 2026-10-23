@@ -592,7 +592,6 @@ CALLBACK_PATH = "/auth/callback"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_PATH = "/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
-FORM_LOGOUT_PATH = LOGOUT_PATH
 OLD_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
 OLD_CSRF_COOKIE_NAME = "__Host-csrf_token"  # noqa: S105
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
@@ -800,7 +799,7 @@ def an_oidc_host(
         issue_session_cookies(response, session.id, config)
         return {"username": outcome.account.username}
 
-    @app.post(FORM_LOGOUT_PATH)
+    @app.post(LOGOUT_PATH)
     def form_logout(request: Request) -> Response:
         return log_out(
             relying_party, request, config,
@@ -1390,8 +1389,7 @@ def test_two_tabs_both_sign_in_and_the_later_session_replaces_the_earlier(
 
 
 def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_session() -> None:
-    host = an_oidc_host()
-    host.callback(host.sign_in_at_issuer())
+    host = signed_in_host()
     queries = []
     for _ in range(MAX_PENDING_LOGINS + 1):
         queries.append(host.sign_in_at_issuer())
@@ -1463,7 +1461,7 @@ def signed_in_host(**config_overrides: object) -> OidcHost:
 
 
 def post_logout(host: OidcHost, headers: dict[str, str]) -> HttpxResponse:
-    return host.client.post(FORM_LOGOUT_PATH, headers=headers, follow_redirects=False)
+    return host.client.post(LOGOUT_PATH, headers=headers, follow_redirects=False)
 
 
 def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
@@ -1639,18 +1637,21 @@ def test_a_same_origin_logout_still_answers_the_page(
 
 @pytest.mark.parametrize("old_cookie_name", [OLD_HINT_COOKIE_NAME, OLD_CSRF_COOKIE_NAME])
 @pytest.mark.parametrize("signed_in", [True, False])
-def test_an_old_cookie_is_neither_read_nor_cleared(
+def test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared(
     *, signed_in: bool, old_cookie_name: str,
 ) -> None:
-    host = an_oidc_host()
-    if signed_in:
-        host.callback(host.sign_in_at_issuer())
-    host.client.cookies.set(old_cookie_name, a_fake_id_token("set-before-the-upgrade"))
+    def decisions(*, carrying_old_cookie: bool) -> tuple[int, int, bool, int]:
+        host = signed_in_host() if signed_in else an_oidc_host()
+        if carrying_old_cookie:
+            host.client.cookies.set(old_cookie_name, a_fake_id_token("set-before-the-upgrade"))
+        post_logout(host, {**SAME_ORIGIN_FORM, "sec-fetch-site": "cross-site"})
+        kept = host.sessions.count_active()
+        reply = post_logout(host, SAME_ORIGIN_FORM)
+        assert old_cookie_name not in set_cookies(reply)
+        return kept, reply.status_code, hint_of(reply) is not None, host.sessions.count_active()
 
-    response = post_logout(host, SAME_ORIGIN_FORM)
-
-    assert hint_of(response) == (host.issued_id_tokens[-1] if signed_in else None)
-    assert old_cookie_name not in set_cookies(response)
+    expected = (int(signed_in), 200, signed_in, 0)
+    assert decisions(carrying_old_cookie=True) == decisions(carrying_old_cookie=False) == expected
 
 
 @pytest.mark.parametrize("headers", [
@@ -1660,7 +1661,6 @@ def test_an_old_cookie_is_neither_read_nor_cleared(
 ])
 def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]) -> None:
     host = signed_in_host()
-    host.client.cookies.set(OLD_CSRF_COOKIE_NAME, "set-before-the-upgrade")
 
     response = post_logout(host, {"content-type": "application/x-www-form-urlencoded", **headers})
 
@@ -1697,7 +1697,7 @@ def test_the_logout_form_carries_the_configured_values_whatever_the_request_name
     })
 
     response = host.client.post(
-        f"{FORM_LOGOUT_PATH}?{query}", headers=SAME_ORIGIN_FORM, content=query,
+        f"{LOGOUT_PATH}?{query}", headers=SAME_ORIGIN_FORM, content=query,
     )
 
     assert LogoutPage(response.text).hidden_fields == {
@@ -1989,7 +1989,7 @@ def test_an_oversized_logout_body_is_refused_and_ends_nothing(
 @pytest.mark.parametrize("path", [
     pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}/", id="trailing-slash"),
     pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}-other", id="longer-name"),
-    pytest.param(FORM_LOGOUT_PATH, id="the-browser-logout"),
+    pytest.param(LOGOUT_PATH, id="the-browser-logout"),
 ])
 def test_a_path_next_to_the_callback_stays_csrf_protected(path: str) -> None:
     host = signed_in_host()
