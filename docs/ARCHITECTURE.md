@@ -87,7 +87,7 @@ Nothing is provisioned. Only then does it record an admission for this app, this
 memory and the token is never stored. `CsrfOriginMiddleware` and the session gate read that record strictly and step aside, so no cookie decides
 a machine path; `bearer_caller` reads it strictly too, and the loose reader makes `current_user` and `admitted_admin` raise (500) and `admitted_user` answer `None`. A copy of the record
 carried to another path, app or header is no admission. The gate sits inside the rate limit, so a bearer request spends the same budget, and the installer puts a
-`no-store` rule first in the security-headers policy for the gated paths, so every answer there is `no-store`, and webauth sets no cookie there. The README holds the refusal table.
+`no-store` rule first in the security-headers policy for the gated paths, so every answer there is `no-store`, and webauth sets no cookie there. The [host contract](host-contract.md#signed-out-and-refused) holds the refusal table.
 
 ### Reading the session
 
