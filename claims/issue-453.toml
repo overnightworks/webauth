@@ -1,7 +1,0 @@
-claim_id = "1f81ba7819d94bea83ec7430e68b2aaf"
-agent = "Codex webauth-01a16e6c"
-role = "builder"
-base = "b689e54699d9ac34e2c72d77eee60cf17215ec87"
-branch = "codex/issue-453-trace-csrf-and-logout-rules-to-their-dec"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md"]
-opened_commit = "e3e2ede4e795d27df09f958257acbd357dd2f2c0"
