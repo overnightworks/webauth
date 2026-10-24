@@ -47,7 +47,7 @@ e2e = [
 [project.urls]
 Repository = "https://github.com/overnightworks/webauth"
 Issues = "https://github.com/overnightworks/webauth/issues"
-Changelog = "https://github.com/overnightworks/webauth/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/overnightworks/webauth/blob/main/docs/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=77"]
