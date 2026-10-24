@@ -39,6 +39,18 @@ immediate removal requires disabling the user at the issuer together with
 [back-channel logout](ARCHITECTURE.md#back-channel-logout). See
 [Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
 
+Admission never looks up a username and has no local active-user flag; disabling
+people belongs to the issuer ([#279](https://github.com/overnightworks/webauth/issues/279),
+operator ruling 19.10.2026). A host store may still reject a new account's name
+with `UsernameTakenError`. Store-controlled username uniqueness is proven by
+`test_a_store_without_unique_usernames_admits_two_subjects_sharing_one` and
+`test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written`
+in [test_oidc_login.py](../tests/test_oidc_login.py). The absence of a local
+active-user policy is visible in `UserRecord` and `SubjectUserStore` in
+[ports.py](../src/webauth/ports.py), `admit_identity` in
+[oidc_login.py](../src/webauth/oidc_login.py) and `admit_session` in
+[dependencies.py](../src/webauth/dependencies.py).
+
 **When Keycloak is down.** People who are already signed in keep working until
 their app session ends, because the app checks a session in its own store and
 never asks Keycloak. A new sign-in fails at Keycloak: the app sends the browser
@@ -143,7 +155,14 @@ webauth supports the current releases of Chrome, Edge, Firefox and Safari
 
 Every app shows signed-out and refused people the same way. This is the rule
 every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it, and a
-host without the gate follows it itself.
+host without the gate follows it itself. The page/API split, public paths and
+host pages follow [#246](https://github.com/overnightworks/webauth/issues/246),
+operator ruling 19.10.2026; [#349](https://github.com/overnightworks/webauth/issues/349)
+added the enforcing gate. Its page, API and public-path proofs are
+`test_a_page_without_a_session_is_redirected_to_the_start_route_with_next`,
+`test_an_api_call_without_a_session_gets_401_authentication_required` and
+`test_a_public_path_passes_untouched_and_asks_no_store` in
+[test_session_gate.py](../tests/test_session_gate.py).
 
 - **A page without a session** sends the browser straight to the app's start
   route, with `next` naming the page, so the person lands there after signing
@@ -155,6 +174,17 @@ host without the gate follows it itself.
   [The return path](ARCHITECTURE.md#the-return-path). For a
   server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
   [Reading the session](ARCHITECTURE.md#reading-the-session).
+  Keeping the deep link follows [#281](https://github.com/overnightworks/webauth/issues/281),
+  operator ruling 19.10.2026, qualified by
+  [#304](https://github.com/overnightworks/webauth/issues/304) on 20.10.2026:
+  only request-address construction may prepend `root_path`; `start_login`
+  never prepends it to an explicit `return_to`. Proofs:
+  `test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_default_page`
+  in [test_oidc_login.py](../tests/test_oidc_login.py) and
+  `test_only_a_path_of_this_app_is_a_return_path` in
+  [test_paths.py](../tests/test_paths.py). `deep_link_survives_the_login` in
+  [prove.py](../e2e/oidc/prove.py) drives the browser round trip in the hand-run
+  harness, not CI.
 - **A machine route** (see [The host's machine routes](#the-hosts-machine-routes))
   answers 401 with a `WWW-Authenticate: Bearer realm="admin"` challenge, never a
   redirect, and 403 for a valid token without the admin group:
@@ -166,6 +196,14 @@ host without the gate follows it itself.
   | invalid token (any verification failure, an unavailable key set included) | 401 | `Bearer realm="admin", error="invalid_token"` | `Invalid token` |
   | valid token, not an admin | 403 | `Bearer realm="admin", error="insufficient_scope"` | `Admin access required` |
 
+  The refusal contract comes from
+  [#350](https://github.com/overnightworks/webauth/issues/350), operator ruling
+  22.10.2026; [#409](https://github.com/overnightworks/webauth/issues/409)
+  supplies the implementation and precise response table.
+  `test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge` in
+  [test_bearer_gate.py](../tests/test_bearer_gate.py) proves these responses,
+  including 401 when the key set is unavailable.
+
 - **Public paths** are the exception. Each app names its own, and they need
   no session and do not redirect.
 - **The page after signing out** is the app's `post_logout_redirect_uri`. It
@@ -173,12 +211,19 @@ host without the gate follows it itself.
 - **Which refusal shows which page.** "No access" is for
   `AdmissionRefusal.NOT_A_MEMBER`; "Login failed" is for an `OidcRefusal`
   and for `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are
-  setup errors, not missing rights.
+  setup errors, not missing rights. That setup-error page choice is the operator
+  ruling of 20.10.2026, recorded in
+  [c1318d7](https://github.com/overnightworks/webauth/commit/c1318d768afa16148d680e11b10b4359ebff3012).
   Both types are returned by `finish_login`, see
   [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes).
-  A refusal carries no identity, so the page shows no name. A
+  A refusal carries no identity (`AdmissionRefusal` in
+  [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
+  [oidc.py](../src/webauth/oidc.py)), so the page shows no name. A
   `NOT_A_MEMBER` login stores no session, so signing out from "no access"
   follows the missing-ID-token case in [Signing out](#what-every-app-gets).
+  `outsider_is_refused` in [prove.py](../e2e/oidc/prove.py) drives the harness's
+  refusal with no account or session; it is a hand-run browser proof, not a
+  test of every host's page. Page choice and presentation remain host duties.
 - **Look.** The three pages (logged out, no access, login failed), their
   wording and their ways out are the sign-in pattern of
   [ui-style](https://github.com/overnightworks/ui-style) (formerly ui-console); each app takes
@@ -194,13 +239,21 @@ the access token Keycloak issued it in `Authorization: Bearer`. `BearerGate` is 
 `AuthorizedParties`, the `azp` values (hal's client ids) the host admits, read
 from configuration. A route reads the admitted caller with
 `Depends(bearer_caller)`; `BearerCaller.subject` is the token's `sub`, with no
-account and no role.
+account and no role. This follows
+[#350](https://github.com/overnightworks/webauth/issues/350), operator ruling
+22.10.2026, including the accepted defaults for opt-in admission, no session or
+cookie, and shared rate limits; [#409](https://github.com/overnightworks/webauth/issues/409)
+is its implementation, not a separate ruling.
 
 - **What passes.** Only an RS256 `at+jwt` of the app's issuer whose only
   `aud` is the app's client, whose `azp` is allowed and whose `groups` hold the
   admin group or a group below it. Nothing is created or provisioned, and webauth
   emits no event: the host audits the admitted call itself (subject, route,
-  outcome).
+  outcome). `test_the_audience_must_be_the_app_alone` and
+  `test_an_authorized_party_the_host_did_not_allow_is_refused` in
+  [test_access_token.py](../tests/test_access_token.py) prove the audience and
+  `azp` restrictions; [bearer.py](../e2e/oidc/bearer.py) holds the hand-run
+  real-issuer admission proofs.
 - **What it replaces.** On a gated path the cookie, the CSRF check and the
   session gate decide nothing, every answer is `no-store`, and webauth sets no
   cookie. `admitted_user` returns `None`. The same rate
@@ -208,9 +261,17 @@ account and no role.
   is bounded only by it. A session dependency (`current_user`, `admin_user`,
   `admitted_admin`, `verified_session_id`) on a gated path raises, so the library answers 500,
   and `session_id_from_request` reads the cookie, which is the host's duty not to
-  trust there.
+  trust there. `test_the_cookie_counts_for_nothing_beside_a_token` in
+  [test_bearer_admission.py](../tests/test_bearer_admission.py) proves admission
+  uses the token's subject without opening a session transaction.
 - **Token lifetime.** A block at Keycloak reaches the gate only when the token
-  expires, plus the leeway; signing out of a browser leaves the token valid.
+  expires, plus the leeway; signing out of a browser leaves the token valid
+  (#350 sentences 4/5, operator ruling 22.10.2026).
+  `test_an_expired_token_is_admitted_until_expiry_plus_leeway` in
+  [test_access_token.py](../tests/test_access_token.py) proves the expiry boundary.
+  `disabled_person_keeps_the_token`, `sign_out_leaves_the_token` and
+  `short_token_fails_after_exp_and_leeway` in [bearer.py](../e2e/oidc/bearer.py)
+  drive the real-issuer cases in the hand-run harness, not CI.
 - **The paths** are written as every other policy's are; the `PathRules`
   docstring says how.
   They must cover every machine route, a prefix being the safe form. Every method
