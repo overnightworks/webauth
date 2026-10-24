@@ -57,7 +57,7 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
 
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
 `admin_user`, `verified_session_id`) and its docstring says what `session_store`
-and `on_authenticated` are. The sign-in routes are in the [host contract](docs/host-contract.md#openid-connect-login); [`tests/typing/oidc_host.py`](tests/typing/oidc_host.py)
+and `on_authenticated` are. The sign-in routes are in the [host contract](docs/host-contract.md#the-hosts-start-callback-and-logout-routes); [`tests/typing/oidc_host.py`](tests/typing/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
 The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trusted-proxies).
@@ -108,9 +108,6 @@ pass and how a release is made. The commands live under `scripts/`:
   constraints from the setuptools floor in `pyproject.toml`;
 - `scripts/verify-release.sh` downloads a release and checks the checksums and
   build-provenance attestations of its wheel and sdist.
-
-The proof runs against a real issuer are described in
-[`e2e/oidc/README.md`](e2e/oidc/README.md).
 
 ## Licence
 

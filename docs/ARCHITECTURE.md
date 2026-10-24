@@ -81,13 +81,13 @@ position and where a host's own middleware goes. A host whose own middleware is 
 
 ### The bearer gate
 
-`install_web_auth_middleware(..., bearer_gate=BearerGate(...))` declares the host's machine paths once. On every request a path selects (written as `PathRules` says, every method), the gate verifies that request's own `Authorization: Bearer` token with `OidcRelyingParty.verify_access_token` (off the event loop):
-an RS256 `at+jwt` of the issuer whose only `aud` is the app's client, whose `azp` is among `AuthorizedParties`, and whose `groups` give `AppRole.ADMIN` as at login.
-Nothing is provisioned. Only then does it record an admission for this app, this path and a SHA-256 digest of the one header value; the digest lives in request
-memory and the token is never stored. `CsrfOriginMiddleware` and the session gate read that record strictly and step aside, so no cookie decides
-a machine path; `bearer_caller` reads it strictly too, and the loose reader makes `current_user` and `admitted_admin` raise (500) and `admitted_user` answer `None`. A copy of the record
-carried to another path, app or header is no admission. The gate sits inside the rate limit, so a bearer request spends the same budget, and the installer puts a
-`no-store` rule first in the security-headers policy for the gated paths, so every answer there is `no-store`, and webauth sets no cookie there. The [host contract](host-contract.md#signed-out-and-refused) holds the refusal table.
+The [host contract](host-contract.md#the-hosts-machine-routes) owns the path declaration, token requirements and caller outcomes;
+[Signed out and refused](host-contract.md#signed-out-and-refused) owns the refusal table. The gate invokes
+`OidcRelyingParty.verify_access_token` off the event loop and uses `app_role` for admission. Only after verification and admission does it
+record the app, path and SHA-256 digest of the one header value in request memory; the token is never stored.
+`CsrfOriginMiddleware`, the session gate and `bearer_caller` read the record strictly. A copy carried to another path, app or header is no
+admission. Session dependencies use the loose reader to detect a bearer admission. The gate sits inside the rate limit, and the installer
+puts the gated paths' `no-store` rule first in the security-headers policy.
 
 ### Reading the session
 
@@ -112,23 +112,20 @@ back as `None`, the host's default page, and the login still succeeds. The `star
 
 ### Logging out and the ID token hint
 
-`log_out` is the whole logout sequence in one call: it ends the session, clears the cookies and answers a `no-store` page that POSTs the client ID, the post-logout
-redirect URI and the ID token hint to the issuer's end-session endpoint and submits itself, so the issuer ends its own session too and no URL carries the token.
-Where a script cannot run, the page shows one button. The page carries its own Content-Security-Policy, which admits only its one script by hash and posts only to
-the end-session and post-logout origins, and the security-headers middleware leaves that policy and its `Cache-Control` in place ([Trust](#trust)). It makes
-no outbound call, so an issuer that is down still leaves the person signed out of the app. Its docstring holds the rest.
+The [host contract](host-contract.md#what-every-app-gets) owns the sign-out outcomes and missing-hint cases.
+`log_out` reads the row's ID token and deletes the session under the host's lock, even when the row has expired; it neither renews nor
+admits that session. It builds the end-session form without making an outbound call. The page's Content-Security-Policy admits its one
+script by hash and posts only to the end-session and post-logout origins; security-headers middleware preserves that policy and
+`Cache-Control` ([Trust](#trust)).
 
-The login's ID token lives in the session row, next to the refresh token, and ends with it; the browser holds no copy. `open_session` stores it unless the host keeps none (`keeps_id_token=False`, for a host that never logs out), `log_out` reads it from
-the row it is about to delete, whatever the row's lifetime says, and passes it to Keycloak as `id_token_hint`, so Keycloak can end its session without asking the person
-to confirm. The hint is never a credential: webauth does not sign, decode, verify or log it, and Keycloak judges it. A logout after the row is gone (ended by the host,
-swept, pruned, ended by back-channel logout, or stored before the host held ID tokens) sends no hint, and Keycloak asks once while its own session lives. Renewing a
-session and rotating its refresh token leave the login's token as it was.
+`open_session` stores the login's ID token next to the refresh token unless the host chooses `keeps_id_token=False` for a host that never
+logs out. Renewal and refresh-token rotation leave the ID token unchanged. The token's exposure and the consequences of a copy belong
+to [Trust](#trust), items 4 and 8. webauth does not sign, decode, verify or log the hint; Keycloak judges it.
 
 ### Back-channel logout
 
-When a person's session ends at the issuer, the issuer posts a Logout Token to every client that session signed in to.
-`webauth.oidc_login.receive_backchannel_logout` reads that form, has `OidcRelyingParty.verify_logout_token` check the token, and ends every session of its subject,
-in every browser. The host owns the route and the transaction; the route answers 200 only after its commit. The token's signature is the only control, so the route
+`webauth.oidc_login.receive_backchannel_logout` reads the issuer's form, has `OidcRelyingParty.verify_logout_token` check the Logout Token,
+and calls the store's subject-wide deletion for the [sign-out contract](host-contract.md#what-every-app-gets). The host owns the route and the transaction; the route answers 200 only after its commit. The token's signature is the only control, so the route
 must be reachable by the issuer alone. The docstrings of those two names hold the token rules and the setup the route needs.
 
 ### The relying party
@@ -147,8 +144,8 @@ webauth makes no revocation call ([Trust](#trust), item 8). `OidcRelyingParty.wo
 ### Admitting an identity
 
 `admit_identity` turns a verified identity into the account it signs in as, and `finish_login` takes the same `AdmissionConfig`. The host's store is bound to one
-issuer, so an account's `id` is the issuer's subject. Members of `login_group` come in, members of `admin_group` get the admin role, and `EverySubject` and
-`NoAdmins` state on purpose that there is no group to require or no admin. A second service that verifies the issuer's token itself calls `app_role`.
+issuer, so an account's `id` is the issuer's subject. `app_role` owns the group decision described in the
+[host contract](host-contract.md#what-every-app-gets); a second service that verifies the issuer's token itself calls it too.
 
 ## Crosscutting Concepts
 
@@ -162,11 +159,9 @@ builds the policy a host gives it.
 
 ### Session lifetime
 
-`SessionLifetime` holds the two numbers that decide how long someone stays signed in: an idle window and an absolute cap from the session's creation. An open session
-is not re-checked, so the cap is also the worst-case delay before a removal from the host's login group takes effect. The recommended policy for a host that admits
-by `login_group` is a 12-hour cap with an idle window of the same length. Every login checks the group again, and the issuer's SSO session turns that login into a
-redirect the person does not notice. A removal takes effect at once only by disabling the user at the issuer together with [Back-channel
-logout](#back-channel-logout).
+`SessionLifetime` holds an idle window and an absolute cap from the session's creation. Admission does not re-check groups during a session;
+the [host contract](host-contract.md#what-every-app-gets) owns when membership and role changes take effect. The recommended policy for a host
+that admits by `login_group` is a 12-hour cap with an idle window of the same length.
 
 ### CSRF origin
 
@@ -197,19 +192,15 @@ owning section, it links there.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
    - Availability: every connection and read is bounded.
 3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only `log_out`'s page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
-4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. It also holds the login's ID token (unless the host keeps none), which is the person's identity claims and no credential, but whose copy lets its holder end that Keycloak session without asking.
+4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. An ID token stored there carries the person's identity claims, not an authentication credential; a copy nevertheless allows its holder to invoke the [hinted logout](host-contract.md#what-every-app-gets).
 5. **Host infrastructure** (`WallClock`, `WriteLock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
-7. **Bearer caller to library** ([The bearer gate](#the-bearer-gate)): anyone who can reach a gated path is untrusted. The token's signature, issuer, type, audience, `azp` and groups are the control; the admission record keeps a SHA-256 digest of the header in request memory, never the token. Named residues:
-   - a block at the issuer reaches the gate only when the token expires, plus the leeway;
-   - a browser sign-out leaves the token valid;
+7. **Bearer caller to library:** anyone who can reach a gated path is untrusted. [The bearer gate](#the-bearer-gate) owns the verification and admission mechanism; the [host contract](host-contract.md#the-hosts-machine-routes) owns token lifetime, cookie handling and socket exclusions. Named residues:
    - an admin token opens every machine route; there is no sender constraint (no DPoP or mTLS);
    - only the realm keeps a service account out of the admin group;
-   - an unavailable key set answers 401, not 503;
-   - WebSocket scopes are not gated;
-   - host code that reads the cookie itself (`session_id_from_request`) on a machine path trusts it.
+   - key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
 8. **Named residues:**
-   - the ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of a `no-store` page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
+   - the ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of that page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
    - with a `WriteLock` that is released before the host commits (an in-process lock), a back-channel logout of the same account that runs between `finish_login`'s admission and the host's commit after `open_session` deletes nothing of that login, so the session it opens survives; a lock that the request's first `hold` takes and only the host's commit or rollback releases (a transaction-scoped lock) closes that window;
    - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
    - a clock reading past year 9999 fails closed;
