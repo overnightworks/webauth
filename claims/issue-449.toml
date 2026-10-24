@@ -1,0 +1,8 @@
+claim_id = "1f7a3265cbac4f47962cead29a7de4c7"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "ea1e96a6fe383bfc073bd4458d86dddc2a2fd55c"
+branch = "claude/issue-449-readme-front-door"
+scope = ["README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "docs/testing-a-host.md"]
+opened_commit = "04fce7ce45a32c19f5baa4d02155ac1624d001e3"
+whole_reason = "One move of README text into two new documents and the links that point at it."
