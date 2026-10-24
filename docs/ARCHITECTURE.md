@@ -116,10 +116,17 @@ The [host contract](host-contract.md#what-every-app-gets) owns the sign-out outc
 `log_out` reads the row's ID token and deletes the session under the host's lock, even when the row has expired; it neither renews nor
 admits that session. It builds the end-session form without making an outbound call. The page's Content-Security-Policy admits its one
 script by hash and posts only to the end-session and post-logout origins; security-headers middleware preserves that policy and
-`Cache-Control` ([Trust](#trust)).
+`Cache-Control` ([Trust](#trust)). This implements [#418 R4](https://github.com/overnightworks/webauth/issues/418),
+operator ruling 22.10.2026: `test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two_origins`
+in [test_oidc_login.py](../tests/test_oidc_login.py) and
+`test_the_logout_page_keeps_its_policy_and_no_store_and_gets_the_other_headers` in
+[test_security_headers.py](../tests/test_security_headers.py) prove the policy boundary.
+`test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings` in
+[test_oidc_login.py](../tests/test_oidc_login.py) proves the row's hint survives in the answer after deletion
+([#418 R1/R2](https://github.com/overnightworks/webauth/issues/418), operator ruling 22.10.2026).
 
-`open_session` stores the login's ID token next to the refresh token unless the host chooses `keeps_id_token=False` for a host that never
-logs out. Renewal and refresh-token rotation leave the ID token unchanged. The token's exposure and the consequences of a copy belong
+The [host's explicit retention choice](host-contract.md#the-hosts-start-callback-and-logout-routes) decides what `open_session` stores.
+The token's exposure and the consequences of a copy belong
 to [Trust](#trust), items 4 and 8. webauth does not sign, decode, verify or log the hint; Keycloak judges it.
 
 ### Back-channel logout
@@ -165,10 +172,10 @@ that admits by `login_group` is a 12-hour cap with an idle window of the same le
 
 ### CSRF origin
 
-`CsrfOriginMiddleware` refuses a state-changing request that a foreign page originated, by `Sec-Fetch-Site` where a browser sends it and otherwise by comparing
-`Origin` with the hostnames in `WebAuthConfig`, admitting an `http` origin only while `cookie_secure` is off; a state-changing request with neither header is refused; a request the bearer gate admitted is not checked, because those routes ignore ambient cookies and need an explicitly supplied credential; the `WebAuthConfig` docstring holds the matching rule. `CsrfPolicy` names what it exempts: every other state-changing path is checked.
-
-webauth supports the current releases of Chrome, Edge, Firefox and Safari (macOS and iOS). On every request whose method is not GET or HEAD, each sends `Origin`, possibly `null`, and, to an https app, `Sec-Fetch-Site`. A state-changing request that carries neither is refused, whatever its content type; `Referer` is not read.
+`CsrfOriginMiddleware` implements the [host's CSRF contract](host-contract.md#csrf-origin).
+It reads Fetch Metadata before the shared origin matcher; `authenticate_websocket` uses that matcher directly at the handshake.
+The bearer gate records verified admission before the origin middleware runs, so cookie-independent machine calls can bypass it.
+`CsrfPolicy` selects exempt paths; the `WebAuthConfig` docstring owns exact-host and port matching.
 
 ### Rate limiting, and the optional Redis extra
 
