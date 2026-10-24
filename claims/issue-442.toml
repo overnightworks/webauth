@@ -1,0 +1,8 @@
+claim_id = "29a3c1b233364bab849e2ba65f672424"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "75ceedfc78601f6e740793657cf066de3e11b56e"
+branch = "claude/issue-442-ci-measures-branch-coverage"
+scope = [".github/workflows/ci.yml", "AGENTS.md", "pyproject.toml", "tests/gate_arrangement.py", "tests/test_bearer_admission.py", "tests/test_bearer_gate.py", "tests/test_session_gate.py"]
+opened_commit = "5bf6b2c9b4a2ca66a358b96de0be9b74adac1ac5"
+whole_reason = "Bundles #442 and #443, two small test-configuration cards that land as one lane."
