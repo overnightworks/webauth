@@ -1,8 +1,0 @@
-claim_id = "8e71d392a19448e8b51d01c1fd965f29"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "e49285cbf36743fa119f6161fa99611a59d3f420"
-branch = "claude/issue-451-one-owner-per-fact"
-scope = ["README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "docs/testing-a-host.md"]
-opened_commit = "5661592d438e39908b778c91605b242b5bdeaf75"
-whole_reason = "One fact-ownership pass over the documents that hold the duplicated facts."
