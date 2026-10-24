@@ -4,7 +4,8 @@ For a host developer: what a host sees from webauth and what it must provide.
 
 ## Trusted proxies
 
-`trusted_proxies` lists the app's direct peer and every proxy whose address the
+`WebAuthConfig.trusted_proxies` names the trusted proxy addresses for the host.
+It lists the app's direct peer and every proxy whose address the
 `X-Forwarded-For` chain carries; listing every proxy between the client and the
 app is the simple way to be sure. webauth reads `X-Forwarded-For` and
 `X-Forwarded-Proto` and never RFC 7239 `Forwarded`. It reads the chain from the
@@ -12,27 +13,30 @@ right and takes the first address it does not trust as the client, so a proxy
 whose address the chain carries but which the list lacks becomes the client
 address, and every visitor that reaches the app through it shares that address
 and its rate-limit budget. With a CDN, a tunnel and a reverse proxy in front of
-the app, list whichever of their addresses appear in the chain.
+the app, list whichever of their addresses appear in the chain. The operator's
+[edge](https://github.com/overnightworks/edge) project owns that reachability
+infrastructure; the changelog's edge references name this project.
 `trusted_proxies` decides alone only when the ASGI server does not rewrite the
 client address or scheme from those headers, so the host turns the server's own
 forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
 `proxy_headers=False` or `--no-proxy-headers`).
 
-## OpenID Connect login
-
-### What every app gets
+## What every app gets
 
 Every app that signs people in through Keycloak behaves the same way, unless it
-names `EverySubject` or `NoAdmins` under
-[Admitting an identity](ARCHITECTURE.md#admitting-an-identity). The details are in the
-sections linked below.
+configures `EverySubject` to require no login group or `NoAdmins` to grant no
+admin role. The details are in the sections below.
 
 **Who gets in.** Only members of the app's `login_group`, such as
 `/apps/notes`, get in. Members of its `admin_group`, such as
 `/apps/notes/admin`, are admins. Both are decided again at every login, so a
 change in Keycloak takes effect at the person's next sign-in; an app session
 that is already open keeps its access until it ends; a changed admin role
-reaches every open session at the person's next sign-in. See
+reaches every open session at the person's next sign-in. The session's absolute
+cap bounds the delay before a login-group removal takes effect. The issuer's
+SSO session makes a fresh login a redirect the person does not notice; an
+immediate removal requires disabling the user at the issuer together with
+[back-channel logout](ARCHITECTURE.md#back-channel-logout). See
 [Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
 
 **When Keycloak is down.** People who are already signed in keep working until
@@ -45,11 +49,7 @@ the sign-in stop at the app's callback, on the host's refusal page. webauth
 offers no local fallback login. See
 [The store decides every request](ARCHITECTURE.md#the-store-decides-every-request).
 
-**hal on the admin routes.** The host's machine (admin) routes take hal's
-Keycloak access token alone, in `Authorization: Bearer`; the cookie counts for
-nothing there. A block in Keycloak reaches hal when the token expires, plus
-the leeway, and signing out of a browser leaves the token valid. See
-[The host's machine routes](#the-hosts-machine-routes).
+**Machine callers.** See [The host's machine routes](#the-hosts-machine-routes).
 
 **Signing out.** Signing out of an app ends its session in that browser at once
 and shows a short page that posts to Keycloak, which ends the person's Keycloak session in
@@ -58,14 +58,22 @@ person signed in to through that Keycloak session, and each of those apps ends
 all of the person's sessions, on every device. An app they used only on another
 device is not told and keeps them signed in there. On their other devices, the
 next sign-in asks for no password while that device's own Keycloak session
-lasts. Without the session's row (ended, swept, pruned or ended by
-back-channel logout), the app has no ID token to send, and Keycloak asks once
-to confirm while its own session lives; if the realm key that signed that
-token has been deleted since, Keycloak shows an error page instead. See
-[The ID token hint](ARCHITECTURE.md#logging-out-and-the-id-token-hint), [Logging out](ARCHITECTURE.md#logging-out-and-the-id-token-hint) and
-[Back-channel logout](ARCHITECTURE.md#back-channel-logout).
+lasts. The logout page is `no-store`, clears the app's cookies and submits itself;
+where scripts cannot run, it shows one button. If Keycloak is down, the person
+still leaves the app signed out.
 
-#### Signed out and refused
+The page sends the client ID, `post_logout_redirect_uri` and the stored ID token
+as `id_token_hint` by POST to Keycloak's end-session endpoint; no URL carries
+the token. Without the session's row
+(ended by the host, swept, pruned or ended by back-channel logout), or with a row
+that holds no ID token (stored before the host held them or opened with
+`keeps_id_token=False`), it sends no hint, and Keycloak asks once to confirm
+while its own session lives. If the realm key that signed a supplied token has
+been deleted since, Keycloak shows an error page instead. See
+[Logging out and the ID token hint](ARCHITECTURE.md#logging-out-and-the-id-token-hint)
+for the mechanism and its trust boundaries.
+
+## Signed out and refused
 
 Every app shows signed-out and refused people the same way. This is the rule
 every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it, and a
@@ -95,7 +103,7 @@ host without the gate follows it itself.
 - **Public paths** are the exception. Each app names its own, and they need
   no session and do not redirect.
 - **The page after signing out** is the app's `post_logout_redirect_uri`. It
-  never redirects by itself. See [Logging out](ARCHITECTURE.md#logging-out-and-the-id-token-hint).
+  never redirects by itself.
 - **Which refusal shows which page.** "No access" is for
   `AdmissionRefusal.NOT_A_MEMBER`; "Login failed" is for an `OidcRefusal`
   and for `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are
@@ -104,17 +112,17 @@ host without the gate follows it itself.
   [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes).
   A refusal carries no identity, so the page shows no name. A
   `NOT_A_MEMBER` login stores no session, so signing out from "no access"
-  makes Keycloak ask once while its own session lives (see
-  [The ID token hint](ARCHITECTURE.md#logging-out-and-the-id-token-hint)).
+  follows the missing-ID-token case in [Signing out](#what-every-app-gets).
 - **Look.** The three pages (logged out, no access, login failed), their
   wording and their ways out are the sign-in pattern of
-  [ui-console](https://github.com/overnightworks/ui-console); each app takes
+  [ui-style](https://github.com/overnightworks/ui-style) (formerly ui-console); each app takes
   the colours from its own tokens.
 
-### The host's machine routes
+## The host's machine routes
 
-A host declares its machine (admin) paths once, and hal calls them with the
-access token Keycloak issued it. `BearerGate` is passed to
+hal is the operator's CLI for calling an app's machine routes with a bearer
+token. A host declares its machine (admin) paths once, and hal calls them with
+the access token Keycloak issued it in `Authorization: Bearer`. `BearerGate` is passed to
 `install_web_auth_middleware(bearer_gate=...)`; it holds the paths
 (`PathRules`), the app's own `OidcRelyingParty`, the app's `AdmissionConfig` and
 `AuthorizedParties`, the `azp` values (hal's client ids) the host admits, read
@@ -128,12 +136,15 @@ account and no role.
   emits no event: the host audits the admitted call itself (subject, route,
   outcome).
 - **What it replaces.** On a gated path the cookie, the CSRF check and the
-  session gate decide nothing, and every answer is `no-store`. The same rate
+  session gate decide nothing, every answer is `no-store`, and webauth sets no
+  cookie. `admitted_user` returns `None`. The same rate
   limit applies where a rate policy covers the path; a flood of invalid tokens
   is bounded only by it. A session dependency (`current_user`, `admin_user`,
   `admitted_admin`, `verified_session_id`) on a gated path raises, so the library answers 500,
   and `session_id_from_request` reads the cookie, which is the host's duty not to
   trust there.
+- **Token lifetime.** A block at Keycloak reaches the gate only when the token
+  expires, plus the leeway; signing out of a browser leaves the token valid.
 - **The paths** are written as every other policy's are; the `PathRules`
   docstring says how.
   They must cover every machine route, a prefix being the safe form. Every method
@@ -143,11 +154,11 @@ account and no role.
   routes. A sub-app mounted below a gated path keeps its own CSRF and session
   gate, and its `bearer_caller` raises. WebSocket scopes are not gated.
 
-### The host's start, callback and logout routes
+## The host's start, callback and logout routes
 
 The host serves three routes over its one `OidcRelyingParty`: start
 (`start_login`), callback (`finish_login`, then `open_session`) and logout
-(`log_out`), whose answer, a page that posts to Keycloak, the route returns as it is; a
+(`log_out`), whose answer the route returns as it is; a
 single-page app logs out by a top-level form POST to that route. `webauth.oidc_login` carries the pending login in a signed cookie of
 its own, one per login, so the host keeps no server-side store and
 `WebAuthConfig` knows nothing of OpenID Connect. Each function's docstring holds
