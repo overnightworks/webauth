@@ -1,0 +1,8 @@
+claim_id = "628f0cae85824a89b4c914136080e7d6"
+agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
+role = "builder"
+base = "be661a11a3246dbd10cbc0e805ab0e4c3e2a1b92"
+branch = "claude/issue-445-quality-0-6-0"
+scope = [".github/SECURITY.md", ".github/workflows/ci.yml", ".github/workflows/codeql.yml", ".github/workflows/release.yml", "AGENTS.md", "CHANGELOG.md", "README.md", "SECURITY.md", "docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "pyproject.toml", "quality/config.toml"]
+opened_commit = "ca39bff93d7d579cb97df7eb3b5b8f45781f804f"
+whole_reason = "One pin bump whose new root rule needs the two moves and their links in the same change, or the verdict turns red."
