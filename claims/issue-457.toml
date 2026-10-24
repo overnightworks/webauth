@@ -1,0 +1,7 @@
+claim_id = "5aa51935b0ff403da7c2c13b36edd045"
+agent = "Codex webauth-01a16e6c"
+role = "builder"
+base = "13b91eb2926d5219c576212eff156b9669660dba"
+branch = "codex/issue-457-show-the-core-login-flow-in-a-concise-ar"
+scope = ["docs/ARCHITECTURE.md"]
+opened_commit = "b6a40b31acf75db22573292debc3d65c94deaeab"
