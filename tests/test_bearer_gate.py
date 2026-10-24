@@ -11,184 +11,50 @@ import base64
 import hashlib
 import logging
 import threading
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 import pytest
-from fastapi import Depends, Request
+from gate_arrangement import (
+    A_TOKEN,
+    ADMISSION,
+    EXPORT_PATH,
+    MACHINE_PATHS,
+    REALM,
+    REALM_INSUFFICIENT_SCOPE,
+    REALM_INVALID_REQUEST,
+    REALM_INVALID_TOKEN,
+    UNDECLARED_PATH,
+    BearerApp,
+    a_bearer_app,
+    a_key_set_answering,
+    a_token,
+    assert_answers_no_store,
+    assert_no_store_and_no_cookie,
+    bearing,
+)
 from httpx import Response
 from oidc_arrangement import (
     ABSENT,
-    ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
-    FakeClock,
-    FakeKeySetEndpoint,
     a_relying_party,
     an_access_token,
-    key_set_document,
-    public_jwk,
-    rsa_key,
 )
-from starlette.middleware import Middleware
 from webauth_arrangement import (
-    ADMIN_ROLE,
     HTTPS_TEST_SERVER,
-    AuthApp,
-    FakeUser,
-    a_session,
-    an_auth_app,
     an_http_scope,
     drive,
-    session_cookie_header,
     starts,
 )
 
 from webauth.https_client import KeySetFetchError
-from webauth.middleware import BearerGate, bearer_caller
+from webauth.middleware import BearerGate
 from webauth.oidc_login import AdmissionConfig, NoAdmins
 from webauth.policies import AuthorizedParties, PathRules, PathShape, PublicRule
-from webauth.ports import BearerCaller
 
-MACHINE_PREFIX = "/api/admin/"
-EXPORT_PATH = "/api/admin/export"
-UNDECLARED_PATH = "/api/admin/forgotten"
-RAISING_PATH = "/api/admin/boom"
-PEOPLE_PATH = "/api/admin/people/{subject}/export"
-UNGATED_EXPORT_PATH = "/ungated-export"
 HEALTH_PATH = "/health"
 GATE_LOGGER = "webauth.middleware.bearer_gate"
-REALM = 'Bearer realm="admin"'
-REALM_INVALID_REQUEST = f'{REALM}, error="invalid_request"'
-REALM_INVALID_TOKEN = f'{REALM}, error="invalid_token"'
-REALM_INSUFFICIENT_SCOPE = f'{REALM}, error="insufficient_scope"'
-ADMISSION = AdmissionConfig(
-    bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
-)
-MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
-
-
-def a_token(**claims: Any) -> str:
-    return an_access_token(claims=claims)
-
-
-def bearing(token: str) -> tuple[str, ...]:
-    return (f"Bearer {token}",)
-
-
-def a_bearer_gate(
-    *,
-    paths: PathRules = MACHINE_PATHS,
-    key_sets: FakeKeySetEndpoint | None = None,
-    clock: FakeClock | None = None,
-) -> BearerGate:
-    return BearerGate(
-        paths=paths,
-        relying_party=a_relying_party(fetch_key_set=key_sets, wall_clock=clock),
-        admission=ADMISSION,
-        authorized_parties=AuthorizedParties(frozenset({"hal"})),
-    )
-
-
-def a_key_set_answering(response: bytes | Exception | None = None) -> FakeKeySetEndpoint:
-    document = key_set_document(public_jwk(rsa_key("current"), "current-key"))
-    return FakeKeySetEndpoint(document if response is None else response)
-
-
-@dataclass
-class BearerApp:
-    auth: AuthApp
-    key_sets: FakeKeySetEndpoint
-    clock: FakeClock
-    cookie: str = field(default="")
-
-    def ask(
-        self,
-        path: str = EXPORT_PATH,
-        *,
-        method: str = "GET",
-        authorization: tuple[str, ...] = (),
-        cookie: bool = False,
-        headers: dict[str, str] | None = None,
-        **request: Any,
-    ) -> Response:
-        sent = [("authorization", value) for value in authorization]
-        sent += list((headers or {}).items())
-        if cookie:
-            sent.append(("cookie", self.cookie))
-        return self.auth.client.request(method, path, headers=sent, **request)
-
-
-def add_machine_routes(auth: AuthApp) -> None:
-    def ran(request: Request) -> None:
-        auth.route_runs.append(request.scope["path"])
-
-    @auth.app.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
-    def export(
-        request: Request, caller: BearerCaller = Depends(bearer_caller),
-    ) -> dict[str, str]:
-        ran(request)
-        return {"subject": caller.subject}
-
-    @auth.app.api_route(UNDECLARED_PATH, methods=["GET", "DELETE"])
-    def forgotten(request: Request) -> dict[str, str]:
-        ran(request)
-        return {"ran": "without bearer_caller"}
-
-    @auth.app.api_route(PEOPLE_PATH, methods=["GET"])
-    def person(request: Request, subject: str) -> dict[str, str]:
-        ran(request)
-        return {"subject": subject}
-
-    @auth.app.api_route(UNGATED_EXPORT_PATH, methods=["GET", "DELETE"])
-    def ungated_export(
-        request: Request, caller: BearerCaller = Depends(bearer_caller),
-    ) -> dict[str, str]:
-        ran(request)
-        return {"subject": caller.subject}
-
-    @auth.app.get(RAISING_PATH)
-    def raising(_caller: BearerCaller = Depends(bearer_caller)) -> None:
-        raise RuntimeError("the route failed")
-
-
-def a_bearer_app(
-    *,
-    paths: PathRules = MACHINE_PATHS,
-    key_sets: FakeKeySetEndpoint | None = None,
-    gated: bool = True,
-    policies: dict[str, Any] | None = None,
-    inner_middleware: tuple[Middleware, ...] = (),
-    **auth_app_keywords: Any,
-) -> BearerApp:
-    """An app whose machine paths sit behind a bearer gate (or none, when `gated` is false).
-
-    It serves `EXPORT_PATH` and `UNGATED_EXPORT_PATH` (read `bearer_caller`),
-    `UNDECLARED_PATH` and `PEOPLE_PATH` (read nothing) and `RAISING_PATH`, besides the
-    arrangement's own routes; the session store holds an admin's session, whose cookie
-    is `BearerApp.cookie`.
-    """
-    key_sets = key_sets or a_key_set_answering()
-    clock = FakeClock(float(ACCESS_TOKEN_NOW))
-    record = a_session(user=FakeUser(role=ADMIN_ROLE))
-    gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock)
-    stack = {"bearer_gate": gate} if gated else {}
-    auth = an_auth_app(
-        record,
-        gate=True,
-        raise_server_exceptions=False,
-        stack_policies={**stack, **(policies or {})},
-        **auth_app_keywords,
-    )
-
-    auth.app.user_middleware.extend(inner_middleware)
-
-    add_machine_routes(auth)
-
-    return BearerApp(
-        auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
-    )
 
 
 @dataclass(frozen=True)
@@ -217,7 +83,6 @@ INSUFFICIENT_SCOPE = Answer(
     403, REALM_INSUFFICIENT_SCOPE, "Admin access required", logging.WARNING,
     ("insufficient-scope",),
 )
-A_TOKEN = a_token()
 PLAIN_GET: dict[str, Any] = {}
 FORM_BODY_DELETE: dict[str, Any] = {"method": "DELETE", "data": {"access_token": "throwaway"}}
 ONLY_THE_APP_GROUP = a_token(groups=["/apps/x"])
@@ -262,14 +127,6 @@ REFUSED = [
                  id="T03c-no-groups"),
 ]
 
-
-def assert_no_store_and_no_cookie(headers: Mapping[str, str]) -> None:
-    assert headers["cache-control"] == "no-store"
-    assert "set-cookie" not in headers
-
-
-def assert_answers_no_store(response: Response) -> None:
-    assert_no_store_and_no_cookie(response.headers)
 
 
 @pytest.mark.parametrize(("lines", "query", "key_set_response", "answer", "sent"), REFUSED)

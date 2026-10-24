@@ -81,6 +81,9 @@ extend-immutable-calls = ["fastapi.Depends"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.coverage.run]
+branch = true
+
 [tool.deptry.per_rule_ignores]
 # rate_limit imports redis only under TYPE_CHECKING, which deptry does not count as use
 DEP002 = ["redis"]

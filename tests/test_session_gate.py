@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import anyio
 import pytest
-from fastapi import Depends, FastAPI, Request, WebSocket
+from fastapi import FastAPI
+from gate_arrangement import (
+    ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH,
+    ADMITTED_ADMIN_PATH,
+    ADMITTED_ADMIN_PATHS,
+    WEBSOCKET_ADMITTED_ADMIN_PATH,
+    ScopeRelay,
+    relayed,
+    with_admitted_admin_routes,
+)
 from httpx import Response
 from starlette.websockets import WebSocketDisconnect
 from webauth_arrangement import (
@@ -40,8 +49,7 @@ from webauth_arrangement import (
     starts,
 )
 
-from webauth.dependencies import ConnectionRefusal, current_user_dependency
-from webauth.middleware import admitted_admin
+from webauth.dependencies import ConnectionRefusal
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
@@ -55,7 +63,6 @@ from webauth.ports import AuthenticatedUser, SessionTransaction
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from starlette.types import ASGIApp, Receive, Scope, Send
 
 LOGIN_PATH = "/login"
 HTML = "text/html"
@@ -376,47 +383,9 @@ class TestAdmittedUser:
             ask(app, "/health", cookie=cookie)
 
 
-ADMITTED_ADMIN_PATH = "/admitted-admin"
-ADMITTED_ADMIN_DEPENDENCY_PATH = "/admitted-admin-dependency"
-ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH = "/admitted-admin-after-current-user"
-ADMITTED_ADMIN_PATHS = (ADMITTED_ADMIN_PATH, ADMITTED_ADMIN_DEPENDENCY_PATH)
-WEBSOCKET_ADMITTED_ADMIN_PATH = "/ws-admitted-admin"
 AUTHENTICATION_REQUIRED = {"detail": "Authentication required"}
 ADMIN_REQUIRED = {"detail": "Admin access required"}
 OPERATOR_ROLE = "operator"
-
-
-def with_admitted_admin_routes(app: AuthApp) -> AuthApp:
-    """The routes that read ``admitted_admin``, added to an application of the arrangement."""
-    dependencies = current_user_dependency(
-        session_store=lambda: app.sessions, on_authenticated=app.authenticated.append,
-    )
-
-    @app.app.get(ADMITTED_ADMIN_PATH)
-    def reading_admitted_admin(request: Request) -> dict[str, str]:
-        app.route_runs.append(request.url.path)
-        return {"username": admitted_admin(request).username}
-
-    @app.app.get(ADMITTED_ADMIN_DEPENDENCY_PATH)
-    def depending_on_admitted_admin(
-        request: Request, admin: AuthenticatedUser = Depends(admitted_admin),
-    ) -> dict[str, str]:
-        app.route_runs.append(request.url.path)
-        return {"username": admin.username}
-
-    @app.app.get(ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH)
-    def reading_admitted_admin_after_current_user(
-        request: Request, _account: AuthenticatedUser = Depends(dependencies.current_user),
-    ) -> dict[str, str]:
-        return {"username": admitted_admin(request).username}
-
-    @app.app.websocket(WEBSOCKET_ADMITTED_ADMIN_PATH)
-    async def reading_admitted_admin_of_a_websocket(websocket: WebSocket) -> None:
-        admitted_admin(websocket)
-        await websocket.accept()
-        await websocket.close()
-
-    return app
 
 
 def a_gated_app_of(role: str, **keywords: Any) -> AuthApp:
@@ -626,37 +595,6 @@ class TestOrder:
         spent = a_full_stack_app()
         post(spent, **same_origin)
         assert post(spent, **same_origin).status_code == 429
-
-
-@dataclass
-class ScopeRelay:
-    """What an outer host middleware saw the inner app add to the scope, and what it replays."""
-
-    added: dict[str, Any] = field(default_factory=dict)
-    replay: dict[str, Any] = field(default_factory=dict)
-
-
-class RelayingScope:
-    """Outer middleware: records the scope entries the inner app adds, and plants others."""
-
-    def __init__(self, app: ASGIApp, relay: ScopeRelay) -> None:
-        self._app = app
-        self._relay = relay
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self._app(scope, receive, send)
-            return
-        known = set(scope)
-        scope.update(self._relay.replay)
-        await self._app(scope, receive, send)
-        self._relay.added = {key: scope[key] for key in set(scope) - known}
-
-
-def relayed(app: AuthApp) -> ScopeRelay:
-    relay = ScopeRelay()
-    app.app.add_middleware(RelayingScope, relay=relay)
-    return relay
 
 
 class TestARecordedAdmissionBelongsToItsRequest:

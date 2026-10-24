@@ -11,15 +11,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from oidc_arrangement import (
-    ACCESS_TOKEN_LEEWAY_SECONDS,
-    ACCESS_TOKEN_LIFETIME_SECONDS,
-    ACCESS_TOKEN_NOW,
-    OPERATOR_SUBJECT,
-)
-from starlette.middleware import Middleware
-from test_bearer_gate import (
+from gate_arrangement import (
     A_TOKEN,
+    ADMITTED_ADMIN_PATH,
+    ADMITTED_ADMIN_PATHS,
     EXPORT_PATH,
     MACHINE_PATHS,
     REALM,
@@ -31,13 +26,16 @@ from test_bearer_gate import (
     a_bearer_gate,
     assert_answers_no_store,
     bearing,
-)
-from test_session_gate import (
-    ADMITTED_ADMIN_PATH,
-    ADMITTED_ADMIN_PATHS,
     relayed,
     with_admitted_admin_routes,
 )
+from oidc_arrangement import (
+    ACCESS_TOKEN_LEEWAY_SECONDS,
+    ACCESS_TOKEN_LIFETIME_SECONDS,
+    ACCESS_TOKEN_NOW,
+    OPERATOR_SUBJECT,
+)
+from starlette.middleware import Middleware
 from webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
     HTTPS_TEST_SERVER,
