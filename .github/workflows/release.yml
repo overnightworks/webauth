@@ -68,8 +68,8 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if ! grep -qxF "## ${version}" CHANGELOG.md; then
-            echo "CHANGELOG.md has no '## ${version}' heading for tag ${GITHUB_REF_NAME}" >&2
+          if ! grep -qxF "## ${version}" docs/CHANGELOG.md; then
+            echo "docs/CHANGELOG.md has no '## ${version}' heading for tag ${GITHUB_REF_NAME}" >&2
             exit 1
           fi
 

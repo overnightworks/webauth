@@ -10,7 +10,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
 
 **Breaking**
 
-- The CSRF origin check refuses a POST, PUT, PATCH or DELETE that sends neither `Sec-Fetch-Site` nor `Origin`, whatever its content type or body, with 403 `Missing Origin header`. Before, only a form submission was refused, and `Referer` stood in for a missing `Origin`; it is no longer read. A sessionless server call (a worker, a webhook, the back-channel logout) goes into `CsrfPolicy.exempt`, and a bearer-admitted request is not checked. A host's test client sends `Sec-Fetch-Site: same-origin` on state-changing requests. The supported browsers are named under [CSRF origin](docs/ARCHITECTURE.md#csrf-origin).
+- The CSRF origin check refuses a POST, PUT, PATCH or DELETE that sends neither `Sec-Fetch-Site` nor `Origin`, whatever its content type or body, with 403 `Missing Origin header`. Before, only a form submission was refused, and `Referer` stood in for a missing `Origin`; it is no longer read. A sessionless server call (a worker, a webhook, the back-channel logout) goes into `CsrfPolicy.exempt`, and a bearer-admitted request is not checked. A host's test client sends `Sec-Fetch-Site: same-origin` on state-changing requests. The supported browsers are named under [CSRF origin](ARCHITECTURE.md#csrf-origin).
 - `WebAuthConfig.allowed_hosts_patterns` is removed. The origin check and the WebSocket handshake admit only the hosts `allowed_hosts_exact` names, and a single string there is refused. List each host by name; a `*.suffix` entry has no replacement.
 - `open_session` requires the keyword `keeps_id_token: bool`, with no default, so every host states its choice. A host
   that never calls `log_out` passes `False`, and its session rows then hold no ID token. `SessionRecordStore.create`
@@ -666,7 +666,7 @@ Versions before 0.3.0 and releases without an entry here are described in the
 - `COOKIE_PATH`, `issue_session_cookies` and `clear_session_cookies` moved from
   `webauth.login` to `webauth.cookies`. `webauth.login` no longer exports them
   and keeps no alias: import them from `webauth.cookies`.
-- The 0.14 line receives no further fixes; see [SECURITY.md](SECURITY.md). A host
+- The 0.14 line receives no further fixes; see [SECURITY.md](../.github/SECURITY.md). A host
   on 0.14.x moves to the OpenID Connect login to receive fixes.
 - The session cookie's signature is an HMAC-SHA256 over `session:` and the session
   identifier, so a signature made for another purpose is no session cookie. Cookies
@@ -883,7 +883,7 @@ This is the last release with password parts.
   through the host's `HTTPException` handler. A response that fails after it
   started streaming now ends incomplete, and its exception reaches the server; it
   used to end as a complete response.
-- `install_web_auth_middleware` (see [Middleware order](docs/ARCHITECTURE.md#middleware-order))
+- `install_web_auth_middleware` (see [Middleware order](ARCHITECTURE.md#middleware-order))
   installs the whole stack in the order that makes every library refusal carry
   the headers. It refuses, before touching the app, a token policy without an
   origin policy, a token policy that exempts paths the origin policy does not
@@ -943,7 +943,7 @@ when `timeout_seconds` exceeds it instead of capping it silently.
 v0.12.0 adds the RS256 verifier `webauth.jwt_verification` (install the
 `jwt` extra), a cookie lifetime separate from the idle window
 (`cookie_max_age_seconds`), and an absolute cap for `IdleWindowLiveness`
-(`absolute_max_age_seconds`) — see [Session lifetime](docs/ARCHITECTURE.md#session-lifetime). It
+(`absolute_max_age_seconds`) — see [Session lifetime](ARCHITECTURE.md#session-lifetime). It
 also refuses at construction what used to fail later: every lifetime —
 `session_max_age_seconds`, `cookie_max_age_seconds`, and the windows and caps
 of both liveness policies — must be a positive whole number of seconds, so a

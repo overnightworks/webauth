@@ -262,8 +262,8 @@ Tags are never moved; a broken release gets the next patch tag.
 
 The version follows [semantic versioning](https://semver.org/). While it is 0.x,
 a minor release may break a public contract and says so under **Breaking** in the
-[CHANGELOG](CHANGELOG.md); a patch release never does. Only the latest minor
-release receives security fixes, as [SECURITY.md](SECURITY.md) says.
+[CHANGELOG](docs/CHANGELOG.md); a patch release never does. Only the latest minor
+release receives security fixes, as [SECURITY.md](.github/SECURITY.md) says.
 
 A module's public names are the names its `__all__` lists. Every other name it
 defines starts with an underscore, and a module whose name starts with one (such

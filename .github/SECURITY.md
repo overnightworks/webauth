@@ -10,7 +10,7 @@ Please do not open a public issue or pull request for a vulnerability.
 
 ## Scope
 
-What the library defends against, and what it trusts, is the [Trust](docs/ARCHITECTURE.md#trust) section of the architecture document.
+What the library defends against, and what it trusts, is the [Trust](../docs/ARCHITECTURE.md#trust) section of the architecture document.
 
 ## Supported versions
 
