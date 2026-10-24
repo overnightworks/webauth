@@ -71,7 +71,73 @@ that holds no ID token (stored before the host held them or opened with
 while its own session lives. If the realm key that signed a supplied token has
 been deleted since, Keycloak shows an error page instead. See
 [Logging out and the ID token hint](ARCHITECTURE.md#logging-out-and-the-id-token-hint)
-for the mechanism and its trust boundaries.
+for the mechanism and its trust boundaries. The POST page and fallback follow
+[#418 R4](https://github.com/overnightworks/webauth/issues/418), operator ruling
+22.10.2026; `test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint`
+and `test_a_same_origin_logout_still_answers_the_page` in
+[test_oidc_login.py](../tests/test_oidc_login.py) prove the response shape,
+including a missing hint. Browser behavior is driven by `logout` and
+`logout_after_the_app_session_ended` in [prove.py](../e2e/oidc/prove.py) and
+`logout_through_the_page` in [engines.py](../e2e/oidc/engines.py).
+These are hand-run browser proofs, not CI tests; [#420's review journal](https://github.com/overnightworks/webauth/issues/420#issuecomment-6351975830)
+records the page implementation's browser evidence.
+
+An old hint cookie is neither read nor cleared and expires by its own `Max-Age`,
+at most the absolute session cap after the host's upgrade
+([#418 R5](https://github.com/overnightworks/webauth/issues/418), operator ruling
+22.10.2026). `test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared`
+in [test_oidc_login.py](../tests/test_oidc_login.py) proves it leaves the
+response and session outcome unchanged.
+
+## CSRF origin
+
+Every app supplies `csrf_origin=CsrfPolicy(...)` when installing the middleware;
+there is no frontend CSRF-token obligation. A state-changing request (POST, PUT,
+PATCH or DELETE) needs trustworthy provenance regardless of its body or content
+type. `Sec-Fetch-Site: same-origin` passes; `same-site` or an absent Fetch
+Metadata header falls back to `Origin`; every other Fetch Metadata value is
+refused. Without either header the request is refused, and `Referer` is never
+read. These are [#429 S-1, S-3, S-5 and S-6](https://github.com/overnightworks/webauth/issues/429),
+operator ruling 23.10.2026. The proofs are
+`test_a_request_is_judged_by_sec_fetch_site_then_origin`,
+`test_a_state_changing_request_without_provenance_is_refused_whatever_its_body`,
+`test_the_referer_is_not_read` and
+`test_a_session_request_is_decided_by_its_provenance_whatever_token_material_it_carries`
+in [test_csrf.py](../tests/test_csrf.py), plus
+`TestRefusedInstallation.test_an_install_without_csrf_origin_is_refused_before_touching_the_app`
+in [test_middleware_stack.py](../tests/test_middleware_stack.py).
+
+Only verified bearer admission and the sessionless server paths the host names
+in `CsrfPolicy.exempt` bypass this check; an adjacent path is still checked
+([#429 S-2](https://github.com/overnightworks/webauth/issues/429), operator ruling
+23.10.2026). Proofs: `test_a_bearer_request_needs_no_csrf_origin_header_or_cookie`
+in [test_bearer_admission.py](../tests/test_bearer_admission.py) and
+`test_protect_everything_checks_every_route_but_the_exempt_ones` in
+[test_csrf.py](../tests/test_csrf.py).
+
+The `Origin` fallback matches exact hosts in `WebAuthConfig.allowed_hosts_exact`,
+never host patterns; its docstring owns port matching. With `cookie_secure` on,
+the origin must use HTTPS; with it off, the scheme is not compared. This also
+holds for WebSocket handshakes, which check `Origin` directly
+([#429 S-4 and P-3](https://github.com/overnightworks/webauth/issues/429), operator
+ruling 23.10.2026). Proofs: `test_an_origin_that_only_resembles_the_exact_host_is_refused`
+in [test_csrf.py](../tests/test_csrf.py), and
+`test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on` in both that
+module and [test_websocket_auth.py](../tests/test_websocket_auth.py).
+
+An old CSRF cookie changes no decision and is neither read nor cleared; it
+expires by its own `Max-Age` ([#429 P-2](https://github.com/overnightworks/webauth/issues/429),
+operator ruling 23.10.2026). Proofs:
+`test_an_old_csrf_cookie_changes_no_decision_signed_in_or_out` in
+[test_csrf.py](../tests/test_csrf.py) and
+`test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared` in
+[test_oidc_login.py](../tests/test_oidc_login.py).
+
+webauth supports the current releases of Chrome, Edge, Firefox and Safari
+(macOS and iOS). On every request whose method is not GET or HEAD, each sends
+`Origin`, possibly `null`, and, to an HTTPS app, `Sec-Fetch-Site`
+([#429 S-3](https://github.com/overnightworks/webauth/issues/429), operator ruling
+23.10.2026).
 
 ## Signed out and refused
 
@@ -171,3 +237,16 @@ The library never commits: the host commits an admitted login before it issues
 the cookies. A pending login is single-use because its cookie is cleared and the
 issuer accepts a code once; webauth keeps no replay store. The `finish_login`
 docstring holds the callback's outcomes and the host's duties.
+
+`open_session` requires the host's explicit `keeps_id_token` choice, with no
+default. A host that never logs out passes `False`: its session row keeps no
+ID token, while refresh-token storage is unchanged. With `True`, the row keeps
+the login's ID token for logout. Renewal and refresh-token rotation preserve
+that choice and the original token. This is [#418 R1/R2](https://github.com/overnightworks/webauth/issues/418)
+(operator ruling 22.10.2026), qualified by [#428 R1](https://github.com/overnightworks/webauth/issues/428)
+(operator ruling 23.10.2026). [test_open_session_id_token.py](../tests/test_open_session_id_token.py)
+proves the explicit choice, refresh-token retention, hint-free logout and
+renewal/rotation with no ID token;
+`test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_login`
+and `test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout` in
+[test_oidc_login.py](../tests/test_oidc_login.py) prove the retained-token case.
