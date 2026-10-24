@@ -1,7 +1,5 @@
 # webauth vision
 
-Draft until the operator has blessed it.
-
 ## The wish
 
 > "eine auth library die mir alles abnimmt, damit ich sie in all meine repos easy wiederverwenden kann"
@@ -18,7 +16,7 @@ from the code, and the code is clean enough that the next agent changes it witho
 
 ## Who uses it today
 
-The operator's apps (hopin, songmaker, agent-presentator, and the next one) and the agents that build and integrate them.
+The operator's apps (hopin, songmaker, presentator, and the next one) and the agents that build and integrate them.
 Every app integrates the same way: one app's need sets a shape for all of them, so all of them are asked.
 
 ## Deliberate non-goals
