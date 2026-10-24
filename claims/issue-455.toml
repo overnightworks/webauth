@@ -1,7 +1,0 @@
-claim_id = "16d2d1593d2947748bbcc607795246b9"
-agent = "Codex webauth-01a16e6c"
-role = "builder"
-base = "723e3a2c53fc3b13f099ee81e5e110b2184e693d"
-branch = "codex/issue-455-record-provenance-of-sign-in-and-bearer"
-scope = ["docs/host-contract.md"]
-opened_commit = "1651b9734541fee65c8f370530991f927142df8e"
