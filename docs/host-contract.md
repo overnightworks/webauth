@@ -1,0 +1,313 @@
+# Host contract
+
+For a host developer: what a host sees from webauth and what it must provide.
+
+## Trusted proxies
+
+`WebAuthConfig.trusted_proxies` names the trusted proxy addresses for the host.
+It lists the app's direct peer and every proxy whose address the
+`X-Forwarded-For` chain carries; listing every proxy between the client and the
+app is the simple way to be sure. webauth reads `X-Forwarded-For` and
+`X-Forwarded-Proto` and never RFC 7239 `Forwarded`. It reads the chain from the
+right and takes the first address it does not trust as the client, so a proxy
+whose address the chain carries but which the list lacks becomes the client
+address, and every visitor that reaches the app through it shares that address
+and its rate-limit budget. With a CDN, a tunnel and a reverse proxy in front of
+the app, list whichever of their addresses appear in the chain. The operator's
+[edge](https://github.com/overnightworks/edge) project owns that reachability
+infrastructure; the changelog's edge references name this project.
+`trusted_proxies` decides alone only when the ASGI server does not rewrite the
+client address or scheme from those headers, so the host turns the server's own
+forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
+`proxy_headers=False` or `--no-proxy-headers`).
+
+## What every app gets
+
+Every app that signs people in through Keycloak behaves the same way, unless it
+configures `EverySubject` to require no login group or `NoAdmins` to grant no
+admin role. The details are in the sections below.
+
+**Who gets in.** Only members of the app's `login_group`, such as
+`/apps/notes`, get in. Members of its `admin_group`, such as
+`/apps/notes/admin`, are admins. Both are decided again at every login, so a
+change in Keycloak takes effect at the person's next sign-in; an app session
+that is already open keeps its access until it ends; a changed admin role
+reaches every open session at the person's next sign-in. The session's absolute
+cap bounds the delay before a login-group removal takes effect. The issuer's
+SSO session makes a fresh login a redirect the person does not notice; an
+immediate removal requires disabling the user at the issuer together with
+[back-channel logout](ARCHITECTURE.md#back-channel-logout). See
+[Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
+
+Admission never looks up a username and has no local active-user flag; disabling
+people belongs to the issuer ([#279](https://github.com/overnightworks/webauth/issues/279),
+operator ruling 19.10.2026). A host store may still reject a new account's name
+with `UsernameTakenError`. Store-controlled username uniqueness is proven by
+`test_a_store_without_unique_usernames_admits_two_subjects_sharing_one` and
+`test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written`
+in [test_oidc_login.py](../tests/test_oidc_login.py). The absence of a local
+active-user policy is visible in `UserRecord` and `SubjectUserStore` in
+[ports.py](../src/webauth/ports.py), `admit_identity` in
+[oidc_login.py](../src/webauth/oidc_login.py) and `admit_session` in
+[dependencies.py](../src/webauth/dependencies.py).
+
+**When Keycloak is down.** People who are already signed in keep working until
+their app session ends, because the app checks a session in its own store and
+never asks Keycloak. A new sign-in fails at Keycloak: the app sends the browser
+to Keycloak's sign-in page, which does not load, so the person sees the
+browser's or the proxy's error page, not the app's. Only when Keycloak fails
+during the sign-in, or the browser reaches Keycloak but the app does not, does
+the sign-in stop at the app's callback, on the host's refusal page. webauth
+offers no local fallback login. See
+[The store decides every request](ARCHITECTURE.md#the-store-decides-every-request).
+
+**Machine callers.** See [The host's machine routes](#the-hosts-machine-routes).
+
+**Signing out.** Signing out of an app ends its session in that browser at once
+and shows a short page that posts to Keycloak, which ends the person's Keycloak session in
+that browser without asking anything. Keycloak then tells each app the
+person signed in to through that Keycloak session, and each of those apps ends
+all of the person's sessions, on every device. An app they used only on another
+device is not told and keeps them signed in there. On their other devices, the
+next sign-in asks for no password while that device's own Keycloak session
+lasts. The logout page is `no-store`, clears the app's cookies and submits itself;
+where scripts cannot run, it shows one button. If Keycloak is down, the person
+still leaves the app signed out.
+
+The page sends the client ID, `post_logout_redirect_uri` and the stored ID token
+as `id_token_hint` by POST to Keycloak's end-session endpoint; no URL carries
+the token. Without the session's row
+(ended by the host, swept, pruned or ended by back-channel logout), or with a row
+that holds no ID token (stored before the host held them or opened with
+`keeps_id_token=False`), it sends no hint, and Keycloak asks once to confirm
+while its own session lives. If the realm key that signed a supplied token has
+been deleted since, Keycloak shows an error page instead. See
+[Logging out and the ID token hint](ARCHITECTURE.md#logging-out-and-the-id-token-hint)
+for the mechanism and its trust boundaries. The POST page and fallback follow
+[#418 R4](https://github.com/overnightworks/webauth/issues/418), operator ruling
+22.10.2026; `test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint`
+and `test_a_same_origin_logout_still_answers_the_page` in
+[test_oidc_login.py](../tests/test_oidc_login.py) prove the response shape,
+including a missing hint. Browser behavior is driven by `logout` and
+`logout_after_the_app_session_ended` in [prove.py](../e2e/oidc/prove.py) and
+`logout_through_the_page` in [engines.py](../e2e/oidc/engines.py).
+These are hand-run browser proofs, not CI tests; [#420's review journal](https://github.com/overnightworks/webauth/issues/420#issuecomment-6351975830)
+records the page implementation's browser evidence.
+
+An old hint cookie is neither read nor cleared and expires by its own `Max-Age`,
+at most the absolute session cap after the host's upgrade
+([#418 R5](https://github.com/overnightworks/webauth/issues/418), operator ruling
+22.10.2026). `test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared`
+in [test_oidc_login.py](../tests/test_oidc_login.py) proves it leaves the
+response and session outcome unchanged.
+
+## CSRF origin
+
+Every app supplies `csrf_origin=CsrfPolicy(...)` when installing the middleware;
+there is no frontend CSRF-token obligation. A state-changing request (POST, PUT,
+PATCH or DELETE) needs trustworthy provenance regardless of its body or content
+type. `Sec-Fetch-Site: same-origin` passes; `same-site` or an absent Fetch
+Metadata header falls back to `Origin`; every other Fetch Metadata value is
+refused. Without either header the request is refused, and `Referer` is never
+read. These are [#429 S-1, S-3, S-5 and S-6](https://github.com/overnightworks/webauth/issues/429),
+operator ruling 23.10.2026. The proofs are
+`test_a_request_is_judged_by_sec_fetch_site_then_origin`,
+`test_a_state_changing_request_without_provenance_is_refused_whatever_its_body`,
+`test_the_referer_is_not_read` and
+`test_a_session_request_is_decided_by_its_provenance_whatever_token_material_it_carries`
+in [test_csrf.py](../tests/test_csrf.py), plus
+`TestRefusedInstallation.test_an_install_without_csrf_origin_is_refused_before_touching_the_app`
+in [test_middleware_stack.py](../tests/test_middleware_stack.py).
+
+Only verified bearer admission and the sessionless server paths the host names
+in `CsrfPolicy.exempt` bypass this check; an adjacent path is still checked
+([#429 S-2](https://github.com/overnightworks/webauth/issues/429), operator ruling
+23.10.2026). Proofs: `test_a_bearer_request_needs_no_csrf_origin_header_or_cookie`
+in [test_bearer_admission.py](../tests/test_bearer_admission.py) and
+`test_protect_everything_checks_every_route_but_the_exempt_ones` in
+[test_csrf.py](../tests/test_csrf.py).
+
+The `Origin` fallback matches exact hosts in `WebAuthConfig.allowed_hosts_exact`,
+never host patterns; its docstring owns port matching. With `cookie_secure` on,
+the origin must use HTTPS; with it off, the scheme is not compared. This also
+holds for WebSocket handshakes, which check `Origin` directly
+([#429 S-4 and P-3](https://github.com/overnightworks/webauth/issues/429), operator
+ruling 23.10.2026). Proofs: `test_an_origin_that_only_resembles_the_exact_host_is_refused`
+in [test_csrf.py](../tests/test_csrf.py), and
+`test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on` in both that
+module and [test_websocket_auth.py](../tests/test_websocket_auth.py).
+
+An old CSRF cookie changes no decision and is neither read nor cleared; it
+expires by its own `Max-Age` ([#429 P-2](https://github.com/overnightworks/webauth/issues/429),
+operator ruling 23.10.2026). Proofs:
+`test_an_old_csrf_cookie_changes_no_decision_signed_in_or_out` in
+[test_csrf.py](../tests/test_csrf.py) and
+`test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared` in
+[test_oidc_login.py](../tests/test_oidc_login.py).
+
+webauth supports the current releases of Chrome, Edge, Firefox and Safari
+(macOS and iOS). On every request whose method is not GET or HEAD, each sends
+`Origin`, possibly `null`, and, to an HTTPS app, `Sec-Fetch-Site`
+([#429 S-3](https://github.com/overnightworks/webauth/issues/429), operator ruling
+23.10.2026).
+
+## Signed out and refused
+
+Every app shows signed-out and refused people the same way. This is the rule
+every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it, and a
+host without the gate follows it itself. The page/API split, public paths and
+host pages follow [#246](https://github.com/overnightworks/webauth/issues/246),
+operator ruling 19.10.2026; [#349](https://github.com/overnightworks/webauth/issues/349)
+added the enforcing gate. Its page, API and public-path proofs are
+`test_a_page_without_a_session_is_redirected_to_the_start_route_with_next`,
+`test_an_api_call_without_a_session_gets_401_authentication_required` and
+`test_a_public_path_passes_untouched_and_asks_no_store` in
+[test_session_gate.py](../tests/test_session_gate.py).
+
+- **A page without a session** sends the browser straight to the app's start
+  route, with `next` naming the page, so the person lands there after signing
+  in. The host passes `next` to `start_login` as `return_to`, and
+  `finish_login` hands back the same-origin path or `None`. An API call without a session gets
+  401, and the app's UI then navigates to its start route. See
+  [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes)
+  and, for the rule `return_to` must pass,
+  [The return path](ARCHITECTURE.md#the-return-path). For a
+  server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
+  [Reading the session](ARCHITECTURE.md#reading-the-session).
+  Keeping the deep link follows [#281](https://github.com/overnightworks/webauth/issues/281),
+  operator ruling 19.10.2026, qualified by
+  [#304](https://github.com/overnightworks/webauth/issues/304) on 20.10.2026:
+  only request-address construction may prepend `root_path`; `start_login`
+  never prepends it to an explicit `return_to`. Proofs:
+  `test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_default_page`
+  in [test_oidc_login.py](../tests/test_oidc_login.py) and
+  `test_only_a_path_of_this_app_is_a_return_path` in
+  [test_paths.py](../tests/test_paths.py). `deep_link_survives_the_login` in
+  [prove.py](../e2e/oidc/prove.py) drives the browser round trip in the hand-run
+  harness, not CI.
+- **A machine route** (see [The host's machine routes](#the-hosts-machine-routes))
+  answers 401 with a `WWW-Authenticate: Bearer realm="admin"` challenge, never a
+  redirect, and 403 for a valid token without the admin group:
+
+  | Case | Status | `WWW-Authenticate` | `detail` |
+  |---|---|---|---|
+  | no credentials | 401 | `Bearer realm="admin"` | `Authentication required` |
+  | malformed request (repeated or combined `Authorization`, or `access_token` in the query beside an `Authorization: Bearer`; in the query alone it is no credential) | 401 | `Bearer realm="admin", error="invalid_request"` | `Invalid request` |
+  | invalid token (any verification failure, an unavailable key set included) | 401 | `Bearer realm="admin", error="invalid_token"` | `Invalid token` |
+  | valid token, not an admin | 403 | `Bearer realm="admin", error="insufficient_scope"` | `Admin access required` |
+
+  The refusal contract comes from
+  [#350](https://github.com/overnightworks/webauth/issues/350), operator ruling
+  22.10.2026; [#409](https://github.com/overnightworks/webauth/issues/409)
+  supplies the implementation and precise response table.
+  `test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge` in
+  [test_bearer_gate.py](../tests/test_bearer_gate.py) proves these responses,
+  including 401 when the key set is unavailable.
+
+- **Public paths** are the exception. Each app names its own, and they need
+  no session and do not redirect.
+- **The page after signing out** is the app's `post_logout_redirect_uri`. It
+  never redirects by itself.
+- **Which refusal shows which page.** "No access" is for
+  `AdmissionRefusal.NOT_A_MEMBER`; "Login failed" is for an `OidcRefusal`
+  and for `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are
+  setup errors, not missing rights. That setup-error page choice is the operator
+  ruling of 20.10.2026, recorded in
+  [c1318d7](https://github.com/overnightworks/webauth/commit/c1318d768afa16148d680e11b10b4359ebff3012).
+  Both types are returned by `finish_login`, see
+  [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes).
+  A refusal carries no identity (`AdmissionRefusal` in
+  [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
+  [oidc.py](../src/webauth/oidc.py)), so the page shows no name. A
+  `NOT_A_MEMBER` login stores no session, so signing out from "no access"
+  follows the missing-ID-token case in [Signing out](#what-every-app-gets).
+  `outsider_is_refused` in [prove.py](../e2e/oidc/prove.py) drives the harness's
+  refusal with no account or session; it is a hand-run browser proof, not a
+  test of every host's page. Page choice and presentation remain host duties.
+- **Look.** The three pages (logged out, no access, login failed), their
+  wording and their ways out are the sign-in pattern of
+  [ui-style](https://github.com/overnightworks/ui-style) (formerly ui-console); each app takes
+  the colours from its own tokens.
+
+## The host's machine routes
+
+hal is the operator's CLI for calling an app's machine routes with a bearer
+token. A host declares its machine (admin) paths once, and hal calls them with
+the access token Keycloak issued it in `Authorization: Bearer`. `BearerGate` is passed to
+`install_web_auth_middleware(bearer_gate=...)`; it holds the paths
+(`PathRules`), the app's own `OidcRelyingParty`, the app's `AdmissionConfig` and
+`AuthorizedParties`, the `azp` values (hal's client ids) the host admits, read
+from configuration. A route reads the admitted caller with
+`Depends(bearer_caller)`; `BearerCaller.subject` is the token's `sub`, with no
+account and no role. This follows
+[#350](https://github.com/overnightworks/webauth/issues/350), operator ruling
+22.10.2026, including the accepted defaults for opt-in admission, no session or
+cookie, and shared rate limits; [#409](https://github.com/overnightworks/webauth/issues/409)
+is its implementation, not a separate ruling.
+
+- **What passes.** Only an RS256 `at+jwt` of the app's issuer whose only
+  `aud` is the app's client, whose `azp` is allowed and whose `groups` hold the
+  admin group or a group below it. Nothing is created or provisioned, and webauth
+  emits no event: the host audits the admitted call itself (subject, route,
+  outcome). `test_the_audience_must_be_the_app_alone` and
+  `test_an_authorized_party_the_host_did_not_allow_is_refused` in
+  [test_access_token.py](../tests/test_access_token.py) prove the audience and
+  `azp` restrictions; [bearer.py](../e2e/oidc/bearer.py) holds the hand-run
+  real-issuer admission proofs.
+- **What it replaces.** On a gated path the cookie, the CSRF check and the
+  session gate decide nothing, every answer is `no-store`, and webauth sets no
+  cookie. `admitted_user` returns `None`. The same rate
+  limit applies where a rate policy covers the path; a flood of invalid tokens
+  is bounded only by it. A session dependency (`current_user`, `admin_user`,
+  `admitted_admin`, `verified_session_id`) on a gated path raises, so the library answers 500,
+  and `session_id_from_request` reads the cookie, which is the host's duty not to
+  trust there. `test_the_cookie_counts_for_nothing_beside_a_token` in
+  [test_bearer_admission.py](../tests/test_bearer_admission.py) proves admission
+  uses the token's subject without opening a session transaction.
+- **Token lifetime.** A block at Keycloak reaches the gate only when the token
+  expires, plus the leeway; signing out of a browser leaves the token valid
+  (#350 sentences 4/5, operator ruling 22.10.2026).
+  `test_an_expired_token_is_admitted_until_expiry_plus_leeway` in
+  [test_access_token.py](../tests/test_access_token.py) proves the expiry boundary.
+  `disabled_person_keeps_the_token`, `sign_out_leaves_the_token` and
+  `short_token_fails_after_exp_and_leeway` in [bearer.py](../e2e/oidc/bearer.py)
+  drive the real-issuer cases in the hand-run harness, not CI.
+- **The paths** are written as every other policy's are; the `PathRules`
+  docstring says how.
+  They must cover every machine route, a prefix being the safe form. Every method
+  is gated, `OPTIONS` included; a CORS preflight is the host's own layer outside
+  the stack.
+- **Mounts and sockets.** Install the gate on the app that serves the machine
+  routes. A sub-app mounted below a gated path keeps its own CSRF and session
+  gate, and its `bearer_caller` raises. WebSocket scopes are not gated.
+
+## The host's start, callback and logout routes
+
+The host serves three routes over its one `OidcRelyingParty`: start
+(`start_login`), callback (`finish_login`, then `open_session`) and logout
+(`log_out`), whose answer the route returns as it is; a
+single-page app logs out by a top-level form POST to that route. `webauth.oidc_login` carries the pending login in a signed cookie of
+its own, one per login, so the host keeps no server-side store and
+`WebAuthConfig` knows nothing of OpenID Connect. Each function's docstring holds
+its contract, the `webauth.oidc_login` and `webauth.cookies` module docstrings
+hold the login and its cookies, and `build_app` in
+[`e2e/oidc/host_app.py`](../e2e/oidc/host_app.py) is the worked set of routes,
+type-checked and run against a real issuer.
+
+The library never commits: the host commits an admitted login before it issues
+the cookies. A pending login is single-use because its cookie is cleared and the
+issuer accepts a code once; webauth keeps no replay store. The `finish_login`
+docstring holds the callback's outcomes and the host's duties.
+
+`open_session` requires the host's explicit `keeps_id_token` choice, with no
+default. A host that never logs out passes `False`: its session row keeps no
+ID token, while refresh-token storage is unchanged. With `True`, the row keeps
+the login's ID token for logout. Renewal and refresh-token rotation preserve
+that choice and the original token. This is [#418 R1/R2](https://github.com/overnightworks/webauth/issues/418)
+(operator ruling 22.10.2026), qualified by [#428 R1](https://github.com/overnightworks/webauth/issues/428)
+(operator ruling 23.10.2026). [test_open_session_id_token.py](../tests/test_open_session_id_token.py)
+proves the explicit choice, refresh-token retention, hint-free logout and
+renewal/rotation with no ID token;
+`test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_login`
+and `test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout` in
+[test_oidc_login.py](../tests/test_oidc_login.py) prove the retained-token case.
