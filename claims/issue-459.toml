@@ -1,7 +1,0 @@
-claim_id = "7116581b460c459db6ece2ceb3a5e446"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "981d41125f392b0d5a5aa505fc439a3c73bdfabd"
-branch = "claude/issue-459-changelog-fold-dated"
-scope = [".github/workflows/release.yml", "AGENTS.md", "docs/CHANGELOG.md"]
-opened_commit = "15837ad1834fa445e8c4e3157b896e957d448185"
