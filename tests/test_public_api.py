@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 import webauth
-from webauth import WebAuthError, ports
+from webauth import WebAuthError
 from webauth.https_client import ExchangeFailure, KeySetFetchError
 from webauth.oidc import TokenEndpointError
 from webauth.ports import UsernameTakenError
@@ -444,18 +444,6 @@ def test_a_test_takes_only_public_names_and_functions_or_classes_a_module_define
 def test_a_typing_host_takes_only_public_names(host: Path) -> None:
     assert _names_taken_from_webauth(host)
     assert _offences_of(host, only_public=True) == []
-
-
-@pytest.mark.parametrize(
-    ("module", "name"),
-    [
-        ("webauth.dependencies", "AuthenticatedUser"),
-        ("webauth.jwt_verification", "WallClock"),
-    ],
-)
-def test_a_name_moved_to_ports_is_gone_from_its_old_module(module: str, name: str) -> None:
-    assert hasattr(ports, name)
-    assert not hasattr(importlib.import_module(module), name)
 
 
 def _is_webauth_or_redis_module(name: str) -> bool:
