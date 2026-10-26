@@ -1,7 +1,0 @@
-claim_id = "00260f88e6b44f9f9c339da2efd13581"
-agent = "Claude 14f5bef2-c430-4353-9252-271f3687c6c1"
-role = "builder"
-base = "ea1e96a6fe383bfc073bd4458d86dddc2a2fd55c"
-branch = "claude/issue-447-vision"
-scope = ["docs/VISION.md"]
-opened_commit = "83176fbc6ac810851950d3b487f8986745e0aa10"
