@@ -86,16 +86,7 @@ from webauth._end_session_page import end_session_page
 from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
 from webauth._validation import require_positive_whole_number
-from webauth.cookies import (
-    _clear_pending_login_cookie,
-    _cookie_pairs,
-    _cookie_values,
-    _is_pending_login_cookie_name,
-    _issue_pending_login_cookie,
-    _pending_login_cookie_name,
-    _verify_pending_login,
-    clear_session_cookies,
-)
+from webauth.cookies import _begin_pending_login, _take_pending_login, clear_session_cookies
 from webauth.dependencies import (
     _is_admitted,
     _renewed_expiry,
@@ -117,7 +108,6 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
     from webauth.config import WebAuthConfig
-    from webauth.cookies import PendingLogin
     from webauth.oidc import OidcIdentity, OidcRelyingParty
     from webauth.ports import (
         AuditSink,
@@ -148,14 +138,6 @@ __all__ = [
     "receive_backchannel_logout",
     "start_login",
 ]
-
-_MAX_PENDING_LOGINS: Final = 5
-"""Pending-login cookies a browser keeps at once. A start beyond them
-evicts the oldest, so repeated starts never crowd out the session cookie."""
-
-# A cookie that does not verify, or whose name appears twice, ranks below
-# every genuine one and is evicted first.
-_UNRANKED: Final = -1
 
 
 class EverySubject(Enum):
@@ -311,13 +293,8 @@ def start_login(
     """
     authorization = relying_party.begin_login()
     pending = authorization.pending.returning_to(same_app_path(request, return_to))
-    for name in _pending_login_cookies_to_evict(request, config):
-        _clear_pending_login_cookie(response, name, config)
-    _issue_pending_login_cookie(
-        response,
-        pending,
-        max_age_seconds=PENDING_LOGIN_MAX_AGE_SECONDS,
-        config=config,
+    _begin_pending_login(
+        request, response, pending, max_age_seconds=PENDING_LOGIN_MAX_AGE_SECONDS, config=config,
     )
     return authorization.url
 
@@ -368,9 +345,7 @@ def finish_login(
     state = _callback_state(callback_query)
     if isinstance(state, OidcRefusal):
         return state
-    cookie_name = _pending_login_cookie_name(state, secure=config.cookie_secure)
-    _clear_pending_login_cookie(response, cookie_name, config)
-    pending = _sole_pending_login(request, cookie_name, config)
+    pending = _take_pending_login(request, response, state, config)
     if pending is None:
         return OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
     identity = relying_party.complete_login(pending, callback_query)
@@ -690,33 +665,6 @@ def _logout_token_of(form_body: bytes, content_type: str | None) -> str | None:
         return None
     tokens = [value for name, value in fields if name == "logout_token"]
     return tokens[0] if len(tokens) == 1 and tokens[0] else None
-
-
-def _sole_pending_login(
-    request: Request, cookie_name: str, config: WebAuthConfig,
-) -> PendingLogin | None:
-    values = _cookie_values(request, cookie_name)
-    if len(values) != 1:
-        return None
-    return _verify_pending_login(values[0], config.signing_key)
-
-
-def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> list[str]:
-    """The names to clear so the new pending login is one of at most
-    ``_MAX_PENDING_LOGINS``, oldest first."""
-    issued_at_by_name: dict[str, int] = {}
-    for name, value in _cookie_pairs(request):
-        if _is_pending_login_cookie_name(name, secure=config.cookie_secure):
-            issued_at_by_name[name] = (
-                _UNRANKED if name in issued_at_by_name else _issued_at(value, config)
-            )
-    oldest_first = sorted(issued_at_by_name, key=issued_at_by_name.__getitem__)
-    return oldest_first[: max(0, len(oldest_first) - _MAX_PENDING_LOGINS + 1)]
-
-
-def _issued_at(cookie_value: str, config: WebAuthConfig) -> int:
-    pending = _verify_pending_login(cookie_value, config.signing_key)
-    return _UNRANKED if pending is None else pending.issued_at
 
 
 def admit_identity(
