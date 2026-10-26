@@ -1,0 +1,7 @@
+claim_id = "db9a144910c74345802e7b0d429cb8bd"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "f36dbea1f85a3d20ccd73132e617863e67c78aef"
+branch = "fix/audit-remnants"
+scope = ["e2e/oidc/stack.py", "tests/test_public_api.py", "tests/test_websocket_auth.py"]
+opened_commit = "3d7b963cde18ed6a370cb9d7c34b9c9680ddf390"
