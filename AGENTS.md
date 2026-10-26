@@ -30,7 +30,7 @@ from a directory without `src`, so a port change or an export a host cannot impo
 - A tag is never moved: a broken release gets the next patch tag. The tag ruleset forbids updating and deleting tags.
 - `webauth.__version__` alone is raised, in the pull request that precedes the tag, and stays a plain string literal:
   setuptools reads it without importing the package, whose dependencies the isolated build lacks. The same pull request turns
-  `## X.Y.Z - Unreleased` in `docs/CHANGELOG.md` into the bare `## X.Y.Z`.
+  `## X.Y.Z - Unreleased` in `docs/CHANGELOG.md` into `## X.Y.Z - YYYY-MM-DD`, the date it expects to tag on.
 - A pull request that changes behaviour a host can see adds its line to `docs/CHANGELOG.md` under `## X.Y.Z - Unreleased` (open it
   when none is open), marked **Breaking** when a public contract changes.
 - If the release workflow's `verify` job failed only because CI was still running, re-run it once CI is green. Never

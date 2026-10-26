@@ -64,12 +64,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: The changelog has a heading for the tagged version
+      - name: The changelog has a dated heading for the tagged version
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if ! grep -qxF "## ${version}" docs/CHANGELOG.md; then
-            echo "docs/CHANGELOG.md has no '## ${version}' heading for tag ${GITHUB_REF_NAME}" >&2
+          if ! grep -qE "^## ${version//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" docs/CHANGELOG.md; then
+            echo "docs/CHANGELOG.md has no '## ${version} - YYYY-MM-DD' heading for tag ${GITHUB_REF_NAME}" >&2
             exit 1
           fi
 
