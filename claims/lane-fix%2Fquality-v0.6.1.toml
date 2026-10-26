@@ -1,0 +1,7 @@
+claim_id = "6a6209ac5e3b4a3782265948cce470c9"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "981d41125f392b0d5a5aa505fc439a3c73bdfabd"
+branch = "fix/quality-v0.6.1"
+scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml"]
+opened_commit = "f5b5cf5d731e5e2afc724024c6e642fdb9fe00d6"
