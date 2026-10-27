@@ -9,10 +9,12 @@ from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
 import pytest
+from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
 from tests.support.oidc_arrangement import (
     ABSENT,
+    a_logout_token,
     key_set_document,
     public_jwk,
     rsa_key,
@@ -20,23 +22,20 @@ from tests.support.oidc_arrangement import (
 from tests.support.oidc_login_host import (
     BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
     BACKCHANNEL_LOGOUT_PATH,
+    BOUND_ISSUER,
+    CLIENT_ID,
     DEFAULT_MAX_BODY_BYTES,
-    FORM,
-    FORM_MEDIA_TYPE,
     LOGIN_GROUP,
     LOGOUT_PATH,
+    NOW,
     OTHER_SUBJECT,
     SAME_ORIGIN_FORM,
     SUBJECT,
     OidcHost,
-    a_form_of,
-    a_logout_token_of_the_issuer,
     after_signing_in,
     an_id_token,
     an_oidc_host,
-    post_backchannel_logout,
     post_logout,
-    post_logout_token,
     stored_id_tokens,
     stored_refresh_tokens,
 )
@@ -56,6 +55,41 @@ from webauth.oidc_login import (
 from webauth.ports import (
     AccountEventKind,
 )
+
+FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
+
+
+FORM = {"content-type": FORM_MEDIA_TYPE}
+
+
+def a_logout_token_of_the_issuer(
+    *, claims: dict[str, object] | None = None, header: dict[str, object] | None = None,
+    key_name: str = "issuer",
+) -> str:
+    return a_logout_token(
+        issuer=BOUND_ISSUER,
+        audience=CLIENT_ID,
+        subject=SUBJECT,
+        now=NOW,
+        key_id="issuer-key",
+        key_name=key_name,
+        claims=claims,
+        header=header,
+    )
+
+
+def a_form_of(logout_token: str, **other_fields: str) -> bytes:
+    return urllib.parse.urlencode({"logout_token": logout_token, **other_fields}).encode()
+
+
+def post_backchannel_logout(
+    host: OidcHost, content: bytes | Iterator[bytes], headers: dict[str, str] = FORM,
+) -> HttpxResponse:
+    return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=content, headers=headers)
+
+
+def post_logout_token(host: OidcHost, logout_token: str, **other_fields: str) -> HttpxResponse:
+    return post_backchannel_logout(host, a_form_of(logout_token, **other_fields))
 
 
 def a_host_with_sessions(

@@ -20,7 +20,6 @@ from tests.support.oidc_arrangement import (
     FakeIssuer,
     FakeKeySetEndpoint,
     LogoutPage,
-    a_logout_token,
     jws,
     key_set_document,
     public_jwk,
@@ -190,22 +189,6 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding
     if padding:
         header["padding"] = padding
     return jws(header, claims, rs256(rsa_key("issuer")))
-
-
-def a_logout_token_of_the_issuer(
-    *, claims: dict[str, object] | None = None, header: dict[str, object] | None = None,
-    key_name: str = "issuer",
-) -> str:
-    return a_logout_token(
-        issuer=BOUND_ISSUER,
-        audience=CLIENT_ID,
-        subject=SUBJECT,
-        now=NOW,
-        key_id="issuer-key",
-        key_name=key_name,
-        claims=claims,
-        header=header,
-    )
 
 
 def _install_the_host_middleware(
@@ -430,12 +413,6 @@ def hint_of(response: HttpxResponse) -> str | None:
 OTHER_SUBJECT = "0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23"
 
 
-FORM_MEDIA_TYPE = "application/x-www-form-urlencoded"
-
-
-FORM = {"content-type": FORM_MEDIA_TYPE}
-
-
 def stored_refresh_tokens(host: OidcHost) -> list[str]:
     return [record.refresh_token.get_secret_value()
             for record in host.sessions.list_active() if record.refresh_token is not None]
@@ -444,17 +421,3 @@ def stored_refresh_tokens(host: OidcHost) -> list[str]:
 def stored_id_tokens(host: OidcHost) -> list[str]:
     return [record.id_token.get_secret_value()
             for record in host.sessions.list_active() if record.id_token is not None]
-
-
-def post_backchannel_logout(
-    host: OidcHost, content: bytes | Iterator[bytes], headers: dict[str, str] = FORM,
-) -> HttpxResponse:
-    return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=content, headers=headers)
-
-
-def a_form_of(logout_token: str, **other_fields: str) -> bytes:
-    return urllib.parse.urlencode({"logout_token": logout_token, **other_fields}).encode()
-
-
-def post_logout_token(host: OidcHost, logout_token: str, **other_fields: str) -> HttpxResponse:
-    return post_backchannel_logout(host, a_form_of(logout_token, **other_fields))
