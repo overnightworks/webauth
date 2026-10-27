@@ -9,7 +9,6 @@
 
 [file_lines]
 "e2e/oidc/prove.py" = 1546
-"src/webauth/oidc_login.py" = 815
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
 "tests/test_oidc_login.py" = 2314
@@ -25,7 +24,7 @@
 "_exchange" = 63
 
 [function_lines."src/webauth/oidc_login.py"]
-"finish_login" = 70
+"finish_login" = 68
 
 [function_lines."tests/oidc_arrangement.py"]
 "loopback_https_server" = 115
@@ -38,3 +37,5 @@
 
 [function_lines."tests/webauth_arrangement.py"]
 "an_auth_app" = 120
+
+[clones]
