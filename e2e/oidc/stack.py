@@ -151,10 +151,6 @@ class HeldStack:
             raise StackError(f"the stack ended with status {status}: {self.output[-3:]}")
 
     @property
-    def secrets_dir(self) -> Path:
-        return self.scratch / "secrets"
-
-    @property
     def edge_url(self) -> str:
         return self.ready["edge_url"]
 

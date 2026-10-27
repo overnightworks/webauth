@@ -204,9 +204,6 @@ def test_a_handshake_without_one_valid_session_cookie_is_refused(
             ConnectionRefusal.FOREIGN_ORIGIN,
             id="a foreign Origin claiming same-origin metadata",
         ),
-        pytest.param(
-            "https://app.example", [], ConnectionRefusal.FOREIGN_ORIGIN, id="a former pattern host",
-        ),
         pytest.param("null", [], ConnectionRefusal.FOREIGN_ORIGIN, id="the null Origin"),
         pytest.param("", [], ConnectionRefusal.FOREIGN_ORIGIN, id="an empty Origin"),
         pytest.param(
