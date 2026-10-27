@@ -1,7 +1,0 @@
-claim_id = "c18d50692754481fa6b4da893365ede6"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "7dd67065be16b74df5af2a7740d3efd5aed883b3"
-branch = "claude/issue-490-quality-v0-7-0"
-scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", "quality/config.toml"]
-opened_commit = "2434dfb0966dc4b3e492708dea6bd32d0f4eada1"
