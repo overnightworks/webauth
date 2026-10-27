@@ -16,25 +16,20 @@ from tests.support.oidc_arrangement import (
     a_fake_id_token,
 )
 from tests.support.oidc_login_host import (
-    BOUND_ISSUER_ORIGIN,
     CLIENT_ID,
     END_SESSION_ENDPOINT,
     LOGOUT_BUTTON_LABEL,
     LOGOUT_PATH,
     NOW,
-    OLD_CSRF_COOKIE_NAME,
-    OLD_HINT_COOKIE_NAME,
     SAME_ORIGIN_FORM,
     SUBJECT,
     OidcHost,
     a_client_config,
-    a_logout_token_of_the_issuer,
     after_signing_in,
     an_oidc_host,
     hint_of,
     is_cleared,
     post_logout,
-    post_logout_token,
     set_cookies,
     stored_id_tokens,
     stored_refresh_tokens,
@@ -46,6 +41,10 @@ from tests.support.webauth_arrangement import (
 from webauth.oidc_login import (
     fresh_access_token,
 )
+
+BOUND_ISSUER_ORIGIN = "https://id.example"
+OLD_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
+OLD_CSRF_COOKIE_NAME = "__Host-csrf_token"  # noqa: S105
 
 
 def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
@@ -91,16 +90,6 @@ def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two
     assert policy["form-action"] == [BOUND_ISSUER_ORIGIN, HTTPS_TEST_SERVER]
     assert [name for _, attributes in page.elements for name in attributes
             if name.startswith("on")] == []
-
-
-
-
-def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None:
-    host = after_signing_in(an_oidc_host())
-
-    post_logout_token(host, a_logout_token_of_the_issuer())
-
-    assert host.issued_id_tokens[-1] not in stored_id_tokens(host)
 
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:

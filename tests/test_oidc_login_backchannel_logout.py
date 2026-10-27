@@ -37,6 +37,7 @@ from tests.support.oidc_login_host import (
     post_backchannel_logout,
     post_logout,
     post_logout_token,
+    stored_id_tokens,
     stored_refresh_tokens,
 )
 from tests.support.webauth_arrangement import (
@@ -408,3 +409,11 @@ def test_the_callback_needs_neither_an_origin_nor_a_cookie() -> None:
     response = post_logout_token(host, a_logout_token_of_the_issuer())
 
     assert (response.status_code, "origin" in response.request.headers) == (200, False)
+
+
+def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None:
+    host = after_signing_in(an_oidc_host())
+
+    post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert host.issued_id_tokens[-1] not in stored_id_tokens(host)

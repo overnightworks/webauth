@@ -30,8 +30,6 @@ from tests.support.oidc_login_host import (
     ADMIN_GROUP,
     LEGACY_ADMIN,
     LOGIN_GROUP,
-    MAX_PENDING_LOGIN_COOKIE_CHARS,
-    MAX_PENDING_LOGINS,
     NOW,
     SAME_ORIGIN_FORM,
     OidcHost,
@@ -64,6 +62,9 @@ from webauth.oidc import (
 from webauth.ports import (
     AccountEventKind,
 )
+
+MAX_PENDING_LOGIN_COOKIE_CHARS = 896
+MAX_PENDING_LOGINS = 5
 
 
 @pytest.mark.parametrize(("cookie_secure", "prefix", "secure_attribute"), [

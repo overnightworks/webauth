@@ -11,13 +11,12 @@ from dataclasses import asdict, dataclass, replace
 
 import pytest
 
+from tests.support.oidc_arrangement import a_fake_id_token
 from tests.support.oidc_login_host import (
     ADMIN_GROUP,
     ADMISSION,
     BOUND_ISSUER,
     LEGACY_ADMIN,
-    LENA,
-    LENA_IN_THE_ADMIN_GROUP,
     LOGIN_GROUP,
     SUBJECT,
     CountingWriteLock,
@@ -50,6 +49,19 @@ from webauth.ports import (
     AccountEventKind,
     UserRecord,
 )
+
+LENA = OidcIdentity(
+    subject=SUBJECT,
+    issuer=BOUND_ISSUER,
+    groups=(LOGIN_GROUP,),
+    session_id=None,
+    preferred_username="lena",
+    id_token=a_fake_id_token("lena"),
+    refresh_token=None,
+)
+
+
+LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(ADMIN_GROUP,))
 
 
 @dataclass

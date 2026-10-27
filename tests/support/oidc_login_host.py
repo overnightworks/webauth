@@ -6,7 +6,7 @@ import logging
 import urllib.parse
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import anyio.to_thread
 from fastapi import Depends, FastAPI, Request, Response
@@ -20,7 +20,6 @@ from tests.support.oidc_arrangement import (
     FakeIssuer,
     FakeKeySetEndpoint,
     LogoutPage,
-    a_fake_id_token,
     a_logout_token,
     jws,
     key_set_document,
@@ -48,7 +47,6 @@ from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     OidcClientConfig,
-    OidcIdentity,
     OidcRefusal,
     OidcRelyingParty,
 )
@@ -77,32 +75,14 @@ from webauth.ports import (
     AuthenticatedUser,
 )
 
-MAX_PENDING_LOGIN_COOKIE_CHARS = 896
-MAX_PENDING_LOGINS = 5
-
 BOUND_ISSUER = "https://id.example/realms/lab"
-BOUND_ISSUER_ORIGIN = "https://id.example"
 LOGIN_GROUP = "/apps/lab"
 ADMIN_GROUP = f"{LOGIN_GROUP}/admin"
 ADMISSION = AdmissionConfig(
     bound_issuer=BOUND_ISSUER, login_group=LOGIN_GROUP, admin_group=ADMIN_GROUP,
 )
 SUBJECT = "5f0c2a1e-7d4b-4c55-9a51-2f8e3c6b1d90"
-LENA = OidcIdentity(
-    subject=SUBJECT,
-    issuer=BOUND_ISSUER,
-    groups=(LOGIN_GROUP,),
-    session_id=None,
-    preferred_username="lena",
-    id_token=a_fake_id_token("lena"),
-    refresh_token=None,
-)
-
-
-LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(ADMIN_GROUP,))
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
-
-
 
 
 NOW = 1_800_000_000
@@ -111,8 +91,6 @@ CALLBACK_PATH = "/auth/callback"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_PATH = "/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
-OLD_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
-OLD_CSRF_COOKIE_NAME = "__Host-csrf_token"  # noqa: S105
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
