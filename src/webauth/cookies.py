@@ -28,14 +28,14 @@ import hmac
 import math
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, TypedDict
 
 from starlette.requests import cookie_parser
 
 from webauth._paths import MAX_RETURN_PATH_BYTES
 
 if TYPE_CHECKING:
-    from starlette.requests import HTTPConnection
+    from starlette.requests import HTTPConnection, Request
     from starlette.responses import Response
 
     from webauth.config import WebAuthConfig
@@ -69,7 +69,11 @@ _PENDING_LOGIN_SIGNING_PREFIX: Final = b"oidc-pending:"
 _SESSION_SIGNING_PREFIX: Final = b"session:"
 # The callback is a top-level navigation from the issuer's site, which a
 # Strict cookie would not accompany.
-_PENDING_LOGIN_SAMESITE: Final = "lax"
+_PENDING_LOGIN_SAMESITE: Final[CookieSameSite] = "lax"
+_MAX_PENDING_LOGINS: Final = 5
+# A cookie that does not verify, or whose name appears twice, ranks below
+# every genuine one and is evicted first.
+_UNRANKED: Final = -1
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
 _COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
@@ -90,6 +94,13 @@ _PENDING_LOGIN_SIGNATURE: Final = re.compile(r"[0-9a-f]{64}")
 CookieSameSite = Literal["strict", "lax"]
 _DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
 COOKIE_PATH: Final = "/"
+
+
+class _CookieAttributes(TypedDict):
+    path: str
+    secure: bool
+    httponly: bool
+    samesite: CookieSameSite
 
 
 def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
@@ -210,6 +221,13 @@ def _verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
     return None
 
 
+def _cookie_attributes(config: WebAuthConfig, samesite: CookieSameSite) -> _CookieAttributes:
+    """The attributes every cookie is set with, and repeated when it is taken back."""
+    return _CookieAttributes(
+        path=COOKIE_PATH, secure=config.cookie_secure, httponly=True, samesite=samesite,
+    )
+
+
 def issue_session_cookies(
     response: Response, session_id: str, config: WebAuthConfig,
 ) -> None:
@@ -222,17 +240,11 @@ def issue_session_cookies(
     ``cookie_secure`` off: a request's scheme is not trusted to decide it,
     because behind an unlisted TLS proxy every request looks like plain http.
     """
-    secure = config.cookie_secure
-    max_age = config.session_lifetime.absolute_max_age_seconds
-    samesite = config.cookie_samesite
     response.set_cookie(
         config.session_cookie_name,
         sign_session_id(session_id, config.signing_key),
-        max_age=max_age,
-        httponly=True,
-        samesite=samesite,
-        secure=secure,
-        path=COOKIE_PATH,
+        max_age=config.session_lifetime.absolute_max_age_seconds,
+        **_cookie_attributes(config, config.cookie_samesite),
     )
 
 
@@ -242,14 +254,8 @@ def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     The deletion repeats the attributes the cookie was set with, so a browser
     that only lets a secure context overwrite a ``Secure`` cookie accepts it.
     """
-    samesite = config.cookie_samesite
-    secure = config.cookie_secure
     response.delete_cookie(
-        config.session_cookie_name,
-        path=COOKIE_PATH,
-        samesite=samesite,
-        secure=secure,
-        httponly=True,
+        config.session_cookie_name, **_cookie_attributes(config, config.cookie_samesite),
     )
 
 
@@ -283,22 +289,60 @@ def _issue_pending_login_cookie(
         _pending_login_cookie_name(pending.state, secure=config.cookie_secure),
         _sign_pending_login(pending, config.signing_key),
         max_age=max_age_seconds,
-        httponly=True,
-        samesite=_PENDING_LOGIN_SAMESITE,
-        secure=config.cookie_secure,
-        path=COOKIE_PATH,
+        **_cookie_attributes(config, _PENDING_LOGIN_SAMESITE),
     )
 
 
 def _clear_pending_login_cookie(response: Response, name: str, config: WebAuthConfig) -> None:
     """Take a pending-login cookie back, repeating the attributes it was set with."""
-    response.delete_cookie(
-        name,
-        path=COOKIE_PATH,
-        secure=config.cookie_secure,
-        httponly=True,
-        samesite=_PENDING_LOGIN_SAMESITE,
-    )
+    response.delete_cookie(name, **_cookie_attributes(config, _PENDING_LOGIN_SAMESITE))
+
+
+def _begin_pending_login(
+    request: Request,
+    response: Response,
+    pending: PendingLogin,
+    *,
+    max_age_seconds: int,
+    config: WebAuthConfig,
+) -> None:
+    """Hand the browser ``pending``, first clearing the oldest pending-login
+    cookies so it holds at most ``_MAX_PENDING_LOGINS`` with the new one."""
+    for name in _pending_login_cookies_to_evict(request, config):
+        _clear_pending_login_cookie(response, name, config)
+    _issue_pending_login_cookie(response, pending, max_age_seconds=max_age_seconds, config=config)
+
+
+def _take_pending_login(
+    request: Request, response: Response, state: str, config: WebAuthConfig,
+) -> PendingLogin | None:
+    """The pending login of ``state`` the browser carried back, or ``None`` when
+    its cookie is missing, repeated or does not verify; its cookie is cleared
+    either way, so it works once."""
+    cookie_name = _pending_login_cookie_name(state, secure=config.cookie_secure)
+    _clear_pending_login_cookie(response, cookie_name, config)
+    values = _cookie_values(request, cookie_name)
+    if len(values) != 1:
+        return None
+    return _verify_pending_login(values[0], config.signing_key)
+
+
+def _pending_login_cookies_to_evict(request: Request, config: WebAuthConfig) -> list[str]:
+    """The names to clear so the new pending login is one of at most
+    ``_MAX_PENDING_LOGINS``, oldest first."""
+    issued_at_by_name: dict[str, int] = {}
+    for name, value in _cookie_pairs(request):
+        if _is_pending_login_cookie_name(name, secure=config.cookie_secure):
+            issued_at_by_name[name] = (
+                _UNRANKED if name in issued_at_by_name else _issued_at(value, config)
+            )
+    oldest_first = sorted(issued_at_by_name, key=issued_at_by_name.__getitem__)
+    return oldest_first[: max(0, len(oldest_first) - _MAX_PENDING_LOGINS + 1)]
+
+
+def _issued_at(cookie_value: str, config: WebAuthConfig) -> int:
+    pending = _verify_pending_login(cookie_value, config.signing_key)
+    return _UNRANKED if pending is None else pending.issued_at
 
 
 def _sign_pending_login(pending: PendingLogin, secret: bytes) -> str:
