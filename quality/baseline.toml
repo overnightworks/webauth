@@ -10,7 +10,6 @@
 [file_lines]
 "tests/e2e/oidc/prove.py" = 1546
 "tests/support/webauth_arrangement.py" = 918
-"tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
 
 [function_lines."src/webauth/dependencies.py"]
@@ -30,8 +29,5 @@
 
 [function_lines."tests/support/webauth_arrangement.py"]
 "an_auth_app" = 120
-
-[function_lines."tests/test_jwt_verification.py"]
-"_defective_key_sets" = 121
 
 [clones]
