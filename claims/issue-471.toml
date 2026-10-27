@@ -3,6 +3,6 @@ agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
 role = "builder"
 base = "67ac385a7725298baddcbeba3d9a0afce813a515"
 branch = "claude/issue-471-tests-support-importlib"
-scope = ["AGENTS.md", "e2e/oidc/host_app.py", "pyproject.toml", "quality/baseline.toml", "tests"]
+scope = ["AGENTS.md", "e2e/oidc/host_app.py", "pyproject.toml", "quality/baseline.toml", "tests", "uv.lock"]
 opened_commit = "f7e70f29f1976eb1cd4565ab724d952902d7a352"
 whole_reason = "One import convention changes for every test module at once; a partial move breaks collection."
