@@ -41,6 +41,7 @@ from oidc_arrangement import (
     assert_holds_only_the_refresh_token,
     jws,
     key_set_document,
+    opened_session,
     public_jwk,
     rs256,
     rsa_key,
@@ -63,7 +64,6 @@ from webauth_arrangement import (
     WriteLockInMemory,
     _require_held_lock,
     a_web_auth_config,
-    an_http_scope,
     seeded_session,
     session_cookie_header,
     signed_without_bound,
@@ -924,8 +924,7 @@ def test_an_admitted_callback_stores_the_refresh_token_and_nothing_of_the_access
 
     response = host.callback(host.sign_in_at_issuer())
 
-    record = host.sessions.record
-    assert record is not None
+    record = host.sessions.stored_record
     assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
     [admitted] = host.admitted_logins
     visible = (
@@ -995,8 +994,7 @@ def test_an_admitted_callback_opens_the_session_for_one_idle_from_one_whole_seco
 
     host.callback(host.sign_in_at_issuer())
 
-    record = host.sessions.record
-    assert record is not None
+    record = host.sessions.stored_record
     assert (record.created_at, record.expires_at) == (
         FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
     )
@@ -1557,8 +1555,7 @@ def the_session_cookie_is_cleared(host: OidcHost, response: HttpxResponse) -> bo
 
 def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings() -> None:
     host = after_signing_in(an_oidc_host())
-    record = host.sessions.record
-    assert record is not None
+    record = host.sessions.stored_record
     record.id_token = SecretStr(a_fake_id_token("held-by-the-row"))
     [rows_token] = stored_id_tokens(host)
 
@@ -1597,15 +1594,13 @@ def _session_ended_in_the_store(host: OidcHost) -> dict[str, str]:
 
 
 def _session_expired_but_stored(host: OidcHost) -> dict[str, str]:
-    record = host.sessions.record
-    assert record is not None
+    record = host.sessions.stored_record
     record.expires_at = datetime.now(UTC) - timedelta(days=1)
     return {}
 
 
 def _row_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
-    record = host.sessions.record
-    assert record is not None
+    record = host.sessions.stored_record
     record.id_token = None
     return {}
 
@@ -2133,19 +2128,13 @@ class OpeningStore:
         refresh_token: SecretStr | None = None,
         id_token: SecretStr | None = None,
     ) -> SessionRecord:
-        app = FastAPI()
-        install_web_auth_config(app, OPENING_CONFIG)
-        headers: list[tuple[bytes, bytes]] = []
-        if cookie_values:
-            headers.append((b"cookie", session_cookie_header(*cookie_values).encode()))
-        return open_session(
-            Request(an_http_scope(app, headers=headers)), OPENING_CONFIG,
+        return opened_session(
+            OPENING_CONFIG,
             AdmittedLogin(
                 account=ACCOUNT, return_to=None, refresh_token=refresh_token,
                 id_token=id_token or SecretStr("id-token-of-the-login"),
             ),
-            sessions=self.sessions, lock=self.lock,
-            max_sessions=max_sessions, keeps_id_token=True,
+            *cookie_values, sessions=self.sessions, lock=self.lock, max_sessions=max_sessions,
         )
 
 
