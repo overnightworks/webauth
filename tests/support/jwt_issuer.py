@@ -11,7 +11,10 @@ from jwt.algorithms import ECAlgorithm
 
 from tests.support.oidc_arrangement import (
     ABSENT,
+    ACCESS_TOKEN_LEEWAY_SECONDS,
+    APP_CLIENT_ID,
     REALM_ISSUER,
+    REALM_JWKS_URL,
     FakeClock,
     FakeKeySetEndpoint,
     changed,
@@ -27,10 +30,6 @@ from webauth.jwt_verification import (
 )
 
 KEY_SET_TTL_SECONDS = 60 * 60
-ISSUER = REALM_ISSUER
-AUDIENCE = "notes-app"
-JWKS_URL = f"{ISSUER}/protocol/openid-connect/certs"
-LEEWAY_SECONDS = 30
 
 
 @dataclass
@@ -47,8 +46,8 @@ class IssuerScenario:
     def claims(self, changes: dict[str, Any] | None = None) -> dict[str, Any]:
         now = int(self.wall_clock.now)
         issued_claims = {
-            "iss": ISSUER,
-            "aud": AUDIENCE,
+            "iss": REALM_ISSUER,
+            "aud": APP_CLIENT_ID,
             "sub": "7335d417-61da-459d-899c-0a01c76a2f94",
             "exp": now + 300,
             "iat": now - 10,
@@ -75,7 +74,7 @@ class IssuerScenario:
         audience = issued["aud"]
         return VerifiedClaims(
             subject=issued.get("sub"),
-            issuer=ISSUER,
+            issuer=REALM_ISSUER,
             audiences=(audience,) if isinstance(audience, str) else tuple(audience),
             expires_at=issued["exp"],
             issued_at=issued["iat"],
@@ -90,10 +89,10 @@ class IssuerScenario:
 
     def verifier_with(self, **changes: Any) -> JwtVerifier:
         arguments = {
-            "issuer": ISSUER,
-            "audiences": [AUDIENCE],
-            "jwks_url": JWKS_URL,
-            "leeway_seconds": LEEWAY_SECONDS,
+            "issuer": REALM_ISSUER,
+            "audiences": [APP_CLIENT_ID],
+            "jwks_url": REALM_JWKS_URL,
+            "leeway_seconds": ACCESS_TOKEN_LEEWAY_SECONDS,
             "fetch_key_set": self.endpoint,
             "wall_clock": self.wall_clock,
             "monotonic_clock": self.monotonic_clock,

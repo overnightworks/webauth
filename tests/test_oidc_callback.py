@@ -20,34 +20,34 @@ from pydantic import SecretStr
 
 from tests.support.oidc_arrangement import (
     ABSENT,
+    ACCESS_TOKEN_LEEWAY_SECONDS,
+    ACCESS_TOKEN_NOW,
+    APP_CLIENT_ID,
+    AUTHORIZATION_ENDPOINT,
+    CLIENT_SECRET,
     ISSUED_ACCESS_TOKEN_CANARY,
     ISSUED_REFRESH_TOKEN,
     REALM_ISSUER,
+    REDIRECT_URI,
+    TOKEN_ENDPOINT,
     FakeTokenEndpoint,
     a_fake_id_token,
+    a_realm_client_config,
     assert_holds_only_the_refresh_token,
     s256_code_challenge,
     token_endpoint_answer,
 )
 from tests.support.oidc_relying_party import (
-    AUTHORIZATION_ENDPOINT,
     BASIC_AUTHORIZATION,
-    CLIENT_ID,
-    CLIENT_SECRET,
     CODE,
     GROUPS,
-    LEEWAY_SECONDS,
-    NOW,
     OTHER_REALM,
     OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR,
-    REDIRECT_URI,
     SESSION_ID,
     SUBJECT,
     TOKEN_AT_BOTH_ENDS,
-    TOKEN_ENDPOINT,
     Attempt,
     LoginScenario,
-    a_realm_client_config,
     issued,
 )
 from webauth.cookies import PendingLogin
@@ -108,14 +108,14 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
     ("attempt", "identity"),
     [
         pytest.param(
-            Attempt(claims={"aud": [CLIENT_ID, "agent-service"], "azp": CLIENT_ID}),
+            Attempt(claims={"aud": [APP_CLIENT_ID, "agent-service"], "azp": APP_CLIENT_ID}),
             _IDENTITY,
             id="several-audiences-with-this-client-as-azp",
         ),
-        pytest.param(Attempt(claims={"azp": CLIENT_ID}), _IDENTITY, id="one-audience-with-azp"),
-        pytest.param(Attempt(claims={"aud": [CLIENT_ID]}), _IDENTITY, id="one-audience-list"),
+        pytest.param(Attempt(claims={"azp": APP_CLIENT_ID}), _IDENTITY, id="one-audience-with-azp"),
+        pytest.param(Attempt(claims={"aud": [APP_CLIENT_ID]}), _IDENTITY, id="one-audience-list"),
         pytest.param(
-            Attempt(claims={"exp": NOW - LEEWAY_SECONDS + 1}),
+            Attempt(claims={"exp": ACCESS_TOKEN_NOW - ACCESS_TOKEN_LEEWAY_SECONDS + 1}),
             _IDENTITY,
             id="expired-within-the-leeway",
         ),
@@ -376,7 +376,7 @@ _EXCHANGE_REFUSALS = [
         id="token-for-another-app",
     ),
     pytest.param(
-        Attempt(claims={"exp": NOW - LEEWAY_SECONDS}),
+        Attempt(claims={"exp": ACCESS_TOKEN_NOW - ACCESS_TOKEN_LEEWAY_SECONDS}),
         OidcRefusal(OidcRefusalReason.ID_TOKEN_REJECTED, token_rejection=RejectionReason.EXPIRED),
         id="expired-past-the-leeway",
     ),
@@ -386,7 +386,7 @@ _EXCHANGE_REFUSALS = [
         id="azp-of-another-app",
     ),
     pytest.param(
-        Attempt(claims={"aud": [CLIENT_ID, "agent-service"]}),
+        Attempt(claims={"aud": [APP_CLIENT_ID, "agent-service"]}),
         OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH),
         id="several-audiences-without-azp",
     ),
@@ -449,12 +449,15 @@ def test_a_callback_refused_on_its_own_sends_no_token_request(
     [
         pytest.param(
             PendingLogin(
-                state="", nonce="a-real-nonce", code_verifier="a-real-verifier", issued_at=NOW
+                state="",
+                nonce="a-real-nonce",
+                code_verifier="a-real-verifier",
+                issued_at=ACCESS_TOKEN_NOW,
             ),
             id="empty-state",
         ),
         pytest.param(
-            PendingLogin(state="", nonce="", code_verifier="", issued_at=NOW),
+            PendingLogin(state="", nonce="", code_verifier="", issued_at=ACCESS_TOKEN_NOW),
             id="empty-state-and-nonce",
         ),
     ],
@@ -491,7 +494,7 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
     assert url._replace(query="").geturl() == AUTHORIZATION_ENDPOINT
     assert urllib.parse.parse_qs(url.query, strict_parsing=True) == {
         "response_type": ["code"],
-        "client_id": [CLIENT_ID],
+        "client_id": [APP_CLIENT_ID],
         "redirect_uri": [REDIRECT_URI],
         "scope": ["openid profile"],
         "state": [pending.state],
@@ -505,9 +508,9 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
 @pytest.mark.parametrize(
     ("client_id", "client_secret", "authorization"),
     [
-        pytest.param(CLIENT_ID, CLIENT_SECRET, BASIC_AUTHORIZATION, id="plain-credentials"),
+        pytest.param(APP_CLIENT_ID, CLIENT_SECRET, BASIC_AUTHORIZATION, id="plain-credentials"),
         pytest.param(
-            CLIENT_ID,
+            APP_CLIENT_ID,
             "se:cr+et %",
             "Basic bm90ZXMtYXBwOnNlJTNBY3IlMkJldCslMjU=",
             id="secret-form-encoded-before-basic-encoding",
@@ -543,9 +546,9 @@ def test_the_token_endpoint_receives_the_code_and_verifier_with_basic_client_aut
 def test_a_pending_login_is_stamped_with_the_wall_clock_second_it_began(
     login: LoginScenario,
 ) -> None:
-    login.wall_clock.now = NOW + 0.75
+    login.wall_clock.now = ACCESS_TOKEN_NOW + 0.75
 
-    assert login.relying_party.begin_login().pending.issued_at == NOW
+    assert login.relying_party.begin_login().pending.issued_at == ACCESS_TOKEN_NOW
 
 
 def test_two_logins_never_share_a_state_nonce_or_verifier(login: LoginScenario) -> None:

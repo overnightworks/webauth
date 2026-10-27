@@ -18,14 +18,14 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from tests.support.jwt_issuer import (
-    AUDIENCE,
-    ISSUER,
-    JWKS_URL,
-    LEEWAY_SECONDS,
     IssuerScenario,
 )
 from tests.support.oidc_arrangement import (
     ABSENT,
+    ACCESS_TOKEN_LEEWAY_SECONDS,
+    APP_CLIENT_ID,
+    REALM_ISSUER,
+    REALM_JWKS_URL,
     jws,
     rs256,
     rsa_key,
@@ -64,8 +64,8 @@ def _with_unused_signature_bits_set(token: str) -> str:
     "claims",
     [
         pytest.param({}, id="audience-string"),
-        pytest.param({"aud": [AUDIENCE]}, id="audience-list"),
-        pytest.param({"aud": ["another-app", AUDIENCE]}, id="audience-among-others"),
+        pytest.param({"aud": [APP_CLIENT_ID]}, id="audience-list"),
+        pytest.param({"aud": ["another-app", APP_CLIENT_ID]}, id="audience-among-others"),
         pytest.param({"nbf": ABSENT}, id="without-nbf"),
         pytest.param({"sub": ABSENT}, id="without-sub"),
     ],
@@ -74,7 +74,7 @@ def test_a_token_signed_by_a_key_of_the_fake_key_set_verifies_as_its_claims(
     issuer: IssuerScenario, claims: dict[str, Any]
 ) -> None:
     assert issuer.verifier.verify(issuer.token(claims)) == issuer.verified(claims)
-    assert issuer.endpoint.fetched_urls == [JWKS_URL]
+    assert issuer.endpoint.fetched_urls == [REALM_JWKS_URL]
 
 
 def test_a_token_for_any_one_of_the_accepted_audiences_verifies(
@@ -164,7 +164,7 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
             id="foreign-issuer",
         ),
         pytest.param(
-            lambda issuer: issuer.token({"iss": ISSUER + "/"}),
+            lambda issuer: issuer.token({"iss": REALM_ISSUER + "/"}),
             RejectionReason.INVALID_ISSUER,
             id="issuer-with-trailing-slash",
         ),
@@ -352,21 +352,31 @@ def test_a_header_member_naming_a_key_is_ignored_and_only_the_configured_key_set
     token = issuer.token(header={member: "attacker-chosen"})
 
     assert issuer.verifier.verify(token) == issuer.verified()
-    assert issuer.endpoint.fetched_urls == [JWKS_URL]
+    assert issuer.endpoint.fetched_urls == [REALM_JWKS_URL]
 
 
 @pytest.mark.parametrize(
     ("claim", "offset", "outcome"),
     [
-        pytest.param("exp", -LEEWAY_SECONDS + 1, None, id="exp-inside-the-leeway"),
-        pytest.param("exp", -LEEWAY_SECONDS, RejectionReason.EXPIRED, id="exp-at-the-leeway"),
-        pytest.param("iat", LEEWAY_SECONDS, None, id="iat-at-the-leeway"),
         pytest.param(
-            "iat", LEEWAY_SECONDS + 1, RejectionReason.ISSUED_IN_FUTURE, id="iat-past-the-leeway"
+            "exp", -ACCESS_TOKEN_LEEWAY_SECONDS + 1, None, id="exp-inside-the-leeway"
         ),
-        pytest.param("nbf", LEEWAY_SECONDS, None, id="nbf-at-the-leeway"),
         pytest.param(
-            "nbf", LEEWAY_SECONDS + 1, RejectionReason.NOT_YET_VALID, id="nbf-past-the-leeway"
+            "exp", -ACCESS_TOKEN_LEEWAY_SECONDS, RejectionReason.EXPIRED, id="exp-at-the-leeway"
+        ),
+        pytest.param("iat", ACCESS_TOKEN_LEEWAY_SECONDS, None, id="iat-at-the-leeway"),
+        pytest.param(
+            "iat",
+            ACCESS_TOKEN_LEEWAY_SECONDS + 1,
+            RejectionReason.ISSUED_IN_FUTURE,
+            id="iat-past-the-leeway",
+        ),
+        pytest.param("nbf", ACCESS_TOKEN_LEEWAY_SECONDS, None, id="nbf-at-the-leeway"),
+        pytest.param(
+            "nbf",
+            ACCESS_TOKEN_LEEWAY_SECONDS + 1,
+            RejectionReason.NOT_YET_VALID,
+            id="nbf-past-the-leeway",
         ),
     ],
 )

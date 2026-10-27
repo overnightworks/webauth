@@ -11,15 +11,15 @@ import pytest
 
 from tests.support.oidc_arrangement import (
     ABSENT,
+    ACCESS_TOKEN_LEEWAY_SECONDS,
+    ACCESS_TOKEN_NOW,
+    APP_CLIENT_ID,
     BACKCHANNEL_LOGOUT_EVENT,
     REALM_ISSUER,
     FakeTokenEndpoint,
     a_logout_token,
 )
 from tests.support.oidc_relying_party import (
-    CLIENT_ID,
-    LEEWAY_SECONDS,
-    NOW,
     OTHER_REALM,
     SUBJECT,
     LoginScenario,
@@ -41,9 +41,9 @@ def _logout_token(
 ) -> str:
     return a_logout_token(
         issuer=REALM_ISSUER,
-        audience=CLIENT_ID,
+        audience=APP_CLIENT_ID,
         subject=SUBJECT,
-        now=NOW,
+        now=ACCESS_TOKEN_NOW,
         key_name=key_name,
         claims=claims,
         header=header,
@@ -51,7 +51,7 @@ def _logout_token(
 
 
 _EVENT = BACKCHANNEL_LOGOUT_EVENT
-_MAX_LOGOUT_AGE = LOGOUT_TOKEN_MAX_AGE_SECONDS + LEEWAY_SECONDS
+_MAX_LOGOUT_AGE = LOGOUT_TOKEN_MAX_AGE_SECONDS + ACCESS_TOKEN_LEEWAY_SECONDS
 
 
 def _a_logout_relying_party() -> OidcRelyingParty:
@@ -62,13 +62,21 @@ def _a_logout_relying_party() -> OidcRelyingParty:
     pytest.param({}, {}, id="the token as keycloak signs it"),
     pytest.param({"sid": ABSENT}, {}, id="a subject without a session id"),
     pytest.param({"sid": 7}, {}, id="a session id of any type is never read"),
-    pytest.param({"aud": [CLIENT_ID]}, {}, id="a singleton audience array"),
+    pytest.param({"aud": [APP_CLIENT_ID]}, {}, id="a singleton audience array"),
     pytest.param({"events": {_EVENT: {"reason": "admin"}}}, {}, id="an events object with data"),
     pytest.param({"note": "other claims are ignored"}, {}, id="an unknown claim"),
-    pytest.param({"iat": NOW + LEEWAY_SECONDS}, {}, id="issued in the future within leeway"),
-    pytest.param({"iat": NOW - _MAX_LOGOUT_AGE, "exp": NOW + 1}, {}, id="issued at the limit"),
-    pytest.param({"exp": NOW + LEEWAY_SECONDS - 1, "iat": NOW - 100}, {},
-                 id="one second before the deadline plus leeway"),
+    pytest.param(
+        {"iat": ACCESS_TOKEN_NOW + ACCESS_TOKEN_LEEWAY_SECONDS}, {},
+        id="issued in the future within leeway",
+    ),
+    pytest.param(
+        {"iat": ACCESS_TOKEN_NOW - _MAX_LOGOUT_AGE, "exp": ACCESS_TOKEN_NOW + 1}, {},
+        id="issued at the limit",
+    ),
+    pytest.param(
+        {"exp": ACCESS_TOKEN_NOW + ACCESS_TOKEN_LEEWAY_SECONDS - 1, "iat": ACCESS_TOKEN_NOW - 100},
+        {}, id="one second before the deadline plus leeway",
+    ),
 ])
 def test_a_logout_token_of_the_bound_issuer_yields_its_subject(
     claims: dict[str, Any], header: dict[str, Any],
@@ -94,7 +102,7 @@ _LOGOUT_REFUSALS = [
                  _rejected(RejectionReason.INVALID_ISSUER), id="wrong-issuer"),
     pytest.param(_logout_token({"aud": "another-app"}),
                  _rejected(RejectionReason.INVALID_AUDIENCE), id="wrong-audience"),
-    pytest.param(_logout_token({"aud": [CLIENT_ID, "another-app"]}), _INVALID_LOGOUT_CLAIM,
+    pytest.param(_logout_token({"aud": [APP_CLIENT_ID, "another-app"]}), _INVALID_LOGOUT_CLAIM,
                  id="extra-audience"),
     pytest.param(_logout_token({"events": ABSENT}), _INVALID_LOGOUT_CLAIM, id="events-missing"),
     pytest.param(_logout_token({"events": {}}), _INVALID_LOGOUT_CLAIM, id="events-empty"),
@@ -119,22 +127,28 @@ _LOGOUT_REFUSALS = [
                  id="exp-missing"),
     pytest.param(_logout_token({"exp": "soon"}), _rejected(RejectionReason.INVALID_CLAIM),
                  id="exp-malformed"),
-    pytest.param(_logout_token({"exp": NOW - LEEWAY_SECONDS, "iat": NOW - 100}),
-                 _rejected(RejectionReason.EXPIRED), id="exp-at-the-deadline"),
-    pytest.param(_logout_token({"exp": NOW - 10}), _INVALID_LOGOUT_CLAIM,
+    pytest.param(
+        _logout_token(
+            {"exp": ACCESS_TOKEN_NOW - ACCESS_TOKEN_LEEWAY_SECONDS, "iat": ACCESS_TOKEN_NOW - 100}
+        ),
+        _rejected(RejectionReason.EXPIRED), id="exp-at-the-deadline",
+    ),
+    pytest.param(_logout_token({"exp": ACCESS_TOKEN_NOW - 10}), _INVALID_LOGOUT_CLAIM,
                  id="exp-equal-to-iat"),
-    pytest.param(_logout_token({"exp": NOW - 11}), _INVALID_LOGOUT_CLAIM,
+    pytest.param(_logout_token({"exp": ACCESS_TOKEN_NOW - 11}), _INVALID_LOGOUT_CLAIM,
                  id="exp-before-iat"),
     pytest.param(_logout_token({"iat": ABSENT}), _rejected(RejectionReason.INVALID_CLAIM),
                  id="iat-missing"),
     pytest.param(_logout_token({"iat": "now"}), _rejected(RejectionReason.INVALID_CLAIM),
                  id="iat-malformed"),
-    pytest.param(_logout_token({"iat": float(NOW - 10)}),
+    pytest.param(_logout_token({"iat": float(ACCESS_TOKEN_NOW - 10)}),
                  _rejected(RejectionReason.INVALID_CLAIM), id="iat-not-an-integer"),
-    pytest.param(_logout_token({"iat": NOW + LEEWAY_SECONDS + 1}),
+    pytest.param(_logout_token({"iat": ACCESS_TOKEN_NOW + ACCESS_TOKEN_LEEWAY_SECONDS + 1}),
                  _rejected(RejectionReason.ISSUED_IN_FUTURE), id="iat-past-the-leeway"),
-    pytest.param(_logout_token({"iat": NOW - _MAX_LOGOUT_AGE - 1, "exp": NOW + 1}),
-                 _INVALID_LOGOUT_CLAIM, id="iat-past-the-age-limit"),
+    pytest.param(
+        _logout_token({"iat": ACCESS_TOKEN_NOW - _MAX_LOGOUT_AGE - 1, "exp": ACCESS_TOKEN_NOW + 1}),
+        _INVALID_LOGOUT_CLAIM, id="iat-past-the-age-limit",
+    ),
     pytest.param(_logout_token(header={"typ": ABSENT}),
                  _rejected(RejectionReason.INVALID_TOKEN_TYPE), id="typ-missing"),
     pytest.param(_logout_token(header={"typ": "JWT"}),
