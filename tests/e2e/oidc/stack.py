@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-EDGE_SHA_FILE = Path(__file__).with_name("EDGE_SHA")
+EDGE_SHA_FILE = Path(__file__).with_name("edge_sha.txt")
 PROBE_FILES = "compose.yaml keycloak probe/keycloak src/edge traefik.yml dynamic".split()
 PROBE_PROJECT = "edge-kc-probe"
 KEYCLOAK_NETWORK = "keycloak"

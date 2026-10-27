@@ -17,7 +17,7 @@ step is a verb of `scripts/run_oidc_proof.sh`, which holds the commands, the cap
 ## Prerequisites
 
 - Docker. The probe picks free loopback ports, so the live edge keeps running.
-- An edge checkout at the commit in `EDGE_SHA`, with no change in any path its
+- An edge checkout at the commit in `edge_sha.txt`, with no change in any path its
   probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/edge`, `traefik.yml`,
   `dynamic`). The run refuses otherwise.
 - Playwright's Chromium, Firefox and WebKit for the pinned version (WebKit needs system
