@@ -79,7 +79,7 @@ could still write.
 
 ## Refreshing the pins
 
-Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` dependency group, and does not watch the image digests (it has no docker ecosystem here): `RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`. Only a probe run vouches for them. `EDGE_SHA` is
+Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` dependency group, and does not watch the image digests (it has no docker ecosystem here): `RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`. Only a probe run vouches for them. `edge_sha.txt` is
 a hand-set pin as well. A bump of any of them can break what only a real browser, a real
 Keycloak or the OIDF suite shows, and CI does not run those.
 
