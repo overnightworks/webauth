@@ -44,6 +44,7 @@ from tests.support.oidc_login_host import (
     stored_id_tokens,
     stored_refresh_tokens,
 )
+from tests.support.oidc_relying_party import OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_IDLE_SECONDS,
@@ -145,17 +146,11 @@ def test_an_admitted_callback_stores_what_the_code_answer_issued(
     assert host.sessions.count_active() == 1
 
 
-@pytest.mark.parametrize("refresh_token", [
-    pytest.param("", id="empty"),
-    pytest.param(42, id="a-number"),
-    pytest.param(None, id="null"),
-    pytest.param("rt\x00", id="with-a-nul"),
-    pytest.param("rt\r", id="with-a-carriage-return"),
-    pytest.param("rt\n", id="with-a-line-feed"),
-    pytest.param("rt\x7f", id="with-a-del"),
-    pytest.param("rté", id="non-ascii"),
-    pytest.param("rt\ud800", id="a-lone-surrogate"),
-])
+@pytest.mark.parametrize(
+    "refresh_token",
+    OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR.values(),
+    ids=list(OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR),
+)
 def test_a_refresh_token_outside_the_grammar_refuses_the_login_and_provisions_nothing(
     refresh_token: object,
 ) -> None:

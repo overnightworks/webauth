@@ -13,22 +13,22 @@ from pydantic import SecretStr
 
 from tests.support.oidc_arrangement import (
     ABSENT,
+    ACCESS_TOKEN_NOW,
+    CLIENT_SECRET,
     ISSUED_REFRESH_TOKEN,
+    TOKEN_ENDPOINT,
     FakeClock,
     FakeIssuer,
     FakeTokenEndpoint,
     a_fake_id_token,
+    a_realm_client_config,
     changed,
     token_endpoint_answer,
 )
 from tests.support.oidc_relying_party import (
     BASIC_AUTHORIZATION,
-    CLIENT_SECRET,
-    NOW,
     OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR,
     TOKEN_AT_BOTH_ENDS,
-    TOKEN_ENDPOINT,
-    a_realm_client_config,
     a_relying_party_for,
 )
 from webauth.oidc import (
@@ -61,7 +61,9 @@ _BOTH_GRANTS = pytest.mark.parametrize(
 
 
 def _granting(endpoint: TokenRequestPost) -> OidcRelyingParty:
-    return a_relying_party_for(endpoint, a_realm_client_config(), FakeClock(float(NOW)))
+    return a_relying_party_for(
+        endpoint, a_realm_client_config(), FakeClock(float(ACCESS_TOKEN_NOW))
+    )
 
 
 def _grant_answer(status: int = 200, **changes: Any) -> FakeTokenEndpoint:

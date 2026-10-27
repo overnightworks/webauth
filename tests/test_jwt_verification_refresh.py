@@ -11,11 +11,11 @@ from typing import Any
 import pytest
 
 from tests.support.jwt_issuer import (
-    ISSUER,
     KEY_SET_TTL_SECONDS,
     IssuerScenario,
 )
 from tests.support.oidc_arrangement import (
+    REALM_ISSUER,
     key_set_document,
     public_jwk,
     rs256,
@@ -71,7 +71,7 @@ def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
 
     [warning] = caplog.records
     assert logged_cause in warning.getMessage()
-    assert ISSUER not in warning.getMessage()
+    assert REALM_ISSUER not in warning.getMessage()
     assert _URL_SECRET not in warning.getMessage()
 
 
@@ -153,7 +153,9 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
     ("changes", "refused"),
     [
         pytest.param({"issuer": ""}, "issuer", id="empty-issuer"),
-        pytest.param({"issuer": [ISSUER, "https://other.example.org"]}, "issuer", id="issuer-list"),
+        pytest.param(
+            {"issuer": [REALM_ISSUER, "https://other.example.org"]}, "issuer", id="issuer-list"
+        ),
         pytest.param({"audiences": []}, "audiences", id="no-audience"),
         pytest.param({"audiences": [""]}, "audiences", id="empty-audience"),
         pytest.param({"audiences": "notes-app"}, "audiences", id="audience-as-one-string"),

@@ -9,15 +9,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import SecretStr
-
 from tests.support.oidc_arrangement import (
+    ACCESS_TOKEN_NOW,
+    APP_CLIENT_ID,
+    CLIENT_SECRET,
     ISSUED_ACCESS_TOKEN_CANARY,
     ISSUED_REFRESH_TOKEN,
     REALM_ISSUER,
     FakeClock,
     FakeKeySetEndpoint,
     FakeTokenEndpoint,
+    a_realm_client_config,
     changed,
     jws,
     key_set_document,
@@ -37,17 +39,6 @@ from webauth.oidc import (
 )
 
 OTHER_REALM = "https://login.example.org/realms/elsewhere"
-AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/auth"
-TOKEN_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/token"
-JWKS_URL = f"{REALM_ISSUER}/protocol/openid-connect/certs"
-CLIENT_ID = "notes-app"
-# Canary whose recognisable text is the point
-CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
-END_SESSION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/logout"
-REDIRECT_URI = "https://notes.example.org/auth/callback"
-POST_LOGOUT_REDIRECT_URI = "https://notes.example.org/"
-LEEWAY_SECONDS = 30
-NOW = 1_800_000_000
 CODE = "authorization-code-from-the-callback"
 SUBJECT = "7335d417-61da-459d-899c-0a01c76a2f94"
 SESSION_ID = "4c2a9f0e-session"
@@ -66,25 +57,8 @@ OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR = {
 }
 GROUPS = ("/workshop/admins", "/workshop/makers")
 BASIC_AUTHORIZATION = (
-    "Basic " + base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
+    "Basic " + base64.b64encode(f"{APP_CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
 )
-
-
-def a_realm_client_config(**changes: Any) -> OidcClientConfig:
-    arguments = {
-        "issuer": REALM_ISSUER,
-        "authorization_endpoint": AUTHORIZATION_ENDPOINT,
-        "token_endpoint": TOKEN_ENDPOINT,
-        "jwks_url": JWKS_URL,
-        "end_session_endpoint": END_SESSION_ENDPOINT,
-        "client_id": CLIENT_ID,
-        "client_secret": SecretStr(CLIENT_SECRET),
-        "redirect_uri": REDIRECT_URI,
-        "post_logout_redirect_uri": POST_LOGOUT_REDIRECT_URI,
-        "scopes": ("openid", "profile"),
-        "leeway_seconds": LEEWAY_SECONDS,
-    }
-    return OidcClientConfig(**{**arguments, **changes})
 
 
 def issued(id_token: str, **changes: Any) -> TokenEndpointAnswer:
@@ -135,7 +109,7 @@ def a_relying_party_for(
 class LoginScenario:
     token_endpoint: FakeTokenEndpoint
     config: OidcClientConfig = field(default_factory=a_realm_client_config)
-    wall_clock: FakeClock = field(default_factory=lambda: FakeClock(float(NOW)))
+    wall_clock: FakeClock = field(default_factory=lambda: FakeClock(float(ACCESS_TOKEN_NOW)))
     relying_party: OidcRelyingParty = field(init=False)
     minted_id_tokens: list[str] = field(default_factory=list)
 
@@ -146,7 +120,7 @@ class LoginScenario:
         now = int(self.wall_clock.now)
         claims = {
             "iss": REALM_ISSUER,
-            "aud": CLIENT_ID,
+            "aud": APP_CLIENT_ID,
             "sub": SUBJECT,
             "exp": now + 300,
             "iat": now - 10,

@@ -217,6 +217,13 @@ class FakeTokenEndpoint:
 REALM_ISSUER = "https://login.example.org/realms/workshop"
 REALM_JWKS_URL = f"{REALM_ISSUER}/protocol/openid-connect/certs"
 APP_CLIENT_ID = "notes-app"
+# Canary whose recognisable text is the point
+CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
+AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/auth"
+TOKEN_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/token"
+END_SESSION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/logout"
+REDIRECT_URI = "https://notes.example.org/auth/callback"
+POST_LOGOUT_REDIRECT_URI = "https://notes.example.org/"
 OPERATOR_SUBJECT = "operator-account-1"
 ACCESS_TOKEN_LEEWAY_SECONDS = 30
 ACCESS_TOKEN_NOW = 1_800_000_000
@@ -255,6 +262,24 @@ def an_access_token(
     )
 
 
+def a_realm_client_config(**changes: Any) -> OidcClientConfig:
+    """The configuration of `APP_CLIENT_ID` at `REALM_ISSUER`; `changes` replace its fields."""
+    arguments = {
+        "issuer": REALM_ISSUER,
+        "authorization_endpoint": AUTHORIZATION_ENDPOINT,
+        "token_endpoint": TOKEN_ENDPOINT,
+        "jwks_url": REALM_JWKS_URL,
+        "end_session_endpoint": END_SESSION_ENDPOINT,
+        "client_id": APP_CLIENT_ID,
+        "client_secret": SecretStr(CLIENT_SECRET),
+        "redirect_uri": REDIRECT_URI,
+        "post_logout_redirect_uri": POST_LOGOUT_REDIRECT_URI,
+        "scopes": ("openid", "profile"),
+        "leeway_seconds": ACCESS_TOKEN_LEEWAY_SECONDS,
+    }
+    return OidcClientConfig(**{**arguments, **changes})
+
+
 def a_relying_party(
     *,
     post_token_request: TokenRequestPost | None = None,
@@ -268,20 +293,7 @@ def a_relying_party(
     def post_no_token_request(request: TokenRequest) -> TokenEndpointAnswer:
         raise AssertionError(f"a token request was posted to {request.url}")
 
-    endpoint = f"{REALM_ISSUER}/protocol/openid-connect"
-    config = OidcClientConfig(
-        issuer=REALM_ISSUER,
-        authorization_endpoint=f"{endpoint}/auth",
-        token_endpoint=f"{endpoint}/token",
-        jwks_url=REALM_JWKS_URL,
-        end_session_endpoint=f"{endpoint}/logout",
-        client_id=APP_CLIENT_ID,
-        client_secret=SecretStr(secrets.token_urlsafe(16)),
-        redirect_uri="https://notes.example.org/auth/callback",
-        post_logout_redirect_uri="https://notes.example.org/",
-        scopes=("openid", "profile"),
-        leeway_seconds=ACCESS_TOKEN_LEEWAY_SECONDS,
-    )
+    config = a_realm_client_config(client_secret=SecretStr(secrets.token_urlsafe(16)))
     return OidcRelyingParty(
         config,
         post_token_request=post_token_request or post_no_token_request,

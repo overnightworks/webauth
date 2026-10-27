@@ -12,13 +12,11 @@ import pytest
 from pydantic import SecretStr
 
 from tests.support.oidc_arrangement import (
-    REALM_ISSUER,
-)
-from tests.support.oidc_relying_party import (
     AUTHORIZATION_ENDPOINT,
     END_SESSION_ENDPOINT,
-    JWKS_URL,
     POST_LOGOUT_REDIRECT_URI,
+    REALM_ISSUER,
+    REALM_JWKS_URL,
     TOKEN_ENDPOINT,
     a_realm_client_config,
 )
@@ -88,7 +86,7 @@ def _text_of(value: object) -> str:
         pytest.param("end_session_endpoint", "https://id.example;x/logout", id="host-semicolon"),
         pytest.param("post_logout_redirect_uri", "https://id.example,x/", id="host-comma"),
         pytest.param("end_session_endpoint", "https://*.example/logout", id="wildcard-host"),
-        pytest.param("jwks_url", f"{JWKS_URL}\x00", id="jwks-url-with-a-nul"),
+        pytest.param("jwks_url", f"{REALM_JWKS_URL}\x00", id="jwks-url-with-a-nul"),
         pytest.param("token_endpoint", f"{TOKEN_ENDPOINT} ", id="token-endpoint-with-a-space"),
         pytest.param("client_id", "", id="client-id-empty"),
         pytest.param("client_secret", SecretStr(""), id="client-secret-empty"),
