@@ -1,0 +1,8 @@
+claim_id = "09da475b166f48b285f4f932135de705"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "5f0c2c21a24ef9efb9b80cca130fc2004462454c"
+branch = "claude/issue-487-remove-unauthenticated-response"
+scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "src/webauth/dependencies.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/webauth_arrangement.py", "tests/test_dependencies.py"]
+opened_commit = "c39ea94f8052dc08158ac1b32122c34f62f9c26d"
+whole_reason = "One removal: the function, its docs, its test route and the typing host's import go together, or the static checks break between slices."
