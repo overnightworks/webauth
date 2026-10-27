@@ -1,7 +1,0 @@
-claim_id = "45e369bae27a495eb8108a12c6058327"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "f36dbea1f85a3d20ccd73132e617863e67c78aef"
-branch = "claude/issue-465-cookie-ownership"
-scope = ["quality/baseline.toml", "src/webauth/cookies.py", "src/webauth/oidc_login.py"]
-opened_commit = "592f8e8fdf47e0e544b7939df584bf4c09139500"
