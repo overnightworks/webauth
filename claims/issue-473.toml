@@ -1,8 +1,0 @@
-claim_id = "91e3b4ad8d4d4434a37639ae016f5b3d"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "f15795401d969a6349953f87169291d661de06ba"
-branch = "claude/issue-473-module-path-renames"
-scope = ["docs/host-contract.md", "tests"]
-opened_commit = "f2bac083dd433fb7c3daa348e517153130d8b03d"
-whole_reason = "One naming rule applied to sixteen test files in one rename commit; the files are not edited."
