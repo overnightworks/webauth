@@ -1,0 +1,8 @@
+claim_id = "fcfe7a3968784e7b90c51f0036641574"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "4196d119e581e92072cc6fd7b3e94a09cafe6552"
+branch = "claude/issue-478-script-layout"
+scope = [".github/workflows/ci.yml", "AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "quality/baseline.toml", "quality/config.toml", "scripts", "tests/e2e/oidc", "tests/fixtures", "tests/test_public_api.py", "tests/test_webauth_public_api.py", "tests/typing"]
+opened_commit = "ed993fc980b9854e3296c2d78934f7bd89aadfde"
+whole_reason = "One rename set: every script name and the typing host move together with the CI line and docs that call them, or a check breaks between slices."
