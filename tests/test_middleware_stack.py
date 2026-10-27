@@ -399,7 +399,7 @@ class TestRefusedInstallation:
                 install_full_stack(carrier)
             except RuntimeError:
                 continue
-            accepted.append(entry.cls.__name__)
+            accepted.append(repr(entry.cls))
         assert accepted == []
 
     def test_a_full_install_with_a_bearer_gate_runs_it_after_the_rate_limit_and_before_csrf(

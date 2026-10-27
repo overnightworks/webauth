@@ -8,6 +8,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
+from typing import TypedDict
 
 import pytest
 from fastapi import FastAPI
@@ -285,6 +286,11 @@ def with_security_headers(app: FastAPI) -> None:
     )
 
 
+class CookieOverrides(TypedDict, total=False):
+    cookie_secure: bool
+    session_cookie_name: str
+
+
 def a_cookie_app(
     *, base_url: str = OVER_HTTPS, peer: str = UNTRUSTED_PEER, **config_overrides: object,
 ) -> CookieApp:
@@ -401,7 +407,7 @@ def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
     ),
 ])
 def test_the_cookie_is_issued_and_cleared_under_the_resolved_name(
-    base_url: str, config_overrides: dict[str, object], session_name: str,
+    base_url: str, config_overrides: CookieOverrides, session_name: str,
 ) -> None:
     app = a_cookie_app(base_url=base_url, **config_overrides)
 

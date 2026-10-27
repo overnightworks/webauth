@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -324,8 +325,8 @@ def a_policy_with_raw_header_value(field: str, value: str) -> SecurityHeadersPol
     if field == "CacheControlRule.value":
         rule = CacheControlRule(paths=PathRules(prefixes=("/",)), value=value)
         return SecurityHeadersPolicy("default-src 'none'", cache_control_rules=(rule,))
-    fields = {"content_security_policy": "default-src 'none'", "permissions_policy": "camera=()"}
-    return SecurityHeadersPolicy(**{**fields, field: value})
+    policy = SecurityHeadersPolicy("default-src 'none'", permissions_policy="camera=()")
+    return replace(policy, **{field: value})
 
 
 def raw_header_value(policy: SecurityHeadersPolicy, field: str) -> str | None:

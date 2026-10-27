@@ -169,6 +169,12 @@ class Host:
         )
 
 
+def admitted_account(host: Host, identity: OidcIdentity) -> UserRecord:
+    account = host.admit(identity)
+    assert not isinstance(account, AdmissionRefusal)
+    return account
+
+
 def a_host(*users: FakeUser, store: type[UsersInMemory] = UsersInMemory) -> Host:
     lock = WriteLockInMemory()
     return Host(store(*users, lock=lock), RecordingAuditSink(), lock)
@@ -185,7 +191,7 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
 ) -> None:
     host = a_host()
 
-    account = host.admit(replace(LENA, preferred_username=preferred_username))
+    account = admitted_account(host, replace(LENA, preferred_username=preferred_username))
 
     assert (account.id, account.username, account.role) == (
         SUBJECT, username, MEMBER_ROLE,
@@ -317,7 +323,9 @@ MALFORMED_GROUP_PATHS = [
 def test_a_malformed_login_group_fails_at_construction(login_group: object) -> None:
     with pytest.raises(ValueError):
         AdmissionConfig(
-            bound_issuer=BOUND_ISSUER, login_group=login_group, admin_group=NoAdmins.IN_THIS_APP,
+            bound_issuer=BOUND_ISSUER,
+            login_group=login_group,  # pyright: ignore[reportArgumentType] -- malformed on purpose
+            admin_group=NoAdmins.IN_THIS_APP,
         )
 
 
@@ -332,7 +340,7 @@ def test_a_malformed_admin_group_fails_at_construction(admin_group: object) -> N
         AdmissionConfig(
             bound_issuer=BOUND_ISSUER,
             login_group=EverySubject.OF_THE_BOUND_ISSUER,
-            admin_group=admin_group,
+            admin_group=admin_group,  # pyright: ignore[reportArgumentType] -- malformed on purpose
         )
 
 
@@ -366,7 +374,7 @@ def test_an_admission_config_missing_a_required_group_setting_fails_at_construct
 def test_a_stored_admin_outside_the_admin_group_is_demoted_and_audited_at_login() -> None:
     host = a_host(deepcopy(LEGACY_ADMIN))
 
-    account = host.admit(LENA)
+    account = admitted_account(host, LENA)
 
     assert account is host.accounts.get(SUBJECT)
     assert (account.username, account.role) == ("lena.legacy", MEMBER_ROLE)
@@ -503,7 +511,7 @@ def test_admission_answers_the_record_the_role_write_returned() -> None:
                   store=UsersReplacingRecords)
     read_before = host.accounts.get(SUBJECT)
 
-    account = host.admit(LENA_IN_THE_ADMIN_GROUP)
+    account = admitted_account(host, LENA_IN_THE_ADMIN_GROUP)
 
     assert account is not read_before
     assert account is host.accounts.get(SUBJECT)
@@ -579,8 +587,8 @@ def test_a_store_without_unique_usernames_admits_two_subjects_sharing_one() -> N
     host = a_host(store=UsersWithoutUniqueUsernames)
     other_lena = replace(LENA, subject="0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23")
 
-    first = host.admit(LENA)
-    second = host.admit(other_lena)
+    first = admitted_account(host, LENA)
+    second = admitted_account(host, other_lena)
 
     assert (first.id, second.id) == (LENA.subject, other_lena.subject)
     assert (first.username, second.username) == ("lena", "lena")
@@ -1389,7 +1397,7 @@ def test_two_tabs_both_sign_in_and_the_later_session_replaces_the_earlier(
 
 
 def test_starts_beyond_the_cap_evict_the_oldest_pending_cookie_and_keep_the_session() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
     queries = []
     for _ in range(MAX_PENDING_LOGINS + 1):
         queries.append(host.sign_in_at_issuer())
@@ -1453,8 +1461,7 @@ SAME_ORIGIN_FORM = {
 }
 
 
-def signed_in_host(**config_overrides: object) -> OidcHost:
-    host = an_oidc_host(**config_overrides)
+def after_signing_in(host: OidcHost) -> OidcHost:
     host.callback(host.sign_in_at_issuer())
     assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
     return host
@@ -1472,7 +1479,7 @@ def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
 
 
 def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
@@ -1497,7 +1504,7 @@ def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoi
 
 
 def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two_origins() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
@@ -1514,7 +1521,7 @@ def hint_of(response: HttpxResponse) -> str | None:
 
 
 def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
 
     post_logout_token(host, a_logout_token_of_the_issuer())
 
@@ -1523,7 +1530,7 @@ def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
     session_clock = FakeClock(float(NOW))
-    host = signed_in_host(wall_clock=session_clock)
+    host = after_signing_in(an_oidc_host(wall_clock=session_clock))
     login_token = host.issued_id_tokens[-1]
     host.issuer.refresh_answer_members = {"id_token": a_fake_id_token("issued-by-the-refresh")}
     [session] = host.sessions.list_active()
@@ -1549,7 +1556,7 @@ def the_session_cookie_is_cleared(host: OidcHost, response: HttpxResponse) -> bo
 
 
 def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
     record = host.sessions.record
     assert record is not None
     record.id_token = SecretStr(a_fake_id_token("held-by-the-row"))
@@ -1641,7 +1648,7 @@ def test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared(
     *, signed_in: bool, old_cookie_name: str,
 ) -> None:
     def decisions(*, carrying_old_cookie: bool) -> tuple[int, object, int, int, int]:
-        host = signed_in_host() if signed_in else an_oidc_host()
+        host = after_signing_in(an_oidc_host()) if signed_in else an_oidc_host()
         if carrying_old_cookie:
             host.client.cookies.set(old_cookie_name, a_fake_id_token("set-before-the-upgrade"))
         refused = post_logout(host, {**SAME_ORIGIN_FORM, "sec-fetch-site": "cross-site"})
@@ -1660,7 +1667,7 @@ def test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared(
     pytest.param({}, id="form-with-neither-header"),
 ])
 def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]) -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
 
     response = post_logout(host, {"content-type": "application/x-www-form-urlencoded", **headers})
 
@@ -1670,7 +1677,7 @@ def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]
 
 
 def test_a_logout_reaches_no_issuer_endpoint() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
     exchanges_before = len(host.issuer.requests)
     fetches_before = len(host.key_set.fetched_urls)
 
@@ -1689,7 +1696,7 @@ def test_a_logout_reaches_no_issuer_endpoint() -> None:
 
 
 def test_the_logout_form_carries_the_configured_values_whatever_the_request_names() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
     query = urllib.parse.urlencode({
         "post_logout_redirect_uri": "https://evil.test/",
         "redirect": "https://evil.test/",
@@ -1801,9 +1808,8 @@ def test_after_a_session_ends_its_cookie_is_refused_and_every_other_sessions_coo
 ) -> None:
     host = a_host_with_sessions(subject_sessions=3, other_sessions=1, max_sessions=3)
     session_ids = [record.id for record in host.sessions.list_active()]
-    ended_tokens = [
-        host.sessions.list_active()[index].refresh_token.get_secret_value() for index in ended
-    ]
+    refresh_tokens = stored_refresh_tokens(host)
+    ended_tokens = [refresh_tokens[index] for index in ended]
 
     ending(host, session_ids)
 
@@ -1992,7 +1998,7 @@ def test_an_oversized_logout_body_is_refused_and_ends_nothing(
     pytest.param(LOGOUT_PATH, id="the-browser-logout"),
 ])
 def test_a_path_next_to_the_callback_stays_csrf_protected(path: str) -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
 
     response = host.client.post(path, headers=FORM, content=b"logout_token=x")
 
@@ -2245,7 +2251,10 @@ def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_anything_is
     cookie = signed(before[0])
 
     with pytest.raises(ValueError, match="max_sessions"):
-        store.open_session(cookie, max_sessions=max_sessions)
+        store.open_session(
+            cookie,
+            max_sessions=max_sessions,  # pyright: ignore[reportArgumentType] -- not an int on purpose
+        )
 
     assert store.ids() == before
 
@@ -2291,7 +2300,7 @@ def test_two_same_tick_logins_at_a_cap_of_one_both_succeed_and_the_later_remains
 
 
 def test_a_second_login_in_the_same_browser_replaces_the_first_session() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
     [first] = [record.id for record in host.sessions.list_active()]
 
     host.callback(host.sign_in_at_issuer())
@@ -2301,7 +2310,7 @@ def test_a_second_login_in_the_same_browser_replaces_the_first_session() -> None
 
 
 def test_a_failed_commit_after_the_login_issues_no_cookie_and_keeps_the_replaced_session() -> None:
-    host = signed_in_host()
+    host = after_signing_in(an_oidc_host())
     before = [record.id for record in host.sessions.list_active()]
     cookie_before = host.client.cookies[host.config.session_cookie_name]
     host.sessions.commit_failure = StoreDown()

@@ -329,6 +329,13 @@ class SessionRecordsInMemory:
     def record(self) -> FakeSessionRecord | None:
         return next(iter(self._records.values()), None)
 
+    @property
+    def stored_record(self) -> FakeSessionRecord:
+        """The one record the store holds; a store without one fails the test."""
+        record = self.record
+        assert record is not None
+        return record
+
     def create(
         self,
         user_id: str,

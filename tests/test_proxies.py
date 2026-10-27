@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+from typing import SupportsIndex
 
 import pytest
 from fastapi import FastAPI, Request
@@ -154,12 +155,12 @@ class _CountedChain(str):
         chain.pieces = []
         return chain
 
-    def split(self, sep: str | None = None, maxsplit: int = -1) -> list[str]:
+    def split(self, sep: str | None = None, maxsplit: SupportsIndex = -1) -> list[str]:
         pieces = super().split(sep, maxsplit)
         self.pieces.extend(pieces)
         return pieces
 
-    def __getitem__(self, key: int | slice) -> str:
+    def __getitem__(self, key: SupportsIndex | slice) -> str:
         piece = super().__getitem__(key)
         self.pieces.append(piece)
         return piece

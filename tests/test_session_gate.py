@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -567,7 +568,9 @@ class TestOrder:
                 },
             )
 
-        def post(app: AuthApp, *, body: bytes = b"{}", **headers: str) -> Response:
+        def post(
+            app: AuthApp, *, body: bytes = b"{}", headers: Mapping[str, str],
+        ) -> Response:
             passing = dict(
                 (name.decode(), value.decode())
                 for name, value in a_signed_in_same_origin_request(app.config)
@@ -577,8 +580,10 @@ class TestOrder:
                 "/optional", content=body, headers=passing, follow_redirects=False,
             )
 
-        assert post(a_full_stack_app(), origin=FOREIGN_ORIGIN, **{"sec-fetch-site": "cross-site"}
-                    ).status_code == 403
+        assert post(
+            a_full_stack_app(),
+            headers={"origin": FOREIGN_ORIGIN, "sec-fetch-site": "cross-site"},
+        ).status_code == 403
         same_origin = {"origin": ALLOWED_ORIGIN}
         app = a_full_stack_app()
         without_provenance = {
@@ -590,11 +595,11 @@ class TestOrder:
             "/optional", content=b"{}", headers=without_provenance,
         ).status_code == 403
         assert post(
-            a_full_stack_app(), body=b"x" * (BODY_LIMIT_BYTES + 1), **same_origin,
+            a_full_stack_app(), body=b"x" * (BODY_LIMIT_BYTES + 1), headers=same_origin,
         ).status_code == 413
         spent = a_full_stack_app()
-        post(spent, **same_origin)
-        assert post(spent, **same_origin).status_code == 429
+        post(spent, headers=same_origin)
+        assert post(spent, headers=same_origin).status_code == 429
 
 
 class TestARecordedAdmissionBelongsToItsRequest:

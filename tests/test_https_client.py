@@ -21,6 +21,7 @@ import urllib.parse
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
+from typing import Concatenate
 
 import pytest
 import urllib3
@@ -123,6 +124,24 @@ def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_urllib3_recor
 
 # Modules `import urllib3` does not load: webauth.https_client creates their
 # loggers when it is imported, before urllib3 ever loads the modules.
+def _logging_the_url[**Parameters, Result](
+    send: Callable[Concatenate[urllib3.PoolManager, str, str, Parameters], Result],
+    module_name: str,
+) -> Callable[Concatenate[urllib3.PoolManager, str, str, Parameters], Result]:
+    def send_logging_the_url(
+        pool: urllib3.PoolManager,
+        method: str,
+        url: str,
+        /,
+        *args: Parameters.args,
+        **kwargs: Parameters.kwargs,
+    ) -> Result:
+        logging.getLogger(module_name).warning("sending to %s", url)
+        return send(pool, method, url, *args, **kwargs)
+
+    return send_logging_the_url
+
+
 @pytest.mark.parametrize(
     "module_name",
     [
@@ -137,13 +156,9 @@ def test_a_urllib3_module_loaded_later_logs_nothing_during_an_exchange(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    send = urllib3.PoolManager.request
-
-    def send_logging_the_url(pool: urllib3.PoolManager, method: str, url: str, **kwargs: object):
-        logging.getLogger(module_name).warning("sending to %s", url)
-        return send(pool, method, url, **kwargs)
-
-    monkeypatch.setattr(urllib3.PoolManager, "request", send_logging_the_url)
+    monkeypatch.setattr(
+        urllib3.PoolManager, "request", _logging_the_url(urllib3.PoolManager.request, module_name),
+    )
 
     post_token_request_over_https(_token_request(f"{token_server.base_url}/token?{_URL_QUERY}"))
 
@@ -610,9 +625,9 @@ def test_an_exchange_never_follows_a_redirect(
         pytest.param(None, id="not-a-string"),
     ],
 )
-def test_a_key_set_fetch_refuses_every_url_but_a_well_formed_https_one(url: object) -> None:
+def test_a_key_set_fetch_refuses_every_url_but_a_well_formed_https_one(url: str | None) -> None:
     with pytest.raises(KeySetFetchError):
-        fetch_key_set_over_https(url)
+        fetch_key_set_over_https(url)  # pyright: ignore[reportArgumentType] -- not a string on purpose
 
 
 def test_a_key_set_fetch_refuses_a_c1_control_character_before_any_request(

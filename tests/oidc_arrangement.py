@@ -328,7 +328,7 @@ class FakeIssuer:
 
     mint_id_token: Callable[[str], str]
     requests: list[TokenRequest] = field(default_factory=list)
-    before_exchange: Callable[[], None] = lambda: None
+    before_exchange: Callable[[], object] = lambda: None
     code_answer_members: dict[str, Any] = field(
         default_factory=lambda: {
             "refresh_token": ISSUED_REFRESH_TOKEN,

@@ -75,7 +75,7 @@ class Host:
             self.relying_party, Request(an_http_scope(app, headers=headers)), self.config,
             sessions=self.sessions, lock=self.lock, button_label=LOGOUT_BUTTON_LABEL,
         )
-        return LogoutPage(answer.body.decode())
+        return LogoutPage(bytes(answer.body).decode())
 
     def signed(self, session_id: str) -> str:
         return sign_session_id(session_id, self.config.signing_key)
