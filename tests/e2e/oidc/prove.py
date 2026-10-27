@@ -1,6 +1,6 @@
 """Proves login and logout of a webauth host in a real browser against a real Keycloak.
 
-    scripts/e2e-oidc.sh prove --edge PATH
+    scripts/run_oidc_proof.sh prove --edge PATH
 
 ``README.md`` beside this file is the runbook. Nothing of the OIDC path is faked:
 the browser fills Keycloak's own form, the host's library talks to the real
@@ -89,7 +89,7 @@ another key, signed by a CA nobody trusts, with a ``net::ERR_*CERT*`` error.
 
 Scenarios 1, 2, 4, 6 and 7 run at 390x844 (mobile emulation, touch) and
 1280x800; the scenarios not listed otherwise run at 1280x800. The run stays
-inside its 900 s budget (``run_cap_seconds`` in ``scripts/e2e-oidc.sh``).
+inside its 900 s budget (``run_cap_seconds`` in ``scripts/run_oidc_proof.sh``).
 
 The back-channel phase, scenarios 10 to 13 at 390x844 and 1280x800 and
 scenarios 22 and 23 at 1280x800, runs against two further hosts, app A on

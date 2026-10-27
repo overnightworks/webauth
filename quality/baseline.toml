@@ -3,7 +3,7 @@
 [ccn."tests/support/oidc_arrangement.py"]
 "loopback_https_server.LoopbackHandler._receive" = 16
 
-[ccn."tests/test_public_api.py"]
+[ccn."tests/test_webauth_public_api.py"]
 "_names_taken_from_webauth" = 16
 "_surface_of_source" = 20
 

@@ -1,6 +1,6 @@
 """Runs webauth as the relying party of the pinned OpenID conformance suite.
 
-    scripts/e2e-oidc.sh conformance
+    scripts/run_oidc_proof.sh conformance
 
 ``README.md`` beside this file is the runbook. The run creates
 ``oidcc-client-basic-certification-test-plan`` (OpenID Foundation conformance

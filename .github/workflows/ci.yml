@@ -31,7 +31,7 @@ jobs:
         run: uv sync --locked --group dev
 
       - name: Static checks
-        run: scripts/check.sh
+        run: scripts/run_static_checks.sh
 
       - name: Tests
         run: uv run --locked pytest tests -q --cov=webauth --cov-report=xml --cov-report=term-missing:skip-covered

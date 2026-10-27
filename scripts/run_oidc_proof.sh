@@ -20,7 +20,7 @@ kill_after_seconds=240
 
 usage() {
   cat >&2 <<'USAGE'
-usage: scripts/e2e-oidc.sh VERB [ARGS]
+usage: scripts/run_oidc_proof.sh VERB [ARGS]
 
   prepare            install Chromium, Firefox and WebKit and pull the relay and suite images
   prove --edge DIR   run tests/e2e/oidc/prove.py against the edge checkout DIR
