@@ -1,0 +1,8 @@
+claim_id = "408ff407ed394ca9a9db0644df87f0d1"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "b3535caf3f767b25b9529075fedc7125201cc62a"
+branch = "claude/issue-480-oidc-login-split"
+scope = ["docs/host-contract.md", "quality/baseline.toml", "tests/support/oidc_login_host.py", "tests/test_oidc_login.py", "tests/test_oidc_login_admission.py", "tests/test_oidc_login_backchannel_logout.py", "tests/test_oidc_login_callback.py", "tests/test_oidc_login_fresh_access_token.py", "tests/test_oidc_login_logout.py", "tests/test_oidc_login_open_session.py", "tests/test_oidc_login_open_session_id_token.py"]
+opened_commit = "b9ab9bba3ae0dc783cbe1dcdffc04fc6a63a942d"
+whole_reason = "One file split: the six parts and the shared builder move together, or a helper would live in two places between slices."
