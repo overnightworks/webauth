@@ -28,7 +28,7 @@ WEBAUTH_MODULES = [
     "webauth",
     *(module.name for module in pkgutil.walk_packages(webauth.__path__, "webauth.")),
 ]
-TYPING_HOSTS = sorted((TESTS / "typing").glob("*.py"))
+TYPING_HOSTS = sorted((TESTS / "fixtures" / "typing_hosts").glob("*.py"))
 OTHER_CONSUMERS = sorted(
     path
     for path in TESTS.rglob("*.py")

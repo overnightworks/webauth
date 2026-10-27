@@ -197,4 +197,4 @@ Who the library defends against and trusts; links point to owning sections.
 
 To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 
-The operator's account and environment are trusted. A same-user race between listing and removal in `scripts/e2e-oidc.sh` is out of scope.
+The operator's account and environment are trusted. A same-user race between listing and removal in `scripts/run_oidc_proof.sh` is out of scope.

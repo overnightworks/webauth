@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Type-checks the typing hosts in tests/typing the way a host's own pyright sees webauth: from a
+# Type-checks the typing hosts in tests/fixtures/typing_hosts the way a host's own pyright sees webauth: from a
 # directory without src, against the built wheel installed at the locked versions,
 # so pyright applies py.typed export rules (reportPrivateImportUsage).
 set -euo pipefail
-repo="$(cd "$(dirname "$0")/../.." && pwd)"
+repo="$(cd "$(dirname "$0")/.." && pwd)"
 host="$(mktemp -d)"
 trap 'rm -rf "$host"' EXIT
 uv build "$repo" --out-dir "$host/dist" \
@@ -17,6 +17,6 @@ uv pip install --quiet --python "$host/.venv/bin/python" --constraints "$host/co
 # Without py.typed pyright reads webauth as untyped and checks no export at all.
 site="$("$host/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
 [[ -f "$site/webauth/py.typed" ]] || { echo "the built wheel installs no webauth/py.typed" >&2; exit 1; }
-cp "$repo"/tests/typing/*.py "$host/"
+cp "$repo"/tests/fixtures/typing_hosts/*.py "$host/"
 cd "$host"
 uv run --project "$repo" --locked --group dev pyright --stats --pythonpath .venv/bin/python *.py

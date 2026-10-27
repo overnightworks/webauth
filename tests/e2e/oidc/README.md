@@ -12,12 +12,12 @@ realm's facts and the admin calls that shape it.
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
 Playwright browser, and takes a few minutes. CI only lints `tests/e2e/`. Every terminal
-step is a verb of `scripts/e2e-oidc.sh`, which holds the commands, the caps and the lock.
+step is a verb of `scripts/run_oidc_proof.sh`, which holds the commands, the caps and the lock.
 
 ## Prerequisites
 
 - Docker. The probe picks free loopback ports, so the live edge keeps running.
-- An edge checkout at the commit in `EDGE_SHA`, with no change in any path its
+- An edge checkout at the commit in `edge_sha.txt`, with no change in any path its
   probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/edge`, `traefik.yml`,
   `dynamic`). The run refuses otherwise.
 - Playwright's Chromium, Firefox and WebKit for the pinned version (WebKit needs system
@@ -79,7 +79,7 @@ could still write.
 
 ## Refreshing the pins
 
-Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` dependency group, and does not watch the image digests (it has no docker ecosystem here): `RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`. Only a probe run vouches for them. `EDGE_SHA` is
+Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` dependency group, and does not watch the image digests (it has no docker ecosystem here): `RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`. Only a probe run vouches for them. `edge_sha.txt` is
 a hand-set pin as well. A bump of any of them can break what only a real browser, a real
 Keycloak or the OIDF suite shows, and CI does not run those.
 

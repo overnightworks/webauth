@@ -16,13 +16,13 @@ from typing import Any
 
 import httpx
 
-EDGE_SHA_FILE = Path(__file__).with_name("EDGE_SHA")
+EDGE_SHA_FILE = Path(__file__).with_name("edge_sha.txt")
 PROBE_FILES = "compose.yaml keycloak probe/keycloak src/edge traefik.yml dynamic".split()
 PROBE_PROJECT = "edge-kc-probe"
 KEYCLOAK_NETWORK = "keycloak"
 READY_MARK = "READY "
 HOLD_ENDED = "HOLD ENDED"
-STOP_WAIT_SECONDS = 180  # scripts/e2e-oidc.sh: --kill-after must exceed the worst-case cleanup
+STOP_WAIT_SECONDS = 180  # run_oidc_proof.sh: --kill-after must exceed the worst-case cleanup
 ADMIN_TIMEOUT_SECONDS = 30
 DOCKER_TIMEOUT_SECONDS = 30
 
