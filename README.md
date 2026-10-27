@@ -67,7 +67,7 @@ The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trust
 - A host developer: [How to test a host](docs/testing-a-host.md) and the [host contract](docs/host-contract.md), which holds the trusted-proxy rule, what every app gets, the machine routes and the start, callback and logout routes.
 - An engineer changing the library: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) holds the architecture: the building blocks and what the host owns, how a request and a sign-in run, and the concepts behind each module.
 - Security: [Trust](docs/ARCHITECTURE.md#trust) says who the library defends against and what it trusts; [SECURITY.md](.github/SECURITY.md) says how to report.
-- The proof harness: [`e2e/oidc/README.md`](e2e/oidc/README.md).
+- The proof harness: [`tests/e2e/oidc/README.md`](tests/e2e/oidc/README.md).
 
 ## Install
 

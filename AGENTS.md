@@ -1,7 +1,7 @@
 # Repository agent guidance
 
-webauth is a library with no deployment of its own; hosts install the tagged wheel. `e2e/` is a hand-run proof harness
-(driven through `scripts/e2e-oidc.sh`, described in `e2e/oidc/README.md`); CI only lints it.
+webauth is a library with no deployment of its own; hosts install the tagged wheel. `tests/e2e/` is a hand-run proof harness
+(driven through `scripts/e2e-oidc.sh`, described in `tests/e2e/oidc/README.md`); CI only lints it.
 
 ## Boundaries
 

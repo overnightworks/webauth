@@ -71,7 +71,7 @@ sequenceDiagram
     H-->>Browser: Response: session cookie + pending clearing
 ```
 Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc.py),
-[`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../e2e/oidc/host_app.py).
+[`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
 Harness admission precedes its in-memory session transaction; cookies follow. No encompassing transaction/lock is proven ([Trust](#trust)).
 [Host refusals](host-contract.md#signed-out-and-refused) are outside this successful flow.
 

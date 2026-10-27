@@ -89,8 +89,8 @@ for the mechanism and its trust boundaries. The POST page and fallback follow
 and `test_a_same_origin_logout_still_answers_the_page` in
 [test_oidc_login.py](../tests/test_oidc_login.py) prove the response shape,
 including a missing hint. Browser behavior is driven by `logout` and
-`logout_after_the_app_session_ended` in [prove.py](../e2e/oidc/prove.py) and
-`logout_through_the_page` in [engines.py](../e2e/oidc/engines.py).
+`logout_after_the_app_session_ended` in [prove.py](../tests/e2e/oidc/prove.py) and
+`logout_through_the_page` in [engines.py](../tests/e2e/oidc/engines.py).
 These are hand-run browser proofs, not CI tests; [#420's review journal](https://github.com/overnightworks/webauth/issues/420#issuecomment-6351975830)
 records the page implementation's browser evidence.
 
@@ -183,7 +183,7 @@ added the enforcing gate. Its page, API and public-path proofs are
   in [test_oidc_login.py](../tests/test_oidc_login.py) and
   `test_only_a_path_of_this_app_is_a_return_path` in
   [test_paths.py](../tests/test_paths.py). `deep_link_survives_the_login` in
-  [prove.py](../e2e/oidc/prove.py) drives the browser round trip in the hand-run
+  [prove.py](../tests/e2e/oidc/prove.py) drives the browser round trip in the hand-run
   harness, not CI.
 - **A machine route** (see [The host's machine routes](#the-hosts-machine-routes))
   answers 401 with a `WWW-Authenticate: Bearer realm="admin"` challenge, never a
@@ -221,7 +221,7 @@ added the enforcing gate. Its page, API and public-path proofs are
   [oidc.py](../src/webauth/oidc.py)), so the page shows no name. A
   `NOT_A_MEMBER` login stores no session, so signing out from "no access"
   follows the missing-ID-token case in [Signing out](#what-every-app-gets).
-  `outsider_is_refused` in [prove.py](../e2e/oidc/prove.py) drives the harness's
+  `outsider_is_refused` in [prove.py](../tests/e2e/oidc/prove.py) drives the harness's
   refusal with no account or session; it is a hand-run browser proof, not a
   test of every host's page. Page choice and presentation remain host duties.
 - **Look.** The three pages (logged out, no access, login failed), their
@@ -252,7 +252,7 @@ is its implementation, not a separate ruling.
   outcome). `test_the_audience_must_be_the_app_alone` and
   `test_an_authorized_party_the_host_did_not_allow_is_refused` in
   [test_oidc_access_token.py](../tests/test_oidc_access_token.py) prove the audience and
-  `azp` restrictions; [bearer.py](../e2e/oidc/bearer.py) holds the hand-run
+  `azp` restrictions; [bearer.py](../tests/e2e/oidc/bearer.py) holds the hand-run
   real-issuer admission proofs.
 - **What it replaces.** On a gated path the cookie, the CSRF check and the
   session gate decide nothing, every answer is `no-store`, and webauth sets no
@@ -270,7 +270,7 @@ is its implementation, not a separate ruling.
   `test_an_expired_token_is_admitted_until_expiry_plus_leeway` in
   [test_oidc_access_token.py](../tests/test_oidc_access_token.py) proves the expiry boundary.
   `disabled_person_keeps_the_token`, `sign_out_leaves_the_token` and
-  `short_token_fails_after_exp_and_leeway` in [bearer.py](../e2e/oidc/bearer.py)
+  `short_token_fails_after_exp_and_leeway` in [bearer.py](../tests/e2e/oidc/bearer.py)
   drive the real-issuer cases in the hand-run harness, not CI.
 - **The paths** are written as every other policy's are; the `PathRules`
   docstring says how.
@@ -291,7 +291,7 @@ its own, one per login, so the host keeps no server-side store and
 `WebAuthConfig` knows nothing of OpenID Connect. Each function's docstring holds
 its contract, the `webauth.oidc_login` and `webauth.cookies` module docstrings
 hold the login and its cookies, and `build_app` in
-[`e2e/oidc/host_app.py`](../e2e/oidc/host_app.py) is the worked set of routes,
+[`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py) is the worked set of routes,
 type-checked and run against a real issuer.
 
 The library never commits: the host commits an admitted login before it issues

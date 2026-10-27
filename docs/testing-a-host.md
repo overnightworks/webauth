@@ -15,7 +15,7 @@ A test of the host's own start, callback and logout routes gives
 `webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from
 `webauth.jwt_verification`) instead of the HTTPS ones. The host owns that stub.
 
-The sign-in flow itself is proven against a real issuer: `e2e/oidc/` drives
+The sign-in flow itself is proven against a real issuer: `tests/e2e/oidc/` drives
 Keycloak in a real browser and is webauth's own proof. A host proves its own
 sign-in against an issuer of its choosing. webauth ships no fake issuer, because
 one that mints tokens does not belong in every production install.

@@ -31,7 +31,7 @@ WEBAUTH_MODULES = [
 TYPING_HOSTS = sorted((TESTS / "typing").glob("*.py"))
 OTHER_CONSUMERS = sorted(
     path
-    for path in [*TESTS.rglob("*.py"), *(REPOSITORY / "e2e").rglob("*.py")]
+    for path in TESTS.rglob("*.py")
     if path not in TYPING_HOSTS
 )
 
