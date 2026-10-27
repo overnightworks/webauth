@@ -423,13 +423,22 @@ def test_a_browser_whose_session_expired_is_sent_to_the_login_page() -> None:
     assert response.headers["location"] == "/login?next=%2Fme"
 
 
-def test_the_redirect_keeps_the_asked_for_query_string() -> None:
-    app = an_auth_app(None, login_redirect=A_LOGIN_REDIRECT)
+@pytest.mark.parametrize(
+    ("login_redirect", "expected_location"),
+    [
+        (A_LOGIN_REDIRECT, "/login?next=%2Fme%3Ftab%3Doverview"),
+        (A_CONFIGURED_LOGIN_REDIRECT, "/login?return_to=%2Fme%3Ftab%3Doverview"),
+    ],
+)
+def test_the_redirect_keeps_the_asked_for_query_string_under_the_configured_key(
+    login_redirect: LoginRedirect, expected_location: str,
+) -> None:
+    app = an_auth_app(None, login_redirect=login_redirect)
 
-    response = app.get("/me?tab=1", accept="text/html")
+    response = app.get("/me?tab=overview", accept="text/html")
 
     assert response.status_code == 302
-    assert response.headers["location"] == "/login?next=%2Fme%3Ftab%3D1"
+    assert response.headers["location"] == expected_location
 
 
 def a_guarded_catch_all_app() -> FastAPI:
@@ -642,4 +651,3 @@ def test_a_live_session_authenticates_regardless_of_a_configured_login_redirect(
 
     assert response.status_code == 200
     assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
-
