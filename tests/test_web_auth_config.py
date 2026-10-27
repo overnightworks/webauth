@@ -68,7 +68,7 @@ def test_a_configuration_built_positionally_is_refused() -> None:
     positional_arguments = list(web_auth_config_arguments().values())
 
     with pytest.raises(TypeError, match="positional"):
-        WebAuthConfig(*positional_arguments)
+        WebAuthConfig(*positional_arguments)  # pyright: ignore[reportCallIssue] -- positional on purpose
 
 
 @pytest.mark.parametrize("value", [None, "none"])
@@ -92,8 +92,13 @@ def test_the_ipv6_budget_prefix_defaults_to_one_subscriber_network() -> None:
 
 
 LIFETIMES: dict[str, Callable[[object], object]] = {
-    "idle_seconds": lambda seconds: SessionLifetime(seconds, SESSION_ABSOLUTE_MAX_AGE_SECONDS),
-    "absolute_max_age_seconds": lambda seconds: SessionLifetime(1, seconds),
+    "idle_seconds": lambda seconds: SessionLifetime(
+        seconds,  # pyright: ignore[reportArgumentType] -- not an int on purpose
+        SESSION_ABSOLUTE_MAX_AGE_SECONDS,
+    ),
+    "absolute_max_age_seconds": lambda seconds: SessionLifetime(
+        1, seconds,  # pyright: ignore[reportArgumentType] -- not an int on purpose
+    ),
 }
 
 
@@ -387,7 +392,7 @@ def test_the_configuration_cannot_be_changed_after_it_is_installed() -> None:
     config = a_web_auth_config()
 
     with pytest.raises(AttributeError):
-        config.cookie_secure = False
+        config.cookie_secure = False  # pyright: ignore[reportAttributeAccessIssue] -- frozen on purpose
 
     assert replace(config, cookie_secure=False).cookie_secure is False
 

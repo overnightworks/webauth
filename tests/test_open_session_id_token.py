@@ -17,6 +17,7 @@ from oidc_arrangement import (
     LogoutPage,
     a_fake_id_token,
     a_relying_party,
+    opened_session,
 )
 from pydantic import SecretStr
 from webauth_arrangement import (
@@ -55,16 +56,13 @@ class Host:
     relying_party: OidcRelyingParty
 
     def open_session(self, *, keeps_id_token: bool) -> SessionRecord:
-        app = FastAPI()
-        install_web_auth_config(app, self.config)
-        return open_session(
-            Request(an_http_scope(app)), self.config,
+        return opened_session(
+            self.config,
             AdmittedLogin(
                 account=ACCOUNT, return_to=None,
                 refresh_token=SecretStr(ISSUED_REFRESH_TOKEN), id_token=SecretStr(LOGIN_ID_TOKEN),
             ),
-            sessions=self.sessions, lock=self.lock,
-            max_sessions=None, keeps_id_token=keeps_id_token,
+            sessions=self.sessions, lock=self.lock, keeps_id_token=keeps_id_token,
         )
 
     def log_out(self, session_id: str) -> LogoutPage:
@@ -75,7 +73,7 @@ class Host:
             self.relying_party, Request(an_http_scope(app, headers=headers)), self.config,
             sessions=self.sessions, lock=self.lock, button_label=LOGOUT_BUTTON_LABEL,
         )
-        return LogoutPage(answer.body.decode())
+        return LogoutPage(bytes(answer.body).decode())
 
     def signed(self, session_id: str) -> str:
         return sign_session_id(session_id, self.config.signing_key)

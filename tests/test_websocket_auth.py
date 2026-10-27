@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import FastAPI
 from starlette.requests import HTTPConnection, Request
+from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from webauth_arrangement import (
     ALLOWED_HOST,
@@ -21,6 +22,7 @@ from webauth_arrangement import (
     SESSION_ID,
     SESSION_IDLE_SECONDS,
     WEBSOCKET_DEPENDENCY_PATH,
+    WEBSOCKET_PATH,
     AuthApp,
     SessionsAnsweringTouch,
     SessionsThatMustNotBeAsked,
@@ -48,8 +50,6 @@ CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
 ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1"})
-PLAIN_HTTP_DEVELOPMENT = {"allowed_hosts_exact": LOOPBACK_HOSTS, "cookie_secure": False}
-HTTPS_DEVELOPMENT = {"allowed_hosts_exact": LOOPBACK_HOSTS, "cookie_secure": True}
 
 
 @pytest.fixture
@@ -57,9 +57,19 @@ def auth_app() -> AuthApp:
     return an_auth_app(a_session())
 
 
-def the_refusal_of(app: AuthApp, **handshake: object) -> ConnectionRefusal:
+def the_refusal_of(
+    app: AuthApp,
+    *,
+    path: str = WEBSOCKET_PATH,
+    cookie: str | None = None,
+    origin: str | None = ALLOWED_ORIGIN,
+    headers: Sequence[tuple[str, str]] = (),
+) -> ConnectionRefusal:
     """Drive a handshake that must close before accept, and say why the helper refused it."""
-    with pytest.raises(WebSocketDisconnect) as closed, app.connect(**handshake):
+    with (
+        pytest.raises(WebSocketDisconnect) as closed,
+        app.connect(path, cookie=cookie, origin=origin, headers=headers),
+    ):
         pass
     assert closed.value.code == POLICY_VIOLATION_CLOSE_CODE
     refusal = app.websocket_outcomes[-1]
@@ -94,12 +104,12 @@ def test_the_session_the_handshake_proved_can_be_named_from_the_same_connection(
 
 
 def test_an_admitted_handshake_renews_its_session_in_place(auth_app: AuthApp) -> None:
-    before = auth_app.sessions.record.expires_at
+    before = auth_app.sessions.stored_record.expires_at
 
     with auth_app.connect(cookie=auth_app.signed_cookie()) as socket:
         socket.receive_json()
 
-    assert auth_app.sessions.record.expires_at > before
+    assert auth_app.sessions.stored_record.expires_at > before
 
 
 def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> None:
@@ -121,20 +131,28 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
 
 
 @pytest.mark.parametrize(
-    ("origin", "config_overrides"),
+    ("origin", "loopback_cookie_secure"),
     [
-        pytest.param(ALLOWED_ORIGIN, {}, id="an exact host"),
-        pytest.param(f"{ALLOWED_ORIGIN}:8443", {}, id="an exact host on any port"),
-        pytest.param("http://localhost:8000", PLAIN_HTTP_DEVELOPMENT, id="localhost over http"),
-        pytest.param("http://127.0.0.1:5173", PLAIN_HTTP_DEVELOPMENT, id="127.0.0.1 over http"),
-        pytest.param("https://localhost:8000", HTTPS_DEVELOPMENT, id="localhost over https"),
-        pytest.param("https://127.0.0.1:5173", HTTPS_DEVELOPMENT, id="127.0.0.1 over https"),
+        pytest.param(ALLOWED_ORIGIN, None, id="an exact host"),
+        pytest.param(f"{ALLOWED_ORIGIN}:8443", None, id="an exact host on any port"),
+        pytest.param("http://localhost:8000", False, id="localhost over http"),
+        pytest.param("http://127.0.0.1:5173", False, id="127.0.0.1 over http"),
+        pytest.param("https://localhost:8000", True, id="localhost over https"),
+        pytest.param("https://127.0.0.1:5173", True, id="127.0.0.1 over https"),
     ],
 )
 def test_an_origin_from_the_configured_hosts_is_admitted(
-    origin: str, config_overrides: dict[str, object],
+    origin: str, loopback_cookie_secure: bool | None,
 ) -> None:
-    app = an_auth_app(a_session(), **config_overrides)
+    app = (
+        an_auth_app(a_session())
+        if loopback_cookie_secure is None
+        else an_auth_app(
+            a_session(),
+            allowed_hosts_exact=LOOPBACK_HOSTS,
+            cookie_secure=loopback_cookie_secure,
+        )
+    )
 
     with app.connect(cookie=app.signed_cookie(), origin=origin) as socket:
         assert socket.receive_json()["username"] == "alice"
@@ -148,44 +166,46 @@ def test_the_allowlist_decides_whatever_fetch_metadata_claims(auth_app: AuthApp)
 
 
 @pytest.mark.parametrize(
-    ("handshake", "refusal"),
+    ("cookie", "headers", "refusal"),
     [
-        pytest.param({}, ConnectionRefusal.NO_SESSION, id="no cookie"),
-        pytest.param({"cookie": ""}, ConnectionRefusal.NO_SESSION, id="an empty cookie"),
+        pytest.param(None, (), ConnectionRefusal.NO_SESSION, id="no cookie"),
+        pytest.param("", (), ConnectionRefusal.NO_SESSION, id="an empty cookie"),
         pytest.param(
-            {"cookie": "x" * (MAX_SESSION_COOKIE_CHARS + 1)},
+            "x" * (MAX_SESSION_COOKIE_CHARS + 1),
+            (),
             ConnectionRefusal.NO_SESSION,
             id="an oversized cookie",
         ),
+        pytest.param("unsigned", (), ConnectionRefusal.INVALID_SESSION, id="an unsigned cookie"),
         pytest.param(
-            {"cookie": "unsigned"}, ConnectionRefusal.INVALID_SESSION, id="an unsigned cookie",
-        ),
-        pytest.param(
-            {"cookie": sign_session_id(SESSION_ID, b"another signing key entirely")},
+            sign_session_id(SESSION_ID, b"another signing key entirely"),
+            (),
             ConnectionRefusal.INVALID_SESSION,
             id="a cookie signed with another key",
         ),
         pytest.param(
-            {
-                "headers": [
-                    (
-                        "cookie",
-                        session_cookie_header(
-                            sign_session_id(SESSION_ID, SIGNING_KEY),
-                            sign_session_id("session-2", SIGNING_KEY),
-                        ),
+            None,
+            [
+                (
+                    "cookie",
+                    session_cookie_header(
+                        sign_session_id(SESSION_ID, SIGNING_KEY),
+                        sign_session_id("session-2", SIGNING_KEY),
                     ),
-                ],
-            },
+                ),
+            ],
             ConnectionRefusal.INVALID_SESSION,
             id="two session cookies",
         ),
     ],
 )
 def test_a_handshake_without_one_valid_session_cookie_is_refused(
-    auth_app: AuthApp, handshake: dict[str, object], refusal: ConnectionRefusal,
+    auth_app: AuthApp,
+    cookie: str | None,
+    headers: Sequence[tuple[str, str]],
+    refusal: ConnectionRefusal,
 ) -> None:
-    assert the_refusal_of(auth_app, **handshake) is refusal
+    assert the_refusal_of(auth_app, cookie=cookie, headers=headers) is refusal
 
 
 @pytest.mark.parametrize(
@@ -324,11 +344,11 @@ def logged_out(app: AuthApp) -> None:
 
 
 def expired(app: AuthApp) -> None:
-    app.sessions.record.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    app.sessions.stored_record.expires_at = datetime.now(UTC) - timedelta(seconds=1)
 
 
 def past_the_absolute_limit(app: AuthApp) -> None:
-    app.sessions.record.created_at = datetime.now(UTC) - timedelta(days=2)
+    app.sessions.stored_record.created_at = datetime.now(UTC) - timedelta(days=2)
 
 
 @pytest.mark.parametrize(
@@ -363,24 +383,24 @@ def test_a_later_check_after_expiry_renews_nothing(auth_app: AuthApp) -> None:
     with auth_app.connect(cookie=auth_app.signed_cookie()) as socket:
         socket.receive_json()
         expired(auth_app)
-        expired_at = auth_app.sessions.record.expires_at
+        expired_at = auth_app.sessions.stored_record.expires_at
         socket.send_text("check again")
         with pytest.raises(WebSocketDisconnect):
             socket.receive_json()
 
-    assert auth_app.sessions.record.expires_at == expired_at
+    assert auth_app.sessions.stored_record.expires_at == expired_at
 
 
 def test_a_later_check_counts_as_activity_and_keeps_the_socket_open(auth_app: AuthApp) -> None:
     with auth_app.connect(cookie=auth_app.signed_cookie()) as socket:
         socket.receive_json()
         nearly_expired = datetime.now(UTC) + timedelta(seconds=30)
-        auth_app.sessions.record.expires_at = nearly_expired
+        auth_app.sessions.stored_record.expires_at = nearly_expired
         socket.send_text("check again")
 
         assert socket.receive_json() == {"username": "alice"}
 
-    assert auth_app.sessions.record.expires_at > nearly_expired
+    assert auth_app.sessions.stored_record.expires_at > nearly_expired
 
 
 def test_a_host_dependency_around_the_helper_admits_a_live_session(auth_app: AuthApp) -> None:
@@ -394,11 +414,11 @@ def test_a_host_dependency_around_the_helper_refuses_as_the_plain_call_does(
     assert the_refusal_of(auth_app, path=WEBSOCKET_DEPENDENCY_PATH) is ConnectionRefusal.NO_SESSION
 
 
-async def no_message() -> dict[str, object]:
+async def no_message() -> Message:
     return {}
 
 
-async def discard_message(message: dict[str, object]) -> None:
+async def discard_message(message: Message) -> None:
     return None
 
 

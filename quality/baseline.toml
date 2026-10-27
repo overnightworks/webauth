@@ -11,8 +11,8 @@
 "e2e/oidc/prove.py" = 1546
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
-"tests/test_oidc_login.py" = 2314
-"tests/webauth_arrangement.py" = 935
+"tests/test_oidc_login.py" = 2312
+"tests/webauth_arrangement.py" = 923
 
 [function_lines."e2e/oidc/host_app.py"]
 "build_app" = 162

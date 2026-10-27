@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TypedDict
 
 import pytest
 from fastapi import FastAPI, Request
@@ -196,6 +197,17 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
     assert response.json() == body
 
 
+class BodyContent(TypedDict, total=False):
+    json: dict[str, int]
+    data: dict[str, str]
+    files: dict[str, tuple[str, bytes]]
+    content: bytes
+
+
+class RequestBody(BodyContent, total=False):
+    headers: dict[str, str]
+
+
 PROVENANCE_FREE_BODIES = [
     pytest.param({}, id="no body"),
     pytest.param({"json": {"n": 1}}, id="json"),
@@ -214,7 +226,7 @@ PROVENANCE_FREE_BODIES = [
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 @pytest.mark.parametrize("body", PROVENANCE_FREE_BODIES)
 def test_a_state_changing_request_without_provenance_is_refused_whatever_its_body(
-    method: str, body: dict[str, object],
+    method: str, body: RequestBody,
 ) -> None:
     client = an_origin_guarded_client()
 
@@ -240,7 +252,7 @@ def test_a_state_changing_request_without_provenance_is_refused_whatever_its_bod
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 @pytest.mark.parametrize("body", PROVENANCE_FREE_BODIES[1:3])
 def test_the_referer_is_not_read(
-    method: str, headers: dict[str, str], body: dict[str, object],
+    method: str, headers: dict[str, str], body: BodyContent,
 ) -> None:
     client = an_origin_guarded_client()
 

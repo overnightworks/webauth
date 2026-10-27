@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from starlette.types import Message
 from webauth_arrangement import (
     ADMIN_ROLE,
     FIXED_INSTANT,
@@ -253,11 +254,11 @@ def test_a_signed_cookie_under_the_pre_upgrade_name_signs_nobody_in(auth_app: Au
 
 
 def test_a_served_request_renews_its_session_in_place(auth_app: AuthApp) -> None:
-    before = auth_app.sessions.record.expires_at
+    before = auth_app.sessions.stored_record.expires_at
 
     auth_app.get("/me", cookie=auth_app.signed_cookie())
 
-    assert auth_app.sessions.record.expires_at > before
+    assert auth_app.sessions.stored_record.expires_at > before
 
 
 def test_a_session_one_second_past_the_configured_clock_is_refused_and_not_renewed() -> None:
@@ -474,7 +475,7 @@ def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
 
 
 def test_the_redirect_falls_back_for_a_literal_backslash_in_the_raw_path() -> None:
-    sent: list[dict] = []
+    sent: list[Message] = []
     scope = {
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
         "scheme": "https", "server": ("testserver", 443), "client": ("127.0.0.1", 1),
@@ -482,10 +483,10 @@ def test_the_redirect_falls_back_for_a_literal_backslash_in_the_raw_path() -> No
         "query_string": b"", "headers": [(b"host", b"testserver"), (b"accept", b"text/html")],
     }
 
-    async def receive() -> dict:
+    async def receive() -> Message:
         return {"type": "http.request", "body": b"", "more_body": False}
 
-    async def send(message: dict) -> None:
+    async def send(message: Message) -> None:
         sent.append(message)
 
     asyncio.run(a_guarded_catch_all_app()(scope, receive, send))

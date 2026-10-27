@@ -68,12 +68,14 @@ def _redundant_reexports(statement: ast.Import | ast.ImportFrom) -> dict[str, in
         return {
             alias.asname: alias.lineno
             for alias in statement.names
-            if alias.asname and alias.asname == alias.name.split(".")[-1]
+            if alias.asname is not None and alias.asname == alias.name.split(".")[-1]
         }
     if statement.module is None:
         return {alias.asname or alias.name: alias.lineno for alias in statement.names}
     return {
-        alias.asname: alias.lineno for alias in statement.names if alias.asname == alias.name
+        alias.asname: alias.lineno
+        for alias in statement.names
+        if alias.asname is not None and alias.asname == alias.name
     }
 
 
@@ -89,15 +91,20 @@ def _is_type_checking_guard(statement: ast.If) -> bool:
     )
 
 
-def _is_literal_all_assignment(statement: ast.stmt) -> bool:
+def _literal_all_elements(statement: ast.stmt) -> list[ast.expr] | None:
+    """The elements of ``__all__ = [...]`` written as one literal list, else ``None``."""
     if isinstance(statement, ast.AnnAssign):
-        return isinstance(statement.target, ast.Name) and isinstance(statement.value, ast.List)
-    return (
+        if isinstance(statement.target, ast.Name) and isinstance(statement.value, ast.List):
+            return statement.value.elts
+        return None
+    if (
         isinstance(statement, ast.Assign)
         and len(statement.targets) == 1
         and isinstance(statement.targets[0], ast.Name)
         and isinstance(statement.value, ast.List)
-    )
+    ):
+        return statement.value.elts
+    return None
 
 
 def _bound_names(target: ast.expr) -> Iterator[str]:
@@ -141,11 +148,12 @@ def _surface_of_source(source: str) -> ModuleSurface:
     all_declared = False
     for statement in ast.parse(source).body:
         if _mentions_all(statement):
-            if all_declared or not _is_literal_all_assignment(statement):
+            elements = None if all_declared else _literal_all_elements(statement)
+            if elements is None:
                 irregular_all_lines.append(statement.lineno)
             else:
                 all_declared = True
-                public = {element.value: element.lineno for element in statement.value.elts}
+                public = {ast.literal_eval(element): element.lineno for element in elements}
             continue
         match statement:
             case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name):
@@ -457,7 +465,7 @@ def webauth_modules_imported_afresh_without_redis() -> Iterator[None]:
     }
     for name in original:
         del sys.modules[name]
-    sys.modules["redis"] = None
+    sys.modules["redis"] = None  # pyright: ignore[reportArgumentType] -- None blocks the import on purpose
     try:
         yield
     finally:

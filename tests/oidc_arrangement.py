@@ -36,9 +36,12 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from fastapi import FastAPI, Request
 from jwt.algorithms import RSAAlgorithm
 from pydantic import SecretStr
+from webauth_arrangement import an_http_scope, session_cookie_header
 
+from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.https_client import MAX_KEY_SET_BYTES
 from webauth.jwt_verification import KeySetFetch, MonotonicClock
 from webauth.oidc import (
@@ -49,7 +52,8 @@ from webauth.oidc import (
     TokenRequest,
     TokenRequestPost,
 )
-from webauth.ports import WallClock
+from webauth.oidc_login import AdmittedLogin, open_session
+from webauth.ports import SessionRecord, SessionRecordStore, WallClock, WriteLock
 
 ABSENT = object()
 """A claim or header change that removes the member instead of setting it."""
@@ -328,7 +332,7 @@ class FakeIssuer:
 
     mint_id_token: Callable[[str], str]
     requests: list[TokenRequest] = field(default_factory=list)
-    before_exchange: Callable[[], None] = lambda: None
+    before_exchange: Callable[[], object] = lambda: None
     code_answer_members: dict[str, Any] = field(
         default_factory=lambda: {
             "refresh_token": ISSUED_REFRESH_TOKEN,
@@ -675,6 +679,23 @@ def assert_holds_only_the_refresh_token(subject: HoldsRefreshToken) -> None:
     assert [path for path, text in leaves if ISSUED_REFRESH_TOKEN in text] == [("refresh_token",)]
     assert subject.refresh_token is not None
     assert subject.refresh_token.get_secret_value() == ISSUED_REFRESH_TOKEN
+
+
+def opened_session(
+    config: WebAuthConfig, admitted: AdmittedLogin, *cookie_values: str,
+    sessions: SessionRecordStore, lock: WriteLock,
+    max_sessions: int | None = None, keeps_id_token: bool = True,
+) -> SessionRecord:
+    """``open_session`` for a request that carries the given session-cookie values."""
+    app = FastAPI()
+    install_web_auth_config(app, config)
+    headers: list[tuple[bytes, bytes]] = []
+    if cookie_values:
+        headers.append((b"cookie", session_cookie_header(*cookie_values).encode()))
+    return open_session(
+        Request(an_http_scope(app, headers=headers)), config, admitted,
+        sessions=sessions, lock=lock, max_sessions=max_sessions, keeps_id_token=keeps_id_token,
+    )
 
 
 class LogoutPage(HTMLParser):

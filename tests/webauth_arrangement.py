@@ -183,9 +183,7 @@ def a_policy_rate_limited_client(
     keyword replaces the configuration field it names.
     """
     app = FastAPI()
-    install_web_auth_config(
-        app, a_web_auth_config(rate_limits=rate_limits, **config_overrides),
-    )
+    install_web_auth_config(app, a_web_auth_config(rate_limits=rate_limits, **config_overrides))
     app.add_middleware(IpRateLimitMiddleware, policy=policy)
     for path in paths:
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET"])
@@ -329,6 +327,13 @@ class SessionRecordsInMemory:
     def record(self) -> FakeSessionRecord | None:
         return next(iter(self._records.values()), None)
 
+    @property
+    def stored_record(self) -> FakeSessionRecord:
+        """The one record the store holds; a store without one fails the test."""
+        record = self.record
+        assert record is not None
+        return record
+
     def create(
         self,
         user_id: str,
@@ -345,9 +350,7 @@ class SessionRecordsInMemory:
         session_id = f"session-{next(self._ids)}"
         while session_id in self._records:
             session_id = f"session-{next(self._ids)}"
-        record = FakeSessionRecord(
-            session_id, user, now, expires_at, refresh_token, id_token,
-        )
+        record = FakeSessionRecord(session_id, user, now, expires_at, refresh_token, id_token)
         self._records[record.id] = record
         return record
 
@@ -376,12 +379,7 @@ class SessionRecordsInMemory:
     def load(self, session_id: str) -> FakeSessionRecord | None:
         return self._records.get(session_id)
 
-    def touch(
-        self,
-        session_id: str,
-        *,
-        expires_at: datetime,
-    ) -> bool:
+    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
         record = self._records.get(session_id)
         if record is None:
             return False
@@ -508,12 +506,7 @@ class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
     def load(self, session_id: str) -> FakeSessionRecord | None:
         raise AssertionError("the store was asked to load a session")
 
-    def touch(
-        self,
-        session_id: str,
-        *,
-        expires_at: datetime,
-    ) -> bool:
+    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
         raise AssertionError("the store was asked to touch a session")
 
     def delete(self, session_id: str) -> None:
@@ -527,12 +520,7 @@ class SessionsAnsweringTouch(SessionRecordsInMemory):
         super().__init__(record)
         self.touch_answer = touch_answer
 
-    def touch(
-        self,
-        session_id: str,
-        *,
-        expires_at: datetime,
-    ) -> bool:
+    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
         return self.touch_answer
 
 

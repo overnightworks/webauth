@@ -92,8 +92,7 @@ DEP002 = ["redis"]
 include = [
     "src/webauth",
     "e2e",
-    "tests/webauth_arrangement.py",
-    "tests/oidc_arrangement.py",
+    "tests",
 ]
 pythonVersion = "3.12"
 
