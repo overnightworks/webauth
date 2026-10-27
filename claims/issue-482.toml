@@ -1,0 +1,8 @@
+claim_id = "73822013623847e19f759a3bde1ff28c"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "4eb056cd15d14d5931e775e592068bab3aa0e9e1"
+branch = "claude/issue-482-jwt-verification-split"
+scope = ["quality/baseline.toml", "tests/conftest.py", "tests/support/jwt_issuer.py", "tests/test_jwt_verification.py", "tests/test_jwt_verification_https_fetch.py", "tests/test_jwt_verification_key_set.py", "tests/test_jwt_verification_kidless.py", "tests/test_jwt_verification_refresh.py", "tests/test_jwt_verification_token.py"]
+opened_commit = "bfc7755fb05ffcba93878206579356befc95fd3f"
+whole_reason = "One file split: the five parts, the shared scenario and the fixture move together, or a helper would live in two places between slices."
