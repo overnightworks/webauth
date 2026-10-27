@@ -488,7 +488,8 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
     url = urllib.parse.urlsplit(request.url)
     pending = request.pending
 
-    assert f"{url.scheme}://{url.netloc}{url.path}" == AUTHORIZATION_ENDPOINT
+    authorization_endpoint = f"{url.scheme}://{url.netloc}{url.path}"
+    assert authorization_endpoint == AUTHORIZATION_ENDPOINT
     assert urllib.parse.parse_qs(url.query, strict_parsing=True) == {
         "response_type": ["code"],
         "client_id": [CLIENT_ID],
