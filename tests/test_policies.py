@@ -12,8 +12,8 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from webauth_arrangement import a_web_auth_config
 
+from tests.support.webauth_arrangement import a_web_auth_config
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import (

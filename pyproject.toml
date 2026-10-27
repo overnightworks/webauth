@@ -80,6 +80,8 @@ extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+pythonpath = ["."]
 
 [tool.coverage.run]
 branch = true

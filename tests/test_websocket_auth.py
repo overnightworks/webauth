@@ -10,7 +10,8 @@ from fastapi import FastAPI
 from starlette.requests import HTTPConnection, Request
 from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from webauth_arrangement import (
+
+from tests.support.webauth_arrangement import (
     ALLOWED_HOST,
     ALLOWED_ORIGIN,
     CLIENT_ADDRESS,
@@ -31,7 +32,6 @@ from webauth_arrangement import (
     an_auth_app,
     session_cookie_header,
 )
-
 from webauth.config import (
     install_web_auth_config,
     web_auth_config,

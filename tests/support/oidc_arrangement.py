@@ -39,8 +39,8 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from fastapi import FastAPI, Request
 from jwt.algorithms import RSAAlgorithm
 from pydantic import SecretStr
-from webauth_arrangement import an_http_scope, session_cookie_header
 
+from tests.support.webauth_arrangement import an_http_scope, session_cookie_header
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.https_client import MAX_KEY_SET_BYTES
 from webauth.jwt_verification import KeySetFetch, MonotonicClock

@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from fastapi import FastAPI
 from starlette.requests import Request
-from webauth_arrangement import an_http_scope
 
+from tests.support.webauth_arrangement import an_http_scope
 from webauth._paths import same_app_path
 
 _A_LONG_PATH = "/" + "a" * 511

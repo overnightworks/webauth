@@ -16,7 +16,8 @@ from fastapi.testclient import TestClient
 from httpx import Response as ClientResponse
 from starlette.requests import Request
 from starlette.responses import Response
-from webauth_arrangement import (
+
+from tests.support.webauth_arrangement import (
     ALLOWED_HOST,
     SEVEN_DAYS_SECONDS,
     THIRTY_DAYS_SECONDS,
@@ -24,7 +25,6 @@ from webauth_arrangement import (
     session_cookie_header,
     signed_without_bound,
 )
-
 from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,

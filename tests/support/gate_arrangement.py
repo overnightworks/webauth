@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, Request, WebSocket
 from httpx import Response
-from oidc_arrangement import (
+from starlette.middleware import Middleware
+
+from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
     FakeClock,
     FakeKeySetEndpoint,
@@ -18,8 +20,7 @@ from oidc_arrangement import (
     public_jwk,
     rsa_key,
 )
-from starlette.middleware import Middleware
-from webauth_arrangement import (
+from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     AuthApp,
     FakeUser,
@@ -27,7 +28,6 @@ from webauth_arrangement import (
     an_auth_app,
     session_cookie_header,
 )
-
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import BearerGate, admitted_admin, bearer_caller
 from webauth.oidc_login import AdmissionConfig

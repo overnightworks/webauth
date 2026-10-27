@@ -18,7 +18,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from oidc_arrangement import (
+from pydantic import SecretStr
+
+from tests.support.oidc_arrangement import (
     ABSENT,
     BACKCHANNEL_LOGOUT_EVENT,
     ISSUED_ACCESS_TOKEN_CANARY,
@@ -39,8 +41,6 @@ from oidc_arrangement import (
     s256_code_challenge,
     token_endpoint_answer,
 )
-from pydantic import SecretStr
-
 from webauth.cookies import PendingLogin
 from webauth.jwt_verification import RejectionReason
 from webauth.oidc import (

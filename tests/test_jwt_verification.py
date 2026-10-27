@@ -27,7 +27,8 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
-from oidc_arrangement import (
+
+from tests.support.oidc_arrangement import (
     ABSENT,
     FakeClock,
     FakeKeySetEndpoint,
@@ -42,7 +43,6 @@ from oidc_arrangement import (
     segment,
     weak_public_jwk,
 )
-
 from webauth.https_client import (
     MAX_KEY_SET_BYTES,
     KeySetFetchError,

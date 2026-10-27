@@ -15,14 +15,15 @@ import pytest
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
-from oidc_arrangement import a_relying_party
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.types import Message
-from webauth_arrangement import (
+
+from tests.support.oidc_arrangement import a_relying_party
+from tests.support.webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
     HTTPS_TEST_SERVER,
@@ -40,7 +41,6 @@ from webauth_arrangement import (
     drive,
     starts,
 )
-
 from webauth.config import install_web_auth_config
 from webauth.middleware import (
     BearerGate,

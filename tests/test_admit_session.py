@@ -7,7 +7,8 @@ from datetime import UTC, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
-from webauth_arrangement import (
+
+from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
@@ -20,7 +21,6 @@ from webauth_arrangement import (
     a_session,
     a_web_auth_config,
 )
-
 from webauth.config import SessionLifetime
 from webauth.dependencies import ConnectionRefusal, admit_session
 from webauth.ports import AuthenticatedUser

@@ -15,7 +15,9 @@ from threading import get_ident
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from oidc_arrangement import (
+from pydantic import SecretStr
+
+from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_REFRESH_TOKEN,
     FakeClock,
@@ -25,8 +27,7 @@ from oidc_arrangement import (
     a_relying_party,
     token_endpoint_answer,
 )
-from pydantic import SecretStr
-from webauth_arrangement import (
+from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_IDLE_SECONDS,
@@ -39,7 +40,6 @@ from webauth_arrangement import (
     SessionsRecordingTheirTransaction,
     a_web_auth_config,
 )
-
 from webauth.config import WebAuthConfig
 from webauth.dependencies import admit_session
 from webauth.oidc import (

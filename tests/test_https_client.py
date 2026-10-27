@@ -25,7 +25,10 @@ from typing import Concatenate
 
 import pytest
 import urllib3
-from oidc_arrangement import (
+from pydantic import SecretStr
+
+import webauth.https_client
+from tests.support.oidc_arrangement import (
     DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
@@ -36,9 +39,6 @@ from oidc_arrangement import (
     unanswering_loopback_port,
     unconnectable_loopback_port,
 )
-from pydantic import SecretStr
-
-import webauth.https_client
 from webauth.https_client import (
     MAX_KEY_SET_BYTES,
     ExchangeFailure,

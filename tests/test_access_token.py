@@ -9,7 +9,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from oidc_arrangement import (
+
+from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
@@ -26,7 +27,6 @@ from oidc_arrangement import (
     public_jwk,
     rsa_key,
 )
-
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import JwtVerifier, RejectionReason
 from webauth.oidc import (
