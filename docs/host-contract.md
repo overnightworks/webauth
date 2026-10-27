@@ -45,7 +45,7 @@ operator ruling 19.10.2026). A host store may still reject a new account's name
 with `UsernameTakenError`. Store-controlled username uniqueness is proven by
 `test_a_store_without_unique_usernames_admits_two_subjects_sharing_one` and
 `test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written`
-in [test_oidc_login.py](../tests/test_oidc_login.py). The absence of a local
+in [test_oidc_login_admission.py](../tests/test_oidc_login_admission.py). The absence of a local
 active-user policy is visible in `UserRecord` and `SubjectUserStore` in
 [ports.py](../src/webauth/ports.py), `admit_identity` in
 [oidc_login.py](../src/webauth/oidc_login.py) and `admit_session` in
@@ -87,7 +87,7 @@ for the mechanism and its trust boundaries. The POST page and fallback follow
 [#418 R4](https://github.com/overnightworks/webauth/issues/418), operator ruling
 22.10.2026; `test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint`
 and `test_a_same_origin_logout_still_answers_the_page` in
-[test_oidc_login.py](../tests/test_oidc_login.py) prove the response shape,
+[test_oidc_login_logout.py](../tests/test_oidc_login_logout.py) prove the response shape,
 including a missing hint. Browser behavior is driven by `logout` and
 `logout_after_the_app_session_ended` in [prove.py](../tests/e2e/oidc/prove.py) and
 `logout_through_the_page` in [engines.py](../tests/e2e/oidc/engines.py).
@@ -98,7 +98,7 @@ An old hint cookie is neither read nor cleared and expires by its own `Max-Age`,
 at most the absolute session cap after the host's upgrade
 ([#418 R5](https://github.com/overnightworks/webauth/issues/418), operator ruling
 22.10.2026). `test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared`
-in [test_oidc_login.py](../tests/test_oidc_login.py) proves it leaves the
+in [test_oidc_login_logout.py](../tests/test_oidc_login_logout.py) proves it leaves the
 response and session outcome unchanged.
 
 ## CSRF origin
@@ -143,7 +143,7 @@ operator ruling 23.10.2026). Proofs:
 `test_an_old_csrf_cookie_changes_no_decision_signed_in_or_out` in
 [test_csrf.py](../tests/middleware/test_csrf.py) and
 `test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared` in
-[test_oidc_login.py](../tests/test_oidc_login.py).
+[test_oidc_login_logout.py](../tests/test_oidc_login_logout.py).
 
 webauth supports the current releases of Chrome, Edge, Firefox and Safari
 (macOS and iOS). On every request whose method is not GET or HEAD, each sends
@@ -180,7 +180,7 @@ added the enforcing gate. Its page, API and public-path proofs are
   only request-address construction may prepend `root_path`; `start_login`
   never prepends it to an explicit `return_to`. Proofs:
   `test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_default_page`
-  in [test_oidc_login.py](../tests/test_oidc_login.py) and
+  in [test_oidc_login_callback.py](../tests/test_oidc_login_callback.py) and
   `test_only_a_path_of_this_app_is_a_return_path` in
   [test_paths.py](../tests/test_paths.py). `deep_link_survives_the_login` in
   [prove.py](../tests/e2e/oidc/prove.py) drives the browser round trip in the hand-run
@@ -309,5 +309,6 @@ that choice and the original token. This is [#418 R1/R2](https://github.com/over
 proves the explicit choice, refresh-token retention, hint-free logout and
 renewal/rotation with no ID token;
 `test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_login`
-and `test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout` in
-[test_oidc_login.py](../tests/test_oidc_login.py) prove the retained-token case.
+in [test_oidc_login_open_session.py](../tests/test_oidc_login_open_session.py) and
+`test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout` in
+[test_oidc_login_logout.py](../tests/test_oidc_login_logout.py) prove the retained-token case.
