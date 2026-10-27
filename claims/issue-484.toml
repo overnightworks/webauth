@@ -1,0 +1,8 @@
+claim_id = "2bf5a053f99d4a90b2963b3ca8dcd1db"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "2a3f2b501fd27259cc08c729143548603c04e287"
+branch = "claude/issue-484-oidc-split"
+scope = ["quality/baseline.toml", "tests/conftest.py", "tests/support/jwt_issuer.py", "tests/support/oidc_arrangement.py", "tests/support/oidc_relying_party.py", "tests/test_oidc.py", "tests/test_oidc_callback.py", "tests/test_oidc_client_config.py", "tests/test_oidc_grants.py", "tests/test_oidc_logout_token.py"]
+opened_commit = "8a89abe5d871e1818940f39ba41866fcb3c66418"
+whole_reason = "One file split: the four parts and their shared names move together, or a helper would live in two places between slices."
