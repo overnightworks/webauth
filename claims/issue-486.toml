@@ -1,0 +1,8 @@
+claim_id = "41b359fc0c894e288e6ffe1f4c4a26c4"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "5f0c2c21a24ef9efb9b80cca130fc2004462454c"
+branch = "claude/issue-486-oidc-test-value-owner"
+scope = ["tests/conftest.py", "tests/support/jwt_issuer.py", "tests/support/oidc_arrangement.py", "tests/support/oidc_relying_party.py", "tests/test_jwt_verification_https_fetch.py", "tests/test_jwt_verification_key_set.py", "tests/test_jwt_verification_kidless.py", "tests/test_jwt_verification_refresh.py", "tests/test_jwt_verification_token.py", "tests/test_oidc_callback.py", "tests/test_oidc_client_config.py", "tests/test_oidc_grants.py", "tests/test_oidc_login_callback.py", "tests/test_oidc_logout_token.py"]
+opened_commit = "a8b54adc228847deeb5821c81115e6b67e223eae"
+whole_reason = "One owner per value: removing a copy and repointing its users must happen in one change, or a test would import a name that no longer exists."
