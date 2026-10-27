@@ -12,7 +12,6 @@
 "tests/support/webauth_arrangement.py" = 918
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
-"tests/test_oidc_login.py" = 2312
 
 [function_lines."src/webauth/dependencies.py"]
 "current_user_dependency" = 60
@@ -34,8 +33,5 @@
 
 [function_lines."tests/test_jwt_verification.py"]
 "_defective_key_sets" = 121
-
-[function_lines."tests/test_oidc_login.py"]
-"an_oidc_host" = 140
 
 [clones]
