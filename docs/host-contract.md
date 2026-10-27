@@ -115,17 +115,17 @@ operator ruling 23.10.2026. The proofs are
 `test_a_state_changing_request_without_provenance_is_refused_whatever_its_body`,
 `test_the_referer_is_not_read` and
 `test_a_session_request_is_decided_by_its_provenance_whatever_token_material_it_carries`
-in [test_csrf.py](../tests/test_csrf.py), plus
+in [test_csrf.py](../tests/middleware/test_csrf.py), plus
 `TestRefusedInstallation.test_an_install_without_csrf_origin_is_refused_before_touching_the_app`
-in [test_middleware_stack.py](../tests/test_middleware_stack.py).
+in [test_stack.py](../tests/middleware/test_stack.py).
 
 Only verified bearer admission and the sessionless server paths the host names
 in `CsrfPolicy.exempt` bypass this check; an adjacent path is still checked
 ([#429 S-2](https://github.com/overnightworks/webauth/issues/429), operator ruling
 23.10.2026). Proofs: `test_a_bearer_request_needs_no_csrf_origin_header_or_cookie`
-in [test_bearer_admission.py](../tests/test_bearer_admission.py) and
+in [test_bearer_gate_admission.py](../tests/middleware/test_bearer_gate_admission.py) and
 `test_protect_everything_checks_every_route_but_the_exempt_ones` in
-[test_csrf.py](../tests/test_csrf.py).
+[test_csrf.py](../tests/middleware/test_csrf.py).
 
 The `Origin` fallback matches exact hosts in `WebAuthConfig.allowed_hosts_exact`,
 never host patterns; its docstring owns port matching. With `cookie_secure` on,
@@ -133,15 +133,15 @@ the origin must use HTTPS; with it off, the scheme is not compared. This also
 holds for WebSocket handshakes, which check `Origin` directly
 ([#429 S-4 and P-3](https://github.com/overnightworks/webauth/issues/429), operator
 ruling 23.10.2026). Proofs: `test_an_origin_that_only_resembles_the_exact_host_is_refused`
-in [test_csrf.py](../tests/test_csrf.py), and
+in [test_csrf.py](../tests/middleware/test_csrf.py), and
 `test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on` in both that
-module and [test_websocket_auth.py](../tests/test_websocket_auth.py).
+module and [test_dependencies_websocket_auth.py](../tests/test_dependencies_websocket_auth.py).
 
 An old CSRF cookie changes no decision and is neither read nor cleared; it
 expires by its own `Max-Age` ([#429 P-2](https://github.com/overnightworks/webauth/issues/429),
 operator ruling 23.10.2026). Proofs:
 `test_an_old_csrf_cookie_changes_no_decision_signed_in_or_out` in
-[test_csrf.py](../tests/test_csrf.py) and
+[test_csrf.py](../tests/middleware/test_csrf.py) and
 `test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared` in
 [test_oidc_login.py](../tests/test_oidc_login.py).
 
@@ -162,7 +162,7 @@ added the enforcing gate. Its page, API and public-path proofs are
 `test_a_page_without_a_session_is_redirected_to_the_start_route_with_next`,
 `test_an_api_call_without_a_session_gets_401_authentication_required` and
 `test_a_public_path_passes_untouched_and_asks_no_store` in
-[test_session_gate.py](../tests/test_session_gate.py).
+[test_session_gate.py](../tests/middleware/test_session_gate.py).
 
 - **A page without a session** sends the browser straight to the app's start
   route, with `next` naming the page, so the person lands there after signing
@@ -201,7 +201,7 @@ added the enforcing gate. Its page, API and public-path proofs are
   22.10.2026; [#409](https://github.com/overnightworks/webauth/issues/409)
   supplies the implementation and precise response table.
   `test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge` in
-  [test_bearer_gate.py](../tests/test_bearer_gate.py) proves these responses,
+  [test_bearer_gate.py](../tests/middleware/test_bearer_gate.py) proves these responses,
   including 401 when the key set is unavailable.
 
 - **Public paths** are the exception. Each app names its own, and they need
@@ -251,7 +251,7 @@ is its implementation, not a separate ruling.
   emits no event: the host audits the admitted call itself (subject, route,
   outcome). `test_the_audience_must_be_the_app_alone` and
   `test_an_authorized_party_the_host_did_not_allow_is_refused` in
-  [test_access_token.py](../tests/test_access_token.py) prove the audience and
+  [test_oidc_access_token.py](../tests/test_oidc_access_token.py) prove the audience and
   `azp` restrictions; [bearer.py](../e2e/oidc/bearer.py) holds the hand-run
   real-issuer admission proofs.
 - **What it replaces.** On a gated path the cookie, the CSRF check and the
@@ -262,13 +262,13 @@ is its implementation, not a separate ruling.
   `admitted_admin`, `verified_session_id`) on a gated path raises, so the library answers 500,
   and `session_id_from_request` reads the cookie, which is the host's duty not to
   trust there. `test_the_cookie_counts_for_nothing_beside_a_token` in
-  [test_bearer_admission.py](../tests/test_bearer_admission.py) proves admission
+  [test_bearer_gate_admission.py](../tests/middleware/test_bearer_gate_admission.py) proves admission
   uses the token's subject without opening a session transaction.
 - **Token lifetime.** A block at Keycloak reaches the gate only when the token
   expires, plus the leeway; signing out of a browser leaves the token valid
   (#350 sentences 4/5, operator ruling 22.10.2026).
   `test_an_expired_token_is_admitted_until_expiry_plus_leeway` in
-  [test_access_token.py](../tests/test_access_token.py) proves the expiry boundary.
+  [test_oidc_access_token.py](../tests/test_oidc_access_token.py) proves the expiry boundary.
   `disabled_person_keeps_the_token`, `sign_out_leaves_the_token` and
   `short_token_fails_after_exp_and_leeway` in [bearer.py](../e2e/oidc/bearer.py)
   drive the real-issuer cases in the hand-run harness, not CI.
@@ -305,7 +305,7 @@ ID token, while refresh-token storage is unchanged. With `True`, the row keeps
 the login's ID token for logout. Renewal and refresh-token rotation preserve
 that choice and the original token. This is [#418 R1/R2](https://github.com/overnightworks/webauth/issues/418)
 (operator ruling 22.10.2026), qualified by [#428 R1](https://github.com/overnightworks/webauth/issues/428)
-(operator ruling 23.10.2026). [test_open_session_id_token.py](../tests/test_open_session_id_token.py)
+(operator ruling 23.10.2026). [test_oidc_login_open_session_id_token.py](../tests/test_oidc_login_open_session_id_token.py)
 proves the explicit choice, refresh-token retention, hint-free logout and
 renewal/rotation with no ID token;
 `test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_login`
