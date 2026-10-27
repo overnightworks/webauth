@@ -38,7 +38,6 @@ from webauth.dependencies import (
     authenticate_websocket,
     current_user_dependency,
     session_id_from_request,
-    unauthenticated_response,
 )
 from webauth.https_client import (
     KEY_SET_FETCH_DEADLINE_SECONDS,
@@ -470,5 +469,4 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         VerifiedAccessToken, VerifiedClaims, VerifiedLogout, WallClock, admit_session,
         bearer_caller, install_web_auth_config,
         is_https_url, session_id_from_request,
-        unauthenticated_response,
     )

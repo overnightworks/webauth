@@ -83,7 +83,6 @@ Every authenticated request reads `SessionRecordStore`, never a cache; the libra
 
 `install_web_auth_middleware` enforces outermost-first: security headers, body size, rate limit, bearer gate, CSRF origin, session gate.
 Install once, adding no library middleware yourself; its docstring explains placement of host middleware and rejected stacks.
-A host-owned session authority uses `webauth.dependencies.unauthenticated_response` for missing sessions.
 
 ### The bearer gate
 
