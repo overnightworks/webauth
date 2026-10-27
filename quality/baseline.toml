@@ -9,7 +9,7 @@
 
 [file_lines]
 "tests/e2e/oidc/prove.py" = 1546
-"tests/support/webauth_arrangement.py" = 918
+"tests/support/webauth_arrangement.py" = 905
 
 [function_lines."src/webauth/dependencies.py"]
 "current_user_dependency" = 60
@@ -27,6 +27,6 @@
 "loopback_https_server" = 115
 
 [function_lines."tests/support/webauth_arrangement.py"]
-"an_auth_app" = 120
+"an_auth_app" = 112
 
 [clones]

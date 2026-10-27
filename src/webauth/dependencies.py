@@ -52,7 +52,6 @@ __all__ = [
     "authenticate_websocket",
     "current_user_dependency",
     "session_id_from_request",
-    "unauthenticated_response",
 ]
 
 
@@ -219,22 +218,6 @@ def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
     if len(origins) > 1 or not origin_is_allowed(origins[0], web_auth_config(connection)):
         return ConnectionRefusal.FOREIGN_ORIGIN
     return None
-
-
-def unauthenticated_response(
-    request: Request, login_redirect: LoginRedirect | None,
-) -> Response:
-    """The refusal ``current_user_dependency`` answers with for no session cookie.
-
-    A host whose own middleware is the session authority calls this directly
-    to answer what the dependency answers for a request without a usable
-    session cookie (``ConnectionRefusal.NO_SESSION``): the login redirect
-    (``Location``, ``next`` carrying path and query) a browser navigation
-    gets, the 401 ``Authentication required`` every other request gets. For a
-    forged, doubled or ended session the dependency and the session gate
-    answer ``Invalid session`` or ``Session expired``, with the same redirect.
-    """
-    return _refusal_response(request, ConnectionRefusal.NO_SESSION, login_redirect)
 
 
 def _unauthenticated(

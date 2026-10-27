@@ -7,6 +7,12 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.24.0 - Unreleased
+
+**Breaking**
+
+- `webauth.dependencies.unauthenticated_response` is removed. A host whose own middleware is the session authority answers a missing session itself, or guards its routes with `current_user_dependency`, which answers the login redirect for a browser navigation and 401 `Authentication required` for every other request.
+
 ## 0.23.0 - 2026-10-23
 
 **Breaking**

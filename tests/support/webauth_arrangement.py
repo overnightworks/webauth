@@ -21,7 +21,6 @@ from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import HTTPConnection
-from starlette.responses import Response
 from starlette.websockets import WebSocketDisconnect
 
 from webauth.config import (
@@ -37,7 +36,6 @@ from webauth.dependencies import (
     authenticate_websocket,
     current_user_dependency,
     session_id_from_request,
-    unauthenticated_response,
 )
 from webauth.middleware import (
     IpRateLimitMiddleware,
@@ -622,9 +620,6 @@ def a_session(
     )
 
 
-UNAUTHENTICATED_RESPONSE_PATH = "/unauthenticated-response"
-
-
 def _add_websocket_routes(
     app: FastAPI,
     sessions: SessionRecordStore,
@@ -709,10 +704,6 @@ def an_auth_app(
     ``session_transaction`` or else the store's ``in_transaction``;
     ``stack_policies`` adds the other policies the installer takes, or replaces
     the headers.
-
-    ``UNAUTHENTICATED_RESPONSE_PATH`` answers with ``unauthenticated_response``
-    called directly, over the same ``login_redirect``, so a test can compare
-    it against a dependency-guarded route for the same request.
     """
     if config is None:
         config = a_web_auth_config(admin_role=ADMIN_ROLE, **config_overrides)
@@ -781,10 +772,6 @@ def an_auth_app(
         verified: str = Depends(dependencies.verified_session_id),
     ) -> dict[str, str]:
         return {"session_id": verified}
-
-    @app.get(UNAUTHENTICATED_RESPONSE_PATH)
-    def unauthenticated(request: Request) -> Response:
-        return unauthenticated_response(request, login_redirect)
 
     _add_websocket_routes(app, sessions, websocket_outcomes)
 
