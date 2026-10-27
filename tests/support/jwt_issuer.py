@@ -11,6 +11,7 @@ from jwt.algorithms import ECAlgorithm
 
 from tests.support.oidc_arrangement import (
     ABSENT,
+    REALM_ISSUER,
     FakeClock,
     FakeKeySetEndpoint,
     changed,
@@ -26,7 +27,7 @@ from webauth.jwt_verification import (
 )
 
 KEY_SET_TTL_SECONDS = 60 * 60
-ISSUER = "https://login.example.org/realms/workshop"
+ISSUER = REALM_ISSUER
 AUDIENCE = "notes-app"
 JWKS_URL = f"{ISSUER}/protocol/openid-connect/certs"
 LEEWAY_SECONDS = 30
