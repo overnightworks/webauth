@@ -75,8 +75,6 @@ extend-immutable-calls = ["fastapi.Depends"]
 [tool.ruff.lint.per-file-ignores]
 # pytest's assertion rewriting is how a test asserts
 "tests/**" = ["S101"]
-# prove.py's checks are assertions, and its main refuses to run with assertions stripped
-"e2e/**" = ["S101"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -93,7 +91,6 @@ DEP002 = ["redis"]
 [tool.pyright]
 include = [
     "src/webauth",
-    "e2e",
     "tests",
 ]
 pythonVersion = "3.12"

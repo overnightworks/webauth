@@ -11,7 +11,7 @@ caller, against the same Keycloak (scenarios 28 onwards of `prove.py`); `realm.p
 realm's facts and the admin calls that shape it.
 
 The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
-Playwright browser, and takes a few minutes. CI only lints `e2e/`. Every terminal
+Playwright browser, and takes a few minutes. CI only lints `tests/e2e/`. Every terminal
 step is a verb of `scripts/e2e-oidc.sh`, which holds the commands, the caps and the lock.
 
 ## Prerequisites

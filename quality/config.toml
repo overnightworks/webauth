@@ -5,7 +5,3 @@ mandatory_jobs = ["checks", "lowest-direct"]
 allow = [
   { rule = "generic-api-key", file = "src/webauth/jwt_verification.py", secret_sha256 = "601cc025a76eaae2bfb9c339166aa64c82abab2b0d1490758074646d502f03cc", reason = "enum value, not a key" },
 ]
-
-[[root.allow]]
-entry = "e2e/"
-reason = "moves to tests/e2e/oidc/ with webauth's layout migration; this declaration goes away with it"

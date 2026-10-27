@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The terminal steps of the real-browser proofs in e2e/oidc/ (see its README).
+# The terminal steps of the real-browser proofs in tests/e2e/oidc/ (see its README).
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -23,8 +23,8 @@ usage() {
 usage: scripts/e2e-oidc.sh VERB [ARGS]
 
   prepare            install Chromium, Firefox and WebKit and pull the relay and suite images
-  prove --edge DIR   run e2e/oidc/prove.py against the edge checkout DIR
-  conformance        run e2e/oidc/conformance.py
+  prove --edge DIR   run tests/e2e/oidc/prove.py against the edge checkout DIR
+  conformance        run tests/e2e/oidc/conformance.py
   cleanup            remove what a killed run left behind
 
 A run's directory is made under the state root and printed when the run starts.
@@ -67,20 +67,20 @@ echo "run directory: $run_directory"
 shift 2
 exec "$@" --scratch "$run_directory"' _ "$state_root" "${driver%.py}" \
     timeout --kill-after="$kill_after_seconds" "$run_cap_seconds" \
-    uv run --locked --project "$root" --group dev --group e2e python "$root/e2e/oidc/$driver" "$@"
+    uv run --locked --project "$root" --group dev --group e2e python "$root/tests/e2e/oidc/$driver" "$@"
 }
 
 # A constant the harness defines, read from its module so no copy can drift.
 harness_constant() {
   uv run --locked --project "$root" --group e2e python -I -c \
     'import importlib, sys; sys.path.insert(0, sys.argv[1]); print(getattr(importlib.import_module(sys.argv[2]), sys.argv[3]))' \
-    "$root/e2e/oidc" "$1" "$2"
+    "$root/tests/e2e/oidc" "$1" "$2"
 }
 
 prepare() {
   uv run --locked --project "$root" --group e2e playwright install chromium firefox webkit
   docker pull "$(harness_constant shim RELAY_IMAGE)"
-  SUITE_HOST="$suite_host" docker compose -f "$root/e2e/oidc/suite-compose.yaml" pull
+  SUITE_HOST="$suite_host" docker compose -f "$root/tests/e2e/oidc/suite-compose.yaml" pull
 }
 
 # The compose project names are reserved for the probe: the harness's own teardown
@@ -161,7 +161,7 @@ checkout_interpreter() {
 host_app_pids() {
   local host_app state_real cmdline pid
   local -a argv
-  host_app="$(realpath -m -- "$root/e2e/oidc/host_app.py")"
+  host_app="$(realpath -m -- "$root/tests/e2e/oidc/host_app.py")"
   state_real="$(realpath -m -- "$state_root")"
   for cmdline in /proc/[0-9]*/cmdline; do
     pid="${cmdline#/proc/}"
