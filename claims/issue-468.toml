@@ -1,8 +1,0 @@
-claim_id = "c4ccb4a02e304455b283d2855df97fe5"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "790b349e2e3953a581513c0f10a99e807a8ac947"
-branch = "claude/issue-468-pyright-tests"
-scope = ["pyproject.toml", "quality/baseline.toml", "tests"]
-opened_commit = "fc076dee77ec0d078003bfa1044a5abfd19af9c4"
-whole_reason = "Type fixes for one checker setting reach the 13 test modules that carry its 68 errors; splitting would leave tests half included."
