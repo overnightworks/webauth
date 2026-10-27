@@ -17,6 +17,8 @@ def anyio_backend() -> str:
 
 @pytest.fixture
 def issuer() -> IssuerScenario:
+    # Inline: a top-level import of tests.support would load it before register_assert_rewrite
+    # and lose assertion rewriting.
     from tests.support.jwt_issuer import IssuerScenario
     from tests.support.oidc_arrangement import (
         FakeClock,
