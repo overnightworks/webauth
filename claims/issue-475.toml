@@ -1,8 +1,0 @@
-claim_id = "1062a70738b64fc880c790a5930b83b7"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "125478e8d4819ec844d09d8932d3ea2d8244910c"
-branch = "claude/issue-475-e2e-move"
-scope = [".github/dependabot.yml", "AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "docs/testing-a-host.md", "e2e", "pyproject.toml", "quality/baseline.toml", "quality/config.toml", "scripts/check.sh", "scripts/e2e-oidc.sh", "sonar-project.properties", "tests"]
-opened_commit = "73469a9a71becae726e2a8f21343050d95a1b564"
-whole_reason = "One directory move whose paths are pinned in config, scripts, a test and docs; a partial move breaks lint, typing or the harness script."
