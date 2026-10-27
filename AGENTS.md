@@ -16,7 +16,7 @@ webauth is a library with no deployment of its own; hosts install the tagged whe
 
 - Ports are Protocols, and none of them commits. A new host obligation is a Protocol in `webauth.ports`.
 - Deployment facts come from `WebAuthConfig`. Nothing reads an environment variable or a global.
-- Tests use the builders in `tests/webauth_arrangement.py`, `tests/oidc_arrangement.py` and `tests/gate_arrangement.py`, not a second set of fakes.
+- Tests use the builders in `tests/support/webauth_arrangement.py`, `tests/support/oidc_arrangement.py` and `tests/support/gate_arrangement.py`, not a second set of fakes.
 
 ## Checks
 

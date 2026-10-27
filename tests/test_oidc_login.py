@@ -27,7 +27,9 @@ import pytest
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
-from oidc_arrangement import (
+from pydantic import SecretStr
+
+from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_ACCESS_TOKEN_CANARY,
     ISSUED_REFRESH_TOKEN,
@@ -46,8 +48,7 @@ from oidc_arrangement import (
     rs256,
     rsa_key,
 )
-from pydantic import SecretStr
-from webauth_arrangement import (
+from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
@@ -68,7 +69,6 @@ from webauth_arrangement import (
     session_cookie_header,
     signed_without_bound,
 )
-
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,

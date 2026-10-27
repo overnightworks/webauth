@@ -9,7 +9,8 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
-from webauth_arrangement import (
+
+from tests.support.webauth_arrangement import (
     ALLOWED_HOST,
     ALLOWED_ORIGIN,
     API_PATH,
@@ -19,7 +20,6 @@ from webauth_arrangement import (
     an_auth_app,
     session_cookie_header,
 )
-
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.middleware import CsrfOriginMiddleware
 from webauth.policies import CsrfPolicy, PathRules, PathShape, PublicRule

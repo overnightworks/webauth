@@ -11,7 +11,8 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
-from webauth_arrangement import (
+
+from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     SAME_ORIGIN_REQUEST,
     AuthApp,
@@ -19,7 +20,6 @@ from webauth_arrangement import (
     an_auth_app,
     an_http_scope,
 )
-
 from webauth.config import install_web_auth_config
 from webauth.middleware import install_web_auth_middleware
 from webauth.middleware._route_path import route_path

@@ -10,14 +10,14 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from webauth_arrangement import (
+
+from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     MIN_SESSION_SECRET_CHARS,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     a_web_auth_config,
     web_auth_config_arguments,
 )
-
 from webauth.config import (
     SessionLifetime,
     WebAuthConfig,

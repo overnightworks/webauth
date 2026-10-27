@@ -10,7 +10,9 @@ from unittest.mock import MagicMock, patch
 import fakeredis
 import pytest
 from fastapi.testclient import TestClient
-from webauth_arrangement import (
+
+import webauth.rate_limit
+from tests.support.webauth_arrangement import (
     API_PATH,
     BULK_BUDGET_NAME,
     BULK_PATH,
@@ -21,8 +23,6 @@ from webauth_arrangement import (
     a_policy_rate_limited_client,
     a_rate_limited_client,
 )
-
-import webauth.rate_limit
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
 from webauth.rate_limit import RedisRateLimitBackend
 

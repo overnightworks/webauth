@@ -16,7 +16,9 @@ from typing import Any
 
 import httpx
 import pytest
-from gate_arrangement import (
+from httpx import Response
+
+from tests.support.gate_arrangement import (
     A_TOKEN,
     ADMISSION,
     EXPORT_PATH,
@@ -34,20 +36,18 @@ from gate_arrangement import (
     assert_no_store_and_no_cookie,
     bearing,
 )
-from httpx import Response
-from oidc_arrangement import (
+from tests.support.oidc_arrangement import (
     ABSENT,
     OPERATOR_SUBJECT,
     a_relying_party,
     an_access_token,
 )
-from webauth_arrangement import (
+from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     an_http_scope,
     drive,
     starts,
 )
-
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import BearerGate
 from webauth.oidc_login import AdmissionConfig, NoAdmins

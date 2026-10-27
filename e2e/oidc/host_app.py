@@ -133,7 +133,7 @@ LOGOUT_BUTTON = (
 @functools.cache
 def _arrangement() -> Any:
     """The library suite's in-memory stores, loaded by path from ``tests/``."""
-    path = REPOSITORY / "tests" / "webauth_arrangement.py"
+    path = REPOSITORY / "tests" / "support" / "webauth_arrangement.py"
     spec = importlib.util.spec_from_file_location("webauth_arrangement", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

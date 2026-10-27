@@ -9,10 +9,11 @@ import pytest
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.testclient import TestClient
-from oidc_arrangement import LogoutPage, a_relying_party
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
-from webauth_arrangement import (
+
+from tests.support.oidc_arrangement import LogoutPage, a_relying_party
+from tests.support.webauth_arrangement import (
     SessionRecordsInMemory,
     UsersInMemory,
     WriteLockInMemory,
@@ -23,7 +24,6 @@ from webauth_arrangement import (
     no_receive,
     starts,
 )
-
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
 from webauth.oidc_login import log_out

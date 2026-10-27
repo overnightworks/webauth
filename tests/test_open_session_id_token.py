@@ -10,7 +10,9 @@ from dataclasses import dataclass
 
 import pytest
 from fastapi import FastAPI, Request
-from oidc_arrangement import (
+from pydantic import SecretStr
+
+from tests.support.oidc_arrangement import (
     ISSUED_REFRESH_TOKEN,
     FakeClock,
     FakeIssuer,
@@ -19,8 +21,7 @@ from oidc_arrangement import (
     a_relying_party,
     opened_session,
 )
-from pydantic import SecretStr
-from webauth_arrangement import (
+from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_IDLE_SECONDS,
     FakeUser,
@@ -31,7 +32,6 @@ from webauth_arrangement import (
     an_http_scope,
     session_cookie_header,
 )
-
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import sign_session_id
 from webauth.dependencies import admit_session

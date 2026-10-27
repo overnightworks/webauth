@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from gate_arrangement import (
+from starlette.middleware import Middleware
+
+from tests.support.gate_arrangement import (
     A_TOKEN,
     ADMITTED_ADMIN_PATH,
     ADMITTED_ADMIN_PATHS,
@@ -29,14 +31,13 @@ from gate_arrangement import (
     relayed,
     with_admitted_admin_routes,
 )
-from oidc_arrangement import (
+from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
     ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
 )
-from starlette.middleware import Middleware
-from webauth_arrangement import (
+from tests.support.webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
     HTTPS_TEST_SERVER,
     LOGIN_REDIRECT,
@@ -44,7 +45,6 @@ from webauth_arrangement import (
     a_web_auth_config,
     session_cookie_header,
 )
-
 from webauth.config import install_web_auth_config
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import bearer_caller, install_web_auth_middleware

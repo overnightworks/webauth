@@ -1,6 +1,6 @@
 import pytest
 
-pytest.register_assert_rewrite("webauth_arrangement")
+pytest.register_assert_rewrite("tests.support")
 
 
 @pytest.fixture

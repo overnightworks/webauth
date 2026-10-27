@@ -1,9 +1,4 @@
-"""Shared arrangement for the webauth suites.
-
-A plain builder rather than a `conftest.py`: pytest puts every test directory
-on `sys.path`, so a second `conftest` module here would shadow the repository
-one that the rest of the suite imports `TEST_SECRET` and its factories from.
-"""
+"""Shared arrangement for the webauth suites."""
 
 from __future__ import annotations
 

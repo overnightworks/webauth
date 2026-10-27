@@ -9,8 +9,8 @@ from typing import SupportsIndex
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from webauth_arrangement import a_web_auth_config
 
+from tests.support.webauth_arrangement import a_web_auth_config
 from webauth import proxies
 from webauth.config import install_web_auth_config
 from webauth.proxies import (

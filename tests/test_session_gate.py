@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import pytest
 from fastapi import FastAPI
-from gate_arrangement import (
+from httpx import Response
+from starlette.websockets import WebSocketDisconnect
+
+from tests.support.gate_arrangement import (
     ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH,
     ADMITTED_ADMIN_PATH,
     ADMITTED_ADMIN_PATHS,
@@ -21,9 +24,7 @@ from gate_arrangement import (
     relayed,
     with_admitted_admin_routes,
 )
-from httpx import Response
-from starlette.websockets import WebSocketDisconnect
-from webauth_arrangement import (
+from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     ALL_DEPENDENCIES_PATH,
     ALLOWED_ORIGIN,
@@ -49,7 +50,6 @@ from webauth_arrangement import (
     session_cookie_header,
     starts,
 )
-
 from webauth.dependencies import ConnectionRefusal
 from webauth.policies import (
     BodySizePolicy,

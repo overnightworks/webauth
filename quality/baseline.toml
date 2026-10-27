@@ -1,6 +1,6 @@
 # Measured by `quality baseline write`. Entries only ever go down.
 
-[ccn."tests/oidc_arrangement.py"]
+[ccn."tests/support/oidc_arrangement.py"]
 "loopback_https_server.LoopbackHandler._receive" = 16
 
 [ccn."tests/test_public_api.py"]
@@ -9,10 +9,10 @@
 
 [file_lines]
 "e2e/oidc/prove.py" = 1546
+"tests/support/webauth_arrangement.py" = 918
 "tests/test_jwt_verification.py" = 1278
 "tests/test_oidc.py" = 1261
 "tests/test_oidc_login.py" = 2312
-"tests/webauth_arrangement.py" = 923
 
 [function_lines."e2e/oidc/host_app.py"]
 "build_app" = 162
@@ -26,16 +26,16 @@
 [function_lines."src/webauth/oidc_login.py"]
 "finish_login" = 68
 
-[function_lines."tests/oidc_arrangement.py"]
+[function_lines."tests/support/oidc_arrangement.py"]
 "loopback_https_server" = 115
+
+[function_lines."tests/support/webauth_arrangement.py"]
+"an_auth_app" = 120
 
 [function_lines."tests/test_jwt_verification.py"]
 "_defective_key_sets" = 121
 
 [function_lines."tests/test_oidc_login.py"]
 "an_oidc_host" = 140
-
-[function_lines."tests/webauth_arrangement.py"]
-"an_auth_app" = 120
 
 [clones]

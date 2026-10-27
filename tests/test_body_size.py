@@ -10,7 +10,8 @@ import pytest
 from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
-from webauth_arrangement import (
+
+from tests.support.webauth_arrangement import (
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
     StartSend,
@@ -23,7 +24,6 @@ from webauth_arrangement import (
     drive,
     starts,
 )
-
 from webauth import WebAuthError
 from webauth.config import install_web_auth_config
 from webauth.middleware import RequestBodyTooLarge, install_web_auth_middleware
