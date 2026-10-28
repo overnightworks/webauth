@@ -353,6 +353,50 @@ def test_no_session_is_named_where_no_account_would_be_admitted(
     assert response.json()["detail"] == detail
 
 
+@pytest.mark.parametrize(
+    ("login_redirect", "accept", "status", "location"),
+    [
+        pytest.param(None, None, 401, None, id="an API client"),
+        pytest.param(
+            A_LOGIN_REDIRECT, "text/html", 302, "/login?next=%2Fsession-id", id="a browser",
+        ),
+    ],
+)
+def test_a_replaced_current_user_still_names_no_session_for_a_request_without_a_cookie(
+    login_redirect: LoginRedirect | None,
+    accept: str | None,
+    status: int,
+    location: str | None,
+) -> None:
+    dependencies = current_user_dependency(
+        session_store=lambda: SessionRecordsInMemory(None),
+        on_authenticated=lambda user: None,
+        login_redirect=login_redirect,
+    )
+    app = FastAPI()
+    install_web_auth_config(app, a_web_auth_config())
+
+    @app.get("/session-id")
+    def session_id(
+        verified: str = Depends(dependencies.verified_session_id),
+    ) -> dict[str, str]:
+        return {"session_id": verified}
+
+    app.dependency_overrides[dependencies.current_user] = lambda: FakeUser()
+    client = TestClient(app, base_url=HTTPS_TEST_SERVER)
+
+    response = client.get(
+        "/session-id",
+        headers={} if accept is None else {"accept": accept},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == status
+    assert response.headers.get("location") == location
+    if location is None:
+        assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL
+
+
 def test_a_missing_cookie_401_stays_byte_identical_without_a_login_redirect(
     auth_app: AuthApp,
 ) -> None:

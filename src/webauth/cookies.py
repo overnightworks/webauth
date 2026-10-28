@@ -375,16 +375,12 @@ def _verify_pending_login(cookie_value: str, secret: bytes) -> PendingLogin | No
         return None
     if not hmac.compare_digest(signature, _pending_login_signature(payload, secret)):
         return None
-    try:
-        return_to = _decoded_return_to(fields["return_to"])
-    except ValueError:
-        return None
     return PendingLogin(
         state=fields["state"],
         nonce=fields["nonce"],
         code_verifier=fields["code_verifier"],
         issued_at=int(fields["issued_at"]),
-        return_to=return_to,
+        return_to=_decoded_return_to(fields["return_to"]),
     )
 
 
