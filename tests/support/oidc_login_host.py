@@ -428,6 +428,27 @@ def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) ->
         return {"username": user.username}
 
 
+def _an_issuer_side(
+    wall_clock: FakeClock, groups_claim: object,
+) -> tuple[FakeIssuer, FakeKeySetEndpoint, OidcRelyingParty, list[str]]:
+    issued_id_tokens: list[str] = []
+
+    def mint_id_token(nonce: str) -> str:
+        issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
+        return issued_id_tokens[-1]
+
+    issuer = FakeIssuer(mint_id_token=mint_id_token)
+    key_set = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("issuer"), "issuer-key")))
+    relying_party = OidcRelyingParty(
+        a_client_config(),
+        post_token_request=issuer,
+        fetch_key_set=key_set,
+        wall_clock=wall_clock,
+        monotonic_clock=FakeClock(5_000.0),
+    )
+    return issuer, key_set, relying_party, issued_id_tokens
+
+
 def an_oidc_host(
     *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
@@ -448,21 +469,7 @@ def an_oidc_host(
     sessions = SessionRecordsInMemory(stored_session, users=accounts, lock=lock)
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
-    issued_id_tokens: list[str] = []
-
-    def mint_id_token(nonce: str) -> str:
-        issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
-        return issued_id_tokens[-1]
-
-    issuer = FakeIssuer(mint_id_token=mint_id_token)
-    key_set = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("issuer"), "issuer-key")))
-    relying_party = OidcRelyingParty(
-        a_client_config(),
-        post_token_request=issuer,
-        fetch_key_set=key_set,
-        wall_clock=wall_clock,
-        monotonic_clock=FakeClock(5_000.0),
-    )
+    issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(wall_clock, groups_claim)
     transaction = RecordingSignInTransaction(
         transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
         strict=strict_records,
