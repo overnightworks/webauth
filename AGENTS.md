@@ -14,7 +14,7 @@ webauth is a library with no deployment of its own; hosts install the tagged whe
 
 ## Code patterns
 
-- Ports are Protocols, and none of them commits. A new host obligation is a Protocol in `webauth.ports`.
+- Ports are Protocols. The library never commits: durability belongs to the host, at a store call where its adapter persists each call, or at the exit of a transaction port (`SessionTransaction`, `SignInTransaction`). A new host obligation is a Protocol in `webauth.ports`.
 - Deployment facts come from `WebAuthConfig`. Nothing reads an environment variable or a global.
 - Tests use the builders in `tests/support/webauth_arrangement.py`, `tests/support/oidc_arrangement.py` and `tests/support/gate_arrangement.py`, not a second set of fakes.
 

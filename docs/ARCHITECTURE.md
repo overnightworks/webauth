@@ -37,8 +37,9 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 
 The host owns users/role names; the library writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
+The sign-in callback enters one host-owned `SignInTransaction`, serialized against every other entry over the same stores.
 Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
-The host owns routes; library responses are refusals (401/403/413/429/503/500), 302 login redirects and the logout page.
+The host owns its routes except the sign-in start and callback, which `install_sign_in_routes` registers; library responses are refusals (401/403/413/429/503/500), 302 login redirects, the sign-in 303s and the logout page.
 ASGI owns HTTP framing (h11/httptools may legally differ); the body-size limit counts streamed bytes, never re-parsing framing.
 
 ## Runtime View
@@ -46,29 +47,29 @@ ASGI owns HTTP framing (h11/httptools may legally differ); the body-size limit c
 ```mermaid
 sequenceDiagram
     actor Browser
-    participant H as Host routes
-    participant L as webauth.<br/>oidc_login
+    participant L as webauth.<br/>sign_in_routes
     participant R as OidcRelyingParty
+    participant H as Host<br/>refusal hook
     participant S as Host stores<br/>accounts<br/>sessions
-    H->>L: start_login
+    Browser->>L: Start (next)
     L->>R: begin_login
-    L-->>H: Authorization URL + signed pending cookie on response
-    H-->>Browser: Redirect + pending cookie
+    L-->>Browser: 303 to the issuer + signed pending cookie
     Browser->>Issuer: Authorization request (PKCE, state, nonce)
     Issuer-->>Browser: Redirect to callback with code + state
-    Browser->>H: Callback + pending cookie
-    H->>L: finish_login (select/clear pending cookie on response)
+    Browser->>L: Callback + pending cookie
+    Note over L: Select the pending cookie and write its deletion
     L->>R: complete_login
     R->>Issuer: Code + PKCE verifier via injected transport
     Note over R: Verify ID token<br/>cached keys<br/>(fetch if needed)
-    L->>S: admit_identity: account/role under WriteLock
-    L-->>H: AdmittedLogin
-    H->>L: open_session
-    L->>S: Replace/prune/create session under WriteLock
-    L-->>H: SessionRecord
-    H->>S: Commit
-    H->>H: webauth.cookies.issue_session_cookies
-    H-->>Browser: Response: session cookie + pending clearing
+    Note over L: Decide admission (pure)
+    alt refused
+        L->>H: SignInRefusal
+        H-->>Browser: The host's answer + pending clearing
+    else admitted
+        L->>S: One SignInTransaction: account/role, replace/prune/create session
+        S-->>L: Exit returned (durable)
+        L-->>Browser: 303 to the return path + session cookie + pending clearing
+    end
 ```
 Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc.py),
 [`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
@@ -108,15 +109,15 @@ ending a session alone does not end a socket.
 
 ### The return path
 
-`return_to` survives login only as a same-origin app path, else `None` without refusal; `start_login` owns validation,
-[the host contract](host-contract.md#signed-out-and-refused) owns the default-page outcome.
+The return path survives login only as a same-origin app path, else the app root without refusal; the start route owns validation,
+[the host contract](host-contract.md#signed-out-and-refused) owns the landing outcome.
 
 ### Logging out and the ID token hint
 
 `log_out` reads the row's ID token before deleting the session under the host lock, even for expired rows; it neither renews nor admits.
 It builds an end-session form without an outbound call. CSP admits one script by hash and only the end-session/post-logout origins;
 security headers preserve that policy and `Cache-Control`. [The host contract](host-contract.md#what-every-app-gets) owns outcomes and ruling/proof provenance.
-[Retention](host-contract.md#the-hosts-start-callback-and-logout-routes) is explicit. webauth never signs, decodes, verifies or logs the hint;
+[Retention](host-contract.md#the-start-and-callback-routes-and-the-hosts-logout-route) is explicit. webauth never signs, decodes, verifies or logs the hint;
 Keycloak judges it. [Trust](#trust), items 4 and 8, owns exposure and copied-token consequences.
 
 ### Back-channel logout
@@ -137,7 +138,7 @@ follow no redirects and log nothing. The host names authorization, token, key-se
 
 ### Admitting an identity
 
-`admit_identity` and `finish_login` share `AdmissionConfig`; the host store binds to one issuer, whose subject is the account `id`.
+The callback's admission decision and its account write share `AdmissionConfig`; the host store binds to one issuer, whose subject is the account `id`.
 `app_role` owns the [group decision](host-contract.md#what-every-app-gets), also used by services verifying issuer tokens themselves.
 
 ## Crosscutting Concepts
@@ -186,7 +187,8 @@ Who the library defends against and trusts; links point to owning sections.
    - key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
 8. **Named residues:**
    - the ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of that page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
-   - with a `WriteLock` that is released before the host commits (an in-process lock), a back-channel logout of the same account that runs between `finish_login`'s admission and the host's commit after `open_session` deletes nothing of that login, so the session it opens survives; a lock that the request's first `hold` takes and only the host's commit or rollback releases (a transaction-scoped lock) closes that window;
+   - the callback's `SignInTransaction` serializes sign-ins against each other and against whatever else the host locks the same way, but the back-channel logout still runs under its own `WriteLock`: with a lock that is released before the host commits (an in-process lock), a back-channel logout of the same account that runs between the callback's admission and its exit deletes nothing of that login, so the session it opens survives; a lock that the request's first `hold` takes and only the host's commit or rollback releases (a transaction-scoped lock) closes that window;
+   - a logout that completes before a verified sign-in cannot end that later session; closing that needs sessions bound to the issuer's `sid`, which webauth does not do. A failed sign-in is not repaired later: a host whose store applies each call keeps the account created, the sessions ended and the events recorded before the failure;
    - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
    - a clock reading past year 9999 fails closed;
    - name resolution is bounded by the system resolver, not by the library; connecting is bounded per resolved address, outside the total deadline ([The relying party](#the-relying-party));

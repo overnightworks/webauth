@@ -2,8 +2,8 @@
 
 OpenID Connect login and session authentication for FastAPI applications. It is
 built for [Keycloak](https://www.keycloak.org/); any OpenID Connect issuer that
-signs ID tokens with RS256 and publishes static endpoints works. The host serves
-a start and a callback route. webauth runs the flow, then keeps the session:
+signs ID tokens with RS256 and publishes static endpoints works. webauth serves
+the start and callback routes, runs the flow, then keeps the session:
 sessions the store decides on every request, HMAC-signed cookies, CSRF
 origin checks, admin checks, per-address rate limits, and the audit events they
 raise. The client is a confidential client: it authenticates at the token
@@ -23,10 +23,12 @@ from pydantic import SecretStr
 from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
+from webauth.oidc_login import AdmissionConfig
 from webauth.policies import CsrfPolicy, SecurityHeadersPolicy, default_content_security_policy
 from webauth.ports import AuthenticatedUser
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
+from webauth.sign_in_routes import SignInPaths, install_sign_in_routes
 
 app = FastAPI()
 config = WebAuthConfig(
@@ -37,12 +39,28 @@ config = WebAuthConfig(
     session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
 )
 install_web_auth_config(app, config)
+paths = SignInPaths(start="/login/oidc", callback="/auth/callback")
 install_web_auth_middleware(
     app,
     security_headers=SecurityHeadersPolicy(
         content_security_policy=default_content_security_policy(),
+        cache_control_rules=(paths.cache_control_rule,),
     ),
     csrf_origin=CsrfPolicy(),
+)
+install_sign_in_routes(
+    app,
+    paths=paths,
+    relying_party=the_hosts_relying_party,
+    admission=AdmissionConfig(
+        bound_issuer="https://keycloak.example/realms/notes",
+        login_group="/apps/notes",
+        admin_group="/apps/notes/admin",
+    ),
+    transaction=the_hosts_sign_in_transaction,
+    refused=the_hosts_refusal_page,
+    keeps_id_token=True,
+    max_sessions=None,
 )
 auth = current_user_dependency(
     session_store=the_hosts_session_store,
@@ -57,14 +75,14 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
 
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
 `admin_user`, `verified_session_id`) and its docstring says what `session_store`
-and `on_authenticated` are. The sign-in routes are in the [host contract](docs/host-contract.md#the-hosts-start-callback-and-logout-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
+and `on_authenticated` are. `paths` also derives the policies of the two routes (`public_rules`, `browser_paths`, `login_redirect`), so the host lists them once. The sign-in routes are in the [host contract](docs/host-contract.md#the-start-and-callback-routes-and-the-hosts-logout-route); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
 The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trusted-proxies).
 
 ## Documentation
 
-- A host developer: [How to test a host](docs/testing-a-host.md) and the [host contract](docs/host-contract.md), which holds the trusted-proxy rule, what every app gets, the machine routes and the start, callback and logout routes.
+- A host developer: [How to test a host](docs/testing-a-host.md) and the [host contract](docs/host-contract.md), which holds the trusted-proxy rule, what every app gets, the machine routes and the sign-in and logout routes.
 - An engineer changing the library: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) holds the architecture: the building blocks and what the host owns, how a request and a sign-in run, and the concepts behind each module.
 - Security: [Trust](docs/ARCHITECTURE.md#trust) says who the library defends against and what it trusts; [SECURITY.md](.github/SECURITY.md) says how to report.
 - The proof harness: [`tests/e2e/oidc/README.md`](tests/e2e/oidc/README.md).

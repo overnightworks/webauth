@@ -221,7 +221,7 @@ def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | Non
 
     It reads nothing but its arguments. It does not look at
     ``admission.bound_issuer``: the caller has checked that the groups come from
-    that issuer, as ``admit_identity`` does. The caller also validates the raw
+    that issuer, as the callback's admission does. The caller also validates the raw
     groups claim, refusing any shape but a list of strings as webauth's login
     does, and passes the normalized sequence of strings.
     """
