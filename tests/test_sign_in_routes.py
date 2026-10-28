@@ -410,7 +410,7 @@ def test_a_failure_after_the_answer_started_sends_no_second_response() -> None:
     assert isinstance(raised, StoreDown)
 
 
-def test_two_concurrent_callbacks_enter_one_after_the_other_and_keep_the_cap() -> None:
+def test_two_concurrent_callbacks_exchange_outside_the_transaction_and_keep_the_cap() -> None:
     host = an_oidc_host(max_sessions=1)
     first, second = host.sign_in_at_issuer(), host.sign_in_at_issuer()
     cookies = [host.pending_cookie(query) for query in (first, second)]

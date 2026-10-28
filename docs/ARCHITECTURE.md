@@ -74,7 +74,7 @@ sequenceDiagram
 ```
 Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc.py),
 [`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
-The harness opens one sign-in transaction under its write lock around admission and the session writes; cookies follow ([Trust](#trust)).
+The harness opens one sign-in transaction under its write lock around the account and session writes; cookies follow ([Trust](#trust)).
 [Host refusals](host-contract.md#signed-out-and-refused) are outside this successful flow.
 
 ### The store decides every request

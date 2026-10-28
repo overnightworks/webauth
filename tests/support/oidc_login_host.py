@@ -182,8 +182,7 @@ class _Guarded:
 class RecordingSignInTransaction:
     """The host's ``SignInTransaction`` over the host's stores and its one lock.
 
-    It counts its entries and the most that were ever open at once, and refuses to be
-    entered again from inside its own block. ``strict`` hands the route stores whose
+    It counts its entries and refuses to be entered again from inside its own block. ``strict`` hands the route stores whose
     records fail once the block is left."""
 
     def __init__(
