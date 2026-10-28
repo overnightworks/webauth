@@ -12,6 +12,7 @@ releases without an entry are described in the
 **Breaking**
 
 - `webauth.dependencies.unauthenticated_response` is removed. A host whose own middleware is the session authority answers a missing session itself, or guards its routes with `current_user_dependency`, which, given a `LoginRedirect`, answers the login redirect for a browser navigation and 401 `Authentication required` for every other request; a host-owned authority builds its own answer from its `LoginRedirect`.
+- `TrustedProxies` no longer has a truth value; a host that tested `if proxies:` tests `if proxies.networks:`.
 
 ## 0.23.0 - 2026-10-23
 
