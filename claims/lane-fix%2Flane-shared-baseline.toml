@@ -1,0 +1,7 @@
+claim_id = "a099890046f943b3ac54fb1423d39e23"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "961627fb4d6d0cb03801b87249a92f0ea505cfe7"
+branch = "fix/lane-shared-baseline"
+scope = [".aco/board.toml"]
+opened_commit = "74f22439876dbbf586a3ec6dab61dc8264118fc1"
