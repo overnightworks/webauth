@@ -168,7 +168,7 @@ not a failed run. A second sign-in that passes through Keycloak's live session
 without a form (scenarios 2, 9 and 21) is a finding of the same kind.
 
 Deliberately unproven: the demotion of a person taken out of the admin group is
-proven at the ``finish_login`` layer, not here (a D1 step would need an
+proven at the admission layer, not here (a D1 step would need an
 ``Admin.delete`` in ``stack.py``), and a successful workload token is not
 proven (scenario 27 proves only the refusal)."""
 

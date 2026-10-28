@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import enum
 import logging
 import urllib.parse
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
+from threading import get_ident
+from typing import Any
 
 import anyio.to_thread
 from fastapi import Depends, FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
@@ -29,6 +33,7 @@ from tests.support.oidc_arrangement import (
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     HTTPS_TEST_SERVER,
+    FakeSessionRecord,
     FakeUser,
     RecordingAuditSink,
     SessionRecordsInMemory,
@@ -40,7 +45,6 @@ from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     _pending_login_cookie_name,
     _pending_login_cookie_prefix,
-    issue_session_cookies,
 )
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
@@ -51,14 +55,9 @@ from webauth.oidc import (
 )
 from webauth.oidc_login import (
     AdmissionConfig,
-    AdmissionRefusal,
-    AdmittedLogin,
     BackchannelLogoutResult,
-    finish_login,
     log_out,
-    open_session,
     receive_backchannel_logout,
-    start_login,
 )
 from webauth.policies import (
     BodySizePolicy,
@@ -72,7 +71,9 @@ from webauth.policies import (
 )
 from webauth.ports import (
     AuthenticatedUser,
+    SignInStores,
 )
+from webauth.sign_in_routes import SignInPaths, SignInRefusal, install_sign_in_routes
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
@@ -86,7 +87,9 @@ LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
 
 NOW = 1_800_000_000
 CLIENT_ID = "lab-app <\"&'>"
+START_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
+SIGN_IN_PATHS = SignInPaths(start=START_PATH, callback=CALLBACK_PATH)
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_PATH = "/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
@@ -125,6 +128,137 @@ class CountingWriteLock(WriteLockInMemory):
         return super().hold()
 
 
+class TransactionKind(enum.Enum):
+    """What the host's ``SignInTransaction`` does when its block fails."""
+
+    PER_CALL = "serializes only: every store call stands whatever happens later"
+    ROLLING_BACK = "restores accounts, sessions and audit events when the block or its exit fails"
+
+
+class UsersWithSnapshots(UsersInMemory):
+    """Accounts that can be put back as they were."""
+
+    def snapshot(self) -> Callable[[], None]:
+        users, usernames = dict(self._users), dict(self._usernames)
+        roles = [(user, user.role) for user in users.values()]
+
+        def restore() -> None:
+            self._users, self._usernames = dict(users), dict(usernames)
+            for user, role in roles:
+                user.role = role
+
+        return restore
+
+
+class _WindowClosedError(AssertionError):
+    """A record was used after the transaction's exit."""
+
+
+class _Window:
+    def __init__(self) -> None:
+        self.open = True
+
+
+class _Guarded:
+    """A record, or a store handing out guarded records, that fails once its window closed."""
+
+    def __init__(self, wrapped: Any, window: _Window) -> None:  # noqa: ANN401
+        self._wrapped = wrapped
+        self._window = window
+
+    def __getattr__(self, name: str) -> Any:  # noqa: ANN401
+        if not self._window.open:
+            raise _WindowClosedError(f"{name} used after the sign-in transaction's exit")
+        member = getattr(self._wrapped, name)
+        if callable(member):
+            return lambda *args, **kwargs: self._guard(member(*args, **kwargs))
+        return self._guard(member)
+
+    def _guard(self, value: object) -> object:
+        return value if value is None or isinstance(value, (bool, int, str)) else (
+            _Guarded(value, self._window)
+        )
+
+
+class RecordingSignInTransaction:
+    """The host's ``SignInTransaction`` over the host's stores and its one lock.
+
+    It counts its entries and the most that were ever open at once, and refuses to be
+    entered again from inside its own block. ``strict`` hands the route stores whose
+    records fail once the block is left."""
+
+    def __init__(
+        self,
+        kind: TransactionKind,
+        *,
+        accounts: UsersWithSnapshots,
+        sessions: SessionRecordsInMemory,
+        audit: RecordingAuditSink,
+        lock: CountingWriteLock,
+        strict: bool,
+    ) -> None:
+        self.kind = kind
+        self.entries = 0
+        self.most_open_at_once = 0
+        self.thread_idents: set[int] = set()
+        self._accounts = accounts
+        self._sessions = sessions
+        self._audit = audit
+        self._lock = lock
+        self._strict = strict
+        self._open = 0
+
+    def __call__(self) -> AbstractContextManager[SignInStores]:
+        self.thread_idents.add(get_ident())
+        return self._entered()
+
+    @contextmanager
+    def _entered(self) -> Iterator[SignInStores]:
+        with self._lock.hold_uncounted():
+            if self._open:
+                raise AssertionError("the sign-in transaction was entered from inside its block")
+            self.entries += 1
+            self._open += 1
+            self.most_open_at_once = max(self.most_open_at_once, self._open)
+            window = _Window()
+            try:
+                with self._failing_as_the_kind_does():
+                    yield self._stores(window)
+            finally:
+                window.open = False
+                self._open -= 1
+
+    @contextmanager
+    def _failing_as_the_kind_does(self) -> Iterator[None]:
+        if self.kind is TransactionKind.PER_CALL:
+            yield
+            return
+        restore_accounts = self._accounts.snapshot()
+        events = list(self._audit.account_events)
+        try:
+            with self._sessions.transaction():
+                yield
+        except BaseException:
+            restore_accounts()
+            self._audit.account_events[:] = events
+            raise
+
+    def _stores(self, window: _Window) -> SignInStores:
+        if not self._strict:
+            return SignInStores(self._accounts, self._sessions, self._audit)
+        return SignInStores(
+            _Guarded(self._accounts, window),  # pyright: ignore[reportArgumentType]
+            _Guarded(self._sessions, window),  # pyright: ignore[reportArgumentType]
+            self._audit,
+        )
+
+
+def _the_refusal_as_json(_request: Request, refusal: SignInRefusal) -> Response:
+    cause = refusal.cause
+    reason = cause.reason.value if isinstance(cause, OidcRefusal) else cause.value
+    return JSONResponse({"refusal": reason}, status_code=403)
+
+
 @dataclass
 class OidcHost:
     """A host application and the browser that visits it."""
@@ -133,20 +267,22 @@ class OidcHost:
     issuer: FakeIssuer
     key_set: FakeKeySetEndpoint
     wall_clock: FakeClock
-    accounts: UsersInMemory
+    accounts: UsersWithSnapshots
     sessions: SessionRecordsInMemory
     audit: RecordingAuditSink
     config: WebAuthConfig
     lock: CountingWriteLock
     relying_party: OidcRelyingParty
+    transaction: RecordingSignInTransaction
     issued_id_tokens: list[str]
-    returned_to: list[str | None]
-    admitted_logins: list[AdmittedLogin]
+    refusals: list[SignInRefusal]
+    answer_refusals: Callable[[Request, SignInRefusal], Response] = _the_refusal_as_json
+    """What the host's refusal hook answers; a test replaces it."""
 
     def start(self, *, return_to: str | None = None) -> str:
-        """Visit the start route; answer the authorization URL it sends the browser to."""
+        """Visit the start route; answer the authorization URL it redirects the browser to."""
         params = {} if return_to is None else {"next": return_to}
-        return self.client.get("/login/oidc", params=params).json()["authorization_url"]
+        return self.client.get(START_PATH, params=params).headers["location"]
 
     def sign_in_at_issuer(self, *, return_to: str | None = None) -> str:
         """Start a login and sign in at the issuer; answer the callback query."""
@@ -200,7 +336,10 @@ def _install_the_host_middleware(
         app,
         security_headers=SecurityHeadersPolicy(
             content_security_policy="default-src 'self'",
-            cache_control_rules=(CacheControlRule(paths=backchannel_path, value="no-store"),),
+            cache_control_rules=(
+                SIGN_IN_PATHS.cache_control_rule,
+                CacheControlRule(paths=backchannel_path, value="no-store"),
+            ),
         ),
         body_size=BodySizePolicy(
             default_max_bytes=DEFAULT_MAX_BODY_BYTES,
@@ -218,45 +357,28 @@ def _install_the_host_middleware(
 def _add_the_login_routes(
     app: FastAPI,
     relying_party: OidcRelyingParty,
-    config: WebAuthConfig,
     *,
-    accounts: UsersInMemory,
-    sessions: SessionRecordsInMemory,
-    lock: CountingWriteLock,
-    audit: RecordingAuditSink,
+    host: Callable[[], OidcHost],
+    transaction: RecordingSignInTransaction,
     max_sessions: int | None,
-    returned_to: list[str | None],
-    admitted_logins: list[AdmittedLogin],
+    keeps_id_token: bool,
+    admission: AdmissionConfig,
 ) -> None:
-    @app.get("/login/oidc")
-    def start(
-        request: Request, response: Response, next: str | None = None,  # noqa: A002
-    ) -> dict[str, str]:
-        return {"authorization_url": start_login(
-            relying_party, request, response, config, return_to=next,
-        )}
+    def refused(request: Request, refusal: SignInRefusal) -> Response:
+        current = host()
+        current.refusals.append(refusal)
+        return current.answer_refusals(request, refusal)
 
-    @app.get(CALLBACK_PATH)
-    def callback(request: Request, response: Response) -> dict[str, str]:
-        outcome = finish_login(
-            relying_party, request, response, config,
-            admission=ADMISSION, accounts=accounts, lock=lock, audit=audit,
-        )
-        if isinstance(outcome, OidcRefusal):
-            response.status_code = 403
-            return {"refusal": outcome.reason.value}
-        if isinstance(outcome, AdmissionRefusal):
-            response.status_code = 403
-            return {"refusal": outcome.value}
-        returned_to.append(outcome.return_to)
-        admitted_logins.append(outcome)
-        with sessions.transaction():
-            session = open_session(
-                request, config, outcome, sessions=sessions, lock=lock,
-                max_sessions=max_sessions, keeps_id_token=True,
-            )
-        issue_session_cookies(response, session.id, config)
-        return {"username": outcome.account.username}
+    install_sign_in_routes(
+        app,
+        paths=SIGN_IN_PATHS,
+        relying_party=lambda _request: relying_party,
+        admission=admission,
+        transaction=transaction,
+        refused=refused,
+        keeps_id_token=keeps_id_token,
+        max_sessions=max_sessions,
+    )
 
 
 def _add_the_logout_routes(
@@ -318,17 +440,21 @@ def an_oidc_host(
     address_budget: int | None = None,
     max_sessions: int | None = None,
     root_path: str = "",
+    transaction_kind: TransactionKind = TransactionKind.PER_CALL,
+    strict_records: bool = False,
+    behind_base_http_middleware: bool = False,
+    stored_session: FakeSessionRecord | None = None,
+    keeps_id_token: bool = True,
+    admission: AdmissionConfig = ADMISSION,
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
     lock = CountingWriteLock()
-    accounts = UsersInMemory(*users, lock=lock)
-    sessions = SessionRecordsInMemory(users=accounts, lock=lock)
+    accounts = UsersWithSnapshots(*users, lock=lock)
+    sessions = SessionRecordsInMemory(stored_session, users=accounts, lock=lock)
     audit = RecordingAuditSink()
     wall_clock = FakeClock(float(NOW))
     issued_id_tokens: list[str] = []
-    returned_to: list[str | None] = []
-    admitted_logins: list[AdmittedLogin] = []
 
     def mint_id_token(nonce: str) -> str:
         issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
@@ -343,18 +469,28 @@ def an_oidc_host(
         wall_clock=wall_clock,
         monotonic_clock=FakeClock(5_000.0),
     )
+    transaction = RecordingSignInTransaction(
+        transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
+        strict=strict_records,
+    )
     app = FastAPI()
     _install_the_host_middleware(app, config, address_budget)
+    if behind_base_http_middleware:
+        app.middleware("http")(_pass_through)
+    holder: list[OidcHost] = []
     _add_the_login_routes(
-        app, relying_party, config, accounts=accounts, sessions=sessions, lock=lock, audit=audit,
-        max_sessions=max_sessions, returned_to=returned_to, admitted_logins=admitted_logins,
+        app, relying_party, host=lambda: holder[0], transaction=transaction,
+        max_sessions=max_sessions, keeps_id_token=keeps_id_token, admission=admission,
     )
     _add_the_logout_routes(
         app, relying_party, config, accounts=accounts, sessions=sessions, lock=lock, audit=audit,
     )
     _add_the_signed_in_routes(app, sessions)
-    return OidcHost(
-        client=TestClient(app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=root_path),
+    holder.append(OidcHost(
+        client=TestClient(
+            app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=root_path,
+            follow_redirects=False, raise_server_exceptions=False,
+        ),
         issuer=issuer,
         key_set=key_set,
         wall_clock=wall_clock,
@@ -364,10 +500,15 @@ def an_oidc_host(
         config=config,
         lock=lock,
         relying_party=relying_party,
+        transaction=transaction,
         issued_id_tokens=issued_id_tokens,
-        returned_to=returned_to,
-        admitted_logins=admitted_logins,
-    )
+        refusals=[],
+    ))
+    return holder[0]
+
+
+async def _pass_through(request: Request, call_next: Callable[[Request], Any]) -> Response:
+    return await call_next(request)
 
 
 def set_cookies(response: HttpxResponse) -> dict[str, set[str]]:

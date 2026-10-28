@@ -1,7 +1,7 @@
 """Admitting an identity the bound issuer vouched for: groups, roles, accounts.
 
-These tests drive `admit_identity` and `app_role` on their own: an identity the
-bound issuer vouched for becomes, or reuses, an account.
+These tests drive the callback's admission steps and `app_role` on their own: an
+identity the bound issuer vouched for is decided, then becomes or reuses an account.
 """
 
 from __future__ import annotations
@@ -42,7 +42,9 @@ from webauth.oidc_login import (
     AppRole,
     EverySubject,
     NoAdmins,
-    admit_identity,
+    _admit_account,
+    _decide_admission,
+    _UsernameTakenSignal,
     app_role,
 )
 from webauth.ports import (
@@ -73,14 +75,14 @@ class Host:
     def admit(
         self, identity: OidcIdentity, admission: AdmissionConfig = ADMISSION,
     ) -> UserRecord | AdmissionRefusal:
-        return admit_identity(
-            identity,
-            admission=admission,
-            accounts=self.accounts,
-            lock=self.lock,
-            audit=self.audit,
-            config=a_web_auth_config(),
-        )
+        decided = _decide_admission(identity, admission=admission, config=a_web_auth_config())
+        if isinstance(decided, AdmissionRefusal):
+            return decided
+        try:
+            with self.lock.hold():
+                return _admit_account(decided, accounts=self.accounts, audit=self.audit)
+        except _UsernameTakenSignal:
+            return AdmissionRefusal.USERNAME_TAKEN
 
 
 def admitted_account(host: Host, identity: OidcIdentity) -> UserRecord:

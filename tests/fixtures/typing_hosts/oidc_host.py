@@ -76,7 +76,6 @@ from webauth.oidc import (
     MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcClientConfig,
-    OidcIdentity,
     OidcRefusal,
     OidcRelyingParty,
     TokenEndpointError,
@@ -88,26 +87,19 @@ from webauth.oidc_login import (
     AccessTokenRefusal,
     AccessTokenRefusalReason,
     AdmissionConfig,
-    AdmissionRefusal,
-    AdmittedLogin,
     AppRole,
     BackchannelLogoutResult,
-    EverySubject,
-    NoAdmins,
-    admit_identity,
     app_role,
-    finish_login,
     fresh_access_token,
     log_out,
-    open_session,
     receive_backchannel_logout,
-    start_login,
 )
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     DEFAULT_PERMISSIONS_POLICY,
     AuthorizedParties,
     BodySizePolicy,
+    CacheControlRule,
     CspDirective,
     CsrfPolicy,
     PathRules,
@@ -125,17 +117,23 @@ from webauth.ports import (
     AuthenticatedUser,
     BearerCaller,
     RateLimitBackend,
-    SessionRecord,
     SessionRecordStore,
     SessionTransaction,
+    SignInStores,
+    SignInTransaction,
     SubjectUserStore,
     UsernameTakenError,
-    UserRecord,
     WallClock,
     WriteLock,
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
+from webauth.sign_in_routes import (
+    RefusalPage,
+    SignInPaths,
+    SignInRefusal,
+    install_sign_in_routes,
+)
 
 
 @dataclass(frozen=True)
@@ -218,43 +216,38 @@ def a_host_configures_without_local_credentials() -> WebAuthConfig:
     )
 
 
-def a_host_starts_a_keycloak_login(
-    relying_party: OidcRelyingParty, request: Request, response: Response,
-    config: WebAuthConfig, return_to: str | None,
-) -> str:
-    return start_login(relying_party, request, response, config, return_to=return_to)
+def a_host_sign_in_transaction() -> AbstractContextManager[SignInStores]:
+    stores = SignInStores(accounts=HostAccounts(), sessions=HostSessions(), audit=HostAudit())
+    return nullcontext(stores)
 
 
-def a_host_finishes_a_keycloak_login(
-    relying_party: OidcRelyingParty, request: Request, response: Response,
-    config: WebAuthConfig,
-) -> AdmittedLogin | OidcRefusal | AdmissionRefusal:
-    accounts: SubjectUserStore = HostAccounts()
-    lock: WriteLock = HostLock()
-    audit: AuditSink = HostAudit()
-    return finish_login(
-        relying_party, request, response, config,
+def a_host_refuses_a_sign_in(request: Request, refusal: SignInRefusal) -> Response:
+    return Response(status_code=403 if refusal.page is RefusalPage.NO_ACCESS else 400)
+
+
+def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingParty) -> None:
+    transaction: SignInTransaction = a_host_sign_in_transaction
+    install_sign_in_routes(
+        app,
+        paths=SignInPaths(start="/login/oidc", callback="/auth/callback"),
+        relying_party=lambda _request: relying_party,
         admission=AdmissionConfig(
             bound_issuer="https://keycloak.example/realms/host",
             login_group="/apps/host",
             admin_group="/apps/host/admin",
         ),
-        accounts=accounts, lock=lock, audit=audit,
+        transaction=transaction,
+        refused=a_host_refuses_a_sign_in,
+        keeps_id_token=True,
+        max_sessions=None,
     )
 
 
-def a_host_sends_the_browser_back(admitted: AdmittedLogin) -> tuple[UserRecord, str]:
-    return admitted.account, admitted.return_to or "/"
-
-
-def a_host_opens_a_session(
-    request: Request, config: WebAuthConfig, admitted: AdmittedLogin,
-) -> SessionRecord:
-    sessions: SessionRecordStore = HostSessions()
-    lock: WriteLock = HostLock()
-    return open_session(
-        request, config, admitted,
-        sessions=sessions, lock=lock, max_sessions=None, keeps_id_token=True,
+def a_host_derives_the_policies_of_its_sign_in_paths(
+    paths: SignInPaths,
+) -> tuple[tuple[PublicRule, ...], PathRules, CacheControlRule, LoginRedirect]:
+    return (
+        paths.public_rules, paths.browser_paths, paths.cache_control_rule, paths.login_redirect,
     )
 
 
@@ -332,23 +325,6 @@ def a_host_serves_a_machine_route(app: FastAPI) -> None:
     @app.get("/api/admin/export")
     def export(caller: BearerCaller = Depends(bearer_caller)) -> str:
         return caller.subject
-
-
-def a_host_admits_an_identity(
-    identity: OidcIdentity, config: WebAuthConfig,
-) -> UserRecord | AdmissionRefusal:
-    accounts: SubjectUserStore = HostAccounts()
-    lock: WriteLock = HostLock()
-    audit: AuditSink = HostAudit()
-    return admit_identity(
-        identity,
-        admission=AdmissionConfig(
-            bound_issuer="https://keycloak.example/realms/host",
-            login_group=EverySubject.OF_THE_BOUND_ISSUER,
-            admin_group=NoAdmins.IN_THIS_APP,
-        ),
-        accounts=accounts, lock=lock, audit=audit, config=config,
-    )
 
 
 def a_second_service_reads_the_app_role_of_its_token_groups(groups: list[str]) -> AppRole | None:

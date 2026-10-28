@@ -4,7 +4,8 @@ Each port is a Protocol the application implements over the persistence it
 already owns, so the library needs no schema and no ORM of its own. The
 library commits nothing: a store either applies each of its calls at once or
 writes into a transaction the host opens and commits, and `SessionTransaction`
-is that transaction when the host hands it to the library. Whether a request
+is that transaction when the host hands it to the library, and `SignInTransaction`
+is the serialized one the library's sign-in routes enter. Whether a request
 that fails leaves the auth machinery's writes behind is the host's: a
 transaction that rolls back on an exception leaves none, a store that applies
 each call keeps them, and the rate-limit budget counts attempts either way.
@@ -40,6 +41,8 @@ __all__ = [
     "SessionRecord",
     "SessionRecordStore",
     "SessionTransaction",
+    "SignInStores",
+    "SignInTransaction",
     "SubjectUserStore",
     "UserRecord",
     "UsernameTakenError",
@@ -120,7 +123,7 @@ class SessionRecord(Protocol):
         ``SecretStr``; it is at most ``MAX_TOKEN_CHARACTERS`` (8192) ASCII
         characters, the verifier's bound, so the column takes no less. ``None``
         for a row stored before the host held ID tokens, or for a session
-        opened by a host that keeps none (``open_session(keeps_id_token=False)``)."""
+        the callback route opened for a host that keeps none (``keeps_id_token=False``)."""
         ...
 
 
@@ -183,7 +186,7 @@ class SessionRecordStore(Protocol):
     mounted application under another ``WebAuthConfig`` admits it again.
 
     The library ends a session in three places only, by calling ``delete``,
-    ``delete_for_user`` or ``prune_overflow``: ``log_out``, ``open_session`` (the
+    ``delete_for_user`` or ``prune_overflow``: ``log_out``, the callback route (the
     session an incoming cookie replaced, and all but the newest ones under the
     cap) and back-channel logout.
     """
@@ -299,6 +302,43 @@ class SessionTransaction(Protocol):
     """
 
     def __call__(self) -> AbstractContextManager[SessionRecordStore]: ...
+
+
+@dataclass(frozen=True)
+class SignInStores:
+    """The stores one sign-in entry uses, not necessarily one database transaction."""
+
+    accounts: SubjectUserStore
+    sessions: SessionRecordStore
+    audit: AuditSink
+
+
+class SignInTransaction(Protocol):
+    """The host's serialized context around one sign-in, entered by the callback route.
+
+    Creating it, entering the context manager, every store call inside the block
+    and leaving it all run on one worker thread, never on the event loop. Entries
+    for concurrent requests run on several worker threads, so the context
+    serializes every entry over the same stores until its exit returns, and
+    against whatever else the host locks the same way. Inside one entry the
+    library never nests a transaction, never takes a lock and never calls the
+    issuer, so a lock that is not re-entrant works.
+
+    Leaving the block without an exception makes the writes made inside it
+    durable. An exception raised inside the block, by a store, by the audit sink
+    or by the library, passes through the exit and escapes after the host's
+    cleanup; what the exit rolls back is the host's decision, so a host whose
+    stores apply each call keeps the account created, the sessions ended and the
+    events recorded before the failure, and the next sign-in opens a new session
+    and restores nothing. An exception the exit raises itself, such as a failing
+    commit, reaches the route with an uncertain outcome.
+
+    The records the stores return are read inside the block only. The audit sink
+    is called inside the block only: a sink that writes outside the host's
+    transaction keeps the events of a failed block.
+    """
+
+    def __call__(self) -> AbstractContextManager[SignInStores]: ...
 
 
 class RateLimitBackend(Protocol):
