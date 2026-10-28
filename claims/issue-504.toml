@@ -1,0 +1,8 @@
+claim_id = "71701771691844baaf65242d095db916"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "3c3027afe0db29be281e71b97546e48a13781ec6"
+branch = "claude/issue-504-logout-route"
+scope = ["README.md", "docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "docs/testing-a-host.md", "quality/baseline.toml", "src/webauth/cookies.py", "src/webauth/dependencies.py", "src/webauth/middleware/security_headers.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/sign_in_routes.py", "tests/e2e/oidc/host_app.py", "tests/e2e/oidc/prove.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_security_headers.py", "tests/support/oidc_login_host.py", "tests/support/webauth_arrangement.py", "tests/test_cookies.py", "tests/test_dependencies.py", "tests/test_oidc_login_logout.py", "tests/test_sign_in_routes.py"]
+opened_commit = "bc7c6068423851d2099f7adb8d10dbb7524f73ce"
+whole_reason = "The logout route, the SignInPaths field and install check it needs, and the predecessors made private are one logout operation: #499 B7 makes log_out and clear_session_cookies private in the slice that adds their route, and the docstrings, tests, harness and typing host that name them or the install signature must move with them."
