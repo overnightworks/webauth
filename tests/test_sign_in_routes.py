@@ -67,6 +67,7 @@ from webauth.oidc_login import AdmissionConfig, AdmissionRefusal
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
+    PathRules,
     RateLimitBudget,
     RateLimitPolicy,
     RateLimitRule,
@@ -577,8 +578,13 @@ class GatedHost:
     issuer: FakeIssuer
 
 
-def _a_gated_host(rate_budget: int | None = None) -> GatedHost:
-    """A host whose gate, rate limit and cache rules are the ones the paths derive."""
+def _a_gated_host(
+    rate_budget: int | None = None, *, exempts_backchannel: bool = True,
+) -> GatedHost:
+    """A host whose gate, rate limit, cache, CSRF and body rules are the ones the paths derive.
+
+    Without ``exempts_backchannel`` the rate limit is left to ``browser_paths`` alone.
+    """
     config = a_web_auth_config()
     sessions = SessionRecordsInMemory()
     issuer = FakeIssuer(mint_id_token=lambda _nonce: "unused")
@@ -596,7 +602,7 @@ def _a_gated_host(rate_budget: int | None = None) -> GatedHost:
         ),
         rate_limit=None if rate_budget is None else RateLimitPolicy(
             default=RateLimitBudget("host", 1000, 60),
-            exempt=SIGN_IN_PATHS.backchannel,
+            exempt=SIGN_IN_PATHS.backchannel if exempts_backchannel else PathRules(),
             rules=(RateLimitRule(
                 paths=SIGN_IN_PATHS.browser_paths,
                 budget=RateLimitBudget("sign-in", rate_budget, 60),
@@ -693,4 +699,13 @@ def test_a_back_channel_post_reaches_the_route_past_the_gate_csrf_and_sign_in_bu
     ]
 
     assert statuses == [400, 400, 400]
+    assert host.client.get(START_PATH).status_code == 303
+
+
+def test_the_back_channel_path_is_not_a_browser_path() -> None:
+    host = _a_gated_host(rate_budget=1, exempts_backchannel=False)
+
+    for _ in range(3):
+        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
+
     assert host.client.get(START_PATH).status_code == 303
