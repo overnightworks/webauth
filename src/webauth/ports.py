@@ -47,7 +47,6 @@ __all__ = [
     "UserRecord",
     "UsernameTakenError",
     "WallClock",
-    "WriteLock",
 ]
 
 WallClock = Callable[[], float]
@@ -165,18 +164,6 @@ class UsernameTakenError(WebAuthError):
     """The store could not create an account because its username is taken."""
 
 
-class WriteLock(Protocol):
-    """Serialize check-then-write operations in the host's transaction.
-
-    All stores used inside ``hold`` share that transaction. The host owns
-    commit and rollback. A
-    transaction-scoped database lock may remain held after context exit until
-    the host finishes its transaction; exiting never commits implicitly.
-    """
-
-    def hold(self) -> AbstractContextManager[None]: ...
-
-
 class SessionRecordStore(Protocol):
     """The host's sessions, which the library asks on every request.
 
@@ -188,7 +175,7 @@ class SessionRecordStore(Protocol):
     The library ends a session in three places only, by calling ``delete``,
     ``delete_for_user`` or ``prune_overflow``: the logout route, the callback route (the
     session an incoming cookie replaced, and all but the newest ones under the
-    cap) and back-channel logout.
+    cap) and the back-channel logout route.
     """
 
     def create(
@@ -314,7 +301,8 @@ class SignInStores:
 
 
 class SignInTransaction(Protocol):
-    """The host's serialized context around one sign-in, entered by the callback and logout routes.
+    """The host's serialized context around one sign-in, entered by the callback, logout and
+    back-channel logout routes.
 
     Creating it, entering the context manager, every store call inside the block
     and leaving it all run on one worker thread, never on the event loop. Entries

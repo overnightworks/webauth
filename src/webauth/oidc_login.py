@@ -1,8 +1,7 @@
-"""The steps of signing a person in, and the issuer's logout, behind the sign-in routes
-and the host's back-channel route.
+"""The steps of signing a person in, and the issuer's logout, behind the sign-in routes.
 
-``webauth.sign_in_routes`` serves the start, callback and logout routes over these
-private steps. The start step hands the browser the pending login in a signed
+``webauth.sign_in_routes`` serves the start, callback, logout and back-channel logout routes
+over these private steps. The start step hands the browser the pending login in a signed
 cookie of its own, one per login, so two tabs never overwrite each other. The
 callback consumes exactly the cookie its state names and clears it on every
 outcome; together with the issuer's one-time code, that makes a pending login
@@ -56,15 +55,13 @@ the person to confirm. The hint is never decoded or verified here and is no cred
 without a row to read (ended, swept, pruned or stored before the host held ID tokens) the
 issuer asks.
 
-``receive_backchannel_logout`` is the issuer's back-channel logout: it reads the
+The back-channel logout route's step is the issuer's back-channel logout: it reads the
 form body (one non-empty ``logout_token`` field, as the issuer posts it) and
-verifies the Logout Token before taking the lock, then, under the lock, ends every
-session of the account the token's subject names, and records one
+verifies the Logout Token before entering the transaction, then, in one ``SignInTransaction``
+entry, ends every session of the account the token's subject names, and records one
 ``BACKCHANNEL_LOGOUT`` event when a session ended. A subject without an account
-is accepted and provisions nothing. It never
-commits, clears a cookie or calls the issuer; a store or audit failure
-propagates so the host can roll back, and the host commits before it
-answers ``ACCEPTED``.
+is accepted and provisions nothing. It never commits, clears a cookie or calls the issuer;
+a store or audit failure propagates so the host's transaction can roll back.
 
 The production ``TokenRequestPost`` is ``webauth.oidc_transport``'s, not this
 module's.
@@ -113,7 +110,6 @@ if TYPE_CHECKING:
         SignInTransaction,
         SubjectUserStore,
         UserRecord,
-        WriteLock,
     )
 
 __all__ = [
@@ -122,12 +118,10 @@ __all__ = [
     "AccessTokenRefusal",
     "AccessTokenRefusalReason",
     "AppRole",
-    "BackchannelLogoutResult",
     "EverySubject",
     "NoAdmins",
     "app_role",
     "fresh_access_token",
-    "receive_backchannel_logout",
 ]
 
 
@@ -433,7 +427,7 @@ def fresh_access_token(
     ``invalid_grant`` and answers a false ``SIGN_IN_AGAIN``.
 
     Call it from a worker thread, outside any open session transaction and
-    outside the host's write lock, with a ``session_id`` that
+    outside any open session or sign-in transaction, with a ``session_id`` that
     ``session_id_from_request`` bounded. It raises when the store fails, when
     ``replace_refresh_token`` answers anything but a ``bool``, or when the
     transaction's exit fails; no token is handed out then.
@@ -486,71 +480,48 @@ def _stored(sessions: SessionRecordStore, session_id: str, refresh_token: Secret
     return stored
 
 
-class BackchannelLogoutResult(Enum):
-    """The host's route answers 200 for ``ACCEPTED`` only after it has committed,
-    and 400 for ``REFUSED`` and for any failure. The function deletes sessions
-    before it emits its audit event and rolls nothing back, so a failure leaves
-    every session in place only when the host's transaction rolls back."""
-
+class _BackchannelLogoutResult(Enum):
     ACCEPTED = "accepted"
-    """The token held: the subject's sessions, if any, are deleted in the
-    host's transaction."""
+    """The token held: the subject's sessions, if any, are deleted in the transaction."""
     REFUSED = "refused"
     """The form or the token did not hold; nothing was changed."""
 
 
-def receive_backchannel_logout(
+def _receive_backchannel_logout(
     relying_party: OidcRelyingParty,
     form_body: bytes,
     content_type: str | None,
     *,
-    accounts: SubjectUserStore,
-    sessions: SessionRecordStore,
-    lock: WriteLock,
-    audit: AuditSink,
-) -> BackchannelLogoutResult:
+    transaction: SignInTransaction,
+) -> _BackchannelLogoutResult:
     """End every session of the subject a verified Logout Token names.
 
-    The issuer posts the Logout Token to the client's ``backchannel.logout.url``
-    when a person's session at the issuer ends. A request that is not one
-    URL-encoded form with exactly one non-empty ``logout_token`` is refused
-    before anything is verified or locked. The token is verified before the
-    lock is taken. Under the lock, a subject with no account is accepted and
-    creates none; a known subject loses every session in every browser, and one
-    ``backchannel_logout`` audit event with ``actor_id=None`` is emitted when
-    at least one session ended. It never commits, rolls back, clears a cookie
-    or calls the issuer. Run it inside one host transaction that rolls back
-    when it raises, including when the audit sink fails after the deletion, and
-    commits only after it returns ``ACCEPTED``.
+    A request that is not one URL-encoded form with exactly one non-empty ``logout_token`` is
+    refused before anything is verified, and the token is verified before the transaction is
+    entered. In the one entry, a subject with no account is accepted and creates none; a known
+    subject loses every session in every browser, and one ``backchannel_logout`` audit event
+    with ``actor_id=None`` is emitted when at least one session ended. It never commits, rolls
+    back, clears a cookie or calls the issuer: the host's transaction rolls back when this
+    raises, including when the audit sink fails after the deletion.
 
-    The verification, the lock and the stores are synchronous: run it in a
-    worker thread that creates and uses its stores there.
-
-    The route is open to anyone who can reach it, and the token is its only
-    control, so set it up for the issuer alone. The issuer sends neither an
-    Origin nor a cookie, so list the exact path (never a prefix) in
-    ``CsrfPolicy.exempt``. It posts from shared server addresses, so exempt the
-    exact path from the rate limit too, or one budget refuses a real logout.
-    Give it a ``BodySizeRule`` that admits a Logout Token, which the default
-    may not, and a ``CacheControlRule`` of ``no-store``. Let the issuer reach
-    it over an internal network alone, never the public route (tunnel, CDN,
-    access proxy); its URL may name the public hostname via an internal alias.
+    The verification and the stores are synchronous: run it in a worker thread, which
+    creates, enters and leaves the transaction.
     """
     logout_token = _logout_token_of(form_body, content_type)
     if logout_token is None:
-        return BackchannelLogoutResult.REFUSED
+        return _BackchannelLogoutResult.REFUSED
     logout = relying_party.verify_logout_token(logout_token)
     if isinstance(logout, OidcRefusal):
-        return BackchannelLogoutResult.REFUSED
-    with lock.hold():
-        account = accounts.get(logout.subject)
-        if account is not None and sessions.delete_for_user(account.id):
-            audit.account_event(AccountEvent(
+        return _BackchannelLogoutResult.REFUSED
+    with transaction() as stores:
+        account = stores.accounts.get(logout.subject)
+        if account is not None and stores.sessions.delete_for_user(account.id):
+            stores.audit.account_event(AccountEvent(
                 kind=AccountEventKind.BACKCHANNEL_LOGOUT,
                 actor_id=None,
                 subject_id=account.id,
             ))
-    return BackchannelLogoutResult.ACCEPTED
+    return _BackchannelLogoutResult.ACCEPTED
 
 
 def _logout_token_of(form_body: bytes, content_type: str | None) -> str | None:

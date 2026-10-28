@@ -65,21 +65,16 @@ from webauth.oidc import (
 )
 from webauth.oidc_login import (
     AdmissionConfig,
-    BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
     fresh_access_token,
-    receive_backchannel_logout,
 )
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     AuthorizedParties,
     BodySizePolicy,
-    BodySizeRule,
-    CacheControlRule,
     CsrfPolicy,
     PathRules,
-    PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
     SecurityHeadersPolicy,
@@ -94,12 +89,15 @@ LOOPBACK = "127.0.0.1"
 LOGIN_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
-SIGN_IN_PATHS = SignInPaths(start=LOGIN_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH)
-LOGOUT_BUTTON_LABEL = "Log out"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
+SIGN_IN_PATHS = SignInPaths(
+    start=LOGIN_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH,
+    backchannel_logout=BACKCHANNEL_LOGOUT_PATH,
+)
+LOGOUT_BUTTON_LABEL = "Log out"
 ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
 WORKLOAD_TOKEN_PATH = "/workload-token"  # noqa: S105  # a route, not a credential
-BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
+BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = SIGN_IN_PATHS.backchannel_body_size_rule.max_bytes
 DEFAULT_MAX_BODY_BYTES = 1024
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 REPOSITORY = Path(__file__).resolve().parents[3]
@@ -334,23 +332,17 @@ def call_userinfo(settings: HostSettings, current: World) -> None:
 
 
 def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]) -> None:
-    backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
     install_web_auth_middleware(
         app,
         security_headers=SecurityHeadersPolicy(
             default_content_security_policy(),
-            cache_control_rules=(
-                SIGN_IN_PATHS.cache_control_rule,
-                CacheControlRule(paths=backchannel_path, value="no-store"),
-            ),
+            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
         ),
         body_size=BodySizePolicy(
             default_max_bytes=DEFAULT_MAX_BODY_BYTES,
-            rules=(BodySizeRule(
-                paths=backchannel_path, max_bytes=BACKCHANNEL_LOGOUT_MAX_BODY_BYTES
-            ),),
+            rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
         ),
-        csrf_origin=CsrfPolicy(exempt=backchannel_path),
+        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
         **_bearer_policies(settings, world),
     )
 
@@ -373,10 +365,7 @@ def _bearer_policies(settings: HostSettings, world: dict[str, World]) -> dict[st
         "session_gate": SessionGate(
             session_transaction=counted_session_transaction,
             login_redirect=None,
-            public=(
-                *SIGN_IN_PATHS.public_rules,
-                PublicRule(PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))),
-            ),
+            public=SIGN_IN_PATHS.public_rules,
             optional=PathRules(exact=frozenset({"/"})),
         ),
         "bearer_gate": BearerGate(
@@ -427,7 +416,11 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     admission = _admission_of(settings)
 
     def relying_party_of(request: Request) -> OidcRelyingParty:
-        return world["world"].relying_parties[f"https://{request.headers['host']}"]
+        relying_parties = world["world"].relying_parties
+        # The issuer posts the back-channel to the bridge's own Host, which names no app origin.
+        return relying_parties.get(
+            f"https://{request.headers['host']}", next(iter(relying_parties.values())),
+        )
 
     dependencies = current_user_dependency(
         session_store=lambda: world["world"].sessions,
@@ -444,9 +437,16 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
 
     @app.middleware("http")
     async def count_callbacks(request: Request, call_next: Any) -> Response:
+        current = world["world"]
+        if request.url.path == BACKCHANNEL_LOGOUT_PATH:
+            answer = await call_next(request)
+            if answer.status_code == 200:
+                current.backchannel_accepted += 1
+            else:
+                current.backchannel_refused += 1
+            return answer
         if request.url.path != CALLBACK_PATH:
             return await call_next(request)
-        current = world["world"]
         current.callbacks_received += 1
         answer = await call_next(request)
         if _admitted(answer, config):
@@ -538,31 +538,6 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
-
-    def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
-        current = world["world"]
-        with current.sessions.transaction():
-            return receive_backchannel_logout(
-                next(iter(current.relying_parties.values())), form_body, content_type,
-                accounts=current.accounts, sessions=current.sessions,
-                lock=current.lock, audit=current.audit,
-            )
-
-    @app.post(BACKCHANNEL_LOGOUT_PATH)
-    async def backchannel_logout(request: Request) -> Response:
-        form_body = await request.body()
-        content_type = request.headers.get("content-type")
-        current = world["world"]
-        result = BackchannelLogoutResult.REFUSED
-        try:
-            result = await anyio.to_thread.run_sync(end_the_sessions_of, form_body, content_type)
-        except Exception:
-            logger.exception("back-channel logout failed")
-        if result is BackchannelLogoutResult.ACCEPTED:
-            current.backchannel_accepted += 1
-            return Response(status_code=200)
-        current.backchannel_refused += 1
-        return Response(status_code=400)
 
     if settings.is_bearer_host:
         _add_machine_routes(app, dependencies.current_user)

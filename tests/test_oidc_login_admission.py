@@ -19,7 +19,6 @@ from tests.support.oidc_login_host import (
     LEGACY_ADMIN,
     LOGIN_GROUP,
     SUBJECT,
-    CountingWriteLock,
 )
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
@@ -182,14 +181,12 @@ EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
         AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer where every subject is admitted",
     ),
 ])
-def test_an_identity_refused_before_its_account_takes_no_lock_and_writes_nothing(
+def test_an_identity_refused_before_its_account_writes_nothing(
     identity: OidcIdentity, admission: AdmissionConfig, refusal: AdmissionRefusal,
 ) -> None:
-    lock = CountingWriteLock()
-    host = Host(UsersInMemory(lock=lock), RecordingAuditSink(), lock)
+    host = a_host()
 
     assert host.admit(identity, admission) is refusal
-    assert lock.times_taken == 0
     assert host.accounts.list() == []
     assert host.audit.account_events == []
 
