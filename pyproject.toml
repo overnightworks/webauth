@@ -68,7 +68,7 @@ line-length = 100
 select = ["E", "F", "W", "I", "B", "S", "UP"]
 
 [tool.ruff.lint.flake8-bugbear]
-# fastapi.Depends returns a frozen dataclass (fastapi/params.py at the locked 0.141.1); the
+# fastapi.Depends returns a frozen dataclass (fastapi/params.py); the
 # Annotated[..., Depends()] form cannot resolve the closure-local callables in dependencies.py
 extend-immutable-calls = ["fastapi.Depends"]
 
