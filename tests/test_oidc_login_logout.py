@@ -196,7 +196,6 @@ def test_a_same_origin_logout_still_answers_the_page(
         host.callback(host.sign_in_at_issuer())
     extra_headers = arrange(host)
     entries_before = host.transaction.entries
-    taken_before = host.lock.times_taken
 
     response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers})
 
@@ -207,7 +206,6 @@ def test_a_same_origin_logout_still_answers_the_page(
     assert the_session_cookie_is_cleared(host, response)
     assert host.sessions.count_active() == sessions_kept
     assert host.transaction.entries - entries_before == entered
-    assert host.lock.times_taken == taken_before
 
 
 @pytest.mark.parametrize("old_cookie_name", [OLD_HINT_COOKIE_NAME, OLD_CSRF_COOKIE_NAME])
@@ -293,19 +291,17 @@ def test_a_get_of_the_logout_path_ends_nothing() -> None:
 
 @pytest.mark.parametrize("strict_records", [False, True], ids=["plain", "strict"])
 @pytest.mark.parametrize("kind", list(TransactionKind), ids=lambda kind: kind.name.lower())
-def test_a_logout_enters_the_transaction_once_takes_no_lock_and_reads_no_record_after_its_exit(
+def test_a_logout_enters_the_transaction_once_and_reads_no_record_after_its_exit(
     kind: TransactionKind, *, strict_records: bool,
 ) -> None:
     host = after_signing_in(an_oidc_host(transaction_kind=kind, strict_records=strict_records))
     entries_before = host.transaction.entries
-    taken_before = host.lock.times_taken
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
     assert response.status_code == 200
     assert hint_of(response) == host.issued_id_tokens[-1]
     assert host.transaction.entries - entries_before == 1
-    assert host.lock.times_taken == taken_before
 
 
 def _answers_a_plain_500_and_clears_no_cookie(response: HttpxResponse) -> bool:
@@ -377,19 +373,19 @@ def _a_relying_party_that_raises(_request: Request) -> OidcRelyingParty:
 
 
 @pytest.mark.parametrize(
-    ("label", "raising_relying_party"),
+    ("label", "relying_party_of"),
     [
-        pytest.param(_a_label_that_raises, False, id="label"),
-        pytest.param(_a_label_that_raises_an_http_exception, False, id="label-http-exception"),
-        pytest.param(_a_label, True, id="relying-party"),
+        pytest.param(_a_label_that_raises, None, id="label"),
+        pytest.param(_a_label_that_raises_an_http_exception, None, id="label-http-exception"),
+        pytest.param(_a_label, _a_relying_party_that_raises, id="relying-party"),
     ],
 )
 def test_a_label_or_relying_party_that_raises_answers_500_and_ends_nothing(
-    label: Callable[[Request], str], raising_relying_party: bool,
+    label: Callable[[Request], str],
+    relying_party_of: Callable[[Request], OidcRelyingParty] | None,
 ) -> None:
     host = after_signing_in(an_oidc_host(logout_button_label=label))
-    if raising_relying_party:
-        host.relying_party_of = _a_relying_party_that_raises
+    host.relying_party_of = relying_party_of
     entries_before = host.transaction.entries
 
     response = post_logout(host, SAME_ORIGIN_FORM)

@@ -89,18 +89,17 @@ from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
     AppRole,
-    BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
     app_role,
     fresh_access_token,
-    receive_backchannel_logout,
 )
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     DEFAULT_PERMISSIONS_POLICY,
     AuthorizedParties,
     BodySizePolicy,
+    BodySizeRule,
     CacheControlRule,
     CspDirective,
     CsrfPolicy,
@@ -115,7 +114,6 @@ from webauth.policies import (
 from webauth.ports import (
     AccountEvent,
     AccountEventKind,
-    AuditSink,
     AuthenticatedUser,
     BearerCaller,
     RateLimitBackend,
@@ -124,11 +122,9 @@ from webauth.ports import (
     SessionTransaction,
     SignInStores,
     SignInTransaction,
-    SubjectUserStore,
     UsernameTakenError,
     UserRecord,
     WallClock,
-    WriteLock,
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
@@ -195,11 +191,6 @@ class HostSessions:
         return None
 
 
-class HostLock:
-    def hold(self) -> AbstractContextManager[None]:
-        return nullcontext()
-
-
 class HostAudit:
     def account_event(self, event: AccountEvent) -> None:
         assert event.kind
@@ -233,7 +224,10 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
     transaction: SignInTransaction = a_host_sign_in_transaction
     install_sign_in_routes(
         app,
-        paths=SignInPaths(start="/login/oidc", callback="/auth/callback", logout="/logout"),
+        paths=SignInPaths(
+            start="/login/oidc", callback="/auth/callback", logout="/logout",
+            backchannel_logout="/auth/backchannel-logout",
+        ),
         relying_party=lambda _request: relying_party,
         admission=AdmissionConfig(
             bound_issuer="https://keycloak.example/realms/host",
@@ -245,14 +239,18 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
         keeps_id_token=True,
         max_sessions=None,
         logout_button_label=lambda _request: "Sign out",
+        backchannel_dependencies=[Depends(lambda: None)],
     )
 
 
 def a_host_derives_the_policies_of_its_sign_in_paths(
     paths: SignInPaths,
-) -> tuple[tuple[PublicRule, ...], PathRules, CacheControlRule, LoginRedirect]:
+) -> tuple[
+    tuple[PublicRule, ...], PathRules, PathRules, BodySizeRule, CacheControlRule, LoginRedirect,
+]:
     return (
-        paths.public_rules, paths.browser_paths, paths.cache_control_rule, paths.login_redirect,
+        paths.public_rules, paths.browser_paths, paths.backchannel,
+        paths.backchannel_body_size_rule, paths.cache_control_rule, paths.login_redirect,
     )
 
 
@@ -265,19 +263,6 @@ def a_host_gets_a_fresh_access_token(
         config=config,
     )
     return outcome.reason if isinstance(outcome, AccessTokenRefusal) else outcome
-
-
-def a_host_receives_a_backchannel_logout(
-    relying_party: OidcRelyingParty, form_body: bytes, content_type: str | None,
-) -> BackchannelLogoutResult:
-    accounts: SubjectUserStore = HostAccounts()
-    sessions: SessionRecordStore = HostSessions()
-    lock: WriteLock = HostLock()
-    audit: AuditSink = HostAudit()
-    return receive_backchannel_logout(
-        relying_party, form_body, content_type,
-        accounts=accounts, sessions=sessions, lock=lock, audit=audit,
-    )
 
 
 def a_host_verifies_a_logout_token(

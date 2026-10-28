@@ -287,11 +287,12 @@ is its implementation, not a separate ruling.
 
 ## The sign-in routes
 
-`install_sign_in_routes` registers the start, callback and logout routes on the host's
+`install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
 `FastAPI` app over its one `OidcRelyingParty` (read per request), and `SignInPaths`
 derives the policies for exactly those paths: `public_rules` for the session gate (`GET` of
-start and callback, `POST` of logout), `browser_paths` for the sign-in rate budget,
-`cache_control_rule` (`no-store`) and `login_redirect`, so the host lists the paths once. It is browser-absolute, so
+start and callback, `POST` of logout and of the back-channel), `browser_paths` for the sign-in
+rate budget, `backchannel` for `CsrfPolicy.exempt` and `RateLimitPolicy.exempt`,
+`backchannel_body_size_rule` (32 KiB for `POST`), `cache_control_rule` (`no-store`) and `login_redirect`, so the host lists the paths once. It is browser-absolute, so
 `login_redirect` is right for an app at its origin's root; a host below a `root_path`
 builds its own `LoginRedirect`. The library serves the logout route at `SignInPaths.logout` for `POST` only, with the
 button text from the host's `logout_button_label`, read per request; a single-page app logs
@@ -328,6 +329,33 @@ callables answers a plain 500 with no page and no cookie cleared. A rolling-back
 keeps the session, and a retry ends it with its hint; under per-call persistence or an
 uncertain commit the row and its ID token may already be gone, and a retry still reaches
 the issuer's end-session page, without the hint.
+
+`SignInPaths.backchannel_logout` serves the issuer's back-channel logout for `POST` only, and
+must differ from every other path, `logout` included. Only that exact path is exempt from the
+origin check and the rate limit, and logout is never exempt. The host's `backchannel_dependencies`
+run before the body is read, and are given only with that path or install raises `ValueError`
+before any route is registered. A host answers an empty 404 by raising its own exception class
+and mapping it with `app.add_exception_handler(ThatError, lambda request, error:
+Response(status_code=404))`: an `HTTPException(404)` answers JSON, and a `Response` returned
+from a dependency does not stop the route. The answers are, in order: 413 for a declared
+`Content-Length` over the bound, before any dependency; the dependencies' own; 413 for a
+streamed body over the bound; an empty 400 for a request that is not one URL-encoded form with exactly one
+non-empty `logout_token`, or whose token does not verify, before any transaction is entered; an
+empty 200 after the clean exit of one `SignInTransaction` entry; and an empty 400, then the
+failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
+sink or the exit. A subject without an account is accepted and provisions nothing; a known
+subject loses every session in every browser, and one `BACKCHANNEL_LOGOUT` event with
+`actor_id=None` is recorded when at least one session ended. The route clears no cookie and
+calls no issuer endpoint beyond the key fetch of verification. `relying_party` receives the
+request with the Host the issuer posted to, often an internal alias.
+
+The host's transaction must roll back when the back-channel block raises, also when the audit
+sink fails after the deletion, and commit only for an accepted token. A per-call host keeps the
+sessions ended before the failure, and no event is emitted again.
+
+The back-channel route is open to anyone who can reach it, and the token is its only control.
+The host lets the issuer reach it over an internal network alone, never the public route
+(tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
 
 `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
 default, and validates `max_sessions` before it registers a route. A host that serves no logout

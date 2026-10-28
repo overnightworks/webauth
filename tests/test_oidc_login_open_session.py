@@ -14,6 +14,7 @@ from tests.support.oidc_login_host import (
     OTHER_SUBJECT,
     SUBJECT,
     OidcHost,
+    StoreDown,
     TransactionKind,
     after_signing_in,
     an_oidc_host,
@@ -40,10 +41,6 @@ BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
 FIRST_EXPIRY = datetime(2030, 1, 1, tzinfo=UTC)
 FIRST_CREATED_AT = FIXED_INSTANT - timedelta(hours=1)
 IDLE = timedelta(seconds=SESSION_IDLE_SECONDS)
-
-
-class StoreDown(Exception):
-    pass
 
 
 class OpeningHost:
@@ -78,7 +75,7 @@ class OpeningHost:
 
     def create_for(self, owner: FakeUser, now: datetime) -> str:
         return seeded_session(
-            self.host.sessions, self.host.lock.hold_uncounted(), owner.id, now, now + IDLE,
+            self.host.sessions, self.host.lock.hold(), owner.id, now, now + IDLE,
         ).id
 
     def ids(self) -> list[str]:

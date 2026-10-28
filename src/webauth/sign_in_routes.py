@@ -1,9 +1,11 @@
-"""The start, callback and logout routes of signing in through an OpenID Connect issuer.
+"""The start, callback, logout and back-channel logout routes of signing in through an
+OpenID Connect issuer.
 
 ``install_sign_in_routes`` registers the routes on the host's ``FastAPI`` app,
-and ``SignInPaths`` derives the policies the host's gate, rate limit and cache
-rules need for exactly those paths, so the host lists them once. The routes are
-synchronous and run in the threadpool; configuration comes from the installed
+and ``SignInPaths`` derives the policies the host's gate, rate limit, body-size, CSRF and
+cache rules need for exactly those paths, so the host lists them once. The start, callback and
+logout routes are synchronous and run in the threadpool; the back-channel route reads its body
+on the event loop and then makes one worker-thread call. Configuration comes from the installed
 ``WebAuthConfig``, and the library adds no middleware and logs nothing.
 
 The callback exchanges the code and verifies the ID token outside any
@@ -34,14 +36,48 @@ sent and no cookie is cleared. Under a host whose transaction rolls back, the se
 stands and a retry ends it with its hint; under per-call persistence or an uncertain
 commit, the row and its ID token may already be gone, and a retry still reaches the
 issuer's end-session page, without the hint.
+
+The back-channel route is the issuer's back-channel logout, registered for ``POST`` only. The
+issuer posts one URL-encoded form with one non-empty ``logout_token`` when a person's session
+at the issuer ends. The route answers in this order:
+
+1. A declared ``Content-Length`` over ``SignInPaths.backchannel_body_size_rule`` gets 413 from
+   the body-size middleware before any dependency runs.
+2. ``backchannel_dependencies`` run before the body is read. A host answers an empty 404 by
+   raising its own exception class and mapping it with
+   ``app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))``:
+   an ``HTTPException(404)`` answers JSON, and a ``Response`` returned from a dependency does
+   not stop the endpoint.
+3. The body is read outside every catch, so a streamed oversized body gets 413.
+4. A request that is not one form with exactly one non-empty ``logout_token``, or whose token
+   does not verify, gets an empty 400. The token is verified before the transaction, so a
+   refusal enters none.
+5. 200 only after a clean exit of the one ``SignInTransaction`` entry, in which a subject
+   with an account loses every session in every browser and one ``BACKCHANNEL_LOGOUT`` event
+   with ``actor_id=None`` is recorded when at least one session ended. A subject without an
+   account is accepted and provisions nothing. The route clears no cookie and calls no
+   issuer endpoint beyond the key fetch of verification.
+6. Any exception in ``relying_party``, the verification, a store, the audit sink or the exit
+   gets an empty 400 and is then re-raised.
+
+The host's transaction rolls back when the block raises, also when the audit sink fails after
+the deletion, and commits only for an accepted token. A per-call host keeps the sessions
+ended before the failure and emits no event again. ``relying_party`` receives the back-channel
+request with the Host the issuer posted to, often an internal alias.
+
+The route is open to anyone who can reach it, and the token is its only control: the host lets
+the issuer reach it over an internal network alone, never the public route (tunnel, CDN,
+access proxy). Only the exact path is exempt from the origin check and the rate limit.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING
 
+import anyio.to_thread
 from fastapi import FastAPI, Request  # noqa: TC002  # FastAPI reads the annotation at runtime
 from starlette.responses import RedirectResponse, Response
 
@@ -55,17 +91,20 @@ from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
     _AdmittedLogin,
+    _BackchannelLogoutResult,
     _decide_admission,
     _log_out,
+    _receive_backchannel_logout,
     _start_login,
     _UsernameTakenSignal,
     _write_sign_in,
 )
-from webauth.policies import CacheControlRule, PathRules, PublicRule
+from webauth.policies import BodySizeRule, CacheControlRule, PathRules, PublicRule
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
+    from fastapi import params
     from starlette.types import Message, Receive, Scope, Send
 
     from webauth.cookies import PendingLogin
@@ -81,6 +120,7 @@ __all__ = [
 
 _RETURN_PATH_QUERY_NAME = "next"
 _SET_COOKIE = b"set-cookie"
+_BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
 
 
 class RefusalPage(StrEnum):
@@ -112,13 +152,15 @@ class SignInPaths:
     Every path must be absolute, name nothing a browser reads as another host, hold no
     dot segment, ``?`` or ``#``, and differ from the others; ``ValueError`` at
     construction, before any route is registered, names the first that is not.
-    ``logout`` is ``None`` for a host that serves no logout route. The derived values are
-    the policies for exactly these paths.
+    ``logout`` is ``None`` for a host that serves no logout route, and
+    ``backchannel_logout`` for one that serves no back-channel logout route. The derived
+    values are the policies for exactly these paths.
     """
 
     start: str
     callback: str
     logout: str | None = None
+    backchannel_logout: str | None = None
 
     def __post_init__(self) -> None:
         for name, path in self._named_paths:
@@ -131,23 +173,47 @@ class SignInPaths:
     @property
     def public_rules(self) -> tuple[PublicRule, ...]:
         """The rules that let a browser without a session reach the routes, for
-        ``SessionGate.public``: ``GET`` of the start and callback paths and, when
-        there is one, ``POST`` of the logout path."""
+        ``SessionGate.public``: ``GET`` of the start and callback paths and ``POST`` of the
+        logout and back-channel logout paths, when there are any. The logout token, not a
+        session, authenticates the back-channel."""
         rules = (PublicRule(self._sign_in, methods=frozenset({"GET"})),)
-        if self.logout is None:
+        posted = {path for path in (self.logout, self.backchannel_logout) if path is not None}
+        if not posted:
             return rules
-        logout = PathRules(exact=frozenset({self.logout}))
-        return (*rules, PublicRule(logout, methods=frozenset({"POST"})))
+        return (*rules, PublicRule(PathRules(exact=frozenset(posted)), methods=frozenset({"POST"})))
 
     @property
     def browser_paths(self) -> PathRules:
-        """The paths a browser reaches the sign-in with, for the sign-in rate budget."""
-        return self._exact
+        """The paths a browser reaches the sign-in with, for the sign-in rate budget: the
+        back-channel, which the issuer posts to, is not one."""
+        return PathRules(exact=frozenset(
+            path for name, path in self._named_paths if name != "backchannel_logout"
+        ))
+
+    @property
+    def backchannel(self) -> PathRules:
+        """The exact back-channel logout path, for ``CsrfPolicy.exempt`` and
+        ``RateLimitPolicy.exempt``: the issuer sends neither an Origin nor a cookie and posts
+        from shared server addresses. It exempts nothing when there is no such path, and
+        logout is never exempt."""
+        return PathRules(exact=frozenset(
+            () if self.backchannel_logout is None else (self.backchannel_logout,),
+        ))
+
+    @property
+    def backchannel_body_size_rule(self) -> BodySizeRule:
+        """A bound of 32 KiB for ``POST`` of the back-channel path, which admits a Logout
+        Token where a host's default may not."""
+        return BodySizeRule(
+            self.backchannel, _BACKCHANNEL_MAX_BODY_BYTES, methods=frozenset({"POST"}),
+        )
 
     @property
     def cache_control_rule(self) -> CacheControlRule:
-        """``no-store`` for every path: the answers carry cookies."""
-        return CacheControlRule(self._exact, "no-store")
+        """``no-store`` for every path: the answers carry cookies, or are the issuer's."""
+        return CacheControlRule(
+            PathRules(exact=frozenset(path for _, path in self._named_paths)), "no-store",
+        )
 
     @property
     def login_redirect(self) -> LoginRedirect:
@@ -159,16 +225,15 @@ class SignInPaths:
 
     @property
     def _named_paths(self) -> tuple[tuple[str, str], ...]:
-        named = (("start", self.start), ("callback", self.callback))
-        return named if self.logout is None else (*named, ("logout", self.logout))
+        optional = (("logout", self.logout), ("backchannel_logout", self.backchannel_logout))
+        return (
+            ("start", self.start), ("callback", self.callback),
+            *((name, path) for name, path in optional if path is not None),
+        )
 
     @property
     def _sign_in(self) -> PathRules:
         return PathRules(exact=frozenset({self.start, self.callback}))
-
-    @property
-    def _exact(self) -> PathRules:
-        return PathRules(exact=frozenset(path for _, path in self._named_paths))
 
 
 def _require_sign_in_path(name: str, path: str) -> None:
@@ -200,8 +265,10 @@ def install_sign_in_routes(
     keeps_id_token: bool,
     max_sessions: int | None,
     logout_button_label: Callable[[Request], str] | None,
+    backchannel_dependencies: Sequence[params.Depends] = (),
 ) -> None:
-    """Register the start and callback routes of the sign-in, and the logout route, on ``app``.
+    """Register the start and callback routes of the sign-in, the logout route and the
+    back-channel logout route on ``app``.
 
     The start route stores the pending login in its own signed cookie, with the
     ``next`` query value as the path to return to, and redirects (303) to the issuer. The
@@ -225,8 +292,10 @@ def install_sign_in_routes(
     duplicated or of another login is ``STATE_MISMATCH``.
 
     The logout route ends the session the request's cookie names and answers the page that
-    ends the issuer's; ``logout_button_label`` is read per request, the text of the button
-    shown where no script runs.
+    ends the issuer's; ``logout_button_label`` is read per request.
+
+    ``backchannel_dependencies`` need ``paths.backchannel_logout``, or ``ValueError`` is raised
+    before a route is registered. The module docstring holds the back-channel's answers.
 
     ``relying_party`` is read per request. ``keeps_id_token`` has no default: ``True`` stores
     the login's ID token so the logout posts it as the hint, ``False`` stores none.
@@ -239,9 +308,11 @@ def install_sign_in_routes(
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
     if (paths.logout is None) != (logout_button_label is None):
         raise ValueError("paths.logout and logout_button_label must both be given or both be None")
+    if backchannel_dependencies and paths.backchannel_logout is None:
+        raise ValueError("backchannel_dependencies need paths.backchannel_logout")
     routes = _SignIn(relying_party, admission, transaction, refused, keeps_id_token, max_sessions)
 
-    _register_routes(app, paths, routes, logout_button_label)
+    _register_routes(app, paths, routes, logout_button_label, backchannel_dependencies)
 
 
 def _register_routes(
@@ -249,6 +320,7 @@ def _register_routes(
     paths: SignInPaths,
     routes: _SignIn,
     logout_button_label: Callable[[Request], str] | None,
+    backchannel_dependencies: Sequence[params.Depends],
 ) -> None:
     def start(request: Request, next: str | None = None) -> Response:  # noqa: A002
         return routes.start(request, next)
@@ -265,6 +337,15 @@ def _register_routes(
             return routes.logout(request, button_label)
 
         app.add_api_route(paths.logout, logout, methods=["POST"], include_in_schema=False)
+    if paths.backchannel_logout is not None:
+
+        async def backchannel_logout(request: Request) -> Response:
+            return await routes.backchannel_logout(request)
+
+        app.add_api_route(
+            paths.backchannel_logout, backchannel_logout, methods=["POST"],
+            dependencies=list(backchannel_dependencies), include_in_schema=False,
+        )
 
 
 @dataclass(frozen=True)
@@ -291,7 +372,21 @@ class _SignIn:
                 transaction=self.transaction, button_label=button_label(request),
             )
         except Exception as failure:
-            return _RouteAnswer(Response(), failure)
+            return _RouteAnswer(Response(), failure, _plain_server_error)
+
+    async def backchannel_logout(self, request: Request) -> Response:
+        form_body = await request.body()
+        try:
+            relying_party = self.relying_party(request)
+            result = await anyio.to_thread.run_sync(partial(
+                _receive_backchannel_logout, relying_party, form_body,
+                request.headers.get("content-type"), transaction=self.transaction,
+            ))
+        except Exception as failure:
+            return _RouteAnswer(Response(), failure, _empty_bad_request)
+        if result is _BackchannelLogoutResult.ACCEPTED:
+            return Response()
+        return _empty_bad_request()
 
     def callback(self, request: Request) -> Response:
         config = web_auth_config(request)
@@ -303,8 +398,8 @@ class _SignIn:
         try:
             answer = self._answer(request, config, pending)
         except Exception as failure:
-            return _RouteAnswer(carrier, failure)
-        return _RouteAnswer(carrier, answer)
+            return _RouteAnswer(carrier, failure, _plain_server_error)
+        return _RouteAnswer(carrier, answer, _plain_server_error)
 
     def _answer(
         self, request: Request, config: WebAuthConfig, pending: PendingLogin | None,
@@ -348,19 +443,32 @@ def _app_root(request: Request) -> str:
     return request.scope.get("root_path", "").rstrip("/") + "/"
 
 
+def _plain_server_error() -> Response:
+    return Response("Internal Server Error", status_code=500, media_type="text/plain")
+
+
+def _empty_bad_request() -> Response:
+    return Response(status_code=400)
+
+
 class _RouteAnswer(Response):
     """A route's answer: ``outcome`` carrying the ``Set-Cookie`` headers of ``carrier``.
-    A failure as the ``outcome``, or an answer that raises before it starts, is sent as a plain
-    500 with those headers and then raised, so no framework exception handler answers instead."""
+    A failure as the ``outcome``, or an answer that raises before it starts, is sent as the
+    route's ``failure_answer`` with those headers and then raised, so no framework exception
+    handler answers instead."""
 
-    def __init__(self, carrier: Response, outcome: Response | Exception) -> None:
+    def __init__(
+        self, carrier: Response, outcome: Response | Exception,
+        failure_answer: Callable[[], Response],
+    ) -> None:
         super().__init__()
         self._cookies = [header for header in carrier.raw_headers if header[0] == _SET_COOKIE]
         self._outcome = outcome
+        self._failure_answer = failure_answer
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if isinstance(self._outcome, Exception):
-            await self._send_server_error(scope, receive, send)
+            await self._send_failure_answer(scope, receive, send)
             raise self._outcome
         started = False
 
@@ -376,10 +484,10 @@ class _RouteAnswer(Response):
         except Exception:
             if started:
                 raise
-            await self._send_server_error(scope, receive, send)
+            await self._send_failure_answer(scope, receive, send)
             raise
 
-    async def _send_server_error(self, scope: Scope, receive: Receive, send: Send) -> None:
-        answer = Response("Internal Server Error", status_code=500, media_type="text/plain")
+    async def _send_failure_answer(self, scope: Scope, receive: Receive, send: Send) -> None:
+        answer = self._failure_answer()
         answer.raw_headers.extend(self._cookies)
         await answer(scope, receive, send)

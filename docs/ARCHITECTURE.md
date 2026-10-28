@@ -12,7 +12,7 @@ flowchart LR
     subgraph stores["Host infrastructure (trusted)"]
         sessions[("Session store")]
         limits[("Rate-limit backend")]
-        audit["Audit sink, clock, write lock"]
+        audit["Audit sink, clock"]
     end
     browser["Browser<br/>(any visitor, in scope)"] -- "cookies, CSRF, Origin" --> lib
     hal["hal<br/>(machine caller)"] -- "Authorization: Bearer" --> lib
@@ -27,7 +27,7 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 
 Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout and fresh tokens.
 
-- `sign_in_routes` registers the sign-in start, callback and logout routes, selects `SignInPaths` policies and answers failures.
+- `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes, selects `SignInPaths` policies and answers failures.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
 - `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission.
 - `middleware` enforces body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
@@ -38,9 +38,9 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 
 The host owns users/role names; the library writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
-The sign-in callback and the logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores.
+The sign-in callback, the logout route and the back-channel logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores.
 Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
-The host owns its routes except the sign-in start, callback and logout, which `install_sign_in_routes` registers; library responses are refusals (401/403/413/429/503/500), 302 login redirects, the sign-in 303s and the logout page.
+The host owns its routes except the sign-in start, callback, logout and back-channel logout, which `install_sign_in_routes` registers; library responses are refusals (401/403/413/429/503/500), 302 login redirects, the sign-in 303s, the logout page and the back-channel's 200 and 400.
 ASGI owns HTTP framing (h11/httptools may legally differ); the body-size limit counts streamed bytes, never re-parsing framing.
 
 ## Runtime View
@@ -123,8 +123,8 @@ Keycloak judges it. [Trust](#trust), items 4 and 8, owns exposure and copied-tok
 
 ### Back-channel logout
 
-`receive_backchannel_logout` verifies the issuer's form token through `OidcRelyingParty.verify_logout_token`, then deletes sessions by subject.
-The host owns the route/transaction and answers 200 only after commit. Signature is the only control; restrict reachability to the issuer.
+`install_sign_in_routes` registers the issuer's route for `POST` only, over a private step. It reads the body outside every catch (a streamed oversized body is 413), verifies the form's one `logout_token` through `OidcRelyingParty.verify_logout_token`, and only then enters one `SignInTransaction`, where it deletes the subject's sessions and records one event when at least one session ended. A refused form or token is an empty 400 that enters no transaction; 200 follows only a clean exit; any exception in the relying-party callable, the verification, a store, the audit sink or the exit is an empty 400 and is re-raised. The host's `backchannel_dependencies` run before the body is read and answer its own 404 by exception handler.
+The host's transaction rolls back when the block raises, also when the audit sink fails after the deletion. Signature is the only control; restrict reachability to the issuer.
 
 ### The relying party
 
@@ -179,8 +179,8 @@ Who the library defends against and trusts; links point to owning sections.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
    - Availability: every connection and read is bounded.
 3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only the logout route's page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
-4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. An ID token stored there carries the person's identity claims, not an authentication credential; a copy nevertheless allows its holder to invoke the [hinted logout](host-contract.md#what-every-app-gets).
-5. **Host infrastructure** (`WallClock`, `WriteLock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
+4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, serialization of sign-in entries, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. An ID token stored there carries the person's identity claims, not an authentication credential; a copy nevertheless allows its holder to invoke the [hinted logout](host-contract.md#what-every-app-gets).
+5. **Host infrastructure** (`WallClock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
 7. **Bearer caller to library:** anyone who can reach a gated path is untrusted. [The bearer gate](#the-bearer-gate) owns the verification and admission mechanism; the [host contract](host-contract.md#the-hosts-machine-routes) owns token lifetime, cookie handling and socket exclusions. Named residues:
    - an admin token opens every machine route; there is no sender constraint (no DPoP or mTLS);
@@ -188,7 +188,6 @@ Who the library defends against and trusts; links point to owning sections.
    - key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
 8. **Named residues:**
    - the ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of that page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
-   - the callback's `SignInTransaction` serializes sign-ins against each other and against whatever else the host locks the same way, but the back-channel logout still runs under its own `WriteLock`: with a lock that is released before the host commits (an in-process lock), a back-channel logout of the same account that runs between the callback's admission and its exit deletes nothing of that login, so the session it opens survives; a lock that the request's first `hold` takes and only the host's commit or rollback releases (a transaction-scoped lock) closes that window;
    - a logout that completes before a verified sign-in cannot end that later session; closing that needs sessions bound to the issuer's `sid`, which webauth does not do. A failed sign-in is not repaired later: a host whose store applies each call keeps the account created, the sessions ended and the events recorded before the failure;
    - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
    - a clock reading past year 9999 fails closed;

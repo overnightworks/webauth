@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import enum
-import logging
 import urllib.parse
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-import anyio.to_thread
 import pytest
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response, params
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
@@ -53,17 +51,10 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRelyingParty,
 )
-from webauth.oidc_login import (
-    AdmissionConfig,
-    BackchannelLogoutResult,
-    receive_backchannel_logout,
-)
+from webauth.oidc_login import AdmissionConfig
 from webauth.policies import (
     BodySizePolicy,
-    BodySizeRule,
-    CacheControlRule,
     CsrfPolicy,
-    PathRules,
     RateLimitBudget,
     RateLimitPolicy,
     SecurityHeadersPolicy,
@@ -89,11 +80,14 @@ CLIENT_ID = "lab-app <\"&'>"
 START_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
-SIGN_IN_PATHS = SignInPaths(start=START_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH)
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
-BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
+SIGN_IN_PATHS = SignInPaths(
+    start=START_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH,
+    backchannel_logout=BACKCHANNEL_LOGOUT_PATH,
+)
+BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = SIGN_IN_PATHS.backchannel_body_size_rule.max_bytes
 DEFAULT_MAX_BODY_BYTES = 1024
 
 
@@ -110,21 +104,6 @@ def a_client_config() -> OidcClientConfig:
         post_logout_redirect_uri=f"{HTTPS_TEST_SERVER}/",
         leeway_seconds=30,
     )
-
-
-class CountingWriteLock(WriteLockInMemory):
-    def __init__(self) -> None:
-        super().__init__()
-        self.times_taken = 0
-
-    @contextmanager
-    def hold(self) -> Iterator[None]:
-        self.times_taken += 1
-        with self.hold_uncounted():
-            yield
-
-    def hold_uncounted(self) -> AbstractContextManager[None]:
-        return super().hold()
 
 
 class TransactionKind(enum.Enum):
@@ -193,7 +172,7 @@ class RecordingSignInTransaction:
         accounts: UsersWithSnapshots,
         sessions: SessionRecordsInMemory,
         audit: RecordingAuditSink,
-        lock: CountingWriteLock,
+        lock: WriteLockInMemory,
         strict: bool,
     ) -> None:
         self.kind = kind
@@ -211,7 +190,7 @@ class RecordingSignInTransaction:
 
     @contextmanager
     def _entered(self) -> Iterator[SignInStores]:
-        with self._lock.hold_uncounted():
+        with self._lock.hold():
             if self._open:
                 raise AssertionError("the sign-in transaction was entered from inside its block")
             self.entries += 1
@@ -282,7 +261,7 @@ class OidcHost:
     sessions: SessionRecordsInMemory
     audit: RecordingAuditSink
     config: WebAuthConfig
-    lock: CountingWriteLock
+    lock: WriteLockInMemory
     relying_party: OidcRelyingParty
     transaction: RecordingSignInTransaction
     issued_id_tokens: list[str]
@@ -348,27 +327,22 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding
 def _install_the_host_middleware(
     app: FastAPI, config: WebAuthConfig, address_budget: int | None,
 ) -> None:
-    backchannel_path = PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))
     install_web_auth_config(app, config)
     install_web_auth_middleware(
         app,
         security_headers=SecurityHeadersPolicy(
             content_security_policy="default-src 'self'",
-            cache_control_rules=(
-                SIGN_IN_PATHS.cache_control_rule,
-                CacheControlRule(paths=backchannel_path, value="no-store"),
-            ),
+            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
         ),
         body_size=BodySizePolicy(
             default_max_bytes=DEFAULT_MAX_BODY_BYTES,
-            rules=(BodySizeRule(
-                paths=backchannel_path, max_bytes=BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
-            ),),
+            rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
         ),
         rate_limit=None if address_budget is None else RateLimitPolicy(
-            default=RateLimitBudget("host", address_budget, 60), exempt=backchannel_path,
+            default=RateLimitBudget("host", address_budget, 60),
+            exempt=SIGN_IN_PATHS.backchannel,
         ),
-        csrf_origin=CsrfPolicy(exempt=backchannel_path),
+        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
     )
 
 
@@ -381,6 +355,7 @@ def _add_the_login_routes(
     keeps_id_token: bool,
     admission: AdmissionConfig,
     logout_button_label: Callable[[Request], str],
+    backchannel_dependencies: Sequence[params.Depends],
 ) -> None:
     def refused(request: Request, refusal: SignInRefusal) -> Response:
         current = host()
@@ -397,37 +372,8 @@ def _add_the_login_routes(
         keeps_id_token=keeps_id_token,
         max_sessions=max_sessions,
         logout_button_label=logout_button_label,
+        backchannel_dependencies=backchannel_dependencies,
     )
-
-
-def _add_the_backchannel_logout_route(
-    app: FastAPI,
-    relying_party: OidcRelyingParty,
-    *,
-    accounts: UsersInMemory,
-    sessions: SessionRecordsInMemory,
-    lock: CountingWriteLock,
-    audit: RecordingAuditSink,
-) -> None:
-    def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
-        with sessions.transaction():
-            return receive_backchannel_logout(
-                relying_party, form_body, content_type,
-                accounts=accounts, sessions=sessions, lock=lock, audit=audit,
-            )
-
-    @app.post(BACKCHANNEL_LOGOUT_PATH)
-    async def backchannel_logout(request: Request) -> Response:
-        form_body = await request.body()
-        content_type = request.headers.get("content-type")
-        try:
-            result = await anyio.to_thread.run_sync(end_the_sessions_of, form_body, content_type)
-        except Exception:
-            logging.getLogger(__name__).exception("back-channel logout failed")
-            return Response(status_code=400)
-        return Response(
-            status_code=200 if result is BackchannelLogoutResult.ACCEPTED else 400,
-        )
 
 
 def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) -> None:
@@ -479,10 +425,11 @@ def an_oidc_host(
     keeps_id_token: bool = True,
     admission: AdmissionConfig = ADMISSION,
     logout_button_label: Callable[[Request], str] = lambda _request: LOGOUT_BUTTON_LABEL,
+    backchannel_dependencies: Sequence[params.Depends] = (),
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
-    lock = CountingWriteLock()
+    lock = WriteLockInMemory()
     accounts = UsersWithSnapshots(*users, lock=lock)
     sessions = SessionRecordsInMemory(stored_session, users=accounts, lock=lock)
     audit = RecordingAuditSink()
@@ -501,9 +448,7 @@ def an_oidc_host(
         app, host=lambda: holder[0], transaction=transaction,
         max_sessions=max_sessions, keeps_id_token=keeps_id_token, admission=admission,
         logout_button_label=logout_button_label,
-    )
-    _add_the_backchannel_logout_route(
-        app, relying_party, accounts=accounts, sessions=sessions, lock=lock, audit=audit,
+        backchannel_dependencies=backchannel_dependencies,
     )
     _add_the_signed_in_routes(app, sessions)
     holder.append(OidcHost(

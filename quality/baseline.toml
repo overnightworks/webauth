@@ -15,7 +15,7 @@
 "_exchange" = 63
 
 [function_lines."tests/e2e/oidc/host_app.py"]
-"build_app" = 153
+"build_app" = 122
 
 [function_lines."tests/support/oidc_arrangement.py"]
 "loopback_https_server" = 115

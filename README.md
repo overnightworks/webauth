@@ -3,7 +3,7 @@
 OpenID Connect login and session authentication for FastAPI applications. It is
 built for [Keycloak](https://www.keycloak.org/); any OpenID Connect issuer that
 signs ID tokens with RS256 and publishes static endpoints works. webauth serves
-the start, callback and logout routes, runs the flow, then keeps the session:
+the start, callback, logout and back-channel logout routes, runs the flow, then keeps the session:
 sessions the store decides on every request, HMAC-signed cookies, CSRF
 origin checks, admin checks, per-address rate limits, and the audit events they
 raise. The client is a confidential client: it authenticates at the token
@@ -24,7 +24,12 @@ from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_conf
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc_login import AdmissionConfig
-from webauth.policies import CsrfPolicy, SecurityHeadersPolicy, default_content_security_policy
+from webauth.policies import (
+    BodySizePolicy,
+    CsrfPolicy,
+    SecurityHeadersPolicy,
+    default_content_security_policy,
+)
 from webauth.ports import AuthenticatedUser
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
@@ -39,14 +44,20 @@ config = WebAuthConfig(
     session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
 )
 install_web_auth_config(app, config)
-paths = SignInPaths(start="/login/oidc", callback="/auth/callback", logout="/logout")
+paths = SignInPaths(
+    start="/login/oidc", callback="/auth/callback", logout="/logout",
+    backchannel_logout="/auth/backchannel-logout",
+)
 install_web_auth_middleware(
     app,
     security_headers=SecurityHeadersPolicy(
         content_security_policy=default_content_security_policy(),
         cache_control_rules=(paths.cache_control_rule,),
     ),
-    csrf_origin=CsrfPolicy(),
+    body_size=BodySizePolicy(
+        default_max_bytes=64 * 1024, rules=(paths.backchannel_body_size_rule,),
+    ),
+    csrf_origin=CsrfPolicy(exempt=paths.backchannel),
 )
 install_sign_in_routes(
     app,
@@ -76,7 +87,7 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
 
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
 `admin_user`) and its docstring says what `session_store`
-and `on_authenticated` are. `paths` also derives the policies of the three routes (`public_rules`, `browser_paths`, `cache_control_rule`, `login_redirect`), so the host lists them once. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
+and `on_authenticated` are. `paths` also derives the policies of the four routes (`public_rules`, `browser_paths`, `backchannel`, `backchannel_body_size_rule`, `cache_control_rule`, `login_redirect`), so the host lists them once. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
 The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trusted-proxies).
