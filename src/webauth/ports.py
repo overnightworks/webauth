@@ -186,7 +186,7 @@ class SessionRecordStore(Protocol):
     mounted application under another ``WebAuthConfig`` admits it again.
 
     The library ends a session in three places only, by calling ``delete``,
-    ``delete_for_user`` or ``prune_overflow``: ``log_out``, the callback route (the
+    ``delete_for_user`` or ``prune_overflow``: the logout route, the callback route (the
     session an incoming cookie replaced, and all but the newest ones under the
     cap) and back-channel logout.
     """
@@ -314,7 +314,7 @@ class SignInStores:
 
 
 class SignInTransaction(Protocol):
-    """The host's serialized context around one sign-in, entered by the callback route.
+    """The host's serialized context around one sign-in, entered by the callback and logout routes.
 
     Creating it, entering the context manager, every store call inside the block
     and leaving it all run on one worker thread, never on the event loop. Entries

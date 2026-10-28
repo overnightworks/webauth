@@ -32,13 +32,17 @@ from tests.support.oidc_login_host import (
     CALLBACK_PATH,
     LEGACY_ADMIN,
     LOGIN_GROUP,
+    LOGOUT_PATH,
     OTHER_SUBJECT,
+    SAME_ORIGIN_FORM,
     SIGN_IN_PATHS,
     START_PATH,
     SUBJECT,
     OidcHost,
+    StoreDown,
     TransactionKind,
     an_oidc_host,
+    failing,
     is_cleared,
     set_cookies,
 )
@@ -80,10 +84,6 @@ BOTH_KINDS = [
     pytest.param(TransactionKind.PER_CALL, id="per-call host"),
     pytest.param(TransactionKind.ROLLING_BACK, id="rolling-back host"),
 ]
-
-
-class StoreDown(Exception):
-    pass
 
 
 class _AnswerFailingBeforeItsStart(Response):
@@ -245,20 +245,13 @@ class BlockFault:
     per_call_residue: object
 
 
-def _failing(owner: object, name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    def down(*_arguments: object, **_keywords: object) -> None:
-        raise StoreDown
-
-    monkeypatch.setattr(owner, name, down)
-
-
 _BYSTANDER_ACCOUNT = (OTHER_SUBJECT, "user")
 _NEW_ACCOUNT = (SUBJECT, "user")
 
 _BLOCK_FAULTS = [
     pytest.param(
         BlockFault(
-            lambda host, patch: _failing(host.accounts, "create_for_subject", patch),
+            lambda host, patch: failing(host.accounts, "create_for_subject", patch),
             (BYSTANDER,),
             ([_BYSTANDER_ACCOUNT], ["session-1"], []),
         ),
@@ -266,7 +259,7 @@ _BLOCK_FAULTS = [
     ),
     pytest.param(
         BlockFault(
-            lambda host, patch: _failing(host.accounts, "set_role", patch),
+            lambda host, patch: failing(host.accounts, "set_role", patch),
             (BYSTANDER, LEGACY_ADMIN),
             (sorted([_BYSTANDER_ACCOUNT, (SUBJECT, "admin")]), ["session-1"], []),
         ),
@@ -274,7 +267,7 @@ _BLOCK_FAULTS = [
     ),
     pytest.param(
         BlockFault(
-            lambda host, patch: _failing(host.sessions, "create", patch),
+            lambda host, patch: failing(host.sessions, "create", patch),
             (BYSTANDER,),
             (sorted([_BYSTANDER_ACCOUNT, _NEW_ACCOUNT]), [], [AccountEventKind.USER_CREATED]),
         ),
@@ -282,7 +275,7 @@ _BLOCK_FAULTS = [
     ),
     pytest.param(
         BlockFault(
-            lambda host, patch: _failing(host.audit, "account_event", patch),
+            lambda host, patch: failing(host.audit, "account_event", patch),
             (BYSTANDER,),
             (sorted([_BYSTANDER_ACCOUNT, _NEW_ACCOUNT]), ["session-1"], []),
         ),
@@ -466,23 +459,62 @@ def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_i
     assert not _sign_in_routes_of(app)
 
 
-@pytest.mark.parametrize(("start", "callback"), [
-    pytest.param("login", "/callback", id="a relative start"),
-    pytest.param("/login", "callback", id="a relative callback"),
-    pytest.param("//evil.example/login", "/callback", id="a start another host serves"),
-    pytest.param("/login", "/\\evil.example", id="a callback another host serves"),
-    pytest.param("/login", "/\t/evil.example", id="a callback a browser strips to another host"),
-    pytest.param("/a/../login", "/callback", id="a dot segment in start"),
-    pytest.param("/login", "/a/%2e%2e/callback", id="an encoded dot segment in callback"),
-    pytest.param("/login?x=1", "/callback", id="a query in start"),
-    pytest.param("/login", "/callback#top", id="a fragment in callback"),
-    pytest.param("/auth", "/auth", id="one path for both routes"),
+@pytest.mark.parametrize(("start", "callback", "logout"), [
+    pytest.param("login", "/callback", "/logout", id="a relative start"),
+    pytest.param("/login", "callback", "/logout", id="a relative callback"),
+    pytest.param("/login", "/callback", "logout", id="a relative logout"),
+    pytest.param("//evil.example/login", "/callback", "/logout", id="a start another host serves"),
+    pytest.param("/login", "/\\evil.example", "/logout", id="a callback another host serves"),
+    pytest.param("/login", "/\t/evil.example", "/logout", id="a callback a browser strips"),
+    pytest.param("/login", "/callback", "//evil.example/logout", id="a logout another host serves"),
+    pytest.param("/a/../login", "/callback", "/logout", id="a dot segment in start"),
+    pytest.param("/login", "/a/%2e%2e/callback", "/logout", id="an encoded dot segment"),
+    pytest.param("/login", "/callback", "/a/../logout", id="a dot segment in logout"),
+    pytest.param("/login?x=1", "/callback", "/logout", id="a query in start"),
+    pytest.param("/login", "/callback#top", "/logout", id="a fragment in callback"),
+    pytest.param("/login", "/callback", "/logout?x=1", id="a query in logout"),
+    pytest.param("/auth", "/auth", "/logout", id="one path for start and callback"),
+    pytest.param("/auth", "/callback", "/auth", id="one path for start and logout"),
+    pytest.param("/login", "/auth", "/auth", id="one path for callback and logout"),
 ])
 def test_a_path_that_is_not_an_absolute_distinct_path_of_this_app_is_refused_at_construction(
-    start: str, callback: str,
+    start: str, callback: str, logout: str,
 ) -> None:
     with pytest.raises(ValueError, match="SignInPaths"):
-        SignInPaths(start=start, callback=callback)
+        SignInPaths(start=start, callback=callback, logout=logout)
+
+
+@pytest.mark.parametrize(("logout", "label"), [
+    pytest.param(LOGOUT_PATH, None, id="a logout path without a label"),
+    pytest.param(None, lambda _request: "Sign out", id="a label without a logout path"),
+])
+def test_a_logout_path_and_a_label_come_together_or_install_refuses_before_any_route(
+    logout: str | None, label: Callable[[Request], str] | None,
+) -> None:
+    app = FastAPI()
+    arguments = {
+        **_install_arguments(),
+        "paths": SignInPaths(start=START_PATH, callback=CALLBACK_PATH, logout=logout),
+        "logout_button_label": label,
+    }
+
+    with pytest.raises(ValueError, match="logout"):
+        install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
+
+    assert not _sign_in_routes_of(app)
+
+
+def test_a_host_without_a_logout_path_and_label_registers_no_logout_route() -> None:
+    app = FastAPI()
+    arguments = {
+        **_install_arguments(),
+        "paths": SignInPaths(start=START_PATH, callback=CALLBACK_PATH),
+        "logout_button_label": None,
+    }
+
+    install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
+
+    assert _sign_in_routes_of(app) == [START_PATH, CALLBACK_PATH]
 
 
 def _install_arguments() -> dict[str, object]:
@@ -495,11 +527,12 @@ def _install_arguments() -> dict[str, object]:
         "refused": lambda _request, _refusal: Response(status_code=403),
         "keeps_id_token": True,
         "max_sessions": None,
+        "logout_button_label": lambda _request: "Sign out",
     }
 
 
 def _sign_in_routes_of(app: FastAPI) -> list[str]:
-    paths = {SIGN_IN_PATHS.start, SIGN_IN_PATHS.callback}
+    paths = {SIGN_IN_PATHS.start, SIGN_IN_PATHS.callback, LOGOUT_PATH}
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
     return [route.path for route in routes if route.path in paths]
 
@@ -548,6 +581,7 @@ def _a_gated_host(rate_budget: int | None = None) -> GatedHost:
         refused=lambda _request, _refusal: Response(status_code=403),
         keeps_id_token=True,
         max_sessions=None,
+        logout_button_label=lambda _request: "Sign out",
     )
 
     @app.get("/albums/{album_id}")
@@ -575,19 +609,35 @@ def test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_
     )
 
 
+def test_a_signed_out_logout_passes_the_gate_and_enters_no_transaction() -> None:
+    host = _a_gated_host()
+
+    response = host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM)
+
+    assert response.status_code == 200
+
+
 def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
     host = _a_gated_host()
 
-    answers = [host.client.get(START_PATH), host.client.get(CALLBACK_PATH)]
+    answers = [
+        host.client.get(START_PATH),
+        host.client.get(CALLBACK_PATH),
+        host.client.post(LOGOUT_PATH, headers={"content-type": SAME_ORIGIN_FORM["content-type"]}),
+    ]
 
-    assert [answer.headers["cache-control"] for answer in answers] == ["no-store", "no-store"]
+    assert [answer.status_code for answer in answers[-1:]] == [403]
+    assert [answer.headers["cache-control"] for answer in answers] == ["no-store"] * 3
 
 
 def test_the_derived_browser_paths_spend_one_sign_in_budget() -> None:
-    host = _a_gated_host(rate_budget=2)
+    host = _a_gated_host(rate_budget=3)
 
     statuses = [
-        host.client.get(path).status_code for path in (START_PATH, CALLBACK_PATH, START_PATH)
+        host.client.get(START_PATH).status_code,
+        host.client.get(CALLBACK_PATH).status_code,
+        host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM).status_code,
+        host.client.get(START_PATH).status_code,
     ]
 
     assert statuses[-1] == 429

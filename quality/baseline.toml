@@ -8,22 +8,19 @@
 "_surface_of_source" = 20
 
 [file_lines]
-"tests/e2e/oidc/prove.py" = 1546
-"tests/support/webauth_arrangement.py" = 905
-
-[function_lines."src/webauth/dependencies.py"]
-"current_user_dependency" = 60
+"tests/e2e/oidc/prove.py" = 1545
+"tests/support/webauth_arrangement.py" = 898
 
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63
 
 [function_lines."tests/e2e/oidc/host_app.py"]
-"build_app" = 160
+"build_app" = 153
 
 [function_lines."tests/support/oidc_arrangement.py"]
 "loopback_https_server" = 115
 
 [function_lines."tests/support/webauth_arrangement.py"]
-"an_auth_app" = 112
+"an_auth_app" = 105
 
 [clones]

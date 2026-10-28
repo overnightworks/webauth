@@ -3,7 +3,7 @@
 OpenID Connect login and session authentication for FastAPI applications. It is
 built for [Keycloak](https://www.keycloak.org/); any OpenID Connect issuer that
 signs ID tokens with RS256 and publishes static endpoints works. webauth serves
-the start and callback routes, runs the flow, then keeps the session:
+the start, callback and logout routes, runs the flow, then keeps the session:
 sessions the store decides on every request, HMAC-signed cookies, CSRF
 origin checks, admin checks, per-address rate limits, and the audit events they
 raise. The client is a confidential client: it authenticates at the token
@@ -39,7 +39,7 @@ config = WebAuthConfig(
     session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
 )
 install_web_auth_config(app, config)
-paths = SignInPaths(start="/login/oidc", callback="/auth/callback")
+paths = SignInPaths(start="/login/oidc", callback="/auth/callback", logout="/logout")
 install_web_auth_middleware(
     app,
     security_headers=SecurityHeadersPolicy(
@@ -61,6 +61,7 @@ install_sign_in_routes(
     refused=the_hosts_refusal_page,
     keeps_id_token=True,
     max_sessions=None,
+    logout_button_label=the_hosts_logout_button_label,
 )
 auth = current_user_dependency(
     session_store=the_hosts_session_store,
@@ -74,8 +75,8 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
 ```
 
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
-`admin_user`, `verified_session_id`) and its docstring says what `session_store`
-and `on_authenticated` are. `paths` also derives the policies of the two routes (`public_rules`, `browser_paths`, `login_redirect`), so the host lists them once. The sign-in routes are in the [host contract](docs/host-contract.md#the-start-and-callback-routes-and-the-hosts-logout-route); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
+`admin_user`) and its docstring says what `session_store`
+and `on_authenticated` are. `paths` also derives the policies of the three routes (`public_rules`, `browser_paths`, `cache_control_rule`, `login_redirect`), so the host lists them once. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
 The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trusted-proxies).

@@ -1,6 +1,6 @@
 """The steps of signing a person in, and the issuer's logout, behind the host's routes.
 
-``webauth.sign_in_routes`` serves the start and callback routes over these
+``webauth.sign_in_routes`` serves the start, callback and logout routes over these
 private steps. The start step hands the browser the pending login in a signed
 cookie of its own, one per login, so two tabs never overwrite each other. The
 callback consumes exactly the cookie its state names and clears it on every
@@ -41,20 +41,19 @@ holding the login's refresh token and, when the host logs out, its ID token (the
 keeps none), at the configured clock's instant, never committing and setting no cookie,
 so the route issues the cookies only after the transaction's exit returned.
 
-``log_out`` is the logout route's whole sequence: it ends the session the
-request's cookie names, if any, and answers a page that posts the ID token hint
-to the issuer's end-session endpoint, clearing the session cookie. It makes no
-outbound call and never commits, so the person is signed out of the app even
-when the issuer is down, and a request without a usable session still reaches
-the issuer. A forged, oversized or duplicated cookie counts as missing: it ends
-no stored session, which leaves a duplicated cookie's session until it expires,
-while the browser's own cookies are still cleared.
+The logout route's step ends the session the request's cookie names, if any, in one
+``SignInTransaction`` entry and answers a page that posts the ID token hint to the issuer's
+end-session endpoint, clearing the session cookie. It makes no outbound call and never
+commits, so the person is signed out of the app even when the issuer is down, and a request
+without a usable session still reaches the issuer. A forged, oversized or duplicated cookie
+counts as missing: it ends no stored session, which leaves a duplicated cookie's session until
+it expires, while the browser's own cookies are still cleared.
 
-``log_out`` reads the login's ID token from the session row before it deletes
-the row and passes it to the issuer as ``id_token_hint``, so the issuer ends its
-session without asking the person to confirm. The hint is never decoded or
-verified here and is no credential; without a row to read (ended, swept,
-pruned or stored before the host held ID tokens) the issuer asks.
+The step reads the login's ID token from the session row before it deletes the row and
+passes it to the issuer as ``id_token_hint``, so the issuer ends its session without asking
+the person to confirm. The hint is never decoded or verified here and is no credential;
+without a row to read (ended, swept, pruned or stored before the host held ID tokens) the
+issuer asks.
 
 ``receive_backchannel_logout`` is the issuer's back-channel logout: it reads the
 form body (one non-empty ``logout_token`` field, as the issuer posts it) and
@@ -83,7 +82,7 @@ from pydantic import SecretStr
 from webauth._end_session_page import end_session_page
 from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
-from webauth.cookies import _begin_pending_login, clear_session_cookies
+from webauth.cookies import _begin_pending_login, _clear_session_cookies
 from webauth.dependencies import (
     _is_admitted,
     _renewed_expiry,
@@ -110,6 +109,7 @@ if TYPE_CHECKING:
         SessionRecordStore,
         SessionTransaction,
         SignInStores,
+        SignInTransaction,
         SubjectUserStore,
         UserRecord,
         WriteLock,
@@ -126,7 +126,6 @@ __all__ = [
     "NoAdmins",
     "app_role",
     "fresh_access_token",
-    "log_out",
     "receive_backchannel_logout",
 ]
 
@@ -330,52 +329,36 @@ def _write_sign_in(
 
 
 
-def log_out(
+def _log_out(
     relying_party: OidcRelyingParty,
     request: Request,
     config: WebAuthConfig,
     *,
-    sessions: SessionRecordStore,
-    lock: WriteLock,
+    transaction: SignInTransaction,
     button_label: str,
 ) -> Response:
-    """End this browser's app session and answer the page that ends the issuer's.
+    """The logout route's whole sequence: end the session the request's cookie names, if any,
+    and answer the page that ends the issuer's.
 
-    The session the request's cookie names is read and then deleted under
-    ``lock``, and the session cookie is cleared on the answer in every case.
-    An expired row that still stands is read too, and neither renewed nor admitted.
-    The answer is a ``no-store`` HTML page under its own Content-Security-Policy
-    that posts the client ID, the configured ``post_logout_redirect_uri`` and the
-    ID token hint the row holds to the end-session endpoint, and submits itself;
-    ``button_label`` is the text of the button shown where no script runs. The
-    security-headers middleware leaves that policy and ``Cache-Control`` in
-    place, so no host policy needs a source for the issuer. Without a stored
-    row, or with a row holding no ID token (stored before the host held them, or
-    opened with ``keeps_id_token=False``), the issuer asks the person once. The
-    session's stored refresh token goes to the issuer nowhere; deleting the row removes it.
-
-    The host commits and returns the answer as it is, and a single-page app
-    logs out by a top-level form POST to the route. The route needs no
-    ``current_user`` dependency, so a request without a session still reaches
-    the issuer.
-
-    The origin check protects the route, so the host keeps it POST only (the
-    origin check runs on mutating methods alone) and does not list it in
-    ``CsrfPolicy.exempt``."""
+    The row is read and then deleted in one ``transaction`` entry, and only when the cookie names
+    a session; the ID token's value is copied inside the block. The answer clears the session
+    cookie in every case. Never commits and makes no outbound call."""
     session_id = session_id_from_request(request, config)
     id_token: SecretStr | None = None
     if session_id is not None:
-        with lock.hold():
-            id_token = _id_token_of_ended_session(sessions, session_id)
+        with transaction() as stores:
+            id_token = _id_token_of_ended_session(stores.sessions, session_id)
     form = relying_party._end_session_form(id_token_hint=id_token)
     answer = end_session_page(form, button_label=button_label)
-    clear_session_cookies(answer, config)
+    _clear_session_cookies(answer, config)
     return answer
 
 
 def _id_token_of_ended_session(sessions: SessionRecordStore, session_id: str) -> SecretStr | None:
     record = sessions.load(session_id)
-    id_token = None if record is None else record.id_token
+    id_token = None
+    if record is not None and record.id_token is not None:
+        id_token = SecretStr(record.id_token.get_secret_value())
     sessions.delete(session_id)
     return id_token
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from tests.support.oidc_arrangement import LogoutPage, a_relying_party
 from tests.support.webauth_arrangement import (
+    RecordingAuditSink,
     SessionRecordsInMemory,
     UsersInMemory,
     WriteLockInMemory,
@@ -26,7 +28,7 @@ from tests.support.webauth_arrangement import (
 )
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
-from webauth.oidc_login import log_out
+from webauth.oidc_login import AdmissionConfig
 from webauth.policies import (
     CacheControlRule,
     CspDirective,
@@ -35,6 +37,8 @@ from webauth.policies import (
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
+from webauth.ports import SignInStores
+from webauth.sign_in_routes import SignInPaths, install_sign_in_routes
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -474,7 +478,9 @@ def the_logout_page(
     """What a browser gets from a logout route behind this stack."""
     config = a_web_auth_config(cookie_secure=cookie_secure)
     lock = WriteLockInMemory()
-    sessions = SessionRecordsInMemory(users=UsersInMemory(lock=lock), lock=lock)
+    users = UsersInMemory(lock=lock)
+    sessions = SessionRecordsInMemory(users=users, lock=lock)
+    stores = SignInStores(users, sessions, RecordingAuditSink())
     relying_party = a_relying_party()
     app = FastAPI()
     if host_middleware is not None:
@@ -483,11 +489,20 @@ def the_logout_page(
     if installed:
         install_web_auth_middleware(app, security_headers=HOST_POLICY, csrf_origin=CsrfPolicy())
 
-    @app.post(LOGOUT_PATH)
-    def log_out_route(request: Request) -> Response:
-        return log_out(
-            relying_party, request, config, sessions=sessions, lock=lock, button_label="Sign out",
-        )
+    install_sign_in_routes(
+        app,
+        paths=SignInPaths(start="/login", callback="/callback", logout=LOGOUT_PATH),
+        relying_party=lambda _request: relying_party,
+        admission=AdmissionConfig(
+            bound_issuer="https://login.example.org", login_group="/apps/notes",
+            admin_group="/apps/notes/admin",
+        ),
+        transaction=lambda: nullcontext(stores),
+        refused=lambda _request, _refusal: Response(status_code=403),
+        keeps_id_token=True,
+        max_sessions=None,
+        logout_button_label=lambda _request: "Sign out",
+    )
 
     return TestClient(app).post(LOGOUT_PATH, headers={"sec-fetch-site": "same-origin"})
 

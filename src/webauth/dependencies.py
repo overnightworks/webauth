@@ -94,14 +94,12 @@ class LoginRedirect:
 class AuthDependencies:
     """The route dependencies built from one set of stores.
 
-    ``admin_user`` and ``verified_session_id`` resolve ``current_user``
-    themselves, so an application that replaces one in a test replaces the
-    identity behind all three.
+    ``admin_user`` resolves ``current_user`` itself, so an application that
+    replaces one in a test replaces the identity behind both.
     """
 
     current_user: Callable[[Request, ports.SessionRecordStore], ports.AuthenticatedUser]
     admin_user: Callable[[Request, ports.AuthenticatedUser], ports.AuthenticatedUser]
-    verified_session_id: Callable[[Request, ports.AuthenticatedUser], str]
 
 
 def current_user_dependency(
@@ -144,25 +142,9 @@ def current_user_dependency(
     ) -> ports.AuthenticatedUser:
         return _require_admin(request, user)
 
-    def verified_session_id(
-        request: Request,
-        _account: ports.AuthenticatedUser = Depends(current_user),
-    ) -> str:
-        """The session this request proved it holds.
-
-        A logout needs the identifier of the very session it just
-        authenticated, and ``AuthenticatedUser`` deliberately does not carry
-        one. Resolving ``current_user`` first is what makes the answer
-        trustworthy: an expired or unknown session never reaches
-        this line. A route ends the session through ``log_out``, never by
-        deleting from the store itself.
-        """
-        return _session_id_from_cookie(request, web_auth_config(request), login_redirect)
-
     return AuthDependencies(
         current_user=current_user,
         admin_user=admin_user,
-        verified_session_id=verified_session_id,
     )
 
 
@@ -288,15 +270,6 @@ def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -
     """
     reading = _read_session_cookie(connection, config)
     return None if isinstance(reading, ConnectionRefusal) else reading
-
-
-def _session_id_from_cookie(
-    request: Request, config: WebAuthConfig, login_redirect: LoginRedirect | None,
-) -> str:
-    reading = _read_session_cookie(request, config)
-    if isinstance(reading, ConnectionRefusal):
-        raise _http_refusal(request, reading, login_redirect)
-    return reading
 
 
 def _read_session_cookie(
@@ -537,8 +510,8 @@ def _raise_for_bearer_admission(connection: HTTPConnection) -> None:
     if _is_bearer_admitted(connection):
         raise RuntimeError(
             "A bearer-admitted request carries no session: a machine route takes "
-            "Depends(bearer_caller), not current_user, admin_user, admitted_admin "
-            "or verified_session_id.",
+            "Depends(bearer_caller), not current_user, admin_user "
+            "or admitted_admin.",
         )
 
 
