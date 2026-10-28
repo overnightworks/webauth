@@ -1,8 +1,0 @@
-claim_id = "c7f133659d514b5fb4e8e15f263c1741"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "301a3bd190c61c2593fcc5018433cdc3935c30cc"
-branch = "claude/issue-506-backchannel-route"
-scope = ["README.md", "docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "quality/baseline.toml", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/sign_in_routes.py", "tests/e2e/oidc/host_app.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/oidc_login_host.py", "tests/test_oidc_login_admission.py", "tests/test_oidc_login_backchannel_logout.py", "tests/test_oidc_login_logout.py", "tests/test_oidc_login_open_session.py", "tests/test_sign_in_routes.py"]
-opened_commit = "1bb3794a1b6ff011b3c1929ec5974ba364043d20"
-whole_reason = "The back-channel route, the SignInPaths field and install check it needs, the receiver made private and WriteLock deleted are one operation: #499 B7 makes the receiver private in the slice that adds its route, WriteLock's last library user is that receiver, and the tests, harness, typing host and docs that name them or the lock must move with them."
