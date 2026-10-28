@@ -1,2 +1,3 @@
 body_contract = "block"
 dependency_paths = ["uv.lock", ".github/workflows/", ".github/requirements-build.txt"]
+lane_shared = ["quality/baseline.toml"]
