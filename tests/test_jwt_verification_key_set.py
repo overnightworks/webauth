@@ -177,6 +177,7 @@ def _key_sets_of_too_many_kidless_keys() -> list[Any]:
 
 
 def _key_sets_with_a_malformed_key(current: rsa.RSAPrivateKey) -> list[Any]:
+    modulus = public_jwk(current, "current-key")["n"]
     return [
         pytest.param(
             key_set_document(public_jwk(current, "current-key", n=7)),
@@ -187,6 +188,23 @@ def _key_sets_with_a_malformed_key(current: rsa.RSAPrivateKey) -> list[Any]:
             key_set_document(public_jwk(current, "current-key", e="AAAA")),
             "invalid-rsa-key",
             id="key-exponent-zero",
+        ),
+        pytest.param(
+            key_set_document(public_jwk(current, "current-key", n=modulus.replace("-", "+", 1))),
+            "invalid-rsa-key",
+            id="key-modulus-not-base64url",
+        ),
+        pytest.param(
+            key_set_document(public_jwk(current, "current-key", n=modulus + "=")),
+            "invalid-rsa-key",
+            id="key-modulus-padded",
+        ),
+        pytest.param(
+            key_set_document(
+                public_jwk(current, "current-key", n=modulus[:-1] + chr(ord(modulus[-1]) + 1))
+            ),
+            "invalid-rsa-key",
+            id="key-modulus-with-nonzero-trailing-bits",
         ),
         pytest.param(key_set_document("not a key"), "key-not-an-object", id="key-not-an-object"),
     ]
