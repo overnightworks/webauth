@@ -169,6 +169,17 @@ def install_sign_in_routes(
     in the hook or in the transaction, and an answer that fails before it starts; a failure
     is then re-raised once that 500 is sent. Nothing is sent after an answer has started.
 
+    A callback names a usable state when it carries ``state`` exactly once,
+    non-empty and decodable. Every refusal below comes before any token
+    request. With a usable state, a malformed rest (a parameter named twice,
+    one that does not decode, or a pair strict query parsing refuses, such as a
+    trailing ``&`` or a name without ``=``) is refused to the hook as
+    ``MALFORMED_CALLBACK`` when that state's cookie is genuine and
+    ``STATE_MISMATCH`` otherwise. Without one, the same malformed rest is
+    ``MALFORMED_CALLBACK`` and anything else ``STATE_MISMATCH``. A well-formed
+    callback whose cookie is missing, forged, oversized, of an unknown version,
+    duplicated or of another login is ``STATE_MISMATCH``.
+
     ``relying_party`` is read per request. ``keeps_id_token`` has no default: ``True`` stores
     the login's ID token so the logout posts it as the hint, ``False`` stores none.
     ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``

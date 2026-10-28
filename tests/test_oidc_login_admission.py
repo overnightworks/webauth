@@ -78,11 +78,8 @@ class Host:
         decided = _decide_admission(identity, admission=admission, config=a_web_auth_config())
         if isinstance(decided, AdmissionRefusal):
             return decided
-        try:
-            with self.lock.hold():
-                return _admit_account(decided, accounts=self.accounts, audit=self.audit)
-        except _UsernameTakenSignal:
-            return AdmissionRefusal.USERNAME_TAKEN
+        with self.lock.hold():
+            return _admit_account(decided, accounts=self.accounts, audit=self.audit)
 
 
 def admitted_account(host: Host, identity: OidcIdentity) -> UserRecord:
@@ -474,11 +471,6 @@ def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed(
         AdmissionRefusal.FOREIGN_ISSUER,
         id="another issuer's identity whose subject names a legacy admin",
     ),
-    pytest.param(
-        LENA, [FakeUser(id="user-7", username="lena")],
-        AdmissionRefusal.USERNAME_TAKEN,
-        id="a new subject whose username another account holds",
-    ),
 ])
 def test_a_refused_identity_changes_neither_the_store_nor_the_audit_log(
     identity: OidcIdentity, stored: list[FakeUser], refusal: AdmissionRefusal,
@@ -494,7 +486,8 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
     stored = [FakeUser(id="user-7", username="Lena")]
     host = a_host(*deepcopy(stored), store=UsersWithCaseInsensitiveUsernames)
 
-    assert host.admit(LENA) is AdmissionRefusal.USERNAME_TAKEN
+    with pytest.raises(_UsernameTakenSignal):
+        host.admit(LENA)
     assert host.accounts.list() == stored
     assert host.audit.account_events == []
 

@@ -27,6 +27,7 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 
 Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout and fresh tokens.
 
+- `sign_in_routes` registers the sign-in start and callback routes, selects `SignInPaths` policies and answers failures.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
 - `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission.
 - `middleware` enforces body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
@@ -73,7 +74,7 @@ sequenceDiagram
 ```
 Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc.py),
 [`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
-Harness admission precedes its in-memory session transaction; cookies follow. No encompassing transaction/lock is proven ([Trust](#trust)).
+The harness opens one sign-in transaction under its write lock around admission and the session writes; cookies follow ([Trust](#trust)).
 [Host refusals](host-contract.md#signed-out-and-refused) are outside this successful flow.
 
 ### The store decides every request

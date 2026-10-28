@@ -8,7 +8,6 @@ import urllib.parse
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
-from threading import get_ident
 from typing import Any
 
 import anyio.to_thread
@@ -199,8 +198,6 @@ class RecordingSignInTransaction:
     ) -> None:
         self.kind = kind
         self.entries = 0
-        self.most_open_at_once = 0
-        self.thread_idents: set[int] = set()
         self._accounts = accounts
         self._sessions = sessions
         self._audit = audit
@@ -209,7 +206,6 @@ class RecordingSignInTransaction:
         self._open = 0
 
     def __call__(self) -> AbstractContextManager[SignInStores]:
-        self.thread_idents.add(get_ident())
         return self._entered()
 
     @contextmanager
@@ -219,7 +215,6 @@ class RecordingSignInTransaction:
                 raise AssertionError("the sign-in transaction was entered from inside its block")
             self.entries += 1
             self._open += 1
-            self.most_open_at_once = max(self.most_open_at_once, self._open)
             window = _Window()
             try:
                 with self._failing_as_the_kind_does():

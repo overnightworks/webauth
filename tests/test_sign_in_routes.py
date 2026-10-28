@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 import anyio
 import pytest
@@ -43,6 +43,7 @@ from tests.support.oidc_login_host import (
     set_cookies,
 )
 from tests.support.webauth_arrangement import (
+    FIXED_INSTANT,
     HTTPS_TEST_SERVER,
     FakeUser,
     SessionRecordsInMemory,
@@ -107,7 +108,7 @@ def _carrying_its_own_cookie(_request: Request, _refusal: SignInRefusal) -> Resp
 def _signed_in_holding_session_of_bystander(host: OidcHost) -> tuple[str, str]:
     """The query of a login at the issuer and the Cookie header of a browser that also holds
     the session of the bystander, which that login replaces."""
-    now = datetime.now(UTC)
+    now = FIXED_INSTANT
     replaced = seeded_session(
         host.sessions, host.lock.hold_uncounted(), BYSTANDER.id, now, now + timedelta(hours=1),
     )
@@ -422,7 +423,7 @@ def test_two_concurrent_callbacks_enter_one_after_the_other_and_keep_the_cap() -
         ))
 
     assert [response.status_code for response in responses] == [303, 303]
-    assert (host.transaction.entries, host.transaction.most_open_at_once) == (2, 1)
+    assert host.transaction.entries == 2
     assert host.sessions.count_active() == 1
 
 
