@@ -1,8 +1,0 @@
-claim_id = "da0d2f3839794edf89f2dbd99726b374"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "05ab21d085608a9f43b5dca5f9c5c908d092bd13"
-branch = "claude/issue-502-sign-in-routes"
-scope = ["AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "docs/testing-a-host.md", "quality/baseline.toml", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/sign_in_routes.py", "tests/e2e/oidc/conformance.py", "tests/e2e/oidc/host_app.py", "tests/e2e/oidc/prove.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/oidc_arrangement.py", "tests/support/oidc_login_host.py", "tests/support/webauth_arrangement.py", "tests/test_oidc_login_admission.py", "tests/test_oidc_login_backchannel_logout.py", "tests/test_oidc_login_callback.py", "tests/test_oidc_login_open_session.py", "tests/test_oidc_login_open_session_id_token.py", "tests/test_sign_in_routes.py"]
-opened_commit = "afd4bb406285db6cb567b68ed6d2fab57a077d53"
-whole_reason = "The routes, the transaction port they enter and the private steps they call are one sign-in operation; landing a part leaves a public shape without a caller or a second sign-in path, and the retargeted tests, harness and typing host must move with the names they pin."
