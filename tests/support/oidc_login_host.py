@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import anyio.to_thread
+import pytest
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
@@ -55,7 +56,6 @@ from webauth.oidc import (
 from webauth.oidc_login import (
     AdmissionConfig,
     BackchannelLogoutResult,
-    log_out,
     receive_backchannel_logout,
 )
 from webauth.policies import (
@@ -88,9 +88,9 @@ NOW = 1_800_000_000
 CLIENT_ID = "lab-app <\"&'>"
 START_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
-SIGN_IN_PATHS = SignInPaths(start=START_PATH, callback=CALLBACK_PATH)
-END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_PATH = "/logout"
+SIGN_IN_PATHS = SignInPaths(start=START_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH)
+END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
@@ -183,7 +183,8 @@ class RecordingSignInTransaction:
     """The host's ``SignInTransaction`` over the host's stores and its one lock.
 
     It counts its entries and refuses to be entered again from inside its own block.
-    ``strict`` hands the route stores whose records fail once the block is left."""
+    ``strict`` hands the route stores whose records fail once the block is left.
+    ``exit_failure`` is raised after a clean block, as an exit that fails to commit."""
 
     def __init__(
         self,
@@ -197,6 +198,7 @@ class RecordingSignInTransaction:
     ) -> None:
         self.kind = kind
         self.entries = 0
+        self.exit_failure: Exception | None = None
         self._accounts = accounts
         self._sessions = sessions
         self._audit = audit
@@ -218,6 +220,8 @@ class RecordingSignInTransaction:
             try:
                 with self._failing_as_the_kind_does():
                     yield self._stores(window)
+                    if self.exit_failure is not None:
+                        raise self.exit_failure
             finally:
                 window.open = False
                 self._open -= 1
@@ -247,6 +251,19 @@ class RecordingSignInTransaction:
         )
 
 
+class StoreDown(Exception):
+    pass
+
+
+def failing(owner: object, name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``owner.name`` raise ``StoreDown`` until the monkeypatch is undone."""
+
+    def down(*_arguments: object, **_keywords: object) -> None:
+        raise StoreDown
+
+    monkeypatch.setattr(owner, name, down)
+
+
 def _the_refusal_as_json(_request: Request, refusal: SignInRefusal) -> Response:
     cause = refusal.cause
     reason = cause.reason.value if isinstance(cause, OidcRefusal) else cause.value
@@ -272,6 +289,13 @@ class OidcHost:
     refusals: list[SignInRefusal]
     answer_refusals: Callable[[Request, SignInRefusal], Response] = _the_refusal_as_json
     """What the host's refusal hook answers; a test replaces it."""
+    relying_party_of: Callable[[Request], OidcRelyingParty] | None = None
+    """What the host's relying-party callable answers; a test replaces it."""
+
+    def read_relying_party(self, request: Request) -> OidcRelyingParty:
+        if self.relying_party_of is None:
+            return self.relying_party
+        return self.relying_party_of(request)
 
     def start(self, *, return_to: str | None = None) -> str:
         """Visit the start route; answer the authorization URL it redirects the browser to."""
@@ -350,13 +374,13 @@ def _install_the_host_middleware(
 
 def _add_the_login_routes(
     app: FastAPI,
-    relying_party: OidcRelyingParty,
     *,
     host: Callable[[], OidcHost],
     transaction: RecordingSignInTransaction,
     max_sessions: int | None,
     keeps_id_token: bool,
     admission: AdmissionConfig,
+    logout_button_label: Callable[[Request], str],
 ) -> None:
     def refused(request: Request, refusal: SignInRefusal) -> Response:
         current = host()
@@ -366,32 +390,25 @@ def _add_the_login_routes(
     install_sign_in_routes(
         app,
         paths=SIGN_IN_PATHS,
-        relying_party=lambda _request: relying_party,
+        relying_party=lambda request: host().read_relying_party(request),
         admission=admission,
         transaction=transaction,
         refused=refused,
         keeps_id_token=keeps_id_token,
         max_sessions=max_sessions,
+        logout_button_label=logout_button_label,
     )
 
 
-def _add_the_logout_routes(
+def _add_the_backchannel_logout_route(
     app: FastAPI,
     relying_party: OidcRelyingParty,
-    config: WebAuthConfig,
     *,
     accounts: UsersInMemory,
     sessions: SessionRecordsInMemory,
     lock: CountingWriteLock,
     audit: RecordingAuditSink,
 ) -> None:
-    @app.post(LOGOUT_PATH)
-    def form_logout(request: Request) -> Response:
-        return log_out(
-            relying_party, request, config,
-            sessions=sessions, lock=lock, button_label=LOGOUT_BUTTON_LABEL,
-        )
-
     def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
         with sessions.transaction():
             return receive_backchannel_logout(
@@ -461,6 +478,7 @@ def an_oidc_host(
     stored_session: FakeSessionRecord | None = None,
     keeps_id_token: bool = True,
     admission: AdmissionConfig = ADMISSION,
+    logout_button_label: Callable[[Request], str] = lambda _request: LOGOUT_BUTTON_LABEL,
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
@@ -480,11 +498,12 @@ def an_oidc_host(
         app.middleware("http")(_pass_through)
     holder: list[OidcHost] = []
     _add_the_login_routes(
-        app, relying_party, host=lambda: holder[0], transaction=transaction,
+        app, host=lambda: holder[0], transaction=transaction,
         max_sessions=max_sessions, keeps_id_token=keeps_id_token, admission=admission,
+        logout_button_label=logout_button_label,
     )
-    _add_the_logout_routes(
-        app, relying_party, config, accounts=accounts, sessions=sessions, lock=lock, audit=audit,
+    _add_the_backchannel_logout_route(
+        app, relying_party, accounts=accounts, sessions=sessions, lock=lock, audit=audit,
     )
     _add_the_signed_in_routes(app, sessions)
     holder.append(OidcHost(

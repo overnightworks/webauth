@@ -124,20 +124,19 @@ result is counts, response outcomes and screenshots, never a Logout Token.
   admin logout (204) then calls each app back exactly once, which also shows
   the disable sent none; each holds 0 sessions and answers ``/me`` with 401. A
   fresh sign in is refused at Keycloak's form.
-- Scenario 22, a logout from another site (proves a sentence of the ``log_out``
-  docstring): the browser holds a signed-in session at app A. A page on
-  ``https://demo.example.test``, which the harness fulfils in the browser (the
-  hosts' policies would not let a served page post across origins), submits a
-  form to A's ``/logout``. A answers 403 ``Cross-origin request rejected`` from
-  the origin check; ``/`` still says signed in, ``/me`` answers 200, the host
-  holds 1 session. The person's own logout then ends the session with no page.
-- Scenario 23, a logout after the back-channel logout ended the row (proves a
-  sentence of the ``log_out`` docstring): a person signs in to A (Keycloak
-  session S1), Keycloak's admin logout ends S1 (A's back-channel call ends A's
-  row), a sign-in to B in the same browser opens S2, and A's page, still showing
-  its button, posts the logout, which sends no hint. Keycloak asks "Do you want
-  to log out?" (status 200 and ``#kc-logout``), as the docstring says; after
-  confirming, it ends S2 and calls B back.
+- Scenario 22, a logout from another site (proves a sentence of the ``webauth.sign_in_routes``
+  module docstring): the browser holds a signed-in session at app A. A page on
+  ``https://demo.example.test``, which the harness fulfils in the browser (the hosts' policies
+  would not let a served page post across origins), submits a form to A's ``/logout``. A
+  answers 403 ``Cross-origin request rejected`` from the origin check; ``/`` still says signed
+  in, ``/me`` answers 200, the host holds 1 session. The person's own logout then ends the
+  session with no page.
+- Scenario 23, a logout after the back-channel logout ended the row (proves a sentence of the
+  ``webauth.sign_in_routes`` module docstring): a person signs in to A (Keycloak session S1),
+  Keycloak's admin logout ends S1 (A's back-channel call ends A's row), a sign-in to B in the
+  same browser opens S2, and A's page, still showing its button, posts the logout, which sends
+  no hint. Keycloak asks "Do you want to log out?" (status 200 and ``#kc-logout``), as the
+  docstring says; after confirming, it ends S2 and calls B back.
 
 The refresh phase, scenarios 25 to 27 on the default host at 1280x800. The
 host's ``GET /access-token`` calls ``fresh_access_token`` for the request's

@@ -27,7 +27,6 @@ from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PLAIN_SESSION_COOKIE_NAME,
     PendingLogin,
-    clear_session_cookies,
     issue_session_cookies,
 )
 from webauth.dependencies import (
@@ -95,7 +94,6 @@ from webauth.oidc_login import (
     NoAdmins,
     app_role,
     fresh_access_token,
-    log_out,
     receive_backchannel_logout,
 )
 from webauth.oidc_transport import post_token_request_over_https
@@ -235,7 +233,7 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
     transaction: SignInTransaction = a_host_sign_in_transaction
     install_sign_in_routes(
         app,
-        paths=SignInPaths(start="/login/oidc", callback="/auth/callback"),
+        paths=SignInPaths(start="/login/oidc", callback="/auth/callback", logout="/logout"),
         relying_party=lambda _request: relying_party,
         admission=AdmissionConfig(
             bound_issuer="https://keycloak.example/realms/host",
@@ -246,6 +244,7 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
         refused=a_host_refuses_a_sign_in,
         keeps_id_token=True,
         max_sessions=None,
+        logout_button_label=lambda _request: "Sign out",
     )
 
 
@@ -266,16 +265,6 @@ def a_host_gets_a_fresh_access_token(
         config=config,
     )
     return outcome.reason if isinstance(outcome, AccessTokenRefusal) else outcome
-
-
-def a_host_logs_out(
-    relying_party: OidcRelyingParty, request: Request, config: WebAuthConfig,
-) -> Response:
-    sessions: SessionRecordStore = HostSessions()
-    lock: WriteLock = HostLock()
-    return log_out(
-        relying_party, request, config, sessions=sessions, lock=lock, button_label="Sign out",
-    )
 
 
 def a_host_receives_a_backchannel_logout(
@@ -420,9 +409,8 @@ def a_host_reads_the_admitted_admin(request: Request) -> str:
     return admitted_admin(request).username
 
 
-def a_host_signs_a_session_in_and_out(response: Response, config: WebAuthConfig) -> None:
+def a_host_signs_a_session_in(response: Response, config: WebAuthConfig) -> None:
     issue_session_cookies(response, "session-id", config)
-    clear_session_cookies(response, config)
 
 
 def a_host_ends_a_session() -> None:

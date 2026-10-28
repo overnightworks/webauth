@@ -27,7 +27,7 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 
 Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout and fresh tokens.
 
-- `sign_in_routes` registers the sign-in start and callback routes, selects `SignInPaths` policies and answers failures.
+- `sign_in_routes` registers the sign-in start, callback and logout routes, selects `SignInPaths` policies and answers failures.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
 - `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission.
 - `middleware` enforces body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
@@ -38,9 +38,9 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 
 The host owns users/role names; the library writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
-The sign-in callback enters one host-owned `SignInTransaction`, serialized against every other entry over the same stores.
+The sign-in callback and the logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores.
 Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
-The host owns its routes except the sign-in start and callback, which `install_sign_in_routes` registers; library responses are refusals (401/403/413/429/503/500), 302 login redirects, the sign-in 303s and the logout page.
+The host owns its routes except the sign-in start, callback and logout, which `install_sign_in_routes` registers; library responses are refusals (401/403/413/429/503/500), 302 login redirects, the sign-in 303s and the logout page.
 ASGI owns HTTP framing (h11/httptools may legally differ); the body-size limit counts streamed bytes, never re-parsing framing.
 
 ## Runtime View
@@ -95,7 +95,7 @@ The gate sits inside rate limiting; installation puts its paths' `no-store` rule
 
 ### Reading the session
 
-`current_user_dependency` binds the store to `current_user`, `admin_user`, `verified_session_id`; `admit_session` judges a host-read id.
+`current_user_dependency` binds the store to `current_user`, `admin_user`; `admit_session` judges a host-read id.
 `session_id_from_request` reads the signed cookie; [the host contract](host-contract.md#signed-out-and-refused) owns `LoginRedirect`/401 outcomes.
 
 ### The session gate
@@ -115,10 +115,10 @@ The return path survives login only as a same-origin app path, else the app root
 
 ### Logging out and the ID token hint
 
-`log_out` reads the row's ID token before deleting the session under the host lock, even for expired rows; it neither renews nor admits.
+The logout route reads the row's ID token before deleting the session, in one `SignInTransaction` entry and only when the cookie names a session, even for expired rows; it neither renews nor admits.
 It builds an end-session form without an outbound call. CSP admits one script by hash and only the end-session/post-logout origins;
 security headers preserve that policy and `Cache-Control`. [The host contract](host-contract.md#what-every-app-gets) owns outcomes and ruling/proof provenance.
-[Retention](host-contract.md#the-start-and-callback-routes-and-the-hosts-logout-route) is explicit. webauth never signs, decodes, verifies or logs the hint;
+[Retention](host-contract.md#the-sign-in-routes) is explicit. webauth never signs, decodes, verifies or logs the hint;
 Keycloak judges it. [Trust](#trust), items 4 and 8, owns exposure and copied-token consequences.
 
 ### Back-channel logout
@@ -178,7 +178,7 @@ Who the library defends against and trusts; links point to owning sections.
    - In scope: anyone presenting a token that lacks the issuer's signature or carries the wrong `alg`, `aud`, `iss`, type or time.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
    - Availability: every connection and read is bounded.
-3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only `log_out`'s page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
+3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only the logout route's page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
 4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. An ID token stored there carries the person's identity claims, not an authentication credential; a copy nevertheless allows its holder to invoke the [hinted logout](host-contract.md#what-every-app-gets).
 5. **Host infrastructure** (`WallClock`, `WriteLock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).

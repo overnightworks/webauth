@@ -170,7 +170,7 @@ added the enforcing gate. Its page, API and public-path proofs are
   sends the browser to it when it is a same-origin path of the app, otherwise to the
   app root. An API call without a session gets
   401, and the app's UI then navigates to its start route. See
-  [The start and callback routes, and the host's logout route](#the-start-and-callback-routes-and-the-hosts-logout-route)
+  [The sign-in routes](#the-sign-in-routes)
   and, for the rule the return path must pass,
   [The return path](ARCHITECTURE.md#the-return-path). For a
   server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
@@ -217,7 +217,7 @@ added the enforcing gate. Its page, API and public-path proofs are
   [c1318d7](https://github.com/overnightworks/webauth/commit/c1318d768afa16148d680e11b10b4359ebff3012).
   Both types reach the host's `refused` hook inside a `SignInRefusal`, whose `page` is
   this mapping; see
-  [The start and callback routes, and the host's logout route](#the-start-and-callback-routes-and-the-hosts-logout-route).
+  [The sign-in routes](#the-sign-in-routes).
   `test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise` in
   [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
   A refusal carries no identity (`AdmissionRefusal` in
@@ -263,7 +263,7 @@ is its implementation, not a separate ruling.
   cookie. `admitted_user` returns `None`. The same rate
   limit applies where a rate policy covers the path; a flood of invalid tokens
   is bounded only by it. A session dependency (`current_user`, `admin_user`,
-  `admitted_admin`, `verified_session_id`) on a gated path raises, so the library answers 500,
+  `admitted_admin`) on a gated path raises, so the library answers 500,
   and `session_id_from_request` reads the cookie, which is the host's duty not to
   trust there. `test_the_cookie_counts_for_nothing_beside_a_token` in
   [test_bearer_gate_admission.py](../tests/middleware/test_bearer_gate_admission.py) proves admission
@@ -285,19 +285,21 @@ is its implementation, not a separate ruling.
   routes. A sub-app mounted below a gated path keeps its own CSRF and session
   gate, and its `bearer_caller` raises. WebSocket scopes are not gated.
 
-## The start and callback routes, and the host's logout route
+## The sign-in routes
 
-`install_sign_in_routes` registers the start and callback routes on the host's
+`install_sign_in_routes` registers the start, callback and logout routes on the host's
 `FastAPI` app over its one `OidcRelyingParty` (read per request), and `SignInPaths`
-derives the policies for exactly those two paths: `public_rules` for the session gate,
-`browser_paths` for the sign-in rate budget, `cache_control_rule` (`no-store`) and
-`login_redirect`, so the host lists the paths once. It is browser-absolute, so
+derives the policies for exactly those paths: `public_rules` for the session gate (`GET` of
+start and callback, `POST` of logout), `browser_paths` for the sign-in rate budget,
+`cache_control_rule` (`no-store`) and `login_redirect`, so the host lists the paths once. It is browser-absolute, so
 `login_redirect` is right for an app at its origin's root; a host below a `root_path`
-builds its own `LoginRedirect`. The host serves the logout route with `log_out`, whose
-answer it returns as it is; a single-page app logs out by a top-level form POST to that
-route. `webauth.cookies` carries the pending login in a signed cookie of its own, one
+builds its own `LoginRedirect`. The library serves the logout route at `SignInPaths.logout` for `POST` only, with the
+button text from the host's `logout_button_label`, read per request; a single-page app logs
+out by a top-level form POST to that route, and the host never lists the path in
+`CsrfPolicy.exempt`. `paths.logout` and `logout_button_label` come together, or both
+are `None` for a host without logout. `webauth.cookies` carries the pending login in a signed cookie of its own, one
 per login, so the library keeps no server-side store and `WebAuthConfig` knows nothing
-of OpenID Connect. The `install_sign_in_routes` docstring holds the routes' contract, the
+of OpenID Connect. The `webauth.sign_in_routes` module and `install_sign_in_routes` docstrings hold the routes' contract, the
 `webauth.oidc_login` and `webauth.cookies` module docstrings hold the login and its
 cookies, and `build_app` in [`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py)
 is the worked host, type-checked and run against a real issuer.
@@ -320,9 +322,16 @@ route then sends a plain 500 with the deletion and raises the failure. Other tab
 pending cookies stay. A pending login is single-use because its cookie is cleared and the
 issuer accepts a code once; webauth keeps no replay store.
 
+The logout route enters the transaction once, only when the request's cookie names a
+session, and never commits. An exception in the route, the transaction or the host's
+callables answers a plain 500 with no page and no cookie cleared. A rolling-back host
+keeps the session, and a retry ends it with its hint; under per-call persistence or an
+uncertain commit the row and its ID token may already be gone, and a retry still reaches
+the issuer's end-session page, without the hint.
+
 `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
-default, and validates `max_sessions` before it registers a route. A host that never logs
-out passes `False`: its session row keeps no
+default, and validates `max_sessions` before it registers a route. A host that serves no logout
+route passes `False`: its session row keeps no
 ID token, while refresh-token storage is unchanged. With `True`, the row keeps
 the login's ID token for logout. Renewal and refresh-token rotation preserve
 that choice and the original token. This is [#418 R1/R2](https://github.com/overnightworks/webauth/issues/418)

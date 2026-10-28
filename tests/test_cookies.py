@@ -29,13 +29,13 @@ from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_conf
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
+    _clear_session_cookies,
     _default_cookie_name,
     _is_valid_cookie_name,
     _pending_login_cookie_name,
     _sign_pending_login,
     _verify_pending_login,
     _verify_session_cookie,
-    clear_session_cookies,
     issue_session_cookies,
     sign_session_id,
 )
@@ -316,7 +316,7 @@ def a_cookie_app(
 
     @app.delete("/session")
     def clear(response: Response) -> dict[str, str]:
-        clear_session_cookies(response, config)
+        _clear_session_cookies(response, config)
         return {"status": "ok"}
 
     return CookieApp(client=TestClient(app, base_url=base_url, client=(peer, 50000)), config=config)

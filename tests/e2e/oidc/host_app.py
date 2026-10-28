@@ -69,7 +69,6 @@ from webauth.oidc_login import (
     EverySubject,
     NoAdmins,
     fresh_access_token,
-    log_out,
     receive_backchannel_logout,
 )
 from webauth.oidc_transport import post_token_request_over_https
@@ -94,8 +93,8 @@ logger = logging.getLogger(__name__)
 LOOPBACK = "127.0.0.1"
 LOGIN_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
-SIGN_IN_PATHS = SignInPaths(start=LOGIN_PATH, callback=CALLBACK_PATH)
 LOGOUT_PATH = "/logout"
+SIGN_IN_PATHS = SignInPaths(start=LOGIN_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH)
 LOGOUT_BUTTON_LABEL = "Log out"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
@@ -504,6 +503,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         refused=refused,
         keeps_id_token=True,
         max_sessions=None,
+        logout_button_label=lambda _request: LOGOUT_BUTTON_LABEL,
     )
 
     @app.get("/me")
@@ -538,14 +538,6 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
-
-    @app.post(LOGOUT_PATH)
-    def logout(request: Request) -> Response:
-        current = world["world"]
-        return log_out(
-            relying_party_of(request), request, config,
-            sessions=current.sessions, lock=current.lock, button_label=LOGOUT_BUTTON_LABEL,
-        )
 
     def end_the_sessions_of(form_body: bytes, content_type: str | None) -> BackchannelLogoutResult:
         current = world["world"]

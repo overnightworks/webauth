@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import HTTPException, Request
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
@@ -24,9 +25,12 @@ from tests.support.oidc_login_host import (
     SAME_ORIGIN_FORM,
     SUBJECT,
     OidcHost,
+    StoreDown,
+    TransactionKind,
     a_client_config,
     after_signing_in,
     an_oidc_host,
+    failing,
     hint_of,
     is_cleared,
     post_logout,
@@ -38,6 +42,7 @@ from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     SESSION_IDLE_SECONDS,
 )
+from webauth.oidc import OidcRelyingParty
 from webauth.oidc_login import (
     fresh_access_token,
 )
@@ -171,7 +176,7 @@ def _row_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
     return {}
 
 
-@pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent", "lock_taken"), [
+@pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent", "entered"), [
     pytest.param(_no_session, 0, False, False, id="no-session"),
     pytest.param(_forged_session_cookie, 1, False, False, id="forged-cookie-ends-nothing"),
     pytest.param(_session_cookie_dropped, 1, False, False, id="session-cookie-gone"),
@@ -184,12 +189,13 @@ def test_a_same_origin_logout_still_answers_the_page(
     sessions_kept: int,
     *,
     hint_sent: bool,
-    lock_taken: bool,
+    entered: bool,
 ) -> None:
     host = an_oidc_host()
     if arrange is not _no_session:
         host.callback(host.sign_in_at_issuer())
     extra_headers = arrange(host)
+    entries_before = host.transaction.entries
     taken_before = host.lock.times_taken
 
     response = post_logout(host, {**SAME_ORIGIN_FORM, **extra_headers})
@@ -200,7 +206,8 @@ def test_a_same_origin_logout_still_answers_the_page(
     assert hint_of(response) == (host.issued_id_tokens[-1] if hint_sent else None)
     assert the_session_cookie_is_cleared(host, response)
     assert host.sessions.count_active() == sessions_kept
-    assert host.lock.times_taken - taken_before == lock_taken
+    assert host.transaction.entries - entries_before == entered
+    assert host.lock.times_taken == taken_before
 
 
 @pytest.mark.parametrize("old_cookie_name", [OLD_HINT_COOKIE_NAME, OLD_CSRF_COOKIE_NAME])
@@ -273,3 +280,130 @@ def test_the_logout_form_carries_the_configured_values_whatever_the_request_name
         "post_logout_redirect_uri": a_client_config().post_logout_redirect_uri,
         "id_token_hint": host.issued_id_tokens[-1],
     }
+
+
+def test_a_get_of_the_logout_path_ends_nothing() -> None:
+    host = after_signing_in(an_oidc_host())
+
+    response = host.client.get(LOGOUT_PATH)
+
+    assert response.status_code == 405
+    assert (host.sessions.count_active(), host.transaction.entries) == (1, 1)
+
+
+@pytest.mark.parametrize("strict_records", [False, True], ids=["plain", "strict"])
+@pytest.mark.parametrize("kind", list(TransactionKind), ids=lambda kind: kind.name.lower())
+def test_a_logout_enters_the_transaction_once_takes_no_lock_and_reads_no_record_after_its_exit(
+    kind: TransactionKind, *, strict_records: bool,
+) -> None:
+    host = after_signing_in(an_oidc_host(transaction_kind=kind, strict_records=strict_records))
+    entries_before = host.transaction.entries
+    taken_before = host.lock.times_taken
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert response.status_code == 200
+    assert hint_of(response) == host.issued_id_tokens[-1]
+    assert host.transaction.entries - entries_before == 1
+    assert host.lock.times_taken == taken_before
+
+
+def _answers_a_plain_500_and_clears_no_cookie(response: HttpxResponse) -> bool:
+    return (
+        response.status_code == 500
+        and set_cookies(response) == {}
+        and response.text == "Internal Server Error"
+    )
+
+
+@pytest.mark.parametrize("store_call", ["load", "delete"])
+@pytest.mark.parametrize("kind", list(TransactionKind), ids=lambda kind: kind.name.lower())
+def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
+    kind: TransactionKind, store_call: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = after_signing_in(an_oidc_host(transaction_kind=kind))
+    with monkeypatch.context() as patch:
+        failing(host.sessions, store_call, patch)
+
+        response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert _answers_a_plain_500_and_clears_no_cookie(response)
+    assert host.sessions.count_active() == 1
+    retry = post_logout(host, SAME_ORIGIN_FORM)
+    assert hint_of(retry) == host.issued_id_tokens[-1]
+    assert host.sessions.count_active() == 0
+
+
+def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_hint() -> None:
+    host = after_signing_in(an_oidc_host(transaction_kind=TransactionKind.ROLLING_BACK))
+    host.sessions.commit_failure = StoreDown()
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert _answers_a_plain_500_and_clears_no_cookie(response)
+    assert host.sessions.count_active() == 1
+    host.sessions.commit_failure = None
+    assert hint_of(post_logout(host, SAME_ORIGIN_FORM)) == host.issued_id_tokens[-1]
+
+
+def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_the_hint() -> None:
+    host = after_signing_in(an_oidc_host())
+    host.transaction.exit_failure = StoreDown()
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert _answers_a_plain_500_and_clears_no_cookie(response)
+    assert host.sessions.count_active() == 0
+    host.transaction.exit_failure = None
+    retry = post_logout(host, SAME_ORIGIN_FORM)
+    assert retry.status_code == 200
+    assert hint_of(retry) is None
+
+
+def _a_label_that_raises(_request: Request) -> str:
+    raise StoreDown
+
+
+def _a_label_that_raises_an_http_exception(_request: Request) -> str:
+    raise HTTPException(status_code=403)
+
+
+def _a_label(_request: Request) -> str:
+    return LOGOUT_BUTTON_LABEL
+
+
+def _a_relying_party_that_raises(_request: Request) -> OidcRelyingParty:
+    raise StoreDown
+
+
+@pytest.mark.parametrize(
+    ("label", "raising_relying_party"),
+    [
+        pytest.param(_a_label_that_raises, False, id="label"),
+        pytest.param(_a_label_that_raises_an_http_exception, False, id="label-http-exception"),
+        pytest.param(_a_label, True, id="relying-party"),
+    ],
+)
+def test_a_label_or_relying_party_that_raises_answers_500_and_ends_nothing(
+    label: Callable[[Request], str], raising_relying_party: bool,
+) -> None:
+    host = after_signing_in(an_oidc_host(logout_button_label=label))
+    if raising_relying_party:
+        host.relying_party_of = _a_relying_party_that_raises
+    entries_before = host.transaction.entries
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert _answers_a_plain_500_and_clears_no_cookie(response)
+    assert host.transaction.entries == entries_before
+    assert host.sessions.count_active() == 1
+
+
+def test_the_logout_button_reads_its_label_from_the_request() -> None:
+    host = after_signing_in(an_oidc_host(
+        logout_button_label=lambda request: request.headers["x-label"],
+    ))
+
+    response = post_logout(host, {**SAME_ORIGIN_FORM, "x-label": "Abmelden"})
+
+    assert LogoutPage(response.text).texts["button"] == "Abmelden"

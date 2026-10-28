@@ -510,8 +510,7 @@ class TestTheGatesAdmissionIsTheDependencys:
             pytest.param(
                 Reuse("/admin", expected_status=403, authenticated=1), id="non-admin",
             ),
-            pytest.param(Reuse("/session-id"), id="verified-session-id"),
-            pytest.param(Reuse(ALL_DEPENDENCIES_PATH, role=ADMIN_ROLE), id="all-three"),
+            pytest.param(Reuse(ALL_DEPENDENCIES_PATH, role=ADMIN_ROLE), id="every-dependency"),
             pytest.param(Reuse("/me", mode=Rule.OPTIONAL), id="optional-live"),
             pytest.param(
                 Reuse(

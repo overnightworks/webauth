@@ -1,6 +1,6 @@
-"""The start and callback routes of signing in through an OpenID Connect issuer.
+"""The start, callback and logout routes of signing in through an OpenID Connect issuer.
 
-``install_sign_in_routes`` registers both routes on the host's ``FastAPI`` app,
+``install_sign_in_routes`` registers the routes on the host's ``FastAPI`` app,
 and ``SignInPaths`` derives the policies the host's gate, rate limit and cache
 rules need for exactly those paths, so the host lists them once. The routes are
 synchronous and run in the threadpool; configuration comes from the installed
@@ -10,6 +10,30 @@ The callback exchanges the code and verifies the ID token outside any
 transaction, decides admission without writing, and then enters one
 ``SignInTransaction`` for the account and the session. The session cookie is
 issued only after that transaction's exit returned.
+
+The logout route ends the session the request's cookie names, reading its ID token before
+deleting the row, and answers a ``no-store`` HTML page under its own Content-Security-Policy
+that posts the client ID, the configured ``post_logout_redirect_uri`` and the ID token hint to
+the end-session endpoint, submits itself and clears the session cookie. An expired row that
+still stands is read too, and neither renewed nor admitted. The page needs no outbound call,
+so the person is signed out of the app even when the issuer is down. A request without a
+usable session, or whose row holds no ID token (stored before the host held them, or opened
+with ``keeps_id_token=False``), still reaches the issuer, which asks the person once. The
+session's stored refresh token goes to the issuer nowhere, and the security-headers
+middleware leaves the page's policy and ``Cache-Control`` in place, so no host policy needs a
+source for the issuer.
+
+The logout route answers ``POST`` only, and the origin check protects it: it
+runs on mutating methods alone, so the host never lists the path in
+``CsrfPolicy.exempt``. A single-page app logs out by a top-level form ``POST`` to
+the route. The route needs no ``current_user`` dependency, so a request without a
+session still reaches the issuer. It enters one ``SignInTransaction``, only when the
+request's cookie names a session, and never commits. A failure in the route, in the
+transaction or in the host's callables answers the route's plain 500: no page is
+sent and no cookie is cleared. Under a host whose transaction rolls back, the session
+stands and a retry ends it with its hint; under per-call persistence or an uncertain
+commit, the row and its ID token may already be gone, and a retry still reaches the
+issuer's end-session page, without the hint.
 """
 
 from __future__ import annotations
@@ -32,6 +56,7 @@ from webauth.oidc_login import (
     AdmissionRefusal,
     _AdmittedLogin,
     _decide_admission,
+    _log_out,
     _start_login,
     _UsernameTakenSignal,
     _write_sign_in,
@@ -87,23 +112,32 @@ class SignInPaths:
     Every path must be absolute, name nothing a browser reads as another host, hold no
     dot segment, ``?`` or ``#``, and differ from the others; ``ValueError`` at
     construction, before any route is registered, names the first that is not.
-    The derived values are the policies for exactly these paths.
+    ``logout`` is ``None`` for a host that serves no logout route. The derived values are
+    the policies for exactly these paths.
     """
 
     start: str
     callback: str
+    logout: str | None = None
 
     def __post_init__(self) -> None:
-        for name, path in (("start", self.start), ("callback", self.callback)):
+        for name, path in self._named_paths:
             _require_sign_in_path(name, path)
-        if self.start == self.callback:
-            raise ValueError("SignInPaths.start and SignInPaths.callback must differ")
+        paths = [path for _, path in self._named_paths]
+        if len(set(paths)) != len(paths):
+            names = ", ".join(f"SignInPaths.{name}" for name, _ in self._named_paths)
+            raise ValueError(f"{names} must differ")
 
     @property
     def public_rules(self) -> tuple[PublicRule, ...]:
-        """The rules that let a browser without a session reach the routes: ``GET`` of
-        both paths, for ``SessionGate.public``."""
-        return (PublicRule(self._exact, methods=frozenset({"GET"})),)
+        """The rules that let a browser without a session reach the routes, for
+        ``SessionGate.public``: ``GET`` of the start and callback paths and, when
+        there is one, ``POST`` of the logout path."""
+        rules = (PublicRule(self._sign_in, methods=frozenset({"GET"})),)
+        if self.logout is None:
+            return rules
+        logout = PathRules(exact=frozenset({self.logout}))
+        return (*rules, PublicRule(logout, methods=frozenset({"POST"})))
 
     @property
     def browser_paths(self) -> PathRules:
@@ -112,7 +146,7 @@ class SignInPaths:
 
     @property
     def cache_control_rule(self) -> CacheControlRule:
-        """``no-store`` for both paths: the answers carry cookies."""
+        """``no-store`` for every path: the answers carry cookies."""
         return CacheControlRule(self._exact, "no-store")
 
     @property
@@ -124,8 +158,17 @@ class SignInPaths:
         return LoginRedirect(self.start, _RETURN_PATH_QUERY_NAME)
 
     @property
-    def _exact(self) -> PathRules:
+    def _named_paths(self) -> tuple[tuple[str, str], ...]:
+        named = (("start", self.start), ("callback", self.callback))
+        return named if self.logout is None else (*named, ("logout", self.logout))
+
+    @property
+    def _sign_in(self) -> PathRules:
         return PathRules(exact=frozenset({self.start, self.callback}))
+
+    @property
+    def _exact(self) -> PathRules:
+        return PathRules(exact=frozenset(path for _, path in self._named_paths))
 
 
 def _require_sign_in_path(name: str, path: str) -> None:
@@ -156,8 +199,9 @@ def install_sign_in_routes(
     refused: Callable[[Request, SignInRefusal], Response],
     keeps_id_token: bool,
     max_sessions: int | None,
+    logout_button_label: Callable[[Request], str] | None,
 ) -> None:
-    """Register the start and callback routes of the sign-in on ``app``.
+    """Register the start and callback routes of the sign-in, and the logout route, on ``app``.
 
     The start route stores the pending login in its own signed cookie, with the
     ``next`` query value as the path to return to, and redirects (303) to the issuer. The
@@ -180,15 +224,32 @@ def install_sign_in_routes(
     callback whose cookie is missing, forged, oversized, of an unknown version,
     duplicated or of another login is ``STATE_MISMATCH``.
 
+    The logout route ends the session the request's cookie names and answers the page that
+    ends the issuer's; ``logout_button_label`` is read per request, the text of the button
+    shown where no script runs.
+
     ``relying_party`` is read per request. ``keeps_id_token`` has no default: ``True`` stores
     the login's ID token so the logout posts it as the hint, ``False`` stores none.
     ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``
-    is raised before a route is registered.
+    is raised before a route is registered. ``paths.logout`` and ``logout_button_label`` come
+    together: a host without a logout route passes ``None`` for both, and exactly one of them
+    raises ``ValueError`` before a route is registered.
     """
     if max_sessions is not None:
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
+    if (paths.logout is None) != (logout_button_label is None):
+        raise ValueError("paths.logout and logout_button_label must both be given or both be None")
     routes = _SignIn(relying_party, admission, transaction, refused, keeps_id_token, max_sessions)
 
+    _register_routes(app, paths, routes, logout_button_label)
+
+
+def _register_routes(
+    app: FastAPI,
+    paths: SignInPaths,
+    routes: _SignIn,
+    logout_button_label: Callable[[Request], str] | None,
+) -> None:
     def start(request: Request, next: str | None = None) -> Response:  # noqa: A002
         return routes.start(request, next)
 
@@ -197,6 +258,13 @@ def install_sign_in_routes(
 
     app.add_api_route(paths.start, start, methods=["GET"], include_in_schema=False)
     app.add_api_route(paths.callback, callback, methods=["GET"], include_in_schema=False)
+    if paths.logout is not None and logout_button_label is not None:
+        button_label = logout_button_label
+
+        def logout(request: Request) -> Response:
+            return routes.logout(request, button_label)
+
+        app.add_api_route(paths.logout, logout, methods=["POST"], include_in_schema=False)
 
 
 @dataclass(frozen=True)
@@ -216,6 +284,15 @@ class _SignIn:
         )
         return answer
 
+    def logout(self, request: Request, button_label: Callable[[Request], str]) -> Response:
+        try:
+            return _log_out(
+                self.relying_party(request), request, web_auth_config(request),
+                transaction=self.transaction, button_label=button_label(request),
+            )
+        except Exception as failure:
+            return _RouteAnswer(Response(), failure)
+
     def callback(self, request: Request) -> Response:
         config = web_auth_config(request)
         state = _callback_state(request.url.query)
@@ -226,8 +303,8 @@ class _SignIn:
         try:
             answer = self._answer(request, config, pending)
         except Exception as failure:
-            return _CallbackAnswer(carrier, failure)
-        return _CallbackAnswer(carrier, answer)
+            return _RouteAnswer(carrier, failure)
+        return _RouteAnswer(carrier, answer)
 
     def _answer(
         self, request: Request, config: WebAuthConfig, pending: PendingLogin | None,
@@ -271,10 +348,10 @@ def _app_root(request: Request) -> str:
     return request.scope.get("root_path", "").rstrip("/") + "/"
 
 
-class _CallbackAnswer(Response):
-    """The callback's answer: ``outcome`` carrying the ``Set-Cookie`` headers of ``carrier``.
+class _RouteAnswer(Response):
+    """A route's answer: ``outcome`` carrying the ``Set-Cookie`` headers of ``carrier``.
     A failure as the ``outcome``, or an answer that raises before it starts, is sent as a plain
-    500 with those headers and then raised."""
+    500 with those headers and then raised, so no framework exception handler answers instead."""
 
     def __init__(self, carrier: Response, outcome: Response | Exception) -> None:
         super().__init__()

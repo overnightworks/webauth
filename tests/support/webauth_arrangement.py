@@ -746,9 +746,8 @@ def an_auth_app(
     def all_dependencies(
         user: AuthenticatedUser = Depends(dependencies.current_user),
         admin: AuthenticatedUser = Depends(dependencies.admin_user),
-        verified: str = Depends(dependencies.verified_session_id),
     ) -> dict[str, str]:
-        return {"username": user.username, "admin": admin.username, "session_id": verified}
+        return {"username": user.username, "admin": admin.username}
 
     async def reading_admission(request: Request) -> dict[str, str | None]:
         route_runs.append(request.url.path)
@@ -766,12 +765,6 @@ def an_auth_app(
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
-
-    @app.get("/session-id")
-    def session_id(
-        verified: str = Depends(dependencies.verified_session_id),
-    ) -> dict[str, str]:
-        return {"session_id": verified}
 
     _add_websocket_routes(app, sessions, websocket_outcomes)
 

@@ -20,7 +20,6 @@ from tests.support.webauth_arrangement import (
     SESSION_COOKIE_NAME,
     SESSION_ID,
     AuthApp,
-    FakeSessionRecord,
     FakeUser,
     SessionRecordsInMemory,
     SessionsAnsweringTouch,
@@ -163,7 +162,7 @@ FORGED_COOKIE = sign_session_id(SESSION_ID, b"a different signing key entirely")
         ),
     ],
 )
-@pytest.mark.parametrize("path", ["/me", "/admin", "/session-id"])
+@pytest.mark.parametrize("path", ["/me", "/admin"])
 def test_a_request_carrying_more_than_one_session_cookie_authenticates_nobody(
     cookie_headers: list[str], path: str,
 ) -> None:
@@ -316,85 +315,6 @@ def test_the_admin_route_refuses_the_same_cookie_the_protected_route_refuses(
 
     assert response.status_code == 401
     assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL
-
-
-def test_a_route_can_name_the_session_the_request_proved_it_holds(
-    auth_app: AuthApp,
-) -> None:
-    response = auth_app.get("/session-id", cookie=auth_app.signed_cookie())
-
-    assert response.status_code == 200
-    assert response.json() == {"session_id": SESSION_ID}
-
-
-@pytest.mark.parametrize(
-    ("record", "cookie", "status", "detail"),
-    [
-        pytest.param(a_session(), None, 401, AUTHENTICATION_REQUIRED_DETAIL, id="no cookie"),
-        pytest.param(
-            a_session(remaining=-timedelta(seconds=1)),
-            SESSION_ID,
-            401,
-            SESSION_EXPIRED_DETAIL,
-            id="a session past its expiry",
-        ),
-    ],
-)
-def test_no_session_is_named_where_no_account_would_be_admitted(
-    record: FakeSessionRecord, cookie: str | None, status: int, detail: str,
-) -> None:
-    app = an_auth_app(record)
-
-    response = app.get(
-        "/session-id", cookie=None if cookie is None else app.signed_cookie(),
-    )
-
-    assert response.status_code == status
-    assert response.json()["detail"] == detail
-
-
-@pytest.mark.parametrize(
-    ("login_redirect", "accept", "status", "location"),
-    [
-        pytest.param(None, None, 401, None, id="an API client"),
-        pytest.param(
-            A_LOGIN_REDIRECT, "text/html", 302, "/login?next=%2Fsession-id", id="a browser",
-        ),
-    ],
-)
-def test_a_replaced_current_user_still_names_no_session_for_a_request_without_a_cookie(
-    login_redirect: LoginRedirect | None,
-    accept: str | None,
-    status: int,
-    location: str | None,
-) -> None:
-    dependencies = current_user_dependency(
-        session_store=lambda: SessionRecordsInMemory(None),
-        on_authenticated=lambda user: None,
-        login_redirect=login_redirect,
-    )
-    app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config())
-
-    @app.get("/session-id")
-    def session_id(
-        verified: str = Depends(dependencies.verified_session_id),
-    ) -> dict[str, str]:
-        return {"session_id": verified}
-
-    app.dependency_overrides[dependencies.current_user] = lambda: FakeUser()
-    client = TestClient(app, base_url=HTTPS_TEST_SERVER)
-
-    response = client.get(
-        "/session-id",
-        headers={} if accept is None else {"accept": accept},
-        follow_redirects=False,
-    )
-
-    assert response.status_code == status
-    assert response.headers.get("location") == location
-    if location is None:
-        assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL
 
 
 def test_a_missing_cookie_401_stays_byte_identical_without_a_login_redirect(

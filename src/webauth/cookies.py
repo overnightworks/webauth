@@ -47,7 +47,6 @@ __all__ = [
     "PLAIN_SESSION_COOKIE_NAME",
     "CookieSameSite",
     "PendingLogin",
-    "clear_session_cookies",
     "issue_session_cookies",
     "sign_session_id",
 ]
@@ -248,7 +247,7 @@ def issue_session_cookies(
     )
 
 
-def clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
+def _clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     """Take the session cookie back, so the browser stops carrying a dead session.
 
     The deletion repeats the attributes the cookie was set with, so a browser
