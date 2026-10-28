@@ -67,7 +67,7 @@ if TYPE_CHECKING:
 
 EXPIRY = ACCESS_TOKEN_NOW + ACCESS_TOKEN_LIFETIME_SECONDS
 HEALTH_PATH = "/health"
-SESSION_PATHS = ("/me", "/admin", "/session-id", *ADMITTED_ADMIN_PATHS)
+SESSION_PATHS = ("/me", "/admin", *ADMITTED_ADMIN_PATHS)
 FOREIGN_PAGE = {
     "origin": "https://evil.example.test",
     "sec-fetch-site": "cross-site",
