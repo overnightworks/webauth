@@ -47,7 +47,7 @@ with `UsernameTakenError`. Store-controlled username uniqueness is proven by
 `test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written`
 in [test_oidc_login_admission.py](../tests/test_oidc_login_admission.py). The absence of a local
 active-user policy is visible in `UserRecord` and `SubjectUserStore` in
-[ports.py](../src/webauth/ports.py), `admit_identity` in
+[ports.py](../src/webauth/ports.py), the admission steps in
 [oidc_login.py](../src/webauth/oidc_login.py) and `admit_session` in
 [dependencies.py](../src/webauth/dependencies.py).
 
@@ -166,20 +166,21 @@ added the enforcing gate. Its page, API and public-path proofs are
 
 - **A page without a session** sends the browser straight to the app's start
   route, with `next` naming the page, so the person lands there after signing
-  in. The host passes `next` to `start_login` as `return_to`, and
-  `finish_login` hands back the same-origin path or `None`. An API call without a session gets
+  in. The start route reads `next` as the path to return to, and the callback
+  sends the browser to it when it is a same-origin path of the app, otherwise to the
+  app root. An API call without a session gets
   401, and the app's UI then navigates to its start route. See
-  [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes)
-  and, for the rule `return_to` must pass,
+  [The start and callback routes, and the host's logout route](#the-start-and-callback-routes-and-the-hosts-logout-route)
+  and, for the rule the return path must pass,
   [The return path](ARCHITECTURE.md#the-return-path). For a
   server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
   [Reading the session](ARCHITECTURE.md#reading-the-session).
   Keeping the deep link follows [#281](https://github.com/overnightworks/webauth/issues/281),
   operator ruling 19.10.2026, qualified by
   [#304](https://github.com/overnightworks/webauth/issues/304) on 20.10.2026:
-  only request-address construction may prepend `root_path`; `start_login`
-  never prepends it to an explicit `return_to`. Proofs:
-  `test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_default_page`
+  only request-address construction may prepend `root_path`; the start route
+  never prepends it to an explicit `next`. Proofs:
+  `test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_app_root`
   in [test_oidc_login_callback.py](../tests/test_oidc_login_callback.py) and
   `test_only_a_path_of_this_app_is_a_return_path` in
   [test_paths.py](../tests/test_paths.py). `deep_link_survives_the_login` in
@@ -214,8 +215,11 @@ added the enforcing gate. Its page, API and public-path proofs are
   setup errors, not missing rights. That setup-error page choice is the operator
   ruling of 20.10.2026, recorded in
   [c1318d7](https://github.com/overnightworks/webauth/commit/c1318d768afa16148d680e11b10b4359ebff3012).
-  Both types are returned by `finish_login`, see
-  [The host's start, callback and logout routes](#the-hosts-start-callback-and-logout-routes).
+  Both types reach the host's `refused` hook inside a `SignInRefusal`, whose `page` is
+  this mapping; see
+  [The start and callback routes, and the host's logout route](#the-start-and-callback-routes-and-the-hosts-logout-route).
+  `test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise` in
+  [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
   A refusal carries no identity (`AdmissionRefusal` in
   [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
   [oidc.py](../src/webauth/oidc.py)), so the page shows no name. A
@@ -281,26 +285,44 @@ is its implementation, not a separate ruling.
   routes. A sub-app mounted below a gated path keeps its own CSRF and session
   gate, and its `bearer_caller` raises. WebSocket scopes are not gated.
 
-## The host's start, callback and logout routes
+## The start and callback routes, and the host's logout route
 
-The host serves three routes over its one `OidcRelyingParty`: start
-(`start_login`), callback (`finish_login`, then `open_session`) and logout
-(`log_out`), whose answer the route returns as it is; a
-single-page app logs out by a top-level form POST to that route. `webauth.oidc_login` carries the pending login in a signed cookie of
-its own, one per login, so the host keeps no server-side store and
-`WebAuthConfig` knows nothing of OpenID Connect. Each function's docstring holds
-its contract, the `webauth.oidc_login` and `webauth.cookies` module docstrings
-hold the login and its cookies, and `build_app` in
-[`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py) is the worked set of routes,
-type-checked and run against a real issuer.
+`install_sign_in_routes` registers the start and callback routes on the host's
+`FastAPI` app over its one `OidcRelyingParty` (read per request), and `SignInPaths`
+derives the policies for exactly those two paths: `public_rules` for the session gate,
+`browser_paths` for the sign-in rate budget, `cache_control_rule` (`no-store`) and
+`login_redirect`, so the host lists the paths once. It is browser-absolute, so
+`login_redirect` is right for an app at its origin's root; a host below a `root_path`
+builds its own `LoginRedirect`. The host serves the logout route with `log_out`, whose
+answer it returns as it is; a single-page app logs out by a top-level form POST to that
+route. `webauth.cookies` carries the pending login in a signed cookie of its own, one
+per login, so the library keeps no server-side store and `WebAuthConfig` knows nothing
+of OpenID Connect. The `install_sign_in_routes` docstring holds the routes' contract, the
+`webauth.oidc_login` and `webauth.cookies` module docstrings hold the login and its
+cookies, and `build_app` in [`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py)
+is the worked host, type-checked and run against a real issuer.
 
-The library never commits: the host commits an admitted login before it issues
-the cookies. A pending login is single-use because its cookie is cleared and the
-issuer accepts a code once; webauth keeps no replay store. The `finish_login`
-docstring holds the callback's outcomes and the host's duties.
+The host supplies a `SignInTransaction` (`webauth.ports`) and a `refused` hook. The
+callback enters the transaction once, only after the issuer's code exchange and the pure
+admission decision, so no issuer call runs inside it and a refusal before admission
+enters none. It writes the account and the session through `SignInStores` and issues
+the session cookie only after the transaction's exit returned. The library never
+commits: a successful exit makes the writes durable. An exception in the block escapes
+through the exit, and what is rolled back is the host's choice: a host whose stores apply
+each call keeps the account created, the sessions ended by replacement or pruning and the
+events recorded before the failure, and the next sign-in opens a new session and
+restores nothing; a rolling-back host keeps none of them.
 
-`open_session` requires the host's explicit `keeps_id_token` choice, with no
-default. A host that never logs out passes `False`: its session row keeps no
+The hook receives a `SignInRefusal` (the cause and its `page`) for every refusal and
+returns any `Response`. Every callback answer sent after the pending cookie was selected
+carries its deletion, also when the hook raises or the answer fails before it starts: the
+route then sends a plain 500 with the deletion and raises the failure. Other tabs'
+pending cookies stay. A pending login is single-use because its cookie is cleared and the
+issuer accepts a code once; webauth keeps no replay store.
+
+`install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
+default, and validates `max_sessions` before it registers a route. A host that never logs
+out passes `False`: its session row keeps no
 ID token, while refresh-token storage is unchanged. With `True`, the row keeps
 the login's ID token for logout. Renewal and refresh-token rotation preserve
 that choice and the original token. This is [#418 R1/R2](https://github.com/overnightworks/webauth/issues/418)

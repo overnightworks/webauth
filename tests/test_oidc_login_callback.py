@@ -79,7 +79,8 @@ def test_a_start_sets_one_lax_http_only_pending_cookie_and_answers_the_issuer_ur
 
     response = host.client.get("/login/oidc")
 
-    url = response.json()["authorization_url"]
+    url = response.headers["location"]
+    assert response.status_code == 303
     assert url.startswith(a_client_config().authorization_endpoint + "?")
     name = host.pending_cookie_name(urllib.parse.urlsplit(url).query)
     assert name.startswith(prefix)
@@ -101,7 +102,7 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
 
     configured = {"path=/", f"max-age={host.config.session_lifetime.absolute_max_age_seconds}",
                   f"samesite={host.config.cookie_samesite}", "secure"}
-    assert response.status_code == 200
+    assert (response.status_code, response.headers["location"]) == (303, "/")
     assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
     assert set(host.client.cookies) == {host.config.session_cookie_name}
     assert host.client.get("/me").json() == {"username": "lena"}
@@ -114,14 +115,9 @@ def test_an_admitted_callback_stores_the_refresh_token_and_nothing_of_the_access
 
     record = host.sessions.stored_record
     assert stored_refresh_tokens(host) == [ISSUED_REFRESH_TOKEN]
-    [admitted] = host.admitted_logins
-    visible = (
-        repr(record) + repr(host.sessions.list_active()) + repr(admitted)
-        + str(response.headers)
-    )
+    visible = repr(record) + repr(host.sessions.list_active()) + str(response.headers)
     assert ISSUED_ACCESS_TOKEN_CANARY not in visible
     assert ISSUED_REFRESH_TOKEN not in visible
-    assert_holds_only_the_refresh_token(admitted)
     assert_holds_only_the_refresh_token(record)
 
 
@@ -141,7 +137,7 @@ def test_an_admitted_callback_stores_what_the_code_answer_issued(
 
     response = host.callback(host.sign_in_at_issuer())
 
-    assert response.status_code == 200
+    assert response.status_code == 303
     assert stored_refresh_tokens(host) == stored
     assert host.sessions.count_active() == 1
 
@@ -193,10 +189,8 @@ def test_the_callback_hands_the_browser_no_id_token_and_each_login_replaces_the_
     response = host.callback(host.sign_in_at_issuer())
 
     first, second = host.issued_id_tokens
-    [login] = host.admitted_logins[1:]
     shown = " ".join([
         repr(host.sessions.list_active()),
-        repr(login),
         *(value for _, value in response.headers.multi_items()),
     ])
     assert first != second
@@ -303,7 +297,7 @@ def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
 
     response = host.callback(host.sign_in_at_issuer())
 
-    assert (response.status_code, response.json()) == (200, {"username": "lena.legacy"})
+    assert response.status_code == 303
     assert host.sessions.count_active() == 1
     assert host.client.get("/me").json() == {"username": "lena.legacy"}
     assert host.client.get("/admin").status_code == 403
@@ -317,7 +311,7 @@ def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
 
     response = host.callback(host.sign_in_at_issuer())
 
-    assert response.status_code == 200
+    assert response.status_code == 303
     assert host.client.get("/admin").json() == {"username": "lena.legacy"}
     assert host.audit.account_events == []
 
@@ -346,25 +340,24 @@ def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
 
 @pytest.mark.parametrize(("asked_for", "returned"), [
     pytest.param("/albums/42", "/albums/42", id="a deep link"),
-    pytest.param("//evil.example", None, id="another host"),
+    pytest.param("//evil.example", "/", id="another host"),
 ])
-def test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_default_page(
-    asked_for: str, returned: str | None,
+def test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_app_root(
+    asked_for: str, returned: str,
 ) -> None:
     host = an_oidc_host()
 
     response = host.callback(host.sign_in_at_issuer(return_to=asked_for))
 
-    assert response.status_code == 200
-    assert host.returned_to == [returned]
+    assert (response.status_code, response.headers["location"]) == (303, returned)
 
 
-def test_a_login_started_without_a_return_path_lands_on_the_default_page() -> None:
+def test_a_login_started_without_a_return_path_lands_on_the_app_root() -> None:
     host = an_oidc_host()
 
-    host.callback(host.sign_in_at_issuer())
+    response = host.callback(host.sign_in_at_issuer())
 
-    assert host.returned_to == [None]
+    assert response.headers["location"] == "/"
 
 
 @pytest.mark.parametrize("signed", ["//evil.example", "/albums/42#top"])
@@ -382,8 +375,7 @@ def test_a_return_path_signed_by_another_build_is_judged_again_at_the_callback(
 
     response = host.callback(query, cookie=f"{name}={resigned}")
 
-    assert response.status_code == 200
-    assert host.returned_to == [None]
+    assert (response.status_code, response.headers["location"]) == (303, "/")
 
 
 def test_the_return_path_of_a_refused_login_is_not_handed_out() -> None:
@@ -391,7 +383,7 @@ def test_the_return_path_of_a_refused_login_is_not_handed_out() -> None:
 
     response = host.callback(host.sign_in_at_issuer(return_to="/albums/42"))
 
-    assert (response.status_code, host.returned_to) == (403, [])
+    assert (response.status_code, "location" in response.headers) == (403, False)
 
 
 def test_an_admitted_callback_consumes_its_cookie_and_keeps_the_other_tabs() -> None:
@@ -401,7 +393,7 @@ def test_an_admitted_callback_consumes_its_cookie_and_keeps_the_other_tabs() -> 
 
     response = host.callback(query)
 
-    assert response.json() == {"username": "lena"}
+    assert response.status_code == 303
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
 
@@ -501,6 +493,7 @@ def test_an_invalid_pending_cookie_is_refused_before_any_token_request_and_clear
 
     assert (response.status_code, response.json()) == (403, {"refusal": refusal})
     assert host.issuer.requests == []
+    assert host.transaction.entries == 0
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.accounts.list() == []
 
@@ -525,6 +518,7 @@ def test_a_callback_without_one_state_is_refused_and_selects_no_cookie(
 
     assert (response.status_code, response.json()) == (403, {"refusal": refusal})
     assert host.issuer.requests == []
+    assert host.transaction.entries == 0
     assert set_cookies(response) == {}
     assert host.pending_cookie_names() == {host.pending_cookie_name(query)}
 
@@ -541,6 +535,7 @@ def test_a_pending_login_is_single_use() -> None:
     assert replayed_by_the_browser.json() == {"refusal": "state-mismatch"}
     assert replayed_with_a_kept_cookie.json() == {"refusal": "token-request-refused"}
     assert len(host.issuer.requests) == 2
+    assert host.transaction.entries == 1
     assert host.sessions.count_active() == 1
 
 
@@ -553,8 +548,9 @@ def test_a_concurrent_replay_of_one_callback_signs_in_exactly_once() -> None:
     with ThreadPoolExecutor(max_workers=2) as pool:
         responses = list(pool.map(lambda _: host.callback(query, cookie=cookie), range(2)))
 
-    assert sorted(response.status_code for response in responses) == [200, 403]
-    assert {"refusal": "token-request-refused"} in [response.json() for response in responses]
+    assert sorted(response.status_code for response in responses) == [303, 403]
+    [refused] = [response for response in responses if response.status_code == 403]
+    assert refused.json() == {"refusal": "token-request-refused"}
     assert host.sessions.count_active() == 1
     assert len(host.accounts.list()) == 1
 
@@ -570,8 +566,7 @@ def test_two_tabs_both_sign_in_and_the_later_session_replaces_the_earlier(
 
     first, second = (host.callback(query) for query in tabs)
 
-    assert first.json() == {"username": "lena"}
-    assert second.json() == {"username": "lena"}
+    assert (first.status_code, second.status_code) == (303, 303)
     assert host.sessions.count_active() == 1
     assert host.pending_cookie_names() == set()
 
@@ -629,6 +624,6 @@ def test_a_start_at_the_cap_leaves_a_prefixed_cookie_of_another_shape_alone() ->
     response = host.client.get("/login/oidc")
 
     newest = host.pending_cookie_name(
-        urllib.parse.urlsplit(response.json()["authorization_url"]).query
+        urllib.parse.urlsplit(response.headers["location"]).query
     )
     assert host.pending_cookie_names() == genuine | {stranger, newest}

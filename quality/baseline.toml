@@ -17,11 +17,8 @@
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63
 
-[function_lines."src/webauth/oidc_login.py"]
-"finish_login" = 68
-
 [function_lines."tests/e2e/oidc/host_app.py"]
-"build_app" = 162
+"build_app" = 160
 
 [function_lines."tests/support/oidc_arrangement.py"]
 "loopback_https_server" = 115

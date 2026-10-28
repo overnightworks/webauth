@@ -28,8 +28,8 @@ import ssl
 import sys
 import threading
 import time
-from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,9 +44,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig, install_web_auth_config
-from webauth.cookies import issue_session_cookies
 from webauth.dependencies import (
-    LoginRedirect,
     current_user_dependency,
     session_id_from_request,
 )
@@ -67,16 +65,12 @@ from webauth.oidc import (
 )
 from webauth.oidc_login import (
     AdmissionConfig,
-    AdmissionRefusal,
     BackchannelLogoutResult,
     EverySubject,
     NoAdmins,
-    finish_login,
     fresh_access_token,
     log_out,
-    open_session,
     receive_backchannel_logout,
-    start_login,
 )
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
@@ -92,13 +86,15 @@ from webauth.policies import (
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
-from webauth.ports import AuthenticatedUser, BearerCaller, SessionRecordStore
+from webauth.ports import AuthenticatedUser, BearerCaller, SessionRecordStore, SignInStores
+from webauth.sign_in_routes import SignInPaths, SignInRefusal, install_sign_in_routes
 
 logger = logging.getLogger(__name__)
 
 LOOPBACK = "127.0.0.1"
 LOGIN_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
+SIGN_IN_PATHS = SignInPaths(start=LOGIN_PATH, callback=CALLBACK_PATH)
 LOGOUT_PATH = "/logout"
 LOGOUT_BUTTON_LABEL = "Log out"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
@@ -344,7 +340,10 @@ def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]
         app,
         security_headers=SecurityHeadersPolicy(
             default_content_security_policy(),
-            cache_control_rules=(CacheControlRule(paths=backchannel_path, value="no-store"),),
+            cache_control_rules=(
+                SIGN_IN_PATHS.cache_control_rule,
+                CacheControlRule(paths=backchannel_path, value="no-store"),
+            ),
         ),
         body_size=BodySizePolicy(
             default_max_bytes=DEFAULT_MAX_BODY_BYTES,
@@ -375,9 +374,10 @@ def _bearer_policies(settings: HostSettings, world: dict[str, World]) -> dict[st
         "session_gate": SessionGate(
             session_transaction=counted_session_transaction,
             login_redirect=None,
-            public=(PublicRule(PathRules(exact=frozenset(
-                {LOGIN_PATH, CALLBACK_PATH, BACKCHANNEL_LOGOUT_PATH}
-            ))),),
+            public=(
+                *SIGN_IN_PATHS.public_rules,
+                PublicRule(PathRules(exact=frozenset({BACKCHANNEL_LOGOUT_PATH}))),
+            ),
             optional=PathRules(exact=frozenset({"/"})),
         ),
         "bearer_gate": BearerGate(
@@ -407,6 +407,14 @@ def _admission_of(settings: HostSettings) -> AdmissionConfig:
     )
 
 
+def _admitted(answer: Response, config: WebAuthConfig) -> bool:
+    """Whether the callback's answer redirects with a session cookie: the login was admitted."""
+    session_cookie = f"{config.session_cookie_name}="
+    return answer.status_code == 303 and any(
+        header.startswith(session_cookie) for header in answer.headers.getlist("set-cookie")
+    )
+
+
 def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     arrangement = _arrangement()
     config: WebAuthConfig = arrangement.a_web_auth_config(
@@ -429,7 +437,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     redirecting_dependencies = current_user_dependency(
         session_store=lambda: world["world"].sessions,
         on_authenticated=lambda user: None,
-        login_redirect=LoginRedirect(path=LOGIN_PATH, redirect_query_param="next"),
+        login_redirect=SIGN_IN_PATHS.login_redirect,
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     install_web_auth_config(app, config)
@@ -437,9 +445,15 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
 
     @app.middleware("http")
     async def count_callbacks(request: Request, call_next: Any) -> Response:
-        if request.url.path == CALLBACK_PATH:
-            world["world"].callbacks_received += 1
-        return await call_next(request)
+        if request.url.path != CALLBACK_PATH:
+            return await call_next(request)
+        current = world["world"]
+        current.callbacks_received += 1
+        answer = await call_next(request)
+        if _admitted(answer, config):
+            current.logins_admitted += 1
+            await anyio.to_thread.run_sync(call_userinfo, settings, current)
+        return answer
 
     def signed_in_user(request: Request) -> AuthenticatedUser | None:
         try:
@@ -464,41 +478,33 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     ) -> str:
         return PAGE.substitute(headline=f"Album {html.escape(album_id)}", body=LOGOUT_BUTTON)
 
-    @app.get(LOGIN_PATH)
-    def start(request: Request, next: str | None = None) -> Response:  # noqa: A002
-        response = Response(status_code=303)
-        response.headers["location"] = start_login(
-            relying_party_of(request), request, response, config, return_to=next
-        )
-        return response
+    @contextmanager
+    def sign_in_transaction() -> Iterator[SignInStores]:
+        current = world["world"]  # `/reset` replaces the world, so it is read at call time
+        with current.lock.hold(), current.sessions.transaction():
+            yield SignInStores(current.accounts, current.sessions, current.audit)
 
-    @app.get(CALLBACK_PATH, response_class=HTMLResponse)
-    def callback(request: Request, response: Response) -> str:
+    def refused(request: Request, refusal: SignInRefusal) -> Response:
         current = world["world"]
-        outcome = finish_login(
-            relying_party_of(request), request, response, config,
-            admission=admission, accounts=current.accounts, lock=current.lock,
-            audit=current.audit,
+        cause = refusal.cause
+        reason = cause.reason.value if isinstance(cause, OidcRefusal) else cause.value
+        current.last_refusal = reason
+        rejection = cause.token_rejection if isinstance(cause, OidcRefusal) else None
+        current.last_token_rejection = rejection.value if rejection else None
+        return HTMLResponse(
+            PAGE.substitute(headline="Sign-in refused", body=html.escape(reason)), status_code=403
         )
-        if isinstance(outcome, (OidcRefusal, AdmissionRefusal)):
-            reason = outcome.reason.value if isinstance(outcome, OidcRefusal) else outcome.value
-            current.last_refusal = reason
-            rejection = outcome.token_rejection if isinstance(outcome, OidcRefusal) else None
-            current.last_token_rejection = rejection.value if rejection else None
-            response.status_code = 403
-            return PAGE.substitute(headline="Sign-in refused", body=html.escape(reason))
-        current.logins_admitted += 1
-        call_userinfo(settings, current)
-        with current.sessions.transaction():
-            session = open_session(
-                request, config, outcome,
-                sessions=current.sessions, lock=current.lock,
-                max_sessions=None, keeps_id_token=True,
-            )
-        issue_session_cookies(response, session.id, config)
-        response.status_code = 303
-        response.headers["location"] = outcome.return_to or "/"
-        return ""
+
+    install_sign_in_routes(
+        app,
+        paths=SIGN_IN_PATHS,
+        relying_party=relying_party_of,
+        admission=admission,
+        transaction=sign_in_transaction,
+        refused=refused,
+        keeps_id_token=True,
+        max_sessions=None,
+    )
 
     @app.get("/me")
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:

@@ -55,7 +55,7 @@ the app and suite hosts are same-site.
 The suite finishes an accepting module only on a UserInfo request, which
 webauth never sends. The host therefore keeps the access token of the token
 answer in memory and makes one UserInfo request after, and only after,
-``finish_login`` admitted the login. ``/reset`` builds the relying parties
+the callback route admitted the login. ``/reset`` builds the relying parties
 again, as a host restarted per module would, because the suite generates new
 keys per module.
 

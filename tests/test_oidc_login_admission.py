@@ -1,7 +1,7 @@
 """Admitting an identity the bound issuer vouched for: groups, roles, accounts.
 
-These tests drive `admit_identity` and `app_role` on their own: an identity the
-bound issuer vouched for becomes, or reuses, an account.
+These tests drive the callback's admission steps and `app_role` on their own: an
+identity the bound issuer vouched for is decided, then becomes or reuses an account.
 """
 
 from __future__ import annotations
@@ -42,7 +42,9 @@ from webauth.oidc_login import (
     AppRole,
     EverySubject,
     NoAdmins,
-    admit_identity,
+    _admit_account,
+    _decide_admission,
+    _UsernameTakenSignal,
     app_role,
 )
 from webauth.ports import (
@@ -73,14 +75,11 @@ class Host:
     def admit(
         self, identity: OidcIdentity, admission: AdmissionConfig = ADMISSION,
     ) -> UserRecord | AdmissionRefusal:
-        return admit_identity(
-            identity,
-            admission=admission,
-            accounts=self.accounts,
-            lock=self.lock,
-            audit=self.audit,
-            config=a_web_auth_config(),
-        )
+        decided = _decide_admission(identity, admission=admission, config=a_web_auth_config())
+        if isinstance(decided, AdmissionRefusal):
+            return decided
+        with self.lock.hold():
+            return _admit_account(decided, accounts=self.accounts, audit=self.audit)
 
 
 def admitted_account(host: Host, identity: OidcIdentity) -> UserRecord:
@@ -472,11 +471,6 @@ def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed(
         AdmissionRefusal.FOREIGN_ISSUER,
         id="another issuer's identity whose subject names a legacy admin",
     ),
-    pytest.param(
-        LENA, [FakeUser(id="user-7", username="lena")],
-        AdmissionRefusal.USERNAME_TAKEN,
-        id="a new subject whose username another account holds",
-    ),
 ])
 def test_a_refused_identity_changes_neither_the_store_nor_the_audit_log(
     identity: OidcIdentity, stored: list[FakeUser], refusal: AdmissionRefusal,
@@ -492,7 +486,8 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
     stored = [FakeUser(id="user-7", username="Lena")]
     host = a_host(*deepcopy(stored), store=UsersWithCaseInsensitiveUsernames)
 
-    assert host.admit(LENA) is AdmissionRefusal.USERNAME_TAKEN
+    with pytest.raises(_UsernameTakenSignal):
+        host.admit(LENA)
     assert host.accounts.list() == stored
     assert host.audit.account_events == []
 

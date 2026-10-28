@@ -1,15 +1,13 @@
-"""Signing a person in through an OpenID Connect issuer, from the host's routes.
+"""The steps of signing a person in, and the issuer's logout, behind the host's routes.
 
-``start_login`` answers the URL the host's start route sends the browser to,
-and hands the browser the pending login in a signed cookie of its own, one
-per login, so two tabs never overwrite each other. ``finish_login`` takes the
-callback the browser brings back, consumes exactly the cookie its state
-names, and answers the account to open a session for and the path to return to,
-or why there is none.
-The cookie is cleared on every outcome; together with the issuer's one-time
-code, that makes a pending login single-use. There is no server-side store,
-so this is not a replay store: a copy of the cookie taken before the callback
-is stopped by the issuer refusing the spent code, not by webauth.
+``webauth.sign_in_routes`` serves the start and callback routes over these
+private steps. The start step hands the browser the pending login in a signed
+cookie of its own, one per login, so two tabs never overwrite each other. The
+callback consumes exactly the cookie its state names and clears it on every
+outcome; together with the issuer's one-time code, that makes a pending login
+single-use. There is no server-side store, so this is not a replay store: a copy
+of the cookie taken before the callback is stopped by the issuer refusing the
+spent code, not by webauth.
 
 The host's store is bound to one issuer — the ``issuer`` of its
 ``OidcClientConfig`` — and an account it provisions has the issuer's subject
@@ -17,8 +15,8 @@ as its ``id``. Moving to another issuer is therefore a migration of the
 host's accounts, never a configuration change. This module builds on
 ``webauth.oidc``.
 
-Admission holds the host's write lock and never commits: the host commits or
-rolls back, and a refusal writes nothing. An ``AdmissionConfig`` states who
+Admission runs inside the host's ``SignInTransaction`` and never commits: the host's
+exit commits or rolls back, and a refusal writes nothing. An ``AdmissionConfig`` states who
 may enter and who is admin: the bound issuer, the app's ``login_group``, a
 Keycloak group path such as ``/apps/notes``, and its ``admin_group``, a
 path below it such as ``/apps/notes/admin`` (or ``NoAdmins``). Only the
@@ -37,13 +35,13 @@ open; that lasts until the host's session lifetime runs out. The groups claim
 must carry full paths (Keycloak's group mapper with ``full.path`` on); a
 missing or empty claim means no membership.
 
-After ``finish_login`` admits an account, ``open_session`` under the host's lock
-ends the session the request's cookie names, prunes the account to a cap, creates
-its new one, holding the login's refresh token and, when the host logs out, its ID
-token (the browser keeps none), at the configured clock's instant, never committing
-and setting no cookie, so the host commits and then issues the cookies.
+After the callback admits an account, one ``SignInTransaction`` ends the session the
+request's cookie names, prunes the account to a cap, and creates its new session,
+holding the login's refresh token and, when the host logs out, its ID token (the browser
+keeps none), at the configured clock's instant, never committing and setting no cookie,
+so the route issues the cookies only after the transaction's exit returned.
 
-``log_out`` is the third route's whole sequence: it ends the session the
+``log_out`` is the logout route's whole sequence: it ends the session the
 request's cookie names, if any, and answers a page that posts the ID token hint
 to the issuer's end-session endpoint, clearing the session cookie. It makes no
 outbound call and never commits, so the person is signed out of the app even
@@ -85,8 +83,7 @@ from pydantic import SecretStr
 from webauth._end_session_page import end_session_page
 from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
-from webauth._validation import require_positive_whole_number
-from webauth.cookies import _begin_pending_login, _take_pending_login, clear_session_cookies
+from webauth.cookies import _begin_pending_login, clear_session_cookies
 from webauth.dependencies import (
     _is_admitted,
     _renewed_expiry,
@@ -97,7 +94,6 @@ from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcRefusal,
     OidcRefusalReason,
-    _callback_state,
 )
 from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
 
@@ -111,9 +107,9 @@ if TYPE_CHECKING:
     from webauth.oidc import OidcIdentity, OidcRelyingParty
     from webauth.ports import (
         AuditSink,
-        SessionRecord,
         SessionRecordStore,
         SessionTransaction,
+        SignInStores,
         SubjectUserStore,
         UserRecord,
         WriteLock,
@@ -124,19 +120,14 @@ __all__ = [
     "AdmissionRefusal",
     "AccessTokenRefusal",
     "AccessTokenRefusalReason",
-    "AdmittedLogin",
     "AppRole",
     "BackchannelLogoutResult",
     "EverySubject",
     "NoAdmins",
-    "admit_identity",
     "app_role",
-    "finish_login",
     "fresh_access_token",
     "log_out",
-    "open_session",
     "receive_backchannel_logout",
-    "start_login",
 ]
 
 
@@ -230,7 +221,7 @@ def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | Non
 
     It reads nothing but its arguments. It does not look at
     ``admission.bound_issuer``: the caller has checked that the groups come from
-    that issuer, as ``admit_identity`` does. The caller also validates the raw
+    that issuer, as the callback's admission does. The caller also validates the raw
     groups claim, refusing any shape but a list of strings as webauth's login
     does, and passes the normalized sequence of strings.
     """
@@ -251,19 +242,21 @@ class AdmissionRefusal(StrEnum):
     USERNAME_TAKEN = "username-taken"
 
 
+class _UsernameTakenSignal(Exception):  # noqa: N818  # a signal inside the transaction, not an error
+    """The store refused a new account's username. It leaves the transaction block as an
+    exception, so the host's exit rolls back as it does for any failure, and the callback
+    route answers it as ``AdmissionRefusal.USERNAME_TAKEN`` once the exit returned."""
+
+
 @dataclass(frozen=True)
-class AdmittedLogin:
-    """An admitted account, the path of this app to send the browser to (or ``None`` for the host's
-    default page), the refresh token the login's code exchange issued (``None`` when the issuer
-    gave none) and the login's ID token, which ``open_session`` stores when the host keeps it."""
+class _AdmittedLogin:
+    """An identity the bound issuer vouched for, admitted as ``role``."""
 
-    account: UserRecord
-    return_to: str | None
-    refresh_token: SecretStr | None
-    id_token: SecretStr
+    identity: OidcIdentity
+    role: str
 
 
-def start_login(
+def _start_login(
     relying_party: OidcRelyingParty,
     request: Request,
     response: Response,
@@ -272,14 +265,14 @@ def start_login(
     return_to: str | None,
 ) -> str:
     """Begin a login: set its pending-login cookie on ``response`` and return
-    the authorization URL the host redirects the browser to.
+    the authorization URL the start route redirects the browser to.
 
     ``return_to`` is the raw path and query as the app sees them, ``root_path``
-    included and not the percent-decoded ``request.url.path``, that
-    ``finish_login`` hands back after the login. It is kept only as a
+    included and not the percent-decoded ``request.url.path``, that the callback
+    hands back after the login. It is kept only as a
     same-origin path of this app, ASCII (other characters are percent-encoded)
     and at most 512 bytes once encoded; anything else is dropped and the login
-    still succeeds, landing on the host's default page. Dropped are a path a
+    still succeeds, landing on the app root. Dropped are a path a
     browser reads as another host (``//x``, ``/\\x``, a tab, CR or LF between
     the slashes), an absolute URL, a bare host, a control character, the empty
     string, a ``.`` or ``..`` segment (also as ``%2e``), a literal ``#`` and a
@@ -299,120 +292,42 @@ def start_login(
     return authorization.url
 
 
-def finish_login(
-    relying_party: OidcRelyingParty,
-    request: Request,
-    response: Response,
-    config: WebAuthConfig,
+def _write_sign_in(
+    stores: SignInStores,
+    admitted: _AdmittedLogin,
     *,
-    admission: AdmissionConfig,
-    accounts: SubjectUserStore,
-    lock: WriteLock,
-    audit: AuditSink,
-) -> AdmittedLogin | OidcRefusal | AdmissionRefusal:
-    """Complete the login the callback ``request`` returns from.
-
-    The callback's state selects exactly one pending-login cookie, which is
-    cleared on ``response`` whatever the outcome, so the host answers with
-    ``response`` on every outcome, refusals included; every other tab's
-    cookie stays. FastAPI copies an injected ``response``'s headers only when
-    the route returns a value that is not itself a ``Response``: a returned
-    ``JSONResponse`` is sent as is and a raised ``HTTPException`` gets a new
-    response, so neither would clear the cookie.
-
-    A callback names a usable state when it carries ``state`` exactly once,
-    non-empty and decodable. Every refusal below comes before any token
-    request. With a usable state, a malformed rest (a parameter named twice,
-    one that does not decode, or a pair strict query parsing refuses, such as a
-    trailing ``&`` or a name without ``=``) is ``MALFORMED_CALLBACK`` when that
-    state's cookie is genuine and ``STATE_MISMATCH`` otherwise. Without one,
-    the same malformed rest is ``MALFORMED_CALLBACK`` and anything else
-    ``STATE_MISMATCH``. A well-formed callback whose cookie is missing, forged,
-    oversized, of an unknown version, duplicated or of another login is
-    ``STATE_MISMATCH``.
-
-    On an admitted login, the host opens its session for ``account`` with
-    ``open_session``, commits, calls ``issue_session_cookies`` and sends the
-    browser to ``return_to``, the path judged again on its way back, or to its
-    default page when that is ``None``. The login's ID token is on the
-    ``AdmittedLogin`` for ``open_session`` to store if the host keeps it, not a cookie.
-    When the issuer is on another registrable domain than the app,
-    ``cookie_samesite`` must be ``"lax"``: with ``"strict"`` the browser
-    withholds the session cookie from the first page after the redirect and
-    that page is signed out.
-    """
-    callback_query = request.url.query
-    state = _callback_state(callback_query)
-    if isinstance(state, OidcRefusal):
-        return state
-    pending = _take_pending_login(request, response, state, config)
-    if pending is None:
-        return OidcRefusal(OidcRefusalReason.STATE_MISMATCH)
-    identity = relying_party.complete_login(pending, callback_query)
-    if isinstance(identity, OidcRefusal):
-        return identity
-    admitted = admit_identity(
-        identity,
-        admission=admission,
-        accounts=accounts,
-        lock=lock,
-        audit=audit,
-        config=config,
-    )
-    if isinstance(admitted, AdmissionRefusal):
-        return admitted
-    return AdmittedLogin(
-        account=admitted,
-        return_to=same_app_path(request, pending.return_to),
-        refresh_token=identity.refresh_token,
-        id_token=SecretStr(identity.id_token),
-    )
-
-
-def open_session(
-    request: Request,
     config: WebAuthConfig,
-    admitted: AdmittedLogin,
-    *,
-    sessions: SessionRecordStore,
-    lock: WriteLock,
+    replaced_session_id: str | None,
     max_sessions: int | None,
     keeps_id_token: bool,
-) -> SessionRecord:
-    """Open the new session of an ``admitted`` login, ending the one the request carries.
+) -> str:
+    """The writes of one sign-in, inside the host's ``SignInTransaction``: the account, then
+    the session. Answers the new session's id, copied before the exit.
 
-    Under one ``lock.hold()``, reads ``config.wall_clock`` once, the same whole-second instant the
-    session decider reads, and in this order: the session the request's cookie names is ended,
-    whoever it belongs to; when ``max_sessions`` is a number, the account's newest
-    ``max_sessions - 1`` sessions are kept and the rest ended, so neither the replaced session nor
-    the new one counts against the cap; the new session is created at that instant, expiring one
-    idle period later, and holds ``admitted.refresh_token`` and, when the required
-    ``keeps_id_token`` is true, ``admitted.id_token``. A host that never calls ``log_out`` passes
-    ``False``: the row holds ``None`` and ``log_out`` posts no hint. ``max_sessions=None`` states
-    that the host sets no cap; any other value must be a positive whole number, or ``ValueError`` is
-    raised before anything is written. A forged, oversized or duplicated cookie ends nothing.
-
-    Never commits, sets no cookie and records no audit event: the host commits,
-    then calls ``issue_session_cookies`` with the returned id. The host's
-    ``WriteLock`` must allow a second hold in the same request, one for
-    admission and one here.
+    The session is opened at the instant of one ``config.wall_clock`` reading, the same whole
+    second the session decider reads, in this order: the session the request's cookie names
+    (``replaced_session_id``) is ended, whoever it belongs to; when ``max_sessions`` is a number,
+    the account's newest ``max_sessions - 1`` sessions are kept and the rest ended, so neither
+    the replaced session nor the new one counts against the cap; the new session is created,
+    expiring one idle period later, and holds the login's refresh token and, when
+    ``keeps_id_token`` is true, its ID token. Never commits, takes no lock and sets no cookie.
+    Raises ``_UsernameTakenSignal`` before any session is touched.
     """
+    account = _admit_account(admitted, accounts=stores.accounts, audit=stores.audit)
+    now = _whole_second_now(config)
+    if replaced_session_id is not None:
+        stores.sessions.delete(replaced_session_id)
     if max_sessions is not None:
-        require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
-    replaced_session_id = session_id_from_request(request, config)
-    with lock.hold():
-        now = _whole_second_now(config)
-        if replaced_session_id is not None:
-            sessions.delete(replaced_session_id)
-        if max_sessions is not None:
-            sessions.prune_overflow(admitted.account.id, max_sessions - 1)
-        return sessions.create(
-            admitted.account.id,
-            now=now,
-            expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
-            refresh_token=admitted.refresh_token,
-            id_token=admitted.id_token if keeps_id_token else None,
-        )
+        stores.sessions.prune_overflow(account.id, max_sessions - 1)
+    identity = admitted.identity
+    return stores.sessions.create(
+        account.id,
+        now=now,
+        expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
+        refresh_token=identity.refresh_token,
+        id_token=SecretStr(identity.id_token) if keeps_id_token else None,
+    ).id
+
 
 
 def log_out(
@@ -667,38 +582,48 @@ def _logout_token_of(form_body: bytes, content_type: str | None) -> str | None:
     return tokens[0] if len(tokens) == 1 and tokens[0] else None
 
 
-def admit_identity(
-    identity: OidcIdentity,
-    *,
-    admission: AdmissionConfig,
-    accounts: SubjectUserStore,
-    lock: WriteLock,
-    audit: AuditSink,
-    config: WebAuthConfig,
-) -> UserRecord | AdmissionRefusal:
-    """The account ``identity`` signs in as, created on its first visit.
+def _decide_admission(
+    identity: OidcIdentity, *, admission: AdmissionConfig, config: WebAuthConfig,
+) -> _AdmittedLogin | AdmissionRefusal:
+    """Whether ``identity`` may sign in, and as which role. Pure: it reads nothing but its
+    arguments and writes nothing.
 
-    A new subject gets an account with the issuer's ``preferred_username``, or
-    the subject when it suggests none or only whitespace, and ``USER_CREATED``
-    is recorded with no actor. A known subject keeps its account and username, whatever username the
-    issuer now suggests, but its role follows the groups: ``admin_role`` when
-    the identity is a member of ``admission.admin_group`` (or below it),
-    otherwise ``user_role``, whatever role the account stored and whatever
-    created it. A role that differs is written with ``SubjectUserStore.set_role``
-    and recorded as ``ROLE_CHANGED``; an equal role writes nothing.
-    ``SubjectUserStore.get`` must compare exactly. A host that migrates legacy
-    accounts makes sure that no legacy ``id`` can equal a subject of the bound
-    issuer.
+    The role is ``admin_role`` when the identity is a member of ``admission.admin_group``
+    (or below it), otherwise ``user_role``, whatever role a stored account holds. The
+    order of refusals is ``FOREIGN_ISSUER``, then ``NOT_A_MEMBER`` (the identity's groups
+    hold no path of ``admission.login_group``, or are missing or empty). Both write nothing and
+    look up no account.
 
     A groups claim that is not a list of strings never reaches this function:
     ``OidcRelyingParty.complete_login`` refuses it as ``INVALID_IDENTITY_CLAIM``.
     A missing claim is an empty list of groups.
+    """
+    if identity.issuer != admission.bound_issuer:
+        return AdmissionRefusal.FOREIGN_ISSUER
+    derived = app_role(identity.groups, admission)
+    if derived is None:
+        return AdmissionRefusal.NOT_A_MEMBER
+    return _AdmittedLogin(
+        identity, config.admin_role if derived is AppRole.ADMIN else config.user_role,
+    )
 
-    The order of refusals is ``FOREIGN_ISSUER``, then ``NOT_A_MEMBER`` (the
-    identity's groups hold no path of ``admission.login_group``, or are
-    missing or empty), then ``USERNAME_TAKEN`` when the store refuses a new
-    account's username. The first two write nothing and look up no account.
-    No username is looked up, so a store without a unique username admits a
+
+def _admit_account(
+    admitted: _AdmittedLogin, *, accounts: SubjectUserStore, audit: AuditSink,
+) -> UserRecord:
+    """The account ``admitted`` signs in as, created on its first visit.
+
+    A new subject gets an account with the issuer's ``preferred_username``, or
+    the subject when it suggests none or only whitespace, and ``USER_CREATED``
+    is recorded with no actor. A known subject keeps its account and username, whatever username the
+    issuer now suggests, but its role follows the groups: a role that differs is written with
+    ``SubjectUserStore.set_role`` and recorded as ``ROLE_CHANGED``; an equal role writes nothing.
+    ``SubjectUserStore.get`` must compare exactly. A host that migrates legacy
+    accounts makes sure that no legacy ``id`` can equal a subject of the bound
+    issuer.
+
+    ``_UsernameTakenSignal`` is raised when the store refuses a new account's username. No
+    username is looked up, so a store without a unique username admits a
     second subject whose ``preferred_username`` another account holds; disabling
     a person is done at the issuer. No local flag locks an account.
 
@@ -706,17 +631,10 @@ def admit_identity(
     a store with its own admins puts them into the admin group first, or they are
     demoted at their next login.
     """
-    if identity.issuer != admission.bound_issuer:
-        return AdmissionRefusal.FOREIGN_ISSUER
-    derived = app_role(identity.groups, admission)
-    if derived is None:
-        return AdmissionRefusal.NOT_A_MEMBER
-    role = config.admin_role if derived is AppRole.ADMIN else config.user_role
-    with lock.hold():
-        account = accounts.get(identity.subject)
-        if account is None:
-            return _provision(identity, role, accounts=accounts, audit=audit)
-        return _with_role(account, role, accounts=accounts, audit=audit)
+    account = accounts.get(admitted.identity.subject)
+    if account is None:
+        return _provision(admitted.identity, admitted.role, accounts=accounts, audit=audit)
+    return _with_role(account, admitted.role, accounts=accounts, audit=audit)
 
 
 def _with_role(
@@ -742,12 +660,12 @@ def _provision(
     *,
     accounts: SubjectUserStore,
     audit: AuditSink,
-) -> UserRecord | AdmissionRefusal:
+) -> UserRecord:
     username = _username_for(identity)
     try:
         account = accounts.create_for_subject(identity.subject, username, role)
-    except UsernameTakenError:
-        return AdmissionRefusal.USERNAME_TAKEN
+    except UsernameTakenError as refused:
+        raise _UsernameTakenSignal from refused
     audit.account_event(AccountEvent(
         kind=AccountEventKind.USER_CREATED,
         actor_id=None,

@@ -10,7 +10,7 @@ request also sends `Sec-Fetch-Site: same-origin` ([CSRF origin](ARCHITECTURE.md#
 When the client keeps the cookie's attributes and `cookie_secure` is on, use an
 `https` base URL.
 
-A test of the host's own start, callback and logout routes gives
+A test of a host that installs the sign-in routes and has its own logout route gives
 `OidcRelyingParty` its own `post_token_request` (a `TokenRequestPost`, from
 `webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from
 `webauth.jwt_verification`) instead of the HTTPS ones. The host owns that stub.

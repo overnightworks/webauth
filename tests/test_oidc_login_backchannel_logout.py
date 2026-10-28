@@ -157,7 +157,7 @@ def _logged_out_by_the_issuer(host: OidcHost, _session_ids: list[str]) -> None:
 
 
 def _logged_in_again_at_the_cap(host: OidcHost, _session_ids: list[str]) -> None:
-    assert host.callback(host.sign_in_at_issuer()).status_code == 200
+    assert host.callback(host.sign_in_at_issuer()).status_code == 303
 
 
 @pytest.mark.parametrize(("ending", "ended"), [
