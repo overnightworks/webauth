@@ -403,6 +403,31 @@ def _admitted(answer: Response, config: WebAuthConfig) -> bool:
     )
 
 
+def _install_counters(
+    app: FastAPI, settings: HostSettings, world: dict[str, World], config: WebAuthConfig
+) -> None:
+    @app.middleware("http")
+    async def count_callbacks_and_back_channel_answers(
+        request: Request, call_next: Any,
+    ) -> Response:
+        current = world["world"]
+        if request.url.path == BACKCHANNEL_LOGOUT_PATH:
+            answer = await call_next(request)
+            if answer.status_code == 200:
+                current.backchannel_accepted += 1
+            else:
+                current.backchannel_refused += 1
+            return answer
+        if request.url.path != CALLBACK_PATH:
+            return await call_next(request)
+        current.callbacks_received += 1
+        answer = await call_next(request)
+        if _admitted(answer, config):
+            current.logins_admitted += 1
+            await anyio.to_thread.run_sync(call_userinfo, settings, current)
+        return answer
+
+
 def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     arrangement = _arrangement()
     config: WebAuthConfig = arrangement.a_web_auth_config(
@@ -435,26 +460,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     install_web_auth_config(app, config)
     _install_stack(app, settings, world)
 
-    @app.middleware("http")
-    async def count_callbacks_and_back_channel_answers(
-        request: Request, call_next: Any,
-    ) -> Response:
-        current = world["world"]
-        if request.url.path == BACKCHANNEL_LOGOUT_PATH:
-            answer = await call_next(request)
-            if answer.status_code == 200:
-                current.backchannel_accepted += 1
-            else:
-                current.backchannel_refused += 1
-            return answer
-        if request.url.path != CALLBACK_PATH:
-            return await call_next(request)
-        current.callbacks_received += 1
-        answer = await call_next(request)
-        if _admitted(answer, config):
-            current.logins_admitted += 1
-            await anyio.to_thread.run_sync(call_userinfo, settings, current)
-        return answer
+    _install_counters(app, settings, world, config)
 
     def signed_in_user(request: Request) -> AuthenticatedUser | None:
         try:
