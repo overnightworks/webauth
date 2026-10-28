@@ -1,0 +1,7 @@
+claim_id = "af1c4aca132d4d75b39c183fa38d9195"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "126b0628965a98cdbedf2dcda7f97727d7f1f5af"
+branch = "fix/depends-comment"
+scope = ["pyproject.toml"]
+opened_commit = "58f2ecc446ff1e4cbf0e26349bd61bf4f2e074e4"
