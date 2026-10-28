@@ -125,7 +125,8 @@ class SignInPaths:
             _require_sign_in_path(name, path)
         paths = [path for _, path in self._named_paths]
         if len(set(paths)) != len(paths):
-            raise ValueError("SignInPaths.start, callback and logout must differ")
+            names = ", ".join(f"SignInPaths.{name}" for name, _ in self._named_paths)
+            raise ValueError(f"{names} must differ")
 
     @property
     def public_rules(self) -> tuple[PublicRule, ...]:
@@ -284,10 +285,13 @@ class _SignIn:
         return answer
 
     def logout(self, request: Request, button_label: Callable[[Request], str]) -> Response:
-        return _log_out(
-            self.relying_party(request), request, web_auth_config(request),
-            transaction=self.transaction, button_label=button_label(request),
-        )
+        try:
+            return _log_out(
+                self.relying_party(request), request, web_auth_config(request),
+                transaction=self.transaction, button_label=button_label(request),
+            )
+        except Exception as failure:
+            return _RouteAnswer(Response(), failure)
 
     def callback(self, request: Request) -> Response:
         config = web_auth_config(request)
@@ -299,8 +303,8 @@ class _SignIn:
         try:
             answer = self._answer(request, config, pending)
         except Exception as failure:
-            return _CallbackAnswer(carrier, failure)
-        return _CallbackAnswer(carrier, answer)
+            return _RouteAnswer(carrier, failure)
+        return _RouteAnswer(carrier, answer)
 
     def _answer(
         self, request: Request, config: WebAuthConfig, pending: PendingLogin | None,
@@ -344,10 +348,10 @@ def _app_root(request: Request) -> str:
     return request.scope.get("root_path", "").rstrip("/") + "/"
 
 
-class _CallbackAnswer(Response):
-    """The callback's answer: ``outcome`` carrying the ``Set-Cookie`` headers of ``carrier``.
+class _RouteAnswer(Response):
+    """A route's answer: ``outcome`` carrying the ``Set-Cookie`` headers of ``carrier``.
     A failure as the ``outcome``, or an answer that raises before it starts, is sent as a plain
-    500 with those headers and then raised."""
+    500 with those headers and then raised, so no framework exception handler answers instead."""
 
     def __init__(self, carrier: Response, outcome: Response | Exception) -> None:
         super().__init__()

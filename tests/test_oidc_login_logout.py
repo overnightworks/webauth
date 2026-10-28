@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fastapi import Request
+from fastapi import HTTPException, Request
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
@@ -364,19 +364,31 @@ def _a_label_that_raises(_request: Request) -> str:
     raise StoreDown
 
 
+def _a_label_that_raises_an_http_exception(_request: Request) -> str:
+    raise HTTPException(status_code=403)
+
+
+def _a_label(_request: Request) -> str:
+    return LOGOUT_BUTTON_LABEL
+
+
 def _a_relying_party_that_raises(_request: Request) -> OidcRelyingParty:
     raise StoreDown
 
 
-@pytest.mark.parametrize("failing_callable", ["label", "relying-party"])
+@pytest.mark.parametrize(
+    ("label", "raising_relying_party"),
+    [
+        pytest.param(_a_label_that_raises, False, id="label"),
+        pytest.param(_a_label_that_raises_an_http_exception, False, id="label-http-exception"),
+        pytest.param(_a_label, True, id="relying-party"),
+    ],
+)
 def test_a_label_or_relying_party_that_raises_answers_500_and_ends_nothing(
-    failing_callable: str,
+    label: Callable[[Request], str], raising_relying_party: bool,
 ) -> None:
-    host = after_signing_in(an_oidc_host(
-        logout_button_label=_a_label_that_raises if failing_callable == "label"
-        else (lambda _request: LOGOUT_BUTTON_LABEL),
-    ))
-    if failing_callable == "relying-party":
+    host = after_signing_in(an_oidc_host(logout_button_label=label))
+    if raising_relying_party:
         host.relying_party_of = _a_relying_party_that_raises
     entries_before = host.transaction.entries
 
