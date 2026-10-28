@@ -89,9 +89,6 @@ class TrustedProxies:
         address = _canonical_address(host)
         return address is not None and self.trusts(address)
 
-    def __bool__(self) -> bool:
-        return bool(self.networks)
-
 
 def _proxy_network(entry: str) -> _IpNetwork:
     if _ZONE_SEPARATOR in entry:
