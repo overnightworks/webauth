@@ -1,0 +1,8 @@
+claim_id = "7064647714b64c469c9e1dea00d4d7cb"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "23752be114dfef7c1c18fa733a107e5defbef382"
+branch = "claude/issue-495-test-input-guards"
+scope = ["tests/middleware/test_body_size.py", "tests/test_jwt_verification_key_set.py", "tests/test_oidc_client_config.py", "tests/test_paths.py"]
+opened_commit = "6c01baad6acde1a6c334b933aec82f4280ea1555"
+whole_reason = "Six one-case test additions in four modules, all test-only; splitting them costs four landings for one behaviour class."
