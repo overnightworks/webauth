@@ -123,7 +123,7 @@ Keycloak judges it. [Trust](#trust), items 4 and 8, owns exposure and copied-tok
 
 ### Back-channel logout
 
-`install_sign_in_routes` registers the issuer's route for `POST` only, over a private step. It reads the body outside every catch (a streamed oversized body is 413), verifies the form's one `logout_token` through `OidcRelyingParty.verify_logout_token`, and only then enters one `SignInTransaction`, where it deletes the subject's sessions and records one event. A refused form or token is an empty 400 that enters no transaction; 200 follows only a clean exit; any exception in the relying-party callable, the verification, a store, the audit sink or the exit is an empty 400 and is re-raised. The host's `backchannel_dependencies` run before the body is read and answer its own 404 by exception handler.
+`install_sign_in_routes` registers the issuer's route for `POST` only, over a private step. It reads the body outside every catch (a streamed oversized body is 413), verifies the form's one `logout_token` through `OidcRelyingParty.verify_logout_token`, and only then enters one `SignInTransaction`, where it deletes the subject's sessions and records one event when at least one session ended. A refused form or token is an empty 400 that enters no transaction; 200 follows only a clean exit; any exception in the relying-party callable, the verification, a store, the audit sink or the exit is an empty 400 and is re-raised. The host's `backchannel_dependencies` run before the body is read and answer its own 404 by exception handler.
 The host's transaction rolls back when the block raises, also when the audit sink fails after the deletion. Signature is the only control; restrict reachability to the issuer.
 
 ### The relying party

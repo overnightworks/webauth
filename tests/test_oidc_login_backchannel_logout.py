@@ -39,6 +39,7 @@ from tests.support.oidc_login_host import (
     after_signing_in,
     an_id_token,
     an_oidc_host,
+    failing,
     post_logout,
     stored_id_tokens,
     stored_refresh_tokens,
@@ -347,16 +348,12 @@ def test_a_path_next_to_the_back_channel_stays_csrf_protected(path: str) -> None
     assert (response.status_code, host.sessions.count_active()) == (403, 1)
 
 
-def fails_with_the_store_down(*_arguments: object, **_keywords: object) -> NoReturn:
-    raise ConnectionError("the store is down")
-
-
 def _the_deletion_fails(host: OidcHost, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(host.sessions, "delete_for_user", fails_with_the_store_down)
+    failing(host.sessions, "delete_for_user", monkeypatch)
 
 
 def _the_audit_sink_fails(host: OidcHost, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(host.audit, "account_event", fails_with_the_store_down)
+    failing(host.audit, "account_event", monkeypatch)
 
 
 def _the_exit_fails(host: OidcHost, _monkeypatch: pytest.MonkeyPatch) -> None:
@@ -487,13 +484,14 @@ def test_a_refusing_dependency_answers_the_hosts_empty_404_before_the_body_is_re
     assert (host.transaction.entries, sessions_of(host, SUBJECT)) == (0, 1)
 
 
+def _a_relying_party_that_raises(_request: Request) -> NoReturn:
+    raise StoreDown
+
+
 def test_a_relying_party_that_raises_answers_400_and_enters_no_transaction() -> None:
     host = a_host_with_sessions(subject_sessions=1)
 
-    def down(_request: Request) -> NoReturn:
-        raise StoreDown
-
-    host.relying_party_of = down
+    host.relying_party_of = _a_relying_party_that_raises
 
     response = post_logout_token(host, a_logout_token_of_the_issuer())
 
@@ -504,10 +502,7 @@ def test_a_relying_party_that_raises_answers_400_and_enters_no_transaction() -> 
 def test_a_back_channel_failure_is_raised_once_the_400_is_sent() -> None:
     host = a_host_with_sessions(subject_sessions=1)
 
-    def down(_request: Request) -> NoReturn:
-        raise StoreDown
-
-    host.relying_party_of = down
+    host.relying_party_of = _a_relying_party_that_raises
     app: FastAPI = host.client.app  # pyright: ignore[reportAssignmentType]
     scope = an_http_scope(
         app, BACKCHANNEL_LOGOUT_PATH, method="POST",

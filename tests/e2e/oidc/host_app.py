@@ -436,7 +436,9 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     _install_stack(app, settings, world)
 
     @app.middleware("http")
-    async def count_callbacks(request: Request, call_next: Any) -> Response:
+    async def count_callbacks_and_back_channel_answers(
+        request: Request, call_next: Any,
+    ) -> Response:
         current = world["world"]
         if request.url.path == BACKCHANNEL_LOGOUT_PATH:
             answer = await call_next(request)
