@@ -626,7 +626,7 @@ def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
         host.client.post(LOGOUT_PATH, headers={"content-type": SAME_ORIGIN_FORM["content-type"]}),
     ]
 
-    assert [answer.status_code for answer in answers[-1:]] == [403]
+    assert answers[-1].status_code == 403
     assert [answer.headers["cache-control"] for answer in answers] == ["no-store"] * 3
 
 

@@ -1,4 +1,5 @@
-"""The steps of signing a person in, and the issuer's logout, behind the host's routes.
+"""The steps of signing a person in, and the issuer's logout, behind the sign-in routes
+and the host's back-channel route.
 
 ``webauth.sign_in_routes`` serves the start, callback and logout routes over these
 private steps. The start step hands the browser the pending login in a signed
