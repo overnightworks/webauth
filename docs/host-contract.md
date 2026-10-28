@@ -338,8 +338,8 @@ before any route is registered. A host answers an empty 404 by raising its own e
 and mapping it with `app.add_exception_handler(ThatError, lambda request, error:
 Response(status_code=404))`: an `HTTPException(404)` answers JSON, and a `Response` returned
 from a dependency does not stop the route. The answers are, in order: 413 for a declared
-`Content-Length` over the bound, before any dependency, and for a streamed body over it; the
-dependencies' own; an empty 400 for a request that is not one URL-encoded form with exactly one
+`Content-Length` over the bound, before any dependency; the dependencies' own; 413 for a
+streamed body over the bound; an empty 400 for a request that is not one URL-encoded form with exactly one
 non-empty `logout_token`, or whose token does not verify, before any transaction is entered; an
 empty 200 after the clean exit of one `SignInTransaction` entry; and an empty 400, then the
 failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
