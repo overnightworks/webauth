@@ -36,6 +36,7 @@ _RETURN_PATH_CASES = [
     pytest.param("", "evil.example", None, id="a bare host"),
     pytest.param("", "/albums/\x01", None, id="a C0 control"),
     pytest.param("", "/albums/\x7f", None, id="DEL"),
+    pytest.param("", "/albums/\udcff", None, id="a lone surrogate from a non-UTF-8 raw path"),
     pytest.param("", "", None, id="the empty string"),
     pytest.param("", _A_LONG_PATH + "a", None, id="one byte over the cap"),
     pytest.param("", "/\u00fc" * 74, None, id="an encoded form over the cap"),

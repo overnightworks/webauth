@@ -52,7 +52,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import re
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
@@ -85,7 +84,6 @@ MAX_KEY_SET_KEYS = 10
 _MIN_RSA_KEY_BITS = 2048
 
 _ALGORITHM = "RS256"
-_BASE64URL = re.compile(r"[A-Za-z0-9_-]*")
 # Private RSA members, and `k`, a symmetric key: a key set publishing either
 # has leaked a secret and is not trusted for any of its keys.
 _SECRET_KEY_MEMBERS = frozenset({"d", "p", "q", "dp", "dq", "qi", "oth", "k"})
@@ -469,10 +467,9 @@ def _audiences(claims: Mapping[str, object]) -> tuple[str, ...]:
 
 
 def _base64url_decode(segment: str) -> bytes:
-    """Decodes unpadded base64url (a JWK's `n` and `e`), refusing what the
-    lenient stdlib decoder would silently skip or round off."""
-    if not _BASE64URL.fullmatch(segment):
-        raise ValueError("not base64url")
+    """Decodes unpadded base64url (a JWK's `n` and `e`). The canonical re-encode
+    check refuses what the lenient stdlib decoder would silently skip or round
+    off: foreign characters, padding and nonzero trailing bits."""
     decoded = base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
     if base64.urlsafe_b64encode(decoded).rstrip(b"=") != segment.encode():
         raise ValueError("not canonical base64url")

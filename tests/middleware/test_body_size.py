@@ -26,7 +26,11 @@ from tests.support.webauth_arrangement import (
 )
 from webauth import WebAuthError
 from webauth.config import install_web_auth_config
-from webauth.middleware import RequestBodyTooLarge, install_web_auth_middleware
+from webauth.middleware import (
+    BodySizeLimitMiddleware,
+    RequestBodyTooLarge,
+    install_web_auth_middleware,
+)
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
@@ -39,7 +43,7 @@ from webauth.policies import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from starlette.types import Message
+    from starlette.types import Message, Receive, Scope, Send
 
 pytestmark = pytest.mark.anyio
 
@@ -86,6 +90,10 @@ def a_body_limited_app(
 
         return StreamingResponse(stream())
 
+    @app.post("/sees-the-first-message")
+    async def sees_the_first_message(request: Request) -> dict[str, str]:
+        return {"type": (await request.receive())["type"]}
+
     @app.post("/reads")
     async def reads(request: Request) -> dict[str, int]:
         return {"length": len(await request.body())}
@@ -113,7 +121,7 @@ def a_body_limited_app(
 async def drive_post(
     path: str,
     spec_version: str,
-    body_chunks: tuple[bytes, ...],
+    body_chunks: tuple[bytes, ...] | None,
     start_send: StartSend = StartSend.PLAIN,
     *,
     app: FastAPI | None = None,
@@ -268,3 +276,52 @@ async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_th
     assert [start["status"] for start in starts(sent)] == [200]
     assert not completed(sent)
     assert isinstance(raised, RequestBodyTooLarge)
+
+
+@pytest.mark.parametrize(
+    ("chunks", "status", "answer"),
+    [
+        pytest.param((b"x" * 60,), 200, b'{"length":60}', id="under-the-limit-is-read-whole"),
+        pytest.param(ONE_CHUNK_OVER_THE_LIMIT, 413, TOO_LARGE_BODY, id="over-the-limit-is-refused"),
+    ],
+)
+async def test_a_content_length_that_is_not_a_number_counts_as_undeclared_and_the_body_is_counted_as_read(  # noqa: E501
+    chunks: tuple[bytes, ...], status: int, answer: bytes
+) -> None:
+    headers = SAME_ORIGIN + ((b"content-length", b"abc"),)
+
+    sent, raised = await drive_post(
+        "/reads", SPEC_WITHOUT_CONCURRENT_READER, chunks, headers=headers
+    )
+
+    (start,) = starts(sent)
+    assert start["status"] == status
+    assert body_of(sent) == answer
+    assert raised is None
+
+
+async def test_a_disconnect_passes_uncounted_and_the_route_sees_it() -> None:
+    sent, raised = await drive_post(
+        "/sees-the-first-message", SPEC_WITHOUT_CONCURRENT_READER, None
+    )
+
+    (start,) = starts(sent)
+    assert start["status"] == 200
+    assert body_of(sent) == b'{"type":"http.disconnect"}'
+    assert raised is None
+
+
+@pytest.mark.parametrize("scope_type", ["websocket", "lifespan"])
+async def test_a_scope_that_is_not_http_reaches_the_app_untouched(scope_type: str) -> None:
+    received_scopes: list[Scope] = []
+
+    async def recording_app(scope: Scope, receive: Receive, send: Send) -> None:
+        received_scopes.append(scope)
+
+    scope: Scope = {"type": scope_type}
+    middleware = BodySizeLimitMiddleware(recording_app, BodySizePolicy(default_max_bytes=LIMIT))
+
+    _, raised = await drive(middleware, scope)
+
+    assert raised is None
+    assert received_scopes == [{"type": scope_type}]
