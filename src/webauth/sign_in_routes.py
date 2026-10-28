@@ -29,7 +29,7 @@ runs on mutating methods alone, so the host never lists the path in
 the route. The route needs no ``current_user`` dependency, so a request without a
 session still reaches the issuer. It enters one ``SignInTransaction``, only when the
 request's cookie names a session, and never commits. A failure in the route, in the
-transaction or in the host's callables answers the middleware's plain 500: no page is
+transaction or in the host's callables answers the route's plain 500: no page is
 sent and no cookie is cleared. Under a host whose transaction rolls back, the session
 stands and a retry ends it with its hint; under per-call persistence or an uncertain
 commit, the row and its ID token may already be gone, and a retry still reaches the
