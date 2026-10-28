@@ -278,16 +278,25 @@ async def test_a_response_started_before_the_body_overflowed_is_cut_off_under_th
     assert isinstance(raised, RequestBodyTooLarge)
 
 
-async def test_a_content_length_that_is_not_a_number_counts_as_undeclared_and_the_body_is_counted_as_read() -> None:  # noqa: E501
+@pytest.mark.parametrize(
+    ("chunks", "status", "answer"),
+    [
+        pytest.param((b"x" * 60,), 200, b'{"length":60}', id="under-the-limit-is-read-whole"),
+        pytest.param(ONE_CHUNK_OVER_THE_LIMIT, 413, TOO_LARGE_BODY, id="over-the-limit-is-refused"),
+    ],
+)
+async def test_a_content_length_that_is_not_a_number_counts_as_undeclared_and_the_body_is_counted_as_read(  # noqa: E501
+    chunks: tuple[bytes, ...], status: int, answer: bytes
+) -> None:
     headers = SAME_ORIGIN + ((b"content-length", b"abc"),)
 
     sent, raised = await drive_post(
-        "/reads", SPEC_WITHOUT_CONCURRENT_READER, ONE_CHUNK_OVER_THE_LIMIT, headers=headers
+        "/reads", SPEC_WITHOUT_CONCURRENT_READER, chunks, headers=headers
     )
 
     (start,) = starts(sent)
-    assert start["status"] == 413
-    assert body_of(sent) == TOO_LARGE_BODY
+    assert start["status"] == status
+    assert body_of(sent) == answer
     assert raised is None
 
 
