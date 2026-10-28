@@ -299,7 +299,7 @@ out by a top-level form POST to that route, and the host never lists the path in
 `CsrfPolicy.exempt`. `paths.logout` and `logout_button_label` come together, or both
 are `None` for a host without logout. `webauth.cookies` carries the pending login in a signed cookie of its own, one
 per login, so the library keeps no server-side store and `WebAuthConfig` knows nothing
-of OpenID Connect. The `install_sign_in_routes` docstring holds the routes' contract, the
+of OpenID Connect. The `webauth.sign_in_routes` module and `install_sign_in_routes` docstrings hold the routes' contract, the
 `webauth.oidc_login` and `webauth.cookies` module docstrings hold the login and its
 cookies, and `build_app` in [`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py)
 is the worked host, type-checked and run against a real issuer.
