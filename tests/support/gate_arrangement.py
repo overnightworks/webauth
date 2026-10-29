@@ -305,10 +305,9 @@ def a_bearer_app(
 ) -> BearerApp:
     """An app whose machine paths sit behind a bearer gate (or none, when `gated` is false).
 
-    It serves `EXPORT_PATH` and `UNGATED_EXPORT_PATH` (read `bearer_caller`),
-    `UNDECLARED_PATH` and `PEOPLE_PATH` (read nothing) and `RAISING_PATH`, besides the
-    arrangement's own routes; the session store holds an admin's session, whose cookie
-    is `BearerApp.cookie`.
+    It serves `EXPORT_PATH` and `UNGATED_EXPORT_PATH` (read `bearer_caller`), `UNDECLARED_PATH`
+    and `PEOPLE_PATH` (read nothing) and `RAISING_PATH`, besides the arrangement's own routes;
+    the session store holds an admin's session, whose cookie is `BearerApp.cookie`.
 
     `person_paths` adds the gate's person paths over `transaction` (default: a recording one
     on the app's accounts) and the routes of `add_person_routes`; `session_gate` false
