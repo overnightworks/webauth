@@ -7,7 +7,7 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
-## 0.24.0 - Unreleased
+## 0.24.0 - 2026-10-29
 
 **Breaking**
 
