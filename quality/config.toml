@@ -9,3 +9,9 @@ allow = [
 [[python.allow]]
 path = "pyproject.toml"
 reason = "presentator and songmaker run Python 3.12, so the floor stays until both move"
+
+[[gate.loosened]]
+what = 'import contract "only webauth.oidc imports webauth.jwt_verification" removed'
+item = "#520"
+date = 2026-10-29
+reason = "the service caller check is a second owner of the JWT verifier, so the contract is renamed and allows webauth.service_callers"
