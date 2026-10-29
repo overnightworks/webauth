@@ -35,7 +35,8 @@ token is decoded: judging its claims belongs to whoever receives it.
 app (RFC 9068 section 4) with the same verifier: an RS256 `at+jwt` of the
 configured issuer whose one audience is the client ID and whose `azp` the
 caller allows, with a `sub` and `groups` absent or a list of strings. It
-answers a `VerifiedAccessToken` or an `OidcRefusal`.
+answers a `VerifiedAccessToken` or an `OidcRefusal`. Unlike the ID token, an access
+token whose `preferred_username` is not a string is still accepted, the name read as absent.
 
 The state, nonce and verifier are each `_PENDING_SECRET_BYTES` random bytes,
 and the received state and nonce are compared in constant time. A pending
@@ -321,10 +322,12 @@ class VerifiedLogout:
 
 @dataclass(frozen=True)
 class VerifiedAccessToken:
-    """An access token that held: the issuer's `subject` and its full group paths."""
+    """An access token that held: the issuer's `subject`, its full group paths and the
+    `preferred_username` it carries, `None` when absent or not a string."""
 
     subject: str
     groups: tuple[str, ...]
+    preferred_username: str | None = None
 
 
 class _RefusalError(Exception):
@@ -571,7 +574,12 @@ class OidcRelyingParty:
         groups = _group_paths(token.claims)
         if groups is None:
             return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
-        return VerifiedAccessToken(subject=token.subject, groups=groups)
+        username = token.claims.get("preferred_username")
+        return VerifiedAccessToken(
+            subject=token.subject,
+            groups=groups,
+            preferred_username=username if isinstance(username, str) else None,
+        )
 
     def _is_logout_profile(self, token: VerifiedClaims) -> bool:
         age_seconds = self._wall_clock() - token.issued_at

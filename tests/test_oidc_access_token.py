@@ -217,6 +217,24 @@ def test_a_token_whose_subject_or_groups_are_unusable_is_an_invalid_claim(
     assert verified(an_access_token(claims=claims)) == INVALID_CLAIM
 
 
+@pytest.mark.parametrize(
+    ("claims", "expected"),
+    [
+        pytest.param({"preferred_username": "lena"}, "lena", id="present"),
+        pytest.param({}, None, id="absent"),
+        pytest.param({"preferred_username": 7}, None, id="not-a-string"),
+    ],
+)
+def test_the_preferred_username_of_an_access_token_is_read_or_none(
+    claims: dict[str, object], expected: str | None,
+) -> None:
+    outcome = verified(an_access_token(claims=claims))
+
+    assert outcome == VerifiedAccessToken(
+        subject=OPERATOR_SUBJECT, groups=("/apps/x/admin",), preferred_username=expected,
+    )
+
+
 def test_a_token_without_groups_is_accepted_with_none() -> None:
     outcome = verified(an_access_token(claims={"groups": ABSENT}))
 

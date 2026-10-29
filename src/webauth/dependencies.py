@@ -12,8 +12,10 @@ the host's `SessionTransaction` before the route ran, and a route that fails
 afterwards does not undo it.
 
 A request the bearer gate admitted carries no session: the records below let
-the CSRF origin check and the session gate step aside for it, and `current_user`
-raises on it, because a machine route asks for `bearer_caller` instead.
+the CSRF origin check and the session gate step aside for it. On a machine path
+`current_user` raises, because a machine route asks for `bearer_caller` instead;
+on a person path the record holds the account behind the token, and `current_user`
+returns it.
 """
 
 from __future__ import annotations
@@ -59,6 +61,8 @@ _AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
 _INVALID_SESSION_DETAIL: Final = "Invalid session"
 _SESSION_EXPIRED_DETAIL: Final = "Session expired"
 _ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
+_PERSON_PATH_CHALLENGE: Final = 'Bearer realm="api"'
+_PERSON_PATH_INSUFFICIENT_SCOPE: Final = 'Bearer error="insufficient_scope"'
 _EXPIRY_TOLERANCE: Final = timedelta(seconds=60)
 
 
@@ -210,12 +214,20 @@ def _unauthenticated(
     A browser navigation is one whose ``Accept`` header rates ``text/html``
     above ``application/json``, by q-value negotiation; every other request —
     an API call, a fetch — keeps the 401 even when the host named a
-    ``login_redirect``, because it cannot follow one.
+    ``login_redirect``, because it cannot follow one. On a person path of the bearer
+    gate the 401 carries the ``Bearer`` challenge.
     """
     if login_redirect is not None and prefers_html(request):
         query = urlencode({login_redirect.redirect_query_param: _asked_for_address(request)})
         return HTTPException(302, headers={"Location": f"{login_redirect.path}?{query}"})
-    return HTTPException(401, detail)
+    return _unauthenticated_without_redirect(request, detail)
+
+
+def _unauthenticated_without_redirect(connection: HTTPConnection, detail: str) -> HTTPException:
+    challenge = _PERSON_PATH_CHALLENGE if _is_person_path(connection) else None
+    return HTTPException(
+        401, detail, headers=None if challenge is None else {"WWW-Authenticate": challenge},
+    )
 
 
 def _asked_for_address(request: Request) -> str:
@@ -265,9 +277,12 @@ def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -
     ``webauth.cookies.MAX_SESSION_COOKIE_CHARS`` even when correctly signed,
     forged, or present more than once: a sibling subdomain can set a second cookie of the same
     name, and choosing either would let it decide whose account the connection
-    runs in. A host that reads the session cookie itself calls this instead of
-    ``request.cookies``.
+    runs in. ``None`` too on a request the bearer gate admitted: the token decides
+    there and the cookie names no session. A host that reads the session cookie itself
+    calls this instead of ``request.cookies``.
     """
+    if _is_bearer_admitted(connection):
+        return None
     reading = _read_session_cookie(connection, config)
     return None if isinstance(reading, ConnectionRefusal) else reading
 
@@ -454,6 +469,9 @@ _BEARER_ADMISSION_SCOPE_KEY: Final = "webauth.bearer_gate"
 class _BearerAdmission:
     """What the bearer gate admitted: this app's gate, this path, this one header.
 
+    ``principal`` is the machine's ``BearerCaller`` on a machine path and the
+    account behind the token on a person path.
+
     Only a SHA-256 digest of the `Authorization` value is kept, in request
     memory, so the record does not store the token. It says the gate admitted
     the request; it is not a freshness proof, and the gate verifies the header
@@ -463,20 +481,22 @@ class _BearerAdmission:
     app: object
     path: str
     authorization_digest: bytes
-    caller: ports.BearerCaller
+    principal: ports.BearerCaller | ports.AuthenticatedUser
 
 
 def _authorization_digest(authorization: str) -> bytes:
     return hashlib.sha256(authorization.encode("latin-1")).digest()
 
 
-def _record_bearer_admission(connection: HTTPConnection, caller: ports.BearerCaller) -> None:
+def _record_bearer_admission(
+    connection: HTTPConnection, principal: ports.BearerCaller | ports.AuthenticatedUser,
+) -> None:
     (authorization,) = connection.headers.getlist("authorization")
     connection.scope[_BEARER_ADMISSION_SCOPE_KEY] = _BearerAdmission(
         app=connection.scope["app"],
         path=connection.scope["path"],
         authorization_digest=_authorization_digest(authorization),
-        caller=caller,
+        principal=principal,
     )
 
 
@@ -506,27 +526,72 @@ def _is_bearer_admitted(connection: HTTPConnection) -> bool:
     return type(connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)) is _BearerAdmission
 
 
+def _is_person_admitted(connection: HTTPConnection) -> bool:
+    """The loose reader for a person path's record, whatever request carries it."""
+    record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
+    return type(record) is _BearerAdmission and isinstance(
+        record.principal, ports.AuthenticatedUser,
+    )
+
+
+def _admitted_token_person(connection: HTTPConnection) -> ports.AuthenticatedUser | None:
+    """The account the bearer gate admitted for this very request on a person path."""
+    admission = _bearer_admission(connection)
+    if admission is None or not isinstance(admission.principal, ports.AuthenticatedUser):
+        return None
+    return admission.principal
+
+
 def _raise_for_bearer_admission(connection: HTTPConnection) -> None:
     if _is_bearer_admitted(connection):
         raise RuntimeError(
-            "A bearer-admitted request carries no session: a machine route takes "
-            "Depends(bearer_caller), not current_user, admin_user "
-            "or admitted_admin.",
+            "A bearer-admitted request has no session reader here: a machine route takes "
+            "Depends(bearer_caller), and a person path's account is read only on the "
+            "request the gate admitted it for, not in a sub-app or after the "
+            "Authorization header changed.",
         )
+
+
+_PERSON_PATH_SCOPE_KEY: Final = "webauth.person_path"
+
+
+def _mark_person_path(connection: HTTPConnection) -> None:
+    """Note that the bearer gate selected this path as a person path.
+
+    The mark carries no authority: it only lets the library's own refusals on the
+    path answer with a ``Bearer`` challenge.
+    """
+    connection.scope[_PERSON_PATH_SCOPE_KEY] = True
+
+
+def _is_person_path(connection: HTTPConnection) -> bool:
+    return connection.scope.get(_PERSON_PATH_SCOPE_KEY) is True
 
 
 def _require_admin(
     connection: HTTPConnection, user: ports.AuthenticatedUser,
 ) -> ports.AuthenticatedUser:
-    """The account itself when its role is the configured admin role; else the 403."""
+    """The account itself when its role is the configured admin role; else the 403.
+
+    The 403 of a person the bearer gate admitted carries ``insufficient_scope``.
+    """
     if user.role != web_auth_config(connection).admin_role:
-        raise HTTPException(403, _ADMIN_REQUIRED_DETAIL)
+        is_token_person = _admitted_token_person(connection) is not None
+        challenge = _PERSON_PATH_INSUFFICIENT_SCOPE if is_token_person else None
+        raise HTTPException(
+            403,
+            _ADMIN_REQUIRED_DETAIL,
+            headers=None if challenge is None else {"WWW-Authenticate": challenge},
+        )
     return user
 
 
 def _gate_or_own_admission(
     connection: HTTPConnection, sessions: SessionRecordStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
+    person = _admitted_token_person(connection)
+    if person is not None:
+        return person
     _raise_for_bearer_admission(connection)
     decided = _gate_admission(connection)
     if decided is None or decided.admission is None:

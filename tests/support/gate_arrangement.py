@@ -20,24 +20,54 @@ from tests.support.oidc_arrangement import (
     public_jwk,
     rsa_key,
 )
+from tests.support.oidc_login_host import (
+    RecordingSignInTransaction,
+    TransactionKind,
+    UsersWithSnapshots,
+)
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
+    GATED_STACK_POLICIES,
     AuthApp,
     FakeUser,
+    RecordingAuditSink,
+    SessionRecordsInMemory,
+    WriteLockInMemory,
     a_session,
     an_auth_app,
     session_cookie_header,
 )
-from webauth.dependencies import current_user_dependency
-from webauth.middleware import BearerGate, admitted_admin, bearer_caller
+from webauth.config import web_auth_config
+from webauth.dependencies import (
+    LoginRedirect,
+    current_user_dependency,
+    session_id_from_request,
+)
+from webauth.middleware import (
+    BearerGate,
+    PersonPaths,
+    admitted_admin,
+    admitted_user,
+    bearer_caller,
+    install_web_auth_middleware,
+)
 from webauth.oidc_login import AdmissionConfig
-from webauth.policies import AuthorizedParties, PathRules
+from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PublicRule
 from webauth.ports import AuthenticatedUser, BearerCaller
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
 
 MACHINE_PREFIX = "/api/admin/"
+PERSON_PREFIX = "/api/"
+PERSON_ME_PATH = "/api/me"
+PERSON_ADMIN_ME_PATH = "/api/admin-me"
+PERSON_ADMITTED_ME_PATH = "/api/admitted-me"
+PERSON_ADMITTED_ADMIN_PATH = "/api/admitted-admin"
+PERSON_CALLER_PATH = "/api/caller"
+MACHINE_AS_PERSON_PATH = "/api/admin/as-person"
+MACHINE_SESSION_PATH = "/api/admin/session"
+FOREIGN_SECRET_PATH = "/hooks/fetch"  # noqa: S105 - a path, not a credential
 EXPORT_PATH = "/api/admin/export"
 UNDECLARED_PATH = "/api/admin/forgotten"
 RAISING_PATH = "/api/admin/boom"
@@ -51,6 +81,11 @@ ADMISSION = AdmissionConfig(
     bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
 )
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
+PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
+PERSON_REALM = 'Bearer realm="api"'
+PERSON_INVALID_REQUEST = 'Bearer error="invalid_request"'
+PERSON_INVALID_TOKEN = 'Bearer error="invalid_token"'
+PERSON_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
 
 
 def a_token(**claims: Any) -> str:
@@ -66,12 +101,15 @@ def a_bearer_gate(
     paths: PathRules = MACHINE_PATHS,
     key_sets: FakeKeySetEndpoint | None = None,
     clock: FakeClock | None = None,
+    person_paths: PersonPaths | None = None,
+    admission: AdmissionConfig = ADMISSION,
 ) -> BearerGate:
     return BearerGate(
         paths=paths,
         relying_party=a_relying_party(fetch_key_set=key_sets, wall_clock=clock),
-        admission=ADMISSION,
+        admission=admission,
         authorized_parties=AuthorizedParties(frozenset({"hal"})),
+        person_paths=person_paths,
     )
 
 
@@ -86,6 +124,9 @@ class BearerApp:
     key_sets: FakeKeySetEndpoint
     clock: FakeClock
     cookie: str = field(default="")
+    accounts: UsersWithSnapshots | None = None
+    audit: RecordingAuditSink = field(default_factory=RecordingAuditSink)
+    transaction: RecordingSignInTransaction | None = None
 
     def ask(
         self,
@@ -132,14 +173,85 @@ def add_machine_routes(auth: AuthApp) -> None:
         ran(request)
         return {"subject": caller.subject}
 
+    @auth.app.get(MACHINE_SESSION_PATH)
+    def machine_session(
+        request: Request, _caller: BearerCaller = Depends(bearer_caller),
+    ) -> dict[str, str | None]:
+        return {"session": session_id_from_request(request, web_auth_config(request))}
+
     @auth.app.get(RAISING_PATH)
     def raising(_caller: BearerCaller = Depends(bearer_caller)) -> None:
         raise RuntimeError("the route failed")
 
 
+def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None) -> None:
+    """The routes under `PERSON_PREFIX` that read the person, and the foreign-secret webhook."""
+    dependencies = current_user_dependency(
+        session_store=lambda: auth.sessions,
+        on_authenticated=auth.authenticated.append,
+        login_redirect=login_redirect,
+    )
+
+    def person(request: Request, user: AuthenticatedUser) -> dict[str, str | None]:
+        auth.route_runs.append(request.scope["path"])
+        return {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+            "session": session_id_from_request(request, web_auth_config(request)),
+        }
+
+    @auth.app.api_route(PERSON_ME_PATH, methods=["GET", "POST", "DELETE"])
+    def me(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str | None]:
+        return person(request, user)
+
+    @auth.app.get(PERSON_ADMIN_ME_PATH)
+    def admin_me(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.admin_user),
+    ) -> dict[str, str | None]:
+        return person(request, user)
+
+    @auth.app.get(PERSON_ADMITTED_ME_PATH)
+    def admitted_me(request: Request) -> dict[str, str | None]:
+        auth.route_runs.append(request.scope["path"])
+        user = admitted_user(request)
+        return {"username": None if user is None else user.username}
+
+    @auth.app.get(PERSON_ADMITTED_ADMIN_PATH)
+    def admitted_admin_me(
+        request: Request, user: AuthenticatedUser = Depends(admitted_admin),
+    ) -> dict[str, str | None]:
+        return person(request, user)
+
+    @auth.app.get(PERSON_CALLER_PATH)
+    def caller_of_a_person_path(
+        _caller: BearerCaller = Depends(bearer_caller),
+    ) -> dict[str, str]:
+        return {"ran": "bearer_caller on a person path"}
+
+    @auth.app.get(MACHINE_AS_PERSON_PATH)
+    def person_of_a_machine_path(
+        _user: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str]:
+        return {"ran": "current_user on a machine path"}
+
+    @auth.app.api_route(FOREIGN_SECRET_PATH, methods=["GET", "POST"])
+    def foreign_secret(request: Request) -> dict[str, str]:
+        auth.route_runs.append(request.scope["path"])
+        return {"authorization": request.headers.get("authorization", "")}
+
+
 def a_bearer_app(
     *,
     paths: PathRules = MACHINE_PATHS,
+    person_paths: PathRules | None = None,
+    session_gate: bool = True,
+    transaction_kind: TransactionKind = TransactionKind.PER_CALL,
+    strict_records: bool = False,
+    known_accounts: tuple[FakeUser, ...] = (),
+    cookie_role: str = ADMIN_ROLE,
     key_sets: FakeKeySetEndpoint | None = None,
     gated: bool = True,
     policies: dict[str, Any] | None = None,
@@ -152,26 +264,57 @@ def a_bearer_app(
     `UNDECLARED_PATH` and `PEOPLE_PATH` (read nothing) and `RAISING_PATH`, besides the
     arrangement's own routes; the session store holds an admin's session, whose cookie
     is `BearerApp.cookie`.
+
+    `person_paths` names the gate's person paths over a `RecordingSignInTransaction` of
+    `transaction_kind` on the app's own accounts (the cookie's person, an account of
+    `cookie_role`, and `known_accounts`) and sessions, and adds the routes of
+    `add_person_routes`; `FOREIGN_SECRET_PATH` is then public and exempt from the CSRF
+    origin check. `session_gate` false installs the stack without the session gate.
     """
     key_sets = key_sets or a_key_set_answering()
     clock = FakeClock(float(ACCESS_TOKEN_NOW))
-    record = a_session(user=FakeUser(role=ADMIN_ROLE))
-    gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock)
+    cookie_person = FakeUser(role=cookie_role)
+    record = a_session(user=cookie_person)
+    lock = WriteLockInMemory()
+    accounts = UsersWithSnapshots(cookie_person, *known_accounts, lock=lock)
+    sessions = auth_app_keywords.pop("sessions", None) or SessionRecordsInMemory(
+        record, users=accounts, lock=lock,
+    )
+    audit = RecordingAuditSink()
+    transaction = RecordingSignInTransaction(
+        transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
+        strict=strict_records,
+    )
+    person = None if person_paths is None else PersonPaths(person_paths, transaction)
+    gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock, person_paths=person)
     stack = {"bearer_gate": gate} if gated else {}
+    public = auth_app_keywords.pop("public", ())
+    if person is not None:
+        foreign_secret = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
+        public = (*public, PublicRule(foreign_secret))
+        stack = {"csrf_origin": CsrfPolicy(exempt=foreign_secret), **stack}
+    stack_policies = {**stack, **(policies or {})}
     auth = an_auth_app(
         record,
-        gate=True,
+        gate=session_gate,
         raise_server_exceptions=False,
-        stack_policies={**stack, **(policies or {})},
+        sessions=sessions,
+        public=public,
+        stack_policies=stack_policies,
         **auth_app_keywords,
     )
+    if not session_gate:
+        install_web_auth_middleware(auth.app, **{**GATED_STACK_POLICIES, **stack_policies})
 
     auth.app.user_middleware.extend(inner_middleware)
 
     add_machine_routes(auth)
+    if person is not None:
+        add_person_routes(auth, auth_app_keywords.get("login_redirect"))
 
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
+        accounts=accounts, audit=audit, transaction=transaction,
     )
 
 

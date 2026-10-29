@@ -11,6 +11,7 @@ import base64
 import hashlib
 import logging
 import threading
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,7 @@ from tests.support.gate_arrangement import (
     UNDECLARED_PATH,
     BearerApp,
     a_bearer_app,
+    a_bearer_gate,
     a_key_set_answering,
     a_token,
     assert_answers_no_store,
@@ -49,12 +51,17 @@ from tests.support.webauth_arrangement import (
     starts,
 )
 from webauth.https_client import KeySetFetchError
-from webauth.middleware import BearerGate
+from webauth.middleware import BearerGate, PersonPaths
 from webauth.oidc_login import AdmissionConfig, NoAdmins
 from webauth.policies import AuthorizedParties, PathRules, PathShape, PublicRule
+from webauth.ports import SignInStores
 
 HEALTH_PATH = "/health"
 GATE_LOGGER = "webauth.middleware.bearer_gate"
+
+
+def a_transaction_never_entered() -> AbstractContextManager[SignInStores]:
+    raise AssertionError("the sign-in transaction was entered")
 
 
 @dataclass(frozen=True)
@@ -373,6 +380,23 @@ class TestAGateIsBuiltFromSoundParts:
 
         with pytest.raises(error):
             BearerGate(**{**arguments, **changes})
+
+
+    def test_person_paths_without_a_path_are_refused_at_construction(self) -> None:
+        with pytest.raises(ValueError, match="at least one path"):
+            PersonPaths(PathRules(), transaction=a_transaction_never_entered)
+
+    def test_a_no_admins_app_may_name_person_paths_alone(self) -> None:
+        gate = a_bearer_gate(
+            paths=PathRules(),
+            person_paths=PersonPaths(PathRules(prefixes=("/api/",)), a_transaction_never_entered),
+            admission=AdmissionConfig(
+                bound_issuer=ADMISSION.bound_issuer, login_group="/apps/x",
+                admin_group=NoAdmins.IN_THIS_APP,
+            ),
+        )
+
+        assert gate.paths == PathRules()
 
 
 class TestWithoutAGateTheAdminPathsStayWithTheSession:
