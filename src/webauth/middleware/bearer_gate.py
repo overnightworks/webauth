@@ -19,6 +19,7 @@ from webauth.config import web_auth_config
 from webauth.dependencies import (
     _ADMIN_REQUIRED_DETAIL,
     _AUTHENTICATION_REQUIRED_DETAIL,
+    _PERSON_PATH_INSUFFICIENT_SCOPE,
     _bearer_admission,
     _mark_person_path,
     _record_bearer_admission,
@@ -135,6 +136,8 @@ class _Refusal(Enum):
         return self.name.lower().replace("_", "-")
 
     def challenge(self, realm: str | None) -> str | None:
+        if self is _Refusal.NOT_A_MEMBER:
+            return _PERSON_PATH_INSUFFICIENT_SCOPE
         parameters = [] if realm is None else [f'realm="{realm}"']
         if self.error is not None:
             parameters.append(f'error="{self.error}"')

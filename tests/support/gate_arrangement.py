@@ -59,6 +59,8 @@ from webauth.ports import AuthenticatedUser, BearerCaller
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
 
+    from webauth.ports import SignInTransaction
+
 MACHINE_PREFIX = "/api/admin/"
 PERSON_PREFIX = "/api/"
 PERSON_ME_PATH = "/api/me"
@@ -291,6 +293,7 @@ def a_bearer_app(
     person_paths: PathRules | None = None,
     session_gate: bool = True,
     transaction_kind: TransactionKind = TransactionKind.PER_CALL,
+    transaction: SignInTransaction | None = None,
     strict_records: bool = False,
     known_accounts: tuple[FakeUser, ...] = (),
     cookie_role: str = ADMIN_ROLE,
@@ -309,7 +312,8 @@ def a_bearer_app(
 
     `person_paths` adds the gate's person paths over a `RecordingSignInTransaction` on the
     app's accounts, and the routes of `add_person_routes` (`FOREIGN_SECRET_PATH` public and
-    CSRF-exempt). `session_gate` false installs the stack without the session gate.
+    CSRF-exempt); `transaction` replaces the recording one. `session_gate` false installs the
+    stack without the session gate.
     """
     key_sets = key_sets or a_key_set_answering()
     clock = FakeClock(float(ACCESS_TOKEN_NOW))
@@ -317,7 +321,8 @@ def a_bearer_app(
         transaction_kind, strict_records, cookie_role, known_accounts,
         auth_app_keywords.pop("sessions", None),
     )
-    person = None if person_paths is None else PersonPaths(person_paths, side.transaction)
+    entered = transaction or side.transaction
+    person = None if person_paths is None else PersonPaths(person_paths, entered)
     gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock, person_paths=person)
     public = auth_app_keywords.pop("public", ())
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)

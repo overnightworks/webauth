@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
 import pytest
@@ -47,13 +49,12 @@ from tests.support.webauth_arrangement import (
     LOGIN_REDIRECT,
     MEMBER_ROLE,
     FakeUser,
-    WriteLockInMemory,
 )
 from webauth.dependencies import current_user_dependency
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import admitted_user
 from webauth.policies import PathRules, PublicRule, RateLimitBudget, RateLimitPolicy
-from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser
+from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser, SignInStores
 
 ADMIN_TOKEN = A_TOKEN
 MEMBER_TOKEN = a_token(groups=["/apps/x"])
@@ -76,6 +77,19 @@ BOTH_TRANSACTIONS = pytest.mark.parametrize(
 
 def a_lena() -> FakeUser:
     return FakeUser(id=OPERATOR_SUBJECT, username="lena", role=MEMBER_ROLE)
+
+
+def a_transaction_failing_to_be_created() -> AbstractContextManager[SignInStores]:
+    raise StoreDown
+
+
+def a_transaction_failing_to_be_entered() -> AbstractContextManager[SignInStores]:
+    @contextmanager
+    def never_entered() -> Iterator[SignInStores]:
+        raise StoreDown
+        yield  # pragma: no cover
+
+    return never_entered()
 
 
 def a_person_app(**keywords: Any) -> BearerApp:
@@ -236,6 +250,12 @@ MALFORMED_OR_INVALID = [
     pytest.param(
         (f"Bearer {ADMIN_TOKEN}",), {"params": {"access_token": "second"}}, None,
         PERSON_INVALID_REQUEST, "Invalid request", id="a-second-method",
+    ),
+    pytest.param(
+        ("Bearer",), {}, None, PERSON_INVALID_REQUEST, "Invalid request", id="no-credential",
+    ),
+    pytest.param(
+        ("=x",), {}, None, PERSON_INVALID_REQUEST, "Invalid request", id="no-scheme",
     ),
     pytest.param(
         ("Bearer a$b",), {}, None, PERSON_INVALID_TOKEN, "Invalid token", id="not-a-b64token",
@@ -400,17 +420,16 @@ class TestAPathBothRulesSelectIsAMachinePath:
 
 
 class TestAFailingTransactionIsTheLibrary500:
-    @BOTH_TRANSACTIONS
     @pytest.mark.parametrize("entry", ["creating", "entering"])
     def test_a_failure_creating_or_entering_the_transaction_propagates_and_runs_no_route(
-        self, kind: TransactionKind, entry: str, monkeypatch: pytest.MonkeyPatch,
+        self, entry: str,
     ) -> None:
-        app = a_person_app(transaction_kind=kind)
-        assert app.transaction is not None
-        if entry == "creating":
-            failing(type(app.transaction), "__call__", monkeypatch)
-        else:
-            failing(WriteLockInMemory, "hold", monkeypatch)
+        transaction = (
+            a_transaction_failing_to_be_created
+            if entry == "creating"
+            else a_transaction_failing_to_be_entered
+        )
+        app = a_person_app(transaction=transaction)
 
         response = app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
 
@@ -692,4 +711,3 @@ def test_the_gate_names_no_machine_paths_when_it_has_person_paths_alone() -> Non
     response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
 
     assert response.status_code == 200
-
