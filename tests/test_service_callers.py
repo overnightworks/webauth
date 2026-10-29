@@ -49,6 +49,7 @@ MAX_WORKLOAD_SECONDS = ACCESS_TOKEN_LIFETIME_SECONDS
 SUBJECT_CANARY = "subject-canary-7f3a"
 CLIENT_CANARY = "client-canary-9b1c"
 GROUP_CANARY = "/group-canary-4d2e"
+CANARIES = (SUBJECT_CANARY, CLIENT_CANARY, GROUP_CANARY)
 SECRET_PATH = "/realms/workshop/certs-secret-path-5e6f"
 UNREGISTERED = "unregistered-client"
 
@@ -106,6 +107,12 @@ def a_workload_token(**claim_changes: Any) -> str:
         **claim_changes,
     }
     return an_access_token(claims=claims)
+
+
+def assert_message_keeps_identity_private(error: pytest.ExceptionInfo[ValueError]) -> None:
+    message = str(error.value)
+    leaked = [secret for secret in (REALM_JWKS_URL, SECRET_PATH, *CANARIES) if secret in message]
+    assert leaked == []
 
 
 def refused(outcome: object) -> CallerRefusal:
@@ -372,7 +379,7 @@ def test_an_invalid_identity_field_is_refused_by_name(
     with pytest.raises(ValueError, match=field) as refusal:
         a_service_identity(jwks_url=secret_url, **changes)
 
-    assert SECRET_PATH not in str(refusal.value)
+    assert_message_keeps_identity_private(refusal)
 
 
 def test_the_identity_repr_never_shows_the_key_set_url() -> None:
@@ -412,15 +419,17 @@ def test_an_invalid_registry_is_refused_by_name(registry: Any, mentions: str) ->
     with pytest.raises(ValueError, match=mentions) as refusal:
         a_check(registered_apps=registry)
 
-    assert REALM_JWKS_URL not in str(refusal.value)
+    assert_message_keeps_identity_private(refusal)
 
 
 @pytest.mark.parametrize("app", ["", 5])
 def test_a_registered_app_needs_a_non_empty_name(app: object) -> None:
     admission = an_app_admission()
 
-    with pytest.raises(ValueError, match="app"):
+    with pytest.raises(ValueError, match="app") as refusal:
         RegisteredApp(app=app, admission=admission)  # type: ignore[arg-type]
+
+    assert_message_keeps_identity_private(refusal)
 
 
 def test_a_non_https_key_set_url_is_refused() -> None:
@@ -429,7 +438,7 @@ def test_a_non_https_key_set_url_is_refused() -> None:
     with pytest.raises(ValueError, match="https") as refusal:
         a_check(identity=identity)
 
-    assert SECRET_PATH not in str(refusal.value)
+    assert_message_keeps_identity_private(refusal)
 
 
 def test_mutating_the_passed_registry_afterwards_changes_nothing() -> None:
@@ -442,11 +451,22 @@ def test_mutating_the_passed_registry_afterwards_changes_nothing() -> None:
     assert isinstance(check.workload_caller(a_workload_token()), WorkloadCaller)
 
 
-def test_a_refusal_rejects_a_token_rejection_that_does_not_match_its_reason() -> None:
-    with pytest.raises(ValueError, match="token_rejection"):
-        CallerRefusal(CallerRefusalReason.TOKEN_REJECTED, None)
-    with pytest.raises(ValueError, match="token_rejection"):
-        CallerRefusal(CallerRefusalReason.MISSING_TOKEN, RejectionReason.EXPIRED)
+@pytest.mark.parametrize(
+    ("reason", "rejection"),
+    [
+        pytest.param(CallerRefusalReason.TOKEN_REJECTED, None, id="rejected-without-rejection"),
+        pytest.param(
+            CallerRefusalReason.MISSING_TOKEN, RejectionReason.EXPIRED, id="missing-with-rejection"
+        ),
+    ],
+)
+def test_a_refusal_rejects_a_token_rejection_that_does_not_match_its_reason(
+    reason: CallerRefusalReason, rejection: RejectionReason | None
+) -> None:
+    with pytest.raises(ValueError, match="token_rejection") as refusal:
+        CallerRefusal(reason, rejection)
+
+    assert_message_keeps_identity_private(refusal)
 
 
 def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
@@ -456,7 +476,6 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
     identity = a_service_identity(jwks_url=secret_url)
     registry = {CLIENT_CANARY: RegisteredApp("notes", an_app_admission())}
     check = a_check(identity=replace(identity, jwks_url=REALM_JWKS_URL), registered_apps=registry)
-    canaries = (SUBJECT_CANARY, CLIENT_CANARY, GROUP_CANARY)
     caller_token = a_workload_token(
         azp=CLIENT_CANARY, client_id=CLIENT_CANARY, groups=[GROUP_CANARY]
     )
@@ -470,7 +489,7 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
         admitted = check.workload_caller(caller_token)
         refusals = [check.workload_caller(token) for token in refused_tokens]
     assert isinstance(admitted, WorkloadCaller)
-    with pytest.raises(ValueError) as configuration_refusal:
+    with pytest.raises(ValueError, match="audience") as configuration_refusal:
         a_service_identity(audience=5)
 
     shown = [
@@ -482,7 +501,7 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
         caplog.text,
     ]
 
-    assert [text for text in shown if any(canary in text for canary in canaries)] == []
+    assert [text for text in shown if any(canary in text for canary in CANARIES)] == []
     assert [text for text in shown if SECRET_PATH in text] == []
     assert [
         record for record in caplog.records if record.name.startswith("webauth.service_callers")
