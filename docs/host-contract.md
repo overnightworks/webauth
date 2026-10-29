@@ -61,7 +61,8 @@ the sign-in stop at the app's callback, on the host's refusal page. webauth
 offers no local fallback login. See
 [The store decides every request](ARCHITECTURE.md#the-store-decides-every-request).
 
-**Machine callers.** See [The host's machine routes](#the-hosts-machine-routes).
+**Machine callers and the person's token.** See [The host's machine routes](#the-hosts-machine-routes)
+and [The person's token on the app's API](#the-persons-token-on-the-apps-api).
 
 **Signing out.** Signing out of an app ends its session in that browser at once
 and shows a short page that posts to Keycloak, which ends the person's Keycloak session in
@@ -119,7 +120,7 @@ in [test_csrf.py](../tests/middleware/test_csrf.py), plus
 `TestRefusedInstallation.test_an_install_without_csrf_origin_is_refused_before_touching_the_app`
 in [test_stack.py](../tests/middleware/test_stack.py).
 
-Only verified bearer admission and the sessionless server paths the host names
+Only verified bearer admission (on a machine path or a person path) and the sessionless server paths the host names
 in `CsrfPolicy.exempt` bypass this check; an adjacent path is still checked
 ([#429 S-2](https://github.com/overnightworks/webauth/issues/429), operator ruling
 23.10.2026). Proofs: `test_a_bearer_request_needs_no_csrf_origin_header_or_cookie`
@@ -197,7 +198,30 @@ added the enforcing gate. Its page, API and public-path proofs are
   | invalid token (any verification failure, an unavailable key set included) | 401 | `Bearer realm="admin", error="invalid_token"` | `Invalid token` |
   | valid token, not an admin | 403 | `Bearer realm="admin", error="insufficient_scope"` | `Admin access required` |
 
-  The refusal contract comes from
+  A **person path** (see [The person's token on the app's API](#the-persons-token-on-the-apps-api))
+  answers a bearer credential as follows; the challenge names `realm="api"` only where
+  no credential was sent:
+
+  | Case | Status | `WWW-Authenticate` | `detail` |
+  |---|---|---|---|
+  | no bearer credential, refused by the library for want of a session (`current_user`, `admin_user`, the session gate, `admitted_admin`) | 401, or the 302 a navigation gets under `login_redirect` | `Bearer realm="api"` on the 401 | the session refusal's own |
+  | malformed (as above) | 401 | `Bearer error="invalid_request"` | `Invalid request` |
+  | invalid token (any verification failure, a foreign audience and an unavailable key set included) | 401 | `Bearer error="invalid_token"` | `Invalid token` |
+  | valid token, not a member of the app | 403 | `Bearer error="insufficient_scope"` | `No access` |
+  | valid member token, the store refuses the new username | 403 | none | `Login failed` |
+  | token person refused by `admin_user` or `admitted_admin` | 403 | `Bearer error="insufficient_scope"` | `Admin access required` |
+
+  A cookie person refused by an admin reader on a person path keeps the 403 without a
+  challenge, and a path outside the person paths keeps its answers. The 401 challenge
+  follows RFC 7235 section 3.1 and RFC 6750 section 3; a malformed header answers 401, not
+  the 400 RFC 6750 section 3.1 recommends, as the machine paths do. A host's own 401 on a
+  person path carries no challenge unless the host adds it.
+  `test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_without_realm`
+  and `test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer` in
+  [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
+  prove the table.
+
+  The machine refusal contract comes from
   [#350](https://github.com/overnightworks/webauth/issues/350), operator ruling
   22.10.2026; [#409](https://github.com/overnightworks/webauth/issues/409)
   supplies the implementation and precise response table.
@@ -260,12 +284,11 @@ is its implementation, not a separate ruling.
   real-issuer admission proofs.
 - **What it replaces.** On a gated path the cookie, the CSRF check and the
   session gate decide nothing, every answer is `no-store`, and webauth sets no
-  cookie. `admitted_user` returns `None`. The same rate
+  cookie. `admitted_user` returns `None` and `session_id_from_request` answers
+  `None`, whatever cookie the request carries. The same rate
   limit applies where a rate policy covers the path; a flood of invalid tokens
   is bounded only by it. A session dependency (`current_user`, `admin_user`,
-  `admitted_admin`) on a gated path raises, so the library answers 500,
-  and `session_id_from_request` reads the cookie, which is the host's duty not to
-  trust there. `test_the_cookie_counts_for_nothing_beside_a_token` in
+  `admitted_admin`) on a machine path raises, so the library answers 500. `test_the_cookie_counts_for_nothing_beside_a_token` in
   [test_bearer_gate_admission.py](../tests/middleware/test_bearer_gate_admission.py) proves admission
   uses the token's subject without opening a session transaction.
 - **Token lifetime.** A block at Keycloak reaches the gate only when the token
@@ -280,10 +303,63 @@ is its implementation, not a separate ruling.
   docstring says how.
   They must cover every machine route, a prefix being the safe form. Every method
   is gated, `OPTIONS` included; a CORS preflight is the host's own layer outside
-  the stack.
+  the stack. A path that machine paths and person paths both select is a machine path.
 - **Mounts and sockets.** Install the gate on the app that serves the machine
   routes. A sub-app mounted below a gated path keeps its own CSRF and session
   gate, and its `bearer_caller` raises. WebSocket scopes are not gated.
+
+## The person's token on the app's API
+
+A token created through hal can call an app's ordinary API with exactly the rights of the
+person behind it, deletion included, and no layer sits on top of the person's rights.
+A host names its API paths in `PersonPaths(paths, transaction)` and passes it as
+`BearerGate(person_paths=...)`; the gate's `paths` may then be `PathRules()`
+(machine paths are optional, and a `NoAdmins` app may name person paths alone). On such a
+path `Authorization: Bearer` is the account behind the token: `current_user`, `admin_user`,
+`admitted_user` and `admitted_admin` return it as they return the browser's person, and no
+host route changes. This follows the operator's rulings of 23.10.2026 (a token carries the
+rights of the identity behind it and the app checks it as it checks the browser; ordinary
+routes admit tokens issued to the hal registration, the same way in every app) and 29.10.2026
+(whoever holds the operator's token may do what the operator may, with no extra security
+layer), with the applied lines of
+[#405](https://github.com/overnightworks/webauth/issues/405).
+
+- **Which paths.** Only the paths the host names. A path neither rule selects is untouched,
+  so a route that takes a foreign secret in `Authorization: Bearer` (a webhook) keeps
+  working, and an API route outside `PersonPaths` is not reachable by token. A request with
+  no bearer credential (no header, another scheme such as `Basic` or `DPoP`, or
+  `access_token` only in the query) is decided by the cookie as on any other path; a bearer
+  credential is judged by the token and never falls back to the cookie.
+- **The account.** The verified `sub` is admitted by the same `app_role` and the same
+  account step as a browser sign-in, in one `SignInTransaction` entry. A person outside the
+  app's login group is refused before any store is touched. An unknown subject gets an
+  account with the token's `preferred_username` (the subject when it carries none) and
+  `USER_CREATED`. A known subject keeps its account, and its role follows the token's
+  groups, written and recorded as `ROLE_CHANGED` when it differs, exactly as at sign-in. No
+  session is created. Nothing is committed here: durability is the exit of the host's
+  transaction, a store, audit or exit failure is the library 500, and no issuer call happens
+  inside the block.
+- **Clients.** The same `AuthorizedParties` admits tokens on machine and person paths, so a
+  token that opens the API also opens the machine routes when its person is an admin.
+- **No origin, no cookie.** A verified token request bypasses the CSRF origin check, so a
+  CLI needs no `Origin`. A cookie-only request is checked as before.
+- **The cookie beside a token.** The token decides and the cookie names no session for that
+  request: `session_id_from_request` answers `None` and the session is not renewed. A host
+  route that binds work to the session answers its own refusal when it gets `None`. Host
+  dependencies such as `current_user`'s `session_store` still resolve before the reader runs.
+- **Refusals.** See the person-path table under
+  [Signed out and refused](#signed-out-and-refused).
+- **Residues.** Signing out in a browser, a back-channel logout, or disabling the person at
+  Keycloak does not end a token: it works until its `exp` plus leeway. Group changes reach a
+  token request with the next token, at most one token lifetime later, and an older token can
+  write the old role back within its lifetime. There is no sender constraint: webauth checks
+  no DPoP proof, so a bound token is plain bearer here, and a copied token is the person until
+  it expires. The per-address rate limit is shared with the browser's. Every token request
+  enters the host's serialized transaction once. A WebSocket handshake is not gated.
+
+Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
+in CI, and scenarios 52 to 57 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
+Keycloak in the hand-run harness.
 
 ## The sign-in routes
 

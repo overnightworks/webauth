@@ -7,6 +7,17 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.25.0 - Unreleased
+
+**Breaking**
+
+- `webauth.dependencies.session_id_from_request` answers `None` on a request the bearer gate admitted, also on a machine path: the token decides and the cookie names no session. No dependent reads it there.
+
+**Added**
+
+- `webauth.middleware.PersonPaths` and `BearerGate(person_paths=...)`: a verified access token on the host's named API paths is the account behind its subject. It is admitted as a sign-in admits it, in one `SignInTransaction` entry, and `current_user`, `admin_user`, `admitted_user` and `admitted_admin` return it; the CSRF origin check does not apply to it. `BearerGate.paths` may be `PathRules()` when `person_paths` is set, and a `NoAdmins` app may name person paths alone. The library's own 401 on a person path carries `WWW-Authenticate: Bearer realm="api"`, and a token refusal carries the `Bearer` error challenge, see the [host contract](host-contract.md#the-persons-token-on-the-apps-api).
+- `webauth.oidc.VerifiedAccessToken.preferred_username`, `None` when the claim is absent or not a string; the field has a default, so every existing construction stays valid.
+
 ## 0.24.0 - 2026-10-29
 
 **Breaking**
