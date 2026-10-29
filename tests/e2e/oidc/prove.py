@@ -170,6 +170,7 @@ Deliberately unproven: the demotion of a person taken out of the admin group is
 proven at the admission layer, not here (a D1 step would need an
 ``Admin.delete`` in ``stack.py``), and a successful workload token is not
 proven (scenario 27 proves only the refusal)."""
+# ruff: noqa: T201 - the proof prints its scenario table for the operator
 
 from __future__ import annotations
 
@@ -285,7 +286,6 @@ EXPIRY_MARGIN_SECONDS = 2
 @dataclass(frozen=True)
 class Width:
     """A browser window the scenarios run at; the phone is touch with mobile emulation."""
-
     pixels_wide: int
     pixels_high: int
     touch: bool

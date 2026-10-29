@@ -17,6 +17,7 @@ the throwaway leaf's public key, and nothing is installed in any profile or
 store. The host app process trusts the throwaway CA through ``SSL_CERT_FILE``.
 ``shim.py`` owns the TLS front for Keycloak and the callback bridge from
 Keycloak's container to the apps."""
+# ruff: noqa: T201 - the proof harness prints run progress for the operator
 
 from __future__ import annotations
 

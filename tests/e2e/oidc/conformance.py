@@ -66,6 +66,7 @@ taken down with its volumes and the run lists the containers, volumes and
 networks still carrying its compose project label; every failure or timeout,
 with its stderr tail, is reported as a leftover line, and the result table
 still follows."""
+# ruff: noqa: T201 - the conformance run prints its module table for the operator
 
 from __future__ import annotations
 

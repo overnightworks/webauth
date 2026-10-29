@@ -117,7 +117,7 @@ MAX_AUTHORIZATION_CODE_CHARS = 2048
 PENDING_LOGIN_MAX_AGE_SECONDS = 600
 LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
 
-_LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105
+_LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105 - token type not a credential
 _ACCESS_TOKEN_MEDIA_TYPES = frozenset({"at+jwt", "application/at+jwt"})
 # An identifier fixed by OpenID Connect Back-Channel Logout 1.0 section 2.4, never fetched.
 _BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR(S5332)
@@ -134,7 +134,7 @@ _REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
 # RFC 6750 section 2.1: a bearer token is a b64token, so it can sit in an
 # `Authorization` header without a CR, LF or space.
 _ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
-_BEARER_TOKEN_TYPE = "bearer"  # noqa: S105
+_BEARER_TOKEN_TYPE = "bearer"  # noqa: S105 - token type not a credential
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
 _ENDPOINT_URL_FIELDS = (
     "issuer",
@@ -261,15 +261,15 @@ class OidcRefusalReason(StrEnum):
     ISSUER_MISMATCH = "issuer-mismatch"
     AUTHORIZATION_DENIED = "authorization-denied"
     # A refusal reason, not a credential
-    TOKEN_REQUEST_REFUSED = "token-request-refused"  # noqa: S105
-    TOKEN_ENDPOINT_FAILED = "token-endpoint-failed"  # noqa: S105
-    ID_TOKEN_REJECTED = "id-token-rejected"  # noqa: S105
+    TOKEN_REQUEST_REFUSED = "token-request-refused"  # noqa: S105 - refusal reason not a credential
+    TOKEN_ENDPOINT_FAILED = "token-endpoint-failed"  # noqa: S105 - refusal reason not a credential
+    ID_TOKEN_REJECTED = "id-token-rejected"  # noqa: S105 - refusal reason not a credential
     NONCE_MISMATCH = "nonce-mismatch"
     AUTHORIZED_PARTY_MISMATCH = "authorized-party-mismatch"
     INVALID_IDENTITY_CLAIM = "invalid-identity-claim"
-    LOGOUT_TOKEN_REJECTED = "logout-token-rejected"  # noqa: S105
+    LOGOUT_TOKEN_REJECTED = "logout-token-rejected"  # noqa: S105 - refusal reason not a credential
     INVALID_LOGOUT_CLAIM = "invalid-logout-claim"
-    ACCESS_TOKEN_REJECTED = "access-token-rejected"  # noqa: S105
+    ACCESS_TOKEN_REJECTED = "access-token-rejected"  # noqa: S105 - refusal reason not a credential
     INVALID_ACCESS_CLAIM = "invalid-access-claim"
 
 

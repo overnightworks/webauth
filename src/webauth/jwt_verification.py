@@ -108,11 +108,11 @@ __all__ = [
 
 class RejectionReason(StrEnum):
     # A refusal reason, not a credential
-    TOKEN_TOO_LONG = "token-too-long"  # noqa: S105
-    MALFORMED_TOKEN = "malformed-token"  # noqa: S105
+    TOKEN_TOO_LONG = "token-too-long"  # noqa: S105 - refusal reason not a credential
+    MALFORMED_TOKEN = "malformed-token"  # noqa: S105 - refusal reason not a credential
     UNSUPPORTED_ALGORITHM = "unsupported-algorithm"
     INVALID_KEY_ID = "invalid-key-id"
-    INVALID_TOKEN_TYPE = "invalid-token-type"  # noqa: S105
+    INVALID_TOKEN_TYPE = "invalid-token-type"  # noqa: S105 - refusal reason not a credential
     UNKNOWN_KEY_ID = "unknown-key-id"
     KEY_SET_UNAVAILABLE = "key-set-unavailable"
     INVALID_SIGNATURE = "invalid-signature"
@@ -161,7 +161,7 @@ class _RefreshFailure(StrEnum):
     KEY_COUNT_OUT_OF_RANGE = "key-count-out-of-range"
     KEY_NOT_AN_OBJECT = "key-not-an-object"
     # A refusal reason, not a credential
-    SECRET_KEY_PUBLISHED = "secret-key-published"  # noqa: S105
+    SECRET_KEY_PUBLISHED = "secret-key-published"  # noqa: S105 - refusal reason not a credential
     DUPLICATE_KEY_ID = "duplicate-key-id"
     NO_RS256_SIGNING_KEY = "no-rs256-signing-key"
     MALFORMED_KEY = "malformed-key"
