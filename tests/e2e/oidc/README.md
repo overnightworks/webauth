@@ -7,7 +7,7 @@ conformance suite against the same host. The OIDC path is not faked. What each
 driver proves, scenario by scenario, is stated in the docstring of `prove.py` and
 `conformance.py`; how the browser and Keycloak reach the apps is stated in
 `harness.py` and `shim.py`. `bearer.py` is the bearer proof: it plays hal, the machine
-caller, against the same Keycloak (scenarios 28 onwards of `prove.py`; scenarios 52 to 57 send
+caller, against the same Keycloak (scenarios 28 onwards of `prove.py`; scenarios 55 to 60 send
 hal's token to the host's person path `/api/me`, where it is the account behind the token); `realm.py` holds the
 realm's facts and the admin calls that shape it.
 

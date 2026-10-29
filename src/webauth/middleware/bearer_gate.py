@@ -123,7 +123,7 @@ class _Refusal(Enum):
     INVALID_REQUEST = (401, "invalid_request", "Invalid request")
     INVALID_TOKEN = (401, "invalid_token", "Invalid token")
     INSUFFICIENT_SCOPE = (403, "insufficient_scope", _ADMIN_REQUIRED_DETAIL)
-    NOT_A_MEMBER = (403, "insufficient_scope", "No access")
+    NOT_A_MEMBER = (403, None, "No access")
     USERNAME_TAKEN = (403, None, "Login failed")
 
     def __init__(self, status_code: int, error: str | None, detail: str) -> None:

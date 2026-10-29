@@ -1,7 +1,7 @@
 """Plays hal against real Keycloak: the bearer gate admits, or refuses, real access tokens.
 
 ``drive_bearer_phase`` runs after the back-channel phase of ``prove.py`` and prints
-``SCENARIO <number> <width> <origin>`` for scenarios 28 to 57. hal is two public
+``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 60. hal is two public
 clients (``d1-hal``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and the optional
 audience scopes; ``d1-app-c`` is a client that exists only to be an audience. hal gets its
 codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
@@ -30,13 +30,13 @@ header ``typ`` of the first minted token. Each scenario's id is the matrix id of
 
 The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's H1 to H6.
 
-- 52 (H1) a member who never signed in to the app: the token answers that person with the
+- 55 (H1) a member who never signed in to the app: the token answers that person with the
   user role and the Keycloak username; one account, one ``USER_CREATED``, no session.
-- 53 (H2) the same person after a browser sign-in: the token answers the same username and id.
-- 54 (H3) ``POST /api/me`` with the token, no ``Origin`` and no cookie reaches the route.
-- 55 (H4) the outsider's token: 403 ``No access``, and no account is created.
-- 56 (H5) a ``d1-other`` token: 401 ``invalid_token``.
-- 57 (H6) after a browser sign-out the token still opens ``/api/me``.
+- 56 (H2) the same person after a browser sign-in: the token answers the same username and id.
+- 57 (H3) ``POST /api/me`` with the token, no ``Origin`` and no cookie reaches the route.
+- 58 (H4) the outsider's token: 403 ``No access``, and no account is created.
+- 59 (H5) a ``d1-other`` token: 401 ``invalid_token``.
+- 60 (H6) after a browser sign-out the token still opens ``/api/me``.
 """
 
 from __future__ import annotations
@@ -568,12 +568,12 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (49, flipped_signature_is_refused),
     (50, answers_are_not_stored_and_set_no_cookie),
     (51, no_token_is_shown_and_refusals_are_logged),
-    (52, member_token_creates_the_account),
-    (53, token_and_browser_name_the_same_person),
-    (54, token_post_needs_no_origin_and_no_cookie),
-    (55, outsider_token_is_refused_without_an_account),
-    (56, other_client_token_is_refused_on_the_person_path),
-    (57, sign_out_leaves_the_token_on_the_person_path),
+    (55, member_token_creates_the_account),
+    (56, token_and_browser_name_the_same_person),
+    (57, token_post_needs_no_origin_and_no_cookie),
+    (58, outsider_token_is_refused_without_an_account),
+    (59, other_client_token_is_refused_on_the_person_path),
+    (60, sign_out_leaves_the_token_on_the_person_path),
 )
 
 

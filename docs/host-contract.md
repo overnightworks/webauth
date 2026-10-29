@@ -358,7 +358,7 @@ layer), with the applied lines of
   enters the host's serialized transaction once. A WebSocket handshake is not gated.
 
 Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
-in CI, and scenarios 52 to 57 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
+in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
 Keycloak in the hand-run harness.
 
 ## The sign-in routes
