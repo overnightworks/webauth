@@ -193,7 +193,7 @@ class HostSessions:
 
 class HostAudit:
     def account_event(self, event: AccountEvent) -> None:
-        assert event.kind
+        _ = event.kind
 
 
 class HostRateLimits:

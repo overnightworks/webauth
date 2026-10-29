@@ -42,7 +42,7 @@ _REALM: Final = 'Bearer realm="admin"'
 _AUTH_SCHEME: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 _ONE_CREDENTIAL: Final = re.compile(r" +([^ \t,]+)")
 _BEARER_SCHEME: Final = "bearer"
-_ACCESS_TOKEN_QUERY_PARAMETER: Final = "access_token"  # noqa: S105
+_ACCESS_TOKEN_QUERY_PARAMETER: Final = "access_token"  # noqa: S105 - query parameter name not a credential
 
 
 @dataclass(frozen=True)
