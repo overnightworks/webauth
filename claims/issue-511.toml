@@ -1,0 +1,8 @@
+claim_id = "3679115d0ef44d6896d707ede7a836bd"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "000abd6d3e3385dbccdb473ce3dfaa6958129c19"
+branch = "claude/issue-511-quality-v090"
+scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", "pyproject.toml", "quality/config.toml", "src/webauth/jwt_verification.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc.py", "tests/e2e/oidc/conformance.py", "tests/e2e/oidc/harness.py", "tests/e2e/oidc/prove.py", "tests/fixtures/typing_hosts/oidc_host.py"]
+opened_commit = "def633d5e4ec284538327c97cc8fe948da1fef5f"
+whole_reason = "One gate bump: the new pin turns quality / verdict red until every finding it reports across these files is cleared, so the pin and its clearances land together."
