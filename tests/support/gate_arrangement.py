@@ -131,7 +131,7 @@ class BearerApp:
     cookie: str = field(default="")
     accounts: UsersWithSnapshots | None = None
     audit: RecordingAuditSink = field(default_factory=RecordingAuditSink)
-    transaction: RecordingSignInTransaction | None = None
+    transaction: SignInTransaction | None = None
 
     def ask(
         self,
@@ -310,7 +310,7 @@ def a_bearer_app(
     the session store holds an admin's session, whose cookie is `BearerApp.cookie`.
 
     `person_paths` adds the gate's person paths over `transaction` (default: a recording one
-    on the app's accounts, held by `BearerApp.transaction`; none when injected) and the routes
+    on the app's accounts), held, injected or not, by `BearerApp.transaction`, and the routes
     of `add_person_routes`; `session_gate` false installs the stack without the session gate.
     """
     key_sets = key_sets or a_key_set_answering()
@@ -319,7 +319,8 @@ def a_bearer_app(
         transaction_kind, strict_records, cookie_role, known_accounts,
         auth_app_keywords.pop("sessions", None),
     )
-    person = PersonPaths(person_paths, transaction or side.transaction) if person_paths else None
+    used_transaction = transaction or side.transaction
+    person = PersonPaths(person_paths, used_transaction) if person_paths else None
     gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock, person_paths=person)
     public = auth_app_keywords.pop("public", ())
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
@@ -344,7 +345,7 @@ def a_bearer_app(
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
         accounts=side.accounts, audit=side.audit,
-        transaction=None if transaction else side.transaction,
+        transaction=used_transaction,
     )
 
 

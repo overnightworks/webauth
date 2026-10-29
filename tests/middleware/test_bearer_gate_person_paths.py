@@ -43,7 +43,12 @@ from tests.support.gate_arrangement import (
     relayed,
 )
 from tests.support.oidc_arrangement import ABSENT, OPERATOR_SUBJECT
-from tests.support.oidc_login_host import StoreDown, TransactionKind, failing
+from tests.support.oidc_login_host import (
+    RecordingSignInTransaction,
+    StoreDown,
+    TransactionKind,
+    failing,
+)
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     LOGIN_REDIRECT,
@@ -192,7 +197,7 @@ def test_a_token_of_a_person_outside_the_app_is_refused_before_any_store_is_touc
     assert (response.status_code, response.json(), the_challenge(response)) == (
         403, {"detail": "No access"}, PERSON_INSUFFICIENT_SCOPE,
     )
-    assert app.transaction is not None
+    assert isinstance(app.transaction, RecordingSignInTransaction)
     assert (app.transaction.entries, the_account(app), ran(app)) == (0, None, [])
 
 
@@ -234,7 +239,7 @@ def test_without_a_bearer_credential_a_person_path_is_decided_by_the_session(
         401, {"detail": "Authentication required"}, PERSON_REALM,
     )
     assert (admitted.status_code, admitted.json()["username"]) == (200, "alice")
-    assert app.transaction is not None
+    assert isinstance(app.transaction, RecordingSignInTransaction)
     assert app.transaction.entries == 0
 
 
@@ -289,7 +294,7 @@ def test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_wit
     assert (response.status_code, response.json(), the_challenge(response)) == (
         401, {"detail": detail}, challenge,
     )
-    assert app.transaction is not None
+    assert isinstance(app.transaction, RecordingSignInTransaction)
     assert (app.transaction.entries, ran(app)) == (0, [])
 
 
@@ -406,7 +411,7 @@ class TestAPathBothRulesSelectIsAMachinePath:
         response = app.ask(EXPORT_PATH, authorization=bearing(ADMIN_TOKEN))
 
         assert (response.status_code, response.json()) == (200, {"subject": OPERATOR_SUBJECT})
-        assert app.transaction is not None
+        assert isinstance(app.transaction, RecordingSignInTransaction)
         assert (app.transaction.entries, the_account(app)) == (0, None)
 
     def test_a_user_token_is_refused_as_on_any_machine_path(self) -> None:
@@ -431,6 +436,7 @@ class TestAFailingTransactionIsTheLibrary500:
         )
         app = a_person_app(transaction=transaction)
 
+        assert app.transaction is transaction
         response = app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
 
         assert app.audit is not None
@@ -457,7 +463,7 @@ class TestAFailingTransactionIsTheLibrary500:
     ) -> None:
         promoted = broken == "audit-after-role-changed"
         app = a_person_app(transaction_kind=kind, known_accounts=(a_lena(),) if promoted else ())
-        assert app.transaction is not None
+        assert isinstance(app.transaction, RecordingSignInTransaction)
         assert app.accounts is not None
         assert app.audit is not None
         if broken == "store":
@@ -485,7 +491,7 @@ def test_a_token_request_enters_one_sign_in_transaction_and_reads_no_record_afte
 
     response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
 
-    assert app.transaction is not None
+    assert isinstance(app.transaction, RecordingSignInTransaction)
     assert (response.status_code, app.transaction.entries) == (200, 1)
 
 
