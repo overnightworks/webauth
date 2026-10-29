@@ -61,6 +61,7 @@ from webauth.middleware import (
     BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
+    PersonPaths,
     SecurityHeadersMiddleware,
     SessionGate,
     SessionGateMiddleware,
@@ -301,6 +302,24 @@ def a_host_declares_its_machine_paths(
     )
 
 
+def a_host_declares_its_person_paths(
+    relying_party: OidcRelyingParty, config: AdmissionConfig, transaction: SignInTransaction,
+) -> BearerGate:
+    return BearerGate(
+        paths=PathRules(),
+        relying_party=relying_party,
+        admission=config,
+        authorized_parties=AuthorizedParties(frozenset({"hal"})),
+        person_paths=PersonPaths(PathRules(prefixes=("/api/",)), transaction),
+    )
+
+
+def a_host_reads_the_token_person(app: FastAPI, dependencies: AuthDependencies) -> None:
+    @app.get("/api/me")
+    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> str:
+        return user.username
+
+
 def a_host_serves_a_machine_route(app: FastAPI) -> None:
     @app.get("/api/admin/export")
     def export(caller: BearerCaller = Depends(bearer_caller)) -> str:
@@ -405,6 +424,7 @@ def a_host_ends_a_session() -> None:
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
         AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
+        PersonPaths,
         BodySizePolicy, CsrfOriginMiddleware,
         DEFAULT_PERMISSIONS_POLICY,
         DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,
