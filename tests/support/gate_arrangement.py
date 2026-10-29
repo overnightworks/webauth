@@ -29,6 +29,7 @@ from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     GATED_STACK_POLICIES,
     AuthApp,
+    FakeSessionRecord,
     FakeUser,
     RecordingAuditSink,
     SessionRecordsInMemory,
@@ -82,6 +83,8 @@ ADMISSION = AdmissionConfig(
 )
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
+FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
+FOREIGN_SECRET_PUBLIC = PublicRule(FOREIGN_SECRET_PATHS)
 PERSON_REALM = 'Bearer realm="api"'
 PERSON_INVALID_REQUEST = 'Bearer error="invalid_request"'
 PERSON_INVALID_TOKEN = 'Bearer error="invalid_token"'
@@ -243,6 +246,45 @@ def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None
         return {"authorization": request.headers.get("authorization", "")}
 
 
+@dataclass
+class _SignInSide:
+    """The host's accounts, sessions, audit and sign-in transaction over one write lock."""
+
+    record: FakeSessionRecord
+    accounts: UsersWithSnapshots
+    sessions: SessionRecordsInMemory
+    audit: RecordingAuditSink
+    transaction: RecordingSignInTransaction
+
+
+def _a_sign_in_side(
+    kind: TransactionKind,
+    strict: bool,
+    cookie_role: str,
+    known_accounts: tuple[FakeUser, ...],
+    sessions: SessionRecordsInMemory | None,
+) -> _SignInSide:
+    cookie_person = FakeUser(role=cookie_role)
+    record = a_session(user=cookie_person)
+    lock = WriteLockInMemory()
+    accounts = UsersWithSnapshots(cookie_person, *known_accounts, lock=lock)
+    sessions = sessions or SessionRecordsInMemory(record, users=accounts, lock=lock)
+    audit = RecordingAuditSink()
+    transaction = RecordingSignInTransaction(
+        kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock, strict=strict,
+    )
+    return _SignInSide(record, accounts, sessions, audit, transaction)
+
+
+def _stack_policies(
+    gate: BearerGate | None, with_person_paths: bool, policies: dict[str, Any] | None,
+) -> dict[str, Any]:
+    stack: dict[str, Any] = {} if gate is None else {"bearer_gate": gate}
+    if with_person_paths:
+        stack["csrf_origin"] = CsrfPolicy(exempt=FOREIGN_SECRET_PATHS)
+    return {**stack, **(policies or {})}
+
+
 def a_bearer_app(
     *,
     paths: PathRules = MACHINE_PATHS,
@@ -265,40 +307,27 @@ def a_bearer_app(
     arrangement's own routes; the session store holds an admin's session, whose cookie
     is `BearerApp.cookie`.
 
-    `person_paths` names the gate's person paths over a `RecordingSignInTransaction` of
-    `transaction_kind` on the app's own accounts (the cookie's person, an account of
-    `cookie_role`, and `known_accounts`) and sessions, and adds the routes of
-    `add_person_routes`; `FOREIGN_SECRET_PATH` is then public and exempt from the CSRF
-    origin check. `session_gate` false installs the stack without the session gate.
+    `person_paths` adds the gate's person paths over a `RecordingSignInTransaction` on the
+    app's accounts, and the routes of `add_person_routes` (`FOREIGN_SECRET_PATH` public and
+    CSRF-exempt). `session_gate` false installs the stack without the session gate.
     """
     key_sets = key_sets or a_key_set_answering()
     clock = FakeClock(float(ACCESS_TOKEN_NOW))
-    cookie_person = FakeUser(role=cookie_role)
-    record = a_session(user=cookie_person)
-    lock = WriteLockInMemory()
-    accounts = UsersWithSnapshots(cookie_person, *known_accounts, lock=lock)
-    sessions = auth_app_keywords.pop("sessions", None) or SessionRecordsInMemory(
-        record, users=accounts, lock=lock,
+    side = _a_sign_in_side(
+        transaction_kind, strict_records, cookie_role, known_accounts,
+        auth_app_keywords.pop("sessions", None),
     )
-    audit = RecordingAuditSink()
-    transaction = RecordingSignInTransaction(
-        transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
-        strict=strict_records,
-    )
-    person = None if person_paths is None else PersonPaths(person_paths, transaction)
+    person = None if person_paths is None else PersonPaths(person_paths, side.transaction)
     gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock, person_paths=person)
-    stack = {"bearer_gate": gate} if gated else {}
     public = auth_app_keywords.pop("public", ())
+    stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
     if person is not None:
-        foreign_secret = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
-        public = (*public, PublicRule(foreign_secret))
-        stack = {"csrf_origin": CsrfPolicy(exempt=foreign_secret), **stack}
-    stack_policies = {**stack, **(policies or {})}
+        public = (*public, FOREIGN_SECRET_PUBLIC)
     auth = an_auth_app(
-        record,
+        side.record,
         gate=session_gate,
         raise_server_exceptions=False,
-        sessions=sessions,
+        sessions=side.sessions,
         public=public,
         stack_policies=stack_policies,
         **auth_app_keywords,
@@ -307,14 +336,13 @@ def a_bearer_app(
         install_web_auth_middleware(auth.app, **{**GATED_STACK_POLICIES, **stack_policies})
 
     auth.app.user_middleware.extend(inner_middleware)
-
     add_machine_routes(auth)
     if person is not None:
         add_person_routes(auth, auth_app_keywords.get("login_redirect"))
 
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
-        accounts=accounts, audit=audit, transaction=transaction,
+        accounts=side.accounts, audit=side.audit, transaction=side.transaction,
     )
 
 
