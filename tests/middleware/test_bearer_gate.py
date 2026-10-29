@@ -381,10 +381,11 @@ class TestAGateIsBuiltFromSoundParts:
         with pytest.raises(error):
             BearerGate(**{**arguments, **changes})
 
-
     def test_person_paths_without_a_path_are_refused_at_construction(self) -> None:
+        no_path = PathRules()
+
         with pytest.raises(ValueError, match="at least one path"):
-            PersonPaths(PathRules(), transaction=a_transaction_never_entered)
+            PersonPaths(no_path, transaction=a_transaction_never_entered)
 
     def test_a_no_admins_app_may_name_person_paths_alone(self) -> None:
         gate = a_bearer_gate(
