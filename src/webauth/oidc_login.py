@@ -565,9 +565,11 @@ def _decide_admission(
     derived = app_role(identity.groups, admission)
     if derived is None:
         return AdmissionRefusal.NOT_A_MEMBER
-    return _AdmittedLogin(
-        identity, config.admin_role if derived is AppRole.ADMIN else config.user_role,
-    )
+    return _AdmittedLogin(identity, _stored_role(derived, config))
+
+
+def _stored_role(derived: AppRole, config: WebAuthConfig) -> str:
+    return config.admin_role if derived is AppRole.ADMIN else config.user_role
 
 
 class _Claimant(Protocol):
@@ -600,7 +602,7 @@ def _admit_token_holder(
     derived = app_role(verified.groups, admission)
     if derived is None:
         return AdmissionRefusal.NOT_A_MEMBER
-    role = config.admin_role if derived is AppRole.ADMIN else config.user_role
+    role = _stored_role(derived, config)
     try:
         with transaction() as stores:
             account = _admit_account(verified, role, accounts=stores.accounts, audit=stores.audit)
