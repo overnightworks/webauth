@@ -7,6 +7,12 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.26.0 - Unreleased
+
+**Added**
+
+- `webauth.service_callers`: `ServiceCallerCheck.workload_caller(token)` proves the app behind an app's own token for a service (realm role, `azp` equal to `client_id`, a registered client, a bounded token life) and returns a `WorkloadCaller` or the first `CallerRefusal` of a fixed order that puts every 401 and 503 cause before any 403, see the [host contract](host-contract.md#a-services-callers).
+
 ## 0.25.0 - 2026-10-29
 
 **Breaking**

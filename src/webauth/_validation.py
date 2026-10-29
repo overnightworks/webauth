@@ -7,6 +7,21 @@ from typing import TypeGuard
 __all__: list[str] = []
 
 
+def is_utf8(text: str) -> bool:
+    """Whether ``text`` holds no byte that failed to decode as UTF-8."""
+    try:
+        text.encode()
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def require_non_empty_string(field: str, value: object) -> None:
+    """Refuse a non-string or empty value, naming the field and never the value."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a non-empty string")
+
+
 def _is_whole_number(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 

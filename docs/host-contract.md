@@ -361,6 +361,38 @@ Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_
 in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
 Keycloak in the hand-run harness.
 
+## A service's callers
+
+A service that is not a browser app (no sessions, no sign-in) admits an app acting as itself with
+`ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
+`ServiceIdentity` (issuer, key-set URL, its own audience, the realm role that marks a workload, the
+group claim, the longest workload token life in seconds, the clock leeway) and its registered apps
+(`RegisteredApp`, keyed by the workload client id). Nothing has a default and nothing is read from
+the environment. `workload_caller(token)` is synchronous, so an async service runs it in a thread.
+
+It returns a `WorkloadCaller` (the app, the client id, the verified `Principal` and the groups) or
+a `CallerRefusal`. The first fault of this order is the refusal; the class is the wire code the
+host answers, and the host owns the codes:
+
+| Reason | Fault | Class |
+|---|---|---|
+| `MISSING_TOKEN` | no token | 401 |
+| `KEY_SET_UNAVAILABLE` | the issuer's key set cannot be fetched and none is cached | 503 |
+| `TOKEN_REJECTED` | the verifier refused it; `token_rejection` says why | 401 |
+| `INVALID_SUBJECT` | `sub` absent or not valid text | 401 |
+| `MALFORMED_GROUPS` | the group claim is present and not a list of strings | 401 |
+| `NOT_A_WORKLOAD` | `realm_access.roles` lacks the workload role | 403 |
+| `UNBOUND_CLIENT` | `azp` absent or empty, or `client_id` differs from it | 403 |
+| `UNREGISTERED_CLIENT` | `azp` is no registered app | 403 |
+| `WORKLOAD_LIVES_TOO_LONG` | `exp - iat` above the maximum | 403 |
+
+The token's `aud` must name the service; it may name others. The check has no policy: which
+groups reach which route is the service's. Nothing taken from a token (subject, client id,
+groups) appears in a repr, an error message or a log record of the module, and `jwks_url` is left
+out of the repr of `ServiceIdentity`.
+
+Proofs: [test_service_callers.py](../tests/test_service_callers.py) in CI.
+
 ## The sign-in routes
 
 `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's

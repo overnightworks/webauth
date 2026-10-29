@@ -15,17 +15,18 @@ source_modules =
 forbidden_modules =
     sqlalchemy
 
-# The JWT verifier is reached only through the OpenID Connect relying party,
-# the cryptographic stack only through the verifier, and urllib3 only through
-# the one HTTPS client, so each of them has one owner, and every
-# outbound request holds one bounded posture.
-[importlinter:contract:only-oidc-imports-jwt-verification]
-name = only webauth.oidc imports webauth.jwt_verification
+# The JWT verifier is reached only through the OpenID Connect relying party
+# and the service caller check, the cryptographic stack only through the
+# verifier, and urllib3 only through the one HTTPS client, so each of them has
+# one owner, and every outbound request holds one bounded posture.
+[importlinter:contract:only-oidc-and-service-callers-import-jwt-verification]
+name = only oidc and service_callers import webauth.jwt_verification
 type = protected
 protected_modules =
     webauth.jwt_verification
 allowed_importers =
     webauth.oidc
+    webauth.service_callers
 
 [importlinter:contract:only-jwt-verification-imports-the-crypto-stack]
 name = only webauth.jwt_verification imports jwt and cryptography
