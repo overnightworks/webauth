@@ -5,8 +5,8 @@ already owns, so the library needs no schema and no ORM of its own. The
 library commits nothing: a store either applies each of its calls at once or
 writes into a transaction the host opens and commits, and `SessionTransaction`
 is that transaction when the host hands it to the library, and `SignInTransaction`
-is the serialized one the library's sign-in routes enter. Whether a request
-that fails leaves the auth machinery's writes behind is the host's: a
+is the serialized one the library's sign-in routes and the bearer gate's person paths
+enter. Whether a request that fails leaves the auth machinery's writes behind is the host's: a
 transaction that rolls back on an exception leaves none, a store that applies
 each call keeps them, and the rate-limit budget counts attempts either way.
 Behind the session gate, the session renewal is durable before the route runs,
@@ -66,7 +66,7 @@ class AuthenticatedUser:
 
 @dataclass(frozen=True)
 class BearerCaller:
-    """The machine behind a request the bearer gate admitted: the token's ``sub``.
+    """The machine behind a request the bearer gate admitted on a machine path: the token's ``sub``.
 
     No account, no role and no token: the host owns what the subject may do.
     """
@@ -302,7 +302,7 @@ class SignInStores:
 
 class SignInTransaction(Protocol):
     """The host's serialized context around one sign-in, entered by the callback, logout and
-    back-channel logout routes.
+    back-channel logout routes, and once per token request on the bearer gate's person paths.
 
     Creating it, entering the context manager, every store call inside the block
     and leaving it all run on one worker thread, never on the event loop. Entries

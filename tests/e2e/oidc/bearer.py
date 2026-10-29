@@ -1,14 +1,15 @@
 """Plays hal against real Keycloak: the bearer gate admits, or refuses, real access tokens.
 
 ``drive_bearer_phase`` runs after the back-channel phase of ``prove.py`` and prints
-``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51. hal is two public
+``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 60. hal is two public
 clients (``d1-hal``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and the optional
 audience scopes; ``d1-app-c`` is a client that exists only to be an audience. hal gets its
 codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
 listens on fails, and Playwright's failed request names the code), posts the code exchange
 itself, and sends the access token as the ``Authorization`` header to the bearer host:
 ``build_app`` with ``bearer_authorized_parties``, whose routes under ``/api/admin/`` are E
-(export), D (delete) and P (session probe). ``CHECK bearer-token-header-type`` records the
+(export), D (delete) and P (session probe); its person path ``/api/me`` (GET and POST)
+answers the account behind the token. ``CHECK bearer-token-header-type`` records the
 header ``typ`` of the first minted token. Each scenario's id is the matrix id of the item.
 
 - 28 (E01) an admin token opens E after ``/reset``.
@@ -26,6 +27,16 @@ header ``typ`` of the first minted token. Each scenario's id is the matrix id of
 - 49 (E22) a flipped signature character.
 - 50 (E23) every machine-route answer is ``no-store`` and sets no cookie.
 - 51 (E24) no token sent appears in an answer or the host log; each refusal has a line.
+
+The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's H1 to H6.
+
+- 55 (H1) a member who never signed in to the app: the token answers that person with the
+  user role and the Keycloak username; one account, one ``USER_CREATED``, no session.
+- 56 (H2) the same person after a browser sign-in: the token answers the same username and id.
+- 57 (H3) ``POST /api/me`` with the token, no ``Origin`` and no cookie reaches the route.
+- 58 (H4) the outsider's token: 403 ``No access``, and no account is created.
+- 59 (H5) a ``d1-other`` token: 401 ``invalid_token``.
+- 60 (H6) after a browser sign-out the token still opens ``/api/me``.
 """
 
 from __future__ import annotations
@@ -103,6 +114,9 @@ SUBJECT = "person-1"
 EXPORT = f"/api/admin/people/{SUBJECT}/export"
 DELETE = f"/api/admin/people/{SUBJECT}"
 PROBE = "/api/admin/session-probe"
+ME = "/api/me"
+PERSON_CHALLENGE_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
+PERSON_CHALLENGE_INVALID_TOKEN = 'Bearer error="invalid_token"'
 
 
 @dataclass(frozen=True)
@@ -254,6 +268,17 @@ def assert_answer(
     if status != 200:
         wanted = CHALLENGE if error is None else f'{CHALLENGE}, error="{error}"'
     assert answer.headers.get("www-authenticate") == wanted, (
+        f"challenge {answer.headers.get('www-authenticate')!r}"
+    )
+    if detail is not None:
+        assert answer.json()["detail"] == detail, f"detail {answer.json()['detail']!r}"
+
+
+def assert_person_answer(
+    answer: httpx.Response, status: int, challenge: str | None = None, detail: str | None = None
+) -> None:
+    assert answer.status_code == status, f"answered {answer.status_code}: {answer.text[:80]}"
+    assert answer.headers.get("www-authenticate") == challenge, (
         f"challenge {answer.headers.get('www-authenticate')!r}"
     )
     if detail is not None:
@@ -455,6 +480,65 @@ def no_token_is_shown_and_refusals_are_logged(run: BearerRun) -> str:
     )
 
 
+# --- the person-path scenarios ---
+
+def member_token_creates_the_account(run: BearerRun) -> str:
+    reset_host(run.host)
+    answer = run.send(Call("GET", ME, run.tokens["user"]))
+    assert_person_answer(answer, 200)
+    expected = {"id": claims_of(run.tokens["user"])["sub"], "username": USER_NAME, "role": "user"}
+    assert answer.json() == expected, answer.json()
+    held = run.state()
+    assert (held["accounts"], held["account_events"], held["sessions"]) == (1, 1, 0), held
+    assert held["session_transactions"] == 0, held
+    return f"{USER_NAME}'s token on /api/me: 200; accounts 1, events 1, sessions 0"
+
+
+def token_and_browser_name_the_same_person(run: BearerRun) -> str:
+    person = run.people["user"]
+    run.host_pages.pop(person.username, None)  # the reset ended the earlier browser session
+    origin = run.settings.app_origins[0]
+    cookies = session_cookies(run.host_page(person), origin)
+    browser = run.send(Call("GET", "/me", cookies=cookies))
+    assert browser.status_code == 200, f"the browser's /me answered {browser.status_code}"
+    token = run.send(Call("GET", ME, run.tokens["user"]))
+    assert_person_answer(token, 200)
+    assert token.json()["username"] == browser.json()["username"], (token.json(), browser.json())
+    held = run.state()
+    assert held["accounts"] == 1, held
+    return f"the browser's /me and the token's /api/me name {USER_NAME}; accounts 1"
+
+
+def token_post_needs_no_origin_and_no_cookie(run: BearerRun) -> str:
+    answer = run.send(Call("POST", ME, run.tokens["user"]))
+    assert_person_answer(answer, 200)
+    return "POST /api/me with the token, no Origin and no cookie: 200"
+
+
+def outsider_token_is_refused_without_an_account(run: BearerRun) -> str:
+    before = run.state()["accounts"]
+    answer = run.send(Call("GET", ME, run.tokens["outsider"]))
+    assert_person_answer(answer, 403, PERSON_CHALLENGE_INSUFFICIENT_SCOPE, "No access")
+    assert run.state()["accounts"] == before, "the outsider's token created an account"
+    return f"d1-outsider's token on /api/me: 403 No access; accounts still {before}"
+
+
+def other_client_token_is_refused_on_the_person_path(run: BearerRun) -> str:
+    answer = run.send(Call("GET", ME, run.tokens["other_client"]))
+    assert_person_answer(answer, 401, PERSON_CHALLENGE_INVALID_TOKEN, "Invalid token")
+    return f"a token of d1-other on /api/me: 401 invalid_token, log: {run.last_gate_reason()}"
+
+
+def sign_out_leaves_the_token_on_the_person_path(run: BearerRun) -> str:
+    page = run.host_page(run.people["user"])
+    run.proof.press(page, "#logout")
+    page.wait_for_url(f"{run.settings.app_origins[0]}/")
+    assert run.proof.headline(page) == "Signed out", "the browser sign-out did not end the session"
+    answer = run.send(Call("GET", ME, run.tokens["user"]))
+    assert_person_answer(answer, 200)
+    return f"after {USER_NAME}'s browser sign-out the token still opens /api/me (200)"
+
+
 SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (28, admin_token_opens_export),
     (29, admission_leaves_no_trace),
@@ -484,6 +568,12 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (49, flipped_signature_is_refused),
     (50, answers_are_not_stored_and_set_no_cookie),
     (51, no_token_is_shown_and_refusals_are_logged),
+    (55, member_token_creates_the_account),
+    (56, token_and_browser_name_the_same_person),
+    (57, token_post_needs_no_origin_and_no_cookie),
+    (58, outsider_token_is_refused_without_an_account),
+    (59, other_client_token_is_refused_on_the_person_path),
+    (60, sign_out_leaves_the_token_on_the_person_path),
 )
 
 

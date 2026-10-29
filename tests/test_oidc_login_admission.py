@@ -78,7 +78,9 @@ class Host:
         if isinstance(decided, AdmissionRefusal):
             return decided
         with self.lock.hold():
-            return _admit_account(decided, accounts=self.accounts, audit=self.audit)
+            return _admit_account(
+                decided.identity, decided.role, accounts=self.accounts, audit=self.audit,
+            )
 
 
 def admitted_account(host: Host, identity: OidcIdentity) -> UserRecord:

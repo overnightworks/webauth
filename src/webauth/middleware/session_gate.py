@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
-from fastapi import HTTPException
 from starlette.requests import HTTPConnection
 
 from webauth._paths import _has_dot_segment
@@ -17,15 +16,18 @@ from webauth.dependencies import (
     _AUTHENTICATION_REQUIRED_DETAIL,
     ConnectionRefusal,
     LoginRedirect,
+    _admitted_token_person,
     _bearer_admission,
     _gate_admission,
     _GateAdmission,
     _is_bearer_admitted,
+    _is_person_admitted,
     _raise_for_bearer_admission,
     _read_session_cookie,
     _record_gate_admission,
     _refusal_response,
     _require_admin,
+    _unauthenticated_without_redirect,
     admit_session,
 )
 from webauth.middleware._refusal import RefusalMiddleware
@@ -134,13 +136,20 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
     """The account the session gate admitted for this request, or ``None``.
 
     ``None`` on a public path, and on an optional path without a live session.
-    ``None`` on a request the bearer gate admitted. Raises ``RuntimeError`` when
-    no gate decided this request: the gate is not installed, the connection is a
+    On a person path of the bearer gate it is the account behind the token, for the
+    request the gate admitted it for; ``None`` on a machine path. Raises
+    ``RuntimeError`` for a bearer admission that does not hold for this request, and
+    when no gate decided this request: the gate is not installed, the connection is a
     WebSocket, the route runs under another ``WebAuthConfig`` instance, or the
     decision was made for another session cookie. A forgotten gate never reads as
     signed out. For the session id use ``session_id_from_request``. The account is
     this request's own: a host must not hand it to another request.
     """
+    person = _admitted_token_person(connection)
+    if person is not None:
+        return person
+    if _is_person_admitted(connection):
+        _raise_for_bearer_admission(connection)
     if _is_bearer_admitted(connection):
         return None
     decided = _gate_admission(connection)
@@ -160,13 +169,18 @@ def admitted_admin(connection: HTTPConnection) -> AuthenticatedUser:
     admitted no account (a public path, or an optional path without a live
     session); it never redirects and never admits a session by itself. A
     ``Depends(current_user)`` that admits the cookie on a public path does not
-    change the gate's record, so the answer there stays 401. Raises
+    change the gate's record, so the answer there stays 401. The token person of a
+    person path is admitted as an admin or answered 403 ``Admin access required``
+    with ``Bearer error="insufficient_scope"``. Raises
     ``RuntimeError`` as ``admitted_user`` does where no gate decided this request,
-    and on a request the bearer gate admitted: a machine route takes
-    ``Depends(bearer_caller)``. Usable as ``Depends(admitted_admin)``.
+    and on a machine admission: a machine route takes ``Depends(bearer_caller)``.
+    Usable as ``Depends(admitted_admin)``.
     """
+    person = _admitted_token_person(connection)
+    if person is not None:
+        return _require_admin(connection, person)
     _raise_for_bearer_admission(connection)
     user = admitted_user(connection)
     if user is None:
-        raise HTTPException(401, _AUTHENTICATION_REQUIRED_DETAIL)
+        raise _unauthenticated_without_redirect(connection, _AUTHENTICATION_REQUIRED_DETAIL)
     return _require_admin(connection, user)

@@ -63,6 +63,11 @@ entry, ends every session of the account the token's subject names, and records 
 is accepted and provisions nothing. It never commits, clears a cookie or calls the issuer;
 a store or audit failure propagates so the host's transaction can roll back.
 
+The bearer gate's person paths admit the holder of a verified access token with the same
+``app_role`` and ``_admit_account`` in one ``SignInTransaction`` entry: the account is
+created on its first token, its role follows the token's groups, and no session is
+created. Nothing is committed, and the answer is built inside the block.
+
 The production ``TokenRequestPost`` is ``webauth.oidc_transport``'s, not this
 module's.
 """
@@ -73,7 +78,7 @@ import unicodedata
 import urllib.parse
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import SecretStr
 
@@ -92,7 +97,7 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRefusalReason,
 )
-from webauth.ports import AccountEvent, AccountEventKind, UsernameTakenError
+from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser, UsernameTakenError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -101,7 +106,7 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
     from webauth.config import WebAuthConfig
-    from webauth.oidc import OidcIdentity, OidcRelyingParty
+    from webauth.oidc import OidcIdentity, OidcRelyingParty, VerifiedAccessToken
     from webauth.ports import (
         AuditSink,
         SessionRecordStore,
@@ -307,7 +312,9 @@ def _write_sign_in(
     ``keeps_id_token`` is true, its ID token. Never commits, takes no lock and sets no cookie.
     Raises ``_UsernameTakenSignal`` before any session is touched.
     """
-    account = _admit_account(admitted, accounts=stores.accounts, audit=stores.audit)
+    account = _admit_account(
+        admitted.identity, admitted.role, accounts=stores.accounts, audit=stores.audit,
+    )
     now = _whole_second_now(config)
     if replaced_session_id is not None:
         stores.sessions.delete(replaced_session_id)
@@ -558,15 +565,56 @@ def _decide_admission(
     derived = app_role(identity.groups, admission)
     if derived is None:
         return AdmissionRefusal.NOT_A_MEMBER
-    return _AdmittedLogin(
-        identity, config.admin_role if derived is AppRole.ADMIN else config.user_role,
-    )
+    return _AdmittedLogin(identity, _stored_role(derived, config))
+
+
+def _stored_role(derived: AppRole, config: WebAuthConfig) -> str:
+    return config.admin_role if derived is AppRole.ADMIN else config.user_role
+
+
+class _Claimant(Protocol):
+    """Whom the issuer vouched for: the ID token's identity or a verified access token."""
+
+    @property
+    def subject(self) -> str: ...
+
+    @property
+    def preferred_username(self) -> str | None: ...
+
+
+def _admit_token_holder(
+    transaction: SignInTransaction,
+    verified: VerifiedAccessToken,
+    *,
+    admission: AdmissionConfig,
+    config: WebAuthConfig,
+) -> AuthenticatedUser | AdmissionRefusal:
+    """The account behind a verified access token, admitted as a sign-in admits it.
+
+    A non-member is refused before any store is touched. A member enters one
+    ``SignInTransaction`` entry in which ``_admit_account`` creates the account on
+    its first token and follows the token's groups for the role; the answer is built
+    inside the block, from the record the store returned. No session is created.
+    Never commits. Runs on one worker thread, like every entry. A store, audit or
+    exit failure propagates; a refused new username answers ``USERNAME_TAKEN`` once
+    the exit returned.
+    """
+    derived = app_role(verified.groups, admission)
+    if derived is None:
+        return AdmissionRefusal.NOT_A_MEMBER
+    role = _stored_role(derived, config)
+    try:
+        with transaction() as stores:
+            account = _admit_account(verified, role, accounts=stores.accounts, audit=stores.audit)
+            return AuthenticatedUser(id=account.id, username=account.username, role=account.role)
+    except _UsernameTakenSignal:
+        return AdmissionRefusal.USERNAME_TAKEN
 
 
 def _admit_account(
-    admitted: _AdmittedLogin, *, accounts: SubjectUserStore, audit: AuditSink,
+    claimant: _Claimant, role: str, *, accounts: SubjectUserStore, audit: AuditSink,
 ) -> UserRecord:
-    """The account ``admitted`` signs in as, created on its first visit.
+    """The account ``claimant`` signs in as, created on its first visit.
 
     A new subject gets an account with the issuer's ``preferred_username``, or
     the subject when it suggests none or only whitespace, and ``USER_CREATED``
@@ -586,10 +634,10 @@ def _admit_account(
     a store with its own admins puts them into the admin group first, or they are
     demoted at their next login.
     """
-    account = accounts.get(admitted.identity.subject)
+    account = accounts.get(claimant.subject)
     if account is None:
-        return _provision(admitted.identity, admitted.role, accounts=accounts, audit=audit)
-    return _with_role(account, admitted.role, accounts=accounts, audit=audit)
+        return _provision(claimant, role, accounts=accounts, audit=audit)
+    return _with_role(account, role, accounts=accounts, audit=audit)
 
 
 def _with_role(
@@ -610,15 +658,15 @@ def _with_role(
 
 
 def _provision(
-    identity: OidcIdentity,
+    claimant: _Claimant,
     role: str,
     *,
     accounts: SubjectUserStore,
     audit: AuditSink,
 ) -> UserRecord:
-    username = _username_for(identity)
+    username = _username_for(claimant)
     try:
-        account = accounts.create_for_subject(identity.subject, username, role)
+        account = accounts.create_for_subject(claimant.subject, username, role)
     except UsernameTakenError as refused:
         raise _UsernameTakenSignal from refused
     audit.account_event(AccountEvent(
@@ -630,7 +678,7 @@ def _provision(
     return account
 
 
-def _username_for(identity: OidcIdentity) -> str:
+def _username_for(claimant: _Claimant) -> str:
     """The issuer's suggested username, or the subject when it suggests a blank one."""
-    suggested = identity.preferred_username
-    return suggested if suggested and not suggested.isspace() else identity.subject
+    suggested = claimant.preferred_username
+    return suggested if suggested and not suggested.isspace() else claimant.subject

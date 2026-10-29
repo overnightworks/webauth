@@ -113,7 +113,7 @@ def public_client_representation(
             ACCESS_TOKEN_TYPE_ATTRIBUTE: "true",
         },
         "redirectUris": [redirect_uri],
-        "defaultClientScopes": ["basic", "groups"],
+        "defaultClientScopes": ["basic", "profile", "groups"],
         "optionalClientScopes": list(optional_scopes),
     }
 

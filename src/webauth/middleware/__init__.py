@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware, bearer_caller
+from webauth.middleware.bearer_gate import (
+    BearerGate,
+    BearerGateMiddleware,
+    PersonPaths,
+    bearer_caller,
+)
 from webauth.middleware.body_size import BodySizeLimitMiddleware, RequestBodyTooLarge
 from webauth.middleware.csrf import CsrfOriginMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
@@ -21,6 +26,7 @@ __all__ = [
     "BodySizeLimitMiddleware",
     "CsrfOriginMiddleware",
     "IpRateLimitMiddleware",
+    "PersonPaths",
     "RequestBodyTooLarge",
     "SecurityHeadersMiddleware",
     "SessionGate",

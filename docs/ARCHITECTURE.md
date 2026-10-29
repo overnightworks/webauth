@@ -15,7 +15,7 @@ flowchart LR
         audit["Audit sink, clock"]
     end
     browser["Browser<br/>(any visitor, in scope)"] -- "cookies, CSRF, Origin" --> lib
-    hal["hal<br/>(machine caller)"] -- "Authorization: Bearer" --> lib
+    hal["hal<br/>(operator's CLI)"] -- "Authorization: Bearer" --> lib
     lib -- "https only, no redirects" --> issuer["OpenID Connect issuer<br/>(trusted for what it signs)"]
     browser -- "sign-in redirects" --> issuer
     lib -- "ports" --> sessions & limits & audit
@@ -29,7 +29,7 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 
 - `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes, selects `SignInPaths` policies and answers failures.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
-- `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission.
+- `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission (a machine caller, or on a person path the account behind the token).
 - `middleware` enforces body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
 - `proxies` derives client identity from trusted peers; `rate_limit` measures sliding windows in Redis or in process.
 - `ports` defines host Protocols, `AuthenticatedUser` and `BearerCaller`; `jwt_verification` verifies RS256 against cached issuer keys.
@@ -88,9 +88,10 @@ Install once, adding no library middleware yourself; its docstring explains plac
 
 ### The bearer gate
 
-[Host requirements/outcomes](host-contract.md#the-hosts-machine-routes) and [refusals](host-contract.md#signed-out-and-refused) have one owner.
+[Host requirements/outcomes](host-contract.md#the-hosts-machine-routes), the [person paths](host-contract.md#the-persons-token-on-the-apps-api) and [refusals](host-contract.md#signed-out-and-refused) have one owner.
 The gate runs `OidcRelyingParty.verify_access_token` off-loop, then `app_role`; only admission records app/path/header SHA-256 in request memory, never the token.
-CSRF, session gate and `bearer_caller` read strictly: another app/path/header is no admission. Session dependencies use the loose reader.
+On a machine path the record holds a `BearerCaller`. On a person path (`PersonPaths`) the gate admits the account behind the token with the sign-in's own `app_role` and account step in one `SignInTransaction` entry, off-loop, and records an `AuthenticatedUser`; a request with no bearer credential falls through to the cookie. A path both rules select is a machine path.
+CSRF, session gate, `bearer_caller`, `current_user` and `admitted_user` read strictly: another app/path/header is no admission. `session_id_from_request` and the loose reader refuse more: a bearer-admitted request names no session.
 The gate sits inside rate limiting; installation puts its paths' `no-store` rule first in security-header policy.
 
 ### Reading the session
@@ -184,6 +185,8 @@ Who the library defends against and trusts; links point to owning sections.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
 7. **Bearer caller to library:** anyone who can reach a gated path is untrusted. [The bearer gate](#the-bearer-gate) owns the verification and admission mechanism; the [host contract](host-contract.md#the-hosts-machine-routes) owns token lifetime, cookie handling and socket exclusions. Named residues:
    - an admin token opens every machine route; there is no sender constraint (no DPoP or mTLS);
+   - on a person path a token is the person, with their rights and no layer on top, until its `exp` plus leeway: a browser sign-out, a back-channel logout or disabling the person at the issuer does not end it, group changes arrive with the next token, and a copied token is the person;
+   - every token request on a person path enters the host's serialized `SignInTransaction` and shares the address budget with the browser;
    - only the realm keeps a service account out of the admin group;
    - key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
 8. **Named residues:**

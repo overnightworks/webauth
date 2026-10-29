@@ -51,6 +51,7 @@ from webauth.dependencies import (
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware import (
     BearerGate,
+    PersonPaths,
     SessionGate,
     bearer_caller,
     install_web_auth_middleware,
@@ -80,7 +81,13 @@ from webauth.policies import (
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
-from webauth.ports import AuthenticatedUser, BearerCaller, SessionRecordStore, SignInStores
+from webauth.ports import (
+    AuthenticatedUser,
+    BearerCaller,
+    SessionRecordStore,
+    SignInStores,
+    SignInTransaction,
+)
 from webauth.sign_in_routes import SignInPaths, SignInRefusal, install_sign_in_routes
 
 logger = logging.getLogger(__name__)
@@ -103,6 +110,7 @@ FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 REPOSITORY = Path(__file__).resolve().parents[3]
 SCOPES = ("openid", "profile", "groups")
 MACHINE_ROUTES_PREFIX = "/api/admin/"
+PERSON_ROUTES_PREFIX = "/api/"
 BEARER_GATE_LOGGER = "webauth.middleware.bearer_gate"
 BEARER_HOST_REQUESTS_PER_MINUTE = 10_000
 LEEWAY_SECONDS = 30
@@ -252,6 +260,7 @@ class World:
             "userinfo_answered": self.userinfo_answered,
             "access_tokens_refused": self.token_requests.refused,
             "session_transactions": self.session_transactions,
+            "account_events": len(self.audit.account_events),
         }
 
 
@@ -331,7 +340,19 @@ def call_userinfo(settings: HostSettings, current: World) -> None:
     current.userinfo_answered += 1
 
 
-def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]) -> None:
+def _sign_in_transaction(world: dict[str, World]) -> SignInTransaction:
+    @contextmanager
+    def transaction() -> Iterator[SignInStores]:
+        current = world["world"]  # `/reset` replaces the world, so it is read at call time
+        with current.lock.hold(), current.sessions.transaction():
+            yield SignInStores(current.accounts, current.sessions, current.audit)
+
+    return transaction
+
+
+def _install_stack(
+    app: FastAPI, settings: HostSettings, world: dict[str, World], transaction: SignInTransaction,
+) -> None:
     install_web_auth_middleware(
         app,
         security_headers=SecurityHeadersPolicy(
@@ -343,11 +364,13 @@ def _install_stack(app: FastAPI, settings: HostSettings, world: dict[str, World]
             rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
         ),
         csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
-        **_bearer_policies(settings, world),
+        **_bearer_policies(settings, world, transaction),
     )
 
 
-def _bearer_policies(settings: HostSettings, world: dict[str, World]) -> dict[str, Any]:
+def _bearer_policies(
+    settings: HostSettings, world: dict[str, World], transaction: SignInTransaction,
+) -> dict[str, Any]:
     """The policies only the bearer host installs; the host without the setting has none."""
     if not settings.is_bearer_host:
         return {}
@@ -375,6 +398,7 @@ def _bearer_policies(settings: HostSettings, world: dict[str, World]) -> dict[st
             ),
             admission=_admission_of(settings),
             authorized_parties=AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
+            person_paths=PersonPaths(PathRules(prefixes=(PERSON_ROUTES_PREFIX,)), transaction),
         ),
     }
 
@@ -458,7 +482,8 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     install_web_auth_config(app, config)
-    _install_stack(app, settings, world)
+    sign_in_transaction = _sign_in_transaction(world)
+    _install_stack(app, settings, world, sign_in_transaction)
 
     _install_counters(app, settings, world, config)
 
@@ -484,12 +509,6 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         user: AuthenticatedUser = Depends(redirecting_dependencies.current_user),
     ) -> str:
         return PAGE.substitute(headline=f"Album {html.escape(album_id)}", body=LOGOUT_BUTTON)
-
-    @contextmanager
-    def sign_in_transaction() -> Iterator[SignInStores]:
-        current = world["world"]  # `/reset` replaces the world, so it is read at call time
-        with current.lock.hold(), current.sessions.transaction():
-            yield SignInStores(current.accounts, current.sessions, current.audit)
 
     def refused(request: Request, refusal: SignInRefusal) -> Response:
         current = world["world"]
@@ -549,6 +568,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
 
     if settings.is_bearer_host:
         _add_machine_routes(app, dependencies.current_user)
+        _add_person_routes(app, dependencies.current_user)
     return app
 
 
@@ -574,6 +594,14 @@ def _add_machine_routes(
         user: AuthenticatedUser = Depends(current_user)
     ) -> dict[str, str]:
         return {"username": user.username}
+
+
+def _add_person_routes(app: FastAPI, current_user: Callable[..., AuthenticatedUser]) -> None:
+    """The routes under the bearer gate's person paths; they echo the account behind the request."""
+
+    @app.api_route(f"{PERSON_ROUTES_PREFIX}me", methods=["GET", "POST"])
+    def person_me(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
+        return {"id": user.id, "username": user.username, "role": user.role}
 
 
 def log_the_bearer_gate() -> None:
