@@ -4,7 +4,8 @@ A service builds one `ServiceCallerCheck` per process from the facts it owns
 (`ServiceIdentity`) and the apps it registered, and calls `workload_caller` with
 the bearer token of each request. The first fault, in the order of
 `CallerRefusalReason`, is the refusal; the host maps it to a wire code: the
-first four are 401 (`KEY_SET_UNAVAILABLE` is 503), the rest 403. Policy
+class of each reason is 503 (`KEY_SET_UNAVAILABLE`), 401 (`MISSING_TOKEN`,
+`TOKEN_REJECTED`, `INVALID_SUBJECT`, `MALFORMED_GROUPS`) or 403 (the rest). Policy
 stays with the service: its groups, routing and wire codes.
 
 Nothing taken from a token (subject, client id, groups, any claim) appears in a
@@ -169,7 +170,7 @@ class ServiceCallerCheck:
         if subject is None or not is_utf8(subject):
             return CallerRefusal(CallerRefusalReason.INVALID_SUBJECT, None)
         claims = verified.claims
-        groups = _groups(claims.get(self._identity.group_claim))
+        groups = _groups(claims, self._identity.group_claim)
         if groups is None:
             return CallerRefusal(CallerRefusalReason.MALFORMED_GROUPS, None)
         if not _has_role(claims, self._identity.workload_role):
@@ -209,9 +210,10 @@ def _verifier_refusal(reason: RejectionReason) -> CallerRefusal:
     return CallerRefusal(CallerRefusalReason.TOKEN_REJECTED, reason)
 
 
-def _groups(claim: object) -> frozenset[str] | None:
-    if claim is None:
+def _groups(claims: Mapping[str, object], group_claim: str) -> frozenset[str] | None:
+    if group_claim not in claims:
         return frozenset()
+    claim = claims[group_claim]
     if isinstance(claim, list) and all(isinstance(group, str) for group in claim):
         return frozenset(claim)
     return None

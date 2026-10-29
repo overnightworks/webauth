@@ -235,8 +235,8 @@ def test_groups_are_the_list_of_the_claim_and_empty_when_absent(
 
 @pytest.mark.parametrize(
     "groups",
-    ["/a", ["/a", 1], {"/a": True}, 5],
-    ids=["string", "non-string-member", "object", "number"],
+    [None, "/a", ["/a", 1], {"/a": True}, 5],
+    ids=["null", "string", "non-string-member", "object", "number"],
 )
 def test_groups_that_are_not_a_list_of_strings_are_malformed(groups: object) -> None:
     outcome = a_check().workload_caller(a_workload_token(groups=groups))
@@ -320,6 +320,11 @@ def test_a_lifetime_at_the_maximum_is_admitted_and_one_second_above_is_refused()
             id="groups-before-role",
         ),
         pytest.param(
+            {"groups": None, "realm_access": {"roles": []}},
+            CallerRefusalReason.MALFORMED_GROUPS,
+            id="null-groups-before-role",
+        ),
+        pytest.param(
             {"realm_access": {"roles": []}, "azp": UNREGISTERED, "client_id": UNREGISTERED},
             CallerRefusalReason.NOT_A_WORKLOAD,
             id="role-before-registry",
@@ -343,27 +348,36 @@ def test_the_first_fault_of_the_documented_order_is_the_one_refused(
         pytest.param({"issuer": ""}, "issuer", id="empty-issuer"),
         pytest.param({"issuer": 5}, "issuer", id="non-string-issuer"),
         pytest.param({"audience": ""}, "audience", id="empty-audience"),
+        pytest.param({"audience": 5}, "audience", id="non-string-audience"),
         pytest.param({"workload_role": ""}, "workload_role", id="empty-role"),
+        pytest.param({"workload_role": 5}, "workload_role", id="non-string-role"),
         pytest.param({"group_claim": ""}, "group_claim", id="empty-group-claim"),
+        pytest.param({"group_claim": 5}, "group_claim", id="non-string-group-claim"),
         pytest.param({"max_workload_seconds": 0}, "max_workload_seconds", id="zero-lifetime"),
+        pytest.param({"max_workload_seconds": -5}, "max_workload_seconds", id="negative-lifetime"),
         pytest.param({"max_workload_seconds": True}, "max_workload_seconds", id="boolean-lifetime"),
+        pytest.param({"max_workload_seconds": 1.5}, "max_workload_seconds", id="float-lifetime"),
+        pytest.param({"max_workload_seconds": "60"}, "max_workload_seconds", id="string-lifetime"),
         pytest.param({"leeway_seconds": -1}, "leeway_seconds", id="negative-leeway"),
+        pytest.param({"leeway_seconds": True}, "leeway_seconds", id="boolean-leeway"),
+        pytest.param({"leeway_seconds": 1.5}, "leeway_seconds", id="float-leeway"),
+        pytest.param({"leeway_seconds": "5"}, "leeway_seconds", id="string-leeway"),
     ],
 )
 def test_an_invalid_identity_field_is_refused_by_name(
     changes: dict[str, object], field: str
 ) -> None:
-    with pytest.raises(ValueError, match=field):
-        a_service_identity(**changes)
-
-
-def test_an_identity_refusal_never_quotes_the_key_set_url() -> None:
     secret_url = f"https://login.example.org{SECRET_PATH}"
 
-    with pytest.raises(ValueError) as refusal:
-        a_check(identity=a_service_identity(jwks_url="http://login.example.org" + SECRET_PATH))
+    with pytest.raises(ValueError, match=field) as refusal:
+        a_service_identity(jwks_url=secret_url, **changes)
 
     assert SECRET_PATH not in str(refusal.value)
+
+
+def test_the_identity_repr_never_shows_the_key_set_url() -> None:
+    secret_url = f"https://login.example.org{SECRET_PATH}"
+
     assert secret_url not in repr(a_service_identity(jwks_url=secret_url))
 
 
@@ -395,19 +409,27 @@ def test_an_identity_refusal_never_quotes_the_key_set_url() -> None:
     ],
 )
 def test_an_invalid_registry_is_refused_by_name(registry: Any, mentions: str) -> None:
-    with pytest.raises(ValueError, match=mentions):
+    with pytest.raises(ValueError, match=mentions) as refusal:
         a_check(registered_apps=registry)
+
+    assert REALM_JWKS_URL not in str(refusal.value)
 
 
 @pytest.mark.parametrize("app", ["", 5])
 def test_a_registered_app_needs_a_non_empty_name(app: object) -> None:
+    admission = an_app_admission()
+
     with pytest.raises(ValueError, match="app"):
-        RegisteredApp(app=app, admission=an_app_admission())  # type: ignore[arg-type]
+        RegisteredApp(app=app, admission=admission)  # type: ignore[arg-type]
 
 
 def test_a_non_https_key_set_url_is_refused() -> None:
-    with pytest.raises(ValueError, match="https"):
-        a_check(identity=a_service_identity(jwks_url="http://login.example.org/certs"))
+    identity = a_service_identity(jwks_url=f"http://login.example.org{SECRET_PATH}")
+
+    with pytest.raises(ValueError, match="https") as refusal:
+        a_check(identity=identity)
+
+    assert SECRET_PATH not in str(refusal.value)
 
 
 def test_mutating_the_passed_registry_afterwards_changes_nothing() -> None:

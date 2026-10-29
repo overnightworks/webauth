@@ -377,14 +377,24 @@ host answers, and the host owns the codes:
 | Reason | Fault | Class |
 |---|---|---|
 | `MISSING_TOKEN` | no token | 401 |
-| `KEY_SET_UNAVAILABLE` | the issuer's key set cannot be fetched and none is cached | 503 |
-| `TOKEN_REJECTED` | the verifier refused it; `token_rejection` says why | 401 |
+| `KEY_SET_UNAVAILABLE` or `TOKEN_REJECTED` | one verifier stage, see below | 503 or 401 |
 | `INVALID_SUBJECT` | `sub` absent or not valid text | 401 |
 | `MALFORMED_GROUPS` | the group claim is present and not a list of strings | 401 |
 | `NOT_A_WORKLOAD` | `realm_access.roles` lacks the workload role | 403 |
 | `UNBOUND_CLIENT` | `azp` absent or empty, or `client_id` differs from it | 403 |
 | `UNREGISTERED_CLIENT` | `azp` is no registered app | 403 |
 | `WORKLOAD_LIVES_TOO_LONG` | `exp - iat` above the maximum | 403 |
+
+The verifier stage keeps the verifier's own order: a malformed header or unsupported algorithm is
+`TOKEN_REJECTED` before any key lookup, so no key set is fetched. `KEY_SET_UNAVAILABLE` (503) is
+the verifier's refusal when the key set cannot be fetched and the token's key is not among the
+cached ones, also when other keys are cached; with a usable cached key, a failed refresh still
+verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
+
+By class: 503 is `KEY_SET_UNAVAILABLE`; 401 is `MISSING_TOKEN`, `TOKEN_REJECTED`,
+`INVALID_SUBJECT` and `MALFORMED_GROUPS`; 403 is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
+`UNREGISTERED_CLIENT` and `WORKLOAD_LIVES_TOO_LONG`. A group claim that is a JSON `null` is
+`MALFORMED_GROUPS`; only an absent claim means no groups.
 
 The token's `aud` must name the service; it may name others. The check has no policy: which
 groups reach which route is the service's. Nothing taken from a token (subject, client id,
