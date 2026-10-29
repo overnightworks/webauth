@@ -322,10 +322,8 @@ def a_bearer_app(
     used_transaction = transaction or side.transaction
     person = PersonPaths(person_paths, used_transaction) if person_paths else None
     gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock, person_paths=person)
-    public = auth_app_keywords.pop("public", ())
+    public = (*auth_app_keywords.pop("public", ()), *([FOREIGN_SECRET_PUBLIC] if person else []))
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
-    if person is not None:
-        public = (*public, FOREIGN_SECRET_PUBLIC)
     auth = an_auth_app(
         side.record,
         gate=session_gate,
