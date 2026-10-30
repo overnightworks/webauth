@@ -1,0 +1,8 @@
+claim_id = "43f2f521cb9c4e40a35f38db767868c6"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "ac7dc58838f0a501c4147b88056897f3c56ee4aa"
+branch = "claude/issue-528-w2-workload-scopes"
+scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "src/webauth/_validation.py", "src/webauth/oidc.py", "tests/e2e/oidc/host_app.py", "tests/e2e/oidc/realm.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/test_oidc_grants.py"]
+opened_commit = "86540289eae1a8bb79471f30bc1d87394a4e0ee0"
+whole_reason = "The grant's signature, the tests, typing host and e2e harness that call it, and the documents naming it move together; landing a part leaves a caller of the old signature."
