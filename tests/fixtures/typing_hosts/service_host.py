@@ -8,11 +8,12 @@ build instead of the service's next upgrade.
 from __future__ import annotations
 
 from webauth.jwt_verification import KeySetFetch, MonotonicClock
-from webauth.oidc_login import AdmissionConfig, EverySubject, NoAdmins
+from webauth.oidc_login import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.ports import WallClock
 from webauth.service_callers import (
     CallerRefusal,
     CallerRefusalReason,
+    PersonCaller,
     Principal,
     RegisteredApp,
     ServiceCallerCheck,
@@ -64,3 +65,17 @@ _UNAUTHENTICATED = frozenset({
     CallerRefusalReason.INVALID_SUBJECT,
     CallerRefusalReason.MALFORMED_GROUPS,
 })
+
+
+def a_service_maps_a_person_outcome_to_a_wire_code(
+    check: ServiceCallerCheck, workload_token: str | None, person_token: str | None
+) -> int:
+    outcome = check.person_caller(workload_token, person_token)
+    if isinstance(outcome, PersonCaller):
+        role: AppRole = outcome.role
+        principal: Principal = outcome.principal
+        return len(outcome.groups) + len(principal.subject) + len(role.value)
+    refusal: CallerRefusal = outcome
+    if refusal.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE:
+        return 503
+    return 401 if refusal.reason in _UNAUTHENTICATED else 403

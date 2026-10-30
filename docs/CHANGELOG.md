@@ -12,6 +12,7 @@ releases without an entry are described in the
 **Added**
 
 - `webauth.service_callers`: `ServiceCallerCheck.workload_caller(token)` proves the app behind an app's own token for a service (realm role, `azp` equal to `client_id`, a registered client, a bounded token life) and returns a `WorkloadCaller` or the first `CallerRefusal` of a fixed order that puts every 401 and 503 cause before any 403, see the [host contract](host-contract.md#a-services-callers).
+- `webauth.service_callers`: `ServiceCallerCheck.person_caller(workload_token, person_token)` admits an app acting for a person: the workload proof, the person token's checks, the `azp` binding of the two tokens and the person's membership through `app_role`. It returns a `PersonCaller` or the first `CallerRefusal`; `CLIENT_MISMATCH`, `SAME_SUBJECT` and `NOT_A_MEMBER` are new reasons, all 403.
 
 ## 0.25.0 - 2026-10-29
 

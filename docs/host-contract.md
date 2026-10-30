@@ -363,12 +363,13 @@ Keycloak in the hand-run harness.
 
 ## A service's callers
 
-A service that is not a browser app (no sessions, no sign-in) admits an app acting as itself with
-`ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
+A service that is not a browser app (no sessions, no sign-in) admits an app acting as itself, or for a person,
+with `ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
 `ServiceIdentity` (issuer, key-set URL, its own audience, the realm role that marks a workload, the
 group claim, the longest workload token life in seconds, the clock leeway) and its registered apps
 (`RegisteredApp`, keyed by the workload client id). Nothing has a default and nothing is read from
-the environment. `workload_caller(token)` is synchronous, so an async service runs it in a thread.
+the environment. `workload_caller(token)` and `person_caller(workload_token, person_token)` are synchronous, so an
+async service runs them in a thread.
 
 It returns a `WorkloadCaller` (the app, the client id, the verified `Principal` and the groups) or
 a `CallerRefusal`. The first fault of this order is the refusal; the class is the wire code the
@@ -385,6 +386,26 @@ host answers, and the host owns the codes:
 | `UNREGISTERED_CLIENT` | `azp` is no registered app | 403 |
 | `WORKLOAD_LIVES_TOO_LONG` | `exp - iat` above the maximum | 403 |
 
+`person_caller` admits an app acting for a person: it returns a `PersonCaller` (the app, the client
+id, the person's `Principal` and groups, and the person's `AppRole`) or a `CallerRefusal`. It never
+says which token a refusal concerns. Both tokens are verified and read before any check that
+compares them, so every 401 and 503 comes before any 403. The first fault of this order is the
+refusal:
+
+| Step | Reasons | Class |
+|---|---|---|
+| 1 The workload token: missing, then the verifier stage | `MISSING_TOKEN`, `KEY_SET_UNAVAILABLE`, `TOKEN_REJECTED` | 401 or 503 |
+| 2 The person token: missing, then the verifier stage | the same three | 401 or 503 |
+| 3 The workload token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | 401 |
+| 4 The person token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | 401 |
+| 5 The workload token: role, binding, registry, lifetime | `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`, `UNREGISTERED_CLIENT`, `WORKLOAD_LIVES_TOO_LONG` | 403 |
+| 6 The person's `azp` is the workload's `azp` | `CLIENT_MISMATCH` | 403 |
+| 7 The person's subject differs from the workload's | `SAME_SUBJECT` | 403 |
+| 8 The person's groups make a member of the app, by `app_role` and the registered admission | `NOT_A_MEMBER` | 403 |
+
+The person token gets no lifetime bound and no role check; its `azp` is the client binding and is
+never evidence of an exchange. `workload_caller` never asks for membership.
+
 The verifier stage keeps the verifier's own order: a malformed header or unsupported algorithm is
 `TOKEN_REJECTED` before any key lookup, so no key set is fetched. `KEY_SET_UNAVAILABLE` (503) is
 the verifier's refusal when the key set cannot be fetched and the token's key is not among the
@@ -393,7 +414,8 @@ verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token
 
 By class: 503 is `KEY_SET_UNAVAILABLE`; 401 is `MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT` and `MALFORMED_GROUPS`; 403 is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
-`UNREGISTERED_CLIENT` and `WORKLOAD_LIVES_TOO_LONG`. A group claim that is a JSON `null` is
+`UNREGISTERED_CLIENT`, `WORKLOAD_LIVES_TOO_LONG`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and
+`NOT_A_MEMBER`. A group claim that is a JSON `null` is
 `MALFORMED_GROUPS`; only an absent claim means no groups.
 
 The token's `aud` must name the service; it may name others. The check has no policy: which
