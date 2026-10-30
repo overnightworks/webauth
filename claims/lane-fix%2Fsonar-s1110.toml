@@ -1,0 +1,7 @@
+claim_id = "15c7d078f3e74811b8f88a7f2e2ce689"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "2c64bfcfb765c590458cd60ddb3074f03be00ae3"
+branch = "fix/sonar-s1110"
+scope = ["src/webauth/https_client.py"]
+opened_commit = "27f48c8881b120a38dc8daeb08e4a8cb2b43e962"
