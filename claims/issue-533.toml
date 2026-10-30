@@ -1,7 +1,0 @@
-claim_id = "01d54c2a7a0b4da0ad2750336820b37d"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "65ab72dd2d0aed17cf27e2b9e7cf99134cc3c314"
-branch = "claude/issue-533-probe-lock-pdeathsig"
-scope = ["scripts/run_oidc_proof.sh", "tests/e2e/oidc/README.md"]
-opened_commit = "3a5e76e929aadc8164454a9b1daa7759cabff299"
