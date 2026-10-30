@@ -89,7 +89,7 @@ that can outlive the driver:
 - The browser. Playwright starts it in a session of its own, so no signal to the
   Playwright driver or its group reaches it, and the driver's interrupt handling kills
   only its own children. It ends on EOF of its pipe once the Playwright driver dies.
-  `cleanup` does not stop it.
+  This is not measured here. `cleanup` does not stop it.
 - The browser's Playwright driver and the stack's `hold` process end on EOF of their
   pipes when the driver dies. This is not measured here.
 
