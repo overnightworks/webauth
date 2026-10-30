@@ -292,7 +292,9 @@ def test_the_workload_grant_carries_an_issuer_invalid_scope_as_the_idp_error() -
 
     outcome = _granting(issuer).workload_access_token(scopes=("not-assigned",))
 
-    assert outcome == OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_scope")
+    assert outcome == OidcRefusal(
+        OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_scope"
+    )
 
 
 def test_two_workload_calls_post_twice_and_yield_two_different_tokens() -> None:

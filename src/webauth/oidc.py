@@ -473,11 +473,11 @@ class OidcRelyingParty:
         """The client's own access token, from a `client_credentials` grant for
         `scopes`, the scope tokens of the service the token is for.
 
-        `scopes` is a non-empty tuple of RFC 6749 scope tokens, none trimmed or
-        normalized; anything else raises `ValueError` and posts nothing. The realm must give the client a service account holding the role the
-        receiver demands; an issuer `error` such as `unauthorized_client` (a
-        client with no service account, or `invalid_scope` for a scope not
-        assigned to the client) is carried as `idp_error`."""
+        `scopes` is a non-empty tuple of RFC 6749 scope tokens, none trimmed;
+        anything else raises `ValueError` and posts nothing. The realm must
+        give the client a service account holding the role the receiver
+        demands; an issuer `error` such as `unauthorized_client` (no service
+        account) or `invalid_scope` (not assigned) is carried as `idp_error`."""
         if not scopes or not is_scope_token_tuple(scopes):
             raise ValueError("scopes must be a non-empty tuple of RFC 6749 scope tokens")
         try:
