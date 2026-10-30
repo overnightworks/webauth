@@ -59,7 +59,7 @@ HOP_BY_HOP = frozenset({
 UPSTREAM_TIMEOUT_SECONDS = 30
 BRIDGE_TIMEOUT_SECONDS = 10
 RELAY_IMAGE = (
-    "python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
+    "python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8"
 )
 RELAY_NAME_PREFIX = "edge-kc-probe-d1-callback-"
 RELAY_PORT = 8080
