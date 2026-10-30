@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Type-checks the typing hosts in tests/fixtures/typing_hosts the way a host's own pyright sees webauth: from a
 # directory without src, against the built wheel installed at the locked versions,
-# so pyright applies py.typed export rules (reportPrivateImportUsage).
+# so pyright applies py.typed export rules (reportPrivateImportUsage). The host lives under the user's cache
+# directory because no dependency install belongs in /tmp.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-host="$(mktemp -d)"
+hosts="${XDG_CACHE_HOME:-$HOME/.cache}/webauth-typing-hosts"
+mkdir -p "$hosts"
+host="$(mktemp -d "$hosts/host.XXXXXX")"
 trap 'rm -rf "$host"' EXIT
 uv build "$repo" --out-dir "$host/dist" \
   --build-constraint "$repo/.github/requirements-build.txt" --require-hashes --quiet
