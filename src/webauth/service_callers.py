@@ -6,10 +6,10 @@ the bearer token of each request, or `person_caller` with that token and the
 token of the person the app acts for. The first fault is the refusal, in
 the order of `docs/host-contract.md` (for `person_caller` the two tokens' stages
 interleave: both verified before either is read); the host maps its
-`CallerRefusal.refusal_class` to a wire code: `UNAVAILABLE` for `KEY_SET_UNAVAILABLE`,
-`UNAUTHENTICATED` for `MISSING_TOKEN`, `TOKEN_REJECTED`, `INVALID_SUBJECT` and
-`MALFORMED_GROUPS`, `FORBIDDEN` for the rest. Policy stays with the service: its
-groups, routing and wire codes.
+`CallerRefusal.refusal_class` to a wire code, recommended as 503 for `UNAVAILABLE`
+(`KEY_SET_UNAVAILABLE`), 401 for `UNAUTHENTICATED` (`MISSING_TOKEN`, `TOKEN_REJECTED`,
+`INVALID_SUBJECT`, `MALFORMED_GROUPS`) and 403 for `FORBIDDEN` (the rest). Policy stays
+with the service: its groups, routing and wire codes.
 
 Nothing taken from a token (subject, client id, groups, any claim) appears in a
 repr, an error message or a log record of this module, which logs nothing.
