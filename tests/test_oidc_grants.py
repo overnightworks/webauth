@@ -196,6 +196,7 @@ _REFUSED_GRANT_ANSWERS = [
         (400, "invalid_grant"),
         (401, "invalid_client"),
         (400, "unauthorized_client"),
+        (400, "invalid_scope"),
     ]
 ] + [
     pytest.param(answer, OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED), id=name)
@@ -287,14 +288,22 @@ def test_the_workload_grant_refuses_scopes_outside_the_scope_token_grammar_and_p
     assert issuer.requests == []
 
 
-def test_the_workload_grant_carries_an_issuer_invalid_scope_as_the_idp_error() -> None:
-    issuer = FakeTokenEndpoint(answer=token_endpoint_answer(400, {"error": "invalid_scope"}))
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda grant: grant(), id="without-scopes"),
+        pytest.param(lambda grant: grant(("svc",)), id="scopes-positional"),
+    ],
+)
+def test_the_workload_grant_takes_scopes_only_by_keyword_and_posts_nothing(
+    call: Callable[[Callable[..., object]], object],
+) -> None:
+    issuer = _an_issuer()
 
-    outcome = _granting(issuer).workload_access_token(scopes=("not-assigned",))
+    with pytest.raises(TypeError, match="scopes|positional"):
+        call(_granting(issuer).workload_access_token)
 
-    assert outcome == OidcRefusal(
-        OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_scope"
-    )
+    assert issuer.requests == []
 
 
 def test_two_workload_calls_post_twice_and_yield_two_different_tokens() -> None:

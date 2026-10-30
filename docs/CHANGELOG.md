@@ -11,7 +11,7 @@ releases without an entry are described in the
 
 **Breaking**
 
-- `webauth.oidc.OidcRelyingParty.workload_access_token` requires the keyword-only `scopes`, a non-empty tuple of RFC 6749 scope tokens that it posts with the `client_credentials` grant, so a workload token names only the service it is for. A host passes the callee's audience scope as its realm names it, for example `scopes=("agent-service-audience",)`; an empty tuple or a token outside the grammar raises `ValueError` and posts nothing, and an issuer's `invalid_scope` is an `OidcRefusal` with `idp_error`.
+- `webauth.oidc.OidcRelyingParty.workload_access_token` requires the keyword-only `scopes`, a non-empty tuple of RFC 6749 scope tokens that it posts with the `client_credentials` grant, so a workload token names only the service it is for. A host passes the callee's audience scope as hal's realm names it, today `scopes=("agent-service-audience",)`; an empty tuple or a token outside the grammar raises `ValueError` and posts nothing, and an issuer's `invalid_scope` is an `OidcRefusal` with `idp_error`.
 
 **Added**
 
