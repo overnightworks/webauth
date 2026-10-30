@@ -1,0 +1,7 @@
+claim_id = "6dee2e9708b14754b38a1cced76e837b"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "0e166a67eda360593f3a5c0f896237a420c633af"
+branch = "claude/issue-531-probe-lock-form"
+scope = ["scripts/run_oidc_proof.sh", "tests/e2e/oidc/README.md"]
+opened_commit = "3ab5e61f417593c79d1546969a522173885474ac"
