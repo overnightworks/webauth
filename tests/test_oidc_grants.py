@@ -281,9 +281,10 @@ def test_the_workload_grant_refuses_scopes_outside_the_scope_token_grammar_and_p
     scopes: object,
 ) -> None:
     issuer = _an_issuer()
+    grant = _granting(issuer).workload_access_token
 
     with pytest.raises(ValueError, match="scopes"):
-        _granting(issuer).workload_access_token(scopes=scopes)  # type: ignore[arg-type]
+        grant(scopes=scopes)  # type: ignore[arg-type]
 
     assert issuer.requests == []
 
@@ -299,9 +300,10 @@ def test_the_workload_grant_takes_scopes_only_by_keyword_and_posts_nothing(
     call: Callable[[Callable[..., object]], object],
 ) -> None:
     issuer = _an_issuer()
+    grant = _granting(issuer).workload_access_token
 
     with pytest.raises(TypeError, match="scopes|positional"):
-        call(_granting(issuer).workload_access_token)
+        call(grant)
 
     assert issuer.requests == []
 
