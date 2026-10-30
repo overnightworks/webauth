@@ -1,8 +1,0 @@
-claim_id = "6e871d0b04dc4611b7100c4fde4e7e11"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "f7fd196e432699bd2f7b64990594293230b36bf7"
-branch = "claude/issue-513-python-3-14"
-scope = [".github/requirements-build.txt", ".github/workflows/ci.yml", ".python-version", "docs/CHANGELOG.md", "pyproject.toml", "quality/config.toml", "scripts/check_typing_hosts.sh", "scripts/regenerate_build_constraints.sh", "sonar-project.properties", "tests/e2e/oidc/shim.py", "tests/test_jwt_verification_token.py", "uv.lock"]
-opened_commit = "80ae7428e2824075d517b46a795a268df1b7698f"
-whole_reason = "One interpreter floor: the manifest, the lock, every place that picks the interpreter and the gate exception move together, or CI and the published metadata disagree about the supported Python."
