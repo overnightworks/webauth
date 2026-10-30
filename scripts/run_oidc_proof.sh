@@ -10,12 +10,15 @@ compose_project_label=com.docker.compose.project
 state_root="${XDG_STATE_HOME:-$HOME/.local/state}/webauth-e2e-oidc"
 
 # The cap is a whole-run limit. --kill-after must exceed the worst case of a
-# run's cleanup, or timeout's SIGKILL would cut it short and leave the stack
-# behind. prove.py: browser worker 15 s, host SIGTERM 15 s, host SIGKILL 15 s,
-# stack 180 s, together 225 s. conformance.py: worker join 15 s, host stop
-# 30 s, first teardown 90 s, backstop teardown 90 s, together 225 s. A full
-# prove run measured 134 s, so 900 s leaves a factor of about 6. CAP + K <= 1830
-# is the fleet's bound for a lock holder (marketplace#291).
+# run's cleanup: timeout exits at cap plus kill-after and flock frees the lock
+# then, so a shorter kill-after would free it while the stack is still being
+# torn down. (This host's uutils timeout sends its KILL only to its direct
+# child, uv, so the KILL does not cut the driver's cleanup short.) prove.py:
+# browser worker 15 s, host SIGTERM 15 s, host SIGKILL 15 s, stack 180 s,
+# together 225 s. conformance.py: worker join 15 s, host stop 30 s, first
+# teardown 90 s, backstop teardown 90 s, together 225 s. A full prove run
+# measured 134 s, so 900 s leaves a factor of about 6. CAP + K <= 1830 is the
+# fleet's bound for a lock holder (marketplace#291).
 run_cap_seconds=900
 kill_after_seconds=240
 # cleanup has no teardown on SIGTERM (bash -c and the docker CLI die, the daemon

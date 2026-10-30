@@ -82,8 +82,8 @@ that budget, nothing here stops the driver, and it runs on with no lock held. Pr
 that can outlive the driver:
 
 - The host app. It is started in a session of its own and sets `PR_SET_PDEATHSIG`
-  (SIGKILL), so it dies with the driver; `cleanup` kills any host app still listening.
-  The host app starts no process of its own.
+  (SIGKILL), so it dies with the driver; `cleanup` kills any host app of this checkout
+  still running. The host app starts no process of its own.
 - Relay containers are docker daemon objects. The driver's teardown removes them, and
   `cleanup` removes what remains.
 - The browser. Playwright starts it in a session of its own, so no signal to the
