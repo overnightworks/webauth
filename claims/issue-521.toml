@@ -1,7 +1,0 @@
-claim_id = "1d9b7b29c76445ce8aacb725f16b6e18"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "fac02058bf931a8f4506f9943d0c532a84536f98"
-branch = "claude/issue-521-host-contract-names-hal"
-scope = ["docs/host-contract.md"]
-opened_commit = "e8da3d8ba8e899b8c9ab3fb904db1a8a53a42588"
