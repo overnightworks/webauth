@@ -331,8 +331,7 @@ def test_the_deepest_header_the_bound_allows_does_not_crash_a_small_stack_thread
     """A thread with a 128 KiB stack, the size of musl's thread default, still
     refuses the deepest header the bound allows as a malformed token. CPython
     3.14's `json.loads` raises `RecursionError` on deeply nested input instead
-    of overflowing that stack, so this pins the outcome, not a crash that only
-    older interpreters have."""
+    of overflowing that stack, so the test pins the refusal outcome."""
     header = "[" * (MAX_HEADER_SEGMENT_CHARACTERS * 3 // 4)
     token = jws(header, issuer.claims(), rs256(rsa_key("current")))
     outcomes: list[object] = []
