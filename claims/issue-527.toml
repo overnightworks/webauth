@@ -1,0 +1,8 @@
+claim_id = "7db2958ef06e435aa3c7c30034c43993"
+agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
+role = "builder"
+base = "0216ec58cb8e080ea29f4c6e8e5521cf842c6267"
+branch = "claude/issue-527-w1b-person-caller"
+scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/service_callers.py", "tests/fixtures/typing_hosts/service_host.py", "tests/test_service_callers.py"]
+opened_commit = "242435ef304437dcb5be7f29f63f69a8f5c34a2c"
+whole_reason = "One new method of the module W1a built, its tests, typing host and the documents that describe the module are one additive contract; landing a part leaves a public name undocumented or untyped."
