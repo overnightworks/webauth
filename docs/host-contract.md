@@ -15,7 +15,7 @@ address, and every visitor that reaches the app through it shares that address
 and its rate-limit budget. With a CDN, a tunnel and a reverse proxy in front of
 the app, list whichever of their addresses appear in the chain. The operator's
 [hal](https://github.com/overnightworks/hal) project owns that reachability
-infrastructure; the changelog's older entries call this project edge.
+infrastructure; the project was named edge until 29.10.2026.
 `trusted_proxies` decides alone only when the ASGI server does not rewrite the
 client address or scheme from those headers, so the host turns the server's own
 forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
