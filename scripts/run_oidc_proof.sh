@@ -14,9 +14,19 @@ state_root="${XDG_STATE_HOME:-$HOME/.local/state}/webauth-e2e-oidc"
 # behind. prove.py: browser worker 15 s, host SIGTERM 15 s, host SIGKILL 15 s,
 # stack 180 s, together 225 s. conformance.py: worker join 15 s, host stop
 # 30 s, first teardown 90 s, backstop teardown 90 s, together 225 s. A full
-# prove run measured 134 s, so 900 s leaves a factor of about 6.
+# prove run measured 134 s, so 900 s leaves a factor of about 6. CAP + K <= 1830
+# is the fleet's bound for a lock holder (marketplace#291).
 run_cap_seconds=900
 kill_after_seconds=240
+# cleanup has no teardown on SIGTERM (bash -c and the docker CLI die, the daemon
+# finishes a started rm); K is a margin. CAP: about 30 docker calls (list, inspect,
+# one rm per object of a probe stack and a suite stack) and seven `uv run` calls
+# (checkout_interpreter, plus harness_constant three times in each of the two
+# probe_objects passes) at a generous 10 s each.
+cleanup_cap_seconds=300
+cleanup_kill_after_seconds=30
+lock_wait_seconds=1200
+lock_wait_timeout_status=75
 
 usage() {
   cat >&2 <<'USAGE'
@@ -50,6 +60,20 @@ refuse_unsafe_state_root() {
   fi
 }
 
+# Takes the probe lock for at most lock_wait_seconds, then runs "$@" (an executable, because
+# timeout cannot run a shell function) under timeout with the given kill-after and cap.
+# The lock is not passed on: flock -o closes it for the command.
+run_locked() {
+  local kill_after="$1" cap="$2" status=0
+  shift 2
+  flock -o -w "$lock_wait_seconds" -E "$lock_wait_timeout_status" "$probe_lock" \
+    timeout --kill-after="$kill_after" "$cap" "$@" || status=$?
+  if [[ "$status" -eq "$lock_wait_timeout_status" ]]; then
+    echo "gave up waiting for $probe_lock after $lock_wait_seconds s" >&2
+  fi
+  return "$status"
+}
+
 # timeout runs in its own process group so its limit reaches every descendant;
 # Ctrl-C reaches only flock. Stop a run with SIGTERM to timeout or the python process.
 # The load is read again once the lock is held, because the wait for it can be long.
@@ -60,13 +84,12 @@ run_under_lock() {
   refuse_while_loaded
   mkdir -p -- "$state_root"
   refuse_unsafe_state_root
-  flock -o "$probe_lock" bash -c "$(declare -f refuse_while_loaded)"'
+  run_locked "$kill_after_seconds" "$run_cap_seconds" bash -c "$(declare -f refuse_while_loaded)"'
 refuse_while_loaded
 run_directory="$(mktemp -d "$1/$2-XXXXXX")" || exit
 echo "run directory: $run_directory"
 shift 2
 exec "$@" --scratch "$run_directory"' _ "$state_root" "${driver%.py}" \
-    timeout --kill-after="$kill_after_seconds" "$run_cap_seconds" \
     uv run --locked --project "$root" --group dev --group e2e python "$root/tests/e2e/oidc/$driver" "$@"
 }
 
@@ -221,14 +244,16 @@ cleanup_under_lock() {
   fi
 }
 
-# The work waits for the lock so that no proof runs while it acts. The lock descriptor
-# is not passed on.
+# The work waits for the lock so that no proof runs while it acts, and is capped like a run.
 cleanup() {
   refuse_unsafe_state_root
-  (
-    flock 9
-    cleanup_under_lock 9>&-
-  ) 9>"$probe_lock"
+  run_locked "$cleanup_kill_after_seconds" "$cleanup_cap_seconds" bash -c "$(declare -p root state_root compose_project_label)
+$(declare -f cleanup_under_lock checkout_interpreter listing_of harness_constant host_app_pids \
+    run_runtime_directories remove_probe_objects probe_objects docker_container_identities \
+    is_probe_project is_relay_container)"'
+set -euo pipefail
+shopt -s inherit_errexit
+cleanup_under_lock'
 }
 
 verb="${1:-}"
