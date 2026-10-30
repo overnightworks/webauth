@@ -64,7 +64,7 @@ jobs:
           cache-suffix: lowest-direct
 
       - name: Create the environment
-        run: uv venv --python 3.12
+        run: uv venv --python 3.14
 
       - name: Install the lowest declared versions
         run: uv pip install --resolution lowest-direct -e ".[redis]" --group dev

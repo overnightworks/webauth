@@ -9,6 +9,12 @@ releases without an entry are described in the
 
 ## 0.27.0 - Unreleased
 
+**Breaking**
+
+- webauth requires Python 3.14 (`requires-python = ">=3.14"`), so a host on an older interpreter cannot install this release. Two dependency floors rose with it because the lower versions have no CPython 3.14 wheel or do not run on it: `pydantic>=2.12` (was 2.6) and, in the dev group, `pytest>=7.4` (was 7.1).
+
+**Added**
+
 - `webauth.service_callers` names the class of a refused service caller as data: `CallerRefusal.refusal_class` is a `CallerRefusalClass` (`UNAUTHENTICATED`, `UNAVAILABLE` or `FORBIDDEN`), so a host maps three classes to its wire codes instead of twelve reasons.
 
 ## 0.26.0 - 2026-10-30

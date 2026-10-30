@@ -328,9 +328,11 @@ def test_a_header_segment_over_the_bound_is_refused_before_it_is_parsed(
 def test_the_deepest_header_the_bound_allows_does_not_crash_a_small_stack_thread(
     issuer: IssuerScenario,
 ) -> None:
-    """CPython 3.12 and 3.13 segfault in `json.loads` of deeply nested input on
-    a 128 KiB stack, the size of musl's thread default; a crash ends the test
-    run, which is the intended failure."""
+    """A thread with a 128 KiB stack, the size of musl's thread default, still
+    refuses the deepest header the bound allows as a malformed token. CPython
+    3.14's `json.loads` raises `RecursionError` on deeply nested input instead
+    of overflowing that stack, so this pins the outcome, not a crash that only
+    older interpreters have."""
     header = "[" * (MAX_HEADER_SEGMENT_CHARACTERS * 3 // 4)
     token = jws(header, issuer.claims(), rs256(rsa_key("current")))
     outcomes: list[object] = []
