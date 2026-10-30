@@ -1,0 +1,8 @@
+claim_id = "64186bdc23dd48e18cce1993749c60c2"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "c757bf44b8c04e129645c7285d5c64bcf823888d"
+branch = "claude/issue-537-a-service-caller-refusal-names-its-class"
+scope = ["docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/service_callers.py", "tests/fixtures/typing_hosts/service_host.py", "tests/test_service_callers.py"]
+opened_commit = "9b60bf463f6b7cd9555a270e07c626940152ba3d"
+whole_reason = "One public name with its proof: the enum, the typing host that imports it, the documents that name it and its changelog line land together, or the docs describe a name the wheel lacks."
