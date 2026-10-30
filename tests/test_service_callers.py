@@ -547,8 +547,8 @@ def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role
     "changes",
     [
         pytest.param({"aud": [CALLEE, "other-service"]}, id="callee-beside-another-audience"),
-        pytest.param({"realm_access": ABSENT}, id="no-workload-role"),
-        pytest.param({"client_id": ABSENT}, id="no-client-id"),
+        pytest.param({"realm_access": {"roles": [WORKLOAD_ROLE]}}, id="carries-workload-role"),
+        pytest.param({"client_id": "another-client"}, id="carries-another-client-id"),
         pytest.param({"exp": ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS + 1}, id="long-lived"),
     ],
 )
@@ -651,7 +651,7 @@ def test_a_person_token_with_a_bad_signature_is_rejected() -> None:
     )
 
 
-def test_a_key_set_that_is_down_makes_a_person_unavailable() -> None:
+def test_a_key_set_that_is_down_is_refused_at_the_workload_verifier_stage() -> None:
     check = a_check(fetch_key_set=FakeKeySetEndpoint(KeySetFetchError("down")))
 
     assert check.person_caller(a_workload_token(), a_person_token()) == CallerRefusal(

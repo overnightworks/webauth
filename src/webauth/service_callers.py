@@ -3,8 +3,9 @@
 A service builds one `ServiceCallerCheck` per process from the facts it owns
 (`ServiceIdentity`) and the apps it registered, and calls `workload_caller` with
 the bearer token of each request, or `person_caller` with that token and the
-token of the person the app acts for. The first fault, in the order of
-`CallerRefusalReason`, is the refusal; the host maps it to a wire code: the
+token of the person the app acts for. The first fault is the refusal, in
+the order of `docs/host-contract.md` (for `person_caller` the two tokens' stages
+interleave: both verified before either is read); the host maps it to a wire code: the
 class of each reason is 503 (`KEY_SET_UNAVAILABLE`), 401 (`MISSING_TOKEN`,
 `TOKEN_REJECTED`, `INVALID_SUBJECT`, `MALFORMED_GROUPS`) or 403 (the rest). Policy
 stays with the service: its groups, routing and wire codes.
@@ -119,7 +120,8 @@ class PersonCaller:
 
 
 class CallerRefusalReason(StrEnum):
-    """The refusals, in the order they are checked."""
+    """The refusals. `workload_caller` checks them in this order; `person_caller` follows
+    the eight steps of `docs/host-contract.md`."""
 
     MISSING_TOKEN = "missing-token"  # noqa: S105 - refusal reason not a credential
     KEY_SET_UNAVAILABLE = "key-set-unavailable"
