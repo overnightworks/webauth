@@ -1,7 +1,0 @@
-claim_id = "177ac09499314d8c9af758cf29407418"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "245038174eaa3c4c62c320b9e7ed2fccf84ba694"
-branch = "claude/issue-539-typing-host-outside-tmp"
-scope = ["scripts/check_typing_hosts.sh"]
-opened_commit = "a3db6b2aad77a6ec39c590911c41b8f6721aa1f8"
