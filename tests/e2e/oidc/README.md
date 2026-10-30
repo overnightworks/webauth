@@ -69,7 +69,8 @@ stack, `runtime/`, result table); further signals are ignored. So the lock is fr
 that teardown runs, and a new proof can take it then. The window is bounded by the
 driver's own teardown budget (225 s, under `timeout`'s kill-after of 240 s; `cleanup`
 has 30 s and no teardown of its own). Sending SIGTERM to `timeout` or to the `prove.py`
-python process has the same effect. `setpriv` must run: if it cannot, `flock` exits 69,
+python process ends the run the same way, but `flock` stays alive and keeps the lock
+until the teardown has ended. `setpriv` must run: if it cannot, `flock` exits 69,
 the script says so and nothing runs.
 
 `timeout`'s KILL (after 900 s plus 240 s) reaches only its direct child, which is `uv`,
@@ -85,6 +86,10 @@ that can outlive the driver:
   The host app starts no process of its own.
 - Relay containers are docker daemon objects. The driver's teardown removes them, and
   `cleanup` removes what remains.
+- The browser. Playwright starts it in a session of its own, so no signal to the
+  Playwright driver or its group reaches it, and the driver's interrupt handling kills
+  only its own children. It ends on EOF of its pipe once the Playwright driver dies.
+  `cleanup` does not stop it.
 - The browser's Playwright driver and the stack's `hold` process end on EOF of their
   pipes when the driver dies. This is not measured here.
 
