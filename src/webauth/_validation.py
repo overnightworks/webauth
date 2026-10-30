@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import re
 from typing import TypeGuard
 
 __all__: list[str] = []
+
+
+# RFC 6749 section 3.3: a scope token is one or more printable ASCII
+# characters other than space, `"` and `\`.
+_SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
+
+
+def is_scope_token_tuple(scopes: object) -> TypeGuard[tuple[str, ...]]:
+    """Whether ``scopes`` is a tuple whose every item is one RFC 6749 scope token."""
+    return isinstance(scopes, tuple) and all(
+        isinstance(scope, str) and _SCOPE_TOKEN.fullmatch(scope) for scope in scopes
+    )
 
 
 def is_utf8(text: str) -> bool:

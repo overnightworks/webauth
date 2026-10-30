@@ -341,7 +341,7 @@ def a_host_uses_the_production_transports() -> tuple[KeySetFetch, TokenRequestPo
 
 
 def a_host_gets_a_workload_token(relying_party: OidcRelyingParty) -> SecretStr | OidcRefusal:
-    return relying_party.workload_access_token()
+    return relying_party.workload_access_token(scopes=("agent-service-audience",))
 
 
 def a_host_resolves_the_current_user(
