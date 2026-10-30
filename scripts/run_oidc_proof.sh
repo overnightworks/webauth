@@ -18,9 +18,11 @@ state_root="${XDG_STATE_HOME:-$HOME/.local/state}/webauth-e2e-oidc"
 # is the fleet's bound for a lock holder (marketplace#291).
 run_cap_seconds=900
 kill_after_seconds=240
-# cleanup stops nothing on SIGTERM, so K only has to outlast one docker call (10 s
-# default stop grace). CAP: about 30 docker calls (list, inspect, one rm per object
-# of a probe stack and a suite stack) at a generous 10 s each.
+# cleanup has no teardown on SIGTERM (bash -c and the docker CLI die, the daemon
+# finishes a started rm); K is a margin. CAP: about 30 docker calls (list, inspect,
+# one rm per object of a probe stack and a suite stack) and seven `uv run` calls
+# (checkout_interpreter, plus harness_constant three times in each of the two
+# probe_objects passes) at a generous 10 s each.
 cleanup_cap_seconds=300
 cleanup_kill_after_seconds=30
 lock_wait_seconds=1200

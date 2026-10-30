@@ -28,13 +28,13 @@ step is a verb of `scripts/run_oidc_proof.sh`, which holds the commands, the cap
 
 ## Run the browser proof
 
-1. Run the verb `prove --edge DIR` with the edge checkout as `DIR`. The script makes
-   the run's directory itself, under `${XDG_STATE_HOME:-~/.local/state}/webauth-e2e-oidc/`
+1. Run the verb `prove --edge DIR` with the edge checkout as `DIR`. The script makes the
+   run's directory itself, under `${XDG_STATE_HOME:-~/.local/state}/webauth-e2e-oidc/`
    (named `prove-` and a random suffix), passes it to the driver as `--scratch` and
    prints it when the run starts; a caller never names it. It takes
-   `/tmp/probe-stack.lock` (it waits at most 20 minutes for it), refuses to start while the 1-minute load average is above
-   1.5 times the cores, and caps the run (the script's comment gives the numbers and
-   why).
+   `/tmp/probe-stack.lock` (it waits at most 20 minutes for it), refuses to start while
+   the 1-minute load average is above 1.5 times the cores, and caps the run (the
+   script's comment gives the numbers and why).
 2. Read the result table the run prints. A scenario or check that is not `held`
    fails the run, with one exception: a measurement that comes out unfavourably is
    reported as `FAILED-as-found` and leaves the exit status 0. File each such row
