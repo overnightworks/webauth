@@ -22,7 +22,8 @@ is refused as `TOKEN_ENDPOINT_FAILED`; the access token is not read.
 `OidcRelyingParty.renew_access` posts a refresh token the issuer gave and
 answers a `RenewedAccess`: the new access token and the refresh token the
 issuer rotated to, or `None` when it sent none. `workload_access_token` posts
-a `client_credentials` grant and answers the client's own access token. Each
+a `client_credentials` grant for the scopes the host passes and answers the
+client's own access token. Each
 is one POST with the code exchange's client authentication, no cache and no
 lock, so every call is a fresh token. The issuer's answer must be a Bearer
 token (`token_type` compared in ASCII case-insensitively) whose `access_token`
@@ -77,7 +78,7 @@ from pydantic import SecretStr
 
 from webauth import WebAuthError
 from webauth._end_session_page import EndSessionForm
-from webauth._validation import is_utf8
+from webauth._validation import is_scope_token_tuple, is_utf8
 from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.https_client import ExchangeFailure, is_https_url
 from webauth.jwt_verification import (
@@ -125,9 +126,6 @@ _ACCESS_TOKEN_MEDIA_TYPES = frozenset({"at+jwt", "application/at+jwt"})
 _BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR(S5332)
 
 _OPENID_SCOPE = "openid"
-# RFC 6749 section 3.3: a scope token is one or more printable ASCII
-# characters other than space, `"` and `\`.
-_SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5b\x5d-\x7e]+")
 # A strict subset of RFC 6749's error code characters: every registered code
 # fits, and nothing that could carry markup or a sentence does.
 _IDP_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
@@ -471,15 +469,21 @@ class OidcRelyingParty:
         )
         return RenewedAccess(_bearer_access_token(document), _issued_refresh_token(document))
 
-    def workload_access_token(self) -> SecretStr | OidcRefusal:
-        """The client's own access token, from a `client_credentials` grant that
-        names no scope, so the issuer applies the client's default scopes.
+    def workload_access_token(self, *, scopes: tuple[str, ...]) -> SecretStr | OidcRefusal:
+        """The client's own access token, from a `client_credentials` grant for
+        `scopes`, the scope tokens of the service the token is for.
 
-        The realm must give the client a service account holding the role the
+        `scopes` is a non-empty tuple of RFC 6749 scope tokens, none trimmed or
+        normalized; anything else raises `ValueError` and posts nothing. The realm must give the client a service account holding the role the
         receiver demands; an issuer `error` such as `unauthorized_client` (a
-        client with no service account) is carried as `idp_error`."""
+        client with no service account, or `invalid_scope` for a scope not
+        assigned to the client) is carried as `idp_error`."""
+        if not scopes or not is_scope_token_tuple(scopes):
+            raise ValueError("scopes must be a non-empty tuple of RFC 6749 scope tokens")
         try:
-            document = self._token_answer(self._grant_request({"grant_type": "client_credentials"}))
+            document = self._token_answer(
+                self._grant_request({"grant_type": "client_credentials", "scope": " ".join(scopes)})
+            )
             return _bearer_access_token(document)
         except _RefusalError as refusal:
             return refusal.refusal
@@ -660,11 +664,7 @@ def _is_app_url(url: object) -> bool:
 
 
 def _is_scope_list_with_openid(scopes: object) -> bool:
-    return (
-        isinstance(scopes, tuple)
-        and all(isinstance(scope, str) and _SCOPE_TOKEN.fullmatch(scope) for scope in scopes)
-        and _OPENID_SCOPE in scopes
-    )
+    return is_scope_token_tuple(scopes) and _OPENID_SCOPE in scopes
 
 
 def _basic_authorization(client_id: str, client_secret: SecretStr) -> SecretStr:

@@ -48,7 +48,7 @@ def _renewed_access_token(relying_party: OidcRelyingParty) -> SecretStr | OidcRe
 
 
 def _workload_access_token(relying_party: OidcRelyingParty) -> SecretStr | OidcRefusal:
-    return relying_party.workload_access_token()
+    return relying_party.workload_access_token(scopes=("svc-audience",))
 
 
 _BOTH_GRANTS = pytest.mark.parametrize(
@@ -231,29 +231,76 @@ def test_a_workload_token_is_refused_while_the_client_has_no_service_account() -
     issuer = _an_issuer()
     issuer.service_accounts_enabled = False
 
-    assert _granting(issuer).workload_access_token() == OidcRefusal(
+    assert _granting(issuer).workload_access_token(scopes=("svc-audience",)) == OidcRefusal(
         OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="unauthorized_client"
     )
 
 
-def test_the_workload_grant_posts_only_the_grant_type_with_the_clients_authorization() -> None:
+@pytest.mark.parametrize(
+    ("scopes", "posted_scope"),
+    [
+        pytest.param(("svc-audience",), "svc-audience", id="one-scope"),
+        pytest.param(("svc-a-audience", "profile"), "svc-a-audience profile", id="several-scopes"),
+        pytest.param(("a!b", "c#d", "[e]", "f~g"), "a!b c#d [e] f~g", id="boundary-punctuation"),
+    ],
+)
+def test_the_workload_grant_posts_the_grant_type_and_the_scopes_with_the_clients_authorization(
+    scopes: tuple[str, ...], posted_scope: str
+) -> None:
     issuer = _an_issuer()
 
-    outcome = _granting(issuer).workload_access_token()
+    outcome = _granting(issuer).workload_access_token(scopes=scopes)
 
     [request] = issuer.requests
     assert request.url == TOKEN_ENDPOINT
-    assert dict(request.form) == {"grant_type": "client_credentials"}
+    assert dict(request.form) == {"grant_type": "client_credentials", "scope": posted_scope}
     assert request.authorization.get_secret_value() == BASIC_AUTHORIZATION
     assert isinstance(outcome, SecretStr)
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        pytest.param((), id="empty-tuple"),
+        pytest.param(["svc"], id="list"),
+        pytest.param("svc", id="one-string"),
+        pytest.param((1,), id="non-string-token"),
+        pytest.param(("",), id="empty-token"),
+        pytest.param((" svc",), id="leading-space"),
+        pytest.param(("svc ",), id="trailing-space"),
+        pytest.param(("a b",), id="inner-space"),
+        pytest.param(('a"b',), id="double-quote"),
+        pytest.param(("a\\b",), id="backslash"),
+        pytest.param(("a\x7fb",), id="delete-character"),
+        pytest.param(("a\nb",), id="control-character"),
+        pytest.param(("a\u00e4b",), id="non-ascii-character"),
+    ],
+)
+def test_the_workload_grant_refuses_scopes_outside_the_scope_token_grammar_and_posts_nothing(
+    scopes: object,
+) -> None:
+    issuer = _an_issuer()
+
+    with pytest.raises(ValueError, match="scopes"):
+        _granting(issuer).workload_access_token(scopes=scopes)  # type: ignore[arg-type]
+
+    assert issuer.requests == []
+
+
+def test_the_workload_grant_carries_an_issuer_invalid_scope_as_the_idp_error() -> None:
+    issuer = FakeTokenEndpoint(answer=token_endpoint_answer(400, {"error": "invalid_scope"}))
+
+    outcome = _granting(issuer).workload_access_token(scopes=("not-assigned",))
+
+    assert outcome == OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_scope")
 
 
 def test_two_workload_calls_post_twice_and_yield_two_different_tokens() -> None:
     issuer = _an_issuer()
     relying_party = _granting(issuer)
 
-    first = relying_party.workload_access_token()
-    second = relying_party.workload_access_token()
+    first = relying_party.workload_access_token(scopes=("svc-audience",))
+    second = relying_party.workload_access_token(scopes=("svc-audience",))
 
     assert len(issuer.requests) == 2
     assert isinstance(first, SecretStr)
@@ -265,7 +312,7 @@ def test_no_repr_shows_a_token_a_grant_sent_or_received() -> None:
     issuer = _an_issuer()
     relying_party = _granting(issuer)
     renewed = relying_party.renew_access(SecretStr(ISSUED_REFRESH_TOKEN))
-    workload = relying_party.workload_access_token()
+    workload = relying_party.workload_access_token(scopes=("svc-audience",))
     assert isinstance(renewed, RenewedAccess)
     assert renewed.refresh_token is not None
     assert isinstance(workload, SecretStr)

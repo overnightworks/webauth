@@ -557,7 +557,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     @app.get(WORKLOAD_TOKEN_PATH)
     def workload_token(request: Request) -> dict[str, str | None]:
         """The outcome of the client's own grant, never the token."""
-        outcome = relying_party_of(request).workload_access_token()
+        outcome = relying_party_of(request).workload_access_token(scopes=("profile",))
         if isinstance(outcome, OidcRefusal):
             return {"outcome": outcome.reason.value, "issuer_error": outcome.idp_error}
         return {"outcome": "token", "issuer_error": None}

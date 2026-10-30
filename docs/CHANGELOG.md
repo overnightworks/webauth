@@ -9,6 +9,10 @@ releases without an entry are described in the
 
 ## 0.26.0 - Unreleased
 
+**Breaking**
+
+- `webauth.oidc.OidcRelyingParty.workload_access_token` requires the keyword-only `scopes`, a non-empty tuple of RFC 6749 scope tokens that it posts with the `client_credentials` grant, so a workload token names only the service it is for. A host passes the callee's audience scope as its realm names it, for example `scopes=("agent-service-audience",)`; an empty tuple or a token outside the grammar raises `ValueError` and posts nothing, and an issuer's `invalid_scope` is an `OidcRefusal` with `idp_error`.
+
 **Added**
 
 - `webauth.service_callers`: `ServiceCallerCheck.workload_caller(token)` proves the app behind an app's own token for a service (realm role, `azp` equal to `client_id`, a registered client, a bounded token life) and returns a `WorkloadCaller` or the first `CallerRefusal` of a fixed order that puts every 401 and 503 cause before any 403, see the [host contract](host-contract.md#a-services-callers).
