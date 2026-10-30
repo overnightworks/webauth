@@ -64,7 +64,9 @@ refuse_unsafe_state_root() {
 # Takes the probe lock for at most lock_wait_seconds, then runs "$@" (an executable, because
 # timeout cannot run a shell function) under timeout with the given kill-after and cap.
 # The lock is not passed on: flock -o closes it for the command. setpriv makes timeout
-# receive SIGTERM when flock dies, so the lock is never free while the command runs on.
+# receive SIGTERM when flock dies. The lock is free from that moment, so while the driver's
+# SIGTERM teardown runs a new proof can take it; that window is bounded by the driver's own
+# teardown budget (225 s, under kill-after 240 s for a run; cleanup has 30 s).
 # flock exits with the status 69 when setpriv cannot run; it is never left out.
 run_locked() {
   local kill_after="$1" cap="$2" status=0
@@ -81,8 +83,8 @@ run_locked() {
 
 # Ctrl-C reaches flock, which holds the lock for the run: setpriv then sends timeout
 # SIGTERM, timeout passes it to the driver, and the run ends through its own cleanup.
-# timeout's KILL reaches only its direct child. Stop a run with SIGTERM to timeout or the
-# python process.
+# timeout's KILL reaches only its direct child, uv, not the driver (see the README's "Stop a
+# run"). Stop a run with SIGTERM to timeout or the python process.
 # The load is read again once the lock is held, because the wait for it can be long.
 # The run directory is made under the lock and handed to the driver as --scratch.
 run_under_lock() {

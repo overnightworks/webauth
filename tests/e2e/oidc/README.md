@@ -62,25 +62,31 @@ stderr tail, and the result table still follows.
 ## Stop a run
 
 Ctrl-C in the terminal reaches `flock`, which holds the probe lock for the run. When
-`flock` dies, `setpriv` sends `timeout` SIGTERM, `timeout` passes it to the driver, and
-the first SIGTERM or SIGINT ends the run with `FAILED: interrupted` and exit status 1
-after an uninterruptible cleanup (host app, stack, `runtime/`, result table); further
-signals are ignored. The lock is freed only after the run has ended. Sending SIGTERM to
-`timeout` or to the `prove.py` python process has the same effect. `setpriv` must run: if
-it cannot, `flock` exits 69, the script says so and nothing runs.
+`flock` dies, the kernel frees the lock at once. `setpriv` sends `timeout` SIGTERM,
+`timeout` passes it to the driver, and the first SIGTERM or SIGINT ends the run with
+`FAILED: interrupted` and exit status 1 after an uninterruptible cleanup (host app,
+stack, `runtime/`, result table); further signals are ignored. So the lock is free while
+that teardown runs, and a new proof can take it then. The window is bounded by the
+driver's own teardown budget (225 s, under `timeout`'s kill-after of 240 s; `cleanup`
+has 30 s and no teardown of its own). Sending SIGTERM to `timeout` or to the `prove.py`
+python process has the same effect. `setpriv` must run: if it cannot, `flock` exits 69,
+the script says so and nothing runs.
 
-`timeout`'s KILL (after 900 s plus 240 s) reaches only its direct child, because this
-host's `timeout` is uutils coreutils 0.10.0 (measured: a child that ignores TERM is
-killed, its own grandchild survives). Two kinds of process can still outlive the lock,
-and `cleanup` ends them:
+`timeout`'s KILL (after 900 s plus 240 s) reaches only its direct child, which is `uv`,
+not the driver: `bash -c` execs `uv run`, and `uv run` starts python as its own child.
+This host's `timeout` is uutils coreutils 0.10.0 (measured: a child that ignores TERM is
+killed, its own grandchild survives). The KILL does not reach the driver. The driver's
+teardown normally ends within its 225 s budget, before the KILL. If a teardown overruns
+that budget, nothing here stops the driver, and it runs on with no lock held. Processes
+that can outlive the driver:
 
-- Processes in a session of their own. The host app is started with
-  `start_new_session`; it dies with the driver (`PR_SET_PDEATHSIG`, SIGKILL), but a
-  process it spawned itself is stopped only by the driver's teardown (a process-group
-  kill). A relay container is a docker daemon object and stays until the driver removes
-  it.
-- A driver that is killed outright. Nothing runs its teardown; the browser's own driver
-  and the stack's `hold` process end on EOF of their pipes, which is not measured here.
+- The host app. It is started in a session of its own and sets `PR_SET_PDEATHSIG`
+  (SIGKILL), so it dies with the driver; `cleanup` kills any host app still listening.
+  The host app starts no process of its own.
+- Relay containers are docker daemon objects. The driver's teardown removes them, and
+  `cleanup` removes what remains.
+- The browser's Playwright driver and the stack's `hold` process end on EOF of their
+  pipes when the driver dies. This is not measured here.
 
 ## Clean up after a killed run
 
