@@ -152,11 +152,10 @@ def fetch_key_set_over_https(
             max_body_bytes=MAX_KEY_SET_BYTES,
         )
     except _HttpsExchangeError as refusal:
-        reason = (
-            refusal.failure.value
-            if refusal.failure is ExchangeFailure.TIMED_OUT
-            else "the origin could not be reached, or the TLS handshake or HTTP exchange failed"
-        )
+        if refusal.failure is ExchangeFailure.TIMED_OUT:
+            reason = refusal.failure.value
+        else:
+            reason = "the origin could not be reached, or the TLS handshake or HTTP exchange failed"
         failed = KeySetFetchError(f"fetching the key set failed: {reason}", refusal.failure)
     else:
         if isinstance(answer, _RefusedStatus):
