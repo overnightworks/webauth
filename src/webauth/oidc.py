@@ -77,6 +77,7 @@ from pydantic import SecretStr
 
 from webauth import WebAuthError
 from webauth._end_session_page import EndSessionForm
+from webauth._validation import is_utf8
 from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.https_client import ExchangeFailure, is_https_url
 from webauth.jwt_verification import (
@@ -621,7 +622,7 @@ def _callback_state(callback_query: str) -> str | OidcRefusal:
         )
         if name == "state"
     ]
-    if len(states) == 1 and states[0] and _is_utf8(states[0]):
+    if len(states) == 1 and states[0] and is_utf8(states[0]):
         return states[0]
     try:
         _callback_parameters(callback_query)
@@ -636,15 +637,6 @@ def _is_backchannel_logout_events(events: object) -> bool:
         and events.keys() == {_BACKCHANNEL_LOGOUT_EVENT}
         and isinstance(events[_BACKCHANNEL_LOGOUT_EVENT], dict)
     )
-
-
-def _is_utf8(text: str) -> bool:
-    """Whether ``text`` holds no byte that failed to decode as UTF-8."""
-    try:
-        text.encode()
-    except UnicodeEncodeError:
-        return False
-    return True
 
 
 def _is_endpoint_url(url: object) -> bool:
@@ -689,7 +681,7 @@ def _s256_code_challenge(code_verifier: str) -> str:
 
 
 def _is_same_secret(received: object, expected: str) -> bool:
-    if not expected or not isinstance(received, str) or not _is_utf8(received):
+    if not expected or not isinstance(received, str) or not is_utf8(received):
         return False
     return hmac.compare_digest(received.encode(), expected.encode())
 

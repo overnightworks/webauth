@@ -361,6 +361,48 @@ Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_
 in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
 Keycloak in the hand-run harness.
 
+## A service's callers
+
+A service that is not a browser app (no sessions, no sign-in) admits an app acting as itself with
+`ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
+`ServiceIdentity` (issuer, key-set URL, its own audience, the realm role that marks a workload, the
+group claim, the longest workload token life in seconds, the clock leeway) and its registered apps
+(`RegisteredApp`, keyed by the workload client id). Nothing has a default and nothing is read from
+the environment. `workload_caller(token)` is synchronous, so an async service runs it in a thread.
+
+It returns a `WorkloadCaller` (the app, the client id, the verified `Principal` and the groups) or
+a `CallerRefusal`. The first fault of this order is the refusal; the class is the wire code the
+host answers, and the host owns the codes:
+
+| Reason | Fault | Class |
+|---|---|---|
+| `MISSING_TOKEN` | no token | 401 |
+| `KEY_SET_UNAVAILABLE` or `TOKEN_REJECTED` | one verifier stage, see below | 503 or 401 |
+| `INVALID_SUBJECT` | `sub` absent or not valid text | 401 |
+| `MALFORMED_GROUPS` | the group claim is present and not a list of strings | 401 |
+| `NOT_A_WORKLOAD` | `realm_access.roles` lacks the workload role | 403 |
+| `UNBOUND_CLIENT` | `azp` absent or empty, or `client_id` differs from it | 403 |
+| `UNREGISTERED_CLIENT` | `azp` is no registered app | 403 |
+| `WORKLOAD_LIVES_TOO_LONG` | `exp - iat` above the maximum | 403 |
+
+The verifier stage keeps the verifier's own order: a malformed header or unsupported algorithm is
+`TOKEN_REJECTED` before any key lookup, so no key set is fetched. `KEY_SET_UNAVAILABLE` (503) is
+the verifier's refusal when the key set cannot be fetched and the token's key is not among the
+cached ones, also when other keys are cached; with a usable cached key, a failed refresh still
+verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
+
+By class: 503 is `KEY_SET_UNAVAILABLE`; 401 is `MISSING_TOKEN`, `TOKEN_REJECTED`,
+`INVALID_SUBJECT` and `MALFORMED_GROUPS`; 403 is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
+`UNREGISTERED_CLIENT` and `WORKLOAD_LIVES_TOO_LONG`. A group claim that is a JSON `null` is
+`MALFORMED_GROUPS`; only an absent claim means no groups.
+
+The token's `aud` must name the service; it may name others. The check has no policy: which
+groups reach which route is the service's. Nothing taken from a token (subject, client id,
+groups) appears in a repr, an error message or a log record of the module, and `jwks_url` is left
+out of the repr of `ServiceIdentity`.
+
+Proofs: [test_service_callers.py](../tests/test_service_callers.py) in CI.
+
 ## The sign-in routes
 
 `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
