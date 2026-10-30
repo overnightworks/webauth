@@ -372,36 +372,36 @@ the environment. `workload_caller(token)` and `person_caller(workload_token, per
 async service runs them in a thread.
 
 It returns a `WorkloadCaller` (the app, the client id, the verified `Principal` and the groups) or
-a `CallerRefusal`. The first fault of this order is the refusal; the class is the wire code the
-host answers, and the host owns the codes:
+a `CallerRefusal`. The first fault of this order is the refusal; `CallerRefusal.refusal_class` names
+its `CallerRefusalClass`, and the host owns the wire codes, here the recommended ones:
 
 | Reason | Fault | Class |
 |---|---|---|
-| `MISSING_TOKEN` | no token | 401 |
-| `KEY_SET_UNAVAILABLE` or `TOKEN_REJECTED` | one verifier stage, see below | 503 or 401 |
-| `INVALID_SUBJECT` | `sub` absent or not valid text | 401 |
-| `MALFORMED_GROUPS` | the group claim is present and not a list of strings | 401 |
-| `NOT_A_WORKLOAD` | `realm_access.roles` lacks the workload role | 403 |
-| `UNBOUND_CLIENT` | `azp` absent or empty, or `client_id` differs from it | 403 |
-| `UNREGISTERED_CLIENT` | `azp` is no registered app | 403 |
-| `WORKLOAD_LIVES_TOO_LONG` | `exp - iat` above the maximum | 403 |
+| `MISSING_TOKEN` | no token | `UNAUTHENTICATED` (401) |
+| `KEY_SET_UNAVAILABLE` or `TOKEN_REJECTED` | one verifier stage, see below | `UNAVAILABLE` (503) or `UNAUTHENTICATED` (401) |
+| `INVALID_SUBJECT` | `sub` absent or not valid text | `UNAUTHENTICATED` (401) |
+| `MALFORMED_GROUPS` | the group claim is present and not a list of strings | `UNAUTHENTICATED` (401) |
+| `NOT_A_WORKLOAD` | `realm_access.roles` lacks the workload role | `FORBIDDEN` (403) |
+| `UNBOUND_CLIENT` | `azp` absent or empty, or `client_id` differs from it | `FORBIDDEN` (403) |
+| `UNREGISTERED_CLIENT` | `azp` is no registered app | `FORBIDDEN` (403) |
+| `WORKLOAD_LIVES_TOO_LONG` | `exp - iat` above the maximum | `FORBIDDEN` (403) |
 
 `person_caller` admits an app acting for a person: it returns a `PersonCaller` (the app, the client
 id, the person's `Principal` and groups, and the person's `AppRole`) or a `CallerRefusal`. It never
 says which token a refusal concerns. Both tokens are verified and read before any check that
-compares them, so every 401 and 503 comes before any 403. The first fault of this order is the
+compares them, so every `UNAUTHENTICATED` and `UNAVAILABLE` refusal comes before any `FORBIDDEN` one. The first fault of this order is the
 refusal:
 
 | Step | Reasons | Class |
 |---|---|---|
-| 1 The workload token: missing, then the verifier stage | `MISSING_TOKEN`, `KEY_SET_UNAVAILABLE`, `TOKEN_REJECTED` | 401 or 503 |
-| 2 The person token: missing, then the verifier stage | the same three | 401 or 503 |
-| 3 The workload token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | 401 |
-| 4 The person token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | 401 |
-| 5 The workload token: role, binding, registry, lifetime | `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`, `UNREGISTERED_CLIENT`, `WORKLOAD_LIVES_TOO_LONG` | 403 |
-| 6 The person's `azp` is the workload's `azp` | `CLIENT_MISMATCH` | 403 |
-| 7 The person's subject differs from the workload's | `SAME_SUBJECT` | 403 |
-| 8 The person's groups make a member of the app, by `app_role` and the registered admission | `NOT_A_MEMBER` | 403 |
+| 1 The workload token: missing, then the verifier stage | `MISSING_TOKEN`, `KEY_SET_UNAVAILABLE`, `TOKEN_REJECTED` | `UNAUTHENTICATED` (401) or `UNAVAILABLE` (503) |
+| 2 The person token: missing, then the verifier stage | the same three | `UNAUTHENTICATED` (401) or `UNAVAILABLE` (503) |
+| 3 The workload token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | `UNAUTHENTICATED` (401) |
+| 4 The person token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | `UNAUTHENTICATED` (401) |
+| 5 The workload token: role, binding, registry, lifetime | `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`, `UNREGISTERED_CLIENT`, `WORKLOAD_LIVES_TOO_LONG` | `FORBIDDEN` (403) |
+| 6 The person's `azp` is the workload's `azp` | `CLIENT_MISMATCH` | `FORBIDDEN` (403) |
+| 7 The person's subject differs from the workload's | `SAME_SUBJECT` | `FORBIDDEN` (403) |
+| 8 The person's groups make a member of the app, by `app_role` and the registered admission | `NOT_A_MEMBER` | `FORBIDDEN` (403) |
 
 The person token gets no lifetime bound and no role check; its `azp` is the client binding and is
 never evidence of an exchange. `workload_caller` never asks for membership.
@@ -412,8 +412,8 @@ the verifier's refusal when the key set cannot be fetched and the token's key is
 cached ones, also when other keys are cached; with a usable cached key, a failed refresh still
 verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
 
-By class: 503 is `KEY_SET_UNAVAILABLE`; 401 is `MISSING_TOKEN`, `TOKEN_REJECTED`,
-`INVALID_SUBJECT` and `MALFORMED_GROUPS`; 403 is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
+By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
+`INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
 `UNREGISTERED_CLIENT`, `WORKLOAD_LIVES_TOO_LONG`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and
 `NOT_A_MEMBER`. A group claim that is a JSON `null` is
 `MALFORMED_GROUPS`; only an absent claim means no groups.
