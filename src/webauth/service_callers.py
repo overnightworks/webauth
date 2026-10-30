@@ -5,10 +5,11 @@ A service builds one `ServiceCallerCheck` per process from the facts it owns
 the bearer token of each request, or `person_caller` with that token and the
 token of the person the app acts for. The first fault is the refusal, in
 the order of `docs/host-contract.md` (for `person_caller` the two tokens' stages
-interleave: both verified before either is read); the host maps it to a wire code: the
-class of each reason is 503 (`KEY_SET_UNAVAILABLE`), 401 (`MISSING_TOKEN`,
-`TOKEN_REJECTED`, `INVALID_SUBJECT`, `MALFORMED_GROUPS`) or 403 (the rest). Policy
-stays with the service: its groups, routing and wire codes.
+interleave: both verified before either is read); the host maps its
+`CallerRefusal.refusal_class` to a wire code: `UNAVAILABLE` for `KEY_SET_UNAVAILABLE`,
+`UNAUTHENTICATED` for `MISSING_TOKEN`, `TOKEN_REJECTED`, `INVALID_SUBJECT` and
+`MALFORMED_GROUPS`, `FORBIDDEN` for the rest. Policy stays with the service: its
+groups, routing and wire codes.
 
 Nothing taken from a token (subject, client id, groups, any claim) appears in a
 repr, an error message or a log record of this module, which logs nothing.
@@ -40,6 +41,7 @@ from webauth.ports import WallClock
 
 __all__ = [
     "CallerRefusal",
+    "CallerRefusalClass",
     "CallerRefusalReason",
     "PersonCaller",
     "Principal",
@@ -137,6 +139,24 @@ class CallerRefusalReason(StrEnum):
     NOT_A_MEMBER = "not-a-member"
 
 
+class CallerRefusalClass(StrEnum):
+    """The kind of answer a refusal calls for; the host owns the wire code of each."""
+
+    UNAUTHENTICATED = "unauthenticated"
+    UNAVAILABLE = "unavailable"
+    FORBIDDEN = "forbidden"
+
+
+_UNAUTHENTICATED_REASONS = frozenset(
+    {
+        CallerRefusalReason.MISSING_TOKEN,
+        CallerRefusalReason.TOKEN_REJECTED,
+        CallerRefusalReason.INVALID_SUBJECT,
+        CallerRefusalReason.MALFORMED_GROUPS,
+    }
+)
+
+
 @dataclass(frozen=True)
 class CallerRefusal:
     """Why a caller was refused; ``token_rejection`` is the verifier's reason
@@ -150,6 +170,17 @@ class CallerRefusal:
             self.token_rejection is not None
         ):
             raise ValueError("token_rejection is set exactly when the reason is TOKEN_REJECTED")
+
+    @property
+    def refusal_class(self) -> CallerRefusalClass:
+        """``UNAVAILABLE`` for ``KEY_SET_UNAVAILABLE``; ``UNAUTHENTICATED`` for a missing or
+        unverifiable token or a malformed subject or groups; ``FORBIDDEN`` for every other
+        reason."""
+        if self.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE:
+            return CallerRefusalClass.UNAVAILABLE
+        if self.reason in _UNAUTHENTICATED_REASONS:
+            return CallerRefusalClass.UNAUTHENTICATED
+        return CallerRefusalClass.FORBIDDEN
 
 
 class ServiceCallerCheck:

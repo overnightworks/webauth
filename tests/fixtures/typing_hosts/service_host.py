@@ -12,7 +12,7 @@ from webauth.oidc_login import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.ports import WallClock
 from webauth.service_callers import (
     CallerRefusal,
-    CallerRefusalReason,
+    CallerRefusalClass,
     PersonCaller,
     Principal,
     RegisteredApp,
@@ -48,23 +48,20 @@ def a_service_builds_its_check(
     )
 
 
+_WIRE_CODES = {
+    CallerRefusalClass.UNAUTHENTICATED: 401,
+    CallerRefusalClass.UNAVAILABLE: 503,
+    CallerRefusalClass.FORBIDDEN: 403,
+}
+
+
 def a_service_maps_the_outcome_to_a_wire_code(check: ServiceCallerCheck, token: str | None) -> int:
     outcome = check.workload_caller(token)
     if isinstance(outcome, WorkloadCaller):
         principal: Principal = outcome.principal
         return len(outcome.groups) + len(principal.issuer)
     refusal: CallerRefusal = outcome
-    if refusal.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE:
-        return 503
-    return 401 if refusal.reason in _UNAUTHENTICATED else 403
-
-
-_UNAUTHENTICATED = frozenset({
-    CallerRefusalReason.MISSING_TOKEN,
-    CallerRefusalReason.TOKEN_REJECTED,
-    CallerRefusalReason.INVALID_SUBJECT,
-    CallerRefusalReason.MALFORMED_GROUPS,
-})
+    return _WIRE_CODES[refusal.refusal_class]
 
 
 def a_service_maps_a_person_outcome_to_a_wire_code(
@@ -76,6 +73,4 @@ def a_service_maps_a_person_outcome_to_a_wire_code(
         principal: Principal = outcome.principal
         return len(outcome.groups) + len(principal.subject) + len(role.value)
     refusal: CallerRefusal = outcome
-    if refusal.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE:
-        return 503
-    return 401 if refusal.reason in _UNAUTHENTICATED else 403
+    return _WIRE_CODES[refusal.refusal_class]

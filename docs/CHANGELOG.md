@@ -7,6 +7,10 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.27.0 - Unreleased
+
+- `webauth.service_callers` names the class of a refused service caller as data: `CallerRefusal.refusal_class` is a `CallerRefusalClass` (`UNAUTHENTICATED`, `UNAVAILABLE` or `FORBIDDEN`), so a host maps three classes to its wire codes instead of twelve reasons.
+
 ## 0.26.0 - 2026-10-30
 
 **Breaking**
