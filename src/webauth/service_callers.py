@@ -2,7 +2,8 @@
 
 A service builds one `ServiceCallerCheck` per process from the facts it owns
 (`ServiceIdentity`) and the apps it registered, and calls `workload_caller` with
-the bearer token of each request. The first fault, in the order of
+the bearer token of each request, or `person_caller` with that token and the
+token of the person the app acts for. The first fault, in the order of
 `CallerRefusalReason`, is the refusal; the host maps it to a wire code: the
 class of each reason is 503 (`KEY_SET_UNAVAILABLE`), 401 (`MISSING_TOKEN`,
 `TOKEN_REJECTED`, `INVALID_SUBJECT`, `MALFORMED_GROUPS`) or 403 (the rest). Policy
@@ -31,13 +32,15 @@ from webauth.jwt_verification import (
     MonotonicClock,
     Rejected,
     RejectionReason,
+    VerifiedClaims,
 )
-from webauth.oidc_login import AdmissionConfig
+from webauth.oidc_login import AdmissionConfig, AppRole, app_role
 from webauth.ports import WallClock
 
 __all__ = [
     "CallerRefusal",
     "CallerRefusalReason",
+    "PersonCaller",
     "Principal",
     "RegisteredApp",
     "ServiceCallerCheck",
@@ -102,6 +105,19 @@ class WorkloadCaller:
     groups: frozenset[str] = field(repr=False)
 
 
+@dataclass(frozen=True)
+class PersonCaller:
+    """An app acting for a person. Its repr shows ``app`` and ``role`` only.
+
+    ``principal`` and ``groups`` are the person's."""
+
+    app: str
+    client_id: str = field(repr=False)
+    principal: Principal = field(repr=False)
+    groups: frozenset[str] = field(repr=False)
+    role: AppRole
+
+
 class CallerRefusalReason(StrEnum):
     """The refusals, in the order they are checked."""
 
@@ -114,6 +130,9 @@ class CallerRefusalReason(StrEnum):
     UNBOUND_CLIENT = "unbound-client"
     UNREGISTERED_CLIENT = "unregistered-client"
     WORKLOAD_LIVES_TOO_LONG = "workload-lives-too-long"
+    CLIENT_MISMATCH = "client-mismatch"
+    SAME_SUBJECT = "same-subject"
+    NOT_A_MEMBER = "not-a-member"
 
 
 @dataclass(frozen=True)
@@ -161,18 +180,74 @@ class ServiceCallerCheck:
 
     def workload_caller(self, token: str | None) -> WorkloadCaller | CallerRefusal:
         """The app that presented ``token`` as itself, or the first refusal."""
+        verified = self._verified(token)
+        if isinstance(verified, CallerRefusal):
+            return verified
+        identified = self._identified(verified)
+        if isinstance(identified, CallerRefusal):
+            return identified
+        return self._workload(verified, identified)
+
+    def person_caller(
+        self, workload_token: str | None, person_token: str | None
+    ) -> PersonCaller | CallerRefusal:
+        """The app that presented ``workload_token`` acting for the person of
+        ``person_token``, or the first refusal.
+
+        Both tokens are verified and read before any check that compares them or
+        looks at the app, so a 401 or 503 never gives way to a 403."""
+        verified_workload = self._verified(workload_token)
+        if isinstance(verified_workload, CallerRefusal):
+            return verified_workload
+        verified_person = self._verified(person_token)
+        if isinstance(verified_person, CallerRefusal):
+            return verified_person
+        workload_identity = self._identified(verified_workload)
+        if isinstance(workload_identity, CallerRefusal):
+            return workload_identity
+        person_identity = self._identified(verified_person)
+        if isinstance(person_identity, CallerRefusal):
+            return person_identity
+        workload = self._workload(verified_workload, workload_identity)
+        if isinstance(workload, CallerRefusal):
+            return workload
+        if _authorized_party(verified_person.claims) != workload.client_id:
+            return CallerRefusal(CallerRefusalReason.CLIENT_MISMATCH, None)
+        if person_identity.principal.subject == workload.principal.subject:
+            return CallerRefusal(CallerRefusalReason.SAME_SUBJECT, None)
+        admission = self._registered_apps[workload.client_id].admission
+        role = app_role(sorted(person_identity.groups), admission)
+        if role is None:
+            return CallerRefusal(CallerRefusalReason.NOT_A_MEMBER, None)
+        return PersonCaller(
+            app=workload.app,
+            client_id=workload.client_id,
+            principal=person_identity.principal,
+            groups=person_identity.groups,
+            role=role,
+        )
+
+    def _verified(self, token: str | None) -> VerifiedClaims | CallerRefusal:
         if not token:
             return CallerRefusal(CallerRefusalReason.MISSING_TOKEN, None)
         verified = self._verifier.verify(token)
         if isinstance(verified, Rejected):
             return _verifier_refusal(verified.reason)
+        return verified
+
+    def _identified(self, verified: VerifiedClaims) -> _Identity | CallerRefusal:
         subject = verified.subject
         if subject is None or not is_utf8(subject):
             return CallerRefusal(CallerRefusalReason.INVALID_SUBJECT, None)
-        claims = verified.claims
-        groups = _groups(claims, self._identity.group_claim)
+        groups = _groups(verified.claims, self._identity.group_claim)
         if groups is None:
             return CallerRefusal(CallerRefusalReason.MALFORMED_GROUPS, None)
+        return _Identity(Principal(issuer=verified.issuer, subject=subject), groups)
+
+    def _workload(
+        self, verified: VerifiedClaims, identified: _Identity
+    ) -> WorkloadCaller | CallerRefusal:
+        claims = verified.claims
         if not _has_role(claims, self._identity.workload_role):
             return CallerRefusal(CallerRefusalReason.NOT_A_WORKLOAD, None)
         client_id = _bound_client_id(claims)
@@ -186,9 +261,15 @@ class ServiceCallerCheck:
         return WorkloadCaller(
             app=registered.app,
             client_id=client_id,
-            principal=Principal(issuer=verified.issuer, subject=subject),
-            groups=groups,
+            principal=identified.principal,
+            groups=identified.groups,
         )
+
+
+@dataclass(frozen=True)
+class _Identity:
+    principal: Principal
+    groups: frozenset[str]
 
 
 def _require_registry(registered_apps: object, issuer: str) -> None:
@@ -227,9 +308,15 @@ def _has_role(claims: Mapping[str, object], role: str) -> bool:
     return isinstance(roles, list) and role in roles
 
 
-def _bound_client_id(claims: Mapping[str, object]) -> str | None:
+def _authorized_party(claims: Mapping[str, object]) -> str | None:
     authorized_party = claims.get("azp")
-    client_id = claims.get("client_id")
-    if isinstance(authorized_party, str) and authorized_party and client_id == authorized_party:
+    if isinstance(authorized_party, str) and authorized_party:
+        return authorized_party
+    return None
+
+
+def _bound_client_id(claims: Mapping[str, object]) -> str | None:
+    authorized_party = _authorized_party(claims)
+    if authorized_party is not None and claims.get("client_id") == authorized_party:
         return authorized_party
     return None

@@ -29,10 +29,11 @@ from tests.support.oidc_arrangement import (
 )
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import RejectionReason
-from webauth.oidc_login import AdmissionConfig, EverySubject, NoAdmins
+from webauth.oidc_login import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.service_callers import (
     CallerRefusal,
     CallerRefusalReason,
+    PersonCaller,
     Principal,
     RegisteredApp,
     ServiceCallerCheck,
@@ -49,7 +50,15 @@ MAX_WORKLOAD_SECONDS = ACCESS_TOKEN_LIFETIME_SECONDS
 SUBJECT_CANARY = "subject-canary-7f3a"
 CLIENT_CANARY = "client-canary-9b1c"
 GROUP_CANARY = "/group-canary-4d2e"
-CANARIES = (SUBJECT_CANARY, CLIENT_CANARY, GROUP_CANARY)
+PERSON_SUBJECT_CANARY = "person-canary-2c8d"
+PERSON_GROUP_CANARY = "/apps/notes/person-group-canary-6a0b"
+CANARIES = (
+    SUBJECT_CANARY,
+    CLIENT_CANARY,
+    GROUP_CANARY,
+    PERSON_SUBJECT_CANARY,
+    PERSON_GROUP_CANARY,
+)
 SECRET_PATH = "/realms/workshop/certs-secret-path-5e6f"
 UNREGISTERED = "unregistered-client"
 
@@ -104,6 +113,18 @@ def a_workload_token(**claim_changes: Any) -> str:
         "client_id": WORKLOAD_CLIENT,
         "realm_access": {"roles": [WORKLOAD_ROLE]},
         "sub": SUBJECT_CANARY,
+        **claim_changes,
+    }
+    return an_access_token(claims=claims)
+
+
+def a_person_token(**claim_changes: Any) -> str:
+    """A token of a person who signed in to `WORKLOAD_CLIENT`: no workload role, no `client_id`."""
+    claims = {
+        "aud": CALLEE,
+        "azp": WORKLOAD_CLIENT,
+        "sub": PERSON_SUBJECT_CANARY,
+        "groups": ["/apps/notes"],
         **claim_changes,
     }
     return an_access_token(claims=claims)
@@ -503,6 +524,298 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
 
     assert [text for text in shown if any(canary in text for canary in CANARIES)] == []
     assert [text for text in shown if SECRET_PATH in text] == []
+    assert [
+        record for record in caplog.records if record.name.startswith("webauth.service_callers")
+    ] == []
+
+
+def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role() -> None:
+    admitted = a_check().person_caller(
+        a_workload_token(), a_person_token(groups=[PERSON_GROUP_CANARY, "/apps/notes"])
+    )
+
+    assert admitted == PersonCaller(
+        app="notes",
+        client_id=WORKLOAD_CLIENT,
+        principal=Principal(issuer=REALM_ISSUER, subject=PERSON_SUBJECT_CANARY),
+        groups=frozenset({PERSON_GROUP_CANARY, "/apps/notes"}),
+        role=AppRole.USER,
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        pytest.param({"aud": [CALLEE, "other-service"]}, id="callee-beside-another-audience"),
+        pytest.param({"realm_access": ABSENT}, id="no-workload-role"),
+        pytest.param({"client_id": ABSENT}, id="no-client-id"),
+        pytest.param(
+            {"exp": ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS + 1}, id="lives-beyond-workload-limit"
+        ),
+    ],
+)
+def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> None:
+    admitted = a_check().person_caller(a_workload_token(), a_person_token(**changes))
+
+    assert isinstance(admitted, PersonCaller)
+
+
+def test_a_person_in_the_admin_group_is_an_admin() -> None:
+    admission = AdmissionConfig(
+        bound_issuer=REALM_ISSUER, login_group="/apps/notes", admin_group="/apps/notes/admin"
+    )
+    registry = {WORKLOAD_CLIENT: RegisteredApp(app="notes", admission=admission)}
+    person = a_person_token(groups=["/apps/notes/admin"])
+
+    admitted = a_check(registered_apps=registry).person_caller(a_workload_token(), person)
+
+    assert isinstance(admitted, PersonCaller)
+    assert admitted.role is AppRole.ADMIN
+
+
+def test_a_person_in_no_group_is_a_user_when_every_subject_is_admitted() -> None:
+    admission = AdmissionConfig(
+        bound_issuer=REALM_ISSUER,
+        login_group=EverySubject.OF_THE_BOUND_ISSUER,
+        admin_group=NoAdmins.IN_THIS_APP,
+    )
+    registry = {WORKLOAD_CLIENT: RegisteredApp(app="notes", admission=admission)}
+
+    admitted = a_check(registered_apps=registry).person_caller(
+        a_workload_token(), a_person_token(groups=ABSENT)
+    )
+
+    assert isinstance(admitted, PersonCaller)
+    assert admitted.role is AppRole.USER
+    assert admitted.groups == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("workload_changes", "reason"),
+    [
+        pytest.param({"sub": ABSENT}, CallerRefusalReason.INVALID_SUBJECT, id="subject"),
+        pytest.param({"groups": "/a"}, CallerRefusalReason.MALFORMED_GROUPS, id="groups"),
+        pytest.param(
+            {"realm_access": ABSENT}, CallerRefusalReason.NOT_A_WORKLOAD, id="not-a-workload"
+        ),
+        pytest.param({"client_id": "other"}, CallerRefusalReason.UNBOUND_CLIENT, id="unbound"),
+        pytest.param(
+            {"azp": UNREGISTERED, "client_id": UNREGISTERED},
+            CallerRefusalReason.UNREGISTERED_CLIENT,
+            id="unregistered",
+        ),
+        pytest.param(
+            {"exp": ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS + 1},
+            CallerRefusalReason.WORKLOAD_LIVES_TOO_LONG,
+            id="lives-too-long",
+        ),
+    ],
+)
+def test_a_workload_fault_is_refused_with_its_reason_beside_a_valid_person(
+    workload_changes: dict[str, object], reason: CallerRefusalReason
+) -> None:
+    outcome = a_check().person_caller(a_workload_token(**workload_changes), a_person_token())
+
+    assert outcome == CallerRefusal(reason, None)
+
+
+def test_a_missing_workload_token_is_refused_as_missing_beside_a_person() -> None:
+    assert a_check().person_caller(None, a_person_token()) == CallerRefusal(
+        CallerRefusalReason.MISSING_TOKEN, None
+    )
+
+
+@pytest.mark.parametrize("token", [None, ""])
+def test_a_missing_person_token_is_refused_as_missing(token: str | None) -> None:
+    assert a_check().person_caller(a_workload_token(), token) == CallerRefusal(
+        CallerRefusalReason.MISSING_TOKEN, None
+    )
+
+
+@pytest.mark.parametrize(
+    ("changes", "rejection"),
+    [
+        pytest.param({"aud": "someone-else"}, RejectionReason.INVALID_AUDIENCE, id="not-callee"),
+        pytest.param(
+            {"iat": ACCESS_TOKEN_NOW - 1_000, "exp": ACCESS_TOKEN_NOW - 100},
+            RejectionReason.EXPIRED,
+            id="expired",
+        ),
+    ],
+)
+def test_a_person_token_the_verifier_rejects_is_refused_with_its_reason(
+    changes: dict[str, object], rejection: RejectionReason
+) -> None:
+    outcome = a_check().person_caller(a_workload_token(), a_person_token(**changes))
+
+    assert outcome == CallerRefusal(CallerRefusalReason.TOKEN_REJECTED, rejection)
+
+
+def test_a_person_token_with_a_bad_signature_is_rejected() -> None:
+    forged = an_access_token(key_name="foreign", claims={"aud": CALLEE})
+
+    assert a_check().person_caller(a_workload_token(), forged) == CallerRefusal(
+        CallerRefusalReason.TOKEN_REJECTED, RejectionReason.INVALID_SIGNATURE
+    )
+
+
+def test_a_key_set_that_is_down_makes_a_person_unavailable() -> None:
+    check = a_check(fetch_key_set=FakeKeySetEndpoint(KeySetFetchError("down")))
+
+    assert check.person_caller(a_workload_token(), a_person_token()) == CallerRefusal(
+        CallerRefusalReason.KEY_SET_UNAVAILABLE, None
+    )
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        pytest.param({"sub": ABSENT}, CallerRefusalReason.INVALID_SUBJECT, id="subject-absent"),
+        pytest.param({"sub": "\ud800"}, CallerRefusalReason.INVALID_SUBJECT, id="surrogate"),
+        pytest.param({"groups": None}, CallerRefusalReason.MALFORMED_GROUPS, id="null-groups"),
+        pytest.param({"groups": "/a"}, CallerRefusalReason.MALFORMED_GROUPS, id="string-groups"),
+        pytest.param(
+            {"groups": ["/a", 1]}, CallerRefusalReason.MALFORMED_GROUPS, id="non-string-group"
+        ),
+    ],
+)
+def test_a_person_subject_or_groups_fault_is_refused(
+    changes: dict[str, object], reason: CallerRefusalReason
+) -> None:
+    outcome = a_check().person_caller(a_workload_token(), a_person_token(**changes))
+
+    assert outcome == CallerRefusal(reason, None)
+
+
+@pytest.mark.parametrize(
+    "azp",
+    [
+        pytest.param(ABSENT, id="absent"),
+        pytest.param(5, id="not-a-string"),
+        pytest.param("another-client", id="another-client"),
+    ],
+)
+def test_a_person_token_of_another_client_is_a_client_mismatch(azp: object) -> None:
+    outcome = a_check().person_caller(a_workload_token(), a_person_token(azp=azp))
+
+    assert outcome == CallerRefusal(CallerRefusalReason.CLIENT_MISMATCH, None)
+
+
+def test_a_person_with_the_workloads_subject_is_the_same_subject() -> None:
+    outcome = a_check().person_caller(a_workload_token(), a_person_token(sub=SUBJECT_CANARY))
+
+    assert outcome == CallerRefusal(CallerRefusalReason.SAME_SUBJECT, None)
+
+
+def test_a_person_outside_the_apps_login_group_is_not_a_member() -> None:
+    outcome = a_check().person_caller(a_workload_token(), a_person_token(groups=["/apps/other"]))
+
+    assert outcome == CallerRefusal(CallerRefusalReason.NOT_A_MEMBER, None)
+
+
+@pytest.mark.parametrize(
+    ("workload_changes", "person_changes", "reason"),
+    [
+        pytest.param(
+            {"azp": UNREGISTERED, "client_id": UNREGISTERED},
+            {"aud": "someone-else"},
+            CallerRefusalReason.TOKEN_REJECTED,
+            id="person-rejected-before-workload-registry",
+        ),
+        pytest.param(
+            {"sub": ABSENT},
+            {"aud": "someone-else"},
+            CallerRefusalReason.TOKEN_REJECTED,
+            id="person-rejected-before-workload-subject",
+        ),
+        pytest.param(
+            {"azp": UNREGISTERED, "client_id": UNREGISTERED},
+            {"azp": "another-client"},
+            CallerRefusalReason.UNREGISTERED_CLIENT,
+            id="workload-registry-before-client-mismatch",
+        ),
+        pytest.param(
+            {},
+            {"azp": "another-client", "sub": SUBJECT_CANARY},
+            CallerRefusalReason.CLIENT_MISMATCH,
+            id="client-mismatch-before-same-subject",
+        ),
+        pytest.param(
+            {},
+            {"sub": SUBJECT_CANARY, "groups": ["/apps/other"]},
+            CallerRefusalReason.SAME_SUBJECT,
+            id="same-subject-before-not-a-member",
+        ),
+        pytest.param(
+            {"realm_access": {"roles": []}},
+            {"groups": "/a"},
+            CallerRefusalReason.MALFORMED_GROUPS,
+            id="person-groups-before-workload-role",
+        ),
+    ],
+)
+def test_the_first_fault_of_the_person_order_is_the_one_refused(
+    workload_changes: dict[str, object],
+    person_changes: dict[str, object],
+    reason: CallerRefusalReason,
+) -> None:
+    outcome = a_check().person_caller(
+        a_workload_token(**workload_changes), a_person_token(**person_changes)
+    )
+
+    assert refused(outcome).reason is reason
+
+
+@pytest.mark.parametrize(
+    "workload_changes",
+    [{"sub": ABSENT}, {"realm_access": {"roles": []}}],
+    ids=["workload-subject-absent", "workload-without-role"],
+)
+def test_a_person_key_set_that_is_down_is_unavailable_before_the_workloads_faults(
+    workload_changes: dict[str, object],
+) -> None:
+    rotated_person = an_access_token(
+        key_id="rotated-key", claims={"aud": CALLEE, "azp": WORKLOAD_CLIENT}
+    )
+    endpoint = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    monotonic = FakeClock(5_000.0)
+    check = a_check(fetch_key_set=endpoint, monotonic_clock=monotonic)
+    assert isinstance(check.person_caller(a_workload_token(), a_person_token()), PersonCaller)
+    endpoint.response = KeySetFetchError("down")
+    monotonic.now += 60
+
+    outcome = check.person_caller(a_workload_token(**workload_changes), rotated_person)
+
+    assert refused(outcome).reason is CallerRefusalReason.KEY_SET_UNAVAILABLE
+
+
+def test_the_workload_path_never_asks_for_membership() -> None:
+    token = a_workload_token(groups=["/apps/other"])
+
+    assert isinstance(a_check().workload_caller(token), WorkloadCaller)
+
+
+def test_nothing_taken_from_either_token_appears_in_a_repr_or_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    registry = {CLIENT_CANARY: RegisteredApp("notes", an_app_admission())}
+    check = a_check(registered_apps=registry)
+    workload = a_workload_token(azp=CLIENT_CANARY, client_id=CLIENT_CANARY)
+    person = a_person_token(azp=CLIENT_CANARY, groups=["/apps/notes", PERSON_GROUP_CANARY])
+    refused_pairs = [
+        (workload, a_person_token(azp="another-client")),
+        (workload, a_person_token(azp=CLIENT_CANARY, sub=SUBJECT_CANARY)),
+        (workload, a_person_token(azp=CLIENT_CANARY, groups=[PERSON_GROUP_CANARY])),
+        (workload, a_person_token(azp=CLIENT_CANARY, groups=PERSON_GROUP_CANARY)),
+    ]
+    with caplog.at_level(logging.DEBUG):
+        admitted = check.person_caller(workload, person)
+        refusals = [check.person_caller(pair[0], pair[1]) for pair in refused_pairs]
+    assert isinstance(admitted, PersonCaller)
+
+    shown = [repr(admitted), repr(admitted.principal), *map(repr, refusals), caplog.text]
+
+    assert [text for text in shown if any(canary in text for canary in CANARIES)] == []
     assert [
         record for record in caplog.records if record.name.startswith("webauth.service_callers")
     ] == []
