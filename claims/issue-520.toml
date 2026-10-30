@@ -1,8 +1,0 @@
-claim_id = "c4e982be2aef44eb9877b273f5f3e866"
-agent = "Claude 9948bf7d-00b6-406e-bb5b-319d1398fcfd"
-role = "builder"
-base = "dd23f09ec4604f8dc56a3e3658d03637eb685c33"
-branch = "claude/issue-520-w1a-service-callers"
-scope = [".importlinter", "docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/VISION.md", "docs/host-contract.md", "quality/config.toml", "src/webauth/_validation.py", "src/webauth/oidc.py", "src/webauth/service_callers.py", "tests/fixtures/typing_hosts/service_host.py", "tests/support/oidc_arrangement.py", "tests/test_service_callers.py"]
-opened_commit = "88d1e4a056d7eaaf2afd86af9f7960d6df341d5f"
-whole_reason = "One new public module, the helper it shares with oidc, its import-linter permission, its tests, typing host and the documents that name it are one additive contract; landing a part leaves a public name undocumented or untyped."
