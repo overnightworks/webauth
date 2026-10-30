@@ -10,7 +10,7 @@ uv build "$repo" --out-dir "$host/dist" \
   --build-constraint "$repo/.github/requirements-build.txt" --require-hashes --quiet
 uv export --project "$repo" --locked --no-emit-project --no-hashes \
   --quiet --output-file "$host/constraints.txt"
-uv venv --quiet --python 3.12 "$host/.venv"
+uv venv --quiet --python 3.14 "$host/.venv"
 wheels=("$host"/dist/*.whl)
 uv pip install --quiet --python "$host/.venv/bin/python" --constraints "$host/constraints.txt" \
   "overnightworks-webauth @ file://${wheels[0]}"

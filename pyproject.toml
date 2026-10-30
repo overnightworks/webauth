@@ -5,21 +5,21 @@ description = "OpenID Connect login for FastAPI applications, with sessions, CSR
 authors = [{ name = "Flex0r (Felix Hummert)", email = "felix.hummert@gmail.com" }]
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 keywords = ["fastapi", "authentication", "session", "csrf", "cookies", "rate-limit", "oidc"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: FastAPI",
     "Typing :: Typed",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
     "fastapi>=0.123.7,<1",
     "starlette>=0.46,<2",
     "anyio>=4.0,<5",
-    "pydantic>=2.6,<3",
+    "pydantic>=2.12,<3",
     "cryptography>=50.0.2,<51",
     "pyjwt[crypto]>=2.15.1,<3",
     "urllib3>=2.6.3,<3",
@@ -30,7 +30,7 @@ redis = ["redis>=5.0,<9"]
 
 [dependency-groups]
 dev = [
-    "pytest>=7.1,<10",
+    "pytest>=7.4,<10",
     "pytest-cov>=7,<8",
     "fakeredis[lua]>=2.20,<3",
     "httpx>=0.27,<1",
@@ -61,7 +61,7 @@ where = ["src"]
 include = ["webauth*"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 100
 
 [tool.ruff.lint]
@@ -89,7 +89,7 @@ include = [
     "src/webauth",
     "tests",
 ]
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/webauth/__init__.py" }]

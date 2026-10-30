@@ -11,6 +11,6 @@ with open("pyproject.toml", "rb") as manifest:
 print(next(requirement for requirement in requirements if requirement.startswith("setuptools")))
 ')"
 
-echo "$floor" | uv pip compile - --generate-hashes --python-version 3.12 --no-annotate \
+echo "$floor" | uv pip compile - --generate-hashes --python-version 3.14 --no-annotate \
   --custom-compile-command 'See AGENTS.md "Releasing"' \
   --output-file .github/requirements-build.txt
