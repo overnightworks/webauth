@@ -27,6 +27,7 @@ cleanup_cap_seconds=300
 cleanup_kill_after_seconds=30
 lock_wait_seconds=1200
 lock_wait_timeout_status=75
+setpriv_unavailable_status=69
 
 usage() {
   cat >&2 <<'USAGE'
@@ -62,20 +63,26 @@ refuse_unsafe_state_root() {
 
 # Takes the probe lock for at most lock_wait_seconds, then runs "$@" (an executable, because
 # timeout cannot run a shell function) under timeout with the given kill-after and cap.
-# The lock is not passed on: flock -o closes it for the command.
+# The lock is not passed on: flock -o closes it for the command. setpriv makes timeout
+# receive SIGTERM when flock dies, so the lock is never free while the command runs on.
+# flock exits with the status 69 when setpriv cannot run; it is never left out.
 run_locked() {
   local kill_after="$1" cap="$2" status=0
   shift 2
   flock -o -w "$lock_wait_seconds" -E "$lock_wait_timeout_status" "$probe_lock" \
-    timeout --kill-after="$kill_after" "$cap" "$@" || status=$?
+    setpriv --pdeathsig TERM timeout --kill-after="$kill_after" "$cap" "$@" || status=$?
   if [[ "$status" -eq "$lock_wait_timeout_status" ]]; then
     echo "gave up waiting for $probe_lock after $lock_wait_seconds s" >&2
+  elif [[ "$status" -eq "$setpriv_unavailable_status" ]]; then
+    echo "setpriv could not run; the lock would not outlive the command, so nothing ran" >&2
   fi
   return "$status"
 }
 
-# timeout runs in its own process group so its limit reaches every descendant;
-# Ctrl-C reaches only flock. Stop a run with SIGTERM to timeout or the python process.
+# Ctrl-C reaches flock, which holds the lock for the run: setpriv then sends timeout
+# SIGTERM, timeout passes it to the driver, and the run ends through its own cleanup.
+# timeout's KILL reaches only its direct child. Stop a run with SIGTERM to timeout or the
+# python process.
 # The load is read again once the lock is held, because the wait for it can be long.
 # The run directory is made under the lock and handed to the driver as --scratch.
 run_under_lock() {

@@ -61,11 +61,26 @@ stderr tail, and the result table still follows.
 
 ## Stop a run
 
-Send SIGTERM to `timeout` or to the `prove.py` python process. Ctrl-C in the terminal
-reaches only `flock` and does not stop the run, because `timeout` runs in its own
-process group so that its limit reaches every descendant. The first SIGTERM or SIGINT
-ends the run with `FAILED: interrupted` and exit status 1 after an uninterruptible
-cleanup (host app, stack, `runtime/`, result table); further signals are ignored.
+Ctrl-C in the terminal reaches `flock`, which holds the probe lock for the run. When
+`flock` dies, `setpriv` sends `timeout` SIGTERM, `timeout` passes it to the driver, and
+the first SIGTERM or SIGINT ends the run with `FAILED: interrupted` and exit status 1
+after an uninterruptible cleanup (host app, stack, `runtime/`, result table); further
+signals are ignored. The lock is freed only after the run has ended. Sending SIGTERM to
+`timeout` or to the `prove.py` python process has the same effect. `setpriv` must run: if
+it cannot, `flock` exits 69, the script says so and nothing runs.
+
+`timeout`'s KILL (after 900 s plus 240 s) reaches only its direct child, because this
+host's `timeout` is uutils coreutils 0.10.0 (measured: a child that ignores TERM is
+killed, its own grandchild survives). Two kinds of process can still outlive the lock,
+and `cleanup` ends them:
+
+- Processes in a session of their own. The host app is started with
+  `start_new_session`; it dies with the driver (`PR_SET_PDEATHSIG`, SIGKILL), but a
+  process it spawned itself is stopped only by the driver's teardown (a process-group
+  kill). A relay container is a docker daemon object and stays until the driver removes
+  it.
+- A driver that is killed outright. Nothing runs its teardown; the browser's own driver
+  and the stack's `hold` process end on EOF of their pipes, which is not measured here.
 
 ## Clean up after a killed run
 
