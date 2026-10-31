@@ -1,4 +1,4 @@
-"""A TLS front for the edge's plain-http Traefik, standing in for Cloudflare's tunnel.
+"""A TLS front for hal's plain-http Traefik, standing in for Cloudflare's tunnel.
 
 It terminates TLS with a throwaway certificate and forwards every request to
 the upstream with the public ``Host`` and ``X-Forwarded-Proto: https``, as

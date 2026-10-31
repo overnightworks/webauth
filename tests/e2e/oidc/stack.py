@@ -1,6 +1,6 @@
-"""The edge's Keycloak stack, held for the run, and the admin calls the proof needs.
+"""Hal's Keycloak stack, held for the run, and the admin calls the proof needs.
 
-Edge keeps the one copy of the realm and the compose project; this module only
+Hal keeps the one copy of the realm and the compose project; this module only
 runs its ``hold`` mode as a subprocess and talks to the admin API it names."""
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from typing import Any
 
 import httpx
 
-EDGE_SHA_FILE = Path(__file__).with_name("edge_sha.txt")
-PROBE_FILES = "compose.yaml keycloak probe/keycloak src/edge traefik.yml dynamic".split()
+HAL_SHA_FILE = Path(__file__).with_name("hal_sha.txt")
+PROBE_FILES = "compose.yaml keycloak probe/keycloak src/hal traefik.yml dynamic".split()
 PROBE_PROJECT = "edge-kc-probe"
 KEYCLOAK_NETWORK = "keycloak"
 READY_MARK = "READY "
@@ -31,14 +31,14 @@ class StackError(Exception):
     pass
 
 
-def require_pinned_clean_edge(edge: Path) -> None:
-    pinned = EDGE_SHA_FILE.read_text().strip()
-    head = _git(edge, "rev-parse", "HEAD").strip()
+def require_pinned_clean_hal(hal: Path) -> None:
+    pinned = HAL_SHA_FILE.read_text().strip()
+    head = _git(hal, "rev-parse", "HEAD").strip()
     if head != pinned:
-        raise StackError(f"edge is at {head}, the harness is pinned to {pinned}")
-    dirty = _git(edge, "status", "--porcelain", "--", *PROBE_FILES)
+        raise StackError(f"hal is at {head}, the harness is pinned to {pinned}")
+    dirty = _git(hal, "status", "--porcelain", "--", *PROBE_FILES)
     if dirty.strip():
-        raise StackError("edge has changes in files the probe consumes")
+        raise StackError("hal has changes in files the probe consumes")
 
 
 def docker(*arguments: str) -> str:
@@ -50,11 +50,11 @@ def docker(*arguments: str) -> str:
     ).stdout
 
 
-def _git(edge: Path, *arguments: str) -> str:
+def _git(hal: Path, *arguments: str) -> str:
     # Fixed command list
     return subprocess.run(  # noqa: S603
         # The operator's own PATH by design
-        ["git", "-C", str(edge), *arguments], check=True, capture_output=True, text=True  # noqa: S607
+        ["git", "-C", str(hal), *arguments], check=True, capture_output=True, text=True  # noqa: S607
     ).stdout
 
 
@@ -96,9 +96,9 @@ class Admin:
 
 @dataclass
 class HeldStack:
-    """``with HeldStack(edge, scratch) as stack`` brings the stack up and removes it on exit."""
+    """``with HeldStack(hal, scratch) as stack`` brings the stack up and removes it on exit."""
 
-    edge: Path
+    hal: Path
     scratch: Path
     output: list[str] = field(default_factory=list)
     ready: dict[str, Any] = field(default_factory=dict)
@@ -108,7 +108,7 @@ class HeldStack:
     def __enter__(self) -> HeldStack:
         # Fixed command list
         self._process = subprocess.Popen(  # noqa: S603
-            [sys.executable, str(self.edge / "probe/keycloak/probe.py"), "hold",
+            [sys.executable, str(self.hal / "probe/keycloak/probe.py"), "hold",
              "--scratch", str(self.scratch)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
