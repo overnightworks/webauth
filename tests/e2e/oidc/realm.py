@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -54,7 +53,7 @@ def host_settings(
 
 
 def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
-    """A user who has already accepted the terms: Keycloak adds the default action to every new
+    """A user with no pending required action: Keycloak adds the terms action to every new
     account whatever the request lists, so the full representation is put back without it."""
     user_id = admin.create(f"/{REALM}/users", {
         "username": username,
@@ -67,9 +66,7 @@ def create_user(admin: Admin, username: str, password: str, groups: tuple[str, .
     })
     user_path = f"/{REALM}/users/{user_id}"
     representation = admin.get(user_path)
-    accepted_at = str(int(time.time()))
-    attributes = {**representation.get("attributes", {}), "terms_and_conditions": [accepted_at]}
-    admin.put(user_path, {**representation, "attributes": attributes, "requiredActions": []})
+    admin.put(user_path, {**representation, "requiredActions": []})
     for path in groups:
         group = admin.get(f"/{REALM}/group-by-path{path}")
         admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")

@@ -37,7 +37,7 @@ usage() {
 usage: scripts/run_oidc_proof.sh VERB [ARGS]
 
   prepare            install Chromium, Firefox and WebKit and pull the relay and suite images
-  prove --hal DIR   run tests/e2e/oidc/prove.py against the hal checkout DIR
+  prove --hal DIR    run tests/e2e/oidc/prove.py against the hal checkout DIR
   conformance        run tests/e2e/oidc/conformance.py
   cleanup            remove what a killed run left behind
 
