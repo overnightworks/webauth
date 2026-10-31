@@ -541,7 +541,7 @@ def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role
         pytest.param({"aud": [CALLEE, "other-service"]}, id="callee-beside-another-audience"),
         pytest.param({"realm_access": {"roles": [WORKLOAD_ROLE]}}, id="carries-workload-role"),
         pytest.param({"client_id": "another-client"}, id="carries-another-client-id"),
-        pytest.param({"exp": ACCESS_TOKEN_NOW + ACCESS_TOKEN_LIFETIME_SECONDS + 1}, id="long-lived"),
+        pytest.param({"exp": ACCESS_TOKEN_NOW + 24 * 60 * 60}, id="long-lived"),
     ],
 )
 def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> None:

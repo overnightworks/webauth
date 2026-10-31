@@ -366,7 +366,7 @@ Keycloak in the hand-run harness.
 A service that is not a browser app (no sessions, no sign-in) admits an app acting as itself, or for a person,
 with `ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
 `ServiceIdentity` (issuer, key-set URL, its own audience, the realm role that marks a workload, the
-group claim, the longest workload token life in seconds, the clock leeway) and its registered apps
+group claim, the clock leeway) and its registered apps
 (`RegisteredApp`, keyed by the workload client id). Nothing has a default and nothing is read from
 the environment. `workload_caller(token)` and `person_caller(workload_token, person_token)` are synchronous, so an
 async service runs them in a thread.
@@ -384,7 +384,6 @@ its `CallerRefusalClass`, and the host owns the wire codes, here the recommended
 | `NOT_A_WORKLOAD` | `realm_access.roles` lacks the workload role | `FORBIDDEN` (403) |
 | `UNBOUND_CLIENT` | `azp` absent or empty, or `client_id` differs from it | `FORBIDDEN` (403) |
 | `UNREGISTERED_CLIENT` | `azp` is no registered app | `FORBIDDEN` (403) |
-| `WORKLOAD_LIVES_TOO_LONG` | `exp - iat` above the maximum | `FORBIDDEN` (403) |
 
 `person_caller` admits an app acting for a person: it returns a `PersonCaller` (the app, the client
 id, the person's `Principal` and groups, and the person's `AppRole`) or a `CallerRefusal`. It never
@@ -398,13 +397,13 @@ refusal:
 | 2 The person token: missing, then the verifier stage | the same three | `UNAUTHENTICATED` (401) or `UNAVAILABLE` (503) |
 | 3 The workload token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | `UNAUTHENTICATED` (401) |
 | 4 The person token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | `UNAUTHENTICATED` (401) |
-| 5 The workload token: role, binding, registry, lifetime | `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`, `UNREGISTERED_CLIENT`, `WORKLOAD_LIVES_TOO_LONG` | `FORBIDDEN` (403) |
+| 5 The workload token: role, binding, registry | `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`, `UNREGISTERED_CLIENT` | `FORBIDDEN` (403) |
 | 6 The person's `azp` is the workload's `azp` | `CLIENT_MISMATCH` | `FORBIDDEN` (403) |
 | 7 The person's subject differs from the workload's | `SAME_SUBJECT` | `FORBIDDEN` (403) |
 | 8 The person's groups make a member of the app, by `app_role` and the registered admission | `NOT_A_MEMBER` | `FORBIDDEN` (403) |
 
-The person token gets no lifetime bound and no role check; its `azp` is the client binding and is
-never evidence of an exchange. `workload_caller` never asks for membership.
+Neither token's lifetime is bounded beyond its `exp` against the clock; the issuer owns it. The person
+token gets no role check; its `azp` is the client binding and is never evidence of an exchange. `workload_caller` never asks for membership.
 
 The verifier stage keeps the verifier's own order: a malformed header or unsupported algorithm is
 `TOKEN_REJECTED` before any key lookup, so no key set is fetched. `KEY_SET_UNAVAILABLE` (503) is
@@ -414,7 +413,7 @@ verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token
 
 By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
-`UNREGISTERED_CLIENT`, `WORKLOAD_LIVES_TOO_LONG`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and
+`UNREGISTERED_CLIENT`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and
 `NOT_A_MEMBER`. A group claim that is a JSON `null` is
 `MALFORMED_GROUPS`; only an absent claim means no groups.
 
