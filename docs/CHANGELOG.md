@@ -7,6 +7,12 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.28.0 - Unreleased
+
+**Breaking**
+
+- `ServiceIdentity.max_workload_seconds` and `CallerRefusalReason.WORKLOAD_LIVES_TOO_LONG` are removed: `ServiceCallerCheck` no longer compares a workload token's `exp - iat`. The issuer owns the token's lifetime, and Keycloak stamps `exp - iat` as the lifespan or the lifespan + 1, so the cap refused a valid token now and then. `exp`, `iat` and `nbf` stay checked against the clock with `leeway_seconds`. A host deletes the `max_workload_seconds` argument and any mapping of the reason.
+
 ## 0.27.0 - 2026-10-31
 
 **Breaking**
