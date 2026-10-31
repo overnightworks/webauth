@@ -1,8 +1,0 @@
-claim_id = "2f7868bd3c8b419b8f3ead7f6a1f5663"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "8cf5ca805e0d7a4cb69e2061092a1b0fdc7a9531"
-branch = "claude/issue-462-e2e-oidc-moves-its-hal-pin-past-hal-268"
-scope = ["scripts/run_oidc_proof.sh", "tests/e2e/oidc/README.md", "tests/e2e/oidc/conformance.py", "tests/e2e/oidc/edge_sha.txt", "tests/e2e/oidc/hal_sha.txt", "tests/e2e/oidc/prove.py", "tests/e2e/oidc/realm.py", "tests/e2e/oidc/shim.py", "tests/e2e/oidc/stack.py"]
-opened_commit = "716d958f91c73af326bfd54371d0beb1603d03c9"
-whole_reason = "One pin bump: the pin file's new name, the verb argument that reads it and every harness file that names the platform repository move together, or the harness names two repositories."
