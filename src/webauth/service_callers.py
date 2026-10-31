@@ -26,7 +26,6 @@ from webauth._validation import (
     is_utf8,
     require_non_empty_string,
     require_non_negative_whole_number,
-    require_positive_whole_number,
 )
 from webauth.jwt_verification import (
     JwtVerifier,
@@ -56,7 +55,7 @@ __all__ = [
 class ServiceIdentity:
     """The deployment facts of one service: the issuer and its key-set URL, the
     audience that names the service, the realm role that marks a workload, the
-    claim that holds groups, the longest workload token life and the clock leeway.
+    claim that holds groups and the clock leeway.
 
     ``jwks_url`` is left out of the repr: its path or query can carry a secret."""
 
@@ -65,7 +64,6 @@ class ServiceIdentity:
     jwks_url: str = field(repr=False)
     workload_role: str
     group_claim: str
-    max_workload_seconds: int
     leeway_seconds: int
 
     def __post_init__(self) -> None:
@@ -73,9 +71,6 @@ class ServiceIdentity:
         require_non_empty_string("audience", self.audience)
         require_non_empty_string("workload_role", self.workload_role)
         require_non_empty_string("group_claim", self.group_claim)
-        require_positive_whole_number(
-            "max_workload_seconds", self.max_workload_seconds, unit="seconds"
-        )
         require_non_negative_whole_number("leeway_seconds", self.leeway_seconds, unit="seconds")
 
 
@@ -133,7 +128,6 @@ class CallerRefusalReason(StrEnum):
     NOT_A_WORKLOAD = "not-a-workload"
     UNBOUND_CLIENT = "unbound-client"
     UNREGISTERED_CLIENT = "unregistered-client"
-    WORKLOAD_LIVES_TOO_LONG = "workload-lives-too-long"
     CLIENT_MISMATCH = "client-mismatch"
     SAME_SUBJECT = "same-subject"
     NOT_A_MEMBER = "not-a-member"
@@ -289,8 +283,6 @@ class ServiceCallerCheck:
         registered = self._registered_apps.get(client_id)
         if registered is None:
             return CallerRefusal(CallerRefusalReason.UNREGISTERED_CLIENT, None)
-        if verified.expires_at - verified.issued_at > self._identity.max_workload_seconds:
-            return CallerRefusal(CallerRefusalReason.WORKLOAD_LIVES_TOO_LONG, None)
         return WorkloadCaller(
             app=registered.app,
             client_id=client_id,

@@ -190,8 +190,9 @@ Who the library defends against and trusts; links point to owning sections.
    - every token request on a person path enters the host's serialized `SignInTransaction` and shares the address budget with the browser;
    - only the realm keeps a service account out of the admin group;
    - key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
-8. **A service's caller:** anyone who can reach a service's API is untrusted. [`service_callers`](../src/webauth/service_callers.py) owns the workload proof (realm role, `azp` equal to `client_id`, a registered client, a bounded token life) and the person binding (the person's `azp` is the workload's, another subject, a member of the app) and refuses 401 and 503 causes before any 403 ([host contract](host-contract.md#a-services-callers)). Replay of an app's token between services is closed only while each app requests the callee's audience alone in each workload grant and no service holds an app's credentials. Named residues:
+8. **A service's caller:** anyone who can reach a service's API is untrusted. [`service_callers`](../src/webauth/service_callers.py) owns the workload proof (realm role, `azp` equal to `client_id`, a registered client) and the person binding (the person's `azp` is the workload's, another subject, a member of the app) and refuses 401 and 503 causes before any 403 ([host contract](host-contract.md#a-services-callers)). Replay of an app's token between services is closed only while each app requests the callee's audience alone in each workload grant and no service holds an app's credentials. Named residues:
    - a compromised app credential defeats that protection;
+   - the issuer owns the workload token's lifetime: a token it signs with a longer life, for example through a client-level override, is admitted until its `exp` plus leeway. The realm's lifespan and its probe own that bound;
    - `account` stays in `aud` of tokens as the realm issues them;
    - the check proves who the app is, not what the service lets it do: groups, roles, routing and wire codes belong to the service.
 9. **Named residues:**
