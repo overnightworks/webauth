@@ -1,0 +1,8 @@
+claim_id = "ce47b44f4ed74895bdf5dadd8d86b1d6"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "d949b313da84d9d45e1cad26efdca10db6411b73"
+branch = "claude/issue-544-workload-lifetime-is-the-issuers"
+scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/service_callers.py", "tests/fixtures/typing_hosts/service_host.py", "tests/test_service_callers.py", "tests/test_service_callers_refusal_class.py"]
+opened_commit = "01addcbe2d624bbd8720720b6bcbdf16c8887194"
+whole_reason = "One removed contract: the check, its field and reason, every test and typing host that names them, and the documents that state the bound move together, or the published contract names a check that no longer exists."
