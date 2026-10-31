@@ -67,11 +67,9 @@ def create_user(admin: Admin, username: str, password: str, groups: tuple[str, .
     })
     user_path = f"/{REALM}/users/{user_id}"
     representation = admin.get(user_path)
-    admin.put(user_path, {
-        **representation,
-        "attributes": {**representation.get("attributes", {}), "terms_and_conditions": [str(int(time.time()))]},
-        "requiredActions": [],
-    })
+    accepted_at = str(int(time.time()))
+    attributes = {**representation.get("attributes", {}), "terms_and_conditions": [accepted_at]}
+    admin.put(user_path, {**representation, "attributes": attributes, "requiredActions": []})
     for path in groups:
         group = admin.get(f"/{REALM}/group-by-path{path}")
         admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")
