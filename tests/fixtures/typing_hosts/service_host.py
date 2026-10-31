@@ -31,7 +31,6 @@ def a_service_builds_its_check(
         jwks_url="https://login.example.org/realms/workshop/protocol/openid-connect/certs",
         workload_role="workload",
         group_claim="groups",
-        max_workload_seconds=300,
         leeway_seconds=30,
     )
     admission = AdmissionConfig(

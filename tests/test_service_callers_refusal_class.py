@@ -19,7 +19,6 @@ from webauth.service_callers import CallerRefusal, CallerRefusalClass, CallerRef
         ("not-a-workload", CallerRefusalClass.FORBIDDEN),
         ("unbound-client", CallerRefusalClass.FORBIDDEN),
         ("unregistered-client", CallerRefusalClass.FORBIDDEN),
-        ("workload-lives-too-long", CallerRefusalClass.FORBIDDEN),
         ("client-mismatch", CallerRefusalClass.FORBIDDEN),
         ("same-subject", CallerRefusalClass.FORBIDDEN),
         ("not-a-member", CallerRefusalClass.FORBIDDEN),

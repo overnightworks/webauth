@@ -45,7 +45,6 @@ CALLEE = "speech-runtime"
 WORKLOAD_ROLE = "workload"
 GROUP_CLAIM = "groups"
 WORKLOAD_CLIENT = "notes-workload"
-MAX_WORKLOAD_SECONDS = ACCESS_TOKEN_LIFETIME_SECONDS
 # Canaries: recognisable text that appears nowhere in the configuration
 SUBJECT_CANARY = "subject-canary-7f3a"
 CLIENT_CANARY = "client-canary-9b1c"
@@ -78,7 +77,6 @@ def a_service_identity(**changes: Any) -> ServiceIdentity:
         "jwks_url": REALM_JWKS_URL,
         "workload_role": WORKLOAD_ROLE,
         "group_claim": GROUP_CLAIM,
-        "max_workload_seconds": MAX_WORKLOAD_SECONDS,
         "leeway_seconds": ACCESS_TOKEN_LEEWAY_SECONDS,
     }
     return ServiceIdentity(**{**arguments, **changes})
@@ -323,15 +321,19 @@ def test_a_client_that_is_not_registered_is_refused() -> None:
     )
 
 
-def test_a_lifetime_at_the_maximum_is_admitted_and_one_second_above_is_refused() -> None:
-    at_maximum = a_workload_token(exp=ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS)
-    above = a_workload_token(exp=ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS + 1)
+@pytest.mark.parametrize(
+    "lifetime_seconds",
+    [
+        pytest.param(ACCESS_TOKEN_LIFETIME_SECONDS + 1, id="issuer-lifespan-plus-one"),
+        pytest.param(24 * 60 * 60, id="one-day"),
+    ],
+)
+def test_a_workload_token_lives_as_long_as_the_issuer_signed_it(lifetime_seconds: int) -> None:
+    token = a_workload_token(exp=ACCESS_TOKEN_NOW + lifetime_seconds)
     check = a_check()
 
-    assert isinstance(check.workload_caller(at_maximum), WorkloadCaller)
-    assert check.workload_caller(above) == CallerRefusal(
-        CallerRefusalReason.WORKLOAD_LIVES_TOO_LONG, None
-    )
+    assert isinstance(check.workload_caller(token), WorkloadCaller)
+    assert isinstance(check.person_caller(token, a_person_token()), PersonCaller)
 
 
 @pytest.mark.parametrize(
@@ -357,11 +359,6 @@ def test_a_lifetime_at_the_maximum_is_admitted_and_one_second_above_is_refused()
             CallerRefusalReason.NOT_A_WORKLOAD,
             id="role-before-registry",
         ),
-        pytest.param(
-            {"client_id": "another-client", "exp": ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS + 1},
-            CallerRefusalReason.UNBOUND_CLIENT,
-            id="binding-before-lifetime",
-        ),
     ],
 )
 def test_the_first_fault_of_the_documented_order_is_the_one_refused(
@@ -381,11 +378,6 @@ def test_the_first_fault_of_the_documented_order_is_the_one_refused(
         pytest.param({"workload_role": 5}, "workload_role", id="non-string-role"),
         pytest.param({"group_claim": ""}, "group_claim", id="empty-group-claim"),
         pytest.param({"group_claim": 5}, "group_claim", id="non-string-group-claim"),
-        pytest.param({"max_workload_seconds": 0}, "max_workload_seconds", id="zero-lifetime"),
-        pytest.param({"max_workload_seconds": -5}, "max_workload_seconds", id="negative-lifetime"),
-        pytest.param({"max_workload_seconds": True}, "max_workload_seconds", id="boolean-lifetime"),
-        pytest.param({"max_workload_seconds": 1.5}, "max_workload_seconds", id="float-lifetime"),
-        pytest.param({"max_workload_seconds": "60"}, "max_workload_seconds", id="string-lifetime"),
         pytest.param({"leeway_seconds": -1}, "leeway_seconds", id="negative-leeway"),
         pytest.param({"leeway_seconds": True}, "leeway_seconds", id="boolean-leeway"),
         pytest.param({"leeway_seconds": 1.5}, "leeway_seconds", id="float-leeway"),
@@ -549,7 +541,7 @@ def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role
         pytest.param({"aud": [CALLEE, "other-service"]}, id="callee-beside-another-audience"),
         pytest.param({"realm_access": {"roles": [WORKLOAD_ROLE]}}, id="carries-workload-role"),
         pytest.param({"client_id": "another-client"}, id="carries-another-client-id"),
-        pytest.param({"exp": ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS + 1}, id="long-lived"),
+        pytest.param({"exp": ACCESS_TOKEN_NOW + ACCESS_TOKEN_LIFETIME_SECONDS + 1}, id="long-lived"),
     ],
 )
 def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> None:
@@ -598,11 +590,6 @@ def test_the_role_is_the_one_the_registered_admission_gives_the_persons_groups(
             {"azp": UNREGISTERED, "client_id": UNREGISTERED},
             CallerRefusalReason.UNREGISTERED_CLIENT,
             id="unregistered",
-        ),
-        pytest.param(
-            {"exp": ACCESS_TOKEN_NOW + MAX_WORKLOAD_SECONDS + 1},
-            CallerRefusalReason.WORKLOAD_LIVES_TOO_LONG,
-            id="lives-too-long",
         ),
     ],
 )
