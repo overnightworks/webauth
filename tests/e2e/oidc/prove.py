@@ -1,6 +1,6 @@
 """Proves login and logout of a webauth host in a real browser against a real Keycloak.
 
-    scripts/run_oidc_proof.sh prove --edge PATH
+    scripts/run_oidc_proof.sh prove --hal PATH
 
 ``README.md`` beside this file is the runbook. Nothing of the OIDC path is faked:
 the browser fills Keycloak's own form, the host's library talks to the real
@@ -247,7 +247,7 @@ from realm import (
     short_lived_tokens,
 )
 from shim import CallbackBridge, TlsShim
-from stack import Admin, HeldStack, require_pinned_clean_edge
+from stack import Admin, HeldStack, require_pinned_clean_hal
 
 from webauth.config import WebAuthConfig
 from webauth.cookies import (
@@ -269,7 +269,7 @@ SHIPPED_COOKIE_SAMESITE = cast(
 APP_HOST = "demo.hallucinai.de"
 SECOND_APP_HOST = "demo.example.test"
 UNTRUSTED_HOST = "untrusted.hallucinai.de"
-EDGE_CONTAINER_FILTER = "edge-kc-probe"
+HAL_CONTAINER_FILTER = "edge-kc-probe"
 APP_ORIGIN = f"https://{APP_HOST}"
 SECOND_APP_ORIGIN = f"https://{SECOND_APP_HOST}"
 DISABLED_USER_NAME = "d1-disabled"
@@ -1157,7 +1157,7 @@ def backchannel_apps(
         yield tuple(apps)
 
 
-def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
+def run_proof(proof: Proof, hal: Path, runtime: Path) -> None:
     proof.session_secret = secrets.token_urlsafe(48)
     proof.user_password = secrets.token_urlsafe(18)
     proof.client_secret = secrets.token_urlsafe(24)
@@ -1166,7 +1166,7 @@ def run_proof(proof: Proof, edge: Path, runtime: Path) -> None:
     proof.admin_password = secrets.token_urlsafe(18)
     tls = issue_throwaway_tls(runtime, "good", [IDP_HOST, APP_HOST, SECOND_APP_HOST, "localhost"])
     untrusted = issue_throwaway_tls(runtime, "untrusted", [UNTRUSTED_HOST])
-    with HeldStack(edge, runtime / "stack") as stack:
+    with HeldStack(hal, runtime / "stack") as stack:
         proof.stack = stack
         admin = stack.admin()
         prepare_keycloak(admin, proof, proof.client_secret)
@@ -1504,7 +1504,7 @@ def run_token_scenarios(proof: Proof) -> None:
         )
 
 
-def prove(edge: Path, scratch: Path) -> int:
+def prove(hal: Path, scratch: Path) -> int:
     if scratch.exists() and any(scratch.iterdir()):
         print(f"FAILED: --scratch {scratch} is not empty")
         return 2
@@ -1513,9 +1513,9 @@ def prove(edge: Path, scratch: Path) -> int:
     proof = Proof(evidence_dir)
     stop_on_first_signal(proof)
     try:
-        require_pinned_clean_edge(edge)
+        require_pinned_clean_hal(hal)
         with runtime_directory(scratch) as runtime:
-            run_proof(proof, edge, runtime)
+            run_proof(proof, hal, runtime)
     except Interrupted:
         pass
     except Exception as error:
@@ -1526,7 +1526,7 @@ def prove(edge: Path, scratch: Path) -> int:
             signal.signal(stop_signal, signal.SIG_IGN)
         if proof.stop_requested.is_set():
             proof.fail("interrupted")
-        for left in leftovers(scratch, EDGE_CONTAINER_FILTER):
+        for left in leftovers(scratch, HAL_CONTAINER_FILTER):
             proof.fail(left)
     return max(0 if proof.all_held else 1, keep_results(proof))
 
@@ -1535,10 +1535,10 @@ def main() -> int:
     if not __debug__:
         raise SystemExit("prove.py checks with assert; run it without python -O")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
-    parser.add_argument("--edge", type=Path, required=True)
+    parser.add_argument("--hal", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
     arguments = parser.parse_args()
-    return prove(arguments.edge.resolve(), arguments.scratch.resolve())
+    return prove(arguments.hal.resolve(), arguments.scratch.resolve())
 
 
 if __name__ == "__main__":

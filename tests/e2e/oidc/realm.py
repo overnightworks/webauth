@@ -53,6 +53,8 @@ def host_settings(
 
 
 def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
+    """A user with no pending required action: Keycloak adds the terms action to every new
+    account whatever the request lists, so the full representation is put back without it."""
     user_id = admin.create(f"/{REALM}/users", {
         "username": username,
         "enabled": True,
@@ -62,6 +64,9 @@ def create_user(admin: Admin, username: str, password: str, groups: tuple[str, .
         "lastName": "User",
         "credentials": [{"type": "password", "value": password, "temporary": False}],
     })
+    user_path = f"/{REALM}/users/{user_id}"
+    representation = admin.get(user_path)
+    admin.put(user_path, {**representation, "requiredActions": []})
     for path in groups:
         group = admin.get(f"/{REALM}/group-by-path{path}")
         admin.put(f"/{REALM}/users/{user_id}/groups/{group['id']}")

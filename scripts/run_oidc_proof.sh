@@ -37,7 +37,7 @@ usage() {
 usage: scripts/run_oidc_proof.sh VERB [ARGS]
 
   prepare            install Chromium, Firefox and WebKit and pull the relay and suite images
-  prove --edge DIR   run tests/e2e/oidc/prove.py against the edge checkout DIR
+  prove --hal DIR    run tests/e2e/oidc/prove.py against the hal checkout DIR
   conformance        run tests/e2e/oidc/conformance.py
   cleanup            remove what a killed run left behind
 
@@ -120,7 +120,7 @@ prepare() {
 
 # The compose project names are reserved for the probe: the harness's own teardown
 # removes them (stack.py PROBE_PROJECT, suite.py d2-suite- and eight lowercase hex
-# digits) and cleanup replays that teardown. The live edge stack's project is `edge`.
+# digits) and cleanup replays that teardown. The live hal stack's project is `edge`.
 is_probe_project() {
   [[ "$2" == "$1" || "$2" =~ ^d2-suite-[0-9a-f]{8}$ ]]
 }
@@ -277,7 +277,7 @@ case "$verb" in
     prepare
     ;;
   prove)
-    [[ $# -eq 2 && "$1" == --edge && -d "$2" ]] || usage
+    [[ $# -eq 2 && "$1" == --hal && -d "$2" ]] || usage
     run_under_lock prove.py "$@"
     ;;
   conformance)

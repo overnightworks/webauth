@@ -12,7 +12,7 @@ drives every module the expectation table does not skip, with the host app
 the redirects. A module without a table row, or a row without a module, fails
 the run. It writes one row per module and exports the plan into the run
 directory's ``export/`` (``README.md`` says how to handle it). It needs Docker
-and no edge checkout. The host's ``login_group`` and ``admin_group`` do not apply:
+and no hal checkout. The host's ``login_group`` and ``admin_group`` do not apply:
 the suite's tokens carry no ``groups`` claim, so this driver states the value of
 ``EverySubject.OF_THE_BOUND_ISSUER`` and of ``NoAdmins.IN_THIS_APP``.
 

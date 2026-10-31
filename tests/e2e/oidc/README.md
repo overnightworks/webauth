@@ -1,7 +1,7 @@
 # How to run the real-browser proof of the OIDC relying party
 
 `prove.py` drives a real Chromium, and `engines.py` also Firefox and WebKit, through a real
-login and logout at a real Keycloak (edge's `hold` stack) against a small host
+login and logout at a real Keycloak (hal's `hold` stack) against a small host
 application whose routes are `build_app` in `host_app.py`; `conformance.py` runs the OpenID Foundation's
 conformance suite against the same host. The OIDC path is not faked. What each
 driver proves, scenario by scenario, is stated in the docstring of `prove.py` and
@@ -11,15 +11,15 @@ caller, against the same Keycloak (scenarios 28 onwards of `prove.py`; scenarios
 hal's token to the host's person path `/api/me`, where it is the account behind the token); `realm.py` holds the
 realm's facts and the admin calls that shape it.
 
-The proof is run by hand, not in CI: it needs Docker, edge's private checkout and a
+The proof is run by hand, not in CI: it needs Docker, hal's private checkout and a
 Playwright browser, and takes a few minutes. CI only lints `tests/e2e/`. Every terminal
 step is a verb of `scripts/run_oidc_proof.sh`, which holds the commands, the caps and the lock.
 
 ## Prerequisites
 
-- Docker. The probe picks free loopback ports, so the live edge keeps running.
-- An edge checkout at the commit in `edge_sha.txt`, with no change in any path its
-  probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/edge`, `traefik.yml`,
+- Docker. The probe picks free loopback ports, so the live hal keeps running.
+- A hal checkout at the commit in `hal_sha.txt`, with no change in any path its
+  probe consumes (`compose.yaml`, `keycloak`, `probe/keycloak`, `src/hal`, `traefik.yml`,
   `dynamic`). The run refuses otherwise.
 - Playwright's Chromium, Firefox and WebKit for the pinned version (WebKit needs system
   libraries that `prepare` cannot install), the relay image of the back-channel
@@ -28,7 +28,7 @@ step is a verb of `scripts/run_oidc_proof.sh`, which holds the commands, the cap
 
 ## Run the browser proof
 
-1. Run the verb `prove --edge DIR` with the edge checkout as `DIR`. The script makes the
+1. Run the verb `prove --hal DIR` with the hal checkout as `DIR`. The script makes the
    run's directory itself, under `${XDG_STATE_HOME:-~/.local/state}/webauth-e2e-oidc/`
    (named `prove-` and a random suffix), passes it to the driver as `--scratch` and
    prints it when the run starts; a caller never names it. It takes
@@ -50,7 +50,7 @@ keys, the stack's scratch) is deleted on every exit path.
 
 Run the verb `conformance`. It takes no argument and runs `conformance.py` in a run
 directory made as for `prove` (named `conformance-`), under the same lock, load check
-and cap; the suite's images come from `prepare`. It needs no edge checkout. The plan
+and cap; the suite's images come from `prepare`. It needs no hal checkout. The plan
 export in the run directory's `export/` holds the client secret and the suite's
 private keys: keep it local, never attach it to anything. A skipped row carries its
 justification in the expectation table in `conformance.py`.
@@ -106,7 +106,7 @@ could still write.
 
 ## Refreshing the pins
 
-Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` dependency group, and does not watch the image digests (it has no docker ecosystem here): `RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`. Only a probe run vouches for them. `edge_sha.txt` is
+Dependabot ignores the `==` pins of `playwright` and `uvicorn` in the `e2e` dependency group, and does not watch the image digests (it has no docker ecosystem here): `RELAY_IMAGE` in `shim.py`, the two images in `suite-compose.yaml`. Only a probe run vouches for them. `hal_sha.txt` is
 a hand-set pin as well. A bump of any of them can break what only a real browser, a real
 Keycloak or the OIDF suite shows, and CI does not run those.
 
