@@ -3,9 +3,10 @@ logout routes over the library's own in-memory stores, served over TLS.
 
 One process serves one cookie configuration on every origin it is told. Beside
 it a plain-http listener on loopback, which no browser is ever pointed at, answers
-``GET /state`` with counts only (among them the access tokens refused as unfit for a
-header and the back-channel logouts accepted and refused), clears everything on
-``POST /reset`` (the relying parties, with their key-set caches, are built again).
+``GET /state`` with counts only (among them the accounts above the member role, the access
+tokens refused as unfit for a header and the back-channel logouts accepted and refused),
+clears everything on ``POST /reset`` (the relying parties, with their key-set caches, are
+built again).
 
 Where an issuer is told a ``userinfo_endpoint``, the host calls it once, with the
 access token of the token answer, after and only after a login was admitted: the
@@ -53,9 +54,12 @@ from webauth.middleware import (
     BearerGate,
     MachinePaths,
     PersonPaths,
+    ProtectedResource,
     SessionGate,
     bearer_caller,
+    install_resource_metadata,
     install_web_auth_middleware,
+    resource_person,
 )
 from webauth.oidc import (
     OidcClientConfig,
@@ -112,6 +116,9 @@ REPOSITORY = Path(__file__).resolve().parents[3]
 SCOPES = ("openid", "profile", "groups")
 MACHINE_ROUTES_PREFIX = "/api/admin/"
 PERSON_ROUTES_PREFIX = "/api/"
+RESOURCE_PATH = "/mcp"
+RESOURCE_SCOPE = "mcp:tools"
+RESOURCE_GROUP_NAME = "mcp"
 BEARER_GATE_LOGGER = "webauth.middleware.bearer_gate"
 BEARER_HOST_REQUESTS_PER_MINUTE = 10_000
 LEEWAY_SECONDS = 30
@@ -250,6 +257,9 @@ class World:
     def counts(self) -> dict[str, object]:
         return {
             "accounts": len(self.accounts.list()),
+            "privileged_accounts": sum(
+                user.role != _arrangement().MEMBER_ROLE for user in self.accounts.list()
+            ),
             "sessions": self.sessions.count_active(),
             "callbacks_received": self.callbacks_received,
             "backchannel_accepted": self.backchannel_accepted,
@@ -383,6 +393,7 @@ def _bearer_policies(
 
     (origin,) = settings.app_origins
     parties = AuthorizedParties(frozenset(settings.bearer_authorized_parties))
+    resource = _resource_of(settings, transaction)
     return {
         "rate_limit": RateLimitPolicy(
             default=RateLimitBudget("bearer-host", BEARER_HOST_REQUESTS_PER_MINUTE, 60)
@@ -390,10 +401,11 @@ def _bearer_policies(
         "session_gate": SessionGate(
             session_transaction=counted_session_transaction,
             login_redirect=None,
-            public=SIGN_IN_PATHS.public_rules,
+            public=(*SIGN_IN_PATHS.public_rules, resource.public_rule),
             optional=PathRules(exact=frozenset({"/"})),
         ),
         "bearer_gate": BearerGate(
+            resource=resource,
             machine_paths=MachinePaths(PathRules(prefixes=(MACHINE_ROUTES_PREFIX,)), parties),
             relying_party=_relying_party(
                 settings, f"{origin}{CALLBACK_PATH}", f"{origin}/", post_token_request_over_https
@@ -404,6 +416,17 @@ def _bearer_policies(
             ),
         ),
     }
+
+
+def _resource_of(settings: HostSettings, transaction: SignInTransaction) -> ProtectedResource:
+    (origin,) = settings.app_origins
+    return ProtectedResource(
+        f"{origin}{RESOURCE_PATH}",
+        RESOURCE_SCOPE,
+        f"{settings.login_group}/{RESOURCE_GROUP_NAME}",
+        AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
+        transaction,
+    )
 
 
 def _admission_of(settings: HostSettings) -> AdmissionConfig:
@@ -570,8 +593,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         return {"username": user.username}
 
     if settings.is_bearer_host:
-        _add_machine_routes(app, dependencies.current_user)
-        _add_person_routes(app, dependencies.current_user)
+        _add_bearer_routes(app, dependencies.current_user, settings, sign_in_transaction)
     return app
 
 
@@ -605,6 +627,24 @@ def _add_person_routes(app: FastAPI, current_user: Callable[..., AuthenticatedUs
     @app.api_route(f"{PERSON_ROUTES_PREFIX}me", methods=["GET", "POST"])
     def person_me(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
         return {"id": user.id, "username": user.username, "role": user.role}
+
+
+def _add_bearer_routes(
+    app: FastAPI,
+    current_user: Callable[..., AuthenticatedUser],
+    settings: HostSettings,
+    transaction: SignInTransaction,
+) -> None:
+    """The routes of each kind of path the bearer gate selects."""
+    _add_machine_routes(app, current_user)
+    _add_person_routes(app, current_user)
+    resource = _resource_of(settings, transaction)
+    install_resource_metadata(app, resource, issuer=settings.issuer)
+
+    @app.api_route(resource.entry_point, methods=["GET", "POST"])
+    def entry_point(request: Request) -> dict[str, str]:
+        person = resource_person(request)
+        return {"id": person.id, "username": person.username, "role": person.role}
 
 
 def log_the_bearer_gate() -> None:

@@ -8,7 +8,7 @@ from typing import Any
 
 from certificates import ThrowawayTls
 from harness import free_port
-from host_app import CALLBACK_PATH, HostSettings
+from host_app import CALLBACK_PATH, RESOURCE_GROUP_NAME, RESOURCE_SCOPE, HostSettings
 from stack import Admin
 
 from webauth.cookies import CookieSameSite
@@ -23,7 +23,9 @@ USER_NAME = "d1-user"
 USER_GROUP = "/apps/songmaker"
 OUTSIDER_NAME = "d1-outsider"
 ADMIN_NAME = "d1-admin"
+UNGROUPED_NAME = "d1-ungrouped"
 ADMIN_GROUP = f"{USER_GROUP}/admin"
+RESOURCE_AUDIENCE_SCOPE = "aud-mcp"
 LIFESPAN_ATTRIBUTE = "access.token.lifespan"
 ACCESS_TOKEN_TYPE_ATTRIBUTE = "access.token.header.type.rfc9068"  # noqa: S105  # an attribute name
 
@@ -123,13 +125,16 @@ def public_client_representation(
     }
 
 
-def audience_scope_representation(name: str, audience: str) -> dict[str, Any]:
-    """A client scope that adds the client ``audience`` to the access token's ``aud``."""
+def audience_scope_representation(
+    name: str, audience: str, *, resource: bool = False, in_token_scope: bool = False,
+) -> dict[str, Any]:
+    """A client scope that adds ``audience`` to the access token's ``aud``: a client id, or
+    with ``resource`` a resource URL; ``in_token_scope`` also names the scope in ``scope``."""
     return {
         "name": name,
         "protocol": "openid-connect",
         "attributes": {
-            "include.in.token.scope": "false",
+            "include.in.token.scope": str(in_token_scope).lower(),
             "display.on.consent.screen": "false",
         },
         "protocolMappers": [{
@@ -138,7 +143,7 @@ def audience_scope_representation(name: str, audience: str) -> dict[str, Any]:
             "protocolMapper": "oidc-audience-mapper",
             "consentRequired": False,
             "config": {
-                "included.client.audience": audience,
+                ("included.custom.audience" if resource else "included.client.audience"): audience,
                 "id.token.claim": "false",
                 "access.token.claim": "true",
                 "userinfo.token.claim": "false",
@@ -146,6 +151,23 @@ def audience_scope_representation(name: str, audience: str) -> dict[str, Any]:
             },
         }],
     }
+
+
+def add_resource(admin: Admin, resource_url: str, members: tuple[str, ...]) -> tuple[str, ...]:
+    """The resource's group, with ``members`` in it, and the two client scopes that carry its URL
+    as audience: ``RESOURCE_SCOPE`` also names itself in ``scope``, ``RESOURCE_AUDIENCE_SCOPE``
+    does not. The scope names."""
+    scopes = (RESOURCE_SCOPE, RESOURCE_AUDIENCE_SCOPE)
+    for name in scopes:
+        admin.create(f"/{REALM}/client-scopes", audience_scope_representation(
+            name, resource_url, resource=True, in_token_scope=name == RESOURCE_SCOPE
+        ))
+    parent = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")["id"]
+    group = admin.create(f"/{REALM}/groups/{parent}/children", {"name": RESOURCE_GROUP_NAME})
+    for name in members:
+        person = admin.get(f"/{REALM}/users?username={name}&exact=true")[0]["id"]
+        admin.put(f"/{REALM}/users/{person}/groups/{group}")
+    return scopes
 
 
 @contextlib.contextmanager

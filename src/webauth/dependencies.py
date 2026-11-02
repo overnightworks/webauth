@@ -14,8 +14,8 @@ afterwards does not undo it.
 A request the bearer gate admitted carries no session: the records below let
 the CSRF origin check and the session gate step aside for it. On a machine path
 `current_user` raises, because a machine route asks for `bearer_caller` instead;
-on a person path the record holds the account behind the token, and `current_user`
-returns it.
+on a person path, and at a resource's entry point for its own method, the record holds
+the account behind the token, and `current_user` returns it.
 """
 
 from __future__ import annotations
@@ -470,7 +470,9 @@ class _BearerAdmission:
     """What the bearer gate admitted: this app's gate, this path, this one header.
 
     ``principal`` is the machine's ``BearerCaller`` on a machine path and the
-    account behind the token on a person path.
+    account behind the token on a person path. ``resource_method`` is the request method of
+    a resource admission, which holds for that method alone; a person path's record leaves it
+    unset.
 
     Only a SHA-256 digest of the `Authorization` value is kept, in request
     memory, so the record does not store the token. It says the gate admitted
@@ -482,6 +484,7 @@ class _BearerAdmission:
     path: str
     authorization_digest: bytes
     principal: ports.BearerCaller | ports.AuthenticatedUser
+    resource_method: str | None = None
 
 
 def _authorization_digest(authorization: str) -> bytes:
@@ -489,7 +492,10 @@ def _authorization_digest(authorization: str) -> bytes:
 
 
 def _record_bearer_admission(
-    connection: HTTPConnection, principal: ports.BearerCaller | ports.AuthenticatedUser,
+    connection: HTTPConnection,
+    principal: ports.BearerCaller | ports.AuthenticatedUser,
+    *,
+    resource_method: str | None = None,
 ) -> None:
     (authorization,) = connection.headers.getlist("authorization")
     connection.scope[_BEARER_ADMISSION_SCOPE_KEY] = _BearerAdmission(
@@ -497,6 +503,7 @@ def _record_bearer_admission(
         path=connection.scope["path"],
         authorization_digest=_authorization_digest(authorization),
         principal=principal,
+        resource_method=resource_method,
     )
 
 
@@ -504,8 +511,9 @@ def _bearer_admission(connection: HTTPConnection) -> _BearerAdmission | None:
     """The bearer gate's admission, only when it was made for this very request.
 
     The strict reader: the same app, the same decoded path and exactly one
-    `Authorization` line with the digest admitted. Anything else, a value other
-    code wrote included, is no admission.
+    `Authorization` line with the digest admitted, and for a resource admission the
+    method it was made for. Anything else, a value other code wrote included, is no
+    admission.
     """
     record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
     if type(record) is not _BearerAdmission:
@@ -514,6 +522,10 @@ def _bearer_admission(connection: HTTPConnection) -> _BearerAdmission | None:
     if (
         record.app is not connection.scope.get("app")
         or record.path != connection.scope["path"]
+        or (
+            record.resource_method is not None
+            and record.resource_method != connection.scope.get("method")
+        )
         or len(authorizations) != 1
         or record.authorization_digest != _authorization_digest(authorizations[0])
     ):
@@ -527,7 +539,7 @@ def _is_bearer_admitted(connection: HTTPConnection) -> bool:
 
 
 def _is_person_admitted(connection: HTTPConnection) -> bool:
-    """The loose reader for a person path's record, whatever request carries it."""
+    """The loose reader for a person path's or a resource's record, whatever request carries it."""
     record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
     return type(record) is _BearerAdmission and isinstance(
         record.principal, ports.AuthenticatedUser,
@@ -535,7 +547,8 @@ def _is_person_admitted(connection: HTTPConnection) -> bool:
 
 
 def _admitted_token_person(connection: HTTPConnection) -> ports.AuthenticatedUser | None:
-    """The account the bearer gate admitted for this very request on a person path."""
+    """The account the bearer gate admitted for this very request on a person path or at a
+    resource's entry point."""
     admission = _bearer_admission(connection)
     if admission is None or not isinstance(admission.principal, ports.AuthenticatedUser):
         return None
@@ -546,9 +559,9 @@ def _raise_for_bearer_admission(connection: HTTPConnection) -> None:
     if _is_bearer_admitted(connection):
         raise RuntimeError(
             "A bearer-admitted request has no session reader here: a machine route takes "
-            "Depends(bearer_caller), and a person path's account is read only on the "
-            "request the gate admitted it for, not in a sub-app or after the "
-            "Authorization header changed.",
+            "Depends(bearer_caller), and a person path's or a resource's account is read only "
+            "on the request the gate admitted it for, not in a sub-app or after the "
+            "Authorization header or, at a resource, the method changed.",
         )
 
 

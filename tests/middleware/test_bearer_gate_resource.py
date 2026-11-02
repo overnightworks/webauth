@@ -1,5 +1,6 @@
-"""The bearer gate's protected resource: its entry point answers the challenge and admits no
-token, its metadata document names it, and every other path is decided as without it.
+"""The bearer gate's protected resource: its entry point answers the challenge, refuses what
+the admission does not let in, and its metadata document names it, and every other path is
+decided as without it. The admission itself is in test_bearer_gate_resource_admission.py.
 
 The app is the real stack over `an_auth_app` behind the session gate, with the host's routes
 of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
@@ -8,39 +9,41 @@ of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import NoReturn
 from urllib.parse import urlsplit
 
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
-from starlette.requests import HTTPConnection
 from starlette.testclient import TestClient
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
     EXPORT_PATH,
-    HAL_ONLY,
     PERSON_ME_PATH,
     PERSON_PATHS,
     REALM,
+    RESOURCE_GROUP,
     BearerApp,
     a_bearer_app,
+    a_known_person,
     a_resource,
     a_resource_token,
     a_token,
+    assert_no_bearer_admission,
     bearing,
     relayed,
+    the_accounts,
 )
 from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_NOW,
+    OPERATOR_SUBJECT,
     REALM_ISSUER,
     an_access_token,
 )
 from webauth.middleware import (
     ProtectedResource,
-    admitted_user,
-    bearer_caller,
     install_resource_metadata,
 )
 from webauth.policies import AuthorizedParties, PathRules
@@ -92,21 +95,6 @@ def assert_untouched(app: BearerApp, expires_at: object) -> None:
     assert app.auth.route_runs == []
     assert app.auth.authenticated == []
     assert app.auth.sessions.stored_record.expires_at == expires_at
-
-
-def assert_no_bearer_admission(
-    app: BearerApp, added_to_scope: dict[str, object], path: str, authorization: str,
-) -> None:
-    """The request, as the gate left it, read through the public admission readers."""
-    connection = HTTPConnection({
-        "type": "http", "app": app.auth.app, "path": path,
-        "headers": [(b"authorization", authorization.encode("latin-1"))],
-        **added_to_scope,
-    })
-    with pytest.raises(RuntimeError):
-        bearer_caller(connection)
-    with pytest.raises(RuntimeError):
-        admitted_user(connection)
 
 
 def refusing_a_session_transaction() -> NoReturn:
@@ -239,7 +227,7 @@ def test_a_resource_token_without_the_scope_is_an_insufficient_scope_with_the_ch
     "scope", ["mcp:tools", "openid mcp:tools", "mcp:tools profile", "openid mcp:tools profile"],
 )
 @EVERY_METHOD
-def test_a_token_that_holds_still_gets_a_plain_403_and_admits_nothing(
+def test_a_token_that_holds_but_not_the_group_gets_a_plain_403_and_admits_nothing(
     resource: ProtectedResource, method: str, scope: str,
 ) -> None:
     app = a_resource_app_refusing_a_session_transaction(resource)
@@ -270,27 +258,32 @@ def test_the_key_set_is_fetched_once_for_two_requests_at_the_entry_point(
 
 def test_a_token_for_the_resource_is_refused_on_a_person_path_and_a_machine_path() -> None:
     resource = a_resource()
-    app = a_bearer_app(person_paths=PERSON_PATHS, resource=resource)
-    token = a_resource_token(resource)
+    app = a_bearer_app(
+        person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
+    )
+    token = a_resource_token(resource, groups=[RESOURCE_GROUP])
 
     on_person_path = app.ask(PERSON_ME_PATH, authorization=bearing(token))
     on_machine_path = app.ask(EXPORT_PATH, authorization=bearing(token))
+    elsewhere = app.ask("/elsewhere", authorization=bearing(token))
 
     assert on_person_path.status_code == on_machine_path.status_code == 401
     assert on_person_path.headers["www-authenticate"] == 'Bearer error="invalid_token"'
     assert on_machine_path.headers["www-authenticate"] == f'{REALM}, error="invalid_token"'
+    assert (elsewhere.status_code, "www-authenticate" in elsewhere.headers) == (401, False)
+    assert {user.id for user in the_accounts(app)} == {OPERATOR_SUBJECT, "user-1"}
+    assert app.audit.account_events == []
 
 
 def test_a_party_listed_only_on_the_resource_is_refused_on_the_other_kinds() -> None:
     resource = a_resource(parties=AuthorizedParties(frozenset({"agent"})))
-    app = a_bearer_app(person_paths=PERSON_PATHS, resource=resource)
-    token = a_resource_token(resource, azp="agent")
+    app = a_bearer_app(
+        person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
+    )
+    token = a_resource_token(resource, azp="agent", groups=[RESOURCE_GROUP])
     app_token = a_token(azp="agent")
 
-    at_entry_point = entry_point_answer(app, resource, token)
-
-    assert at_entry_point[0] == 403
-    assert "insufficient_scope" not in at_entry_point[1]
+    assert entry_point_answer(app, resource, token) == (200, "")
     assert app.ask(PERSON_ME_PATH, authorization=bearing(app_token)).status_code == 401
     assert app.ask(EXPORT_PATH, authorization=bearing(app_token)).status_code == 401
 
@@ -308,8 +301,9 @@ def test_a_party_listed_only_on_a_person_or_machine_kind_is_refused_at_the_entry
 
 @pytest.mark.parametrize("parties", ["hal", frozenset({"hal"}), None])
 def test_a_resource_with_anything_but_authorized_parties_raises(parties: object) -> None:
+    resource = a_resource()
     with pytest.raises(TypeError, match="authorized_parties"):
-        ProtectedResource("https://app.example/mcp", "mcp:tools", parties)  # type: ignore[arg-type]
+        replace(resource, authorized_parties=parties)  # type: ignore[arg-type]
 
 
 def test_a_credential_the_gate_refuses_is_answered_by_that_refusal_with_the_challenge(
@@ -480,10 +474,12 @@ def test_a_url_outside_the_resource_url_rule_is_refused(url: str) -> None:
 
 @pytest.mark.parametrize("scope", ["", "two scopes", 'quo"te', "back\\slash", "tab\t", "ü"])
 def test_a_scope_that_is_not_one_scope_token_is_refused(scope: str) -> None:
+    resource = a_resource()
     with pytest.raises(ValueError, match="scope"):
-        ProtectedResource("https://app.example/mcp", scope, HAL_ONLY)
+        replace(resource, scope=scope)
 
 
 def test_a_non_string_scope_is_refused() -> None:
+    resource = a_resource()
     with pytest.raises(ValueError, match="scope"):
-        ProtectedResource("https://app.example/mcp", ("mcp:tools",), HAL_ONLY)  # type: ignore[arg-type]
+        replace(resource, scope=("mcp:tools",))  # type: ignore[arg-type]

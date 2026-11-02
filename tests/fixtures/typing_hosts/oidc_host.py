@@ -72,6 +72,7 @@ from webauth.middleware import (
     bearer_caller,
     install_resource_metadata,
     install_web_auth_middleware,
+    resource_person,
 )
 from webauth.oidc import (
     LOGOUT_TOKEN_MAX_AGE_SECONDS,
@@ -327,6 +328,28 @@ def a_host_declares_its_person_paths(
             PathRules(prefixes=("/api/",)), AuthorizedParties(frozenset({"hal"})), transaction,
         ),
     )
+
+
+def a_host_declares_its_resource(
+    relying_party: OidcRelyingParty, config: AdmissionConfig, transaction: SignInTransaction,
+) -> BearerGate:
+    return BearerGate(
+        relying_party=relying_party,
+        admission=config,
+        resource=ProtectedResource(
+            "https://app.example/mcp",
+            "mcp:tools",
+            "/apps/host/mcp",
+            AuthorizedParties(frozenset({"agent"})),
+            transaction,
+        ),
+    )
+
+
+def a_host_reads_the_resource_person(app: FastAPI) -> None:
+    @app.post("/mcp")
+    def mcp(request: Request) -> str:
+        return resource_person(request).username
 
 
 def a_host_reads_the_token_person(app: FastAPI, dependencies: AuthDependencies) -> None:

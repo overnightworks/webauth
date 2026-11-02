@@ -1,7 +1,7 @@
 """Plays hal against real Keycloak: the bearer gate admits, or refuses, real access tokens.
 
 ``drive_bearer_phase`` runs after the back-channel phase of ``prove.py`` and prints
-``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 60. hal is two public
+``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 66. hal is two public
 clients (``d1-hal``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and the optional
 audience scopes; ``d1-app-c`` is a client that exists only to be an audience. hal gets its
 codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
@@ -37,67 +37,88 @@ The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's
 - 58 (H4) the outsider's token: 403 ``No access``, and no account is created.
 - 59 (H5) a ``d1-other`` token: 401 ``invalid_token``.
 - 60 (H6) after a browser sign-out the token still opens ``/api/me``.
+
+The resource scenarios 61 to 66 (an agent's token at the entry point ``/mcp``) live in
+``bearer_resource``; ``CHECK bearer-resource-tokens`` runs before them.
 """
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import dataclasses
-import hashlib
-import json
-import re
 import secrets
-import ssl
 import time
 import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import httpx
+from bearer_resource import (
+    known_agent_is_admitted_as_a_person,
+    mint_agent_tokens,
+    no_credential_and_a_cookie_get_the_challenge,
+    no_group_and_unknown_subject_are_refused_plainly,
+    stored_admin_is_admitted_with_the_person_role,
+    the_agent_token_opens_no_other_path,
+    tokens_the_resource_refuses,
+)
+from bearer_run import (
+    EXPORT,
+    HAL,
+    ME,
+    PERSON_CHALLENGE_INVALID_TOKEN,
+    SUBJECT,
+    BearerRun,
+    Call,
+    Person,
+    as_list,
+    assert_answer,
+    assert_person_answer,
+    claims_of,
+    session_cookies,
+    token_part,
+)
 from certificates import ThrowawayTls
 from harness import (
-    Host,
-    cookie_name_and_value,
     free_port,
-    host_state,
     launch_pinned_chromium,
     reset_host,
     start_host,
     stop_host,
 )
-from host_app import LEEWAY_SECONDS, LOOPBACK, HostSettings
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, Playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from host_app import (
+    LEEWAY_SECONDS,
+    LOOPBACK,
+    RESOURCE_PATH,
+    HostSettings,
+)
+from playwright.sync_api import Playwright
 from realm import (
     ADMIN_NAME,
     CLIENT_ID,
     IDP_HOST,
     OUTSIDER_NAME,
     REALM,
+    UNGROUPED_NAME,
+    USER_GROUP,
     USER_NAME,
+    add_resource,
     audience_scope_representation,
+    create_user,
     public_client_representation,
     short_lived_tokens,
 )
 
-from webauth.cookies import DEFAULT_SESSION_COOKIE_NAME
-
 if TYPE_CHECKING:
     from prove import Proof
 
-HAL = "d1-hal"
 OTHER_HAL = "d1-other"
 AUDIENCE_APP = "d1-app-c"
 HOST_AUDIENCE = CLIENT_ID
 HOST_SCOPE = "openid aud-d1-host"
 SHORT_LIFESPAN_SECONDS = 15
 EXPIRY_MARGIN_SECONDS = 2
-GATE_LINE = re.compile(r"Bearer request refused: (?P<case>[a-z-]+)(?: \((?P<reason>[^)]*)\))?")
-CHALLENGE = 'Bearer realm="admin"'
 AUDIENCE_SCOPES = {
     "aud-d1-host": HOST_AUDIENCE, "aud-d1-app-c": AUDIENCE_APP, "aud-account": "account",
 }
@@ -110,189 +131,14 @@ EXPECTED_AUDIENCES = {
     "audience_host_and_account": {HOST_AUDIENCE, "account"},
     "other_client": {HOST_AUDIENCE},
 }
-SUBJECT = "person-1"
-EXPORT = f"/api/admin/people/{SUBJECT}/export"
 DELETE = f"/api/admin/people/{SUBJECT}"
 PROBE = "/api/admin/session-probe"
-ME = "/api/me"
 PERSON_CHALLENGE_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
-PERSON_CHALLENGE_INVALID_TOKEN = 'Bearer error="invalid_token"'
-
-
-@dataclass(frozen=True)
-class Person:
-    username: str
-    password: str
-
-
-@dataclass(frozen=True)
-class Call:
-    """One request to a machine route: what hal (or someone else) sends."""
-
-    method: str
-    path: str
-    token: str | None = None
-    cookies: dict[str, str] = field(default_factory=dict)
-    headers: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class BearerRun:
-    """The bearer host, hal's tokens and every answer the host gave a machine route."""
-
-    proof: Proof
-    host: Host
-    settings: HostSettings
-    ca_certificate: Path
-    people: dict[str, Person]
-    client_uuids: dict[str, str]
-    redirect_uris: dict[str, str]
-    stack: contextlib.ExitStack
-    sso_pages: dict[str, Page] = field(default_factory=dict)
-    host_pages: dict[str, Page] = field(default_factory=dict)
-    tokens: dict[str, str] = field(default_factory=dict, repr=False)
-    answers: list[httpx.Response] = field(default_factory=list)
-    sent: list[str] = field(default_factory=list, repr=False)
-    admin_id: str = ""
-
-    # --- the host ---
-
-    def send(self, call: Call) -> httpx.Response:
-        headers = {"Host": urllib.parse.urlsplit(self.settings.app_origins[0]).netloc}
-        headers |= call.headers
-        if call.token is not None:
-            headers["Authorization"] = f"Bearer {call.token}"
-            self.sent.append(call.token)
-        if call.cookies:
-            headers["Cookie"] = "; ".join(f"{name}={value}" for name, value in call.cookies.items())
-        answer = httpx.request(
-            call.method, f"https://localhost:{self.host.app_port}{call.path}", headers=headers,
-            verify=ssl.create_default_context(cafile=str(self.ca_certificate)),
-        )
-        self.answers.append(answer)
-        return answer
-
-    def state(self) -> dict[str, Any]:
-        return host_state(self.host)
-
-    def gate_lines(self) -> list[str]:
-        lines = self.host.log_file.read_text().splitlines()
-        return [line for line in lines if GATE_LINE.search(line)]
-
-    def last_gate_reason(self) -> str:
-        match = GATE_LINE.search(self.gate_lines()[-1])
-        assert match is not None
-        return f"{match['case']} ({match['reason']})" if match["reason"] else match["case"]
-
-    # --- Keycloak and the browser ---
-
-    def sso_page(self, person: Person) -> Page:
-        if person.username not in self.sso_pages:
-            self.sso_pages[person.username] = self.stack.enter_context(self.proof.browsing())
-        return self.sso_pages[person.username]
-
-    def host_page(self, person: Person) -> Page:
-        """A browser signed in at the bearer host as ``person``, left open."""
-        if person.username not in self.host_pages:
-            page = self.stack.enter_context(self.proof.browsing())
-            self.proof.sign_in(
-                page, None, self.settings.app_origins[0], person.username, person.password
-            )
-            self.host_pages[person.username] = page
-        return self.host_pages[person.username]
-
-    def follow_to_loopback(self, page: Page, url: str, person: Person, redirect_uri: str) -> str:
-        """The redirect URI Keycloak sends the browser to: Chromium cannot connect to the port
-        nobody listens on, and the failed request names the URL (a route does not see redirects)."""
-        try:
-            with page.expect_event(
-                "requestfailed", lambda request: request.url.startswith(redirect_uri)
-            ) as failed:
-                with contextlib.suppress(PlaywrightError):
-                    page.goto(url)
-                if page.locator("#username").count():
-                    self.proof.fill_keycloak_form(page, None, person.password, person.username)
-        except PlaywrightTimeoutError as error:
-            raise AssertionError(
-                f"Keycloak did not redirect to hal: {page.inner_text('body')[:200]!r}"
-            ) from error
-        return failed.value.url
-
-    def mint(self, person: Person, client_id: str, scope: str) -> dict[str, str]:
-        """hal's authorization code request with PKCE at Keycloak, and the code exchange."""
-        redirect_uri = self.redirect_uris[client_id]
-        verifier = secrets.token_urlsafe(48)
-        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
-        state = secrets.token_urlsafe(16)
-        query = urllib.parse.urlencode({
-            "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
-            "scope": scope, "state": state, "code_challenge": challenge.rstrip(b"=").decode(),
-            "code_challenge_method": "S256",
-        })
-        page = self.sso_page(person)
-        authorization_url = f"{self.settings.authorization_endpoint}?{query}"
-        landing = self.follow_to_loopback(page, authorization_url, person, redirect_uri)
-        answer = urllib.parse.parse_qs(urllib.parse.urlsplit(landing).query)
-        assert answer["state"] == [state], "Keycloak answered another state"
-        exchange = httpx.post(
-            self.settings.token_endpoint,
-            data={
-                "grant_type": "authorization_code", "code": answer["code"][0],
-                "redirect_uri": redirect_uri, "client_id": client_id, "code_verifier": verifier,
-            },
-            verify=ssl.create_default_context(cafile=str(self.ca_certificate)),
-        )
-        assert exchange.status_code == 200, f"the code exchange answered {exchange.status_code}"
-        return exchange.json()
-
-
-def claims_of(token: str) -> dict[str, Any]:
-    segment = token.split(".")[1]
-    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
-
-
-def as_list(claim: str | list[str]) -> list[str]:
-    return [claim] if isinstance(claim, str) else claim
 
 
 def header_of(token: str) -> dict[str, Any]:
-    segment = token.split(".")[0]
-    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+    return token_part(token, 0)
 
-
-def assert_answer(
-    answer: httpx.Response, status: int, error: str | None = None, detail: str | None = None
-) -> None:
-    assert answer.status_code == status, f"answered {answer.status_code}: {answer.text[:80]}"
-    wanted = None
-    if status != 200:
-        wanted = CHALLENGE if error is None else f'{CHALLENGE}, error="{error}"'
-    assert answer.headers.get("www-authenticate") == wanted, (
-        f"challenge {answer.headers.get('www-authenticate')!r}"
-    )
-    if detail is not None:
-        assert answer.json()["detail"] == detail, f"detail {answer.json()['detail']!r}"
-
-
-def assert_person_answer(
-    answer: httpx.Response, status: int, challenge: str | None = None, detail: str | None = None
-) -> None:
-    assert answer.status_code == status, f"answered {answer.status_code}: {answer.text[:80]}"
-    assert answer.headers.get("www-authenticate") == challenge, (
-        f"challenge {answer.headers.get('www-authenticate')!r}"
-    )
-    if detail is not None:
-        assert answer.json()["detail"] == detail, f"detail {answer.json()['detail']!r}"
-
-
-def session_cookies(page: Page, origin: str) -> dict[str, str]:
-    """The session cookie the browser holds for the host."""
-    wanted = (DEFAULT_SESSION_COOKIE_NAME,)
-    pairs = (cookie_name_and_value(cookie) for cookie in page.context.cookies([origin]))
-    return {name: value for name, value in pairs if name in wanted}
-
-
-# --- the admitted and the cookie-only scenarios ---
 
 def admin_token_opens_export(run: BearerRun) -> str:
     reset_host(run.host)
@@ -574,6 +420,12 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (58, outsider_token_is_refused_without_an_account),
     (59, other_client_token_is_refused_on_the_person_path),
     (60, sign_out_leaves_the_token_on_the_person_path),
+    (61, known_agent_is_admitted_as_a_person),
+    (62, stored_admin_is_admitted_with_the_person_role),
+    (63, no_group_and_unknown_subject_are_refused_plainly),
+    (64, the_agent_token_opens_no_other_path),
+    (65, tokens_the_resource_refuses),
+    (66, no_credential_and_a_cookie_get_the_challenge),
 )
 
 
@@ -611,11 +463,12 @@ def access_token_type_is_at_jwt(run: BearerRun) -> str:
     return f"the access token's header typ is {header['typ']!r} (the ID token's: {id_token_type!r})"
 
 
-def prepare_keycloak(proof: Proof) -> tuple[dict[str, str], dict[str, str]]:
+def prepare_keycloak(proof: Proof, resource_url: str) -> tuple[dict[str, str], dict[str, str]]:
     """hal's clients and the audiences they may ask for; their uuids and redirect URIs."""
     admin = proof.fresh_admin()
     for name, audience in AUDIENCE_SCOPES.items():
         admin.create(f"/{REALM}/client-scopes", audience_scope_representation(name, audience))
+    scopes = (*AUDIENCE_SCOPES, *add_resource(admin, resource_url, (USER_NAME, ADMIN_NAME)))
     admin.create(
         f"/{REALM}/clients", {"clientId": AUDIENCE_APP, "enabled": True, "bearerOnly": True}
     )
@@ -625,7 +478,7 @@ def prepare_keycloak(proof: Proof) -> tuple[dict[str, str], dict[str, str]]:
     client_uuids = {
         client_id: admin.create(
             f"/{REALM}/clients",
-            public_client_representation(client_id, redirect_uri, tuple(AUDIENCE_SCOPES)),
+            public_client_representation(client_id, redirect_uri, scopes),
         )
         for client_id, redirect_uri in redirect_uris.items()
     }
@@ -641,6 +494,10 @@ def drive_scenarios(run: BearerRun) -> None:
         "CHECK bearer-token-header-type", lambda: access_token_type_is_at_jwt(run)
     )
     for number, scenario in SCENARIOS:
+        if scenario is known_agent_is_admitted_as_a_person and not proof.held_or_failed(
+            "CHECK bearer-resource-tokens", lambda: mint_agent_tokens(run)
+        ):
+            return
         proof.held_or_failed(
             f"SCENARIO {number} {proof.width.label} {origin}",
             lambda scenario=scenario: scenario(run),
@@ -655,13 +512,19 @@ def drive_bearer_phase(
     settings = dataclasses.replace(settings, bearer_authorized_parties=(HAL,))
     hostname = urllib.parse.urlsplit(settings.app_origins[0]).hostname
     assert hostname is not None
-    client_uuids, redirect_uris = prepare_keycloak(proof)
+    client_uuids, redirect_uris = prepare_keycloak(
+        proof, f"{settings.app_origins[0]}{RESOURCE_PATH}"
+    )
     admin_id = proof.fresh_admin().get(f"/{REALM}/users?username={ADMIN_NAME}&exact=true")[0]["id"]
     people = {
         "admin": Person(ADMIN_NAME, proof.admin_password),
         "user": Person(USER_NAME, proof.user_password),
         "outsider": Person(OUTSIDER_NAME, proof.outsider_password),
+        "ungrouped": Person(UNGROUPED_NAME, secrets.token_urlsafe(18)),
     }
+    create_user(
+        proof.fresh_admin(), UNGROUPED_NAME, people["ungrouped"].password, (USER_GROUP,)
+    )
     host = start_host(proof, runtime, settings, tls.ca_certificate)
     try:
         proof.browser = launch_pinned_chromium(

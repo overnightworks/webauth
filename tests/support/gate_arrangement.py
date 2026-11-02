@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, NoReturn
 
+import pytest
 from fastapi import Depends, Request, WebSocket
 from httpx import Response
 from starlette.middleware import Middleware
+from starlette.requests import HTTPConnection
 
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
+    OPERATOR_SUBJECT,
     REALM_ISSUER,
     FakeClock,
     FakeKeySetEndpoint,
@@ -29,6 +32,7 @@ from tests.support.oidc_login_host import (
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     GATED_STACK_POLICIES,
+    MEMBER_ROLE,
     AuthApp,
     FakeSessionRecord,
     FakeUser,
@@ -55,6 +59,7 @@ from webauth.middleware import (
     bearer_caller,
     install_resource_metadata,
     install_web_auth_middleware,
+    resource_person,
 )
 from webauth.oidc_login import AdmissionConfig
 from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PublicRule
@@ -90,6 +95,7 @@ ADMISSION = AdmissionConfig(
 HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
 RESOURCE_URL = "https://app.example/mcp"
 RESOURCE_SCOPE = "mcp:tools"
+RESOURCE_GROUP = "/apps/x/mcp"
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
 FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
@@ -104,10 +110,23 @@ def a_token(**claims: Any) -> str:
     return an_access_token(claims=claims)
 
 
+def an_unbound_transaction() -> NoReturn:
+    raise AssertionError("a resource was used without an app to bind its transaction")
+
+
 def a_resource(
-    url: str = RESOURCE_URL, parties: AuthorizedParties = HAL_ONLY,
+    url: str = RESOURCE_URL,
+    parties: AuthorizedParties = HAL_ONLY,
+    required_group: str = RESOURCE_GROUP,
+    transaction: SignInTransaction = an_unbound_transaction,
 ) -> ProtectedResource:
-    return ProtectedResource(url, RESOURCE_SCOPE, parties)
+    """A resource whose transaction `a_bearer_app` binds to its own when none is given."""
+    return ProtectedResource(url, RESOURCE_SCOPE, required_group, parties, transaction)
+
+
+def a_known_person(role: str = MEMBER_ROLE) -> FakeUser:
+    """The account behind the arrangement's token subject, as a host stored it."""
+    return FakeUser(id=OPERATOR_SUBJECT, username="lena", role=role)
 
 
 def a_resource_token(resource: ProtectedResource | None = None, **claims: Any) -> str:
@@ -214,15 +233,36 @@ def add_machine_routes(auth: AuthApp) -> None:
 
 
 def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
-    """The resource's metadata document and a host route at its entry point."""
-    install_resource_metadata(auth.app, resource, issuer=REALM_ISSUER)
+    """The resource's metadata document and the host's routes at its entry point.
 
-    @auth.app.api_route(
-        resource.entry_point, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    `POST` and the other methods echo `resource_person`; `PATCH` reads `current_user` and
+    `DELETE` reads `admin_user`, so a request a middleware turns into one of them is judged by
+    the reader it reaches.
+    """
+    install_resource_metadata(auth.app, resource, issuer=REALM_ISSUER)
+    dependencies = current_user_dependency(
+        session_store=lambda: auth.sessions, on_authenticated=auth.authenticated.append,
     )
-    def entry_point(request: Request) -> dict[str, str]:
+
+    def echo(request: Request, user: AuthenticatedUser) -> dict[str, str]:
         auth.route_runs.append(request.scope["path"])
-        return {"ran": "the host's entry point"}
+        return {"id": user.id, "username": user.username, "role": user.role}
+
+    @auth.app.api_route(resource.entry_point, methods=["GET", "POST", "PUT", "HEAD", "OPTIONS"])
+    def entry_point(request: Request) -> dict[str, str]:
+        return echo(request, resource_person(request))
+
+    @auth.app.patch(resource.entry_point)
+    def current(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str]:
+        return echo(request, user)
+
+    @auth.app.delete(resource.entry_point)
+    def admin(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.admin_user),
+    ) -> dict[str, str]:
+        return echo(request, user)
 
 
 def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None) -> None:
@@ -332,7 +372,8 @@ def _a_gate_over(
     person = PersonPaths(person_paths, person_parties, transaction) if person_paths else None
     gate = a_bearer_gate(
         paths=paths, key_sets=key_sets, clock=clock,
-        person_paths=person, machine_parties=machine_parties, resource=resource,
+        person_paths=person, machine_parties=machine_parties,
+        resource=_bound_to(resource, transaction),
     )
     return person, gate
 
@@ -356,6 +397,14 @@ def _public_rules(
     webhook = [FOREIGN_SECRET_PUBLIC] if person else []
     metadata = [resource.public_rule] if resource else []
     return (*given, *webhook, *metadata)
+
+
+def _bound_to(
+    resource: ProtectedResource | None, transaction: SignInTransaction,
+) -> ProtectedResource | None:
+    if resource is None or resource.transaction is not an_unbound_transaction:
+        return resource
+    return replace(resource, transaction=transaction)
 
 
 def a_bearer_app(
@@ -492,8 +541,10 @@ class RelayingScope:
             return
         known = set(scope)
         scope.update(self._relay.replay)
-        await self._app(scope, receive, send)
-        self._relay.added = {key: scope[key] for key in set(scope) - known}
+        try:
+            await self._app(scope, receive, send)
+        finally:
+            self._relay.added = {key: scope[key] for key in set(scope) - known}
 
 
 def relayed(app: AuthApp) -> ScopeRelay:
@@ -501,3 +552,22 @@ def relayed(app: AuthApp) -> ScopeRelay:
     app.app.add_middleware(RelayingScope, relay=relay)
     return relay
 
+
+def assert_no_bearer_admission(
+    app: BearerApp, added_to_scope: dict[str, object], path: str, authorization: str,
+) -> None:
+    """The request, as the gate left it, read through the public admission readers."""
+    connection = HTTPConnection({
+        "type": "http", "app": app.auth.app, "path": path,
+        "headers": [(b"authorization", authorization.encode("latin-1"))],
+        **added_to_scope,
+    })
+    with pytest.raises(RuntimeError):
+        bearer_caller(connection)
+    with pytest.raises(RuntimeError):
+        admitted_user(connection)
+
+
+def the_accounts(app: BearerApp) -> list[FakeUser]:
+    assert app.accounts is not None
+    return app.accounts.list()
