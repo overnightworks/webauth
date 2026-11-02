@@ -11,6 +11,7 @@ from typing import NoReturn
 from urllib.parse import urlsplit
 
 import pytest
+from starlette.requests import HTTPConnection
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
@@ -25,8 +26,6 @@ from tests.support.gate_arrangement import (
     relayed,
 )
 from tests.support.oidc_arrangement import REALM_ISSUER
-from starlette.requests import HTTPConnection
-
 from webauth.middleware import ProtectedResource, admitted_user, bearer_caller
 from webauth.policies import PathRules
 
