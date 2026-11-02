@@ -3,6 +3,6 @@ agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
 role = "builder"
 base = "7e93a7de0b3d7a8af2685aca81f538850ad07263"
 branch = "claude/issue-560-the-bearer-gate-checks-a-resource-token"
-scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_bearer_gate_resource.py", "tests/support/gate_arrangement.py", "tests/support/oidc_arrangement.py", "tests/test_oidc_access_token.py"]
+scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_bearer_gate.py", "tests/middleware/test_bearer_gate_resource.py", "tests/support/gate_arrangement.py", "tests/support/oidc_arrangement.py", "tests/test_oidc_access_token.py"]
 opened_commit = "152ab3673088885258668714feb6f52f40c524c2"
 whole_reason = "One vertical slice: the verifier, the policy's parties, the gate's answers, their tests and the host contract land together, or the gate and the published contract disagree on what a token needs."
