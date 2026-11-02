@@ -411,10 +411,7 @@ class OidcRelyingParty:
     def _refreshed_id_token_groups(
         self, document: Mapping[str, object], subject: str, started_at: int
     ) -> tuple[str, ...]:
-        raw_id_token = document.get("id_token")
-        if not isinstance(raw_id_token, str):
-            raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
-        id_token = self._verified_id_token(raw_id_token)
+        id_token = self._verified_id_token(_raw_id_token_of(document))
         if "nonce" in id_token.claims:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.NONCE_MISMATCH))
         if not self._is_authorized_party(id_token):
@@ -464,10 +461,7 @@ class OidcRelyingParty:
             }
         )
         document = self._token_answer(request)
-        id_token = document.get("id_token")
-        if not isinstance(id_token, str):
-            raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
-        return id_token, _issued_refresh_token(document)
+        return _raw_id_token_of(document), _issued_refresh_token(document)
 
     def _token_answer(self, request: TokenRequest) -> Mapping[str, object]:
         try:
@@ -711,6 +705,13 @@ def _bearer_access_token(document: Mapping[str, object]) -> SecretStr:
     ):
         raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
     return SecretStr(access_token)
+
+
+def _raw_id_token_of(document: Mapping[str, object]) -> str:
+    id_token = document.get("id_token")
+    if not isinstance(id_token, str):
+        raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+    return id_token
 
 
 def _identity_of(
