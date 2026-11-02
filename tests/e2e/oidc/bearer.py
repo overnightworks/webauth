@@ -68,7 +68,13 @@ from harness import (
     start_host,
     stop_host,
 )
-from host_app import LEEWAY_SECONDS, LOOPBACK, HostSettings
+from host_app import (
+    LEEWAY_SECONDS,
+    LOOPBACK,
+    RESOURCE_PATH,
+    RESOURCE_SCOPE,
+    HostSettings,
+)
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, Playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -78,7 +84,9 @@ from realm import (
     IDP_HOST,
     OUTSIDER_NAME,
     REALM,
+    RESOURCE_AUDIENCE_SCOPE,
     USER_NAME,
+    add_resource,
     audience_scope_representation,
     public_client_representation,
     short_lived_tokens,
@@ -117,6 +125,8 @@ PROBE = "/api/admin/session-probe"
 ME = "/api/me"
 PERSON_CHALLENGE_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
 PERSON_CHALLENGE_INVALID_TOKEN = 'Bearer error="invalid_token"'
+AGENT_SCOPE = f"openid {RESOURCE_SCOPE}"
+LEDGER = ("accounts", "account_events", "sessions", "session_transactions")
 
 
 @dataclass(frozen=True)
@@ -539,6 +549,83 @@ def sign_out_leaves_the_token_on_the_person_path(run: BearerRun) -> str:
     return f"after {USER_NAME}'s browser sign-out the token still opens /api/me (200)"
 
 
+# --- the resource scenarios: an agent's token at the entry point ---
+
+def resource_challenge(run: BearerRun, error: str | None = None) -> str:
+    metadata = f"{run.settings.app_origins[0]}/.well-known/oauth-protected-resource{RESOURCE_PATH}"
+    challenge = f'Bearer resource_metadata="{metadata}", scope="{RESOURCE_SCOPE}"'
+    return challenge if error is None else f'{challenge}, error="{error}"'
+
+
+def ledger(run: BearerRun) -> tuple[Any, ...]:
+    return tuple(run.state()[key] for key in LEDGER)
+
+
+def agent_post(run: BearerRun, name: str, status: int) -> Any:
+    answer = run.send(Call("POST", RESOURCE_PATH, run.tokens[name]))
+    assert_person_answer(answer, status, None, "Access denied" if status == 403 else None)
+    return answer.json() if status == 200 else None
+
+
+def known_agent_is_admitted_as_a_person(run: BearerRun) -> str:
+    before = ledger(run)
+    person = {"id": claims_of(run.tokens["agent_user"])["sub"], "username": USER_NAME}
+    assert agent_post(run, "agent_user", 200) == {**person, "role": "user"}
+    assert ledger(run) == before, (before, ledger(run))
+    return f"{USER_NAME}'s agent token, POST, no cookie, no Origin: 200 user; ledger {before}"
+
+
+def stored_admin_is_admitted_with_the_person_role(run: BearerRun) -> str:
+    reset_host(run.host)
+    run.host_pages.pop(ADMIN_NAME, None)
+    run.host_page(run.people["admin"])
+    before = ledger(run)
+    assert agent_post(run, "agent_admin", 200)["role"] == "user"
+    assert ledger(run) == before, "the admission changed the stored admin or recorded an event"
+    return f"{ADMIN_NAME}, a stored admin: 200 with role user; ledger unchanged {before}"
+
+
+def no_group_and_unknown_subject_are_refused_plainly(run: BearerRun) -> str:
+    before = ledger(run)
+    agent_post(run, "agent_outsider", 403)
+    assert ledger(run) == before, "the refused token touched the store"
+    reset_host(run.host)
+    agent_post(run, "agent_user", 403)
+    assert ledger(run) == (0, 0, 0, 0), ledger(run)
+    return f"{OUTSIDER_NAME} (no group), an unknown subject: 403 Access denied, store untouched"
+
+
+def the_agent_token_opens_no_other_path(run: BearerRun) -> str:
+    token = run.tokens["agent_user"]
+    me = run.send(Call("GET", ME, token))
+    assert_person_answer(me, 401, PERSON_CHALLENGE_INVALID_TOKEN, "Invalid token")
+    assert_answer(run.send(Call("GET", EXPORT, token)), 401, "invalid_token", "Invalid token")
+    other = run.send(Call("GET", "/admin", token))
+    assert_person_answer(other, 401, None, "Authentication required")
+    assert ledger(run) == (0, 0, 0, 0), ledger(run)
+    return "the agent token on /api/me, E and /admin: 401, 401, the session's 401; accounts 0"
+
+
+def tokens_the_resource_refuses(run: BearerRun) -> str:
+    for name, status, error in (
+        ("user", 401, "invalid_token"), ("audience_app", 401, "invalid_token"),
+        ("agent_two_audiences", 401, "invalid_token"),
+        ("agent_no_scope", 403, "insufficient_scope"),
+    ):
+        answer = run.send(Call("POST", RESOURCE_PATH, run.tokens[name]))
+        assert_person_answer(answer, status, resource_challenge(run, error))
+    return "app bearer, wrong audience, two audiences: 401; no scope: 403 insufficient_scope"
+
+
+def no_credential_and_a_cookie_get_the_challenge(run: BearerRun) -> str:
+    cookies = session_cookies(run.host_page(run.people["admin"]), run.settings.app_origins[0])
+    before = run.state()["session_transactions"]
+    for call in (Call("GET", RESOURCE_PATH), Call("POST", RESOURCE_PATH, cookies=cookies)):
+        assert_person_answer(run.send(call), 401, resource_challenge(run))
+    assert run.state()["session_transactions"] == before
+    return "GET with nothing and POST with a cookie only: 401 with the resource challenge"
+
+
 SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (28, admin_token_opens_export),
     (29, admission_leaves_no_trace),
@@ -574,6 +661,12 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (58, outsider_token_is_refused_without_an_account),
     (59, other_client_token_is_refused_on_the_person_path),
     (60, sign_out_leaves_the_token_on_the_person_path),
+    (61, known_agent_is_admitted_as_a_person),
+    (62, stored_admin_is_admitted_with_the_person_role),
+    (63, no_group_and_unknown_subject_are_refused_plainly),
+    (64, the_agent_token_opens_no_other_path),
+    (65, tokens_the_resource_refuses),
+    (66, no_credential_and_a_cookie_get_the_challenge),
 )
 
 
@@ -604,6 +697,24 @@ def mint_tokens(run: BearerRun) -> str:
     return f"{len(run.tokens)} tokens minted for {HAL} and {OTHER_HAL} with PKCE"
 
 
+def mint_agent_tokens(run: BearerRun) -> str:
+    """Tokens for the resource; the first check reads ``aud`` and ``scope`` off a real one."""
+    people = run.people
+    audience = f"{run.settings.app_origins[0]}{RESOURCE_PATH}"
+    for name, person, scope in (
+        ("agent_user", people["user"], AGENT_SCOPE),
+        ("agent_admin", people["admin"], AGENT_SCOPE),
+        ("agent_outsider", people["outsider"], AGENT_SCOPE),
+        ("agent_two_audiences", people["user"], f"{AGENT_SCOPE} aud-d1-host"),
+        ("agent_no_scope", people["user"], f"openid {RESOURCE_AUDIENCE_SCOPE}"),
+    ):
+        run.tokens[name] = run.mint(person, HAL, scope)["access_token"]
+    claims = claims_of(run.tokens["agent_user"])
+    assert as_list(claims["aud"]) == [audience], claims["aud"]
+    assert RESOURCE_SCOPE in claims["scope"].split(), claims["scope"]
+    return f"aud {audience!r} and scope {claims['scope']!r} on a real token"
+
+
 def access_token_type_is_at_jwt(run: BearerRun) -> str:
     header = header_of(run.tokens["admin"])
     assert header["typ"] == "at+jwt", f"the first access token's header typ is {header['typ']!r}"
@@ -611,11 +722,12 @@ def access_token_type_is_at_jwt(run: BearerRun) -> str:
     return f"the access token's header typ is {header['typ']!r} (the ID token's: {id_token_type!r})"
 
 
-def prepare_keycloak(proof: Proof) -> tuple[dict[str, str], dict[str, str]]:
+def prepare_keycloak(proof: Proof, resource_url: str) -> tuple[dict[str, str], dict[str, str]]:
     """hal's clients and the audiences they may ask for; their uuids and redirect URIs."""
     admin = proof.fresh_admin()
     for name, audience in AUDIENCE_SCOPES.items():
         admin.create(f"/{REALM}/client-scopes", audience_scope_representation(name, audience))
+    scopes = (*AUDIENCE_SCOPES, *add_resource(admin, resource_url, (USER_NAME, ADMIN_NAME)))
     admin.create(
         f"/{REALM}/clients", {"clientId": AUDIENCE_APP, "enabled": True, "bearerOnly": True}
     )
@@ -625,7 +737,7 @@ def prepare_keycloak(proof: Proof) -> tuple[dict[str, str], dict[str, str]]:
     client_uuids = {
         client_id: admin.create(
             f"/{REALM}/clients",
-            public_client_representation(client_id, redirect_uri, tuple(AUDIENCE_SCOPES)),
+            public_client_representation(client_id, redirect_uri, scopes),
         )
         for client_id, redirect_uri in redirect_uris.items()
     }
@@ -641,6 +753,10 @@ def drive_scenarios(run: BearerRun) -> None:
         "CHECK bearer-token-header-type", lambda: access_token_type_is_at_jwt(run)
     )
     for number, scenario in SCENARIOS:
+        if scenario is known_agent_is_admitted_as_a_person and not proof.held_or_failed(
+            "CHECK bearer-resource-tokens", lambda: mint_agent_tokens(run)
+        ):
+            return
         proof.held_or_failed(
             f"SCENARIO {number} {proof.width.label} {origin}",
             lambda scenario=scenario: scenario(run),
@@ -655,7 +771,9 @@ def drive_bearer_phase(
     settings = dataclasses.replace(settings, bearer_authorized_parties=(HAL,))
     hostname = urllib.parse.urlsplit(settings.app_origins[0]).hostname
     assert hostname is not None
-    client_uuids, redirect_uris = prepare_keycloak(proof)
+    client_uuids, redirect_uris = prepare_keycloak(
+        proof, f"{settings.app_origins[0]}{RESOURCE_PATH}"
+    )
     admin_id = proof.fresh_admin().get(f"/{REALM}/users?username={ADMIN_NAME}&exact=true")[0]["id"]
     people = {
         "admin": Person(ADMIN_NAME, proof.admin_password),

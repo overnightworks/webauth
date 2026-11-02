@@ -8,7 +8,10 @@ driver proves, scenario by scenario, is stated in the docstring of `prove.py` an
 `conformance.py`; how the browser and Keycloak reach the apps is stated in
 `harness.py` and `shim.py`. `bearer.py` is the bearer proof: it plays hal, the machine
 caller, against the same Keycloak (scenarios 28 onwards of `prove.py`; scenarios 55 to 60 send
-hal's token to the host's person path `/api/me`, where it is the account behind the token); `realm.py` holds the
+hal's token to the host's person path `/api/me`, where it is the account behind the token;
+scenarios 61 to 66 send an agent's token to the resource's entry point `/mcp`, where a known person in
+the group is admitted with the person role, a stored admin included, and every other case is refused;
+the check `bearer-resource-tokens` reads `aud` and `scope` off a real token first); `realm.py` holds the
 realm's facts and the admin calls that shape it.
 
 The proof is run by hand, not in CI: it needs Docker, hal's private checkout and a
