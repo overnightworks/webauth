@@ -372,7 +372,7 @@ being `.` or `..`, with no trailing slash; its path is the entry point; `scope` 
 derives from `url`: the metadata path is `/.well-known/oauth-protected-resource` plus the entry
 point (RFC 9728 section 3.1), and the challenge names the metadata URL.
 
-**The resource admits an agent's token, capped and read-only.** A token for the resource is refused on the person and machine paths, and an app token is refused at the entry point; a party listed on one kind is not thereby listed on another. At the entry point, on every method and the exact path only,
+**The resource admits an agent's token, capped and read-only.** A token for the resource is refused on the machine paths and on the person paths, except on a route the resource marks; an app token is refused at the entry point; a party listed on one kind is not thereby listed on another. At the entry point, on every method and the exact path only,
 the gate decides before CSRF and the session gate, and a refusal runs no route:
 
 - no credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`;
