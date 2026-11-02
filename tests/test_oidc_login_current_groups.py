@@ -131,6 +131,11 @@ class Arrangement:
     relying_party: OidcRelyingParty
     answered_tokens: list[str] = field(default_factory=list)
 
+    def answer_with_access_token(self) -> None:
+        token = "access-token-of-the-scenario"
+        self.issuer.refresh_answer_members["access_token"] = token
+        self.answered_tokens.append(token)
+
     def answer_with_id_token(self, **claim_changes: Any) -> str:
         now = int(self.clock.now)
         claims = changed(
@@ -437,7 +442,7 @@ class TestTheReply:
     @pytest.mark.parametrize(
         "id_token", [ABSENT, None, 7], ids=["absent", "null", "not-a-string"],
     )
-    def test_a_reply_without_an_id_token_is_refused(
+    def test_a_reply_without_an_id_token_is_refused_after_the_rotation_is_stored(
         self, id_token: object, rotation: dict[str, Any]
     ) -> None:
         arrangement = an_arrangement(answer=False)
@@ -641,7 +646,7 @@ class TestTheTokenNeverLeaves:
     ) -> None:
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(sub="user-1" if id_token_holds else "someone-else")
-        arrangement.issuer.refresh_answer_members["access_token"] = "access-token-of-the-scenario"
+        arrangement.answer_with_access_token()
         caplog.set_level(0)
 
         outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
@@ -653,7 +658,7 @@ class TestTheTokenNeverLeaves:
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
         arrangement = an_arrangement(lambda record: SessionsAnsweringReplace(record, "yes"))
-        arrangement.issuer.refresh_answer_members["access_token"] = "access-token-of-the-scenario"
+        arrangement.answer_with_access_token()
         caplog.set_level(0)
 
         with pytest.raises(TypeError) as raised:
@@ -665,7 +670,7 @@ class TestTheTokenNeverLeaves:
 
 def _secrets_of(arrangement: Arrangement) -> list[str]:
     return [
-        *arrangement.answered_tokens, "access-token-of-the-scenario",
+        *arrangement.answered_tokens,
         *arrangement.issuer.refresh_tokens, _STORED_ID_TOKEN.get_secret_value(),
     ]
 
