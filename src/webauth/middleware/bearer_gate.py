@@ -91,10 +91,9 @@ class PersonPaths:
     """The paths where a token is the person behind it, and the host's sign-in context.
 
     ``paths`` are written as ``PathRules`` says. A token passes there only with an
-    ``azp`` among ``authorized_parties``; a client listed here is not thereby
-    admitted on the machine paths. Each
-    token request enters ``transaction`` once, as a sign-in does, to find or create
-    the account. ``ValueError`` for no paths; ``TypeError`` for
+    ``azp`` among ``authorized_parties``; a client listed here is not thereby admitted
+    on the machine paths. Each token request enters ``transaction`` once, as a sign-in
+    does, to find or create the account. ``ValueError`` for no paths; ``TypeError`` for
     ``authorized_parties`` that is not an ``AuthorizedParties``.
     """
 

@@ -292,6 +292,19 @@ def _stack_policies(
     return {**stack, **(policies or {})}
 
 
+def _a_gate_over(
+    paths: PathRules, key_sets: FakeKeySetEndpoint, clock: FakeClock,
+    machine_parties: AuthorizedParties, person_paths: PathRules | None,
+    person_parties: AuthorizedParties, transaction: SignInTransaction,
+) -> tuple[PersonPaths | None, BearerGate]:
+    person = PersonPaths(person_paths, person_parties, transaction) if person_paths else None
+    gate = a_bearer_gate(
+        paths=paths, key_sets=key_sets, clock=clock,
+        person_paths=person, machine_parties=machine_parties,
+    )
+    return person, gate
+
+
 def a_bearer_app(
     *,
     paths: PathRules = MACHINE_PATHS,
@@ -327,10 +340,8 @@ def a_bearer_app(
         auth_app_keywords.pop("sessions", None),
     )
     used_transaction = transaction or side.transaction
-    person = PersonPaths(person_paths, person_parties, used_transaction) if person_paths else None
-    gate = a_bearer_gate(
-        paths=paths, key_sets=key_sets, clock=clock,
-        person_paths=person, machine_parties=machine_parties,
+    person, gate = _a_gate_over(
+        paths, key_sets, clock, machine_parties, person_paths, person_parties, used_transaction,
     )
     public = (*auth_app_keywords.pop("public", ()), *([FOREIGN_SECRET_PUBLIC] if person else []))
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
