@@ -199,7 +199,7 @@ class BearerGate:
     """Which paths take hal's bearer access token, and whose tokens count.
 
     ``machine_paths``, ``resource`` and ``person_paths`` are the host's three kinds of
-    path; the machine and person paths have their own client parties, and a path two
+    path; each kind has its own authorized parties, and a path two
     kinds select belongs to the first of machine, resource, person. At the
     resource's entry point the gate admits no token yet: a token the resource's check
     refuses is answered 401, one without the resource's scope 403, and one that holds a plain
@@ -238,8 +238,8 @@ class _Refusal(Enum):
     ``RESOURCE_INSUFFICIENT_SCOPE`` refuse the resource's entry point, which names its
     metadata and scope; on a person path ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry
     neither and ``NOT_A_MEMBER`` and ``USERNAME_TAKEN`` belong to it alone.
-    ``RESOURCE_HOLDER`` is the entry point's answer to a token that holds, which only a
-    new sign-in could change, so it carries no challenge.
+    ``RESOURCE_HOLDER`` is the entry point's answer to a token that holds; a new sign-in
+    cannot change it, so it carries no challenge a client would answer with one.
     """
 
     NO_CREDENTIALS = (401, None, _AUTHENTICATION_REQUIRED_DETAIL)
@@ -290,7 +290,8 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     header; the cookie, CSRF and the session gate decide nothing there. On a machine
     path only an admin's token passes and the caller is recorded for
     ``bearer_caller``. The resource's entry point is refused on every method, before CSRF
-    and the session gate, with the challenge of its metadata. On a person path a bearer
+    and the session gate: with the challenge of its metadata, except a token that holds,
+    which gets a plain 403. On a person path a bearer
     credential is the account behind the token, recorded for the session readers; a request
     with no bearer credential is decided by the session as it is outside the gate. Every
     method is gated, HEAD and OPTIONS included.
@@ -299,13 +300,12 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     def __init__(self, app: ASGIApp, policy: BearerGate) -> None:
         super().__init__(app, policy)
         resource = policy.resource
-        self._resource_check = None if resource is None else (
-            resource,
+        self._resource_verifier = None if resource is None else (
             policy.relying_party.resource_token_verifier(
                 resource_url=resource.url,
                 scope=resource.scope,
                 authorized_parties=resource.authorized_parties,
-            ),
+            )
         )
 
     async def _refusal(self, request: Request) -> Response | None:
@@ -314,9 +314,10 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         person_paths = self._policy.person_paths
         if machine_paths is not None and machine_paths.paths.matches(path):
             return await self._machine_refusal(request, machine_paths)
-        resource_check = self._resource_check
-        if resource_check is not None and resource_check[0].entry_point_rule.matches(path):
-            return await self._resource_refusal(request, *resource_check)
+        resource = self._policy.resource
+        verify = self._resource_verifier
+        if resource is not None and verify is not None and resource.entry_point_rule.matches(path):
+            return await self._resource_refusal(request, resource, verify)
         if person_paths is not None and person_paths.paths.matches(path):
             _mark_person_path(request)
             return await self._person_refusal(request, person_paths)

@@ -7,6 +7,7 @@ of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import NoReturn
 from urllib.parse import urlsplit
 
@@ -172,32 +173,36 @@ def entry_point_answer(app: BearerApp, resource: ProtectedResource, token: str) 
     return response.status_code, response.headers.get("www-authenticate", "")
 
 
-def wrong_for_the_resource(resource: ProtectedResource) -> dict[str, str]:
-    """Tokens signed by the test issuer that the resource's check refuses as invalid."""
-    url, scope = resource.url, resource.scope
-    return {
-        "app-bearer": a_token(),
-        "two-audiences": a_resource_token(resource, aud=[url, "another-app"]),
-        "other-audience": a_resource_token(resource, aud="https://other.example/mcp"),
-        "wrong-issuer": a_resource_token(resource, iss="https://evil.example/realms/x"),
-        "expired": a_resource_token(resource, exp=ACCESS_TOKEN_NOW - 1_000),
-        "bad-signature": an_access_token(
-            key_name="forged", claims={"aud": url, "scope": scope},
-        ),
-        "not-an-access-token": an_access_token(
-            claims={"aud": url, "scope": scope}, header={"typ": "JWT"},
-        ),
-        "unlisted-party": a_resource_token(resource, azp="stranger"),
-    }
+# Tokens signed by the test issuer that the resource's check refuses as invalid.
+WRONG_FOR_THE_RESOURCE: dict[str, Callable[[ProtectedResource], str]] = {
+    "app-bearer": lambda resource: a_token(),
+    "two-audiences": lambda resource: a_resource_token(resource, aud=[resource.url, "another-app"]),
+    "other-audience": lambda resource: a_resource_token(resource, aud="https://other.example/mcp"),
+    "wrong-issuer": lambda resource: a_resource_token(resource, iss="https://evil.example/r"),
+    "expired": lambda resource: a_resource_token(resource, exp=ACCESS_TOKEN_NOW - 1_000),
+    "bad-signature": lambda resource: an_access_token(
+        key_name="forged", claims={"aud": resource.url, "scope": resource.scope},
+    ),
+    "not-an-access-token": lambda resource: an_access_token(
+        claims={"aud": resource.url, "scope": resource.scope}, header={"typ": "JWT"},
+    ),
+    "unlisted-party": lambda resource: a_resource_token(resource, azp="stranger"),
+    "unlisted-party-without-scope": lambda resource: a_resource_token(
+        resource, azp="stranger", scope=ABSENT,
+    ),
+    "two-audiences-without-scope": lambda resource: a_resource_token(
+        resource, aud=[resource.url, "another-app"], scope=ABSENT,
+    ),
+}
 
 
-@pytest.mark.parametrize("name", list(wrong_for_the_resource(a_resource())))
+@pytest.mark.parametrize("name", list(WRONG_FOR_THE_RESOURCE))
 def test_a_token_the_resource_check_refuses_is_an_invalid_token_with_the_challenge(
     resource: ProtectedResource, challenge: str, name: str,
 ) -> None:
     app = a_resource_app_refusing_a_session_transaction(resource)
 
-    status, authenticate = entry_point_answer(app, resource, wrong_for_the_resource(resource)[name])
+    status, authenticate = entry_point_answer(app, resource, WRONG_FOR_THE_RESOURCE[name](resource))
 
     assert (status, authenticate) == (401, f'{challenge}, error="invalid_token"')
     assert app.auth.route_runs == []
@@ -220,11 +225,13 @@ def test_a_resource_token_without_the_scope_is_an_insufficient_scope_with_the_ch
 ) -> None:
     app = a_resource_app_refusing_a_session_transaction(resource)
 
-    status, authenticate = entry_point_answer(
-        app, resource, a_resource_token(resource, **claims),
+    response = app.ask(
+        resource.entry_point, authorization=bearing(a_resource_token(resource, **claims)),
     )
 
-    assert (status, authenticate) == (403, f'{challenge}, error="insufficient_scope"')
+    assert response.status_code == 403
+    assert response.headers["www-authenticate"] == f'{challenge}, error="insufficient_scope"'
+    assert "admin" not in response.text.lower()
     assert app.auth.route_runs == []
 
 
@@ -249,6 +256,16 @@ def test_a_token_that_holds_still_gets_a_plain_403_and_admits_nothing(
     assert response.headers["cache-control"] == "no-store"
     assert_untouched(app, expires_at)
     assert_no_bearer_admission(app, relay.added, resource.entry_point, bearing(token)[0])
+
+
+def test_the_key_set_is_fetched_once_for_two_requests_at_the_entry_point(
+    app: BearerApp, resource: ProtectedResource, agent_token: str,
+) -> None:
+    first = app.ask(resource.entry_point, authorization=bearing(agent_token))
+    second = app.ask(resource.entry_point, authorization=bearing(agent_token))
+
+    assert (first.status_code, second.status_code) == (403, 403)
+    assert len(app.key_sets.fetched_urls) == 1
 
 
 def test_a_token_for_the_resource_is_refused_on_a_person_path_and_a_machine_path() -> None:

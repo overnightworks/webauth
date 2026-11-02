@@ -518,10 +518,12 @@ class OidcRelyingParty:
         integer and no more than the leeway in the future, `events` must hold
         the logout event and no other key, that event's member an object, `sub`
         non-empty (a token naming only a `sid` is refused) and `nonce` absent,
-        even as `null`. The token, its claims and its `sid` are never returned,
-        so no session id is stored. A copy of a valid token ends the subject's
-        sessions again until it ages out, and a person who signed in again in
-        that time is signed out once more."""
+        even as `null`. An RS256 `logout+jwt` of the configured issuer whose one
+        audience is the client ID, issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS`
+        plus the leeway ago. The token, its claims and its `sid` are never returned,
+        so no session id is stored. There is no replay store: the age bound is what
+        limits a copy, which ends the subject's sessions again until it ages out, and
+        a person who signed in again in that time is signed out once more."""
         outcome = self._jwt_verifier.verify(logout_token, expected_type=_LOGOUT_TOKEN_TYPE)
         if isinstance(outcome, Rejected):
             return OidcRefusal(
@@ -536,19 +538,16 @@ class OidcRelyingParty:
     ) -> VerifiedAccessToken | OidcRefusal:
         """The subject and groups of an access token presented to this app, or the refusal.
 
-        Stricter than RFC 9068 section 4: the token's only audience is the
-        client ID and its `azp` is one `authorized_parties` admits. `client_id`,
+        Stricter than RFC 9068 section 4: an RS256 `at+jwt` whose only audience is the
+        client ID and whose `azp` is one `authorized_parties` admits, with a `sub`
+        and `groups` absent or a list of strings. `client_id`,
         `jti` and `scope` are not read. `TypeError` for anything but
         `AuthorizedParties`."""
         if not isinstance(authorized_parties, AuthorizedParties):
             raise TypeError("authorized_parties must be an AuthorizedParties")
-        outcome = self._jwt_verifier.verify(
-            access_token, expected_media_types=_ACCESS_TOKEN_MEDIA_TYPES
-        )
-        if isinstance(outcome, Rejected):
-            return OidcRefusal(
-                OidcRefusalReason.ACCESS_TOKEN_REJECTED, token_rejection=outcome.reason
-            )
+        outcome = _verify_access_jwt(self._jwt_verifier, access_token)
+        if isinstance(outcome, OidcRefusal):
+            return outcome
         return self._access_token_profile(
             outcome, authorized_parties, audience=self._config.client_id
         )
@@ -568,13 +567,9 @@ class OidcRelyingParty:
         jwt_verifier = self._verifier_for(resource_url)
 
         def verify(access_token: str) -> VerifiedAccessToken | OidcRefusal:
-            outcome = jwt_verifier.verify(
-                access_token, expected_media_types=_ACCESS_TOKEN_MEDIA_TYPES
-            )
-            if isinstance(outcome, Rejected):
-                return OidcRefusal(
-                    OidcRefusalReason.ACCESS_TOKEN_REJECTED, token_rejection=outcome.reason
-                )
+            outcome = _verify_access_jwt(jwt_verifier, access_token)
+            if isinstance(outcome, OidcRefusal):
+                return outcome
             profile = self._access_token_profile(outcome, authorized_parties, audience=resource_url)
             if isinstance(profile, VerifiedAccessToken) and not _holds_scope(outcome.claims, scope):
                 return OidcRefusal(OidcRefusalReason.INSUFFICIENT_SCOPE)
@@ -782,6 +777,13 @@ def _group_paths(claims: Mapping[str, object]) -> tuple[str, ...] | None:
     if not isinstance(groups, list) or not all(isinstance(group, str) for group in groups):
         return None
     return tuple(groups)
+
+
+def _verify_access_jwt(verifier: JwtVerifier, access_token: str) -> VerifiedClaims | OidcRefusal:
+    outcome = verifier.verify(access_token, expected_media_types=_ACCESS_TOKEN_MEDIA_TYPES)
+    if isinstance(outcome, Rejected):
+        return OidcRefusal(OidcRefusalReason.ACCESS_TOKEN_REJECTED, token_rejection=outcome.reason)
+    return outcome
 
 
 def _holds_scope(claims: Mapping[str, object], scope: str) -> bool:

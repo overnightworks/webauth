@@ -35,6 +35,8 @@ from tests.support.gate_arrangement import (
     a_bearer_app,
     a_bearer_gate,
     a_key_set_answering,
+    a_resource,
+    a_resource_token,
     a_token,
     assert_answers_no_store,
     assert_no_store_and_no_cookie,
@@ -53,7 +55,7 @@ from tests.support.webauth_arrangement import (
     starts,
 )
 from webauth.https_client import KeySetFetchError
-from webauth.middleware import BearerGate, MachinePaths, PersonPaths
+from webauth.middleware import BearerGate, MachinePaths, PersonPaths, ProtectedResource
 from webauth.oidc_login import AdmissionConfig, NoAdmins
 from webauth.policies import AuthorizedParties, PathRules, PathShape, PublicRule
 from webauth.ports import SignInStores
@@ -306,9 +308,21 @@ def test_a_failing_key_set_fetch_is_the_library_500(caplog: pytest.LogCaptureFix
 FETCH_BOUND_SECONDS = 3
 
 
+@pytest.mark.parametrize(
+    ("resource", "path", "token", "status"),
+    [
+        (None, EXPORT_PATH, A_TOKEN, 200),
+        (a_resource(), a_resource().entry_point, a_resource_token(), 403),
+    ],
+    ids=["machine-path", "entry-point"],
+)
 @pytest.mark.anyio
 async def test_a_blocked_key_set_fetch_stalls_no_other_request(
     caplog: pytest.LogCaptureFixture,
+    resource: ProtectedResource | None,
+    path: str,
+    token: str,
+    status: int,
 ) -> None:
     fetch_started = threading.Event()
     release_fetch = threading.Event()
@@ -322,14 +336,17 @@ async def test_a_blocked_key_set_fetch_stalls_no_other_request(
     key_sets = a_key_set_answering()
     key_sets.before_answer = block_until_released
     app = a_bearer_app(
-        key_sets=key_sets, public=(PublicRule(PathRules(exact=frozenset({HEALTH_PATH}))),),
+        paths=MACHINE_PATHS if resource is None else PathRules(),
+        resource=resource,
+        key_sets=key_sets,
+        public=(PublicRule(PathRules(exact=frozenset({HEALTH_PATH}))),),
     )
     transport = httpx.ASGITransport(app=app.auth.app)
 
     with caplog.at_level(logging.DEBUG):
         async with httpx.AsyncClient(transport=transport, base_url=HTTPS_TEST_SERVER) as client:
             blocked = asyncio.create_task(
-                client.get(EXPORT_PATH, headers={"authorization": f"Bearer {A_TOKEN}"}),
+                client.get(path, headers={"authorization": f"Bearer {token}"}),
             )
             try:
                 started = await asyncio.to_thread(fetch_started.wait, FETCH_BOUND_SECONDS)
@@ -340,10 +357,10 @@ async def test_a_blocked_key_set_fetch_stalls_no_other_request(
                 admitted = await asyncio.wait_for(blocked, FETCH_BOUND_SECONDS)
 
     assert (started, health.status_code, fetch_still_blocked, admitted.status_code) == (
-        True, 200, True, 200,
+        True, 200, True, status,
     )
     assert_answers_no_store(admitted)
-    assert_nothing_leaks(secrets_of(bearing(A_TOKEN)), caplog, health, admitted)
+    assert_nothing_leaks(secrets_of(bearing(token)), caplog, health, admitted)
 
 
 class TestAGateIsBuiltFromSoundParts:
