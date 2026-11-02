@@ -51,6 +51,7 @@ from webauth.dependencies import (
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware import (
     BearerGate,
+    MachinePaths,
     PersonPaths,
     SessionGate,
     bearer_caller,
@@ -381,6 +382,7 @@ def _bearer_policies(
         return current.sessions.in_transaction()
 
     (origin,) = settings.app_origins
+    parties = AuthorizedParties(frozenset(settings.bearer_authorized_parties))
     return {
         "rate_limit": RateLimitPolicy(
             default=RateLimitBudget("bearer-host", BEARER_HOST_REQUESTS_PER_MINUTE, 60)
@@ -392,13 +394,14 @@ def _bearer_policies(
             optional=PathRules(exact=frozenset({"/"})),
         ),
         "bearer_gate": BearerGate(
-            paths=PathRules(prefixes=(MACHINE_ROUTES_PREFIX,)),
+            machine_paths=MachinePaths(PathRules(prefixes=(MACHINE_ROUTES_PREFIX,)), parties),
             relying_party=_relying_party(
                 settings, f"{origin}{CALLBACK_PATH}", f"{origin}/", post_token_request_over_https
             ),
             admission=_admission_of(settings),
-            authorized_parties=AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
-            person_paths=PersonPaths(PathRules(prefixes=(PERSON_ROUTES_PREFIX,)), transaction),
+            person_paths=PersonPaths(
+                PathRules(prefixes=(PERSON_ROUTES_PREFIX,)), parties, transaction,
+            ),
         ),
     }
 

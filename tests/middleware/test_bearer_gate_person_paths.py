@@ -58,7 +58,13 @@ from tests.support.webauth_arrangement import (
 from webauth.dependencies import current_user_dependency
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import admitted_user
-from webauth.policies import PathRules, PublicRule, RateLimitBudget, RateLimitPolicy
+from webauth.policies import (
+    AuthorizedParties,
+    PathRules,
+    PublicRule,
+    RateLimitBudget,
+    RateLimitPolicy,
+)
 from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser, SignInStores
 
 ADMIN_TOKEN = A_TOKEN
@@ -306,7 +312,7 @@ def test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_wit
         pytest.param({"azp": ABSENT}, False, id="no-azp"),
     ],
 )
-def test_a_person_path_admits_exactly_the_clients_the_machine_paths_admit(
+def test_with_the_same_parties_on_both_kinds_they_admit_exactly_the_same_clients(
     claims: dict[str, Any], admitted: bool,
 ) -> None:
     app = a_person_app()
@@ -316,6 +322,28 @@ def test_a_person_path_admits_exactly_the_clients_the_machine_paths_admit(
     person = app.ask(PERSON_ME_PATH, authorization=token)
 
     assert (machine.status_code == 200, person.status_code == 200) == (admitted, admitted)
+
+
+@pytest.mark.parametrize(
+    ("machine_parties", "person_parties", "machine_status", "person_status"),
+    [
+        pytest.param({"hal"}, {"another-client"}, 200, 401, id="listed-only-on-machine-paths"),
+        pytest.param({"another-client"}, {"hal"}, 401, 200, id="listed-only-on-person-paths"),
+    ],
+)
+def test_a_party_listed_on_one_kind_of_path_is_refused_on_the_other(
+    machine_parties: set[str], person_parties: set[str], machine_status: int, person_status: int,
+) -> None:
+    app = a_person_app(
+        machine_parties=AuthorizedParties(frozenset(machine_parties)),
+        person_parties=AuthorizedParties(frozenset(person_parties)),
+    )
+    token = bearing(a_token())
+
+    machine = app.ask(EXPORT_PATH, authorization=token)
+    person = app.ask(PERSON_ME_PATH, authorization=token)
+
+    assert (machine.status_code, person.status_code) == (machine_status, person_status)
 
 
 @BOTH_HOSTS
@@ -717,3 +745,11 @@ def test_the_gate_names_no_machine_paths_when_it_has_person_paths_alone() -> Non
     response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
 
     assert response.status_code == 200
+
+
+def test_a_gate_with_person_paths_alone_adds_no_store_to_no_path() -> None:
+    app = a_bearer_app(paths=PathRules(), person_paths=PERSON_PATHS)
+
+    response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
+
+    assert "no-store" not in response.headers.get("cache-control", "")

@@ -5,6 +5,7 @@ from __future__ import annotations
 from webauth.middleware.bearer_gate import (
     BearerGate,
     BearerGateMiddleware,
+    MachinePaths,
     PersonPaths,
     bearer_caller,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "BodySizeLimitMiddleware",
     "CsrfOriginMiddleware",
     "IpRateLimitMiddleware",
+    "MachinePaths",
     "PersonPaths",
     "RequestBodyTooLarge",
     "SecurityHeadersMiddleware",

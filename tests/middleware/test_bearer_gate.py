@@ -51,7 +51,7 @@ from tests.support.webauth_arrangement import (
     starts,
 )
 from webauth.https_client import KeySetFetchError
-from webauth.middleware import BearerGate, PersonPaths
+from webauth.middleware import BearerGate, MachinePaths, PersonPaths
 from webauth.oidc_login import AdmissionConfig, NoAdmins
 from webauth.policies import AuthorizedParties, PathRules, PathShape, PublicRule
 from webauth.ports import SignInStores
@@ -348,7 +348,7 @@ class TestAGateIsBuiltFromSoundParts:
     @pytest.mark.parametrize(
         ("changes", "error"),
         [
-            pytest.param({"paths": PathRules()}, ValueError, id="G01a-no-paths"),
+            pytest.param({"machine_paths": None}, ValueError, id="G01a-no-kind"),
             pytest.param(
                 {"admission": AdmissionConfig(
                     bound_issuer=ADMISSION.bound_issuer, login_group="/apps/x",
@@ -363,41 +363,62 @@ class TestAGateIsBuiltFromSoundParts:
                 )},
                 ValueError, id="G01c-another-issuer",
             ),
-            pytest.param(
-                {"authorized_parties": frozenset({"hal"})}, TypeError, id="G01d-a-bare-set",
-            ),
         ],
     )
     def test_an_unsound_gate_is_refused_at_construction(
         self, changes: dict[str, Any], error: type[Exception],
     ) -> None:
         arguments = {
-            "paths": MACHINE_PATHS,
             "relying_party": a_relying_party(),
             "admission": ADMISSION,
-            "authorized_parties": AuthorizedParties(frozenset({"hal"})),
+            "machine_paths": MachinePaths(MACHINE_PATHS, AuthorizedParties(frozenset({"hal"}))),
         }
 
         with pytest.raises(error):
             BearerGate(**{**arguments, **changes})
 
+    def test_machine_paths_without_a_path_are_refused_at_construction(self) -> None:
+        with pytest.raises(ValueError, match="at least one path"):
+            MachinePaths(PathRules(), AuthorizedParties(frozenset({"hal"})))
+
     def test_person_paths_without_a_path_are_refused_at_construction(self) -> None:
         no_path = PathRules()
 
         with pytest.raises(ValueError, match="at least one path"):
-            PersonPaths(no_path, transaction=a_transaction_never_entered)
+            PersonPaths(
+                no_path, AuthorizedParties(frozenset({"hal"})), a_transaction_never_entered,
+            )
+
+    @pytest.mark.parametrize("kind", [MachinePaths, PersonPaths])
+    def test_a_kind_of_path_refuses_parties_that_are_not_authorized_parties(
+        self, kind: type[MachinePaths] | type[PersonPaths],
+    ) -> None:
+        paths = PathRules(prefixes=("/api/",))
+        arguments = (a_transaction_never_entered,) if kind is PersonPaths else ()
+
+        with pytest.raises(TypeError, match="AuthorizedParties"):
+            kind(paths, frozenset({"hal"}), *arguments)  # type: ignore[arg-type]
 
     def test_a_no_admins_app_may_name_person_paths_alone(self) -> None:
         gate = a_bearer_gate(
             paths=PathRules(),
-            person_paths=PersonPaths(PathRules(prefixes=("/api/",)), a_transaction_never_entered),
+            person_paths=PersonPaths(
+                PathRules(prefixes=("/api/",)),
+                AuthorizedParties(frozenset({"hal"})),
+                a_transaction_never_entered,
+            ),
             admission=AdmissionConfig(
                 bound_issuer=ADMISSION.bound_issuer, login_group="/apps/x",
                 admin_group=NoAdmins.IN_THIS_APP,
             ),
         )
 
-        assert gate.paths == PathRules()
+        assert gate.machine_paths is None
+
+    def test_a_gate_of_machine_paths_alone_builds(self) -> None:
+        gate = a_bearer_gate()
+
+        assert gate.person_paths is None
 
 
 class TestWithoutAGateTheAdminPathsStayWithTheSession:

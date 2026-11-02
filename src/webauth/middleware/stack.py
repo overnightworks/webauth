@@ -44,8 +44,8 @@ def _library_middleware(
     session_gate: SessionGate | None,
 ) -> list[Middleware]:
     """The middleware to install, outermost first, for the policies the host named."""
-    if bearer_gate is not None:
-        no_store = CacheControlRule(bearer_gate.paths, "no-store")
+    if bearer_gate is not None and bearer_gate.machine_paths is not None:
+        no_store = CacheControlRule(bearer_gate.machine_paths.paths, "no-store")
         security_headers = replace(
             security_headers,
             cache_control_rules=(no_store, *security_headers.cache_control_rules),

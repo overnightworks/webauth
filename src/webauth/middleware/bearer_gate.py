@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BearerGate",
     "BearerGateMiddleware",
+    "MachinePaths",
     "PersonPaths",
     "bearer_caller",
 ]
@@ -61,19 +62,47 @@ _BEARER_SCHEME: Final = "bearer"
 _ACCESS_TOKEN_QUERY_PARAMETER: Final = "access_token"  # noqa: S105 - query parameter name not a credential
 
 
+def _require_parties(authorized_parties: AuthorizedParties) -> None:
+    if not isinstance(authorized_parties, AuthorizedParties):
+        raise TypeError("authorized_parties must be an AuthorizedParties")
+
+
+@dataclass(frozen=True)
+class MachinePaths:
+    """The paths where a token is a machine's, and the clients allowed to hold it.
+
+    ``paths`` are written as ``PathRules`` says. A token passes there only with an
+    ``azp`` among ``authorized_parties``, which no other kind of path shares.
+    ``ValueError`` for no paths; ``TypeError`` for ``authorized_parties`` that is
+    not an ``AuthorizedParties``.
+    """
+
+    paths: PathRules
+    authorized_parties: AuthorizedParties
+
+    def __post_init__(self) -> None:
+        _require_parties(self.authorized_parties)
+        if self.paths == PathRules():
+            raise ValueError("machine paths must select at least one path")
+
+
 @dataclass(frozen=True)
 class PersonPaths:
     """The paths where a token is the person behind it, and the host's sign-in context.
 
-    ``paths`` are written as ``PathRules`` says. Each token request enters
-    ``transaction`` once, as a sign-in does, to find or create the account.
-    ``ValueError`` for no paths.
+    ``paths`` are written as ``PathRules`` says. A token passes there only with an
+    ``azp`` among ``authorized_parties``, which no other kind of path shares. Each
+    token request enters ``transaction`` once, as a sign-in does, to find or create
+    the account. ``ValueError`` for no paths; ``TypeError`` for
+    ``authorized_parties`` that is not an ``AuthorizedParties``.
     """
 
     paths: PathRules
+    authorized_parties: AuthorizedParties
     transaction: SignInTransaction
 
     def __post_init__(self) -> None:
+        _require_parties(self.authorized_parties)
         if self.paths == PathRules():
             raise ValueError("person paths must select at least one path")
 
@@ -82,30 +111,26 @@ class PersonPaths:
 class BearerGate:
     """Which paths take hal's bearer access token, and whose tokens count.
 
-    ``paths`` are the machine paths and ``person_paths`` the host's API paths, each
-    written as ``PathRules`` says; a path both select is a machine path. The token
+    ``machine_paths`` and ``person_paths`` are the host's two kinds of path, each
+    with its own client parties; a path both select is a machine path. The token
     must come from ``relying_party``'s issuer, name its client as the only
-    audience and carry an ``azp`` among ``authorized_parties``. A machine path
-    also needs ``admission.admin_group`` or a group below it. On a person path
+    audience and carry an ``azp`` among the parties of the path's kind. A machine
+    path also needs ``admission.admin_group`` or a group below it. On a person path
     the token is the account behind its subject, admitted as a sign-in admits it.
-    ``ValueError`` when neither rule selects a path, for ``NoAdmins`` while the
-    machine paths select something (no token could pass there) and for an
-    ``admission`` bound to another issuer; ``TypeError`` for ``authorized_parties``
-    that is not an ``AuthorizedParties``.
+    ``ValueError`` when the gate has neither kind, for ``NoAdmins`` with machine
+    paths (no token could pass there) and for an ``admission`` bound to another
+    issuer.
     """
 
-    paths: PathRules
     relying_party: OidcRelyingParty
     admission: AdmissionConfig
-    authorized_parties: AuthorizedParties
+    machine_paths: MachinePaths | None = None
     person_paths: PersonPaths | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.authorized_parties, AuthorizedParties):
-            raise TypeError("authorized_parties must be an AuthorizedParties")
-        if self.paths == PathRules() and self.person_paths is None:
-            raise ValueError("paths must select at least one path")
-        if isinstance(self.admission.admin_group, NoAdmins) and self.paths != PathRules():
+        if self.machine_paths is None and self.person_paths is None:
+            raise ValueError("the gate must name machine paths or person paths")
+        if isinstance(self.admission.admin_group, NoAdmins) and self.machine_paths is not None:
             raise ValueError("admission.admin_group is NoAdmins: no token could pass the gate")
         if self.admission.bound_issuer != self.relying_party.issuer:
             raise ValueError("admission.bound_issuer must be the relying party's issuer")
@@ -172,19 +197,22 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
 
     async def _refusal(self, request: Request) -> Response | None:
         path = route_path(request.scope)
+        machine_paths = self._policy.machine_paths
         person_paths = self._policy.person_paths
-        if self._policy.paths.matches(path):
-            return await self._machine_refusal(request)
+        if machine_paths is not None and machine_paths.paths.matches(path):
+            return await self._machine_refusal(request, machine_paths)
         if person_paths is not None and person_paths.paths.matches(path):
             _mark_person_path(request)
             return await self._person_refusal(request, person_paths)
         return None
 
-    async def _machine_refusal(self, request: Request) -> Response | None:
+    async def _machine_refusal(
+        self, request: Request, machine_paths: MachinePaths,
+    ) -> Response | None:
         credential = _credential_of(request)
         if isinstance(credential, _Refusal):
             return self._refused(credential, realm=_MACHINE_REALM)
-        verified = await self._verified(credential)
+        verified = await self._verified(credential, machine_paths.authorized_parties)
         if isinstance(verified, OidcRefusal):
             return self._refused(_Refusal.INVALID_TOKEN, verified, realm=_MACHINE_REALM)
         if app_role(verified.groups, self._policy.admission) is not AppRole.ADMIN:
@@ -200,7 +228,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             return None
         if isinstance(credential, _Refusal):
             return self._refused(credential)
-        verified = await self._verified(credential)
+        verified = await self._verified(credential, person_paths.authorized_parties)
         if isinstance(verified, OidcRefusal):
             return self._refused(_Refusal.INVALID_TOKEN, verified)
         person = await _on_worker(
@@ -217,12 +245,14 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         _record_bearer_admission(request, person)
         return None
 
-    async def _verified(self, credential: str) -> VerifiedAccessToken | OidcRefusal:
+    async def _verified(
+        self, credential: str, authorized_parties: AuthorizedParties,
+    ) -> VerifiedAccessToken | OidcRefusal:
         return await _on_worker(
             partial(
                 self._policy.relying_party.verify_access_token,
                 credential,
-                authorized_parties=self._policy.authorized_parties,
+                authorized_parties=authorized_parties,
             ),
         )
 

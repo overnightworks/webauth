@@ -61,6 +61,7 @@ from webauth.middleware import (
     BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
+    MachinePaths,
     PersonPaths,
     SecurityHeadersMiddleware,
     SessionGate,
@@ -295,10 +296,11 @@ def a_host_declares_its_machine_paths(
     relying_party: OidcRelyingParty, config: AdmissionConfig,
 ) -> BearerGate:
     return BearerGate(
-        paths=PathRules(prefixes=("/api/admin/",)),
         relying_party=relying_party,
         admission=config,
-        authorized_parties=AuthorizedParties(frozenset({"hal"})),
+        machine_paths=MachinePaths(
+            PathRules(prefixes=("/api/admin/",)), AuthorizedParties(frozenset({"hal"})),
+        ),
     )
 
 
@@ -306,11 +308,11 @@ def a_host_declares_its_person_paths(
     relying_party: OidcRelyingParty, config: AdmissionConfig, transaction: SignInTransaction,
 ) -> BearerGate:
     return BearerGate(
-        paths=PathRules(),
         relying_party=relying_party,
         admission=config,
-        authorized_parties=AuthorizedParties(frozenset({"hal"})),
-        person_paths=PersonPaths(PathRules(prefixes=("/api/",)), transaction),
+        person_paths=PersonPaths(
+            PathRules(prefixes=("/api/",)), AuthorizedParties(frozenset({"hal"})), transaction,
+        ),
     )
 
 
@@ -424,7 +426,7 @@ def a_host_ends_a_session() -> None:
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
         AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
-        PersonPaths,
+        MachinePaths, PersonPaths,
         BodySizePolicy, CsrfOriginMiddleware,
         DEFAULT_PERMISSIONS_POLICY,
         DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,
