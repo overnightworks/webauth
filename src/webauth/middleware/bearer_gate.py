@@ -13,7 +13,6 @@ from urllib.parse import urlsplit
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
-from fastapi.routing import APIRoute
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
@@ -444,5 +443,4 @@ def install_resource_metadata(app: FastAPI, resource: ProtectedResource, *, issu
     def metadata() -> dict[str, object]:
         return document
 
-    route = APIRoute(resource.metadata_path, metadata, methods=["GET"], include_in_schema=False)
-    app.router.routes.append(route)
+    app.add_api_route(resource.metadata_path, metadata, methods=["GET"], include_in_schema=False)

@@ -11,7 +11,9 @@ from typing import NoReturn
 from urllib.parse import urlsplit
 
 import pytest
+from fastapi import Depends, FastAPI, HTTPException
 from starlette.requests import HTTPConnection
+from starlette.testclient import TestClient
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
@@ -26,7 +28,12 @@ from tests.support.gate_arrangement import (
     relayed,
 )
 from tests.support.oidc_arrangement import REALM_ISSUER
-from webauth.middleware import ProtectedResource, admitted_user, bearer_caller
+from webauth.middleware import (
+    ProtectedResource,
+    admitted_user,
+    bearer_caller,
+    install_resource_metadata,
+)
 from webauth.policies import PathRules
 
 EVERY_METHOD = pytest.mark.parametrize(
@@ -272,6 +279,18 @@ def test_the_metadata_path_is_public_for_a_get_of_the_exact_path_only(
     assert longer.status_code == 401
 
 
+def test_the_metadata_route_runs_the_hosts_app_level_dependencies(
+    resource: ProtectedResource,
+) -> None:
+    def refuse() -> NoReturn:
+        raise HTTPException(status_code=418)
+
+    host = FastAPI(dependencies=[Depends(refuse)])
+    install_resource_metadata(host, resource, issuer=REALM_ISSUER)
+
+    assert TestClient(host).get(resource.metadata_path).status_code == 418
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -285,7 +304,10 @@ def test_the_metadata_path_is_public_for_a_get_of_the_exact_path_only(
         "https://app.example/%6Dcp",
         "https://app.example/%7Bid:int%7D",
         "https://app.example/{id}",
-        "https://app.example/mcp\u00e9",
+        "https://app.example/\u20ac",
+        'https://app.exa"mple/mcp',
+        "https://app.example\\x/mcp",
+        "https://ex%61mple/mcp",
         "https://app.example/a/../mcp",
         "https://app.example/./mcp",
         "https://app.example/mcp/",
@@ -293,7 +315,7 @@ def test_the_metadata_path_is_public_for_a_get_of_the_exact_path_only(
         "",
     ],
 )
-def test_a_url_that_is_not_a_path_bearing_endpoint_url_is_refused(url: str) -> None:
+def test_a_url_outside_the_resource_url_rule_is_refused(url: str) -> None:
     with pytest.raises(ValueError, match="url"):
         ProtectedResource(url, "mcp:tools")
 
