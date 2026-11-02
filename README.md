@@ -9,8 +9,8 @@ origin checks, admin checks, per-address rate limits, and the audit events they
 raise. The client is a confidential client: it authenticates at the token
 endpoint with HTTP Basic and sends PKCE with the `S256` method.
 
-Distribution `overnightworks-webauth`, import package `webauth`. [Install](#install) names
-where the wheel comes from.
+Distribution `overnightworks-webauth`, import package `webauth`. [Install](#install) says how a host
+pins it.
 
 ## Quick start
 
@@ -101,16 +101,19 @@ The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trust
 
 ## Install
 
-`overnightworks-webauth` is not on PyPI: it installs only from the wheel
-published as an asset on each tag's release. Take the version from the
-[Releases page](https://github.com/overnightworks/webauth/releases) and put it in
-place of `X.Y.Z`, in a `pyproject.toml`:
+`overnightworks-webauth` is not on PyPI. A host pins a tag by git. Put the tag in place of `vX.Y.Z`, in a `pyproject.toml`:
 
 ```toml
 dependencies = [
-    "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
+    "overnightworks-webauth @ git+https://github.com/overnightworks/webauth@vX.Y.Z",
 ]
 ```
+
+The host's lock records the commit of the tag. A build needs git and builds webauth from source.
+
+A host's Dependabot entry for uv ignores `overnightworks-*`, because Dependabot looks the name up on PyPI. A uv Dependabot run with this pin is proven green for webauth in one host (speech-runtime).
+
+Do not pin the wheel URL: one in a resolved tree fails a uv Dependabot run. The wheel stays on each tag's [release page](https://github.com/overnightworks/webauth/releases), and `scripts/verify_release.sh` checks it.
 
 Tags are never moved; a broken release gets the next patch tag.
 

@@ -18,6 +18,10 @@ releases without an entry are described in the
 
 - `webauth.middleware.ProtectedResource(url, scope, authorized_parties)` and `BearerGate(resource=...)` name a protected resource as a third kind of path. Its entry point answers a request without a bearer with the 401 challenge (`resource_metadata`, `scope`), refuses a token the resource's check refuses as 401 `invalid_token` and one without the scope as 403 `insufficient_scope`, answers a token that holds with a plain 403 and carries `no-store`; the resource admits no token yet. `OidcRelyingParty.resource_token_verifier(resource_url=..., scope=..., authorized_parties=...)` is that check: an access token whose only audience is the URL, whose `azp` the parties admit and whose `scope` claim lists the scope; `OidcRefusalReason.INSUFFICIENT_SCOPE` is its refusal for a missing scope. `install_resource_metadata(app, resource, issuer=...)` serves its RFC 9728 metadata document, and `resource.public_rule` opens it through `SessionGate.public`.
 
+**Changed**
+
+- Hosts pin webauth by git tag (`git+https://github.com/overnightworks/webauth@vX.Y.Z`), as the README's Install says; a release still carries its wheel.
+
 ## 0.27.0 - 2026-10-31
 
 **Breaking**
