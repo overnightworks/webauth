@@ -1,8 +1,0 @@
-claim_id = "ecea900a23134b899d6dc215886aad74"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "49236392ac81caba9fc4d0456ab188861fdf4c08"
-branch = "claude/issue-572-webauth-oidc-becomes-a-package-and-every"
-scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc.py", "src/webauth/oidc/__init__.py", "src/webauth/oidc/_client_config.py", "src/webauth/oidc/_relying_party.py", "src/webauth/sign_in_routes.py"]
-opened_commit = "b1f8b497a65e82c470aaec07ba42feef5759d6da"
-whole_reason = "One move: the module cannot be a package while importers, links and forwards still name the old file, and a partial landing would break every import."
