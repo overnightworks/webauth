@@ -302,7 +302,8 @@ class SignInStores:
 
 class SignInTransaction(Protocol):
     """The host's serialized context around one sign-in, entered by the callback, logout and
-    back-channel logout routes, and once per token request on the bearer gate's person paths.
+    back-channel logout routes, once per token request on the bearer gate's person paths, and
+    once per admitted-group request at a ProtectedResource's entry point.
 
     Creating it, entering the context manager, every store call inside the block
     and leaving it all run on one worker thread, never on the event loop. Entries
