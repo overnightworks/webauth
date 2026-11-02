@@ -611,6 +611,35 @@ def _admit_token_holder(
         return AdmissionRefusal.USERNAME_TAKEN
 
 
+def _admit_resource_holder(
+    transaction: SignInTransaction,
+    verified: VerifiedAccessToken,
+    *,
+    required_group: str,
+    admission: AdmissionConfig,
+    config: WebAuthConfig,
+) -> AuthenticatedUser | None:
+    """The known account behind an agent's token, always with the person role, or ``None``.
+
+    The token's groups must pass ``app_role`` against ``admission`` and hold
+    ``required_group`` or a path below it; otherwise no store is touched. One
+    ``SignInTransaction`` entry then calls only ``accounts.get``: an unknown subject
+    answers ``None``, and nothing is provisioned, re-roled or audited. The answer is built
+    inside the block and takes its role from ``config.user_role``, never from the
+    account, so an admin's agent token carries no admin right. Never commits; a store or
+    exit failure propagates.
+    """
+    if app_role(verified.groups, admission) is None:
+        return None
+    if not _is_member_of(required_group, verified.groups):
+        return None
+    with transaction() as stores:
+        account = stores.accounts.get(verified.subject)
+        if account is None:
+            return None
+        return AuthenticatedUser(id=account.id, username=account.username, role=config.user_role)
+
+
 def _admit_account(
     claimant: _Claimant, role: str, *, accounts: SubjectUserStore, audit: AuditSink,
 ) -> UserRecord:

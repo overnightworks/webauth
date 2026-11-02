@@ -42,11 +42,13 @@ from webauth.oidc_login import (
     AdmissionRefusal,
     AppRole,
     NoAdmins,
+    _admit_resource_holder,
     _admit_token_holder,
+    _require_group_path,
     app_role,
 )
 from webauth.policies import AuthorizedParties, PathRules, PublicRule
-from webauth.ports import BearerCaller
+from webauth.ports import AuthenticatedUser, BearerCaller
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,6 +68,7 @@ __all__ = [
     "ProtectedResource",
     "bearer_caller",
     "install_resource_metadata",
+    "resource_person",
 ]
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -141,9 +144,12 @@ class ProtectedResource:
     the gate answers the challenge. The metadata document sits at the path RFC 9728
     section 3.1 derives from it. ``scope`` is the one scope the challenge asks for and a token
     must hold. A token passes there only with an ``azp`` among ``authorized_parties``, which
-    no other kind's parties extend; the gate admits no token at the entry point yet.
-    ``TypeError`` for ``authorized_parties`` that is not an ``AuthorizedParties``.
-    ``ValueError`` for a ``url`` that is
+    no other kind's parties extend, and groups that hold ``required_group`` or a path below it
+    besides the admission's login group. The gate then looks the token's subject up in one
+    entry of ``transaction``, a read: a person must have signed in once, and is admitted
+    with the configured person role whatever role is stored. ``TypeError`` for
+    ``authorized_parties`` that is not an ``AuthorizedParties``. ``ValueError`` for a
+    ``required_group`` that is not a group path, and for a ``url`` that is
     not an endpoint URL with a plain host, an optional port and a path of one or more
     segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
     trailing slash, and for a ``scope`` that is not one scope token. So the path needs no
@@ -152,10 +158,13 @@ class ProtectedResource:
 
     url: str
     scope: str
+    required_group: str
     authorized_parties: AuthorizedParties
+    transaction: SignInTransaction
 
     def __post_init__(self) -> None:
         _require_parties(self.authorized_parties)
+        _require_group_path("ProtectedResource.required_group", self.required_group)
         if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
             raise ValueError(
                 "ProtectedResource.url must be an endpoint URL with a plain host and a path"
@@ -201,10 +210,11 @@ class BearerGate:
     ``machine_paths``, ``resource`` and ``person_paths`` are the host's three kinds of
     path; each kind has its own authorized parties, and a path two
     kinds select belongs to the first of machine, resource, person. At the
-    resource's entry point the gate admits no token yet: a token the resource's check
-    refuses is answered 401, one without the resource's scope 403, and one that holds a plain
-    403, each without any session. On the other paths the token
-    must come from ``relying_party``'s issuer, name its client as the only
+    resource's entry point a token the resource's check refuses is answered 401, one without
+    the resource's scope 403, and one that holds but whose person the resource does not
+    admit a plain 403, each without any session; an admitted token is the capped person,
+    recorded for ``resource_person`` and for this request's method alone. On the other paths
+    the token must come from ``relying_party``'s issuer, name its client as the only
     audience and carry an ``azp`` among the parties of the path's kind. At the entry point
     the only audience is the resource's URL and the parties are the resource's. A machine
     path also needs ``admission.admin_group`` or a group below it. On a person path
@@ -238,8 +248,9 @@ class _Refusal(Enum):
     ``RESOURCE_INSUFFICIENT_SCOPE`` refuse the resource's entry point, which names its
     metadata and scope; on a person path ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry
     neither and ``NOT_A_MEMBER`` and ``USERNAME_TAKEN`` belong to it alone.
-    ``RESOURCE_HOLDER`` is the entry point's answer to a token that holds; a new sign-in
-    cannot change it, so it carries no challenge a client would answer with one.
+    ``RESOURCE_NOT_ADMITTED`` is the entry point's answer to a token that holds but whose
+    person is unknown or outside the required group; a new sign-in cannot change it, so it
+    carries no challenge a client would answer with one.
     """
 
     NO_CREDENTIALS = (401, None, _AUTHENTICATION_REQUIRED_DETAIL)
@@ -247,7 +258,7 @@ class _Refusal(Enum):
     INVALID_TOKEN = (401, "invalid_token", "Invalid token")
     INSUFFICIENT_SCOPE = (403, "insufficient_scope", _ADMIN_REQUIRED_DETAIL)
     RESOURCE_INSUFFICIENT_SCOPE = (403, "insufficient_scope", "Insufficient scope")
-    RESOURCE_HOLDER = (403, None, "Access denied")
+    RESOURCE_NOT_ADMITTED = (403, None, "Access denied")
     NOT_A_MEMBER = (403, None, "No access")
     USERNAME_TAKEN = (403, None, "Login failed")
 
@@ -289,9 +300,10 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     Every request the paths select is verified from its own ``Authorization``
     header; the cookie, CSRF and the session gate decide nothing there. On a machine
     path only an admin's token passes and the caller is recorded for
-    ``bearer_caller``. The resource's entry point is refused on every method, before CSRF
-    and the session gate: with the challenge of its metadata, except a token that holds,
-    which gets a plain 403. On a person path a bearer
+    ``bearer_caller``. The resource's entry point is decided on every method, before CSRF
+    and the session gate: a refusal carries the challenge of its metadata, except a token that
+    holds whose person is not admitted, which gets a plain 403; an admitted agent is the capped
+    person. On a person path a bearer
     credential is the account behind the token, recorded for the session readers; a request
     with no bearer credential is decided by the session as it is outside the gate. Every
     method is gated, HEAD and OPTIONS included.
@@ -342,7 +354,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         request: Request,
         resource: ProtectedResource,
         verify: Callable[[str], VerifiedAccessToken | OidcRefusal],
-    ) -> JSONResponse:
+    ) -> JSONResponse | None:
         challenge = resource.challenge_parameters
         credential = _credential_of(request)
         if isinstance(credential, _Refusal):
@@ -355,7 +367,20 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 else _Refusal.INVALID_TOKEN
             )
             return self._refused(refusal, verified, challenge=challenge)
-        return self._refused(_Refusal.RESOURCE_HOLDER)
+        person = await _on_worker(
+            partial(
+                _admit_resource_holder,
+                resource.transaction,
+                verified,
+                required_group=resource.required_group,
+                admission=self._policy.admission,
+                config=web_auth_config(request),
+            ),
+        )
+        if person is None:
+            return self._refused(_Refusal.RESOURCE_NOT_ADMITTED)
+        _record_bearer_admission(request, person, resource_method=request.method)
+        return None
 
     async def _person_refusal(
         self, request: Request, person_paths: PersonPaths,
@@ -463,6 +488,28 @@ def bearer_caller(connection: HTTPConnection) -> BearerCaller:
             "The bearer gate admitted no caller for this request: install it with "
             "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
             "route, and select the route's path as a machine path.",
+        )
+    return admission.principal
+
+
+def resource_person(connection: HTTPConnection) -> AuthenticatedUser:
+    """The capped person the resource's entry point admitted for this request.
+
+    Raises ``RuntimeError`` when the gate admitted no resource person for this request: the
+    request is a session, person or machine request, the route runs in a sub-app, or a
+    middleware changed the ``Authorization`` header or the method after admission. A
+    forgotten gate never reads as a person.
+    """
+    admission = _bearer_admission(connection)
+    if (
+        admission is None
+        or admission.resource_method is None
+        or not isinstance(admission.principal, AuthenticatedUser)
+    ):
+        raise RuntimeError(
+            "The bearer gate admitted no resource person for this request: install it with "
+            "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
+            "route, and read the person on the resource's entry point itself.",
         )
     return admission.principal
 

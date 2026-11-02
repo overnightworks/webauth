@@ -10,6 +10,7 @@ from webauth.middleware.bearer_gate import (
     ProtectedResource,
     bearer_caller,
     install_resource_metadata,
+    resource_person,
 )
 from webauth.middleware.body_size import BodySizeLimitMiddleware, RequestBodyTooLarge
 from webauth.middleware.csrf import CsrfOriginMiddleware
@@ -41,4 +42,5 @@ __all__ = [
     "bearer_caller",
     "install_resource_metadata",
     "install_web_auth_middleware",
+    "resource_person",
 ]

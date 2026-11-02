@@ -1,5 +1,6 @@
-"""The bearer gate's protected resource: its entry point answers the challenge and admits no
-token, its metadata document names it, and every other path is decided as without it.
+"""The bearer gate's protected resource: its entry point answers the challenge and admits an
+agent's token as a capped person, its metadata document names it, and every other path is
+decided as without it.
 
 The app is the real stack over `an_auth_app` behind the session gate, with the host's routes
 of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
@@ -8,23 +9,27 @@ of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import NoReturn
 from urllib.parse import urlsplit
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
 from starlette.testclient import TestClient
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
     EXPORT_PATH,
-    HAL_ONLY,
     PERSON_ME_PATH,
     PERSON_PATHS,
     REALM,
+    RESOURCE_GROUP,
     BearerApp,
     a_bearer_app,
+    a_known_person,
     a_resource,
     a_resource_token,
     a_token,
@@ -34,14 +39,18 @@ from tests.support.gate_arrangement import (
 from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_NOW,
+    OPERATOR_SUBJECT,
     REALM_ISSUER,
     an_access_token,
 )
+from tests.support.oidc_login_host import RecordingSignInTransaction, StoreDown, failing
+from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
     ProtectedResource,
     admitted_user,
     bearer_caller,
     install_resource_metadata,
+    resource_person,
 )
 from webauth.policies import AuthorizedParties, PathRules
 
@@ -107,6 +116,11 @@ def assert_no_bearer_admission(
         bearer_caller(connection)
     with pytest.raises(RuntimeError):
         admitted_user(connection)
+
+
+def the_accounts(app: BearerApp) -> list[FakeUser]:
+    assert app.accounts is not None
+    return app.accounts.list()
 
 
 def refusing_a_session_transaction() -> NoReturn:
@@ -239,7 +253,7 @@ def test_a_resource_token_without_the_scope_is_an_insufficient_scope_with_the_ch
     "scope", ["mcp:tools", "openid mcp:tools", "mcp:tools profile", "openid mcp:tools profile"],
 )
 @EVERY_METHOD
-def test_a_token_that_holds_still_gets_a_plain_403_and_admits_nothing(
+def test_a_token_that_holds_but_not_the_group_gets_a_plain_403_and_admits_nothing(
     resource: ProtectedResource, method: str, scope: str,
 ) -> None:
     app = a_resource_app_refusing_a_session_transaction(resource)
@@ -270,27 +284,32 @@ def test_the_key_set_is_fetched_once_for_two_requests_at_the_entry_point(
 
 def test_a_token_for_the_resource_is_refused_on_a_person_path_and_a_machine_path() -> None:
     resource = a_resource()
-    app = a_bearer_app(person_paths=PERSON_PATHS, resource=resource)
-    token = a_resource_token(resource)
+    app = a_bearer_app(
+        person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
+    )
+    token = a_resource_token(resource, groups=[RESOURCE_GROUP])
 
     on_person_path = app.ask(PERSON_ME_PATH, authorization=bearing(token))
     on_machine_path = app.ask(EXPORT_PATH, authorization=bearing(token))
+    elsewhere = app.ask("/elsewhere", authorization=bearing(token))
 
     assert on_person_path.status_code == on_machine_path.status_code == 401
     assert on_person_path.headers["www-authenticate"] == 'Bearer error="invalid_token"'
     assert on_machine_path.headers["www-authenticate"] == f'{REALM}, error="invalid_token"'
+    assert (elsewhere.status_code, "www-authenticate" in elsewhere.headers) == (401, False)
+    assert {user.id for user in the_accounts(app)} == {OPERATOR_SUBJECT, "user-1"}
+    assert app.audit.account_events == []
 
 
 def test_a_party_listed_only_on_the_resource_is_refused_on_the_other_kinds() -> None:
     resource = a_resource(parties=AuthorizedParties(frozenset({"agent"})))
-    app = a_bearer_app(person_paths=PERSON_PATHS, resource=resource)
-    token = a_resource_token(resource, azp="agent")
+    app = a_bearer_app(
+        person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
+    )
+    token = a_resource_token(resource, azp="agent", groups=[RESOURCE_GROUP])
     app_token = a_token(azp="agent")
 
-    at_entry_point = entry_point_answer(app, resource, token)
-
-    assert at_entry_point[0] == 403
-    assert "insufficient_scope" not in at_entry_point[1]
+    assert entry_point_answer(app, resource, token) == (200, "")
     assert app.ask(PERSON_ME_PATH, authorization=bearing(app_token)).status_code == 401
     assert app.ask(EXPORT_PATH, authorization=bearing(app_token)).status_code == 401
 
@@ -309,7 +328,7 @@ def test_a_party_listed_only_on_a_person_or_machine_kind_is_refused_at_the_entry
 @pytest.mark.parametrize("parties", ["hal", frozenset({"hal"}), None])
 def test_a_resource_with_anything_but_authorized_parties_raises(parties: object) -> None:
     with pytest.raises(TypeError, match="authorized_parties"):
-        ProtectedResource("https://app.example/mcp", "mcp:tools", parties)  # type: ignore[arg-type]
+        replace(a_resource(), authorized_parties=parties)  # type: ignore[arg-type]
 
 
 def test_a_credential_the_gate_refuses_is_answered_by_that_refusal_with_the_challenge(
@@ -481,9 +500,232 @@ def test_a_url_outside_the_resource_url_rule_is_refused(url: str) -> None:
 @pytest.mark.parametrize("scope", ["", "two scopes", 'quo"te', "back\\slash", "tab\t", "ü"])
 def test_a_scope_that_is_not_one_scope_token_is_refused(scope: str) -> None:
     with pytest.raises(ValueError, match="scope"):
-        ProtectedResource("https://app.example/mcp", scope, HAL_ONLY)
+        replace(a_resource(), scope=scope)
 
 
 def test_a_non_string_scope_is_refused() -> None:
     with pytest.raises(ValueError, match="scope"):
-        ProtectedResource("https://app.example/mcp", ("mcp:tools",), HAL_ONLY)  # type: ignore[arg-type]
+        replace(a_resource(), scope=("mcp:tools",))  # type: ignore[arg-type]
+
+
+def an_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
+    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
+
+
+def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
+    return next((user for user in the_accounts(app) if user.id == OPERATOR_SUBJECT), None)
+
+
+def the_transaction(app: BearerApp) -> RecordingSignInTransaction:
+    assert isinstance(app.transaction, RecordingSignInTransaction)
+    return app.transaction
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT"])
+@pytest.mark.parametrize(
+    "sent", [{}, {"origin": "https://evil.example"}], ids=["plain", "foreign-origin"],
+)
+def test_a_known_person_in_the_group_is_admitted_with_no_cookie_and_the_person_role(
+    resource: ProtectedResource, method: str, sent: dict[str, str],
+) -> None:
+    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+
+    response = app.ask(
+        resource.entry_point, method=method, authorization=bearing(an_agent_token(resource)),
+        headers=sent,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE}
+    assert response.headers["cache-control"] == "no-store"
+    assert app.audit.account_events == []
+
+
+@pytest.mark.parametrize(
+    "groups", [["/apps/x/mcp/sub"], ["/apps/x/mcp", "/apps/x/admin"]], ids=["subgroup", "admin"],
+)
+def test_a_subgroup_of_the_required_group_counts_and_an_admin_group_adds_nothing(
+    resource: ProtectedResource, groups: list[str],
+) -> None:
+    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+
+    token = bearing(an_agent_token(resource, *groups))
+
+    response = app.ask(resource.entry_point, authorization=token)
+
+    assert (response.status_code, response.json()["role"]) == (200, MEMBER_ROLE)
+
+
+def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
+    resource: ProtectedResource, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = a_bearer_app(
+        paths=PathRules(), resource=resource, known_accounts=(a_known_person(ADMIN_ROLE),),
+    )
+    assert app.accounts is not None
+    failing(app.accounts, "set_role", monkeypatch)
+    token = bearing(an_agent_token(resource, RESOURCE_GROUP, "/apps/x/admin"))
+
+    posted = app.ask(resource.entry_point, method="POST", authorization=token)
+    admin_only = app.ask(resource.entry_point, method="DELETE", authorization=token)
+
+    assert (posted.status_code, posted.json()["role"]) == (200, MEMBER_ROLE)
+    assert admin_only.status_code == 403
+    stored = the_account_of_the_token(app)
+    assert stored is not None
+    assert stored.role == ADMIN_ROLE
+    assert app.audit.account_events == []
+
+
+@pytest.mark.parametrize(
+    "groups", [[], ["/apps/x"], ["/apps/x/mcp2"], ["/apps/x/other"]],
+    ids=["none", "login-group-only", "sibling-prefix", "sibling"],
+)
+def test_a_person_without_the_required_group_gets_the_plain_403_and_the_store_is_untouched(
+    resource: ProtectedResource, groups: list[str],
+) -> None:
+    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+
+    response = app.ask(
+        resource.entry_point, method="POST",
+        authorization=bearing(a_resource_token(resource, groups=groups)),
+    )
+
+    assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
+    assert "www-authenticate" not in response.headers
+    assert (the_transaction(app).entries, app.audit.account_events) == (0, [])
+    assert app.auth.route_runs == []
+
+
+def test_a_person_outside_the_login_group_gets_the_plain_403_with_the_group_held() -> None:
+    resource = a_resource(required_group="/other/mcp")
+    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+
+    response = app.ask(
+        resource.entry_point, authorization=bearing(an_agent_token(resource, "/other/mcp")),
+    )
+
+    assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
+    assert (the_transaction(app).entries, app.audit.account_events) == (0, [])
+
+
+def test_an_unknown_subject_gets_the_plain_403_and_no_account_or_event_appears(
+    resource: ProtectedResource,
+) -> None:
+    app = a_bearer_app(paths=PathRules(), resource=resource)
+
+    response = app.ask(
+        resource.entry_point, method="POST", authorization=bearing(an_agent_token(resource)),
+    )
+
+    assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
+    assert "www-authenticate" not in response.headers
+    assert (the_account_of_the_token(app), app.audit.account_events) == (None, [])
+    assert app.auth.route_runs == []
+
+
+@pytest.mark.parametrize("failure", ["store", "exit"])
+def test_a_store_failure_in_the_admission_is_the_library_500_and_admits_nothing(
+    resource: ProtectedResource, failure: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+    assert app.accounts is not None
+    if failure == "store":
+        failing(app.accounts, "get", monkeypatch)
+    else:
+        the_transaction(app).exit_failure = StoreDown()
+
+    response = app.ask(
+        resource.entry_point, method="POST", authorization=bearing(an_agent_token(resource)),
+    )
+
+    assert response.status_code == 500
+    assert app.auth.route_runs == []
+
+
+def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
+    resource: ProtectedResource,
+) -> None:
+    app = a_bearer_app(
+        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        strict_records=True,
+    )
+
+    response = app.ask(resource.entry_point, authorization=bearing(an_agent_token(resource)))
+
+    assert (response.status_code, the_transaction(app).entries) == (200, 1)
+
+
+class Rewriting:
+    """A host middleware inside the stack that changes the request's method or app."""
+
+    def __init__(self, app: ASGIApp, changes: dict[str, object]) -> None:
+        self._app = app
+        self._changes = changes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            scope.update(self._changes)
+        await self._app(scope, receive, send)
+
+
+def a_resource_person_reader(app: BearerApp, path: str) -> None:
+    @app.auth.app.api_route(path, methods=["GET", "POST"])
+    def reading(request: Request) -> dict[str, str]:
+        return {"id": resource_person(request).id}
+
+
+@pytest.mark.parametrize(
+    ("changes", "status"),
+    [
+        pytest.param({"method": "PATCH"}, 500, id="method-to-current-user"),
+        pytest.param({"method": "GET"}, 500, id="method-to-another-reader"),
+        pytest.param({"app": FastAPI()}, 500, id="sub-app"),
+        pytest.param({"headers": [(b"authorization", b"Bearer other")]}, 500, id="header"),
+        pytest.param({}, 200, id="unchanged"),
+    ],
+)
+def test_the_resource_person_and_current_user_refuse_a_request_changed_after_admission(
+    resource: ProtectedResource, changes: dict[str, object], status: int,
+) -> None:
+    app = a_bearer_app(
+        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        inner_middleware=(Middleware(Rewriting, changes=changes),),
+    )
+
+    response = app.ask(
+        resource.entry_point, method="POST", authorization=bearing(an_agent_token(resource)),
+    )
+
+    assert response.status_code == status
+
+
+@pytest.mark.parametrize(
+    ("path", "asked"),
+    [
+        pytest.param("/plain", {"cookie": True}, id="session"),
+        pytest.param(f"{PERSON_ME_PATH}-reader", {"authorization": bearing(A_TOKEN)}, id="person"),
+        pytest.param(
+            f"{EXPORT_PATH}-reader", {"authorization": bearing(A_TOKEN)}, id="machine",
+        ),
+    ],
+)
+def test_the_resource_person_raises_on_a_session_person_and_machine_request(
+    resource: ProtectedResource, path: str, asked: dict[str, object],
+) -> None:
+    app = a_bearer_app(
+        person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
+    )
+    a_resource_person_reader(app, path)
+
+    response = app.ask(path, **asked)  # type: ignore[arg-type]
+
+    assert response.status_code == 500
+
+
+@pytest.mark.parametrize(
+    "group", ["", "apps/x/mcp", "/", "/apps//mcp", "/apps/x/mcp ", "/a\u200bb"],
+)
+def test_a_required_group_that_is_not_a_group_path_is_refused(group: str) -> None:
+    with pytest.raises(ValueError, match="required_group"):
+        a_resource(required_group=group)
