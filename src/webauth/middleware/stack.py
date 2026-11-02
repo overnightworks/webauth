@@ -44,8 +44,8 @@ def _library_middleware(
     session_gate: SessionGate | None,
 ) -> list[Middleware]:
     """The middleware to install, outermost first, for the policies the host named."""
-    if bearer_gate is not None:
-        no_store = CacheControlRule(bearer_gate.paths, "no-store")
+    if bearer_gate is not None and bearer_gate.machine_paths is not None:
+        no_store = CacheControlRule(bearer_gate.machine_paths.paths, "no-store")
         security_headers = replace(
             security_headers,
             cache_control_rules=(no_store, *security_headers.cache_control_rules),
@@ -96,8 +96,8 @@ def install_web_auth_middleware(
     and a forged state-changing request is refused before it renews a session.
     The bearer gate sits inside the rate limit, so a machine request spends the
     same budget, and outside CSRF and the session gate, so neither decides a
-    machine path by a cookie. With a bearer gate the installed security-headers
-    policy carries the gate's ``no-store`` rule first, so it beats a host rule.
+    machine path by a cookie. With a bearer gate that has machine paths the installed
+    security-headers policy carries their ``no-store`` rule first, so it beats a host rule.
 
     Install once and add no library middleware yourself; an app that already
     carries one, a subclass included, is refused untouched (``RuntimeError``).

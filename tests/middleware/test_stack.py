@@ -48,6 +48,7 @@ from webauth.middleware import (
     BodySizeLimitMiddleware,
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
+    MachinePaths,
     SecurityHeadersMiddleware,
     SessionGate,
     SessionGateMiddleware,
@@ -80,12 +81,13 @@ A_SESSION_GATE = SessionGate(
     public=(),
 )
 A_BEARER_GATE = BearerGate(
-    paths=PathRules(prefixes=("/api/admin/",)),
     relying_party=a_relying_party(),
     admission=AdmissionConfig(
         bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
     ),
-    authorized_parties=AuthorizedParties(frozenset({"hal"})),
+    machine_paths=MachinePaths(
+        PathRules(prefixes=("/api/admin/",)), AuthorizedParties(frozenset({"hal"})),
+    ),
 )
 FOREIGN = {"origin": FOREIGN_ORIGIN}
 FORM = "application/x-www-form-urlencoded"

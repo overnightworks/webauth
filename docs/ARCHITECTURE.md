@@ -91,9 +91,9 @@ Install once, adding no library middleware yourself; its docstring explains plac
 
 [Host requirements/outcomes](host-contract.md#the-hosts-machine-routes), the [person paths](host-contract.md#the-persons-token-on-the-apps-api) and [refusals](host-contract.md#signed-out-and-refused) have one owner.
 The gate runs `OidcRelyingParty.verify_access_token` off-loop, then `app_role`; only admission records app/path/header SHA-256 in request memory, never the token.
-On a machine path the record holds a `BearerCaller`. On a person path (`PersonPaths`) the gate admits the account behind the token with the sign-in's own `app_role` and account step in one `SignInTransaction` entry, off-loop, and records an `AuthenticatedUser`; a request with no bearer credential falls through to the cookie. A path both rules select is a machine path.
+Each kind of path (`MachinePaths`, `PersonPaths`) names its own `AuthorizedParties`; each kind admits only the clients it lists, so a client listed on one is not thereby admitted on the other. On a machine path the record holds a `BearerCaller`. On a person path (`PersonPaths`) the gate admits the account behind the token with the sign-in's own `app_role` and account step in one `SignInTransaction` entry, off-loop, and records an `AuthenticatedUser`; a request with no bearer credential falls through to the cookie. A path both rules select is a machine path.
 CSRF, session gate, `bearer_caller`, `current_user` and `admitted_user` read strictly: another app/path/header is no admission. `session_id_from_request` and the loose reader refuse more: a bearer-admitted request names no session.
-The gate sits inside rate limiting; installation puts its paths' `no-store` rule first in security-header policy.
+The gate sits inside rate limiting; installation puts the machine paths' `no-store` rule first in security-header policy.
 
 ### Reading the session
 

@@ -46,6 +46,7 @@ from webauth.dependencies import (
 )
 from webauth.middleware import (
     BearerGate,
+    MachinePaths,
     PersonPaths,
     admitted_admin,
     admitted_user,
@@ -83,6 +84,7 @@ REALM_INSUFFICIENT_SCOPE = f'{REALM}, error="insufficient_scope"'
 ADMISSION = AdmissionConfig(
     bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
 )
+HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
 FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
@@ -108,12 +110,15 @@ def a_bearer_gate(
     clock: FakeClock | None = None,
     person_paths: PersonPaths | None = None,
     admission: AdmissionConfig = ADMISSION,
+    machine_parties: AuthorizedParties = HAL_ONLY,
 ) -> BearerGate:
+    """A gate whose machine paths are `paths` (none when empty), admitting `machine_parties`."""
     return BearerGate(
-        paths=paths,
         relying_party=a_relying_party(fetch_key_set=key_sets, wall_clock=clock),
         admission=admission,
-        authorized_parties=AuthorizedParties(frozenset({"hal"})),
+        machine_paths=(
+            None if paths == PathRules() else MachinePaths(paths, machine_parties)
+        ),
         person_paths=person_paths,
     )
 
@@ -287,10 +292,25 @@ def _stack_policies(
     return {**stack, **(policies or {})}
 
 
+def _a_gate_over(
+    paths: PathRules, key_sets: FakeKeySetEndpoint, clock: FakeClock,
+    machine_parties: AuthorizedParties, person_paths: PathRules | None,
+    person_parties: AuthorizedParties, transaction: SignInTransaction,
+) -> tuple[PersonPaths | None, BearerGate]:
+    person = PersonPaths(person_paths, person_parties, transaction) if person_paths else None
+    gate = a_bearer_gate(
+        paths=paths, key_sets=key_sets, clock=clock,
+        person_paths=person, machine_parties=machine_parties,
+    )
+    return person, gate
+
+
 def a_bearer_app(
     *,
     paths: PathRules = MACHINE_PATHS,
     person_paths: PathRules | None = None,
+    machine_parties: AuthorizedParties = HAL_ONLY,
+    person_parties: AuthorizedParties = HAL_ONLY,
     session_gate: bool = True,
     transaction_kind: TransactionKind = TransactionKind.PER_CALL,
     transaction: SignInTransaction | None = None,
@@ -320,8 +340,9 @@ def a_bearer_app(
         auth_app_keywords.pop("sessions", None),
     )
     used_transaction = transaction or side.transaction
-    person = PersonPaths(person_paths, used_transaction) if person_paths else None
-    gate = a_bearer_gate(paths=paths, key_sets=key_sets, clock=clock, person_paths=person)
+    person, gate = _a_gate_over(
+        paths, key_sets, clock, machine_parties, person_paths, person_parties, used_transaction,
+    )
     public = (*auth_app_keywords.pop("public", ()), *([FOREIGN_SECRET_PUBLIC] if person else []))
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
     auth = an_auth_app(
@@ -335,15 +356,13 @@ def a_bearer_app(
     )
     if not session_gate:
         install_web_auth_middleware(auth.app, **{**GATED_STACK_POLICIES, **stack_policies})
-
     auth.app.user_middleware.extend(inner_middleware)
     add_machine_routes(auth)
     if person is not None:
         add_person_routes(auth, auth_app_keywords.get("login_redirect"))
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
-        accounts=side.accounts, audit=side.audit,
-        transaction=used_transaction,
+        accounts=side.accounts, audit=side.audit, transaction=used_transaction,
     )
 
 

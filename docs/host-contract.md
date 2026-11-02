@@ -262,10 +262,10 @@ added the enforcing gate. Its page, API and public-path proofs are
 hal is the operator's CLI for calling an app's machine routes with a bearer
 token. A host declares its machine (admin) paths once, and hal calls them with
 the access token Keycloak issued it in `Authorization: Bearer`. `BearerGate` is passed to
-`install_web_auth_middleware(bearer_gate=...)`; it holds the paths
-(`PathRules`), the app's own `OidcRelyingParty`, the app's `AdmissionConfig` and
-`AuthorizedParties`, the `azp` values (hal's client ids) the host admits, read
-from configuration. A route reads the admitted caller with
+`install_web_auth_middleware(bearer_gate=...)`; it holds the app's own
+`OidcRelyingParty`, the app's `AdmissionConfig` and `MachinePaths(paths, authorized_parties)`:
+the paths (`PathRules`) and `AuthorizedParties`, the `azp` values (hal's client ids) the host
+admits on them, read from configuration. A route reads the admitted caller with
 `Depends(bearer_caller)`; `BearerCaller.subject` is the token's `sub`, with no
 account and no role. This follows
 [#350](https://github.com/overnightworks/webauth/issues/350), operator ruling
@@ -312,9 +312,9 @@ is its implementation, not a separate ruling.
 
 A token created through hal can call an app's ordinary API with exactly the rights of the
 person behind it, deletion included, and no layer sits on top of the person's rights.
-A host names its API paths in `PersonPaths(paths, transaction)` and passes it as
-`BearerGate(person_paths=...)`; the gate's `paths` may then be `PathRules()`
-(machine paths are optional, and a `NoAdmins` app may name person paths alone). On such a
+A host names its API paths in `PersonPaths(paths, authorized_parties, transaction)` and passes it
+as `BearerGate(person_paths=...)`; `machine_paths` may then be left out (a gate needs one kind
+of path, and a `NoAdmins` app may name person paths alone). On such a
 path `Authorization: Bearer` is the account behind the token: `current_user`, `admin_user`,
 `admitted_user` and `admitted_admin` return it as they return the browser's person, and no
 host route changes. This follows the operator's rulings of 23.10.2026 (a token carries the
@@ -339,8 +339,9 @@ layer), with the applied lines of
   session is created. Nothing is committed here: durability is the exit of the host's
   transaction, a store, audit or exit failure is the library 500, and no issuer call happens
   inside the block.
-- **Clients.** The same `AuthorizedParties` admits tokens on machine and person paths, so a
-  token that opens the API also opens the machine routes when its person is an admin.
+- **Clients.** Each kind of path names its own `AuthorizedParties`, so a client admitted on the
+  person paths is refused on the machine routes unless `MachinePaths` lists it too, and the
+  other way round. No empty set admits anybody.
 - **No origin, no cookie.** A verified token request bypasses the CSRF origin check, so a
   CLI needs no `Origin`. A cookie-only request is checked as before.
 - **The cookie beside a token.** The token decides and the cookie names no session for that

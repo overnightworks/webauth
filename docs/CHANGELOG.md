@@ -12,6 +12,7 @@ releases without an entry are described in the
 **Breaking**
 
 - `ServiceIdentity.max_workload_seconds` and `CallerRefusalReason.WORKLOAD_LIVES_TOO_LONG` are removed: `ServiceCallerCheck` no longer compares a workload token's `exp - iat`. The issuer owns the token's lifetime, and Keycloak stamps `exp - iat` as the lifespan or the lifespan + 1, so the cap refused a valid token now and then. `exp`, `iat` and `nbf` stay checked against the clock with `leeway_seconds`. A host deletes the `max_workload_seconds` argument and any mapping of the reason.
+- `BearerGate` loses `paths` and `authorized_parties` and gains `machine_paths: MachinePaths | None = None`; `webauth.middleware.MachinePaths(paths, authorized_parties)` is new, and `PersonPaths` gains a required `authorized_parties`, so each kind of path admits only its own clients (a client listed only on one kind is refused on the other). A gate needs at least one kind. To keep today's behaviour a host passes `BearerGate(relying_party=..., admission=..., machine_paths=MachinePaths(machine_rules, parties), person_paths=PersonPaths(person_rules, parties, transaction))`, with its former `paths` as `machine_rules`, its former person `PathRules` as `person_rules` (a path both kinds select stays a machine path, since the gate tries the machine paths first, so rules a host already had keep their meaning) and the same `parties` on both; a host that passed `paths=PathRules()` leaves `machine_paths` out. The `no-store` rule follows the machine paths and is absent when the gate has none.
 
 ## 0.27.0 - 2026-10-31
 
