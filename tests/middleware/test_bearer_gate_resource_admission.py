@@ -14,7 +14,6 @@ import pytest
 from fastapi import FastAPI, Request
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
@@ -23,19 +22,22 @@ from tests.support.gate_arrangement import (
     PERSON_PATHS,
     RESOURCE_GROUP,
     BearerApp,
+    RewritingTheRequest,
     a_bearer_app,
     a_known_person,
     a_resource,
     a_resource_token,
+    an_agent_token,
     assert_no_bearer_admission,
     bearing,
     relayed,
     the_accounts,
+    the_transaction,
 )
 from tests.support.oidc_arrangement import (
     OPERATOR_SUBJECT,
 )
-from tests.support.oidc_login_host import RecordingSignInTransaction, StoreDown, failing
+from tests.support.oidc_login_host import StoreDown, failing
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
     BearerGateMiddleware,
@@ -52,17 +54,8 @@ def resource() -> ProtectedResource:
     return a_resource()
 
 
-def an_agent_token(resource: ProtectedResource, *groups: str) -> str:
-    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP])
-
-
 def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
     return next((user for user in the_accounts(app) if user.id == OPERATOR_SUBJECT), None)
-
-
-def the_transaction(app: BearerApp) -> RecordingSignInTransaction:
-    assert isinstance(app.transaction, RecordingSignInTransaction)
-    return app.transaction
 
 
 @pytest.mark.parametrize("method", ["GET", "POST", "PUT"])
@@ -222,19 +215,6 @@ def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
     assert (response.status_code, the_transaction(app).entries) == (200, 1)
 
 
-class Rewriting:
-    """A host middleware inside the stack that changes the request's method or app."""
-
-    def __init__(self, app: ASGIApp, changes: dict[str, object]) -> None:
-        self._app = app
-        self._changes = changes
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
-            scope.update(self._changes)
-        await self._app(scope, receive, send)
-
-
 REFUSED_AS_RUNTIME_ERROR = 418
 
 
@@ -284,7 +264,7 @@ def test_the_resource_person_and_current_user_refuse_a_request_changed_after_adm
 ) -> None:
     app = a_bearer_app(
         paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
-        inner_middleware=(Middleware(Rewriting, changes=changes),),
+        inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
     )
     answering_a_runtime_error_with_418(app)
 
@@ -307,7 +287,7 @@ def test_admitted_user_reads_the_resource_person_and_refuses_a_method_changed_af
 ) -> None:
     app = a_bearer_app(
         paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
-        inner_middleware=(Middleware(Rewriting, changes=changes),),
+        inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
     )
     an_admitted_user_reader(app, resource)
     answering_a_runtime_error_with_418(app)
@@ -329,7 +309,7 @@ def test_csrf_refuses_a_request_made_mutating_after_admission(
     resource: ProtectedResource, changes: dict[str, object], status: int,
 ) -> None:
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
-    between_the_bearer_gate_and_csrf(app, Middleware(Rewriting, changes=changes))
+    between_the_bearer_gate_and_csrf(app, Middleware(RewritingTheRequest, changes=changes))
 
     response = app.ask(
         resource.entry_point, method="GET", authorization=bearing(an_agent_token(resource)),

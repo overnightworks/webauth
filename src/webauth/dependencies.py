@@ -14,8 +14,8 @@ afterwards does not undo it.
 A request the bearer gate admitted carries no session: the records below let
 the CSRF origin check and the session gate step aside for it. On a machine path
 `current_user` raises, because a machine route asks for `bearer_caller` instead;
-on a person path, and at a resource's entry point for its own method, the record holds
-the account behind the token, and `current_user` returns it.
+on a person path, and at a resource's entry point or marked route for its own method, the
+record holds the account behind the token, and `current_user` returns it.
 """
 
 from __future__ import annotations
@@ -471,8 +471,8 @@ class _BearerAdmission:
 
     ``principal`` is the machine's ``BearerCaller`` on a machine path and the
     account behind the token on a person path. ``resource_method`` is the request method of
-    a resource admission, which holds for that method alone; a person path's record leaves it
-    unset.
+    a resource admission, at its entry point or on a marked route, which holds for that method
+    alone; a person path's record leaves it unset.
 
     Only a SHA-256 digest of the `Authorization` value is kept, in request
     memory, so the record does not store the token. It says the gate admitted
@@ -485,6 +485,10 @@ class _BearerAdmission:
     authorization_digest: bytes
     principal: ports.BearerCaller | ports.AuthenticatedUser
     resource_method: str | None = None
+
+    @property
+    def is_resource_admission(self) -> bool:
+        return self.resource_method is not None
 
 
 def _authorization_digest(authorization: str) -> bytes:
@@ -523,7 +527,7 @@ def _bearer_admission(connection: HTTPConnection) -> _BearerAdmission | None:
         record.app is not connection.scope.get("app")
         or record.path != connection.scope["path"]
         or (
-            record.resource_method is not None
+            record.is_resource_admission
             and record.resource_method != connection.scope.get("method")
         )
         or len(authorizations) != 1
@@ -547,8 +551,8 @@ def _is_person_admitted(connection: HTTPConnection) -> bool:
 
 
 def _admitted_token_person(connection: HTTPConnection) -> ports.AuthenticatedUser | None:
-    """The account the bearer gate admitted for this very request on a person path or at a
-    resource's entry point."""
+    """The account the bearer gate admitted for this very request on a person path, at a
+    resource's entry point or on its marked route."""
     admission = _bearer_admission(connection)
     if admission is None or not isinstance(admission.principal, ports.AuthenticatedUser):
         return None
@@ -586,11 +590,17 @@ def _require_admin(
 ) -> ports.AuthenticatedUser:
     """The account itself when its role is the configured admin role; else the 403.
 
-    The 403 of a person the bearer gate admitted carries ``insufficient_scope``.
+    The 403 of a person a person path admitted carries ``insufficient_scope``; a resource's
+    admission is capped for good, so a new sign-in cannot help and its 403 carries no challenge.
     """
     if user.role != web_auth_config(connection).admin_role:
-        is_token_person = _admitted_token_person(connection) is not None
-        challenge = _PERSON_PATH_INSUFFICIENT_SCOPE if is_token_person else None
+        admission = _bearer_admission(connection)
+        is_person_path_token = (
+            admission is not None
+            and not admission.is_resource_admission
+            and isinstance(admission.principal, ports.AuthenticatedUser)
+        )
+        challenge = _PERSON_PATH_INSUFFICIENT_SCOPE if is_person_path_token else None
         raise HTTPException(
             403,
             _ADMIN_REQUIRED_DETAIL,

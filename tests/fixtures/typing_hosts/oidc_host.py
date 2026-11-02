@@ -62,6 +62,7 @@ from webauth.middleware import (
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
     MachinePaths,
+    MarkedRoute,
     PersonPaths,
     ProtectedResource,
     SecurityHeadersMiddleware,
@@ -342,6 +343,7 @@ def a_host_declares_its_resource(
             "/apps/host/mcp",
             AuthorizedParties(frozenset({"agent"})),
             transaction,
+            marked_routes=frozenset({MarkedRoute("GET", "/notes/{note}")}),
         ),
     )
 

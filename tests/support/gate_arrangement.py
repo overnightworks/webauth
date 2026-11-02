@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
@@ -52,6 +52,7 @@ from webauth.dependencies import (
 from webauth.middleware import (
     BearerGate,
     MachinePaths,
+    MarkedRoute,
     PersonPaths,
     ProtectedResource,
     admitted_admin,
@@ -96,6 +97,26 @@ HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
 RESOURCE_URL = "https://app.example/mcp"
 RESOURCE_SCOPE = "mcp:tools"
 RESOURCE_GROUP = "/apps/x/mcp"
+EVERY_METHOD = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")
+MARKED_NOTE = MarkedRoute("GET", "/notes/{note}")
+MARKED_NEW_NOTE = MarkedRoute("POST", "/notes")
+MARKED_ADMIN_NOTES = MarkedRoute("GET", "/notes-admin")
+MARKED_PERSON_NOTE = MarkedRoute("GET", "/api/notes/{note}")
+MARKED_UNDER_MACHINE = MarkedRoute("GET", "/api/admin/notes/{note}")
+MARKED_RESOURCE_PERSON = MarkedRoute("POST", "/readers/resource-person")
+MARKED_ADMITTED_USER = MarkedRoute("POST", "/readers/admitted-user")
+MARKED_ROUTES = frozenset({
+    MARKED_NOTE, MARKED_NEW_NOTE, MARKED_ADMIN_NOTES, MARKED_PERSON_NOTE, MARKED_UNDER_MACHINE,
+    MARKED_RESOURCE_PERSON, MARKED_ADMITTED_USER,
+})
+A_NOTE = "/notes/7"
+A_PERSON_NOTE = "/api/notes/7"
+A_MACHINE_NOTE = "/api/admin/notes/7"
+RESOURCE_CHALLENGE = (
+    f'Bearer resource_metadata="https://app.example/.well-known/oauth-protected-resource/mcp", '
+    f'scope="{RESOURCE_SCOPE}"'
+)
+THE_COOKIE_PERSON = asdict(FakeUser(role=ADMIN_ROLE))
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
 FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
@@ -119,9 +140,12 @@ def a_resource(
     parties: AuthorizedParties = HAL_ONLY,
     required_group: str = RESOURCE_GROUP,
     transaction: SignInTransaction = an_unbound_transaction,
+    marked_routes: frozenset[MarkedRoute] = frozenset(),
 ) -> ProtectedResource:
     """A resource whose transaction `a_bearer_app` binds to its own when none is given."""
-    return ProtectedResource(url, RESOURCE_SCOPE, required_group, parties, transaction)
+    return ProtectedResource(
+        url, RESOURCE_SCOPE, required_group, parties, transaction, marked_routes,
+    )
 
 
 def a_known_person(role: str = MEMBER_ROLE) -> FakeUser:
@@ -133,6 +157,10 @@ def a_resource_token(resource: ProtectedResource | None = None, **claims: Any) -
     """A token hal holds for `resource` (default `a_resource()`): its audience and its scope."""
     held = resource or a_resource()
     return an_access_token(claims={"aud": held.url, "scope": held.scope, **claims})
+
+
+def an_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
+    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
 
 
 def bearing(token: str) -> tuple[str, ...]:
@@ -237,7 +265,7 @@ def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
 
     `POST` and the other methods echo `resource_person`; `PATCH` reads `current_user` and
     `DELETE` reads `admin_user`, so a request a middleware turns into one of them is judged by
-    the reader it reaches.
+    the reader it reaches. The resource's marked routes are served by `add_marked_routes`.
     """
     install_resource_metadata(auth.app, resource, issuer=REALM_ISSUER)
     dependencies = current_user_dependency(
@@ -263,6 +291,50 @@ def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
         request: Request, user: AuthenticatedUser = Depends(dependencies.admin_user),
     ) -> dict[str, str]:
         return echo(request, user)
+
+    add_marked_routes(auth, resource)
+
+
+def add_marked_routes(auth: AuthApp, resource: ProtectedResource) -> None:
+    """One host route per marked route, reading `current_user` unless its template names a
+    reader: `MARKED_ADMIN_NOTES` reads `admin_user`, `MARKED_RESOURCE_PERSON` reads
+    `resource_person` and `MARKED_ADMITTED_USER` reads `admitted_user`.
+    """
+    dependencies = current_user_dependency(
+        session_store=lambda: auth.sessions, on_authenticated=auth.authenticated.append,
+    )
+
+    def echo(request: Request, user: AuthenticatedUser | None) -> dict[str, str]:
+        auth.route_runs.append(request.scope["path"])
+        assert user is not None
+        return {"id": user.id, "username": user.username, "role": user.role}
+
+    def current(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str]:
+        return echo(request, user)
+
+    def admin(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.admin_user),
+    ) -> dict[str, str]:
+        return echo(request, user)
+
+    def person(request: Request) -> dict[str, str]:
+        return echo(request, resource_person(request))
+
+    def admitted(request: Request) -> dict[str, str]:
+        return echo(request, admitted_user(request))
+
+    readers = {
+        MARKED_ADMIN_NOTES.template: admin,
+        MARKED_RESOURCE_PERSON.template: person,
+        MARKED_ADMITTED_USER.template: admitted,
+    }
+    for route in resource.marked_routes:
+        auth.app.add_api_route(
+            route.template, readers.get(route.template, current), methods=list(EVERY_METHOD),
+            include_in_schema=False,
+        )
 
 
 def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None) -> None:
@@ -520,6 +592,20 @@ def with_admitted_admin_routes(app: AuthApp) -> AuthApp:
     return app
 
 
+class RewritingTheRequest:
+    """Inner middleware: changes the scope entries a host middleware could change after the
+    gate, such as the method, the app or the headers."""
+
+    def __init__(self, app: ASGIApp, changes: dict[str, object]) -> None:
+        self._app = app
+        self._changes = changes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            scope.update(self._changes)
+        await self._app(scope, receive, send)
+
+
 @dataclass
 class ScopeRelay:
     """What an outer host middleware saw the inner app add to the scope, and what it replays."""
@@ -566,6 +652,11 @@ def assert_no_bearer_admission(
         bearer_caller(connection)
     with pytest.raises(RuntimeError):
         admitted_user(connection)
+
+
+def the_transaction(app: BearerApp) -> RecordingSignInTransaction:
+    assert isinstance(app.transaction, RecordingSignInTransaction)
+    return app.transaction
 
 
 def the_accounts(app: BearerApp) -> list[FakeUser]:
