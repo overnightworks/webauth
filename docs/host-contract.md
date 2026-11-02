@@ -364,19 +364,28 @@ Keycloak in the hand-run harness.
 
 ## The protected resource
 
-A host that serves an MCP-style resource names it in `ProtectedResource(url, scope)` and passes
+A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, authorized_parties)` and passes
 it as `BearerGate(resource=...)`; a gate needs one kind of path, and the resource counts as one.
 `url` is the resource's identifier, an endpoint URL with a plain host, an optional port and a path of
 one or more segments of RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`), none
-being `.` or `..`, with no trailing slash; its path is the entry point; `scope` is the one scope token the challenge asks for. Everything else
+being `.` or `..`, with no trailing slash; its path is the entry point; `scope` is the one scope token the challenge asks for and a token must hold; `authorized_parties` (an `AuthorizedParties`, else `TypeError`) are the clients whose token the resource takes, apart from the parties of the machine and person paths. Everything else
 derives from `url`: the metadata path is `/.well-known/oauth-protected-resource` plus the entry
 point (RFC 9728 section 3.1), and the challenge names the metadata URL.
 
-**The resource admits no token yet.** At the entry point, on every method and the exact path only,
+**The resource admits no token yet.** A token for the resource is refused on the person and machine paths, and an app token is refused at the entry point; a party listed on one kind is not thereby listed on another. At the entry point, on every method and the exact path only,
 the gate answers before CSRF and the session gate and runs no route:
 
 - no credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`;
-- any bearer credential: 401 with `error="invalid_token"` and the same two parameters;
+- a token the resource's check refuses: 401 with `error="invalid_token"` and the same two
+  parameters. The check is `OidcRelyingParty.resource_token_verifier`: an RS256 `at+jwt` of the
+  relying party's issuer whose only audience is the resource's `url` (not the app's client ID,
+  not a list of two) and whose `azp` is one of the resource's parties;
+- a token that passes that but whose `scope` claim, read as space-separated tokens, lacks the
+  resource's scope (absent, not a string, another scope, or the scope only as a substring of
+  another): 403 with `error="insufficient_scope"` and the same two parameters;
+- a token that holds: a plain 403 without `WWW-Authenticate`, because a client answers
+  `insufficient_scope` with a new sign-in, which cannot help. No route runs and nothing is
+  recorded; the admission that replaces this answer is not built yet;
 - a credential the gate refuses (a repeated header, a malformed one): that refusal, with the same
   two parameters.
 

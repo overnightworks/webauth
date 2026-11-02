@@ -294,6 +294,17 @@ def a_host_verifies_an_access_token(
     )
 
 
+def a_host_verifies_a_resource_token(
+    relying_party: OidcRelyingParty, resource: ProtectedResource, access_token: str,
+) -> VerifiedAccessToken | OidcRefusal:
+    verify = relying_party.resource_token_verifier(
+        resource_url=resource.url,
+        scope=resource.scope,
+        authorized_parties=resource.authorized_parties,
+    )
+    return verify(access_token)
+
+
 def a_host_declares_its_machine_paths(
     relying_party: OidcRelyingParty, config: AdmissionConfig,
 ) -> BearerGate:

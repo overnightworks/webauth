@@ -32,6 +32,7 @@ from webauth.oidc import (
     _ACCESS_TOKEN,
     _PLAIN_AUTHORITY,
     OidcRefusal,
+    OidcRefusalReason,
     OidcRelyingParty,
     VerifiedAccessToken,
     _is_endpoint_url,
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
     from starlette.requests import Request
     from starlette.responses import Response
+    from starlette.types import ASGIApp
 
     from webauth.ports import SignInTransaction
 
@@ -137,8 +139,11 @@ class ProtectedResource:
 
     ``url`` is the resource's identifier and entry point: its path is the one path where
     the gate answers the challenge. The metadata document sits at the path RFC 9728
-    section 3.1 derives from it. ``scope`` is the one scope the challenge asks for. The
-    gate admits no token at the entry point yet. ``ValueError`` for a ``url`` that is
+    section 3.1 derives from it. ``scope`` is the one scope the challenge asks for and a token
+    must hold. A token passes there only with an ``azp`` among ``authorized_parties``, which
+    no other kind's parties extend; the gate admits no token at the entry point yet.
+    ``TypeError`` for ``authorized_parties`` that is not an ``AuthorizedParties``.
+    ``ValueError`` for a ``url`` that is
     not an endpoint URL with a plain host, an optional port and a path of one or more
     segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
     trailing slash, and for a ``scope`` that is not one scope token. So the path needs no
@@ -147,8 +152,10 @@ class ProtectedResource:
 
     url: str
     scope: str
+    authorized_parties: AuthorizedParties
 
     def __post_init__(self) -> None:
+        _require_parties(self.authorized_parties)
         if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
             raise ValueError(
                 "ProtectedResource.url must be an endpoint URL with a plain host and a path"
@@ -194,10 +201,12 @@ class BearerGate:
     ``machine_paths``, ``resource`` and ``person_paths`` are the host's three kinds of
     path; the machine and person paths have their own client parties, and a path two
     kinds select belongs to the first of machine, resource, person. At the
-    resource's entry point the gate refuses every request, with the challenge and
-    without any session: it admits no token yet. The token
+    resource's entry point the gate admits no token yet: a token the resource's check
+    refuses is answered 401, one without the resource's scope 403, and one that holds a plain
+    403, each without any session. On the other paths the token
     must come from ``relying_party``'s issuer, name its client as the only
-    audience and carry an ``azp`` among the parties of the path's kind. A machine
+    audience and carry an ``azp`` among the parties of the path's kind. At the entry point
+    the only audience is the resource's URL and the parties are the resource's. A machine
     path also needs ``admission.admin_group`` or a group below it. On a person path
     the token is the account behind its subject, admitted as a sign-in admits it.
     ``ValueError`` when the gate has no kind, for ``NoAdmins`` with machine
@@ -225,16 +234,20 @@ class BearerGate:
 class _Refusal(Enum):
     """The cases the gate refuses, each with its status, challenge error and detail.
 
-    The first four refuse a machine path, which names its realm; the first three also
-    refuse the resource's entry point, which names its metadata and scope; on a person path
-    ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry neither and the last two belong
-    to it alone.
+    The first four refuse a machine path, which names its realm; the first three and
+    ``RESOURCE_INSUFFICIENT_SCOPE`` refuse the resource's entry point, which names its
+    metadata and scope; on a person path ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry
+    neither and ``NOT_A_MEMBER`` and ``USERNAME_TAKEN`` belong to it alone.
+    ``RESOURCE_HOLDER`` is the entry point's answer to a token that holds, which only a
+    new sign-in could change, so it carries no challenge.
     """
 
     NO_CREDENTIALS = (401, None, _AUTHENTICATION_REQUIRED_DETAIL)
     INVALID_REQUEST = (401, "invalid_request", "Invalid request")
     INVALID_TOKEN = (401, "invalid_token", "Invalid token")
     INSUFFICIENT_SCOPE = (403, "insufficient_scope", _ADMIN_REQUIRED_DETAIL)
+    RESOURCE_INSUFFICIENT_SCOPE = (403, "insufficient_scope", "Insufficient scope")
+    RESOURCE_HOLDER = (403, None, "Access denied")
     NOT_A_MEMBER = (403, None, "No access")
     USERNAME_TAKEN = (403, None, "Login failed")
 
@@ -283,15 +296,27 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     method is gated, HEAD and OPTIONS included.
     """
 
+    def __init__(self, app: ASGIApp, policy: BearerGate) -> None:
+        super().__init__(app, policy)
+        resource = policy.resource
+        self._resource_check = None if resource is None else (
+            resource,
+            policy.relying_party.resource_token_verifier(
+                resource_url=resource.url,
+                scope=resource.scope,
+                authorized_parties=resource.authorized_parties,
+            ),
+        )
+
     async def _refusal(self, request: Request) -> Response | None:
         path = route_path(request.scope)
         machine_paths = self._policy.machine_paths
         person_paths = self._policy.person_paths
         if machine_paths is not None and machine_paths.paths.matches(path):
             return await self._machine_refusal(request, machine_paths)
-        resource = self._policy.resource
-        if resource is not None and resource.entry_point_rule.matches(path):
-            return self._resource_refusal(request, resource)
+        resource_check = self._resource_check
+        if resource_check is not None and resource_check[0].entry_point_rule.matches(path):
+            return await self._resource_refusal(request, *resource_check)
         if person_paths is not None and person_paths.paths.matches(path):
             _mark_person_path(request)
             return await self._person_refusal(request, person_paths)
@@ -311,11 +336,25 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         _record_bearer_admission(request, BearerCaller(subject=verified.subject))
         return None
 
-    def _resource_refusal(self, request: Request, resource: ProtectedResource) -> JSONResponse:
+    async def _resource_refusal(
+        self,
+        request: Request,
+        resource: ProtectedResource,
+        verify: Callable[[str], VerifiedAccessToken | OidcRefusal],
+    ) -> JSONResponse:
+        challenge = resource.challenge_parameters
         credential = _credential_of(request)
         if isinstance(credential, _Refusal):
-            return self._refused(credential, challenge=resource.challenge_parameters)
-        return self._refused(_Refusal.INVALID_TOKEN, challenge=resource.challenge_parameters)
+            return self._refused(credential, challenge=challenge)
+        verified = await _on_worker(partial(verify, credential))
+        if isinstance(verified, OidcRefusal):
+            refusal = (
+                _Refusal.RESOURCE_INSUFFICIENT_SCOPE
+                if verified.reason is OidcRefusalReason.INSUFFICIENT_SCOPE
+                else _Refusal.INVALID_TOKEN
+            )
+            return self._refused(refusal, verified, challenge=challenge)
+        return self._refused(_Refusal.RESOURCE_HOLDER)
 
     async def _person_refusal(
         self, request: Request, person_paths: PersonPaths,

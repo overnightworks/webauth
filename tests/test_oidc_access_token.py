@@ -301,3 +301,58 @@ def test_an_unavailable_key_set_refuses_the_token() -> None:
     outcome = verified(an_access_token(), key_sets=key_sets)
 
     assert outcome == rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+
+
+RESOURCE_URL = "https://app.example/mcp"
+
+
+def resource_verified(token: str, *, scope: str = "mcp:tools") -> VerifiedAccessToken | OidcRefusal:
+    verifier = a_relying_party(fetch_key_set=a_key_set()).resource_token_verifier(
+        resource_url=RESOURCE_URL, scope=scope, authorized_parties=HAL,
+    )
+    return verifier(token)
+
+
+def test_a_resource_token_yields_its_subject_and_groups_when_it_holds_the_scope() -> None:
+    token = an_access_token(claims={"aud": RESOURCE_URL, "scope": "openid mcp:tools"})
+
+    assert resource_verified(token) == VerifiedAccessToken(
+        subject=OPERATOR_SUBJECT, groups=("/apps/x/admin",), preferred_username=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("audience", "refusal"),
+    [
+        (APP_CLIENT_ID, rejected(RejectionReason.INVALID_AUDIENCE)),
+        ([RESOURCE_URL, APP_CLIENT_ID], OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)),
+    ],
+    ids=["the-app-alone", "two-audiences"],
+)
+def test_a_resource_token_must_name_the_resource_as_its_only_audience(
+    audience: Any, refusal: OidcRefusal,
+) -> None:
+    token = an_access_token(claims={"aud": audience, "scope": "mcp:tools"})
+
+    assert resource_verified(token) == refusal
+
+
+def test_a_resource_token_is_refused_by_the_app_verifier() -> None:
+    token = an_access_token(claims={"aud": RESOURCE_URL, "scope": "mcp:tools"})
+
+    assert isinstance(verified(token), OidcRefusal)
+
+
+@pytest.mark.parametrize("scope", [ABSENT, "mcp:other", "mcp:tools-more", ["mcp:tools"], 7])
+def test_a_resource_token_without_the_scope_is_an_insufficient_scope(scope: Any) -> None:
+    token = an_access_token(claims={"aud": RESOURCE_URL, "scope": scope})
+
+    assert resource_verified(token) == OidcRefusal(OidcRefusalReason.INSUFFICIENT_SCOPE)
+
+
+@pytest.mark.parametrize("parties", ["hal", frozenset({"hal"})], ids=["string", "frozenset"])
+def test_a_resource_verifier_for_anything_but_authorized_parties_raises(parties: Any) -> None:
+    with pytest.raises(TypeError, match="authorized_parties"):
+        a_relying_party().resource_token_verifier(
+            resource_url=RESOURCE_URL, scope="mcp:tools", authorized_parties=parties,
+        )
