@@ -7,7 +7,9 @@ from webauth.middleware.bearer_gate import (
     BearerGateMiddleware,
     MachinePaths,
     PersonPaths,
+    ProtectedResource,
     bearer_caller,
+    install_resource_metadata,
 )
 from webauth.middleware.body_size import BodySizeLimitMiddleware, RequestBodyTooLarge
 from webauth.middleware.csrf import CsrfOriginMiddleware
@@ -29,6 +31,7 @@ __all__ = [
     "IpRateLimitMiddleware",
     "MachinePaths",
     "PersonPaths",
+    "ProtectedResource",
     "RequestBodyTooLarge",
     "SecurityHeadersMiddleware",
     "SessionGate",
@@ -36,5 +39,6 @@ __all__ = [
     "admitted_admin",
     "admitted_user",
     "bearer_caller",
+    "install_resource_metadata",
     "install_web_auth_middleware",
 ]

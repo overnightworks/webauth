@@ -362,6 +362,35 @@ Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_
 in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
 Keycloak in the hand-run harness.
 
+## The protected resource
+
+A host that serves an MCP-style resource names it in `ProtectedResource(url, scope)` and passes
+it as `BearerGate(resource=...)`; a gate needs one kind of path, and the resource counts as one.
+`url` is the resource's identifier, an endpoint URL with a path other than the root, and its path
+is the entry point; `scope` is the one scope token the challenge asks for. Everything else
+derives from `url`: the metadata path is `/.well-known/oauth-protected-resource` plus the entry
+point (RFC 9728 section 3.1), and the challenge names the metadata URL.
+
+**The resource admits no token yet.** At the entry point, on every method and the exact path only,
+the gate answers before CSRF and the session gate and runs no route:
+
+- no credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`;
+- any bearer credential: 401 with `error="invalid_token"` and the same two parameters;
+- a credential the gate refuses (a repeated header, a malformed one): that refusal, with the same
+  two parameters.
+
+A cookie decides nothing there: no session transaction runs and nothing is admitted. The entry
+point's answers carry `no-store`. A trailing slash or a longer path is not the entry point, and a
+machine path that overlaps it stays a machine path (paths are selected machine, resource, person).
+
+`install_resource_metadata(app, resource, issuer=...)` registers `GET` of the metadata path,
+answering JSON with `resource`, `authorization_servers` (`[issuer]`) and `scopes_supported`
+(`[scope]`). Install it ahead of any catch-all route, and list `resource.public_rule` in
+`SessionGate.public` so a client without a session reads it. The entry point is matched on the
+route path, as every policy is, so an app with a `root_path` names the path without it.
+
+Proofs: [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py) in CI.
+
 ## A service's callers
 
 A service that is not a browser app (no sessions, no sign-in) admits an app acting as itself, or for a person,
