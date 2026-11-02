@@ -23,7 +23,7 @@ Scenarios 67 to 72 send the same tokens to the resource's marked routes (``MARKE
   today's person-path 401; on the other marked route it is ignored and the cookie decides.
 - 71 no bearer: a cookie passes and a cross-origin cookie ``POST`` is refused.
 - 72 the agent token on an unmarked method, ``HEAD``, a trailing slash, a longer path and ``..``:
-  refused, no account.
+  refused, the ledger unchanged, for a person with an account.
 """
 
 from __future__ import annotations
