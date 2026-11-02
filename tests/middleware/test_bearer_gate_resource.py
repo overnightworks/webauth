@@ -327,8 +327,9 @@ def test_a_party_listed_only_on_a_person_or_machine_kind_is_refused_at_the_entry
 
 @pytest.mark.parametrize("parties", ["hal", frozenset({"hal"}), None])
 def test_a_resource_with_anything_but_authorized_parties_raises(parties: object) -> None:
+    resource = a_resource()
     with pytest.raises(TypeError, match="authorized_parties"):
-        replace(a_resource(), authorized_parties=parties)  # type: ignore[arg-type]
+        replace(resource, authorized_parties=parties)  # type: ignore[arg-type]
 
 
 def test_a_credential_the_gate_refuses_is_answered_by_that_refusal_with_the_challenge(
@@ -499,17 +500,19 @@ def test_a_url_outside_the_resource_url_rule_is_refused(url: str) -> None:
 
 @pytest.mark.parametrize("scope", ["", "two scopes", 'quo"te', "back\\slash", "tab\t", "ü"])
 def test_a_scope_that_is_not_one_scope_token_is_refused(scope: str) -> None:
+    resource = a_resource()
     with pytest.raises(ValueError, match="scope"):
-        replace(a_resource(), scope=scope)
+        replace(resource, scope=scope)
 
 
 def test_a_non_string_scope_is_refused() -> None:
+    resource = a_resource()
     with pytest.raises(ValueError, match="scope"):
-        replace(a_resource(), scope=("mcp:tools",))  # type: ignore[arg-type]
+        replace(resource, scope=("mcp:tools",))  # type: ignore[arg-type]
 
 
-def an_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
-    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
+def an_agent_token(resource: ProtectedResource, *groups: str) -> str:
+    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP])
 
 
 def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
