@@ -135,7 +135,9 @@ class BearerRun:
             ) from error
         return failed.value.url
 
-    def mint(self, person: Person, client_id: str, scope: str) -> dict[str, str]:
+    def mint(
+        self, person: Person, client_id: str, scope: str, nonce: str | None = None
+    ) -> dict[str, str]:
         """hal's authorization code request with PKCE at Keycloak, and the code exchange."""
         redirect_uri = self.redirect_uris[client_id]
         verifier = secrets.token_urlsafe(48)
@@ -144,7 +146,7 @@ class BearerRun:
         query = urllib.parse.urlencode({
             "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
             "scope": scope, "state": state, "code_challenge": challenge.rstrip(b"=").decode(),
-            "code_challenge_method": "S256",
+            "code_challenge_method": "S256", **({} if nonce is None else {"nonce": nonce}),
         })
         page = self.sso_page(person)
         authorization_url = f"{self.settings.authorization_endpoint}?{query}"

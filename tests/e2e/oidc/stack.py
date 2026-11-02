@@ -82,6 +82,11 @@ class Admin:
         if answer.status_code not in (200, 204):
             raise StackError(f"PUT {path} answered {answer.status_code}")
 
+    def delete(self, path: str) -> None:
+        answer = self._call("DELETE", path)
+        if answer.status_code != 204:
+            raise StackError(f"DELETE {path} answered {answer.status_code}")
+
     def post(self, path: str) -> None:
         answer = self._call("POST", path)
         if answer.status_code != 204:

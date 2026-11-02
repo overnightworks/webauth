@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from bearer_groups import refreshed_id_token_facts
 from bearer_resource import (
     a_bearer_on_a_marked_route_is_not_the_resource_admission,
     a_marked_route_keeps_session_and_csrf_without_a_bearer,
@@ -104,6 +105,7 @@ from playwright.sync_api import Playwright
 from realm import (
     ADMIN_NAME,
     CLIENT_ID,
+    GROUPED_NAME,
     IDP_HOST,
     OUTSIDER_NAME,
     REALM,
@@ -506,6 +508,10 @@ def drive_scenarios(run: BearerRun) -> None:
     proof.held_or_failed(
         "CHECK bearer-token-header-type", lambda: access_token_type_is_at_jwt(run)
     )
+    proof.held_or_failed(
+        "CHECK refreshed-id-token-facts",
+        lambda: refreshed_id_token_facts(run, run.people["grouped"], proof),
+    )
     for number, scenario in SCENARIOS:
         if scenario is known_agent_is_admitted_as_a_person and not proof.held_or_failed(
             "CHECK bearer-resource-tokens", lambda: mint_agent_tokens(run)
@@ -534,10 +540,12 @@ def drive_bearer_phase(
         "user": Person(USER_NAME, proof.user_password),
         "outsider": Person(OUTSIDER_NAME, proof.outsider_password),
         "ungrouped": Person(UNGROUPED_NAME, secrets.token_urlsafe(18)),
+        "grouped": Person(GROUPED_NAME, secrets.token_urlsafe(18)),
     }
     create_user(
         proof.fresh_admin(), UNGROUPED_NAME, people["ungrouped"].password, (USER_GROUP,)
     )
+    create_user(proof.fresh_admin(), GROUPED_NAME, people["grouped"].password, (USER_GROUP,))
     host = start_host(proof, runtime, settings, tls.ca_certificate)
     try:
         proof.browser = launch_pinned_chromium(

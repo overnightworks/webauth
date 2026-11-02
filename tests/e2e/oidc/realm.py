@@ -24,6 +24,7 @@ USER_GROUP = "/apps/songmaker"
 OUTSIDER_NAME = "d1-outsider"
 ADMIN_NAME = "d1-admin"
 UNGROUPED_NAME = "d1-ungrouped"
+GROUPED_NAME = "d1-grouped"
 ADMIN_GROUP = f"{USER_GROUP}/admin"
 RESOURCE_AUDIENCE_SCOPE = "aud-mcp"
 LIFESPAN_ATTRIBUTE = "access.token.lifespan"
@@ -168,6 +169,20 @@ def add_resource(admin: Admin, resource_url: str, members: tuple[str, ...]) -> t
         person = admin.get(f"/{REALM}/users?username={name}&exact=true")[0]["id"]
         admin.put(f"/{REALM}/users/{person}/groups/{group}")
     return scopes
+
+
+def add_child_group(admin: Admin, name: str, member: str) -> str:
+    """A child group of ``USER_GROUP`` that holds ``member``; its id."""
+    parent = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")["id"]
+    group = admin.create(f"/{REALM}/groups/{parent}/children", {"name": name})
+    person = admin.get(f"/{REALM}/users?username={member}&exact=true")[0]["id"]
+    admin.put(f"/{REALM}/users/{person}/groups/{group}")
+    return group
+
+
+def remove_from_group(admin: Admin, member: str, group_id: str) -> None:
+    person = admin.get(f"/{REALM}/users?username={member}&exact=true")[0]["id"]
+    admin.delete(f"/{REALM}/users/{person}/groups/{group_id}")
 
 
 @contextlib.contextmanager
