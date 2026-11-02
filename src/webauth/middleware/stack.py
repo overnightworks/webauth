@@ -39,7 +39,7 @@ def _no_store_paths(bearer_gate: BearerGate) -> list[PathRules]:
     if bearer_gate.machine_paths is not None:
         paths.append(bearer_gate.machine_paths.paths)
     if bearer_gate.resource is not None:
-        paths.append(PathRules(exact=frozenset({bearer_gate.resource.entry_point})))
+        paths.append(bearer_gate.resource.entry_point_rule)
     return paths
 
 

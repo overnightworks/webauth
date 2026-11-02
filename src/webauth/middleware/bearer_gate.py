@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Final
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
@@ -123,19 +123,19 @@ class PersonPaths:
 class ProtectedResource:
     r"""The resource a client finds by its URL and signs in to at the issuer.
 
-    ``url`` is the resource's identifier and entry point: its path is the one path
-    where the gate answers the challenge. The metadata document sits at the path
-    RFC 9728 section 3.1 derives from it. ``scope`` is the one scope the challenge
-    asks for. The gate admits no token at the entry point yet. ``ValueError`` for a
-    ``url`` that is not an endpoint URL with a path other than the root, or holds
-    ``"`` or ``\``, and for a ``scope`` that is not one scope token.
+    ``url`` is the resource's identifier and entry point: its path, as the server
+    decodes it, is the one path where the gate answers the challenge. The metadata
+    document sits at the path RFC 9728 section 3.1 derives from it. ``scope`` is the
+    one scope the challenge asks for. The gate admits no token at the entry point yet.
+    ``ValueError`` for a ``url`` that is not an endpoint URL with a path other than the
+    root, or holds ``"`` or ``\``, and for a ``scope`` that is not one scope token.
     """
 
     url: str
     scope: str
 
     def __post_init__(self) -> None:
-        if not _is_endpoint_url(self.url) or urlsplit(self.url).path in {"", "/"}:
+        if not _is_endpoint_url(self.url) or self._wire_path in {"", "/"}:
             raise ValueError("ProtectedResource.url must be an endpoint URL with a path")
         if '"' in self.url or "\\" in self.url:
             raise ValueError('ProtectedResource.url must hold no " and no \\')
@@ -143,8 +143,17 @@ class ProtectedResource:
             raise ValueError("ProtectedResource.scope must be one scope token")
 
     @property
-    def entry_point(self) -> str:
+    def _wire_path(self) -> str:
         return urlsplit(self.url).path
+
+    @property
+    def entry_point(self) -> str:
+        """The path a request for ``url`` carries in the ASGI scope: percent-decoding applied."""
+        return unquote(self._wire_path)
+
+    @property
+    def entry_point_rule(self) -> PathRules:
+        return PathRules(exact=frozenset({self.entry_point}))
 
     @property
     def metadata_path(self) -> str:
@@ -153,7 +162,7 @@ class ProtectedResource:
     @property
     def metadata_url(self) -> str:
         parts = urlsplit(self.url)
-        return f"{parts.scheme}://{parts.netloc}{self.metadata_path}"
+        return f"{parts.scheme}://{parts.netloc}{_METADATA_PREFIX}{self._wire_path}"
 
     @property
     def public_rule(self) -> PublicRule:
@@ -205,8 +214,8 @@ class BearerGate:
 class _Refusal(Enum):
     """The cases the gate refuses, each with its status, challenge error and detail.
 
-    The first four refuse a machine path, which names its realm, or the resource's
-    entry point, which names its metadata and scope; on a person path
+    The first four refuse a machine path, which names its realm; the first three also
+    refuse the resource's entry point, which names its metadata and scope; on a person path
     ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry neither and the last two belong
     to it alone.
     """
@@ -270,7 +279,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         if machine_paths is not None and machine_paths.paths.matches(path):
             return await self._machine_refusal(request, machine_paths)
         resource = self._policy.resource
-        if resource is not None and path == resource.entry_point:
+        if resource is not None and resource.entry_point_rule.matches(path):
             return self._resource_refusal(request, resource)
         if person_paths is not None and person_paths.paths.matches(path):
             _mark_person_path(request)
