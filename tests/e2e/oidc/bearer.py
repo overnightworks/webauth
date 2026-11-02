@@ -1,7 +1,7 @@
 """Plays hal against real Keycloak: the bearer gate admits, or refuses, real access tokens.
 
 ``drive_bearer_phase`` runs after the back-channel phase of ``prove.py`` and prints
-``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 66. hal is two public
+``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 72. hal is two public
 clients (``d1-hal``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and the optional
 audience scopes; ``d1-app-c`` is a client that exists only to be an audience. hal gets its
 codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
@@ -38,8 +38,9 @@ The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's
 - 59 (H5) a ``d1-other`` token: 401 ``invalid_token``.
 - 60 (H6) after a browser sign-out the token still opens ``/api/me``.
 
-The resource scenarios 61 to 66 (an agent's token at the entry point ``/mcp``) live in
-``bearer_resource``; ``CHECK bearer-resource-tokens`` runs before them.
+The resource scenarios 61 to 66 (an agent's token at the entry point ``/mcp``) and 67 to 72
+(the same token on the resource's marked routes)
+live in ``bearer_resource``; ``CHECK bearer-resource-tokens`` runs before them.
 """
 
 from __future__ import annotations
@@ -55,7 +56,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bearer_resource import (
+    a_bearer_on_a_marked_route_is_not_the_resource_admission,
+    a_marked_route_keeps_session_and_csrf_without_a_bearer,
     known_agent_is_admitted_as_a_person,
+    marked_route_admin_reader_is_the_plain_403,
+    marked_route_admits_the_agent_capped,
+    marked_route_refusals_beside_a_cookie,
+    marked_route_refuses_the_agent_beyond_its_mark,
     mint_agent_tokens,
     no_credential_and_a_cookie_get_the_challenge,
     no_group_and_unknown_subject_are_refused_plainly,
@@ -426,6 +433,12 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (64, the_agent_token_opens_no_other_path),
     (65, tokens_the_resource_refuses),
     (66, no_credential_and_a_cookie_get_the_challenge),
+    (67, marked_route_admits_the_agent_capped),
+    (68, marked_route_admin_reader_is_the_plain_403),
+    (69, marked_route_refusals_beside_a_cookie),
+    (70, a_bearer_on_a_marked_route_is_not_the_resource_admission),
+    (71, a_marked_route_keeps_session_and_csrf_without_a_bearer),
+    (72, marked_route_refuses_the_agent_beyond_its_mark),
 )
 
 

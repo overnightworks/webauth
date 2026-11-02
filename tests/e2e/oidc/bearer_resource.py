@@ -1,4 +1,4 @@
-"""The resource scenarios of the bearer proof, 61 to 66.
+"""The resource scenarios of the bearer proof, 61 to 72.
 
 The resource scenarios send agent tokens, whose only audience is the resource, to its entry point
 ``/mcp``; ``CHECK bearer-resource-tokens`` asserts ``aud`` and ``scope`` on a real one.
@@ -11,6 +11,19 @@ The resource scenarios send agent tokens, whose only audience is the resource, t
 - 64 the agent token on ``/api/me``, a machine route and ``/admin``: 401, 401, the session's 401.
 - 65 an app bearer and two audiences: 401; no scope: 403 ``insufficient_scope``.
 - 66 no credential, and a fresh session cookie alone: 401 with the resource challenge.
+
+Scenarios 67 to 72 send the same tokens to the resource's marked routes (``MARKED_ROUTES`` of
+``host_app``):
+
+- 67 the agent token on a marked ``GET`` and ``POST``: 200 with the user role, no cookie, no
+  ``Origin``.
+- 68 a stored admin on the marked route that reads ``admin_user``: the plain 403, no challenge.
+- 69 no scope: 403 ``insufficient_scope``; two audiences: 401; each with a valid admin cookie.
+- 70 an app bearer on the marked person path: admitted as today; one for another audience:
+  today's person-path 401; on the other marked route it is ignored and the cookie decides.
+- 71 no bearer: a cookie passes and a cross-origin cookie ``POST`` is refused.
+- 72 the agent token on an unmarked method, ``HEAD``, a trailing slash, a longer path and ``..``:
+  refused, no account.
 """
 
 from __future__ import annotations
@@ -122,6 +135,87 @@ def no_credential_and_a_cookie_get_the_challenge(run: BearerRun) -> str:
         assert_person_answer(run.send(call), 401, resource_challenge(run))
     assert run.state()["session_transactions"] == before
     return "GET with nothing and POST with a cookie only: 401 with the resource challenge"
+
+
+MARKED = "/notes/7"
+MARKED_PERSON = "/api/notes/7"
+ADMIN_ONLY = "/notes-admin"
+
+
+def marked_route_admits_the_agent_capped(run: BearerRun) -> str:
+    run.host_page(run.people["user"])
+    before = ledger(run)
+    person = {"id": claims_of(run.tokens["agent_user"])["sub"], "username": USER_NAME}
+    for method, path in (("GET", MARKED), ("POST", "/notes")):
+        answer = run.send(Call(method, path, run.tokens["agent_user"]))
+        assert_person_answer(answer, 200)
+        assert answer.json() == {**person, "role": "user"}, answer.json()
+    assert ledger(run) == before, (before, ledger(run))
+    return f"{USER_NAME}'s agent token, GET and POST on marked routes, no cookie: 200 user"
+
+
+def marked_route_admin_reader_is_the_plain_403(run: BearerRun) -> str:
+    reset_host(run.host)
+    run.host_pages.pop(ADMIN_NAME, None)
+    run.host_page(run.people["admin"])
+    before = ledger(run)
+    answer = run.send(Call("GET", ADMIN_ONLY, run.tokens["agent_admin"]))
+    assert_person_answer(answer, 403, None, "Admin access required")
+    assert ledger(run) == before, "the admission changed the stored admin or recorded an event"
+    return f"{ADMIN_NAME}, a stored admin, on the admin_user route: 403 without a challenge"
+
+
+def marked_route_refusals_beside_a_cookie(run: BearerRun) -> str:
+    run.host_pages.pop(ADMIN_NAME, None)
+    cookies = session_cookies(run.host_page(run.people["admin"]), run.settings.app_origins[0])
+    for name, status, error in (
+        ("agent_no_scope", 403, "insufficient_scope"),
+        ("agent_two_audiences", 401, "invalid_token"),
+    ):
+        answer = run.send(Call("GET", MARKED, run.tokens[name], cookies=cookies))
+        assert_person_answer(answer, status, resource_challenge(run, error))
+    return "no scope: 403 insufficient_scope; two audiences: 401; a valid cookie decides nothing"
+
+
+def a_bearer_on_a_marked_route_is_not_the_resource_admission(run: BearerRun) -> str:
+    app_answer = run.send(Call("GET", MARKED_PERSON, run.tokens["user"]))
+    assert_person_answer(app_answer, 200)
+    foreign = run.tokens["audience_app"]
+    assert_person_answer(
+        run.send(Call("GET", MARKED_PERSON, foreign)), 401, PERSON_CHALLENGE_INVALID_TOKEN,
+    )
+    cookies = session_cookies(run.host_page(run.people["admin"]), run.settings.app_origins[0])
+    ignored = run.send(Call("GET", MARKED, foreign, cookies=cookies))
+    assert_person_answer(ignored, 200)
+    assert ignored.json()["role"] == "admin", ignored.json()
+    return "an app bearer admitted as today; another audience: 401 on a person path, else ignored"
+
+
+def a_marked_route_keeps_session_and_csrf_without_a_bearer(run: BearerRun) -> str:
+    origin = run.settings.app_origins[0]
+    cookies = session_cookies(run.host_page(run.people["admin"]), origin)
+    assert_person_answer(run.send(Call("GET", MARKED, cookies=cookies)), 200)
+    refused = run.send(Call(
+        "POST", "/notes", cookies=cookies,
+        headers={"Origin": "https://evil.example.test", "Sec-Fetch-Site": "cross-site"},
+    ))
+    assert refused.status_code == 403, refused.status_code
+    return "a cookie passes on a marked route; a cross-origin cookie POST: 403"
+
+
+def marked_route_refuses_the_agent_beyond_its_mark(run: BearerRun) -> str:
+    run.host_pages.pop(USER_NAME, None)
+    before = ledger(run)
+    token = run.tokens["agent_user"]
+    for method, path in (
+        ("DELETE", MARKED), ("HEAD", MARKED), ("GET", f"{MARKED}/"), ("GET", f"{MARKED}/more"),
+        ("GET", "/notes/.."), ("GET", "/notes/%2e%2e"),
+    ):
+        answer = run.send(Call(method, path, token))
+        assert answer.status_code in (401, 403), (method, path, answer.status_code)
+        assert "resource_metadata" not in answer.headers.get("www-authenticate", ""), path
+    assert ledger(run) == before, (before, ledger(run))
+    return "the agent token beyond its mark (method, HEAD, slash, longer, ..): refused, no account"
 
 
 def mint_agent_tokens(run: BearerRun) -> str:

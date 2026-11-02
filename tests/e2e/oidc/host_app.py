@@ -53,6 +53,7 @@ from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware import (
     BearerGate,
     MachinePaths,
+    MarkedRoute,
     PersonPaths,
     ProtectedResource,
     SessionGate,
@@ -119,6 +120,12 @@ PERSON_ROUTES_PREFIX = "/api/"
 RESOURCE_PATH = "/mcp"
 RESOURCE_SCOPE = "mcp:tools"
 RESOURCE_GROUP_NAME = "mcp"
+MARKED_ROUTES = (
+    MarkedRoute("GET", "/notes/{note}"),
+    MarkedRoute("POST", "/notes"),
+    MarkedRoute("GET", "/notes-admin"),
+    MarkedRoute("GET", "/api/notes/{note}"),
+)
 BEARER_GATE_LOGGER = "webauth.middleware.bearer_gate"
 BEARER_HOST_REQUESTS_PER_MINUTE = 10_000
 LEEWAY_SECONDS = 30
@@ -426,6 +433,7 @@ def _resource_of(settings: HostSettings, transaction: SignInTransaction) -> Prot
         f"{settings.login_group}/{RESOURCE_GROUP_NAME}",
         AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
         transaction,
+        frozenset(MARKED_ROUTES),
     )
 
 
@@ -593,7 +601,9 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         return {"username": user.username}
 
     if settings.is_bearer_host:
-        _add_bearer_routes(app, dependencies.current_user, settings, sign_in_transaction)
+        _add_bearer_routes(
+            app, dependencies.current_user, dependencies.admin_user, settings, sign_in_transaction,
+        )
     return app
 
 
@@ -629,9 +639,30 @@ def _add_person_routes(app: FastAPI, current_user: Callable[..., AuthenticatedUs
         return {"id": user.id, "username": user.username, "role": user.role}
 
 
+def _add_marked_routes(
+    app: FastAPI,
+    current_user: Callable[..., AuthenticatedUser],
+    admin_user: Callable[..., AuthenticatedUser],
+) -> None:
+    """One route per marked route; ``/notes-admin`` reads ``admin_user``, the rest ``current_user``.
+    """
+
+    def echo(user: AuthenticatedUser) -> dict[str, str]:
+        return {"id": user.id, "username": user.username, "role": user.role}
+
+    for route in MARKED_ROUTES:
+        reader = admin_user if route.template == "/notes-admin" else current_user
+
+        def note(user: AuthenticatedUser = Depends(reader)) -> dict[str, str]:
+            return echo(user)
+
+        app.add_api_route(route.template, note, methods=[route.method, "HEAD", "DELETE"])
+
+
 def _add_bearer_routes(
     app: FastAPI,
     current_user: Callable[..., AuthenticatedUser],
+    admin_user: Callable[..., AuthenticatedUser],
     settings: HostSettings,
     transaction: SignInTransaction,
 ) -> None:
@@ -640,6 +671,7 @@ def _add_bearer_routes(
     _add_person_routes(app, current_user)
     resource = _resource_of(settings, transaction)
     install_resource_metadata(app, resource, issuer=settings.issuer)
+    _add_marked_routes(app, current_user, admin_user)
 
     @app.api_route(resource.entry_point, methods=["GET", "POST"])
     def entry_point(request: Request) -> dict[str, str]:
