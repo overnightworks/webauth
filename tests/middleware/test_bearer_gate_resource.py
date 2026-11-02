@@ -22,9 +22,12 @@ from tests.support.gate_arrangement import (
     a_bearer_app,
     a_token,
     bearing,
+    relayed,
 )
 from tests.support.oidc_arrangement import REALM_ISSUER
-from webauth.middleware import ProtectedResource
+from starlette.requests import HTTPConnection
+
+from webauth.middleware import ProtectedResource, admitted_user, bearer_caller
 from webauth.policies import PathRules
 
 EVERY_METHOD = pytest.mark.parametrize(
@@ -69,6 +72,21 @@ def assert_untouched(app: BearerApp, expires_at: object) -> None:
     assert app.auth.route_runs == []
     assert app.auth.authenticated == []
     assert app.auth.sessions.stored_record.expires_at == expires_at
+
+
+def assert_no_bearer_admission(
+    app: BearerApp, added_to_scope: dict[str, object], path: str, authorization: str,
+) -> None:
+    """The request, as the gate left it, read through the public admission readers."""
+    connection = HTTPConnection({
+        "type": "http", "app": app.auth.app, "path": path,
+        "headers": [(b"authorization", authorization.encode("latin-1"))],
+        **added_to_scope,
+    })
+    with pytest.raises(RuntimeError):
+        bearer_caller(connection)
+    with pytest.raises(RuntimeError):
+        admitted_user(connection)
 
 
 def refusing_a_session_transaction() -> NoReturn:
@@ -117,6 +135,7 @@ def test_any_bearer_at_the_entry_point_is_an_invalid_token_and_admits_nothing(
 ) -> None:
     app = a_resource_app_refusing_a_session_transaction(resource)
     expires_at = app.auth.sessions.stored_record.expires_at
+    relay = relayed(app.auth)
 
     response = app.ask(
         resource.entry_point, method=method, authorization=bearing(token), cookie=True,
@@ -126,6 +145,7 @@ def test_any_bearer_at_the_entry_point_is_an_invalid_token_and_admits_nothing(
     assert response.headers["www-authenticate"] == f'{challenge}, error="invalid_token"'
     assert response.headers["cache-control"] == "no-store"
     assert_untouched(app, expires_at)
+    assert_no_bearer_admission(app, relay.added, resource.entry_point, bearing(token)[0])
 
 
 def test_a_credential_the_gate_refuses_is_answered_by_that_refusal_with_the_challenge(
