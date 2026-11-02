@@ -88,6 +88,8 @@ ADMISSION = AdmissionConfig(
     bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
 )
 HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
+RESOURCE_URL = "https://app.example/mcp"
+RESOURCE_SCOPE = "mcp:tools"
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
 FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
@@ -100,6 +102,18 @@ PERSON_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
 
 def a_token(**claims: Any) -> str:
     return an_access_token(claims=claims)
+
+
+def a_resource(
+    url: str = RESOURCE_URL, parties: AuthorizedParties = HAL_ONLY,
+) -> ProtectedResource:
+    return ProtectedResource(url, RESOURCE_SCOPE, parties)
+
+
+def a_resource_token(resource: ProtectedResource | None = None, **claims: Any) -> str:
+    """A token hal holds for `resource` (default `a_resource()`): its audience and its scope."""
+    held = resource or a_resource()
+    return an_access_token(claims={"aud": held.url, "scope": held.scope, **claims})
 
 
 def bearing(token: str) -> tuple[str, ...]:
