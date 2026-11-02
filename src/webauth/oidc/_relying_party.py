@@ -64,7 +64,6 @@ from webauth.jwt_verification import (
     Rejected,
     RejectionReason,
     VerifiedClaims,
-    _base64url_decode,
     _json_object,
 )
 from webauth.oidc._client_config import OidcClientConfig
@@ -387,17 +386,16 @@ class OidcRelyingParty:
         )
 
     def _refreshed_groups(
-        self, refresh_token: SecretStr, *, subject: str, original_id_token: SecretStr
+        self, refresh_token: SecretStr, *, subject: str
     ) -> _RefreshedGroups | OidcRefusal:
         """The groups of the ID token a refresh grant answers, and its rotated refresh token.
 
         Only the issuer's refusal of the grant itself is an `OidcRefusal` here; an ID token
         that does not hold is carried in `groups`, so the caller still stores the rotation.
-        The original ID token is read as stored evidence, for its nonce alone, and raises
-        `ValueError` before any request when it is unreadable. The new one must carry
-        `subject`, any nonce the original carried, and an `iat` within the leeway of the
-        grant's start (OpenID Connect Core 1.0 section 12.2)."""
-        nonce = _stored_nonce(original_id_token.get_secret_value())
+        The new ID token must carry `subject`, no `nonce` key at all (section 12.2 says it
+        SHOULD NOT, section 2 requires a present one to be verified, and nothing is kept to
+        verify it against), and an `iat` within the leeway of the grant's start
+        (OpenID Connect Core 1.0)."""
         started_at = int(self._wall_clock())
         try:
             document = self._refresh_answer(refresh_token.get_secret_value())
@@ -405,21 +403,19 @@ class OidcRelyingParty:
         except _RefusalError as refusal:
             return refusal.refusal
         try:
-            groups = self._refreshed_id_token_groups(document, subject, nonce, started_at)
+            groups = self._refreshed_id_token_groups(document, subject, started_at)
         except _RefusalError as refusal:
             groups = refusal.refusal
         return _RefreshedGroups(rotated, groups)
 
     def _refreshed_id_token_groups(
-        self, document: Mapping[str, object], subject: str, nonce: str | None, started_at: int
+        self, document: Mapping[str, object], subject: str, started_at: int
     ) -> tuple[str, ...]:
         raw_id_token = document.get("id_token")
         if not isinstance(raw_id_token, str):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
         id_token = self._verified_id_token(raw_id_token)
-        if "nonce" in id_token.claims and not _is_same_secret(
-            id_token.claims["nonce"], nonce or ""
-        ):
+        if "nonce" in id_token.claims:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.NONCE_MISMATCH))
         if not self._is_authorized_party(id_token):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH))
@@ -732,22 +728,6 @@ def _identity_of(
         id_token=raw_id_token,
         refresh_token=refresh_token,
     )
-
-
-def _stored_nonce(id_token: str) -> str | None:
-    """The nonce of an ID token this library verified at login, read without any check.
-
-    Raises `ValueError`, naming no part of the token, when the stored value is not a compact
-    JWS with a JSON object payload."""
-    segments = id_token.split(".")
-    try:
-        claims = _json_object(_base64url_decode(segments[1])) if len(segments) == 3 else None
-    except ValueError:
-        claims = None
-    nonce = None if claims is None else claims.get("nonce")
-    if claims is None or not (nonce is None or isinstance(nonce, str)):
-        raise ValueError("the stored ID token is unreadable")
-    return nonce
 
 
 def _group_paths(claims: Mapping[str, object]) -> tuple[str, ...] | None:

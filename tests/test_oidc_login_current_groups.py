@@ -54,7 +54,6 @@ from webauth.oidc import OidcRefusalReason, OidcRelyingParty, TokenEndpointError
 from webauth.oidc_login import (
     AccessTokenRefusal,
     AccessTokenRefusalReason,
-    NoIdToken,
     current_groups,
     fresh_access_token,
 )
@@ -90,7 +89,7 @@ SIGN_IN_AGAIN = AccessTokenRefusal(AccessTokenRefusalReason.SIGN_IN_AGAIN)
 
 
 def a_stored_id_token(**claims: Any) -> SecretStr:
-    """What the login stored: unverifiable here, read for its nonce alone."""
+    """What the login stored: a token the call never reads."""
     payload = changed({"sub": "user-1", "nonce": _NONCE, "exp": 1}, claims)
     return SecretStr(f"{segment({'typ': 'JWT'})}.{segment(payload)}.signature")
 
@@ -112,7 +111,7 @@ class Arrangement:
         claims = changed(
             {
                 "iss": REALM_ISSUER, "aud": APP_CLIENT_ID, "sub": "user-1", "exp": now + 300,
-                "iat": now, "nonce": _NONCE, "groups": _GROUPS,
+                "iat": now, "groups": _GROUPS,
             },
             claim_changes,
         )
@@ -126,7 +125,7 @@ class Arrangement:
 
     def current_groups(
         self, provider: SessionTransaction,
-    ) -> tuple[str, ...] | AccessTokenRefusal | NoIdToken:
+    ) -> tuple[str, ...] | AccessTokenRefusal:
         return current_groups(
             self.relying_party, _SESSION_ID, session_transaction=provider, config=self.config,
         )
@@ -147,7 +146,7 @@ def an_arrangement(
     sessions_of: Callable[[FakeSessionRecord], SessionRecordsInMemory] = SessionRecordsInMemory,
     *,
     refresh_token: str | None = ISSUED_REFRESH_TOKEN,
-    id_token: SecretStr | None = None,
+    id_token: SecretStr | None = a_stored_id_token(),
     leeway_seconds: int = _LEEWAY,
     answer: bool = True,
     clock_now: float = FIXED_INSTANT.timestamp(),
@@ -162,7 +161,7 @@ def an_arrangement(
         created_at=now - timedelta(minutes=5),
         expires_at=now + timedelta(seconds=SESSION_IDLE_SECONDS),
         refresh_token=None if refresh_token is None else SecretStr(refresh_token),
-        id_token=a_stored_id_token() if id_token is None else id_token,
+        id_token=id_token,
     )
     relying_party = a_relying_party_for(
         issuer, a_realm_client_config(leeway_seconds=leeway_seconds), clock,
@@ -221,27 +220,28 @@ class TestTheGroupsReturned:
         assert arrangement.requests_made == 2
 
 
-class TestASessionWithoutAStoredIdToken:
-    @pytest.mark.parametrize("refresh_token", [ISSUED_REFRESH_TOKEN, None], ids=["with", "without"])
-    def test_it_is_refused_before_any_grant_with_a_reason_of_its_own(
-        self, refresh_token: str | None
-    ) -> None:
-        arrangement = an_arrangement(refresh_token=refresh_token)
-        arrangement.sessions.stored_record.id_token = None
+class TestTheStoredIdTokenPlaysNoPart:
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            None, a_stored_id_token(), a_stored_id_token(exp=1),
+            SecretStr("not-a-compact-jws"), SecretStr(f"e30.{segment({'nonce': 7})}.sig"),
+        ],
+        ids=["none", "readable", "expired", "unreadable", "unreadable-nonce"],
+    )
+    def test_a_session_answers_alike_whatever_it_stored(self, stored: SecretStr | None) -> None:
+        arrangement = an_arrangement(id_token=stored)
 
-        outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
-
-        assert outcome is NoIdToken.IN_THIS_SESSION
-        assert arrangement.requests_made == 0
+        assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(_GROUPS)
 
     @pytest.mark.parametrize(
         ("record_change", "expected"),
         [("delete", SESSION_ENDED), ("no-refresh-token", SIGN_IN_AGAIN)],
     )
-    def test_the_other_refusals_before_the_grant_hold(
+    def test_the_refusals_before_the_grant_hold(
         self, record_change: str, expected: AccessTokenRefusal
     ) -> None:
-        arrangement = an_arrangement()
+        arrangement = an_arrangement(id_token=None)
         if record_change == "delete":
             arrangement.sessions.delete(_SESSION_ID)
         else:
@@ -250,33 +250,6 @@ class TestASessionWithoutAStoredIdToken:
         outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
 
         assert outcome == expected
-        assert arrangement.requests_made == 0
-
-
-class TestTheOriginalIdToken:
-    def test_an_expired_stored_token_passes(self) -> None:
-        arrangement = an_arrangement(id_token=a_stored_id_token(exp=1))
-
-        assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(_GROUPS)
-
-    @pytest.mark.parametrize(
-        "stored",
-        [
-            "not-a-compact-jws", "a.b", "a.b.c.d", "e30.!!!.sig",
-            f"e30.{segment('[1]')}.sig", f"e30.{segment('not json')}.sig",
-            f"e30.{segment({'nonce': 7})}.sig",
-        ],
-        ids=["one-part", "two-parts", "four-parts", "not-base64", "array", "not-json", "nonce-7"],
-    )
-    def test_an_unreadable_stored_token_raises_before_any_grant_naming_no_value(
-        self, stored: str
-    ) -> None:
-        arrangement = an_arrangement(id_token=SecretStr(stored))
-
-        with pytest.raises(ValueError, match="unreadable") as raised:
-            arrangement.current_groups(arrangement.sessions.in_transaction)
-
-        assert stored not in str(raised.value)
         assert arrangement.requests_made == 0
 
 
@@ -295,6 +268,7 @@ _ISSUER_REFUSALS = [
     pytest.param({"exp": 1}, _REJECTED, id="expired"),
     pytest.param({"iat": 4_000_000_000}, _REJECTED, id="iat-in-the-future"),
     pytest.param({"nbf": 4_000_000_000}, _REJECTED, id="not-yet-valid"),
+    pytest.param({"nonce": _NONCE}, _NONCE_REFUSED, id="the-logins-nonce"),
     pytest.param({"nonce": "another-nonce"}, _NONCE_REFUSED, id="other-nonce"),
     pytest.param({"nonce": None}, _NONCE_REFUSED, id="null-nonce"),
     pytest.param({"nonce": 7}, _NONCE_REFUSED, id="non-string-nonce"),
@@ -325,7 +299,7 @@ class TestTheNewIdTokenIsVerified:
         forged = jws(
             {"alg": "RS256", "kid": "current-key", "typ": "JWT"},
             {"iss": REALM_ISSUER, "aud": APP_CLIENT_ID, "sub": "user-1", "exp": 4_000_000_000,
-             "iat": int(arrangement.clock.now), "nonce": _NONCE},
+             "iat": int(arrangement.clock.now)},
             rs256(rsa_key("forger")),
         )
         arrangement.issuer.refresh_answer_members["id_token"] = forged
@@ -356,25 +330,10 @@ class TestTheNewIdTokenIsVerified:
 
         assert an_issuer_reason(outcome) is OidcRefusalReason.ID_TOKEN_REJECTED
 
-    def test_a_nonce_is_optional_in_the_new_token_when_the_original_had_one(self) -> None:
-        arrangement = an_arrangement(answer=False)
-        arrangement.answer_with_id_token(nonce=ABSENT)
+    def test_a_token_without_a_nonce_holds(self) -> None:
+        arrangement = an_arrangement()
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(_GROUPS)
-
-    @pytest.mark.parametrize(("new_nonce", "holds"), [(ABSENT, True), (_NONCE, False)])
-    def test_an_original_without_a_nonce_allows_none_in_the_new_token(
-        self, new_nonce: object, holds: bool
-    ) -> None:
-        arrangement = an_arrangement(id_token=a_stored_id_token(nonce=ABSENT), answer=False)
-        arrangement.answer_with_id_token(nonce=new_nonce)
-
-        outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
-
-        if holds:
-            assert outcome == tuple(_GROUPS)
-        else:
-            assert an_issuer_reason(outcome) is OidcRefusalReason.NONCE_MISMATCH
 
 
 class TestFreshness:
