@@ -14,8 +14,8 @@ afterwards does not undo it.
 A request the bearer gate admitted carries no session: the records below let
 the CSRF origin check and the session gate step aside for it. On a machine path
 `current_user` raises, because a machine route asks for `bearer_caller` instead;
-on a person path the record holds the account behind the token, and `current_user`
-returns it.
+on a person path, and at a resource's entry point for its own method, the record holds
+the account behind the token, and `current_user` returns it.
 """
 
 from __future__ import annotations
@@ -539,7 +539,7 @@ def _is_bearer_admitted(connection: HTTPConnection) -> bool:
 
 
 def _is_person_admitted(connection: HTTPConnection) -> bool:
-    """The loose reader for a person path's record, whatever request carries it."""
+    """The loose reader for a person path's or a resource's record, whatever request carries it."""
     record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
     return type(record) is _BearerAdmission and isinstance(
         record.principal, ports.AuthenticatedUser,
@@ -547,7 +547,8 @@ def _is_person_admitted(connection: HTTPConnection) -> bool:
 
 
 def _admitted_token_person(connection: HTTPConnection) -> ports.AuthenticatedUser | None:
-    """The account the bearer gate admitted for this very request on a person path."""
+    """The account the bearer gate admitted for this very request on a person path or at a
+    resource's entry point."""
     admission = _bearer_admission(connection)
     if admission is None or not isinstance(admission.principal, ports.AuthenticatedUser):
         return None
@@ -558,9 +559,9 @@ def _raise_for_bearer_admission(connection: HTTPConnection) -> None:
     if _is_bearer_admitted(connection):
         raise RuntimeError(
             "A bearer-admitted request has no session reader here: a machine route takes "
-            "Depends(bearer_caller), and a person path's account is read only on the "
-            "request the gate admitted it for, not in a sub-app or after the "
-            "Authorization header changed.",
+            "Depends(bearer_caller), and a person path's or a resource's account is read only "
+            "on the request the gate admitted it for, not in a sub-app or after the "
+            "Authorization header or, at a resource, the method changed.",
         )
 
 
