@@ -112,7 +112,7 @@ def a_bearer_gate(
     admission: AdmissionConfig = ADMISSION,
     machine_parties: AuthorizedParties = HAL_ONLY,
 ) -> BearerGate:
-    """A gate whose machine paths are `paths` (none when empty) and whose parties are hal alone."""
+    """A gate whose machine paths are `paths` (none when empty), admitting `machine_parties`."""
     return BearerGate(
         relying_party=a_relying_party(fetch_key_set=key_sets, wall_clock=clock),
         admission=admission,
@@ -315,8 +315,10 @@ def a_bearer_app(
     It serves `EXPORT_PATH` and `UNGATED_EXPORT_PATH` (read `bearer_caller`), `UNDECLARED_PATH`
     and `PEOPLE_PATH` (read nothing) and `RAISING_PATH`, besides the arrangement's own routes;
     the session store holds an admin's session, whose cookie is `BearerApp.cookie`.
+
     `person_paths` adds the gate's person paths over `transaction` (default: a recording one
-    on the app's accounts, held by `BearerApp.transaction`) and the routes of `add_person_routes`.
+    on the app's accounts), held, injected or not, by `BearerApp.transaction`, and the routes
+    of `add_person_routes`; `session_gate` false installs the stack without the session gate.
     """
     key_sets = key_sets or a_key_set_answering()
     clock = FakeClock(float(ACCESS_TOKEN_NOW))
