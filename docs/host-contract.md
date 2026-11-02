@@ -400,8 +400,9 @@ route path, as every policy is, so a host below a `root_path` cannot name a reso
 
 `webauth.middleware.resource_person(connection)` returns the person for this very request and raises `RuntimeError` on a session, person or machine request, in a sub-app, and after the `Authorization` header or the method changed. `current_user` returns the same capped person on the entry point and refuses after a method change.
 
-Proofs: [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py)
-in CI, and scenarios 61 to 66 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
+Proofs: [test_bearer_gate_resource_admission.py](../tests/middleware/test_bearer_gate_resource_admission.py)
+and [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py)
+in CI, and scenarios 61 to 66 of [bearer_resource.py](../tests/e2e/oidc/bearer_resource.py) against real
 Keycloak in the hand-run harness.
 
 ## A service's callers

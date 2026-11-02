@@ -32,10 +32,9 @@ from bearer_run import (
 )
 from harness import reset_host
 from host_app import RESOURCE_PATH, RESOURCE_SCOPE
-from realm import ADMIN_NAME, OUTSIDER_NAME, RESOURCE_AUDIENCE_SCOPE, USER_NAME
+from realm import ADMIN_NAME, OUTSIDER_NAME, RESOURCE_AUDIENCE_SCOPE, UNGROUPED_NAME, USER_NAME
 
 AGENT_SCOPE = f"openid {RESOURCE_SCOPE}"
-UNGROUPED_NAME = "d1-ungrouped"
 LEDGER = (
     "accounts", "account_events", "sessions", "session_transactions", "privileged_accounts",
 )

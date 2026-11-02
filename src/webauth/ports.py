@@ -5,10 +5,10 @@ already owns, so the library needs no schema and no ORM of its own. The
 library commits nothing: a store either applies each of its calls at once or
 writes into a transaction the host opens and commits, and `SessionTransaction`
 is that transaction when the host hands it to the library, and `SignInTransaction`
-is the serialized one the library's sign-in routes and the bearer gate's person paths
-enter. Whether a request that fails leaves the auth machinery's writes behind is the host's: a
-transaction that rolls back on an exception leaves none, a store that applies
-each call keeps them, and the rate-limit budget counts attempts either way.
+is the serialized one the library's sign-in routes, the bearer gate's person paths and
+the resource's entry point enter. Whether a request that fails leaves the auth machinery's
+writes behind is the host's: a transaction that rolls back on an exception leaves none,
+a store that applies each call keeps them, and the rate-limit budget counts attempts either way.
 Behind the session gate, the session renewal is durable before the route runs,
 so a route that fails afterwards leaves it in place.
 

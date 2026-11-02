@@ -55,7 +55,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bearer_resource import (
-    UNGROUPED_NAME,
     known_agent_is_admitted_as_a_person,
     mint_agent_tokens,
     no_credential_and_a_cookie_get_the_challenge,
@@ -101,6 +100,7 @@ from realm import (
     IDP_HOST,
     OUTSIDER_NAME,
     REALM,
+    UNGROUPED_NAME,
     USER_GROUP,
     USER_NAME,
     add_resource,

@@ -1,6 +1,6 @@
-"""The bearer gate's protected resource: its entry point answers the challenge and admits an
-agent's token as a capped person, its metadata document names it, and every other path is
-decided as without it.
+"""The bearer gate's protected resource: its entry point answers the challenge, refuses what
+the admission does not let in, and its metadata document names it, and every other path is
+decided as without it. The admission itself is in test_bearer_gate_resource_admission.py.
 
 The app is the real stack over `an_auth_app` behind the session gate, with the host's routes
 of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
