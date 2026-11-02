@@ -1,0 +1,7 @@
+claim_id = "b08fe19cf6d94b69a68843d50e176c2a"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "74be519fba2ceb26df96ebfdb2d9ccf9341a306d"
+branch = "claude/issue-577-the-oidc-proof-waits-an-hour-for-the-pro"
+scope = ["scripts/run_oidc_proof.sh", "tests/e2e/oidc/README.md"]
+opened_commit = "437bb1c3b8da1d281c06fd72b88d81a69be8839e"
