@@ -147,7 +147,10 @@ def test_a_trailing_slash_and_a_longer_path_are_not_the_entry_point(
     assert "resource_metadata" not in response.headers.get("www-authenticate", "")
 
 
-@pytest.mark.parametrize("url", ["https://app.example/mcp", f"https://app.example{EXPORT_PATH}"])
+@pytest.mark.parametrize(
+    "url", ["https://app.example/mcp", f"https://app.example{EXPORT_PATH}"],
+    ids=["beside", "overlapping"],
+)
 def test_a_machine_path_beside_a_resource_keeps_its_realm_and_admits_an_admin(url: str) -> None:
     app = a_bearer_app(resource=ProtectedResource(url, "mcp:tools"))
 
@@ -244,6 +247,18 @@ def test_a_percent_encoded_url_is_selected_by_the_path_a_server_decodes(
     assert refused.headers["cache-control"] == "no-store"
     assert metadata.status_code == 200
     assert metadata.json()["resource"] == "https://app.example/%6Dcp"
+
+
+def test_encoded_braces_in_the_url_stay_literal_in_the_metadata_route() -> None:
+    braced = ProtectedResource("https://app.example/%7Bid:int%7D", "mcp:tools")
+    app = a_resource_app_refusing_a_session_transaction(braced)
+
+    metadata = app.ask("/.well-known/oauth-protected-resource/{id:int}")
+    as_route_syntax = app.ask("/.well-known/oauth-protected-resource/7")
+
+    assert metadata.status_code == 200
+    assert metadata.json()["resource"] == "https://app.example/%7Bid:int%7D"
+    assert as_route_syntax.status_code != 200
 
 
 def test_the_metadata_route_answers_a_get_of_the_exact_path_only(

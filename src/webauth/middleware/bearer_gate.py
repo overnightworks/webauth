@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlsplit
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
+from fastapi.routing import APIRoute
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
@@ -432,4 +433,8 @@ def install_resource_metadata(app: FastAPI, resource: ProtectedResource, *, issu
     def metadata() -> dict[str, object]:
         return document
 
-    app.add_api_route(resource.metadata_path, metadata, methods=["GET"], include_in_schema=False)
+    route = APIRoute(resource.metadata_path, metadata, methods=["GET"], include_in_schema=False)
+    # Starlette reads braces in a route path as parameters; the decoded path is literal.
+    route.path_regex = re.compile(f"^{re.escape(resource.metadata_path)}$")
+    route.param_convertors = {}
+    app.router.routes.append(route)
