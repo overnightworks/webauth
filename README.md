@@ -111,7 +111,7 @@ dependencies = [
 
 The host's lock records the commit of the tag. A build needs git and builds webauth from source.
 
-A host's Dependabot entry for uv ignores `overnightworks-*`, because Dependabot looks the name up on PyPI. Proven for webauth in one host (speech-runtime).
+A host's Dependabot entry for uv ignores `overnightworks-*`, because Dependabot looks the name up on PyPI. A uv Dependabot run with this pin is proven green for webauth in one host (speech-runtime).
 
 Do not pin the wheel URL: one in a resolved tree fails a uv Dependabot run. The wheel stays on each tag's [release page](https://github.com/overnightworks/webauth/releases), and `scripts/verify_release.sh` checks it.
 
