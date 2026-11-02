@@ -99,8 +99,8 @@ from realm import (
     USER_GROUP,
     USER_NAME,
     add_resource,
-    create_user,
     audience_scope_representation,
+    create_user,
     public_client_representation,
     short_lived_tokens,
 )
