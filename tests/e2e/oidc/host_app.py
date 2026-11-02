@@ -3,9 +3,10 @@ logout routes over the library's own in-memory stores, served over TLS.
 
 One process serves one cookie configuration on every origin it is told. Beside
 it a plain-http listener on loopback, which no browser is ever pointed at, answers
-``GET /state`` with counts only (among them the access tokens refused as unfit for a
-header and the back-channel logouts accepted and refused), clears everything on
-``POST /reset`` (the relying parties, with their key-set caches, are built again).
+``GET /state`` with counts only (among them the accounts above the member role, the access
+tokens refused as unfit for a header and the back-channel logouts accepted and refused),
+clears everything on ``POST /reset`` (the relying parties, with their key-set caches, are
+built again).
 
 Where an issuer is told a ``userinfo_endpoint``, the host calls it once, with the
 access token of the token answer, after and only after a login was admitted: the
@@ -256,6 +257,9 @@ class World:
     def counts(self) -> dict[str, object]:
         return {
             "accounts": len(self.accounts.list()),
+            "privileged_accounts": sum(
+                user.role != _arrangement().MEMBER_ROLE for user in self.accounts.list()
+            ),
             "sessions": self.sessions.count_active(),
             "callbacks_received": self.callbacks_received,
             "backchannel_accepted": self.backchannel_accepted,

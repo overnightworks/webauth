@@ -38,16 +38,8 @@ The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's
 - 59 (H5) a ``d1-other`` token: 401 ``invalid_token``.
 - 60 (H6) after a browser sign-out the token still opens ``/api/me``.
 
-The resource scenarios send agent tokens, whose only audience is the resource, to its entry point
-``/mcp``; ``CHECK bearer-resource-tokens`` asserts ``aud`` and ``scope`` on a real one.
-
-- 61 a known member of the MCP group: POST, no cookie, no ``Origin``, 200 with the user role.
-- 62 a stored admin: 200 with the user role; no ``set_role`` and no event.
-- 63 a known member of the login group outside the MCP group, the outsider and an unknown
-  subject: 403 Access denied, the store untouched.
-- 64 the agent token on ``/api/me``, a machine route and ``/admin``: 401, 401, the session's 401.
-- 65 an app bearer and two audiences: 401; no scope: 403 ``insufficient_scope``.
-- 66 no credential, and a fresh session cookie alone: 401 with the resource challenge.
+The resource scenarios 61 to 66 (an agent's token at the entry point ``/mcp``) live in
+``bearer_resource``; ``CHECK bearer-resource-tokens`` runs before them.
 """
 
 from __future__ import annotations
@@ -55,25 +47,43 @@ from __future__ import annotations
 import base64
 import contextlib
 import dataclasses
-import hashlib
 import json
-import re
 import secrets
-import ssl
 import time
 import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import httpx
+from bearer_resource import (
+    UNGROUPED_NAME,
+    known_agent_is_admitted_as_a_person,
+    mint_agent_tokens,
+    no_credential_and_a_cookie_get_the_challenge,
+    no_group_and_unknown_subject_are_refused_plainly,
+    stored_admin_is_admitted_with_the_person_role,
+    the_agent_token_opens_no_other_path,
+    tokens_the_resource_refuses,
+)
+from bearer_run import (
+    EXPORT,
+    HAL,
+    ME,
+    PERSON_CHALLENGE_INVALID_TOKEN,
+    SUBJECT,
+    BearerRun,
+    Call,
+    Person,
+    as_list,
+    assert_answer,
+    assert_person_answer,
+    claims_of,
+    session_cookies,
+)
 from certificates import ThrowawayTls
 from harness import (
-    Host,
-    cookie_name_and_value,
     free_port,
-    host_state,
     launch_pinned_chromium,
     reset_host,
     start_host,
@@ -83,19 +93,15 @@ from host_app import (
     LEEWAY_SECONDS,
     LOOPBACK,
     RESOURCE_PATH,
-    RESOURCE_SCOPE,
     HostSettings,
 )
-from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Page, Playwright
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Playwright
 from realm import (
     ADMIN_NAME,
     CLIENT_ID,
     IDP_HOST,
     OUTSIDER_NAME,
     REALM,
-    RESOURCE_AUDIENCE_SCOPE,
     USER_GROUP,
     USER_NAME,
     add_resource,
@@ -105,20 +111,15 @@ from realm import (
     short_lived_tokens,
 )
 
-from webauth.cookies import DEFAULT_SESSION_COOKIE_NAME
-
 if TYPE_CHECKING:
     from prove import Proof
 
-HAL = "d1-hal"
 OTHER_HAL = "d1-other"
 AUDIENCE_APP = "d1-app-c"
 HOST_AUDIENCE = CLIENT_ID
 HOST_SCOPE = "openid aud-d1-host"
 SHORT_LIFESPAN_SECONDS = 15
 EXPIRY_MARGIN_SECONDS = 2
-GATE_LINE = re.compile(r"Bearer request refused: (?P<case>[a-z-]+)(?: \((?P<reason>[^)]*)\))?")
-CHALLENGE = 'Bearer realm="admin"'
 AUDIENCE_SCOPES = {
     "aud-d1-host": HOST_AUDIENCE, "aud-d1-app-c": AUDIENCE_APP, "aud-account": "account",
 }
@@ -131,189 +132,14 @@ EXPECTED_AUDIENCES = {
     "audience_host_and_account": {HOST_AUDIENCE, "account"},
     "other_client": {HOST_AUDIENCE},
 }
-SUBJECT = "person-1"
-EXPORT = f"/api/admin/people/{SUBJECT}/export"
 DELETE = f"/api/admin/people/{SUBJECT}"
 PROBE = "/api/admin/session-probe"
-ME = "/api/me"
 PERSON_CHALLENGE_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
-PERSON_CHALLENGE_INVALID_TOKEN = 'Bearer error="invalid_token"'
-AGENT_SCOPE = f"openid {RESOURCE_SCOPE}"
-UNGROUPED_NAME = "d1-ungrouped"
-LEDGER = ("accounts", "account_events", "sessions", "session_transactions")
-
-
-@dataclass(frozen=True)
-class Person:
-    username: str
-    password: str
-
-
-@dataclass(frozen=True)
-class Call:
-    """One request to a machine route: what hal (or someone else) sends."""
-
-    method: str
-    path: str
-    token: str | None = None
-    cookies: dict[str, str] = field(default_factory=dict)
-    headers: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class BearerRun:
-    """The bearer host, hal's tokens and every answer the host gave a machine route."""
-
-    proof: Proof
-    host: Host
-    settings: HostSettings
-    ca_certificate: Path
-    people: dict[str, Person]
-    client_uuids: dict[str, str]
-    redirect_uris: dict[str, str]
-    stack: contextlib.ExitStack
-    sso_pages: dict[str, Page] = field(default_factory=dict)
-    host_pages: dict[str, Page] = field(default_factory=dict)
-    tokens: dict[str, str] = field(default_factory=dict, repr=False)
-    answers: list[httpx.Response] = field(default_factory=list)
-    sent: list[str] = field(default_factory=list, repr=False)
-    admin_id: str = ""
-
-    # --- the host ---
-
-    def send(self, call: Call) -> httpx.Response:
-        headers = {"Host": urllib.parse.urlsplit(self.settings.app_origins[0]).netloc}
-        headers |= call.headers
-        if call.token is not None:
-            headers["Authorization"] = f"Bearer {call.token}"
-            self.sent.append(call.token)
-        if call.cookies:
-            headers["Cookie"] = "; ".join(f"{name}={value}" for name, value in call.cookies.items())
-        answer = httpx.request(
-            call.method, f"https://localhost:{self.host.app_port}{call.path}", headers=headers,
-            verify=ssl.create_default_context(cafile=str(self.ca_certificate)),
-        )
-        self.answers.append(answer)
-        return answer
-
-    def state(self) -> dict[str, Any]:
-        return host_state(self.host)
-
-    def gate_lines(self) -> list[str]:
-        lines = self.host.log_file.read_text().splitlines()
-        return [line for line in lines if GATE_LINE.search(line)]
-
-    def last_gate_reason(self) -> str:
-        match = GATE_LINE.search(self.gate_lines()[-1])
-        assert match is not None
-        return f"{match['case']} ({match['reason']})" if match["reason"] else match["case"]
-
-    # --- Keycloak and the browser ---
-
-    def sso_page(self, person: Person) -> Page:
-        if person.username not in self.sso_pages:
-            self.sso_pages[person.username] = self.stack.enter_context(self.proof.browsing())
-        return self.sso_pages[person.username]
-
-    def host_page(self, person: Person) -> Page:
-        """A browser signed in at the bearer host as ``person``, left open."""
-        if person.username not in self.host_pages:
-            page = self.stack.enter_context(self.proof.browsing())
-            self.proof.sign_in(
-                page, None, self.settings.app_origins[0], person.username, person.password
-            )
-            self.host_pages[person.username] = page
-        return self.host_pages[person.username]
-
-    def follow_to_loopback(self, page: Page, url: str, person: Person, redirect_uri: str) -> str:
-        """The redirect URI Keycloak sends the browser to: Chromium cannot connect to the port
-        nobody listens on, and the failed request names the URL (a route does not see redirects)."""
-        try:
-            with page.expect_event(
-                "requestfailed", lambda request: request.url.startswith(redirect_uri)
-            ) as failed:
-                with contextlib.suppress(PlaywrightError):
-                    page.goto(url)
-                if page.locator("#username").count():
-                    self.proof.fill_keycloak_form(page, None, person.password, person.username)
-        except PlaywrightTimeoutError as error:
-            raise AssertionError(
-                f"Keycloak did not redirect to hal: {page.inner_text('body')[:200]!r}"
-            ) from error
-        return failed.value.url
-
-    def mint(self, person: Person, client_id: str, scope: str) -> dict[str, str]:
-        """hal's authorization code request with PKCE at Keycloak, and the code exchange."""
-        redirect_uri = self.redirect_uris[client_id]
-        verifier = secrets.token_urlsafe(48)
-        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
-        state = secrets.token_urlsafe(16)
-        query = urllib.parse.urlencode({
-            "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
-            "scope": scope, "state": state, "code_challenge": challenge.rstrip(b"=").decode(),
-            "code_challenge_method": "S256",
-        })
-        page = self.sso_page(person)
-        authorization_url = f"{self.settings.authorization_endpoint}?{query}"
-        landing = self.follow_to_loopback(page, authorization_url, person, redirect_uri)
-        answer = urllib.parse.parse_qs(urllib.parse.urlsplit(landing).query)
-        assert answer["state"] == [state], "Keycloak answered another state"
-        exchange = httpx.post(
-            self.settings.token_endpoint,
-            data={
-                "grant_type": "authorization_code", "code": answer["code"][0],
-                "redirect_uri": redirect_uri, "client_id": client_id, "code_verifier": verifier,
-            },
-            verify=ssl.create_default_context(cafile=str(self.ca_certificate)),
-        )
-        assert exchange.status_code == 200, f"the code exchange answered {exchange.status_code}"
-        return exchange.json()
-
-
-def claims_of(token: str) -> dict[str, Any]:
-    segment = token.split(".")[1]
-    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
-
-
-def as_list(claim: str | list[str]) -> list[str]:
-    return [claim] if isinstance(claim, str) else claim
 
 
 def header_of(token: str) -> dict[str, Any]:
     segment = token.split(".")[0]
     return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
-
-
-def assert_answer(
-    answer: httpx.Response, status: int, error: str | None = None, detail: str | None = None
-) -> None:
-    assert answer.status_code == status, f"answered {answer.status_code}: {answer.text[:80]}"
-    wanted = None
-    if status != 200:
-        wanted = CHALLENGE if error is None else f'{CHALLENGE}, error="{error}"'
-    assert answer.headers.get("www-authenticate") == wanted, (
-        f"challenge {answer.headers.get('www-authenticate')!r}"
-    )
-    if detail is not None:
-        assert answer.json()["detail"] == detail, f"detail {answer.json()['detail']!r}"
-
-
-def assert_person_answer(
-    answer: httpx.Response, status: int, challenge: str | None = None, detail: str | None = None
-) -> None:
-    assert answer.status_code == status, f"answered {answer.status_code}: {answer.text[:80]}"
-    assert answer.headers.get("www-authenticate") == challenge, (
-        f"challenge {answer.headers.get('www-authenticate')!r}"
-    )
-    if detail is not None:
-        assert answer.json()["detail"] == detail, f"detail {answer.json()['detail']!r}"
-
-
-def session_cookies(page: Page, origin: str) -> dict[str, str]:
-    """The session cookie the browser holds for the host."""
-    wanted = (DEFAULT_SESSION_COOKIE_NAME,)
-    pairs = (cookie_name_and_value(cookie) for cookie in page.context.cookies([origin]))
-    return {name: value for name, value in pairs if name in wanted}
 
 
 # --- the admitted and the cookie-only scenarios ---
@@ -563,89 +389,6 @@ def sign_out_leaves_the_token_on_the_person_path(run: BearerRun) -> str:
     return f"after {USER_NAME}'s browser sign-out the token still opens /api/me (200)"
 
 
-# --- the resource scenarios: an agent's token at the entry point ---
-
-def resource_challenge(run: BearerRun, error: str | None = None) -> str:
-    metadata = f"{run.settings.app_origins[0]}/.well-known/oauth-protected-resource{RESOURCE_PATH}"
-    challenge = f'Bearer resource_metadata="{metadata}", scope="{RESOURCE_SCOPE}"'
-    return challenge if error is None else f'{challenge}, error="{error}"'
-
-
-def ledger(run: BearerRun) -> tuple[Any, ...]:
-    return tuple(run.state()[key] for key in LEDGER)
-
-
-def agent_post(run: BearerRun, name: str, status: int) -> Any:
-    answer = run.send(Call("POST", RESOURCE_PATH, run.tokens[name]))
-    assert_person_answer(answer, status, None, "Access denied" if status == 403 else None)
-    return answer.json() if status == 200 else None
-
-
-def known_agent_is_admitted_as_a_person(run: BearerRun) -> str:
-    before = ledger(run)
-    person = {"id": claims_of(run.tokens["agent_user"])["sub"], "username": USER_NAME}
-    assert agent_post(run, "agent_user", 200) == {**person, "role": "user"}
-    assert ledger(run) == before, (before, ledger(run))
-    return f"{USER_NAME}'s agent token, POST, no cookie, no Origin: 200 user; ledger {before}"
-
-
-def stored_admin_is_admitted_with_the_person_role(run: BearerRun) -> str:
-    reset_host(run.host)
-    run.host_pages.pop(ADMIN_NAME, None)
-    run.host_page(run.people["admin"])
-    before = ledger(run)
-    assert agent_post(run, "agent_admin", 200)["role"] == "user"
-    assert ledger(run) == before, "the admission changed the stored admin or recorded an event"
-    return f"{ADMIN_NAME}, a stored admin: 200 with role user; ledger unchanged {before}"
-
-
-def no_group_and_unknown_subject_are_refused_plainly(run: BearerRun) -> str:
-    before = ledger(run)
-    agent_post(run, "agent_outsider", 403)
-    assert ledger(run) == before, "the refused token touched the store"
-    run.host_page(run.people["ungrouped"])
-    before = ledger(run)
-    agent_post(run, "agent_ungrouped", 403)
-    assert ledger(run) == before, "a known member without the MCP group touched the store"
-    reset_host(run.host)
-    agent_post(run, "agent_user", 403)
-    assert ledger(run) == (0, 0, 0, 0), ledger(run)
-    return (f"{UNGROUPED_NAME} (known, no MCP group), {OUTSIDER_NAME}, an unknown subject: "
-            "403 Access denied, store untouched")
-
-
-def the_agent_token_opens_no_other_path(run: BearerRun) -> str:
-    token = run.tokens["agent_user"]
-    me = run.send(Call("GET", ME, token))
-    assert_person_answer(me, 401, PERSON_CHALLENGE_INVALID_TOKEN, "Invalid token")
-    assert_answer(run.send(Call("GET", EXPORT, token)), 401, "invalid_token", "Invalid token")
-    other = run.send(Call("GET", "/admin", token))
-    assert_person_answer(other, 401, None, "Authentication required")
-    assert ledger(run) == (0, 0, 0, 0), ledger(run)
-    return "the agent token on /api/me, E and /admin: 401, 401, the session's 401; accounts 0"
-
-
-def tokens_the_resource_refuses(run: BearerRun) -> str:
-    for name, status, error in (
-        ("user", 401, "invalid_token"), ("audience_app", 401, "invalid_token"),
-        ("agent_two_audiences", 401, "invalid_token"),
-        ("agent_no_scope", 403, "insufficient_scope"),
-    ):
-        answer = run.send(Call("POST", RESOURCE_PATH, run.tokens[name]))
-        assert_person_answer(answer, status, resource_challenge(run, error))
-    return "app bearer, wrong audience, two audiences: 401; no scope: 403 insufficient_scope"
-
-
-def no_credential_and_a_cookie_get_the_challenge(run: BearerRun) -> str:
-    run.host_pages.pop(ADMIN_NAME, None)
-    cookies = session_cookies(run.host_page(run.people["admin"]), run.settings.app_origins[0])
-    before = run.state()["session_transactions"]
-    for call in (Call("GET", RESOURCE_PATH), Call("POST", RESOURCE_PATH, cookies=cookies)):
-        assert_person_answer(run.send(call), 401, resource_challenge(run))
-    assert run.state()["session_transactions"] == before
-    return "GET with nothing and POST with a cookie only: 401 with the resource challenge"
-
-
 SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (28, admin_token_opens_export),
     (29, admission_leaves_no_trace),
@@ -715,25 +458,6 @@ def mint_tokens(run: BearerRun) -> str:
     assert claims_of(run.tokens["id_token"])["aud"] == HAL, "the ID token's aud is not d1-hal"
     assert claims_of(run.tokens["other_client"])["azp"] == OTHER_HAL, "azp is not d1-other"
     return f"{len(run.tokens)} tokens minted for {HAL} and {OTHER_HAL} with PKCE"
-
-
-def mint_agent_tokens(run: BearerRun) -> str:
-    """Tokens for the resource; the first check reads ``aud`` and ``scope`` off a real one."""
-    people = run.people
-    audience = f"{run.settings.app_origins[0]}{RESOURCE_PATH}"
-    for name, person, scope in (
-        ("agent_user", people["user"], AGENT_SCOPE),
-        ("agent_admin", people["admin"], AGENT_SCOPE),
-        ("agent_outsider", people["outsider"], AGENT_SCOPE),
-        ("agent_ungrouped", people["ungrouped"], AGENT_SCOPE),
-        ("agent_two_audiences", people["user"], f"{AGENT_SCOPE} aud-d1-host"),
-        ("agent_no_scope", people["user"], f"openid {RESOURCE_AUDIENCE_SCOPE}"),
-    ):
-        run.tokens[name] = run.mint(person, HAL, scope)["access_token"]
-    claims = claims_of(run.tokens["agent_user"])
-    assert as_list(claims["aud"]) == [audience], claims["aud"]
-    assert RESOURCE_SCOPE in claims["scope"].split(), claims["scope"]
-    return f"aud {audience!r} and scope {claims['scope']!r} on a real token"
 
 
 def access_token_type_is_at_jwt(run: BearerRun) -> str:
