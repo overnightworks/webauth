@@ -101,14 +101,13 @@ The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trust
 
 ## Install
 
-`overnightworks-webauth` is not on PyPI: it installs only from the wheel
-published as an asset on each tag's release. Take the version from the
-[Releases page](https://github.com/overnightworks/webauth/releases) and put it in
-place of `X.Y.Z`, in a `pyproject.toml`:
+`overnightworks-webauth` installs from [PyPI](https://pypi.org/project/overnightworks-webauth/).
+Take the version from the [Releases page](https://github.com/overnightworks/webauth/releases)
+and put it in place of `X.Y.Z`, in a `pyproject.toml`:
 
 ```toml
 dependencies = [
-    "overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/vX.Y.Z/overnightworks_webauth-X.Y.Z-py3-none-any.whl",
+    "overnightworks-webauth==X.Y.Z",
 ]
 ```
 
@@ -136,8 +135,8 @@ pass and how a release is made. The commands live under `scripts/`:
 - `scripts/run_static_checks.sh` runs every static check CI's `checks` job runs;
 - `scripts/regenerate_build_constraints.sh` regenerates the hash-pinned build
   constraints from the setuptools floor in `pyproject.toml`;
-- `scripts/verify_release.sh` downloads a release and checks the checksums and
-  build-provenance attestations of its wheel and sdist.
+- `scripts/verify_release.sh` downloads a release's wheel and sdist from PyPI and
+  checks their digests, build-provenance attestations and publisher.
 
 ## Licence
 

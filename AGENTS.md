@@ -37,4 +37,6 @@ from a directory without `src`, so a port change or an export a host cannot impo
   re-create the tag, and never bump the version for it.
 - The setuptools floor lives in `[build-system]` of `pyproject.toml`; after changing it run
   `scripts/regenerate_build_constraints.sh`. A setuptools bump is an ordinary Dependabot pull request (`pip`, `/.github`).
-- `scripts/verify_release.sh TAG` checks a release's checksums and attestations.
+- PyPI is the one install path, and the release workflow publishes to it by trusted publishing, with no token. A version once on
+  PyPI cannot be replaced, so a broken release gets the next patch tag.
+- `scripts/verify_release.sh TAG` checks what PyPI serves for the release: digests, attestations and publisher.
