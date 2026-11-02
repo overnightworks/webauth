@@ -209,5 +209,3 @@ def session_cookies(page: Page, origin: str) -> dict[str, str]:
     wanted = (DEFAULT_SESSION_COOKIE_NAME,)
     pairs = (cookie_name_and_value(cookie) for cookie in page.context.cookies([origin]))
     return {name: value for name, value in pairs if name in wanted}
-
-
