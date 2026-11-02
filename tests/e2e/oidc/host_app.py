@@ -46,6 +46,7 @@ from pydantic import SecretStr
 
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.dependencies import (
+    AuthDependencies,
     current_user_dependency,
     session_id_from_request,
 )
@@ -601,9 +602,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         return {"username": user.username}
 
     if settings.is_bearer_host:
-        _add_bearer_routes(
-            app, dependencies.current_user, dependencies.admin_user, settings, sign_in_transaction,
-        )
+        _add_bearer_routes(app, dependencies, settings, sign_in_transaction)
     return app
 
 
@@ -661,17 +660,17 @@ def _add_marked_routes(
 
 def _add_bearer_routes(
     app: FastAPI,
-    current_user: Callable[..., AuthenticatedUser],
-    admin_user: Callable[..., AuthenticatedUser],
+    dependencies: AuthDependencies,
     settings: HostSettings,
     transaction: SignInTransaction,
 ) -> None:
     """The routes of each kind of path the bearer gate selects."""
+    current_user = dependencies.current_user
     _add_machine_routes(app, current_user)
     _add_person_routes(app, current_user)
     resource = _resource_of(settings, transaction)
     install_resource_metadata(app, resource, issuer=settings.issuer)
-    _add_marked_routes(app, current_user, admin_user)
+    _add_marked_routes(app, current_user, dependencies.admin_user)
 
     @app.api_route(resource.entry_point, methods=["GET", "POST"])
     def entry_point(request: Request) -> dict[str, str]:
