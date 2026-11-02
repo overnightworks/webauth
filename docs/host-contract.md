@@ -382,8 +382,8 @@ The call reads no stored ID token, so a session with or without one answers alik
 with `keeps_id_token=False` works. A store failure or a failed transaction exit raises, and no
 groups are handed out then.
 
-A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(login_group=...,
-admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
+A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(bound_issuer=...,
+login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
 
 - **The source.** Only the new ID token counts: `iss` is the configured issuer, `sub` the
   session account's id, `aud` the client, `azp` as at login, `exp` has not passed, and it holds no `nonce` key.

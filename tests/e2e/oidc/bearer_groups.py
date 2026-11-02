@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from bearer_run import HAL, BearerRun, Call, Person, claims_of, session_cookies
-from host_app import CURRENT_GROUPS_PATH, LEEWAY_SECONDS
+from host_app import CURRENT_GROUPS_PATH
 from realm import USER_GROUP, add_child_group, remove_from_group, user_id_of
 
 if TYPE_CHECKING:
@@ -60,7 +60,7 @@ def refreshed_id_token_facts(run: BearerRun, person: Person, proof: Proof) -> st
     assert claims["aud"] == HAL, f"the refreshed aud is {claims['aud']!r}"
     assert claims["azp"] == original["azp"], "the refreshed azp differs"
     assert claims["iss"] == original["iss"], "the refreshed iss differs"
-    assert claims["iat"] >= started - LEEWAY_SECONDS, "the refreshed iat precedes the grant"
+    assert claims["iat"] >= started, "the refreshed iat precedes the grant's start"
     assert claims["exp"] > claims["iat"], "the refreshed exp is not after iat"
     assert group_path in claims["groups"], "the refreshed ID token lacks the group"
     remove_from_group(proof.fresh_admin(), person.username, group_id)

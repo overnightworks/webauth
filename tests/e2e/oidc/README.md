@@ -6,7 +6,7 @@ application whose routes are `build_app` in `host_app.py`; `conformance.py` runs
 conformance suite against the same host. The OIDC path is not faked. What each
 driver proves, scenario by scenario, is stated in the docstring of `prove.py` and
 `conformance.py`; how the browser and Keycloak reach the apps is stated in
-`harness.py` and `shim.py`. `bearer.py` is the bearer proof (its scenarios 61 to 76 live in `bearer_resource.py`, its shared helpers in `bearer_run.py`): it plays hal, the machine
+`harness.py` and `shim.py`. `bearer.py` is the bearer proof (its scenarios 61 to 72 live in `bearer_resource.py`, its shared helpers in `bearer_run.py`): it plays hal, the machine
 caller, against the same Keycloak (scenarios 28 onwards of `prove.py`; scenarios 55 to 60 send
 hal's token to the host's person path `/api/me`, where it is the account behind the token;
 scenarios 61 to 66 send an agent's token to the resource's entry point `/mcp`, where a known person in

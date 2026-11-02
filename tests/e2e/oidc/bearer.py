@@ -518,10 +518,11 @@ def drive_scenarios(run: BearerRun) -> None:
     proof.held_or_failed(
         "CHECK bearer-token-header-type", lambda: access_token_type_is_at_jwt(run)
     )
-    proof.held_or_failed(
+    if not proof.held_or_failed(
         "CHECK refreshed-id-token-facts",
         lambda: refreshed_id_token_facts(run, run.people["grouped"], proof),
-    )
+    ):
+        return
     for number, scenario in SCENARIOS:
         if scenario is known_agent_is_admitted_as_a_person and not proof.held_or_failed(
             "CHECK bearer-resource-tokens", lambda: mint_agent_tokens(run)
