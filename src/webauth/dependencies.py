@@ -527,7 +527,7 @@ def _bearer_admission(connection: HTTPConnection) -> _BearerAdmission | None:
         record.app is not connection.scope.get("app")
         or record.path != connection.scope["path"]
         or (
-            record.resource_method is not None
+            record.is_resource_admission
             and record.resource_method != connection.scope.get("method")
         )
         or len(authorizations) != 1
