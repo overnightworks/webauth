@@ -347,7 +347,7 @@ class TestTheNewIdTokenIsVerified:
 
         assert an_issuer_reason(outcome) is OidcRefusalReason.ID_TOKEN_REJECTED
 
-    def test_a_token_signed_with_another_algorithm_is_refused(self) -> None:
+    def test_a_token_whose_header_advertises_an_unsupported_algorithm_is_refused(self) -> None:
         arrangement = an_arrangement()
         now = int(arrangement.clock.now)
         other = jws(
@@ -448,8 +448,12 @@ class TestTheReply:
         outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
 
         assert an_issuer_reason(outcome) is OidcRefusalReason.TOKEN_ENDPOINT_FAILED
-        stored_a_replacement = arrangement.stored_refresh_token != ISSUED_REFRESH_TOKEN
-        assert stored_a_replacement is ("refresh_token" not in rotation)
+        if "refresh_token" in rotation:
+            assert arrangement.stored_refresh_token == ISSUED_REFRESH_TOKEN
+        else:
+            assert arrangement.stored_refresh_token in arrangement.issuer.refresh_tokens - {
+                ISSUED_REFRESH_TOKEN
+            }
 
     @pytest.mark.parametrize(
         ("answer", "expected"),
@@ -649,6 +653,7 @@ class TestTheTokenNeverLeaves:
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:
         arrangement = an_arrangement(lambda record: SessionsAnsweringReplace(record, "yes"))
+        arrangement.issuer.refresh_answer_members["access_token"] = "access-token-of-the-scenario"
         caplog.set_level(0)
 
         with pytest.raises(TypeError) as raised:
