@@ -27,15 +27,17 @@ from tests.support.gate_arrangement import (
     a_known_person,
     a_resource,
     a_resource_token,
+    an_agent_token,
     assert_no_bearer_admission,
     bearing,
     relayed,
     the_accounts,
+    the_transaction,
 )
 from tests.support.oidc_arrangement import (
     OPERATOR_SUBJECT,
 )
-from tests.support.oidc_login_host import RecordingSignInTransaction, StoreDown, failing
+from tests.support.oidc_login_host import StoreDown, failing
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
     BearerGateMiddleware,
@@ -52,17 +54,8 @@ def resource() -> ProtectedResource:
     return a_resource()
 
 
-def an_agent_token(resource: ProtectedResource, *groups: str) -> str:
-    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP])
-
-
 def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
     return next((user for user in the_accounts(app) if user.id == OPERATOR_SUBJECT), None)
-
-
-def the_transaction(app: BearerApp) -> RecordingSignInTransaction:
-    assert isinstance(app.transaction, RecordingSignInTransaction)
-    return app.transaction
 
 
 @pytest.mark.parametrize("method", ["GET", "POST", "PUT"])

@@ -109,6 +109,14 @@ MARKED_ROUTES = frozenset({
     MARKED_NOTE, MARKED_NEW_NOTE, MARKED_ADMIN_NOTES, MARKED_PERSON_NOTE, MARKED_UNDER_MACHINE,
     MARKED_RESOURCE_PERSON, MARKED_ADMITTED_USER,
 })
+A_NOTE = "/notes/7"
+A_PERSON_NOTE = "/api/notes/7"
+A_MACHINE_NOTE = "/api/admin/notes/7"
+RESOURCE_CHALLENGE = (
+    f'Bearer resource_metadata="https://app.example/.well-known/oauth-protected-resource/mcp", '
+    f'scope="{RESOURCE_SCOPE}"'
+)
+THE_COOKIE_PERSON = {"id": "user-1", "username": "alice", "role": ADMIN_ROLE}
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
 FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
@@ -149,6 +157,10 @@ def a_resource_token(resource: ProtectedResource | None = None, **claims: Any) -
     """A token hal holds for `resource` (default `a_resource()`): its audience and its scope."""
     held = resource or a_resource()
     return an_access_token(claims={"aud": held.url, "scope": held.scope, **claims})
+
+
+def an_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
+    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
 
 
 def bearing(token: str) -> tuple[str, ...]:
@@ -640,6 +652,11 @@ def assert_no_bearer_admission(
         bearer_caller(connection)
     with pytest.raises(RuntimeError):
         admitted_user(connection)
+
+
+def the_transaction(app: BearerApp) -> RecordingSignInTransaction:
+    assert isinstance(app.transaction, RecordingSignInTransaction)
+    return app.transaction
 
 
 def the_accounts(app: BearerApp) -> list[FakeUser]:

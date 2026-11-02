@@ -13,6 +13,9 @@ import pytest
 from starlette.middleware import Middleware
 
 from tests.support.gate_arrangement import (
+    A_MACHINE_NOTE,
+    A_NOTE,
+    A_PERSON_NOTE,
     MARKED_ADMIN_NOTES,
     MARKED_ADMITTED_USER,
     MARKED_NEW_NOTE,
@@ -21,7 +24,9 @@ from tests.support.gate_arrangement import (
     PERSON_INVALID_TOKEN,
     PERSON_PATHS,
     REALM_INVALID_TOKEN,
+    RESOURCE_CHALLENGE,
     RESOURCE_GROUP,
+    THE_COOKIE_PERSON,
     BearerApp,
     RewritingTheRequest,
     a_bearer_app,
@@ -29,22 +34,15 @@ from tests.support.gate_arrangement import (
     a_resource,
     a_resource_token,
     a_token,
+    an_agent_token,
     bearing,
     the_accounts,
+    the_transaction,
 )
 from tests.support.oidc_arrangement import ABSENT, ACCESS_TOKEN_NOW, OPERATOR_SUBJECT
-from tests.support.oidc_login_host import RecordingSignInTransaction, failing
+from tests.support.oidc_login_host import failing
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE
 from webauth.middleware import MarkedRoute, ProtectedResource
-
-CHALLENGE = (
-    'Bearer resource_metadata="https://app.example/.well-known/oauth-protected-resource/mcp", '
-    'scope="mcp:tools"'
-)
-A_NOTE = "/notes/7"
-A_PERSON_NOTE = "/api/notes/7"
-A_MACHINE_NOTE = "/api/admin/notes/7"
-THE_COOKIE_PERSON = {"id": "user-1", "username": "alice", "role": ADMIN_ROLE}
 
 
 @pytest.fixture
@@ -57,15 +55,6 @@ def app(resource: ProtectedResource) -> BearerApp:
     return a_bearer_app(
         person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
     )
-
-
-def an_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
-    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
-
-
-def the_transaction(app: BearerApp) -> RecordingSignInTransaction:
-    assert isinstance(app.transaction, RecordingSignInTransaction)
-    return app.transaction
 
 
 def assert_admitted_nothing(app: BearerApp) -> None:
@@ -160,7 +149,9 @@ def test_a_token_without_the_scope_is_an_insufficient_scope_beside_a_valid_cooki
     response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
 
     assert response.status_code == 403
-    assert response.headers["www-authenticate"] == f'{CHALLENGE}, error="insufficient_scope"'
+    assert response.headers["www-authenticate"] == (
+        f'{RESOURCE_CHALLENGE}, error="insufficient_scope"'
+    )
     assert_admitted_nothing(app)
 
 
@@ -182,7 +173,7 @@ def test_an_invalid_token_is_a_401_with_the_challenge_and_a_valid_cookie_decides
     response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
 
     assert response.status_code == 401
-    assert response.headers["www-authenticate"] == f'{CHALLENGE}, error="invalid_token"'
+    assert response.headers["www-authenticate"] == f'{RESOURCE_CHALLENGE}, error="invalid_token"'
     assert_admitted_nothing(app)
 
 
@@ -200,7 +191,7 @@ def test_a_credential_the_gate_refuses_is_answered_with_the_challenge_beside_a_c
     response = app.ask(A_NOTE, authorization=authorization, cookie=True)
 
     assert response.status_code == 401
-    assert response.headers["www-authenticate"] == f'{CHALLENGE}, error="{error}"'
+    assert response.headers["www-authenticate"] == f'{RESOURCE_CHALLENGE}, error="{error}"'
     assert_admitted_nothing(app)
 
 
@@ -236,16 +227,6 @@ def test_a_token_of_another_audience_is_ignored_on_any_other_path_and_the_cookie
 
     assert (response.status_code, response.json()) == (200, THE_COOKIE_PERSON)
     assert the_transaction(app).entries == 0
-
-
-def test_an_agent_token_that_is_expired_still_names_the_resource_and_is_not_ignored(
-    app: BearerApp, resource: ProtectedResource,
-) -> None:
-    token = an_agent_token(resource, exp=ACCESS_TOKEN_NOW - 1_000)
-
-    response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
-
-    assert response.status_code == 401
 
 
 @pytest.mark.parametrize("path", [A_NOTE, A_PERSON_NOTE])
@@ -336,7 +317,7 @@ def test_a_marked_route_at_the_entry_point_is_decided_as_the_entry_point() -> No
     no_credential = app.ask("/mcp", cookie=True)
 
     assert no_credential.status_code == 401
-    assert no_credential.headers["www-authenticate"] == CHALLENGE
+    assert no_credential.headers["www-authenticate"] == RESOURCE_CHALLENGE
 
 
 @pytest.mark.parametrize(
@@ -364,7 +345,7 @@ def test_every_reader_on_a_marked_route_refuses_a_request_changed_after_admissio
 
 @pytest.mark.parametrize(
     "method",
-    ["get", "", "GE T", "GET,POST", "GÉT", "GET\n", "G(T"],
+    ["get", "", "GE T", "GET,POST", "GÉT", "GET\n", "G(T", None, 7, b"GET"],
 )
 def test_a_marked_route_refuses_a_method_that_is_not_an_upper_case_token(method: str) -> None:
     with pytest.raises(ValueError, match="method"):
@@ -377,7 +358,7 @@ def test_a_marked_route_refuses_a_method_that_is_not_an_upper_case_token(method:
         "", "/", "notes", "/notes/", "//notes", "/notes//x", "/a/{x", "/a/x}", "/a/{}",
         "/a/x{y}", "/a/{x}y", "/a/{x}{y}", "/a/{x:path}", "/a/{x:int}", "/a/{x-y}", "/a/b c",
         "/a/%2e", "/a/%2F", "/a/./b", "/a/..", "/a/ü", "/a?x", "/a#f", "/a/*", "/a/{*x}",
-        "/a/\n",
+        "/a/\n", None, 7, b"/a",
     ],
 )
 def test_a_marked_route_refuses_a_template_that_is_not_literals_and_whole_segment_names(
@@ -393,8 +374,10 @@ def test_a_marked_route_takes_literal_and_whole_segment_name_segments(template: 
 
 
 def test_marked_routes_that_are_not_marked_routes_are_refused() -> None:
+    not_marked_routes = frozenset({("GET", "/notes")})
+
     with pytest.raises(TypeError, match="marked_routes"):
-        a_resource(marked_routes=frozenset({("GET", "/notes")}))  # type: ignore[arg-type]
+        a_resource(marked_routes=not_marked_routes)  # type: ignore[arg-type]
 
 
 def test_a_resource_without_marked_routes_has_only_its_entry_point(

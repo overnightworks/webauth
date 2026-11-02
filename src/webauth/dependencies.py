@@ -486,6 +486,10 @@ class _BearerAdmission:
     principal: ports.BearerCaller | ports.AuthenticatedUser
     resource_method: str | None = None
 
+    @property
+    def is_resource_admission(self) -> bool:
+        return self.resource_method is not None
+
 
 def _authorization_digest(authorization: str) -> bytes:
     return hashlib.sha256(authorization.encode("latin-1")).digest()
@@ -593,7 +597,7 @@ def _require_admin(
         admission = _bearer_admission(connection)
         is_person_path_token = (
             admission is not None
-            and admission.resource_method is None
+            and not admission.is_resource_admission
             and isinstance(admission.principal, ports.AuthenticatedUser)
         )
         challenge = _PERSON_PATH_INSUFFICIENT_SCOPE if is_person_path_token else None

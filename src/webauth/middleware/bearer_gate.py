@@ -80,7 +80,7 @@ _AUTH_SCHEME: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 _RESOURCE_PATH: Final = re.compile(r"(?:/[A-Za-z0-9._~-]+)+", re.ASCII)
 _METHOD_TOKEN: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Z]+", re.ASCII)
 _LITERAL_SEGMENT: Final = re.compile(r"[A-Za-z0-9._~-]+", re.ASCII)
-_PARAMETER_SEGMENT: Final = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}", re.ASCII)
+_PARAMETER_SEGMENT: Final = re.compile(r"\{[A-Za-z_]\w*\}", re.ASCII)
 _DOT_SEGMENTS: Final = frozenset({".", ".."})
 _ONE_CREDENTIAL: Final = re.compile(r" +([^ \t,]+)")
 _BEARER_SCHEME: Final = "bearer"
@@ -138,7 +138,7 @@ def _is_resource_url(url: str) -> bool:
     return (
         _PLAIN_AUTHORITY.fullmatch(parts.netloc) is not None
         and _RESOURCE_PATH.fullmatch(parts.path) is not None
-        and not {".", ".."} & set(segments)
+        and not _DOT_SEGMENTS & set(segments)
     )
 
 
@@ -598,7 +598,7 @@ def resource_person(connection: HTTPConnection) -> AuthenticatedUser:
     admission = _bearer_admission(connection)
     if (
         admission is None
-        or admission.resource_method is None
+        or not admission.is_resource_admission
         or not isinstance(admission.principal, AuthenticatedUser)
     ):
         raise RuntimeError(
