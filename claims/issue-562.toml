@@ -1,8 +1,0 @@
-claim_id = "7852fe4bf13343a9911498b49b196eb2"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "7e93a7de0b3d7a8af2685aca81f538850ad07263"
-branch = "claude/issue-562-webauth-s-documents-name-the-git-pin"
-scope = ["AGENTS.md", "README.md", "docs/CHANGELOG.md", "docs/VISION.md"]
-opened_commit = "86a5362e6b653ae75affeda3f09a1b72e36083c2"
-whole_reason = "One sentence in four documents: a host pins the tag; left apart, the documents disagree on how a host installs webauth."
