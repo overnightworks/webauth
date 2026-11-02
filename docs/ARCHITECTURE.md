@@ -94,7 +94,7 @@ The gate runs `OidcRelyingParty.verify_access_token` off-loop, then `app_role`; 
 Each kind of path (`MachinePaths`, `PersonPaths`) names its own `AuthorizedParties`; each kind admits only the clients it lists, so a client listed on one is not thereby admitted on the other. On a machine path the record holds a `BearerCaller`. On a person path (`PersonPaths`) the gate admits the account behind the token with the sign-in's own `app_role` and account step in one `SignInTransaction` entry, off-loop, and records an `AuthenticatedUser`; a request with no bearer credential falls through to the cookie. A path both rules select is a machine path.
 A `ProtectedResource` (`BearerGate(resource=...)`) is a third kind: its entry point, the exact path of its `url`, answers every request with the 401 challenge naming its metadata and scope, before CSRF and the session gate; the gate admits no token there yet. `install_resource_metadata` serves the RFC 9728 document. Paths are selected in the order machine, resource, person.
 CSRF, session gate, `bearer_caller`, `current_user` and `admitted_user` read strictly: another app/path/header is no admission. `session_id_from_request` and the loose reader refuse more: a bearer-admitted request names no session.
-The gate sits inside rate limiting; installation puts the machine paths' `no-store` rule first in security-header policy.
+The gate sits inside rate limiting; installation puts the `no-store` rule of the machine paths and the resource's entry point first in security-header policy.
 
 ### Reading the session
 

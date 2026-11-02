@@ -387,7 +387,7 @@ machine path that overlaps it stays a machine path (paths are selected machine, 
 answering JSON with `resource`, `authorization_servers` (`[issuer]`) and `scopes_supported`
 (`[scope]`). Install it ahead of any catch-all route, and list `resource.public_rule` in
 `SessionGate.public` so a client without a session reads it. The entry point is matched on the
-route path, as every policy is, so an app with a `root_path` names the path without it.
+route path, as every policy is, so a host below a `root_path` cannot name a resource yet: the `url` is the public identifier and the route path differs from it.
 
 Proofs: [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py) in CI.
 
