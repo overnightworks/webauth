@@ -198,8 +198,8 @@ class MarkedRoute:
 class ProtectedResource:
     """The resource a client finds by its URL and signs in to at the issuer.
 
-    ``url`` is the resource's identifier and entry point: its path is the one path where
-    the gate answers the challenge. The metadata document sits at the path RFC 9728
+    ``url`` is the resource's identifier and entry point: at its path the gate answers the
+    challenge on every method. The metadata document sits at the path RFC 9728
     section 3.1 derives from it. ``scope`` is the one scope the challenge asks for and a token
     must hold. A token passes there only with an ``azp`` among ``authorized_parties``, which
     no other kind's parties extend, and groups that hold ``required_group`` or a path below it
