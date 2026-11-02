@@ -101,14 +101,14 @@ _STORED_ID_TOKEN = a_stored_id_token()
 class _RecordThatForbidsReadingItsIdToken(FakeSessionRecord):
     """A record whose ID token the library must not read; the test store's own copies may."""
 
-    @property  # type: ignore[override]
-    def id_token(self) -> SecretStr | None:
+    @property
+    def id_token(self) -> SecretStr | None:  # pyright: ignore[reportIncompatibleVariableOverride]
         if sys._getframe(1).f_globals["__name__"].startswith("webauth."):
             raise AssertionError("current_groups read the stored ID token")
         return None
 
     @id_token.setter
-    def id_token(self, value: SecretStr | None) -> None:
+    def id_token(self, value: SecretStr | None) -> None:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Accepts the construction's value and keeps nothing."""
 
 
