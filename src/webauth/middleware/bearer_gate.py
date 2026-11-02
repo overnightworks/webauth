@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Final
+from urllib.parse import urlsplit
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
+from webauth._validation import is_scope_token_tuple
 from webauth.config import web_auth_config
 from webauth.dependencies import (
     _ADMIN_REQUIRED_DETAIL,
@@ -26,7 +28,14 @@ from webauth.dependencies import (
 )
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
-from webauth.oidc import _ACCESS_TOKEN, OidcRefusal, OidcRelyingParty, VerifiedAccessToken
+from webauth.oidc import (
+    _ACCESS_TOKEN,
+    _PLAIN_AUTHORITY,
+    OidcRefusal,
+    OidcRelyingParty,
+    VerifiedAccessToken,
+    _is_endpoint_url,
+)
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
@@ -35,12 +44,13 @@ from webauth.oidc_login import (
     _admit_token_holder,
     app_role,
 )
-from webauth.policies import AuthorizedParties, PathRules
+from webauth.policies import AuthorizedParties, PathRules, PublicRule
 from webauth.ports import BearerCaller
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from fastapi import FastAPI
     from starlette.requests import Request
     from starlette.responses import Response
 
@@ -51,12 +61,16 @@ __all__ = [
     "BearerGateMiddleware",
     "MachinePaths",
     "PersonPaths",
+    "ProtectedResource",
     "bearer_caller",
+    "install_resource_metadata",
 ]
 
 _LOGGER: Final = logging.getLogger(__name__)
-_MACHINE_REALM: Final = "admin"
+_MACHINE_CHALLENGE: Final = ('realm="admin"',)
+_METADATA_PREFIX: Final = "/.well-known/oauth-protected-resource"
 _AUTH_SCHEME: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+_RESOURCE_PATH: Final = re.compile(r"(?:/[A-Za-z0-9._~-]+)+", re.ASCII)
 _ONE_CREDENTIAL: Final = re.compile(r" +([^ \t,]+)")
 _BEARER_SCHEME: Final = "bearer"
 _ACCESS_TOKEN_QUERY_PARAMETER: Final = "access_token"  # noqa: S105 - query parameter name not a credential
@@ -107,17 +121,86 @@ class PersonPaths:
             raise ValueError("person paths must select at least one path")
 
 
+def _is_resource_url(url: str) -> bool:
+    parts = urlsplit(url)
+    segments = parts.path.split("/")[1:]
+    return (
+        _PLAIN_AUTHORITY.fullmatch(parts.netloc) is not None
+        and _RESOURCE_PATH.fullmatch(parts.path) is not None
+        and not {".", ".."} & set(segments)
+    )
+
+
+@dataclass(frozen=True)
+class ProtectedResource:
+    """The resource a client finds by its URL and signs in to at the issuer.
+
+    ``url`` is the resource's identifier and entry point: its path is the one path where
+    the gate answers the challenge. The metadata document sits at the path RFC 9728
+    section 3.1 derives from it. ``scope`` is the one scope the challenge asks for. The
+    gate admits no token at the entry point yet. ``ValueError`` for a ``url`` that is
+    not an endpoint URL with a plain host, an optional port and a path of one or more
+    segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
+    trailing slash, and for a ``scope`` that is not one scope token. So the path needs no
+    decoding and reads the same in a header, in the ASGI path and in a route.
+    """
+
+    url: str
+    scope: str
+
+    def __post_init__(self) -> None:
+        if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
+            raise ValueError(
+                "ProtectedResource.url must be an endpoint URL with a plain host and a path"
+                " of unreserved segments"
+            )
+        if not is_scope_token_tuple((self.scope,)):
+            raise ValueError("ProtectedResource.scope must be one scope token")
+
+    @property
+    def entry_point(self) -> str:
+        """The path of ``url``."""
+        return urlsplit(self.url).path
+
+    @property
+    def entry_point_rule(self) -> PathRules:
+        return PathRules(exact=frozenset({self.entry_point}))
+
+    @property
+    def metadata_path(self) -> str:
+        return f"{_METADATA_PREFIX}{self.entry_point}"
+
+    @property
+    def metadata_url(self) -> str:
+        parts = urlsplit(self.url)
+        return f"{parts.scheme}://{parts.netloc}{self.metadata_path}"
+
+    @property
+    def public_rule(self) -> PublicRule:
+        """``GET`` of the metadata path, for ``SessionGate.public``."""
+        return PublicRule(
+            PathRules(exact=frozenset({self.metadata_path})), methods=frozenset({"GET"}),
+        )
+
+    @property
+    def challenge_parameters(self) -> tuple[str, ...]:
+        return (f'resource_metadata="{self.metadata_url}"', f'scope="{self.scope}"')
+
+
 @dataclass(frozen=True)
 class BearerGate:
     """Which paths take hal's bearer access token, and whose tokens count.
 
-    ``machine_paths`` and ``person_paths`` are the host's two kinds of path, each
-    with its own client parties; a path both select is a machine path. The token
+    ``machine_paths``, ``resource`` and ``person_paths`` are the host's three kinds of
+    path; the machine and person paths have their own client parties, and a path two
+    kinds select belongs to the first of machine, resource, person. At the
+    resource's entry point the gate refuses every request, with the challenge and
+    without any session: it admits no token yet. The token
     must come from ``relying_party``'s issuer, name its client as the only
     audience and carry an ``azp`` among the parties of the path's kind. A machine
     path also needs ``admission.admin_group`` or a group below it. On a person path
     the token is the account behind its subject, admitted as a sign-in admits it.
-    ``ValueError`` when the gate has neither kind, for ``NoAdmins`` with machine
+    ``ValueError`` when the gate has no kind, for ``NoAdmins`` with machine
     paths (no token could pass there) and for an ``admission`` bound to another
     issuer.
     """
@@ -126,10 +209,13 @@ class BearerGate:
     admission: AdmissionConfig
     machine_paths: MachinePaths | None = None
     person_paths: PersonPaths | None = None
+    resource: ProtectedResource | None = None
 
     def __post_init__(self) -> None:
-        if self.machine_paths is None and self.person_paths is None:
-            raise ValueError("the gate must name machine paths or person paths")
+        if self.machine_paths is None and self.person_paths is None and self.resource is None:
+            raise ValueError(
+                "the gate must name machine paths, a protected resource or person paths",
+            )
         if isinstance(self.admission.admin_group, NoAdmins) and self.machine_paths is not None:
             raise ValueError("admission.admin_group is NoAdmins: no token could pass the gate")
         if self.admission.bound_issuer != self.relying_party.issuer:
@@ -139,9 +225,10 @@ class BearerGate:
 class _Refusal(Enum):
     """The cases the gate refuses, each with its status, challenge error and detail.
 
-    The first four refuse a machine path, which names its realm; on a person path
-    ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry no realm and the last two
-    belong to it alone.
+    The first four refuse a machine path, which names its realm; the first three also
+    refuse the resource's entry point, which names its metadata and scope; on a person path
+    ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry neither and the last two belong
+    to it alone.
     """
 
     NO_CREDENTIALS = (401, None, _AUTHENTICATION_REQUIRED_DETAIL)
@@ -160,16 +247,16 @@ class _Refusal(Enum):
     def case(self) -> str:
         return self.name.lower().replace("_", "-")
 
-    def challenge(self, realm: str | None) -> str | None:
+    def challenge(self, kind_parameters: tuple[str, ...]) -> str | None:
         if self is _Refusal.NOT_A_MEMBER:
             return _PERSON_PATH_INSUFFICIENT_SCOPE
-        parameters = [] if realm is None else [f'realm="{realm}"']
+        parameters = list(kind_parameters)
         if self.error is not None:
             parameters.append(f'error="{self.error}"')
         return f"Bearer {', '.join(parameters)}" if parameters else None
 
-    def response(self, realm: str | None) -> JSONResponse:
-        challenge = self.challenge(realm)
+    def response(self, kind_parameters: tuple[str, ...]) -> JSONResponse:
+        challenge = self.challenge(kind_parameters)
         return JSONResponse(
             {"detail": self.detail},
             status_code=self.status_code,
@@ -189,10 +276,11 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     Every request the paths select is verified from its own ``Authorization``
     header; the cookie, CSRF and the session gate decide nothing there. On a machine
     path only an admin's token passes and the caller is recorded for
-    ``bearer_caller``. On a person path a bearer credential is the account behind
-    the token, recorded for the session readers; a request with no bearer credential
-    is decided by the session as it is outside the gate. Every method is gated, HEAD
-    and OPTIONS included.
+    ``bearer_caller``. The resource's entry point is refused on every method, before CSRF
+    and the session gate, with the challenge of its metadata. On a person path a bearer
+    credential is the account behind the token, recorded for the session readers; a request
+    with no bearer credential is decided by the session as it is outside the gate. Every
+    method is gated, HEAD and OPTIONS included.
     """
 
     async def _refusal(self, request: Request) -> Response | None:
@@ -201,6 +289,9 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         person_paths = self._policy.person_paths
         if machine_paths is not None and machine_paths.paths.matches(path):
             return await self._machine_refusal(request, machine_paths)
+        resource = self._policy.resource
+        if resource is not None and resource.entry_point_rule.matches(path):
+            return self._resource_refusal(request, resource)
         if person_paths is not None and person_paths.paths.matches(path):
             _mark_person_path(request)
             return await self._person_refusal(request, person_paths)
@@ -211,14 +302,20 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     ) -> Response | None:
         credential = _credential_of(request)
         if isinstance(credential, _Refusal):
-            return self._refused(credential, realm=_MACHINE_REALM)
+            return self._refused(credential, challenge=_MACHINE_CHALLENGE)
         verified = await self._verified(credential, machine_paths.authorized_parties)
         if isinstance(verified, OidcRefusal):
-            return self._refused(_Refusal.INVALID_TOKEN, verified, realm=_MACHINE_REALM)
+            return self._refused(_Refusal.INVALID_TOKEN, verified, challenge=_MACHINE_CHALLENGE)
         if app_role(verified.groups, self._policy.admission) is not AppRole.ADMIN:
-            return self._refused(_Refusal.INSUFFICIENT_SCOPE, realm=_MACHINE_REALM)
+            return self._refused(_Refusal.INSUFFICIENT_SCOPE, challenge=_MACHINE_CHALLENGE)
         _record_bearer_admission(request, BearerCaller(subject=verified.subject))
         return None
+
+    def _resource_refusal(self, request: Request, resource: ProtectedResource) -> JSONResponse:
+        credential = _credential_of(request)
+        if isinstance(credential, _Refusal):
+            return self._refused(credential, challenge=resource.challenge_parameters)
+        return self._refused(_Refusal.INVALID_TOKEN, challenge=resource.challenge_parameters)
 
     async def _person_refusal(
         self, request: Request, person_paths: PersonPaths,
@@ -261,7 +358,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         refusal: _Refusal,
         reason: OidcRefusal | None = None,
         *,
-        realm: str | None = None,
+        challenge: tuple[str, ...] = (),
     ) -> JSONResponse:
         level = logging.INFO if refusal is _Refusal.NO_CREDENTIALS else logging.WARNING
         if reason is None:
@@ -274,7 +371,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 reason.reason.value,
                 None if reason.token_rejection is None else reason.token_rejection.value,
             )
-        return refusal.response(realm)
+        return refusal.response(challenge)
 
 
 async def _on_worker[Result](work: Callable[[], Result]) -> Result:
@@ -328,3 +425,22 @@ def bearer_caller(connection: HTTPConnection) -> BearerCaller:
             "route, and select the route's path as a machine path.",
         )
     return admission.principal
+
+
+def install_resource_metadata(app: FastAPI, resource: ProtectedResource, *, issuer: str) -> None:
+    """Register ``GET`` of the resource's metadata path (RFC 9728) on ``app``: the resource,
+    its one authorization server ``issuer`` and its one scope.
+
+    Install it ahead of any catch-all route, and list ``resource.public_rule`` in
+    ``SessionGate.public`` so a client without a session reads it.
+    """
+    document = {
+        "resource": resource.url,
+        "authorization_servers": [issuer],
+        "scopes_supported": [resource.scope],
+    }
+
+    def metadata() -> dict[str, object]:
+        return document
+
+    app.add_api_route(resource.metadata_path, metadata, methods=["GET"], include_in_schema=False)

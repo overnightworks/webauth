@@ -13,7 +13,7 @@ from webauth.middleware.csrf import CsrfOriginMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
 from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware
-from webauth.policies import CacheControlRule, SecurityHeadersPolicy
+from webauth.policies import CacheControlRule, PathRules, SecurityHeadersPolicy
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -34,6 +34,15 @@ _LIBRARY_MIDDLEWARE = (
 )
 
 
+def _no_store_paths(bearer_gate: BearerGate) -> list[PathRules]:
+    paths = []
+    if bearer_gate.machine_paths is not None:
+        paths.append(bearer_gate.machine_paths.paths)
+    if bearer_gate.resource is not None:
+        paths.append(bearer_gate.resource.entry_point_rule)
+    return paths
+
+
 def _library_middleware(
     *,
     security_headers: SecurityHeadersPolicy,
@@ -44,11 +53,13 @@ def _library_middleware(
     session_gate: SessionGate | None,
 ) -> list[Middleware]:
     """The middleware to install, outermost first, for the policies the host named."""
-    if bearer_gate is not None and bearer_gate.machine_paths is not None:
-        no_store = CacheControlRule(bearer_gate.machine_paths.paths, "no-store")
+    if bearer_gate is not None:
+        no_store = tuple(
+            CacheControlRule(paths, "no-store") for paths in _no_store_paths(bearer_gate)
+        )
         security_headers = replace(
             security_headers,
-            cache_control_rules=(no_store, *security_headers.cache_control_rules),
+            cache_control_rules=(*no_store, *security_headers.cache_control_rules),
         )
     entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
     if body_size is not None:
@@ -96,8 +107,8 @@ def install_web_auth_middleware(
     and a forged state-changing request is refused before it renews a session.
     The bearer gate sits inside the rate limit, so a machine request spends the
     same budget, and outside CSRF and the session gate, so neither decides a
-    machine path by a cookie. With a bearer gate that has machine paths the installed
-    security-headers policy carries their ``no-store`` rule first, so it beats a host rule.
+    machine path by a cookie. With a bearer gate that has machine paths or a resource
+    the installed security-headers policy carries their ``no-store`` rule first, so it wins.
 
     Install once and add no library middleware yourself; an app that already
     carries one, a subclass included, is refused untouched (``RuntimeError``).

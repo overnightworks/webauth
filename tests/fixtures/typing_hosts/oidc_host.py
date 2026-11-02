@@ -63,12 +63,14 @@ from webauth.middleware import (
     IpRateLimitMiddleware,
     MachinePaths,
     PersonPaths,
+    ProtectedResource,
     SecurityHeadersMiddleware,
     SessionGate,
     SessionGateMiddleware,
     admitted_admin,
     admitted_user,
     bearer_caller,
+    install_resource_metadata,
     install_web_auth_middleware,
 )
 from webauth.oidc import (
@@ -426,7 +428,7 @@ def a_host_ends_a_session() -> None:
 def a_host_names_the_documented_surface() -> tuple[object, ...]:
     return (
         AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
-        MachinePaths, PersonPaths,
+        MachinePaths, PersonPaths, ProtectedResource, install_resource_metadata,
         BodySizePolicy, CsrfOriginMiddleware,
         DEFAULT_PERMISSIONS_POLICY,
         DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,

@@ -12,6 +12,7 @@ from starlette.middleware import Middleware
 
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
+    REALM_ISSUER,
     FakeClock,
     FakeKeySetEndpoint,
     a_relying_party,
@@ -48,9 +49,11 @@ from webauth.middleware import (
     BearerGate,
     MachinePaths,
     PersonPaths,
+    ProtectedResource,
     admitted_admin,
     admitted_user,
     bearer_caller,
+    install_resource_metadata,
     install_web_auth_middleware,
 )
 from webauth.oidc_login import AdmissionConfig
@@ -111,6 +114,7 @@ def a_bearer_gate(
     person_paths: PersonPaths | None = None,
     admission: AdmissionConfig = ADMISSION,
     machine_parties: AuthorizedParties = HAL_ONLY,
+    resource: ProtectedResource | None = None,
 ) -> BearerGate:
     """A gate whose machine paths are `paths` (none when empty), admitting `machine_parties`."""
     return BearerGate(
@@ -120,6 +124,7 @@ def a_bearer_gate(
             None if paths == PathRules() else MachinePaths(paths, machine_parties)
         ),
         person_paths=person_paths,
+        resource=resource,
     )
 
 
@@ -192,6 +197,18 @@ def add_machine_routes(auth: AuthApp) -> None:
     @auth.app.get(RAISING_PATH)
     def raising(_caller: BearerCaller = Depends(bearer_caller)) -> None:
         raise RuntimeError("the route failed")
+
+
+def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
+    """The resource's metadata document and a host route at its entry point."""
+    install_resource_metadata(auth.app, resource, issuer=REALM_ISSUER)
+
+    @auth.app.api_route(
+        resource.entry_point, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    )
+    def entry_point(request: Request) -> dict[str, str]:
+        auth.route_runs.append(request.scope["path"])
+        return {"ran": "the host's entry point"}
 
 
 def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None) -> None:
@@ -296,13 +313,35 @@ def _a_gate_over(
     paths: PathRules, key_sets: FakeKeySetEndpoint, clock: FakeClock,
     machine_parties: AuthorizedParties, person_paths: PathRules | None,
     person_parties: AuthorizedParties, transaction: SignInTransaction,
+    resource: ProtectedResource | None,
 ) -> tuple[PersonPaths | None, BearerGate]:
     person = PersonPaths(person_paths, person_parties, transaction) if person_paths else None
     gate = a_bearer_gate(
         paths=paths, key_sets=key_sets, clock=clock,
-        person_paths=person, machine_parties=machine_parties,
+        person_paths=person, machine_parties=machine_parties, resource=resource,
     )
     return person, gate
+
+
+def _add_routes(
+    auth: AuthApp,
+    person: PersonPaths | None,
+    resource: ProtectedResource | None,
+    login_redirect: LoginRedirect | None,
+) -> None:
+    add_machine_routes(auth)
+    if person is not None:
+        add_person_routes(auth, login_redirect)
+    if resource is not None:
+        add_resource_routes(auth, resource)
+
+
+def _public_rules(
+    given: tuple[PublicRule, ...], person: PersonPaths | None, resource: ProtectedResource | None,
+) -> tuple[PublicRule, ...]:
+    webhook = [FOREIGN_SECRET_PUBLIC] if person else []
+    metadata = [resource.public_rule] if resource else []
+    return (*given, *webhook, *metadata)
 
 
 def a_bearer_app(
@@ -321,6 +360,7 @@ def a_bearer_app(
     gated: bool = True,
     policies: dict[str, Any] | None = None,
     inner_middleware: tuple[Middleware, ...] = (),
+    resource: ProtectedResource | None = None,
     **auth_app_keywords: Any,
 ) -> BearerApp:
     """An app whose machine paths sit behind a bearer gate (or none, when `gated` is false).
@@ -332,18 +372,19 @@ def a_bearer_app(
     `person_paths` adds the gate's person paths over `transaction` (default: a recording one
     on the app's accounts), held, injected or not, by `BearerApp.transaction`, and the routes
     of `add_person_routes`; `session_gate` false installs the stack without the session gate.
+    `resource` adds a protected resource, its public metadata and a host route at its entry point.
     """
-    key_sets = key_sets or a_key_set_answering()
-    clock = FakeClock(float(ACCESS_TOKEN_NOW))
+    key_sets, clock = key_sets or a_key_set_answering(), FakeClock(float(ACCESS_TOKEN_NOW))
     side = _a_sign_in_side(
         transaction_kind, strict_records, cookie_role, known_accounts,
         auth_app_keywords.pop("sessions", None),
     )
     used_transaction = transaction or side.transaction
     person, gate = _a_gate_over(
-        paths, key_sets, clock, machine_parties, person_paths, person_parties, used_transaction,
+        paths, key_sets, clock, machine_parties, person_paths, person_parties,
+        used_transaction, resource,
     )
-    public = (*auth_app_keywords.pop("public", ()), *([FOREIGN_SECRET_PUBLIC] if person else []))
+    public = _public_rules(auth_app_keywords.pop("public", ()), person, resource)
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
     auth = an_auth_app(
         side.record,
@@ -357,9 +398,7 @@ def a_bearer_app(
     if not session_gate:
         install_web_auth_middleware(auth.app, **{**GATED_STACK_POLICIES, **stack_policies})
     auth.app.user_middleware.extend(inner_middleware)
-    add_machine_routes(auth)
-    if person is not None:
-        add_person_routes(auth, auth_app_keywords.get("login_redirect"))
+    _add_routes(auth, person, resource, auth_app_keywords.get("login_redirect"))
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
         accounts=side.accounts, audit=side.audit, transaction=used_transaction,
