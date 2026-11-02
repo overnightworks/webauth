@@ -113,11 +113,7 @@ _ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
 _BEARER_TOKEN_TYPE = "bearer"  # noqa: S105 - token type not a credential
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
 _ENDPOINT_URL_FIELDS = (
-    "issuer",
-    "authorization_endpoint",
-    "token_endpoint",
-    "jwks_url",
-    "end_session_endpoint",
+    "issuer", "authorization_endpoint", "token_endpoint", "jwks_url", "end_session_endpoint",
 )
 _APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
 # The logout page posts to `end_session_endpoint`; the issuer then redirects to
@@ -654,6 +650,10 @@ def _is_backchannel_logout_events(events: object) -> bool:
 
 def _is_endpoint_url(url: object) -> bool:
     return is_https_url(url) and "?" not in url and "#" not in url
+
+
+def _names_another_audience(refusal: OidcRefusal) -> bool:
+    return refusal.token_rejection is RejectionReason.INVALID_AUDIENCE
 
 
 def _is_app_url(url: object) -> bool:

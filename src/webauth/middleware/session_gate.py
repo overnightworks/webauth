@@ -137,7 +137,8 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
 
     ``None`` on a public path, and on an optional path without a live session.
     On a person path of the bearer gate it is the account behind the token, for the
-    request the gate admitted it for; ``None`` on a machine path. Raises
+    request the gate admitted it for; at a protected resource's entry point or marked route it
+    is the capped person; ``None`` on a machine path. Raises
     ``RuntimeError`` for a bearer admission that does not hold for this request, and
     when no gate decided this request: the gate is not installed, the connection is a
     WebSocket, the route runs under another ``WebAuthConfig`` instance, or the
@@ -171,7 +172,8 @@ def admitted_admin(connection: HTTPConnection) -> AuthenticatedUser:
     ``Depends(current_user)`` that admits the cookie on a public path does not
     change the gate's record, so the answer there stays 401. The token person of a
     person path is admitted as an admin or answered 403 ``Admin access required``
-    with ``Bearer error="insufficient_scope"``. Raises
+    with ``Bearer error="insufficient_scope"``; a protected resource's capped person is
+    answered the same 403 without a challenge. Raises
     ``RuntimeError`` as ``admitted_user`` does where no gate decided this request,
     and on a machine admission: a machine route takes ``Depends(bearer_caller)``.
     Usable as ``Depends(admitted_admin)``.
