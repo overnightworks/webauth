@@ -9,6 +9,10 @@ releases without an entry are described in the
 
 ## 0.29.0 - Unreleased
 
+**Added**
+
+- `webauth.oidc_login.current_groups(relying_party, session_id, *, session_transaction, config)` returns a person's group paths from the ID token of a refresh grant made in that call, verified by the bound issuer's key (`iss`, `sub` of the session's account, `aud`, `azp`, `exp`, no `nonce` key at all, and an `iat` no older than the grant's start less the leeway), or an `AccessTokenRefusal` mapped as `fresh_access_token`'s. The call reads no stored ID token. `()` means no membership. A replacement refresh token is stored even when the ID token or its groups are refused, and a deleted session is never recreated. `OidcRefusalReason` gains `SUBJECT_MISMATCH` and `STALE_ID_TOKEN`, which appear as `AccessTokenRefusal.issuer_refusal`. See [the host contract](host-contract.md#a-persons-current-groups).
+
 **Changed**
 
 - `webauth.oidc` is a package, and every public name imports from it as before.

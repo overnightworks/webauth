@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from harness import Host, cookie_name_and_value, host_state
+from harness import Host, cookie_name_and_value, host_state, reset_host
 from host_app import HostSettings
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
@@ -118,6 +118,13 @@ class BearerRun:
             self.host_pages[person.username] = page
         return self.host_pages[person.username]
 
+    def sign_in_after_reset(self, person: Person) -> Page:
+        """The host reset, ``person``'s earlier browser session forgotten with it, and a fresh
+        sign-in: a cached page would hold a cookie the reset ended."""
+        reset_host(self.host)
+        self.host_pages.pop(person.username, None)
+        return self.host_page(person)
+
     def follow_to_loopback(self, page: Page, url: str, person: Person, redirect_uri: str) -> str:
         """The redirect URI Keycloak sends the browser to: Chromium cannot connect to the port
         nobody listens on, and the failed request names the URL (a route does not see redirects)."""
@@ -135,7 +142,9 @@ class BearerRun:
             ) from error
         return failed.value.url
 
-    def mint(self, person: Person, client_id: str, scope: str) -> dict[str, str]:
+    def mint(
+        self, person: Person, client_id: str, scope: str, nonce: str | None = None
+    ) -> dict[str, str]:
         """hal's authorization code request with PKCE at Keycloak, and the code exchange."""
         redirect_uri = self.redirect_uris[client_id]
         verifier = secrets.token_urlsafe(48)
@@ -144,7 +153,7 @@ class BearerRun:
         query = urllib.parse.urlencode({
             "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
             "scope": scope, "state": state, "code_challenge": challenge.rstrip(b"=").decode(),
-            "code_challenge_method": "S256",
+            "code_challenge_method": "S256", **({} if nonce is None else {"nonce": nonce}),
         })
         page = self.sso_page(person)
         authorization_url = f"{self.settings.authorization_endpoint}?{query}"

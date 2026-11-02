@@ -362,6 +362,53 @@ Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_
 in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
 Keycloak in the hand-run harness.
 
+## A person's current groups
+
+`current_groups(relying_party, session_id, *, session_transaction, config)` answers the
+group paths the issuer holds for the person a session signs in, from the ID token of a
+refresh grant made in that call: a check at the moment of use, such as whether a person may
+start a turn that spends the app's budget, is judged against groups that are fresh and
+verified, not those of the login. It stores nothing but the rotated refresh token, and no token
+leaves webauth. The caller is the app, which maps each outcome once:
+
+| Outcome | Meaning | Turn? |
+|---|---|---|
+| a tuple of paths | the current groups; `()` is no membership, so a realm without the groups scope admits nobody | only if the check below holds |
+| `SESSION_ENDED` | the session is gone, expired or deleted during the grant | no |
+| `SIGN_IN_AGAIN` | no refresh token, or the issuer refused it as `invalid_grant` (its session ended, or overlapping calls where the issuer refuses reuse) | no |
+| `ISSUER_UNAVAILABLE` | the issuer failed or its new ID token was refused; `issuer_refusal` says why | no |
+
+The call reads no stored ID token, so a session with or without one answers alike, and a host
+with `keeps_id_token=False` works. A store failure or a failed transaction exit raises, and no
+groups are handed out then.
+
+A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(bound_issuer=...,
+login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
+
+- **The source.** Only the new ID token counts: `iss` is the configured issuer, `sub` the
+  session account's id, `aud` the client, `azp` as at login, `exp` has not passed, and it holds no `nonce` key.
+  OpenID Connect Core 1.0 section 12.2 says the refreshed ID token SHOULD NOT have one and
+  section 2 requires a present one to be verified; webauth keeps nothing to verify it against, so
+  a present nonce, whatever its value, is refused as `nonce-mismatch`. The precondition is that
+  the issuer's refreshed ID token holds no nonce; an issuer that echoes the original's is refused.
+  Freshness is judged against the grant's start, with the configured leeway. A reply without an
+  ID token, or a `groups` claim that is not a list of strings, is `ISSUER_UNAVAILABLE`, never `()`.
+- **The rotation survives.** A replacement refresh token is stored whatever the ID token said,
+  unless the session is gone, which is `SESSION_ENDED` and never recreated.
+- **Overlap.** Each call is one grant. Where the issuer lets a refresh token be used again, two
+  overlapping calls, with each other or with `fresh_access_token`, each succeed and the last
+  replacement written wins; an echoed token never overwrites a replacement. Where it refuses
+  reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session. An app that
+  calls this on every turn must expect that.
+- **Residue.** The second transaction cannot rule out a session deleted after its load: with a
+  store that commits each statement, a deletion before the transaction's exit also escapes when
+  the rotation is omitted or echoed, as [Trust](ARCHITECTURE.md#trust), item 9, says.
+
+Proofs: [test_oidc_login_current_groups.py](../tests/test_oidc_login_current_groups.py) in CI,
+and `CHECK refreshed-id-token-facts` with scenarios 73 to 76 of
+[bearer_groups.py](../tests/e2e/oidc/bearer_groups.py) against real Keycloak in the hand-run
+harness.
+
 ## The protected resource
 
 A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, authorized_parties, transaction, marked_routes)` and passes

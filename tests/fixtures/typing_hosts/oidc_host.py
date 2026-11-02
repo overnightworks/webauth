@@ -11,6 +11,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
+from typing import assert_never
 
 from fastapi import Depends, FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
@@ -98,6 +99,7 @@ from webauth.oidc_login import (
     EverySubject,
     NoAdmins,
     app_role,
+    current_groups,
     fresh_access_token,
 )
 from webauth.oidc_transport import post_token_request_over_https
@@ -269,6 +271,31 @@ def a_host_gets_a_fresh_access_token(
         config=config,
     )
     return outcome.reason if isinstance(outcome, AccessTokenRefusal) else outcome
+
+
+def a_host_maps_an_access_token_refusal(refusal: AccessTokenRefusal) -> int:
+    match refusal.reason:
+        case AccessTokenRefusalReason.SESSION_ENDED:
+            return 401
+        case AccessTokenRefusalReason.SIGN_IN_AGAIN:
+            return 403
+        case AccessTokenRefusalReason.ISSUER_UNAVAILABLE:
+            return 503
+        case unhandled:
+            assert_never(unhandled)
+
+
+def a_host_gets_current_groups(
+    relying_party: OidcRelyingParty, session_id: str, config: WebAuthConfig,
+) -> tuple[str, ...] | int:
+    outcome = current_groups(
+        relying_party, session_id,
+        session_transaction=lambda: nullcontext(HostSessions()),
+        config=config,
+    )
+    if isinstance(outcome, AccessTokenRefusal):
+        return a_host_maps_an_access_token_refusal(outcome)
+    return outcome
 
 
 def a_host_verifies_a_logout_token(

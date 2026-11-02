@@ -81,9 +81,7 @@ def known_agent_is_admitted_as_a_person(run: BearerRun) -> str:
 
 
 def stored_admin_is_admitted_with_the_person_role(run: BearerRun) -> str:
-    reset_host(run.host)
-    run.host_pages.pop(ADMIN_NAME, None)
-    run.host_page(run.people["admin"])
+    run.sign_in_after_reset(run.people["admin"])
     before = ledger(run)
     assert agent_post(run, "agent_admin", 200)["role"] == "user"
     assert ledger(run) == before, "the admission changed the stored admin or recorded an event"
@@ -156,9 +154,7 @@ def marked_route_admits_the_agent_capped(run: BearerRun) -> str:
 
 
 def marked_route_admin_reader_is_the_plain_403(run: BearerRun) -> str:
-    reset_host(run.host)
-    run.host_pages.pop(ADMIN_NAME, None)
-    run.host_page(run.people["admin"])
+    run.sign_in_after_reset(run.people["admin"])
     before = ledger(run)
     answer = run.send(Call("GET", ADMIN_ONLY, run.tokens["agent_admin"]))
     assert_person_answer(answer, 403, None, "Admin access required")
@@ -205,9 +201,7 @@ def a_marked_route_keeps_session_and_csrf_without_a_bearer(run: BearerRun) -> st
 
 
 def marked_route_refuses_the_agent_beyond_its_mark(run: BearerRun) -> str:
-    reset_host(run.host)
-    run.host_pages.pop(USER_NAME, None)
-    run.host_page(run.people["user"])
+    run.sign_in_after_reset(run.people["user"])
     assert run.state()["accounts"] == 1, run.state()
     before = ledger(run)
     token = run.tokens["agent_user"]

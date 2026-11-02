@@ -1,7 +1,7 @@
 """Plays hal against real Keycloak: the bearer gate admits, or refuses, real access tokens.
 
 ``drive_bearer_phase`` runs after the back-channel phase of ``prove.py`` and prints
-``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 72. hal is two public
+``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 76. hal is two public
 clients (``d1-hal``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and the optional
 audience scopes; ``d1-app-c`` is a client that exists only to be an audience. hal gets its
 codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
@@ -40,7 +40,9 @@ The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's
 
 The resource scenarios 61 to 66 (an agent's token at the entry point ``/mcp``) and 67 to 72
 (the same token on the resource's marked routes)
-live in ``bearer_resource``; ``CHECK bearer-resource-tokens`` runs before them.
+live in ``bearer_resource``; ``CHECK bearer-resource-tokens`` runs before them. Scenarios 73 to 76
+(``current_groups`` at a real Keycloak, after ``CHECK refreshed-id-token-facts``) live in
+``bearer_groups``.
 """
 
 from __future__ import annotations
@@ -55,6 +57,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from bearer_groups import (
+    a_group_removed_between_two_calls_is_gone,
+    an_admin_logout_asks_to_sign_in_again,
+    no_token_shows_in_an_answer_or_the_log,
+    refreshed_id_token_facts,
+    the_apps_own_logout_ends_the_session,
+)
 from bearer_resource import (
     a_bearer_on_a_marked_route_is_not_the_resource_admission,
     a_marked_route_keeps_session_and_csrf_without_a_bearer,
@@ -104,6 +113,7 @@ from playwright.sync_api import Playwright
 from realm import (
     ADMIN_NAME,
     CLIENT_ID,
+    GROUPED_NAME,
     IDP_HOST,
     OUTSIDER_NAME,
     REALM,
@@ -348,10 +358,8 @@ def member_token_creates_the_account(run: BearerRun) -> str:
 
 
 def token_and_browser_name_the_same_person(run: BearerRun) -> str:
-    person = run.people["user"]
-    run.host_pages.pop(person.username, None)  # the reset ended the earlier browser session
     origin = run.settings.app_origins[0]
-    cookies = session_cookies(run.host_page(person), origin)
+    cookies = session_cookies(run.sign_in_after_reset(run.people["user"]), origin)
     browser = run.send(Call("GET", "/me", cookies=cookies))
     assert browser.status_code == 200, f"the browser's /me answered {browser.status_code}"
     token = run.send(Call("GET", ME, run.tokens["user"]))
@@ -439,6 +447,10 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (70, a_bearer_on_a_marked_route_is_not_the_resource_admission),
     (71, a_marked_route_keeps_session_and_csrf_without_a_bearer),
     (72, marked_route_refuses_the_agent_beyond_its_mark),
+    (73, a_group_removed_between_two_calls_is_gone),
+    (74, an_admin_logout_asks_to_sign_in_again),
+    (75, the_apps_own_logout_ends_the_session),
+    (76, no_token_shows_in_an_answer_or_the_log),
 )
 
 
@@ -506,6 +518,11 @@ def drive_scenarios(run: BearerRun) -> None:
     proof.held_or_failed(
         "CHECK bearer-token-header-type", lambda: access_token_type_is_at_jwt(run)
     )
+    if not proof.held_or_failed(
+        "CHECK refreshed-id-token-facts",
+        lambda: refreshed_id_token_facts(run, run.people["grouped"], proof),
+    ):
+        return
     for number, scenario in SCENARIOS:
         if scenario is known_agent_is_admitted_as_a_person and not proof.held_or_failed(
             "CHECK bearer-resource-tokens", lambda: mint_agent_tokens(run)
@@ -534,10 +551,12 @@ def drive_bearer_phase(
         "user": Person(USER_NAME, proof.user_password),
         "outsider": Person(OUTSIDER_NAME, proof.outsider_password),
         "ungrouped": Person(UNGROUPED_NAME, secrets.token_urlsafe(18)),
+        "grouped": Person(GROUPED_NAME, secrets.token_urlsafe(18)),
     }
     create_user(
         proof.fresh_admin(), UNGROUPED_NAME, people["ungrouped"].password, (USER_GROUP,)
     )
+    create_user(proof.fresh_admin(), GROUPED_NAME, people["grouped"].password, (USER_GROUP,))
     host = start_host(proof, runtime, settings, tls.ca_certificate)
     try:
         proof.browser = launch_pinned_chromium(
