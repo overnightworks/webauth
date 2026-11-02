@@ -440,9 +440,10 @@ def fresh_access_token(
     ``replace_refresh_token`` answers anything but a ``bool``, or when the
     transaction's exit fails; no token is handed out then.
     """
-    sent = _refresh_token_of_standing_session(session_id, session_transaction, config)
-    if isinstance(sent, AccessTokenRefusal):
-        return sent
+    held = _evidence_of_standing_session(session_id, session_transaction, config)
+    if isinstance(held, AccessTokenRefusal):
+        return held
+    sent = held.refresh_token
     renewed = relying_party.renew_access(sent)
     if isinstance(renewed, OidcRefusal):
         return _refusal_of_grant(renewed)
@@ -516,18 +517,6 @@ def _evidence_of_standing_session(
         if record.refresh_token is None:
             return _SIGN_IN_AGAIN
         return _StandingEvidence(record.refresh_token, record.user.id)
-
-
-def _refresh_token_of_standing_session(
-    session_id: str, session_transaction: SessionTransaction, config: WebAuthConfig,
-) -> SecretStr | AccessTokenRefusal:
-    with session_transaction() as sessions:
-        record = sessions.load(session_id)
-        if record is None or not _is_admitted(
-            config.session_lifetime, record, _whole_second_now(config),
-        ):
-            return _SESSION_ENDED
-        return _SIGN_IN_AGAIN if record.refresh_token is None else record.refresh_token
 
 
 def _refusal_of_grant(refusal: OidcRefusal) -> AccessTokenRefusal:
