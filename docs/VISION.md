@@ -22,6 +22,6 @@ Every app integrates the same way: one app's need sets a shape for all of them, 
 ## Deliberate non-goals
 
 - No storage of its own: the host owns durable state through `webauth.ports`.
-- No deployment of its own: the host installs the tagged wheel.
+- No deployment of its own: the host pins the tag.
 - No identity provider and no password login: it is a relying party of an OpenID Connect issuer.
 - No compatibility layers: a public change breaks cleanly, marked **Breaking**, and leaves no old names, aliases or shims.

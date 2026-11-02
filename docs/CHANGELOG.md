@@ -18,6 +18,10 @@ releases without an entry are described in the
 
 - `webauth.middleware.ProtectedResource(url, scope)` and `BearerGate(resource=...)` name a protected resource as a third kind of path. Its entry point answers every request with the 401 challenge (`resource_metadata`, `scope`), refuses every bearer as `invalid_token` and carries `no-store`; the resource admits no token yet. `install_resource_metadata(app, resource, issuer=...)` serves its RFC 9728 metadata document, and `resource.public_rule` opens it through `SessionGate.public`.
 
+**Changed**
+
+- Hosts pin webauth by git tag (`git+https://github.com/overnightworks/webauth@vX.Y.Z`), as the README's Install says; a release still carries its wheel.
+
 ## 0.27.0 - 2026-10-31
 
 **Breaking**
