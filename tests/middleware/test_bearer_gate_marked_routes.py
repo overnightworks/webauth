@@ -373,11 +373,18 @@ def test_a_marked_route_takes_literal_and_whole_segment_name_segments(template: 
     assert MarkedRoute("GET", template).template == template
 
 
-def test_marked_routes_that_are_not_marked_routes_are_refused() -> None:
-    not_marked_routes = frozenset({("GET", "/notes")})
-
+@pytest.mark.parametrize(
+    "not_marked_routes",
+    [frozenset({("GET", "/notes")}), [MarkedRoute("GET", "/notes")]],
+    ids=["frozenset of tuples", "list of marked routes"],
+)
+def test_marked_routes_that_are_not_marked_routes_are_refused(not_marked_routes: object) -> None:
     with pytest.raises(TypeError, match="marked_routes"):
         a_resource(marked_routes=not_marked_routes)  # type: ignore[arg-type]
+
+
+def test_a_path_without_a_leading_slash_matches_no_marked_route() -> None:
+    assert not MarkedRoute("GET", "/notes").matches("GET", "x/notes")
 
 
 def test_a_resource_without_marked_routes_has_only_its_entry_point(
