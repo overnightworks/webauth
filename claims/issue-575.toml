@@ -1,8 +1,0 @@
-claim_id = "f0f49a99177144e5961f75f89d8aac47"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "74be519fba2ceb26df96ebfdb2d9ccf9341a306d"
-branch = "claude/issue-575-current-groups-gives-an-app-a-person-s-c"
-scope = ["docs/ARCHITECTURE.md", "docs/CHANGELOG.md", "docs/host-contract.md", "quality/baseline.toml", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc_login.py", "tests/e2e/oidc/README.md", "tests/e2e/oidc/bearer.py", "tests/e2e/oidc/bearer_groups.py", "tests/e2e/oidc/bearer_resource.py", "tests/e2e/oidc/bearer_run.py", "tests/e2e/oidc/host_app.py", "tests/e2e/oidc/prove.py", "tests/e2e/oidc/realm.py", "tests/e2e/oidc/stack.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/oidc_arrangement.py", "tests/support/oidc_relying_party.py", "tests/test_oidc_login_current_groups.py"]
-opened_commit = "303860e3e8e93d0777ac74a85e8f27540df29d36"
-whole_reason = "One vertical slice: the check has no caller but the call, and a real token's shape can change the check, so check, call, proof and contract land together."
