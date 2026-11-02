@@ -1,7 +1,7 @@
 """Plays hal against real Keycloak: the bearer gate admits, or refuses, real access tokens.
 
 ``drive_bearer_phase`` runs after the back-channel phase of ``prove.py`` and prints
-``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 60. hal is two public
+``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 66. hal is two public
 clients (``d1-hal``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and the optional
 audience scopes; ``d1-app-c`` is a client that exists only to be an audience. hal gets its
 codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
@@ -37,6 +37,17 @@ The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's
 - 58 (H4) the outsider's token: 403 ``No access``, and no account is created.
 - 59 (H5) a ``d1-other`` token: 401 ``invalid_token``.
 - 60 (H6) after a browser sign-out the token still opens ``/api/me``.
+
+The resource scenarios send agent tokens, whose only audience is the resource, to its entry point
+``/mcp``; ``CHECK bearer-resource-tokens`` asserts ``aud`` and ``scope`` on a real one.
+
+- 61 a known member of the MCP group: POST, no cookie, no ``Origin``, 200 with the user role.
+- 62 a stored admin: 200 with the user role; no ``set_role`` and no event.
+- 63 a known member of the login group outside the MCP group, the outsider and an unknown
+  subject: 403 Access denied, the store untouched.
+- 64 the agent token on ``/api/me``, a machine route and ``/admin``: 401, 401, the session's 401.
+- 65 an app bearer and two audiences: 401; no scope: 403 ``insufficient_scope``.
+- 66 no credential, and a fresh session cookie alone: 401 with the resource challenge.
 """
 
 from __future__ import annotations
@@ -85,8 +96,10 @@ from realm import (
     OUTSIDER_NAME,
     REALM,
     RESOURCE_AUDIENCE_SCOPE,
+    USER_GROUP,
     USER_NAME,
     add_resource,
+    create_user,
     audience_scope_representation,
     public_client_representation,
     short_lived_tokens,
@@ -126,6 +139,7 @@ ME = "/api/me"
 PERSON_CHALLENGE_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
 PERSON_CHALLENGE_INVALID_TOKEN = 'Bearer error="invalid_token"'
 AGENT_SCOPE = f"openid {RESOURCE_SCOPE}"
+UNGROUPED_NAME = "d1-ungrouped"
 LEDGER = ("accounts", "account_events", "sessions", "session_transactions")
 
 
@@ -589,10 +603,15 @@ def no_group_and_unknown_subject_are_refused_plainly(run: BearerRun) -> str:
     before = ledger(run)
     agent_post(run, "agent_outsider", 403)
     assert ledger(run) == before, "the refused token touched the store"
+    run.host_page(run.people["ungrouped"])
+    before = ledger(run)
+    agent_post(run, "agent_ungrouped", 403)
+    assert ledger(run) == before, "a known member without the MCP group touched the store"
     reset_host(run.host)
     agent_post(run, "agent_user", 403)
     assert ledger(run) == (0, 0, 0, 0), ledger(run)
-    return f"{OUTSIDER_NAME} (no group), an unknown subject: 403 Access denied, store untouched"
+    return (f"{UNGROUPED_NAME} (known, no MCP group), {OUTSIDER_NAME}, an unknown subject: "
+            "403 Access denied, store untouched")
 
 
 def the_agent_token_opens_no_other_path(run: BearerRun) -> str:
@@ -618,6 +637,7 @@ def tokens_the_resource_refuses(run: BearerRun) -> str:
 
 
 def no_credential_and_a_cookie_get_the_challenge(run: BearerRun) -> str:
+    run.host_pages.pop(ADMIN_NAME, None)
     cookies = session_cookies(run.host_page(run.people["admin"]), run.settings.app_origins[0])
     before = run.state()["session_transactions"]
     for call in (Call("GET", RESOURCE_PATH), Call("POST", RESOURCE_PATH, cookies=cookies)):
@@ -705,6 +725,7 @@ def mint_agent_tokens(run: BearerRun) -> str:
         ("agent_user", people["user"], AGENT_SCOPE),
         ("agent_admin", people["admin"], AGENT_SCOPE),
         ("agent_outsider", people["outsider"], AGENT_SCOPE),
+        ("agent_ungrouped", people["ungrouped"], AGENT_SCOPE),
         ("agent_two_audiences", people["user"], f"{AGENT_SCOPE} aud-d1-host"),
         ("agent_no_scope", people["user"], f"openid {RESOURCE_AUDIENCE_SCOPE}"),
     ):
@@ -779,7 +800,11 @@ def drive_bearer_phase(
         "admin": Person(ADMIN_NAME, proof.admin_password),
         "user": Person(USER_NAME, proof.user_password),
         "outsider": Person(OUTSIDER_NAME, proof.outsider_password),
+        "ungrouped": Person(UNGROUPED_NAME, secrets.token_urlsafe(18)),
     }
+    create_user(
+        proof.fresh_admin(), UNGROUPED_NAME, people["ungrouped"].password, (USER_GROUP,)
+    )
     host = start_host(proof, runtime, settings, tls.ca_certificate)
     try:
         proof.browser = launch_pinned_chromium(
