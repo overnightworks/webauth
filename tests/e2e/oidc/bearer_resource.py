@@ -143,6 +143,7 @@ ADMIN_ONLY = "/notes-admin"
 
 
 def marked_route_admits_the_agent_capped(run: BearerRun) -> str:
+    run.host_pages.pop(USER_NAME, None)
     run.host_page(run.people["user"])
     before = ledger(run)
     person = {"id": claims_of(run.tokens["agent_user"])["sub"], "username": USER_NAME}
@@ -204,7 +205,10 @@ def a_marked_route_keeps_session_and_csrf_without_a_bearer(run: BearerRun) -> st
 
 
 def marked_route_refuses_the_agent_beyond_its_mark(run: BearerRun) -> str:
+    reset_host(run.host)
     run.host_pages.pop(USER_NAME, None)
+    run.host_page(run.people["user"])
+    assert run.state()["accounts"] == 1, run.state()
     before = ledger(run)
     token = run.tokens["agent_user"]
     for method, path in (
@@ -215,7 +219,7 @@ def marked_route_refuses_the_agent_beyond_its_mark(run: BearerRun) -> str:
         assert answer.status_code in (401, 403), (method, path, answer.status_code)
         assert "resource_metadata" not in answer.headers.get("www-authenticate", ""), path
     assert ledger(run) == before, (before, ledger(run))
-    return "the agent token beyond its mark (method, HEAD, slash, longer, ..): refused, no account"
+    return "the agent token beyond its mark (method, HEAD, slash, longer, ..): refused, unchanged"
 
 
 def mint_agent_tokens(run: BearerRun) -> str:

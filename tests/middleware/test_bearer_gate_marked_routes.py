@@ -378,7 +378,9 @@ def test_a_marked_route_takes_literal_and_whole_segment_name_segments(template: 
     [frozenset({("GET", "/notes")}), [MarkedRoute("GET", "/notes")]],
     ids=["frozenset of tuples", "list of marked routes"],
 )
-def test_marked_routes_that_are_not_marked_routes_are_refused(not_marked_routes: object) -> None:
+def test_marked_routes_that_are_not_a_frozenset_of_marked_routes_are_refused(
+    not_marked_routes: object,
+) -> None:
     with pytest.raises(TypeError, match="marked_routes"):
         a_resource(marked_routes=not_marked_routes)  # type: ignore[arg-type]
 
