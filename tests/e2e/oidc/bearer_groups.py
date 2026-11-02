@@ -55,7 +55,7 @@ def refreshed_id_token_facts(run: BearerRun, person: Person, proof: Proof) -> st
     refreshed = refresh(run, minted["refresh_token"])
     assert "id_token" in refreshed, "a refresh reply holds no id_token"
     claims = claims_of(refreshed["id_token"])
-    assert claims.get("nonce") == nonce, f"the refreshed nonce is {claims.get('nonce')!r}"
+    assert "nonce" not in claims, "the refreshed ID token carries a nonce key"
     assert claims["sub"] == original["sub"], "the refreshed sub differs"
     assert claims["aud"] == HAL, f"the refreshed aud is {claims['aud']!r}"
     assert claims["azp"] == original["azp"], "the refreshed azp differs"
@@ -68,7 +68,7 @@ def refreshed_id_token_facts(run: BearerRun, person: Person, proof: Proof) -> st
     again = claims_of(second["id_token"])
     assert group_path not in again.get("groups", []), "the removed group is still listed"
     return (
-        f"refreshed ID token: nonce equal, sub, aud, azp and iss as minted, iat-started="
+        f"refreshed ID token: no nonce key, sub, aud, azp and iss as minted, iat-started="
         f"{claims['iat'] - started}s, rotated={'refresh_token' in refreshed}; "
         f"after removal the group is gone (groups claim has {len(again.get('groups', []))} paths)"
     )

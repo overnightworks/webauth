@@ -94,6 +94,9 @@ def a_stored_id_token(**claims: Any) -> SecretStr:
     return SecretStr(f"{segment({'typ': 'JWT'})}.{segment(payload)}.signature")
 
 
+_STORED_ID_TOKEN = a_stored_id_token()
+
+
 @dataclass
 class Arrangement:
     """A live session at ``FIXED_INSTANT`` holding ``rt-1`` and a stored ID token, and the
@@ -146,7 +149,7 @@ def an_arrangement(
     sessions_of: Callable[[FakeSessionRecord], SessionRecordsInMemory] = SessionRecordsInMemory,
     *,
     refresh_token: str | None = ISSUED_REFRESH_TOKEN,
-    id_token: SecretStr | None = a_stored_id_token(),
+    id_token: SecretStr | None = _STORED_ID_TOKEN,
     leeway_seconds: int = _LEEWAY,
     answer: bool = True,
     clock_now: float = FIXED_INSTANT.timestamp(),
@@ -224,7 +227,7 @@ class TestTheStoredIdTokenPlaysNoPart:
     @pytest.mark.parametrize(
         "stored",
         [
-            None, a_stored_id_token(), a_stored_id_token(exp=1),
+            None, _STORED_ID_TOKEN, a_stored_id_token(exp=1),
             SecretStr("not-a-compact-jws"), SecretStr(f"e30.{segment({'nonce': 7})}.sig"),
         ],
         ids=["none", "readable", "expired", "unreadable", "unreadable-nonce"],
@@ -538,7 +541,7 @@ class TestTheTokenNeverLeaves:
         arrangement.answer_with_id_token(sub="someone-else")
         secrets_held = [
             *arrangement.answered_tokens, "access-token-at-2", ISSUED_REFRESH_TOKEN,
-            a_stored_id_token().get_secret_value(),
+            _STORED_ID_TOKEN.get_secret_value(),
         ]
 
         outcome = arrangement.current_groups(arrangement.sessions.in_transaction)

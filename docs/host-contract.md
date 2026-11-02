@@ -374,22 +374,23 @@ leaves webauth. The caller is the app, which maps each outcome once:
 | Outcome | Meaning | Turn? |
 |---|---|---|
 | a tuple of paths | the current groups; `()` is no membership, so a realm without the groups scope admits nobody | only if the check below holds |
-| `NoIdToken.IN_THIS_SESSION` | the session holds no ID token (a host that logs in with `keeps_id_token=False`), refused before any grant | no |
 | `SESSION_ENDED` | the session is gone, expired or deleted during the grant | no |
 | `SIGN_IN_AGAIN` | no refresh token, or the issuer refused it as `invalid_grant` (its session ended, or overlapping calls where the issuer refuses reuse) | no |
 | `ISSUER_UNAVAILABLE` | the issuer failed or its new ID token was refused; `issuer_refusal` says why | no |
 
-A caller handles `NoIdToken` first and passes only an `AccessTokenRefusal` to its mapper. An
-unreadable stored ID token raises `ValueError` before any grant, a store failure or a failed
-transaction exit raises, and no groups are handed out then.
+The call reads no stored ID token, so a session with or without one answers alike, and a host
+with `keeps_id_token=False` works. A store failure or a failed transaction exit raises, and no
+groups are handed out then.
 
 A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(login_group=...,
 admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
 
 - **The source.** Only the new ID token counts: `iss` is the configured issuer, `sub` the
-  session account's id, `aud` the client, `azp` as at login, `exp` has not passed, and a nonce,
-  if present, equals the login's (OpenID Connect Core 1.0 section 12.2). The login's ID token is
-  read as previously verified, stored evidence and without an expiry check, for its nonce alone.
+  session account's id, `aud` the client, `azp` as at login, `exp` has not passed, and it holds no `nonce` key.
+  OpenID Connect Core 1.0 section 12.2 says the refreshed ID token SHOULD NOT have one and
+  section 2 requires a present one to be verified; webauth keeps nothing to verify it against, so
+  a present nonce, whatever its value, is refused as `nonce-mismatch`. The precondition is that
+  the issuer's refreshed ID token holds no nonce; an issuer that echoes the original's is refused.
   Freshness is judged against the grant's start, with the configured leeway. A reply without an
   ID token, or a `groups` claim that is not a list of strings, is `ISSUER_UNAVAILABLE`, never `()`.
 - **The rotation survives.** A replacement refresh token is stored whatever the ID token said,

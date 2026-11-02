@@ -76,7 +76,6 @@ from webauth.oidc_login import (
     AdmissionConfig,
     EverySubject,
     NoAdmins,
-    NoIdToken,
     current_groups,
     fresh_access_token,
 )
@@ -86,6 +85,7 @@ from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,
     PathRules,
+    PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
     SecurityHeadersPolicy,
@@ -413,7 +413,14 @@ def _bearer_policies(
         "session_gate": SessionGate(
             session_transaction=counted_session_transaction,
             login_redirect=None,
-            public=(*SIGN_IN_PATHS.public_rules, resource.public_rule),
+            # The gate would answer a dead cookie with 401 before the route runs; the call
+            # answers `session-ended` itself.
+            public=(
+                *SIGN_IN_PATHS.public_rules, resource.public_rule,
+                PublicRule(
+                    PathRules(exact=frozenset({CURRENT_GROUPS_PATH})), methods=frozenset({"GET"}),
+                ),
+            ),
             optional=PathRules(exact=frozenset({"/"})),
         ),
         "bearer_gate": BearerGate(
@@ -640,12 +647,10 @@ def _add_token_routes(
 
 
 def _groups_outcome(
-    outcome: tuple[str, ...] | AccessTokenRefusal | NoIdToken,
+    outcome: tuple[str, ...] | AccessTokenRefusal,
 ) -> dict[str, object]:
     if isinstance(outcome, tuple):
         return {"outcome": "groups", "groups": list(outcome), "issuer_refusal": None}
-    if isinstance(outcome, NoIdToken):
-        return {"outcome": outcome.value, "groups": [], "issuer_refusal": None}
     refusal = outcome.issuer_refusal
     return {
         "outcome": outcome.reason.value, "groups": [],

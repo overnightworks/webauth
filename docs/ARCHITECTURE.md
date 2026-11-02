@@ -138,7 +138,7 @@ follow no redirects and log nothing. The host names authorization, token, key-se
 ### The person's access token
 
 `fresh_access_token` takes a session and returns a `SecretStr` in memory, or `AccessTokenRefusal` carrying `AccessTokenRefusalReason`.
-`current_groups` shares its grant, its second transaction and its rotation, and returns the group paths of the refreshed, verified ID token or an `AccessTokenRefusal` or `NoIdToken` ([host contract](host-contract.md#a-persons-current-groups)).
+`current_groups` shares its grant, its second transaction and its rotation, and returns the group paths of the refreshed, verified ID token or an `AccessTokenRefusal` ([host contract](host-contract.md#a-persons-current-groups)).
 `OidcRelyingParty.workload_access_token(scopes=...)` returns the client's token for the scopes the host passes, the callee's audience scope; [Trust](#trust), item 9, owns lifetime after logout.
 
 ### Admitting an identity

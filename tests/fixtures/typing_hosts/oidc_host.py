@@ -98,7 +98,6 @@ from webauth.oidc_login import (
     AppRole,
     EverySubject,
     NoAdmins,
-    NoIdToken,
     app_role,
     current_groups,
     fresh_access_token,
@@ -294,8 +293,6 @@ def a_host_gets_current_groups(
         session_transaction=lambda: nullcontext(HostSessions()),
         config=config,
     )
-    if isinstance(outcome, NoIdToken):
-        return 403
     if isinstance(outcome, AccessTokenRefusal):
         return a_host_maps_an_access_token_refusal(outcome)
     return outcome
