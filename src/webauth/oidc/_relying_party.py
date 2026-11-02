@@ -64,6 +64,7 @@ from webauth.jwt_verification import (
     Rejected,
     RejectionReason,
     VerifiedClaims,
+    _base64url_decode,
     _json_object,
 )
 from webauth.oidc._client_config import OidcClientConfig
@@ -169,6 +170,8 @@ class OidcRefusalReason(StrEnum):
     ACCESS_TOKEN_REJECTED = "access-token-rejected"  # noqa: S105 - refusal reason not a credential
     INVALID_ACCESS_CLAIM = "invalid-access-claim"
     INSUFFICIENT_SCOPE = "insufficient-scope"
+    SUBJECT_MISMATCH = "subject-mismatch"
+    STALE_ID_TOKEN = "stale-id-token"  # noqa: S105 - refusal reason not a credential
 
 
 @dataclass(frozen=True)
@@ -208,6 +211,14 @@ class RenewedAccess:
 
     access_token: SecretStr
     refresh_token: SecretStr | None
+
+
+@dataclass(frozen=True)
+class _RefreshedGroups:
+    """The rotation of a refresh grant, kept apart from what its ID token yielded."""
+
+    refresh_token: SecretStr | None
+    groups: tuple[str, ...] | OidcRefusal
 
 
 @dataclass(frozen=True)
@@ -365,12 +376,61 @@ class OidcRelyingParty:
             return refusal.refusal
 
     def _renewed_access(self, refresh_token: str) -> RenewedAccess:
+        document = self._refresh_answer(refresh_token)
+        return RenewedAccess(_bearer_access_token(document), _issued_refresh_token(document))
+
+    def _refresh_answer(self, refresh_token: str) -> Mapping[str, object]:
         if not _is_refresh_token(refresh_token):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
-        document = self._token_answer(
+        return self._token_answer(
             self._grant_request({"grant_type": "refresh_token", "refresh_token": refresh_token})
         )
-        return RenewedAccess(_bearer_access_token(document), _issued_refresh_token(document))
+
+    def _refreshed_groups(
+        self, refresh_token: SecretStr, *, subject: str, original_id_token: SecretStr
+    ) -> _RefreshedGroups | OidcRefusal:
+        """The groups of the ID token a refresh grant answers, and its rotated refresh token.
+
+        Only the issuer's refusal of the grant itself is an `OidcRefusal` here; an ID token
+        that does not hold is carried in `groups`, so the caller still stores the rotation.
+        The original ID token is read as stored evidence, for its nonce alone, and raises
+        `ValueError` before any request when it is unreadable. The new one must carry
+        `subject`, any nonce the original carried, and an `iat` within the leeway of the
+        grant's start (OpenID Connect Core 1.0 section 12.2)."""
+        nonce = _stored_nonce(original_id_token.get_secret_value())
+        started_at = int(self._wall_clock())
+        try:
+            document = self._refresh_answer(refresh_token.get_secret_value())
+            rotated = _issued_refresh_token(document)
+        except _RefusalError as refusal:
+            return refusal.refusal
+        try:
+            groups = self._refreshed_id_token_groups(document, subject, nonce, started_at)
+        except _RefusalError as refusal:
+            groups = refusal.refusal
+        return _RefreshedGroups(rotated, groups)
+
+    def _refreshed_id_token_groups(
+        self, document: Mapping[str, object], subject: str, nonce: str | None, started_at: int
+    ) -> tuple[str, ...]:
+        raw_id_token = document.get("id_token")
+        if not isinstance(raw_id_token, str):
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+        id_token = self._verified_id_token(raw_id_token)
+        if "nonce" in id_token.claims and not _is_same_secret(
+            id_token.claims["nonce"], nonce or ""
+        ):
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.NONCE_MISMATCH))
+        if not self._is_authorized_party(id_token):
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH))
+        if id_token.subject != subject:
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.SUBJECT_MISMATCH))
+        if id_token.issued_at + self._config.leeway_seconds < started_at:
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.STALE_ID_TOKEN))
+        groups = _group_paths(id_token.claims)
+        if groups is None:
+            raise _RefusalError(OidcRefusal(OidcRefusalReason.INVALID_IDENTITY_CLAIM))
+        return groups
 
     def workload_access_token(self, *, scopes: tuple[str, ...]) -> SecretStr | OidcRefusal:
         """The client's own access token, from a `client_credentials` grant for
@@ -672,6 +732,22 @@ def _identity_of(
         id_token=raw_id_token,
         refresh_token=refresh_token,
     )
+
+
+def _stored_nonce(id_token: str) -> str | None:
+    """The nonce of an ID token this library verified at login, read without any check.
+
+    Raises `ValueError`, naming no part of the token, when the stored value is not a compact
+    JWS with a JSON object payload."""
+    segments = id_token.split(".")
+    try:
+        claims = _json_object(_base64url_decode(segments[1])) if len(segments) == 3 else None
+    except ValueError:
+        claims = None
+    nonce = None if claims is None else claims.get("nonce")
+    if claims is None or not (nonce is None or isinstance(nonce, str)):
+        raise ValueError("the stored ID token is unreadable")
+    return nonce
 
 
 def _group_paths(claims: Mapping[str, object]) -> tuple[str, ...] | None:

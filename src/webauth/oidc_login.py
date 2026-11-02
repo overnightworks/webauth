@@ -125,7 +125,9 @@ __all__ = [
     "AppRole",
     "EverySubject",
     "NoAdmins",
+    "NoIdToken",
     "app_role",
+    "current_groups",
     "fresh_access_token",
 ]
 
@@ -445,15 +447,88 @@ def fresh_access_token(
     renewed = relying_party.renew_access(sent)
     if isinstance(renewed, OidcRefusal):
         return _refusal_of_grant(renewed)
+    stands = _kept_after_grant(
+        session_id, session_transaction, config, sent=sent, rotated=renewed.refresh_token,
+    )
+    return renewed.access_token if stands else _SESSION_ENDED
+
+
+def _kept_after_grant(
+    session_id: str, session_transaction: SessionTransaction, config: WebAuthConfig,
+    *, sent: SecretStr, rotated: SecretStr | None,
+) -> bool:
+    """Whether the session still stands after the grant, storing the rotated refresh
+    token when it does and differs from the one sent. A deleted session is never recreated."""
     with session_transaction() as sessions:
         record = sessions.load(session_id)
         stands = record is not None and _is_admitted(
             config.session_lifetime, record, _whole_second_now(config),
         )
-        rotated = renewed.refresh_token
         if stands and rotated is not None and rotated != sent:
             stands = _stored(sessions, session_id, rotated)
-    return renewed.access_token if stands else _SESSION_ENDED
+    return stands
+
+
+class NoIdToken(Enum):
+    """The session holds no ID token, so ``current_groups`` cannot check a refreshed one."""
+
+    IN_THIS_SESSION = "no-id-token"
+
+
+@dataclass(frozen=True)
+class _StandingEvidence:
+    refresh_token: SecretStr
+    id_token: SecretStr
+    subject: str
+
+
+def current_groups(
+    relying_party: OidcRelyingParty,
+    session_id: str,
+    *,
+    session_transaction: SessionTransaction,
+    config: WebAuthConfig,
+) -> tuple[str, ...] | AccessTokenRefusal | NoIdToken:
+    """The group paths the issuer holds for the person ``session_id`` signs in, from the
+    verified ID token of a refresh grant made in this call; ``()`` is no membership.
+
+    It shares ``fresh_access_token``'s grant, second transaction, rotation and overlap
+    behaviour, and its refusals. A session without a stored ID token is ``NoIdToken``, before
+    any grant. A replacement refresh token is stored even when the new ID token is refused
+    (``ISSUER_UNAVAILABLE`` with ``issuer_refusal`` naming why), and a session gone by then is
+    ``SESSION_ENDED``. Raises ``ValueError`` when the stored ID token is unreadable."""
+    held = _evidence_of_standing_session(session_id, session_transaction, config)
+    if isinstance(held, AccessTokenRefusal | NoIdToken):
+        return held
+    refreshed = relying_party._refreshed_groups(
+        held.refresh_token, subject=held.subject, original_id_token=held.id_token,
+    )
+    if isinstance(refreshed, OidcRefusal):
+        return _refusal_of_grant(refreshed)
+    if not _kept_after_grant(
+        session_id, session_transaction, config,
+        sent=held.refresh_token, rotated=refreshed.refresh_token,
+    ):
+        return _SESSION_ENDED
+    if isinstance(refreshed.groups, OidcRefusal):
+        return _refusal_of_grant(refreshed.groups)
+    return refreshed.groups
+
+
+def _evidence_of_standing_session(
+    session_id: str, session_transaction: SessionTransaction, config: WebAuthConfig,
+) -> _StandingEvidence | AccessTokenRefusal | NoIdToken:
+    with session_transaction() as sessions:
+        record = sessions.load(session_id)
+        if record is None or not _is_admitted(
+            config.session_lifetime, record, _whole_second_now(config),
+        ):
+            return _SESSION_ENDED
+        if record.id_token is None:
+            return NoIdToken.IN_THIS_SESSION
+        if record.refresh_token is None:
+            return _SIGN_IN_AGAIN
+        return _StandingEvidence(record.refresh_token, record.id_token, record.user.id)
 
 
 def _refresh_token_of_standing_session(

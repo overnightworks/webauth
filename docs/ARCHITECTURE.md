@@ -138,6 +138,7 @@ follow no redirects and log nothing. The host names authorization, token, key-se
 ### The person's access token
 
 `fresh_access_token` takes a session and returns a `SecretStr` in memory, or `AccessTokenRefusal` carrying `AccessTokenRefusalReason`.
+`current_groups` shares its grant, its second transaction and its rotation, and returns the group paths of the refreshed, verified ID token or an `AccessTokenRefusal` or `NoIdToken` ([host contract](host-contract.md#a-persons-current-groups)).
 `OidcRelyingParty.workload_access_token(scopes=...)` returns the client's token for the scopes the host passes, the callee's audience scope; [Trust](#trust), item 9, owns lifetime after logout.
 
 ### Admitting an identity
@@ -204,7 +205,7 @@ Who the library defends against and trusts; links point to owning sections.
    - name resolution is bounded by the system resolver, not by the library; connecting is bounded per resolved address, outside the total deadline ([The relying party](#the-relying-party));
    - an access token that [`fresh_access_token`](#the-persons-access-token) handed out stays valid at the service it is sent to, and at the issuer's own endpoints, until its own `exp`, even after a logout or an expiry that lands once the call has decided; webauth revokes nothing;
    - a copy of a logout token replays within its age bound (`LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway), so it ends the sessions of a login made after the first delivery; webauth keeps no `jti` store, as `OidcRelyingParty.verify_logout_token`'s docstring says;
-   - with a store that commits every statement, a session deleted between `fresh_access_token`'s second `load` and the end of its block is seen only through `replace_refresh_token` answering `False`, and an issuer that echoes or omits the refresh token never reaches that call, so the call then hands out a token for the session deleted in that window.
+   - with a store that commits every statement, a session deleted between `fresh_access_token`'s second `load` and the end of its block is seen only through `replace_refresh_token` answering `False`, and an issuer that echoes or omits the refresh token never reaches that call, so the call then hands out a token for the session deleted in that window; `current_groups` shares that window and hands out groups for such a session.
 
 To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 
