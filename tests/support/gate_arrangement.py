@@ -539,8 +539,10 @@ class RelayingScope:
             return
         known = set(scope)
         scope.update(self._relay.replay)
-        await self._app(scope, receive, send)
-        self._relay.added = {key: scope[key] for key in set(scope) - known}
+        try:
+            await self._app(scope, receive, send)
+        finally:
+            self._relay.added = {key: scope[key] for key in set(scope) - known}
 
 
 def relayed(app: AuthApp) -> ScopeRelay:

@@ -17,6 +17,7 @@ import pytest
 from fastapi import Depends, FastAPI, HTTPException, Request
 from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
+from starlette.responses import JSONResponse
 from starlette.testclient import TestClient
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -46,6 +47,7 @@ from tests.support.oidc_arrangement import (
 from tests.support.oidc_login_host import RecordingSignInTransaction, StoreDown, failing
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
+    BearerGateMiddleware,
     ProtectedResource,
     admitted_user,
     bearer_caller,
@@ -53,6 +55,7 @@ from webauth.middleware import (
     resource_person,
 )
 from webauth.policies import AuthorizedParties, PathRules
+from webauth.ports import SignInStores
 
 EVERY_METHOD = pytest.mark.parametrize(
     "method", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
@@ -627,23 +630,45 @@ def test_an_unknown_subject_gets_the_plain_403_and_no_account_or_event_appears(
     assert app.auth.route_runs == []
 
 
-@pytest.mark.parametrize("failure", ["store", "exit"])
+def a_transaction_that_cannot_be_created() -> NoReturn:
+    raise StoreDown
+
+
+class ATransactionThatCannotBeEntered:
+    def __enter__(self) -> SignInStores:
+        raise StoreDown
+
+    def __exit__(self, *_exception: object) -> None:
+        return None
+
+
+@pytest.mark.parametrize("failure", ["creation", "entry", "lookup", "exit"])
 def test_a_store_failure_in_the_admission_is_the_library_500_and_admits_nothing(
     resource: ProtectedResource, failure: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
-    assert app.accounts is not None
-    if failure == "store":
-        failing(app.accounts, "get", monkeypatch)
-    else:
-        the_transaction(app).exit_failure = StoreDown()
-
-    response = app.ask(
-        resource.entry_point, method="POST", authorization=bearing(an_agent_token(resource)),
+    broken_transactions = {
+        "creation": a_transaction_that_cannot_be_created,
+        "entry": ATransactionThatCannotBeEntered,
+    }
+    app = a_bearer_app(
+        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        transaction=broken_transactions.get(failure),
     )
+    assert app.accounts is not None
+    if failure == "lookup":
+        failing(app.accounts, "get", monkeypatch)
+    if failure == "exit":
+        the_transaction(app).exit_failure = StoreDown()
+    token = bearing(an_agent_token(resource))
+    relay = relayed(app.auth)
+
+    response = app.ask(resource.entry_point, method="POST", authorization=token)
 
     assert response.status_code == 500
     assert app.auth.route_runs == []
+    assert_no_bearer_admission(
+        app, {**relay.added, "method": "POST"}, resource.entry_point, token[0],
+    )
 
 
 def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
@@ -672,19 +697,47 @@ class Rewriting:
         await self._app(scope, receive, send)
 
 
+REFUSED_AS_RUNTIME_ERROR = 418
+
+
+def answering_a_runtime_error_with_418(app: BearerApp) -> None:
+    """A reader that refuses with `RuntimeError` answers 418; any other failure stays the 500."""
+
+    def answer(_request: Request, _error: Exception) -> JSONResponse:
+        return JSONResponse({"detail": "refused"}, status_code=REFUSED_AS_RUNTIME_ERROR)
+
+    app.auth.app.add_exception_handler(RuntimeError, answer)
+
+
 def a_resource_person_reader(app: BearerApp, path: str) -> None:
     @app.auth.app.api_route(path, methods=["GET", "POST"])
     def reading(request: Request) -> dict[str, str]:
         return {"id": resource_person(request).id}
 
 
+def an_admitted_user_reader(app: BearerApp, resource: ProtectedResource) -> None:
+    @app.auth.app.api_route(resource.entry_point, methods=["TRACE"])
+    def reading(request: Request) -> dict[str, str | None]:
+        user = admitted_user(request)
+        return {"id": None if user is None else user.id}
+
+
+def between_the_bearer_gate_and_csrf(app: BearerApp, rewriting: Middleware) -> None:
+    stack = app.auth.app.user_middleware
+    gate = next(at for at, entry in enumerate(stack) if entry.cls is BearerGateMiddleware)
+    stack.insert(gate + 1, rewriting)
+
+
 @pytest.mark.parametrize(
     ("changes", "status"),
     [
-        pytest.param({"method": "PATCH"}, 500, id="method-to-current-user"),
-        pytest.param({"method": "GET"}, 500, id="method-to-another-reader"),
-        pytest.param({"app": FastAPI()}, 500, id="sub-app"),
-        pytest.param({"headers": [(b"authorization", b"Bearer other")]}, 500, id="header"),
+        pytest.param({"method": "PATCH"}, REFUSED_AS_RUNTIME_ERROR, id="method-to-current-user"),
+        pytest.param({"method": "GET"}, REFUSED_AS_RUNTIME_ERROR, id="method-to-another-reader"),
+        pytest.param({"app": FastAPI()}, REFUSED_AS_RUNTIME_ERROR, id="sub-app"),
+        pytest.param(
+            {"headers": [(b"authorization", b"Bearer other")]}, REFUSED_AS_RUNTIME_ERROR,
+            id="header",
+        ),
         pytest.param({}, 200, id="unchanged"),
     ],
 )
@@ -695,12 +748,57 @@ def test_the_resource_person_and_current_user_refuse_a_request_changed_after_adm
         paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
         inner_middleware=(Middleware(Rewriting, changes=changes),),
     )
+    answering_a_runtime_error_with_418(app)
 
     response = app.ask(
         resource.entry_point, method="POST", authorization=bearing(an_agent_token(resource)),
     )
 
     assert response.status_code == status
+
+
+@pytest.mark.parametrize(
+    ("sent", "changes", "status"),
+    [
+        pytest.param("POST", {"method": "TRACE"}, REFUSED_AS_RUNTIME_ERROR, id="method-changed"),
+        pytest.param("TRACE", {}, 200, id="unchanged"),
+    ],
+)
+def test_admitted_user_reads_the_resource_person_and_refuses_a_method_changed_after_admission(
+    resource: ProtectedResource, sent: str, changes: dict[str, object], status: int,
+) -> None:
+    app = a_bearer_app(
+        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        inner_middleware=(Middleware(Rewriting, changes=changes),),
+    )
+    an_admitted_user_reader(app, resource)
+    answering_a_runtime_error_with_418(app)
+
+    response = app.ask(
+        resource.entry_point, method=sent, authorization=bearing(an_agent_token(resource)),
+    )
+
+    assert response.status_code == status
+    if status == 200:
+        assert response.json() == {"id": OPERATOR_SUBJECT}
+
+
+@pytest.mark.parametrize(
+    ("changes", "status"),
+    [pytest.param({"method": "POST"}, 403, id="method-changed"), pytest.param({}, 200, id="same")],
+)
+def test_csrf_refuses_a_request_made_mutating_after_admission(
+    resource: ProtectedResource, changes: dict[str, object], status: int,
+) -> None:
+    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+    between_the_bearer_gate_and_csrf(app, Middleware(Rewriting, changes=changes))
+
+    response = app.ask(
+        resource.entry_point, method="GET", authorization=bearing(an_agent_token(resource)),
+    )
+
+    assert response.status_code == status
+    assert (status == 200) == (app.auth.route_runs == [resource.entry_point])
 
 
 @pytest.mark.parametrize(
@@ -720,10 +818,11 @@ def test_the_resource_person_raises_on_a_session_person_and_machine_request(
         person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
     )
     a_resource_person_reader(app, path)
+    answering_a_runtime_error_with_418(app)
 
     response = app.ask(path, **asked)  # type: ignore[arg-type]
 
-    assert response.status_code == 500
+    assert response.status_code == REFUSED_AS_RUNTIME_ERROR
 
 
 @pytest.mark.parametrize(
