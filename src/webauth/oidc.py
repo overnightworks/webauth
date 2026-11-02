@@ -520,10 +520,11 @@ class OidcRelyingParty:
         non-empty (a token naming only a `sid` is refused) and `nonce` absent,
         even as `null`. An RS256 `logout+jwt` of the configured issuer whose one
         audience is the client ID, issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS`
-        plus the leeway ago. The token, its claims and its `sid` are never returned,
-        so no session id is stored. There is no replay store: the age bound is what
-        limits a copy, which ends the subject's sessions again until it ages out, and
-        a person who signed in again in that time is signed out once more."""
+        plus the leeway ago, and expiring after its `iat`. The token, its claims and
+        its `sid` are never returned, so no session id is stored. There is no replay
+        store: the age bound is what limits a copy, which ends the subject's sessions
+        again until it ages out, and a person who signed in again in that time is
+        signed out once more."""
         outcome = self._jwt_verifier.verify(logout_token, expected_type=_LOGOUT_TOKEN_TYPE)
         if isinstance(outcome, Rejected):
             return OidcRefusal(
