@@ -364,15 +364,15 @@ Keycloak in the hand-run harness.
 
 ## The protected resource
 
-A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, authorized_parties)` and passes
+A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, authorized_parties, transaction)` and passes
 it as `BearerGate(resource=...)`; a gate needs one kind of path, and the resource counts as one.
 `url` is the resource's identifier, an endpoint URL with a plain host, an optional port and a path of
 one or more segments of RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`), none
-being `.` or `..`, with no trailing slash; its path is the entry point; `scope` is the one scope token the challenge asks for and a token must hold; `authorized_parties` (an `AuthorizedParties`, else `TypeError`) are the clients whose token the resource takes, apart from the parties of the machine and person paths. Everything else
+being `.` or `..`, with no trailing slash; its path is the entry point; `scope` is the one scope token the challenge asks for and a token must hold; `authorized_parties` (an `AuthorizedParties`, else `TypeError`) are the clients whose token the resource takes, apart from the parties of the machine and person paths; `required_group` (a group path, else `ValueError`) is the group a person must hold in the token, or one below it, besides the admission's login group; `transaction` is the host's `SignInTransaction`, the same port the person paths use. Everything else
 derives from `url`: the metadata path is `/.well-known/oauth-protected-resource` plus the entry
 point (RFC 9728 section 3.1), and the challenge names the metadata URL.
 
-**The resource admits no token yet.** A token for the resource is refused on the person and machine paths, and an app token is refused at the entry point; a party listed on one kind is not thereby listed on another. At the entry point, on every method and the exact path only,
+**The resource admits an agent's token, capped and read-only.** A token for the resource is refused on the person and machine paths, and an app token is refused at the entry point; a party listed on one kind is not thereby listed on another. At the entry point, on every method and the exact path only,
 the gate answers before CSRF and the session gate and runs no route:
 
 - no credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`;
@@ -383,13 +383,12 @@ the gate answers before CSRF and the session gate and runs no route:
 - a token that passes that but whose `scope` claim, read as space-separated tokens, lacks the
   resource's scope (absent, not a string, another scope, or the scope only as a substring of
   another): 403 with `error="insufficient_scope"` and the same two parameters;
-- a token that holds: a plain 403 without `WWW-Authenticate`, because a client answers
-  `insufficient_scope` with a new sign-in, which cannot help. No route runs and nothing is
-  recorded; the admission that replaces this answer is not built yet;
+- a token that holds, whose person the resource does not admit (the groups lack `required_group` or the admission's login group, or no account has the token's subject): a plain 403 without `WWW-Authenticate`, because a client answers `insufficient_scope` with a new sign-in, which cannot help. No route runs, the store is not touched for a missing group, and nothing is created, changed or audited;
+- a token that holds, whose person is admitted: the request passes with no cookie and no `Origin`, CSRF and the session gate reading the admission as they read a person path's. The lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once. The person is `AuthenticatedUser(id, username, role)` with the configured person role whatever role is stored: a stored admin is admitted as a plain user, and `admin_user` answers 403. A store or exit failure is the library's 500 and records no admission;
 - a credential the gate refuses (a repeated header, a malformed one): that refusal, with the same
   two parameters.
 
-A cookie decides nothing there: no session transaction runs and nothing is admitted. The entry
+A cookie decides nothing there: no session transaction runs. The entry
 point's answers carry `no-store`. A trailing slash or a longer path is not the entry point, and a
 machine path that overlaps it stays a machine path (paths are selected machine, resource, person).
 
@@ -398,6 +397,8 @@ answering JSON with `resource`, `authorization_servers` (`[issuer]`) and `scopes
 (`[scope]`). Install it ahead of any catch-all route, and list `resource.public_rule` in
 `SessionGate.public` so a client without a session reads it. The entry point is matched on the
 route path, as every policy is, so a host below a `root_path` cannot name a resource yet: the `url` is the public identifier and the route path differs from it.
+
+`webauth.middleware.resource_person(connection)` returns the person for this very request and raises `RuntimeError` on a session, person or machine request, in a sub-app, and after the `Authorization` header or the method changed. `current_user` returns the same capped person on the entry point and refuses after a method change.
 
 Proofs: [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py) in CI.
 
