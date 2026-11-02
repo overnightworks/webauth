@@ -28,7 +28,7 @@ kill_after_seconds=240
 # probe_objects passes) at a generous 10 s each.
 cleanup_cap_seconds=300
 cleanup_kill_after_seconds=30
-lock_wait_seconds=1200
+lock_wait_seconds=3600
 lock_wait_timeout_status=75
 setpriv_unavailable_status=69
 
@@ -120,7 +120,7 @@ prepare() {
 
 # The compose project names are reserved for the probe: the harness's own teardown
 # removes them (stack.py PROBE_PROJECT, suite.py d2-suite- and eight lowercase hex
-# digits) and cleanup replays that teardown. The live hal stack's project is `edge`.
+# digits) and cleanup replays that teardown. The live hal stack's project is `hal`.
 is_probe_project() {
   [[ "$2" == "$1" || "$2" =~ ^d2-suite-[0-9a-f]{8}$ ]]
 }
