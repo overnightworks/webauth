@@ -248,38 +248,6 @@ def test_the_challenge_points_at_the_url_the_metadata_document_answers_at(
     assert response.status_code == 200
 
 
-def test_a_percent_encoded_url_is_selected_by_the_path_a_server_decodes(
-    member_token: str,
-) -> None:
-    encoded = ProtectedResource("https://app.example/%6Dcp", "mcp:tools")
-    app = a_resource_app_refusing_a_session_transaction(encoded)
-    advertised = (
-        'Bearer resource_metadata="https://app.example/.well-known/oauth-protected-resource'
-        '/%6Dcp", scope="mcp:tools"'
-    )
-
-    refused = app.ask("/%6Dcp", authorization=bearing(member_token))
-    metadata = app.ask("/.well-known/oauth-protected-resource/%6Dcp")
-
-    assert refused.status_code == 401
-    assert refused.headers["www-authenticate"] == f'{advertised}, error="invalid_token"'
-    assert refused.headers["cache-control"] == "no-store"
-    assert metadata.status_code == 200
-    assert metadata.json()["resource"] == "https://app.example/%6Dcp"
-
-
-def test_encoded_braces_in_the_url_stay_literal_in_the_metadata_route() -> None:
-    braced = ProtectedResource("https://app.example/%7Bid:int%7D", "mcp:tools")
-    app = a_resource_app_refusing_a_session_transaction(braced)
-
-    metadata = app.ask("/.well-known/oauth-protected-resource/{id:int}")
-    as_route_syntax = app.ask("/.well-known/oauth-protected-resource/7")
-
-    assert metadata.status_code == 200
-    assert metadata.json()["resource"] == "https://app.example/%7Bid:int%7D"
-    assert as_route_syntax.status_code != 200
-
-
 def test_the_metadata_route_answers_a_get_of_the_exact_path_only(
     app: BearerApp, resource: ProtectedResource, same_origin: dict[str, str],
 ) -> None:
@@ -314,6 +282,13 @@ def test_the_metadata_path_is_public_for_a_get_of_the_exact_path_only(
         "https://app.example/mcp#top",
         'https://app.example/m"cp',
         "https://app.example/m\\cp",
+        "https://app.example/%6Dcp",
+        "https://app.example/%7Bid:int%7D",
+        "https://app.example/{id}",
+        "https://app.example/mcp\u00e9",
+        "https://app.example/a/../mcp",
+        "https://app.example/./mcp",
+        "https://app.example/mcp/",
         "/mcp",
         "",
     ],

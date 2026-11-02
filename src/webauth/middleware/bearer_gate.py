@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING, Final
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
@@ -31,6 +31,7 @@ from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.oidc import (
     _ACCESS_TOKEN,
+    _PLAIN_AUTHORITY,
     OidcRefusal,
     OidcRelyingParty,
     VerifiedAccessToken,
@@ -70,6 +71,7 @@ _LOGGER: Final = logging.getLogger(__name__)
 _MACHINE_CHALLENGE: Final = ('realm="admin"',)
 _METADATA_PREFIX: Final = "/.well-known/oauth-protected-resource"
 _AUTH_SCHEME: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+_RESOURCE_PATH: Final = re.compile(r"(?:/[A-Za-z0-9._~-]+)+", re.ASCII)
 _ONE_CREDENTIAL: Final = re.compile(r" +([^ \t,]+)")
 _BEARER_SCHEME: Final = "bearer"
 _ACCESS_TOKEN_QUERY_PARAMETER: Final = "access_token"  # noqa: S105 - query parameter name not a credential
@@ -120,37 +122,46 @@ class PersonPaths:
             raise ValueError("person paths must select at least one path")
 
 
+def _is_resource_url(url: str) -> bool:
+    parts = urlsplit(url)
+    segments = parts.path.split("/")[1:]
+    return (
+        _PLAIN_AUTHORITY.fullmatch(parts.netloc) is not None
+        and _RESOURCE_PATH.fullmatch(parts.path) is not None
+        and not {".", ".."} & set(segments)
+    )
+
+
 @dataclass(frozen=True)
 class ProtectedResource:
-    r"""The resource a client finds by its URL and signs in to at the issuer.
+    """The resource a client finds by its URL and signs in to at the issuer.
 
-    ``url`` is the resource's identifier and entry point: its path, as the server
-    decodes it, is the one path where the gate answers the challenge. The metadata
-    document sits at the path RFC 9728 section 3.1 derives from it. ``scope`` is the
-    one scope the challenge asks for. The gate admits no token at the entry point yet.
-    ``ValueError`` for a ``url`` that is not an endpoint URL with a path other than the
-    root, or holds ``"`` or ``\``, and for a ``scope`` that is not one scope token.
+    ``url`` is the resource's identifier and entry point: its path is the one path where
+    the gate answers the challenge. The metadata document sits at the path RFC 9728
+    section 3.1 derives from it. ``scope`` is the one scope the challenge asks for. The
+    gate admits no token at the entry point yet. ``ValueError`` for a ``url`` that is
+    not an endpoint URL with a plain host, an optional port and a path of one or more
+    segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
+    trailing slash, and for a ``scope`` that is not one scope token. So the path needs no
+    decoding and reads the same in a header, in the ASGI path and in a route.
     """
 
     url: str
     scope: str
 
     def __post_init__(self) -> None:
-        if not _is_endpoint_url(self.url) or self._wire_path in {"", "/"}:
-            raise ValueError("ProtectedResource.url must be an endpoint URL with a path")
-        if '"' in self.url or "\\" in self.url:
-            raise ValueError('ProtectedResource.url must hold no " and no \\')
+        if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
+            raise ValueError(
+                "ProtectedResource.url must be an endpoint URL with a plain host and a path"
+                " of unreserved segments"
+            )
         if not is_scope_token_tuple((self.scope,)):
             raise ValueError("ProtectedResource.scope must be one scope token")
 
     @property
-    def _wire_path(self) -> str:
-        return urlsplit(self.url).path
-
-    @property
     def entry_point(self) -> str:
-        """The path a request for ``url`` carries in the ASGI scope: percent-decoding applied."""
-        return unquote(self._wire_path)
+        """The path of ``url``."""
+        return urlsplit(self.url).path
 
     @property
     def entry_point_rule(self) -> PathRules:
@@ -163,7 +174,7 @@ class ProtectedResource:
     @property
     def metadata_url(self) -> str:
         parts = urlsplit(self.url)
-        return f"{parts.scheme}://{parts.netloc}{_METADATA_PREFIX}{self._wire_path}"
+        return f"{parts.scheme}://{parts.netloc}{self.metadata_path}"
 
     @property
     def public_rule(self) -> PublicRule:
@@ -434,7 +445,4 @@ def install_resource_metadata(app: FastAPI, resource: ProtectedResource, *, issu
         return document
 
     route = APIRoute(resource.metadata_path, metadata, methods=["GET"], include_in_schema=False)
-    # Starlette reads braces in a route path as parameters; the decoded path is literal.
-    route.path_regex = re.compile(f"^{re.escape(resource.metadata_path)}$")
-    route.param_convertors = {}
     app.router.routes.append(route)

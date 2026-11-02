@@ -366,8 +366,9 @@ Keycloak in the hand-run harness.
 
 A host that serves an MCP-style resource names it in `ProtectedResource(url, scope)` and passes
 it as `BearerGate(resource=...)`; a gate needs one kind of path, and the resource counts as one.
-`url` is the resource's identifier, an endpoint URL with a path other than the root, and its path,
-as the server decodes it, is the entry point; `scope` is the one scope token the challenge asks for. Everything else
+`url` is the resource's identifier, an endpoint URL with a plain host, an optional port and a path of
+one or more segments of RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`), none
+being `.` or `..`, with no trailing slash; its path is the entry point; `scope` is the one scope token the challenge asks for. Everything else
 derives from `url`: the metadata path is `/.well-known/oauth-protected-resource` plus the entry
 point (RFC 9728 section 3.1), and the challenge names the metadata URL.
 
