@@ -11,6 +11,7 @@ import base64
 import hashlib
 import logging
 import threading
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,7 @@ from tests.support.gate_arrangement import (
     A_TOKEN,
     ADMISSION,
     EXPORT_PATH,
+    HAL_ONLY,
     MACHINE_PATHS,
     REALM,
     REALM_INSUFFICIENT_SCOPE,
@@ -371,33 +373,40 @@ class TestAGateIsBuiltFromSoundParts:
         arguments = {
             "relying_party": a_relying_party(),
             "admission": ADMISSION,
-            "machine_paths": MachinePaths(MACHINE_PATHS, AuthorizedParties(frozenset({"hal"}))),
+            "machine_paths": MachinePaths(MACHINE_PATHS, HAL_ONLY),
         }
 
         with pytest.raises(error):
             BearerGate(**{**arguments, **changes})
 
     def test_machine_paths_without_a_path_are_refused_at_construction(self) -> None:
+        no_path = PathRules()
+
         with pytest.raises(ValueError, match="at least one path"):
-            MachinePaths(PathRules(), AuthorizedParties(frozenset({"hal"})))
+            MachinePaths(no_path, HAL_ONLY)
 
     def test_person_paths_without_a_path_are_refused_at_construction(self) -> None:
         no_path = PathRules()
 
         with pytest.raises(ValueError, match="at least one path"):
-            PersonPaths(
-                no_path, AuthorizedParties(frozenset({"hal"})), a_transaction_never_entered,
-            )
+            PersonPaths(no_path, HAL_ONLY, a_transaction_never_entered)
 
-    @pytest.mark.parametrize("kind", [MachinePaths, PersonPaths])
+    @pytest.mark.parametrize(
+        "construct",
+        [
+            lambda paths, parties: MachinePaths(paths, parties),
+            lambda paths, parties: PersonPaths(paths, parties, a_transaction_never_entered),
+        ],
+        ids=["machine", "person"],
+    )
     def test_a_kind_of_path_refuses_parties_that_are_not_authorized_parties(
-        self, kind: type[MachinePaths] | type[PersonPaths],
+        self, construct: Callable[[PathRules, Any], object],
     ) -> None:
         paths = PathRules(prefixes=("/api/",))
-        arguments = (a_transaction_never_entered,) if kind is PersonPaths else ()
+        bare_set = frozenset({"hal"})
 
         with pytest.raises(TypeError, match="AuthorizedParties"):
-            kind(paths, frozenset({"hal"}), *arguments)  # type: ignore[arg-type]
+            construct(paths, bare_set)
 
     def test_a_no_admins_app_may_name_person_paths_alone(self) -> None:
         gate = a_bearer_gate(
