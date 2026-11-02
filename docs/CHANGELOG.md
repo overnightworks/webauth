@@ -7,6 +7,12 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.29.0 - Unreleased
+
+**Changed**
+
+- `webauth.oidc` is a package, and every public name imports from it as before.
+
 ## 0.28.0 - 2026-11-02
 
 **Breaking**

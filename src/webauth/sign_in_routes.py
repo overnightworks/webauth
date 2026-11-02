@@ -86,7 +86,8 @@ from webauth._validation import require_positive_whole_number
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import _take_pending_login, issue_session_cookies
 from webauth.dependencies import LoginRedirect, session_id_from_request
-from webauth.oidc import OidcRefusal, OidcRefusalReason, _callback_state
+from webauth.oidc import OidcRefusal, OidcRefusalReason
+from webauth.oidc._relying_party import _callback_state
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
