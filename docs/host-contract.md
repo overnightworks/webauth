@@ -246,7 +246,7 @@ added the enforcing gate. Its page, API and public-path proofs are
   [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
   A refusal carries no identity (`AdmissionRefusal` in
   [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
-  [oidc.py](../src/webauth/oidc.py)), so the page shows no name. A
+  [oidc](../src/webauth/oidc/_relying_party.py)), so the page shows no name. A
   `NOT_A_MEMBER` login stores no session, so signing out from "no access"
   follows the missing-ID-token case in [Signing out](#what-every-app-gets).
   `outsider_is_refused` in [prove.py](../tests/e2e/oidc/prove.py) drives the harness's

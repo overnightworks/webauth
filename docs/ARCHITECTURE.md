@@ -21,7 +21,7 @@ flowchart LR
     lib -- "ports" --> sessions & limits & audit
 ```
 Request boundaries for the changing engineer, from [`middleware`](../src/webauth/middleware/), [`ports`](../src/webauth/ports.py),
-[`oidc`](../src/webauth/oidc.py) and [`https_client`](../src/webauth/https_client.py).
+[`oidc`](../src/webauth/oidc/) and [`https_client`](../src/webauth/https_client.py).
 
 ## Building Blocks
 
@@ -73,7 +73,7 @@ sequenceDiagram
         L-->>Browser: 303 to the return path + session cookie + pending clearing
     end
 ```
-Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc.py),
+Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc/),
 [`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
 The harness opens one sign-in transaction under its write lock around the account and session writes; cookies follow ([Trust](#trust)).
 [Host refusals](host-contract.md#signed-out-and-refused) are outside this successful flow.

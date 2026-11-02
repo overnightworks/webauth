@@ -29,15 +29,13 @@ from webauth.dependencies import (
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.oidc import (
-    _ACCESS_TOKEN,
-    _PLAIN_AUTHORITY,
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
     VerifiedAccessToken,
-    _is_endpoint_url,
-    _names_another_audience,
 )
+from webauth.oidc._client_config import _PLAIN_AUTHORITY, _is_endpoint_url
+from webauth.oidc._relying_party import _ACCESS_TOKEN, _names_another_audience
 from webauth.oidc_login import (
     AdmissionConfig,
     AdmissionRefusal,
