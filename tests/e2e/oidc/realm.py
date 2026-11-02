@@ -171,18 +171,20 @@ def add_resource(admin: Admin, resource_url: str, members: tuple[str, ...]) -> t
     return scopes
 
 
+def user_id_of(admin: Admin, username: str) -> str:
+    return admin.get(f"/{REALM}/users?username={username}&exact=true")[0]["id"]
+
+
 def add_child_group(admin: Admin, name: str, member: str) -> str:
     """A child group of ``USER_GROUP`` that holds ``member``; its id."""
     parent = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")["id"]
     group = admin.create(f"/{REALM}/groups/{parent}/children", {"name": name})
-    person = admin.get(f"/{REALM}/users?username={member}&exact=true")[0]["id"]
-    admin.put(f"/{REALM}/users/{person}/groups/{group}")
+    admin.put(f"/{REALM}/users/{user_id_of(admin, member)}/groups/{group}")
     return group
 
 
 def remove_from_group(admin: Admin, member: str, group_id: str) -> None:
-    person = admin.get(f"/{REALM}/users?username={member}&exact=true")[0]["id"]
-    admin.delete(f"/{REALM}/users/{person}/groups/{group_id}")
+    admin.delete(f"/{REALM}/users/{user_id_of(admin, member)}/groups/{group_id}")
 
 
 @contextlib.contextmanager

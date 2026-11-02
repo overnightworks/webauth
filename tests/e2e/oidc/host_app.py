@@ -72,9 +72,12 @@ from webauth.oidc import (
     TokenRequestPost,
 )
 from webauth.oidc_login import (
+    AccessTokenRefusal,
     AdmissionConfig,
     EverySubject,
     NoAdmins,
+    NoIdToken,
+    current_groups,
     fresh_access_token,
 )
 from webauth.oidc_transport import post_token_request_over_https
@@ -111,6 +114,7 @@ SIGN_IN_PATHS = SignInPaths(
 LOGOUT_BUTTON_LABEL = "Log out"
 ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
 WORKLOAD_TOKEN_PATH = "/workload-token"  # noqa: S105  # a route, not a credential
+CURRENT_GROUPS_PATH = "/current-groups"
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = SIGN_IN_PATHS.backchannel_body_size_rule.max_bytes
 DEFAULT_MAX_BODY_BYTES = 1024
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
@@ -572,13 +576,36 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
         return {"username": user.username}
 
+    _add_token_routes(app, relying_party_of, world, config)
+
+    @app.get("/admin")
+    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
+        return {"username": user.username}
+
+    if settings.is_bearer_host:
+        _add_bearer_routes(app, dependencies, settings, sign_in_transaction)
+    return app
+
+
+def _add_token_routes(
+    app: FastAPI,
+    relying_party_of: Callable[[Request], OidcRelyingParty],
+    world: dict[str, World],
+    config: WebAuthConfig,
+) -> None:
+    """The routes that answer an outcome of a grant, never a token."""
+
+    def session_of(request: Request) -> str:
+        session_id = session_id_from_request(request, config)
+        if session_id is None:
+            raise HTTPException(status_code=401)
+        return session_id
+
     @app.get(ACCESS_TOKEN_PATH)
     def access_token(request: Request) -> dict[str, object]:
         """The outcome of ``fresh_access_token`` for the request's session, never the token."""
         current = world["world"]
-        session_id = session_id_from_request(request, config)
-        if session_id is None:
-            raise HTTPException(status_code=401)
+        session_id = session_of(request)
         outcome = fresh_access_token(
             relying_party_of(request), session_id,
             session_transaction=current.sessions.in_transaction, config=config,
@@ -589,6 +616,20 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             "refresh_tokens_stored": len(current.stored_refresh_tokens),
         }
 
+    @app.get(CURRENT_GROUPS_PATH)
+    def groups(request: Request) -> dict[str, object]:
+        """The outcome of ``current_groups`` for the request's session, never a token."""
+        current = world["world"]
+        session_id = session_of(request)
+        outcome = current_groups(
+            relying_party_of(request), session_id,
+            session_transaction=current.sessions.in_transaction, config=config,
+        )
+        current.remember_refresh_token_of(session_id)
+        return {
+            **_groups_outcome(outcome), "refresh_tokens_stored": len(current.stored_refresh_tokens),
+        }
+
     @app.get(WORKLOAD_TOKEN_PATH)
     def workload_token(request: Request) -> dict[str, str | None]:
         """The outcome of the client's own grant, never the token."""
@@ -597,13 +638,19 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             return {"outcome": outcome.reason.value, "issuer_error": outcome.idp_error}
         return {"outcome": "token", "issuer_error": None}
 
-    @app.get("/admin")
-    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
-        return {"username": user.username}
 
-    if settings.is_bearer_host:
-        _add_bearer_routes(app, dependencies, settings, sign_in_transaction)
-    return app
+def _groups_outcome(
+    outcome: tuple[str, ...] | AccessTokenRefusal | NoIdToken,
+) -> dict[str, object]:
+    if isinstance(outcome, tuple):
+        return {"outcome": "groups", "groups": list(outcome), "issuer_refusal": None}
+    if isinstance(outcome, NoIdToken):
+        return {"outcome": outcome.value, "groups": [], "issuer_refusal": None}
+    refusal = outcome.issuer_refusal
+    return {
+        "outcome": outcome.reason.value, "groups": [],
+        "issuer_refusal": None if refusal is None else refusal.reason.value,
+    }
 
 
 def _add_machine_routes(

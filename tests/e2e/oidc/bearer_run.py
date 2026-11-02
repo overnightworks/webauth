@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from harness import Host, cookie_name_and_value, host_state
+from harness import Host, cookie_name_and_value, host_state, reset_host
 from host_app import HostSettings
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
@@ -117,6 +117,13 @@ class BearerRun:
             )
             self.host_pages[person.username] = page
         return self.host_pages[person.username]
+
+    def sign_in_after_reset(self, person: Person) -> Page:
+        """The host reset, ``person``'s earlier browser session forgotten with it, and a fresh
+        sign-in: a cached page would hold a cookie the reset ended."""
+        reset_host(self.host)
+        self.host_pages.pop(person.username, None)
+        return self.host_page(person)
 
     def follow_to_loopback(self, page: Page, url: str, person: Person, redirect_uri: str) -> str:
         """The redirect URI Keycloak sends the browser to: Chromium cannot connect to the port
