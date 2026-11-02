@@ -6,9 +6,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, NoReturn
 
+import pytest
 from fastapi import Depends, Request, WebSocket
 from httpx import Response
 from starlette.middleware import Middleware
+from starlette.requests import HTTPConnection
 
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
@@ -550,3 +552,22 @@ def relayed(app: AuthApp) -> ScopeRelay:
     app.app.add_middleware(RelayingScope, relay=relay)
     return relay
 
+
+def assert_no_bearer_admission(
+    app: BearerApp, added_to_scope: dict[str, object], path: str, authorization: str,
+) -> None:
+    """The request, as the gate left it, read through the public admission readers."""
+    connection = HTTPConnection({
+        "type": "http", "app": app.auth.app, "path": path,
+        "headers": [(b"authorization", authorization.encode("latin-1"))],
+        **added_to_scope,
+    })
+    with pytest.raises(RuntimeError):
+        bearer_caller(connection)
+    with pytest.raises(RuntimeError):
+        admitted_user(connection)
+
+
+def the_accounts(app: BearerApp) -> list[FakeUser]:
+    assert app.accounts is not None
+    return app.accounts.list()
