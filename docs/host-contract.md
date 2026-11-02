@@ -373,7 +373,7 @@ derives from `url`: the metadata path is `/.well-known/oauth-protected-resource`
 point (RFC 9728 section 3.1), and the challenge names the metadata URL.
 
 **The resource admits an agent's token, capped and read-only.** A token for the resource is refused on the person and machine paths, and an app token is refused at the entry point; a party listed on one kind is not thereby listed on another. At the entry point, on every method and the exact path only,
-the gate answers before CSRF and the session gate and runs no route:
+the gate decides before CSRF and the session gate, and a refusal runs no route:
 
 - no credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`;
 - a token the resource's check refuses: 401 with `error="invalid_token"` and the same two
@@ -400,7 +400,9 @@ route path, as every policy is, so a host below a `root_path` cannot name a reso
 
 `webauth.middleware.resource_person(connection)` returns the person for this very request and raises `RuntimeError` on a session, person or machine request, in a sub-app, and after the `Authorization` header or the method changed. `current_user` returns the same capped person on the entry point and refuses after a method change.
 
-Proofs: [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py) in CI.
+Proofs: [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py)
+in CI, and scenarios 61 to 66 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
+Keycloak in the hand-run harness.
 
 ## A service's callers
 
