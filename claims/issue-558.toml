@@ -1,0 +1,8 @@
+claim_id = "c7af0a9e8b91425f9df98074264179c5"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "e3dd5efafa70ff64e88ee90c4a2908b9323d33f6"
+branch = "claude/issue-558-publish-to-pypi"
+scope = [".github/workflows/release.yml", "AGENTS.md", "README.md", "docs/CHANGELOG.md", "scripts/verify_release.sh"]
+opened_commit = "4c659e6483b2d0a53941d5556db40dc4648ec69c"
+whole_reason = "One install path: the publishing job, the end of the release assets, the verification and the documents that name them move together, or a host follows a path that no longer exists."
