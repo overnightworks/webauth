@@ -44,10 +44,8 @@ The resource scenarios 61 to 66 (an agent's token at the entry point ``/mcp``) l
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import dataclasses
-import json
 import secrets
 import time
 import urllib.parse
@@ -80,6 +78,7 @@ from bearer_run import (
     assert_person_answer,
     claims_of,
     session_cookies,
+    token_part,
 )
 from certificates import ThrowawayTls
 from harness import (
@@ -138,11 +137,8 @@ PERSON_CHALLENGE_INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope"'
 
 
 def header_of(token: str) -> dict[str, Any]:
-    segment = token.split(".")[0]
-    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+    return token_part(token, 0)
 
-
-# --- the admitted and the cookie-only scenarios ---
 
 def admin_token_opens_export(run: BearerRun) -> str:
     reset_host(run.host)

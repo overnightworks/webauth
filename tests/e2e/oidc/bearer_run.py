@@ -164,9 +164,14 @@ class BearerRun:
 
 
 
-def claims_of(token: str) -> dict[str, Any]:
-    segment = token.split(".")[1]
+def token_part(token: str, index: int) -> dict[str, Any]:
+    """The decoded JSON of one JWT segment: 0 is the header, 1 the claims."""
+    segment = token.split(".")[index]
     return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+
+
+def claims_of(token: str) -> dict[str, Any]:
+    return token_part(token, 1)
 
 
 def as_list(claim: str | list[str]) -> list[str]:
