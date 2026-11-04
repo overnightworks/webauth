@@ -415,3 +415,12 @@ def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -
 
     page = LogoutPage(response.text)
     assert (page.texts["button"], page.attributes_of("html")) == ("Abmelden", [{"lang": "de"}])
+
+    after_the_cookie_is_cleared = post_logout(
+        host, {**SAME_ORIGIN_FORM, "x-label": "Sign out", "x-language": "en"},
+    )
+
+    second_page = LogoutPage(after_the_cookie_is_cleared.text)
+    assert (second_page.texts["button"], second_page.attributes_of("html")) == (
+        "Sign out", [{"lang": "en"}],
+    )

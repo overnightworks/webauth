@@ -509,7 +509,7 @@ def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(lang
 
 @pytest.mark.parametrize("language", [
     "", "en_US", '"', "<", "en US", "ä", "de\n", "d", "-de", "de-", "de--CH", "1de", "de-123456789",
-    "de-ä", 42, None,
+    "de-ä", "\u212a\u212a", 42, None,
 ])
 def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
     language: object,
