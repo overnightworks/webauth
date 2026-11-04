@@ -15,8 +15,8 @@ issued only after that transaction's exit returned.
 
 The logout route ends the session the request's cookie names, reading its ID token before
 deleting the row, and answers a ``no-store`` HTML page, in the language and with the
-button label of the host's ``logout_page_text`` (a ``LogoutPageText``, read from the request: the page's
-``<html lang>``, title and button), under its own Content-Security-Policy
+button label of the host's ``logout_page_text`` (a ``LogoutPageText``, read from the
+request: the page's ``<html lang>``, title and button), under its own Content-Security-Policy
 that posts the client ID, the configured ``post_logout_redirect_uri`` and the ID token hint to
 the end-session endpoint, submits itself and clears the session cookie. An expired row that
 still stands is read too, and neither renewed nor admitted. The page needs no outbound call,
