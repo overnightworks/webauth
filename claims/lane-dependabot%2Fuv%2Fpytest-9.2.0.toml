@@ -1,7 +1,0 @@
-claim_id = "6d2d2ebd5bcd44bdb69f12cf97e1adfc"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "6a13ea6f1c99fae2524904fbd14b37c333752321"
-branch = "dependabot/uv/pytest-9.2.0"
-scope = ["uv.lock"]
-opened_commit = "9d0f7f37b3d693aa470eb510efbc50828ce629d4"
