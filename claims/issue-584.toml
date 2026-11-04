@@ -1,0 +1,8 @@
+claim_id = "ebce27cc328f4da9b8f96793419e7bc2"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "e7044bec5f46385c6822fcc7e72a08362844a76f"
+branch = "claude/issue-584-the-logout-page-names-the-language-of-it"
+scope = ["README.md", "docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/_end_session_page.py", "src/webauth/oidc_login.py", "src/webauth/sign_in_routes.py", "tests"]
+opened_commit = "549b382a4480be5fb1b94bc43b754de410c5bbef"
+whole_reason = "One public parameter changes shape, and every caller, test host and document naming it moves in the same change, because the old name keeps no alias."
