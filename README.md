@@ -33,7 +33,7 @@ from webauth.policies import (
 from webauth.ports import AuthenticatedUser
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
-from webauth.sign_in_routes import SignInPaths, install_sign_in_routes
+from webauth.sign_in_routes import LogoutPageText, SignInPaths, install_sign_in_routes
 
 app = FastAPI()
 config = WebAuthConfig(
@@ -72,7 +72,7 @@ install_sign_in_routes(
     refused=the_hosts_refusal_page,
     keeps_id_token=True,
     max_sessions=None,
-    logout_button_label=the_hosts_logout_button_label,
+    logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Log out"),
 )
 auth = current_user_dependency(
     session_store=the_hosts_session_store,

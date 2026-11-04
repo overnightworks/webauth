@@ -7,6 +7,12 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.30.0 - Unreleased
+
+**Breaking**
+
+- `install_sign_in_routes` takes `logout_page_text: Callable[[Request], LogoutPageText] | None` in place of `logout_button_label`, and the logout page answers `<html lang="...">` with the language the record names (WCAG 3.1.1). `webauth.sign_in_routes.LogoutPageText(language, button_label)` is frozen and raises `ValueError` when `language` is not a BCP 47 shape (subtags of 1 to 8 ASCII letters or digits joined by hyphens, the first of 2 to 8 letters). Migrate by replacing `logout_button_label=f` with `logout_page_text=lambda request: LogoutPageText(language="<tag of the words>", button_label=f(request))`. `paths.logout` and `logout_page_text` still come together, or both are `None`.
+
 ## 0.29.0 - 2026-11-02
 
 **Added**

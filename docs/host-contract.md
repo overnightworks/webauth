@@ -535,9 +535,11 @@ rate budget, `backchannel` for `CsrfPolicy.exempt` and `RateLimitPolicy.exempt`,
 `backchannel_body_size_rule` (32 KiB for `POST`), `cache_control_rule` (`no-store`) and `login_redirect`, so the host lists the paths once. It is browser-absolute, so
 `login_redirect` is right for an app at its origin's root; a host below a `root_path`
 builds its own `LoginRedirect`. The library serves the logout route at `SignInPaths.logout` for `POST` only, with the
-button text from the host's `logout_button_label`, read per request; a single-page app logs
+page's text from the host's `logout_page_text`, read per request: a `LogoutPageText` whose
+`button_label` is the title and the button, and whose `language` (a BCP 47 tag, validated in shape
+when the record is built) is the page's `<html lang>`; a single-page app logs
 out by a top-level form POST to that route, and the host never lists the path in
-`CsrfPolicy.exempt`. `paths.logout` and `logout_button_label` come together, or both
+`CsrfPolicy.exempt`. `paths.logout` and `logout_page_text` come together, or both
 are `None` for a host without logout. `webauth.cookies` carries the pending login in a signed cookie of its own, one
 per login, so the library keeps no server-side store and `WebAuthConfig` knows nothing
 of OpenID Connect. The `webauth.sign_in_routes` module and `install_sign_in_routes` docstrings hold the routes' contract, the

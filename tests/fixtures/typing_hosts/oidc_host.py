@@ -137,6 +137,7 @@ from webauth.ports import (
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
 from webauth.sign_in_routes import (
+    LogoutPageText,
     RefusalPage,
     SignInPaths,
     SignInRefusal,
@@ -246,7 +247,7 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
         refused=a_host_refuses_a_sign_in,
         keeps_id_token=True,
         max_sessions=None,
-        logout_button_label=lambda _request: "Sign out",
+        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
         backchannel_dependencies=[Depends(lambda: None)],
     )
 

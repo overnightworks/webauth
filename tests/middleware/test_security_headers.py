@@ -38,7 +38,7 @@ from webauth.policies import (
     default_content_security_policy,
 )
 from webauth.ports import SignInStores
-from webauth.sign_in_routes import SignInPaths, install_sign_in_routes
+from webauth.sign_in_routes import LogoutPageText, SignInPaths, install_sign_in_routes
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -501,7 +501,7 @@ def the_logout_page(
         refused=lambda _request, _refusal: Response(status_code=403),
         keeps_id_token=True,
         max_sessions=None,
-        logout_button_label=lambda _request: "Sign out",
+        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
     )
 
     return TestClient(app).post(LOGOUT_PATH, headers={"sec-fetch-site": "same-origin"})

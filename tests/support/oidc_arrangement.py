@@ -329,7 +329,7 @@ class FakeIssuer:
 
     The refresh grant answers a new access token and a new refresh token each
     time, and keeps accepting every refresh token it issued (reuse allowed, as
-    in edge's realm); any other token, and every token after
+    in hal's realm); any other token, and every token after
     `end_sso_session()`, is `invalid_grant`. `refresh_tokens` holds the
     accepted ones, so a test can add a token without a login. The
     `client_credentials` grant answers a new access token per call, or

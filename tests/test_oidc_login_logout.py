@@ -20,6 +20,7 @@ from tests.support.oidc_login_host import (
     CLIENT_ID,
     END_SESSION_ENDPOINT,
     LOGOUT_BUTTON_LABEL,
+    LOGOUT_LANGUAGE,
     LOGOUT_PATH,
     NOW,
     SAME_ORIGIN_FORM,
@@ -46,6 +47,7 @@ from webauth.oidc import OidcRelyingParty
 from webauth.oidc_login import (
     fresh_access_token,
 )
+from webauth.sign_in_routes import LogoutPageText
 
 BOUND_ISSUER_ORIGIN = "https://id.example"
 OLD_HINT_COOKIE_NAME = "__Secure-oidc_id_token_hint"  # noqa: S105
@@ -78,6 +80,8 @@ def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoi
         {"type": "hidden", "name": "id_token_hint", "value": host.issued_id_tokens[-1]},
     ]
     assert page.attributes_of("button") == [{"type": "submit"}]
+    assert page.attributes_of("html") == [{"lang": LOGOUT_LANGUAGE}]
+    assert "content-language" not in response.headers
     assert (page.texts["button"], page.texts["title"]) == (LOGOUT_BUTTON_LABEL, LOGOUT_BUTTON_LABEL)
     assert {tag for tag, _ in page.elements} == {
         "html", "head", "meta", "title", "body", "form", "input", "button", "script",
@@ -356,16 +360,20 @@ def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_th
     assert hint_of(retry) is None
 
 
-def _a_label_that_raises(_request: Request) -> str:
+def _a_page_text_that_raises(_request: Request) -> LogoutPageText:
     raise StoreDown
 
 
-def _a_label_that_raises_an_http_exception(_request: Request) -> str:
+def _a_page_text_that_raises_an_http_exception(_request: Request) -> LogoutPageText:
     raise HTTPException(status_code=403)
 
 
-def _a_label(_request: Request) -> str:
-    return LOGOUT_BUTTON_LABEL
+def _a_page_text_with_a_malformed_language(_request: Request) -> LogoutPageText:
+    return LogoutPageText(language="en_US", button_label=LOGOUT_BUTTON_LABEL)
+
+
+def _a_page_text(_request: Request) -> LogoutPageText:
+    return LogoutPageText(language=LOGOUT_LANGUAGE, button_label=LOGOUT_BUTTON_LABEL)
 
 
 def _a_relying_party_that_raises(_request: Request) -> OidcRelyingParty:
@@ -373,18 +381,19 @@ def _a_relying_party_that_raises(_request: Request) -> OidcRelyingParty:
 
 
 @pytest.mark.parametrize(
-    ("label", "relying_party_of"),
+    ("page_text", "relying_party_of"),
     [
-        pytest.param(_a_label_that_raises, None, id="label"),
-        pytest.param(_a_label_that_raises_an_http_exception, None, id="label-http-exception"),
-        pytest.param(_a_label, _a_relying_party_that_raises, id="relying-party"),
+        pytest.param(_a_page_text_that_raises, None, id="page-text"),
+        pytest.param(_a_page_text_that_raises_an_http_exception, None, id="http-exception"),
+        pytest.param(_a_page_text_with_a_malformed_language, None, id="malformed-language"),
+        pytest.param(_a_page_text, _a_relying_party_that_raises, id="relying-party"),
     ],
 )
-def test_a_label_or_relying_party_that_raises_answers_500_and_ends_nothing(
-    label: Callable[[Request], str],
+def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
+    page_text: Callable[[Request], LogoutPageText],
     relying_party_of: Callable[[Request], OidcRelyingParty] | None,
 ) -> None:
-    host = after_signing_in(an_oidc_host(logout_button_label=label))
+    host = after_signing_in(an_oidc_host(logout_page_text=page_text))
     host.relying_party_of = relying_party_of
     entries_before = host.transaction.entries
 
@@ -395,11 +404,23 @@ def test_a_label_or_relying_party_that_raises_answers_500_and_ends_nothing(
     assert host.sessions.count_active() == 1
 
 
-def test_the_logout_button_reads_its_label_from_the_request() -> None:
+def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -> None:
     host = after_signing_in(an_oidc_host(
-        logout_button_label=lambda request: request.headers["x-label"],
+        logout_page_text=lambda request: LogoutPageText(
+            language=request.headers["x-language"], button_label=request.headers["x-label"],
+        ),
     ))
 
-    response = post_logout(host, {**SAME_ORIGIN_FORM, "x-label": "Abmelden"})
+    response = post_logout(host, {**SAME_ORIGIN_FORM, "x-label": "Abmelden", "x-language": "de"})
 
-    assert LogoutPage(response.text).texts["button"] == "Abmelden"
+    page = LogoutPage(response.text)
+    assert (page.texts["button"], page.attributes_of("html")) == ("Abmelden", [{"lang": "de"}])
+
+    after_the_cookie_is_cleared = post_logout(
+        host, {**SAME_ORIGIN_FORM, "x-label": "Sign out", "x-language": "en"},
+    )
+
+    second_page = LogoutPage(after_the_cookie_is_cleared.text)
+    assert (second_page.texts["button"], second_page.attributes_of("html")) == (
+        "Sign out", [{"lang": "en"}],
+    )

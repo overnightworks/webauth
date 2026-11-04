@@ -63,7 +63,12 @@ from webauth.ports import (
     AuthenticatedUser,
     SignInStores,
 )
-from webauth.sign_in_routes import SignInPaths, SignInRefusal, install_sign_in_routes
+from webauth.sign_in_routes import (
+    LogoutPageText,
+    SignInPaths,
+    SignInRefusal,
+    install_sign_in_routes,
+)
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
@@ -82,6 +87,8 @@ CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
+LOGOUT_LANGUAGE = "en-US"
+LOGOUT_PAGE_TEXT = LogoutPageText(language=LOGOUT_LANGUAGE, button_label=LOGOUT_BUTTON_LABEL)
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 SIGN_IN_PATHS = SignInPaths(
     start=START_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH,
@@ -354,7 +361,7 @@ def _add_the_login_routes(
     max_sessions: int | None,
     keeps_id_token: bool,
     admission: AdmissionConfig,
-    logout_button_label: Callable[[Request], str],
+    logout_page_text: Callable[[Request], LogoutPageText],
     backchannel_dependencies: Sequence[params.Depends],
 ) -> None:
     def refused(request: Request, refusal: SignInRefusal) -> Response:
@@ -371,7 +378,7 @@ def _add_the_login_routes(
         refused=refused,
         keeps_id_token=keeps_id_token,
         max_sessions=max_sessions,
-        logout_button_label=logout_button_label,
+        logout_page_text=logout_page_text,
         backchannel_dependencies=backchannel_dependencies,
     )
 
@@ -424,7 +431,7 @@ def an_oidc_host(
     stored_session: FakeSessionRecord | None = None,
     keeps_id_token: bool = True,
     admission: AdmissionConfig = ADMISSION,
-    logout_button_label: Callable[[Request], str] = lambda _request: LOGOUT_BUTTON_LABEL,
+    logout_page_text: Callable[[Request], LogoutPageText] = lambda _request: LOGOUT_PAGE_TEXT,
     backchannel_dependencies: Sequence[params.Depends] = (),
     **config_overrides: object,
 ) -> OidcHost:
@@ -447,7 +454,7 @@ def an_oidc_host(
     _add_the_login_routes(
         app, host=lambda: holder[0], transaction=transaction,
         max_sessions=max_sessions, keeps_id_token=keeps_id_token, admission=admission,
-        logout_button_label=logout_button_label,
+        logout_page_text=logout_page_text,
         backchannel_dependencies=backchannel_dependencies,
     )
     _add_the_signed_in_routes(app, sessions)

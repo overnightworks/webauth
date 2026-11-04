@@ -48,10 +48,11 @@ class EndSessionForm:
         return fields
 
 
-def end_session_page(form: EndSessionForm, *, button_label: str) -> Response:
-    """The page that posts ``form`` and shows ``button_label`` where no script runs."""
+def end_session_page(form: EndSessionForm, *, language: str, button_label: str) -> Response:
+    """The page that posts ``form`` and shows ``button_label`` where no script runs, in
+    ``language`` (a BCP 47 tag, the page's ``<html lang>``)."""
     return Response(
-        _markup(form, button_label),
+        _markup(form, language, button_label),
         media_type="text/html",
         headers={
             "Cache-Control": "no-store",
@@ -61,14 +62,14 @@ def end_session_page(form: EndSessionForm, *, button_label: str) -> Response:
     )
 
 
-def _markup(form: EndSessionForm, button_label: str) -> str:
+def _markup(form: EndSessionForm, language: str, button_label: str) -> str:
     label = html.escape(button_label)
     inputs = "".join(
         f'<input type="hidden" name="{html.escape(name)}" value="{html.escape(value)}">'
         for name, value in form.hidden_fields().items()
     )
     return (
-        '<!doctype html><html><head><meta charset="utf-8">'
+        f'<!doctype html><html lang="{html.escape(language)}"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f"<title>{label}</title></head><body>"
         f'<form method="post" action="{html.escape(form.end_session_endpoint)}">'
