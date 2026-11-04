@@ -98,7 +98,12 @@ from webauth.ports import (
     SignInStores,
     SignInTransaction,
 )
-from webauth.sign_in_routes import SignInPaths, SignInRefusal, install_sign_in_routes
+from webauth.sign_in_routes import (
+    LogoutPageText,
+    SignInPaths,
+    SignInRefusal,
+    install_sign_in_routes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +116,7 @@ SIGN_IN_PATHS = SignInPaths(
     start=LOGIN_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH,
     backchannel_logout=BACKCHANNEL_LOGOUT_PATH,
 )
-LOGOUT_BUTTON_LABEL = "Log out"
+LOGOUT_PAGE_TEXT = LogoutPageText(language="en", button_label="Log out")
 ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
 WORKLOAD_TOKEN_PATH = "/workload-token"  # noqa: S105  # a route, not a credential
 CURRENT_GROUPS_PATH = "/current-groups"
@@ -576,7 +581,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         refused=refused,
         keeps_id_token=True,
         max_sessions=None,
-        logout_button_label=lambda _request: LOGOUT_BUTTON_LABEL,
+        logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
     )
 
     @app.get("/me")

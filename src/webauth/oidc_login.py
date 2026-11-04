@@ -338,6 +338,7 @@ def _log_out(
     config: WebAuthConfig,
     *,
     transaction: SignInTransaction,
+    language: str,
     button_label: str,
 ) -> Response:
     """The logout route's whole sequence: end the session the request's cookie names, if any,
@@ -352,7 +353,7 @@ def _log_out(
         with transaction() as stores:
             id_token = _id_token_of_ended_session(stores.sessions, session_id)
     form = relying_party._end_session_form(id_token_hint=id_token)
-    answer = end_session_page(form, button_label=button_label)
+    answer = end_session_page(form, language=language, button_label=button_label)
     _clear_session_cookies(answer, config)
     return answer
 

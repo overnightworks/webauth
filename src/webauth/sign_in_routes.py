@@ -72,6 +72,7 @@ access proxy). Only the exact path is exempt from the origin check and the rate 
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
@@ -113,6 +114,7 @@ if TYPE_CHECKING:
     from webauth.ports import SignInTransaction
 
 __all__ = [
+    "LogoutPageText",
     "RefusalPage",
     "SignInPaths",
     "SignInRefusal",
@@ -122,6 +124,25 @@ __all__ = [
 _RETURN_PATH_QUERY_NAME = "next"
 _SET_COOKIE = b"set-cookie"
 _BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
+
+
+_LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*")
+
+
+@dataclass(frozen=True)
+class LogoutPageText:
+    """The words of the logout page and the language they are in, answered together.
+
+    ``language`` is a BCP 47 tag written as the page's ``<html lang>``: subtags of 1 to 8
+    ASCII letters or digits joined by hyphens, the first of 2 to 8 letters. Its shape is
+    checked, not its registration, and anything else raises ``ValueError``."""
+
+    language: str
+    button_label: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.language, str) or _LANGUAGE_TAG.fullmatch(self.language) is None:
+            raise ValueError(f"language is not a tag of letters and digits: {self.language!r}")
 
 
 class RefusalPage(StrEnum):
@@ -265,7 +286,7 @@ def install_sign_in_routes(
     refused: Callable[[Request, SignInRefusal], Response],
     keeps_id_token: bool,
     max_sessions: int | None,
-    logout_button_label: Callable[[Request], str] | None,
+    logout_page_text: Callable[[Request], LogoutPageText] | None,
     backchannel_dependencies: Sequence[params.Depends] = (),
 ) -> None:
     """Register the start and callback routes of the sign-in, the logout route and the
@@ -293,7 +314,7 @@ def install_sign_in_routes(
     duplicated or of another login is ``STATE_MISMATCH``.
 
     The logout route ends the session the request's cookie names and answers the page that
-    ends the issuer's; ``logout_button_label`` is read per request.
+    ends the issuer's; ``logout_page_text`` is read per request: its label and ``<html lang>``.
 
     ``backchannel_dependencies`` need ``paths.backchannel_logout``, or ``ValueError`` is raised
     before a route is registered. The module docstring holds the back-channel's answers.
@@ -301,26 +322,26 @@ def install_sign_in_routes(
     ``relying_party`` is read per request. ``keeps_id_token`` has no default: ``True`` stores
     the login's ID token so the logout posts it as the hint, ``False`` stores none.
     ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``
-    is raised before a route is registered. ``paths.logout`` and ``logout_button_label`` come
+    is raised before a route is registered. ``paths.logout`` and ``logout_page_text`` come
     together: a host without a logout route passes ``None`` for both, and exactly one of them
     raises ``ValueError`` before a route is registered.
     """
     if max_sessions is not None:
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
-    if (paths.logout is None) != (logout_button_label is None):
-        raise ValueError("paths.logout and logout_button_label must both be given or both be None")
+    if (paths.logout is None) != (logout_page_text is None):
+        raise ValueError("paths.logout and logout_page_text must both be given or both be None")
     if backchannel_dependencies and paths.backchannel_logout is None:
         raise ValueError("backchannel_dependencies need paths.backchannel_logout")
     routes = _SignIn(relying_party, admission, transaction, refused, keeps_id_token, max_sessions)
 
-    _register_routes(app, paths, routes, logout_button_label, backchannel_dependencies)
+    _register_routes(app, paths, routes, logout_page_text, backchannel_dependencies)
 
 
 def _register_routes(
     app: FastAPI,
     paths: SignInPaths,
     routes: _SignIn,
-    logout_button_label: Callable[[Request], str] | None,
+    logout_page_text: Callable[[Request], LogoutPageText] | None,
     backchannel_dependencies: Sequence[params.Depends],
 ) -> None:
     def start(request: Request, next: str | None = None) -> Response:  # noqa: A002
@@ -331,11 +352,11 @@ def _register_routes(
 
     app.add_api_route(paths.start, start, methods=["GET"], include_in_schema=False)
     app.add_api_route(paths.callback, callback, methods=["GET"], include_in_schema=False)
-    if paths.logout is not None and logout_button_label is not None:
-        button_label = logout_button_label
+    if paths.logout is not None and logout_page_text is not None:
+        page_text = logout_page_text
 
         def logout(request: Request) -> Response:
-            return routes.logout(request, button_label)
+            return routes.logout(request, page_text)
 
         app.add_api_route(paths.logout, logout, methods=["POST"], include_in_schema=False)
     if paths.backchannel_logout is not None:
@@ -366,11 +387,13 @@ class _SignIn:
         )
         return answer
 
-    def logout(self, request: Request, button_label: Callable[[Request], str]) -> Response:
+    def logout(self, request: Request, page_text: Callable[[Request], LogoutPageText]) -> Response:
         try:
+            text = page_text(request)
             return _log_out(
                 self.relying_party(request), request, web_auth_config(request),
-                transaction=self.transaction, button_label=button_label(request),
+                transaction=self.transaction, language=text.language,
+                button_label=text.button_label,
             )
         except Exception as failure:
             return _RouteAnswer(Response(), failure, _plain_server_error)

@@ -75,6 +75,7 @@ from webauth.policies import (
 )
 from webauth.ports import AccountEventKind, SignInStores
 from webauth.sign_in_routes import (
+    LogoutPageText,
     RefusalPage,
     SignInPaths,
     SignInRefusal,
@@ -501,18 +502,37 @@ def test_a_path_that_is_not_an_absolute_distinct_path_of_this_app_is_refused_at_
         SignInPaths(**{**_VALID_PATHS, **override})
 
 
-@pytest.mark.parametrize(("logout", "label"), [
-    pytest.param(LOGOUT_PATH, None, id="a logout path without a label"),
-    pytest.param(None, lambda _request: "Sign out", id="a label without a logout path"),
+@pytest.mark.parametrize("language", ["de", "en-US", "zh-Hant-TW", "sr-Latn", "de-1996", "en-a1b2"])
+def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(language: str) -> None:
+    assert LogoutPageText(language=language, button_label="Out").language == language
+
+
+@pytest.mark.parametrize("language", [
+    "", "en_US", '"', "<", "en US", "ä", "de\n", "d", "-de", "de-", "de--CH", "1de", "de-123456789",
+    "de-ä", 42, None,
 ])
-def test_a_logout_path_and_a_label_come_together_or_install_refuses_before_any_route(
-    logout: str | None, label: Callable[[Request], str] | None,
+def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
+    language: object,
+) -> None:
+    with pytest.raises(ValueError, match="language"):
+        LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(("logout", "page_text"), [
+    pytest.param(LOGOUT_PATH, None, id="a logout path without page text"),
+    pytest.param(
+        None, lambda _request: LogoutPageText(language="en", button_label="Sign out"),
+        id="page text without a logout path",
+    ),
+])
+def test_a_logout_path_and_page_text_come_together_or_install_refuses_before_any_route(
+    logout: str | None, page_text: Callable[[Request], LogoutPageText] | None,
 ) -> None:
     app = FastAPI()
     arguments = {
         **_install_arguments(),
         "paths": SignInPaths(start=START_PATH, callback=CALLBACK_PATH, logout=logout),
-        "logout_button_label": label,
+        "logout_page_text": page_text,
     }
 
     with pytest.raises(ValueError, match="logout"):
@@ -521,12 +541,12 @@ def test_a_logout_path_and_a_label_come_together_or_install_refuses_before_any_r
     assert not _sign_in_routes_of(app)
 
 
-def test_a_host_without_a_logout_path_and_label_registers_no_logout_route() -> None:
+def test_a_host_without_a_logout_path_and_page_text_registers_no_logout_route() -> None:
     app = FastAPI()
     arguments = {
         **_install_arguments(),
         "paths": SignInPaths(start=START_PATH, callback=CALLBACK_PATH),
-        "logout_button_label": None,
+        "logout_page_text": None,
     }
 
     install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
@@ -544,7 +564,7 @@ def _install_arguments() -> dict[str, object]:
         "refused": lambda _request, _refusal: Response(status_code=403),
         "keeps_id_token": True,
         "max_sessions": None,
-        "logout_button_label": lambda _request: "Sign out",
+        "logout_page_text": lambda _request: LogoutPageText(language="en", button_label="Sign out"),
         "backchannel_dependencies": (),
     }
 
@@ -624,7 +644,7 @@ def _a_gated_host(
         refused=lambda _request, _refusal: Response(status_code=403),
         keeps_id_token=True,
         max_sessions=None,
-        logout_button_label=lambda _request: "Sign out",
+        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
     )
 
     @app.get("/albums/{album_id}")
