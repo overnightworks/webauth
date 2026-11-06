@@ -1,0 +1,8 @@
+claim_id = "8813ab238c9d46cd88af8bfa8af6e680"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "1b03917a52e4ed4c4d354b2cdf2567851b5a5aba"
+branch = "claude/issue-632-admission-module"
+scope = [".importlinter", "README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/admission.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc_login.py", "src/webauth/service_callers.py", "src/webauth/sign_in_routes.py", "tests"]
+opened_commit = "a61566f92a13958c3a32e110b921111df4425661"
+whole_reason = "One public vocabulary moves whole into its own module, so every importer, typing host, test and document repoints in the same landing and hosts migrate their import once."
