@@ -378,7 +378,7 @@ def a_gated_app_of(role: str, **keywords: Any) -> AuthApp:
 
 class TestAdmittedAdmin:
     @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
-    def test_a_session_with_the_admin_role_gets_its_account(self, path: str) -> None:
+    def test_a_stored_admins_session_gets_its_account(self, path: str) -> None:
         app = a_gated_app_of(ADMIN_ROLE)
         response = ask(app, path, cookie=signed_in(app))
         assert (response.status_code, response.json()) == (200, {"username": "alice"})

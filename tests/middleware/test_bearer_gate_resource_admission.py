@@ -1,5 +1,5 @@
 """The bearer gate's protected resource, admission: a token that holds is admitted as a person the
-host's store already knows, capped at the person role, and every failure of the store is the
+host's store already knows, capped at the role "user", and every failure of the store is the
 library's 500.
 
 The app is the real stack over `an_auth_app` behind the session gate, with the host's routes
