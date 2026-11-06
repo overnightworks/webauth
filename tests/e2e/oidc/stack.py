@@ -45,7 +45,10 @@ def docker(*arguments: str) -> str:
     # Fixed command list
     return subprocess.run(  # noqa: S603
         # The operator's own PATH by design
-        ["docker", *arguments], check=True, capture_output=True, text=True,  # noqa: S607
+        ["docker", *arguments],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
         timeout=DOCKER_TIMEOUT_SECONDS,
     ).stdout
 
@@ -54,7 +57,10 @@ def _git(hal: Path, *arguments: str) -> str:
     # Fixed command list
     return subprocess.run(  # noqa: S603
         # The operator's own PATH by design
-        ["git", "-C", str(hal), *arguments], check=True, capture_output=True, text=True  # noqa: S607
+        ["git", "-C", str(hal), *arguments],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
 
 
@@ -94,8 +100,11 @@ class Admin:
 
     def _call(self, method: str, path: str, **options: Any) -> httpx.Response:
         return httpx.request(
-            method, f"{self.admin_url}/admin/realms{path}", timeout=ADMIN_TIMEOUT_SECONDS,
-            headers={"Authorization": f"Bearer {self.token}"}, **options,
+            method,
+            f"{self.admin_url}/admin/realms{path}",
+            timeout=ADMIN_TIMEOUT_SECONDS,
+            headers={"Authorization": f"Bearer {self.token}"},
+            **options,
         )
 
 
@@ -113,9 +122,17 @@ class HeldStack:
     def __enter__(self) -> HeldStack:
         # Fixed command list
         self._process = subprocess.Popen(  # noqa: S603
-            [sys.executable, str(self.hal / "probe/keycloak/probe.py"), "hold",
-             "--scratch", str(self.scratch)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            [
+                sys.executable,
+                str(self.hal / "probe/keycloak/probe.py"),
+                "hold",
+                "--scratch",
+                str(self.scratch),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
         try:
             self._wait_for_ready()
@@ -129,7 +146,7 @@ class HeldStack:
         for line in self._process.stdout:
             self.output.append(line.rstrip())
             if line.startswith(READY_MARK):
-                self.ready = json.loads(line[len(READY_MARK):])
+                self.ready = json.loads(line[len(READY_MARK) :])
                 self._drainer = threading.Thread(target=self._drain, daemon=True)
                 self._drainer.start()
                 return
@@ -137,7 +154,9 @@ class HeldStack:
         raise StackError(f"the stack did not come up: {self.output[-3:]}")
 
     def __exit__(
-        self, kind: type[BaseException] | None, error: BaseException | None,
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
         self._stop()
@@ -162,9 +181,14 @@ class HeldStack:
     def keycloak_network(self) -> str:
         """The name of the probe's ``keycloak`` network, the one Keycloak's container sits on."""
         networks = docker(
-            "network", "ls", "--format", "{{.Name}}",
-            "--filter", f"label=com.docker.compose.project={PROBE_PROJECT}",
-            "--filter", f"label=com.docker.compose.network={KEYCLOAK_NETWORK}",
+            "network",
+            "ls",
+            "--format",
+            "{{.Name}}",
+            "--filter",
+            f"label=com.docker.compose.project={PROBE_PROJECT}",
+            "--filter",
+            f"label=com.docker.compose.network={KEYCLOAK_NETWORK}",
         ).split()
         if len(networks) != 1:
             raise StackError(f"the {KEYCLOAK_NETWORK} network is absent or ambiguous: {networks}")
