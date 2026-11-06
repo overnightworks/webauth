@@ -31,8 +31,33 @@ def issue_throwaway_tls(directory: Path, name: str, dns_names: list[str]) -> Thr
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"{name} throwaway CA")])
     now = datetime.datetime.now(datetime.UTC)
-    ca = (
-        _builder(ca_subject, ca_subject, ca_key.public_key(), now)
+    ca = _ca_certificate(ca_key, ca_subject, now)
+    leaf_key = ec.generate_private_key(ec.SECP256R1())
+    leaf = _leaf_certificate(leaf_key, ca_key, ca_subject, f"{name} throwaway leaf", dns_names, now)
+    tls = ThrowawayTls(
+        ca_certificate=directory / f"{name}-ca.pem",
+        leaf_certificate=directory / f"{name}-leaf.pem",
+        leaf_key=directory / f"{name}-leaf-key.pem",
+        leaf_spki_sha256_base64=_spki_sha256_base64(leaf),
+    )
+    tls.ca_certificate.write_bytes(ca.public_bytes(serialization.Encoding.PEM))
+    tls.leaf_certificate.write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
+    tls.leaf_key.touch(mode=PRIVATE_FILE_MODE)
+    tls.leaf_key.write_bytes(
+        leaf_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return tls
+
+
+def _ca_certificate(
+    ca_key: ec.EllipticCurvePrivateKey, subject: x509.Name, now: datetime.datetime
+) -> x509.Certificate:
+    return (
+        _builder(subject, subject, ca_key.public_key(), now)
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         .add_extension(
             x509.KeyUsage(
@@ -45,10 +70,15 @@ def issue_throwaway_tls(directory: Path, name: str, dns_names: list[str]) -> Thr
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), False)
         .sign(ca_key, hashes.SHA256())
     )
-    leaf_key = ec.generate_private_key(ec.SECP256R1())
-    leaf = (
+
+
+def _leaf_certificate(
+    leaf_key: ec.EllipticCurvePrivateKey, ca_key: ec.EllipticCurvePrivateKey,
+    ca_subject: x509.Name, common_name: str, dns_names: list[str], now: datetime.datetime,
+) -> x509.Certificate:
+    return (
         _builder(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"{name} throwaway leaf")]),
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]),
             ca_subject, leaf_key.public_key(), now,
         )
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
@@ -68,23 +98,6 @@ def issue_throwaway_tls(directory: Path, name: str, dns_names: list[str]) -> Thr
         )
         .sign(ca_key, hashes.SHA256())
     )
-    tls = ThrowawayTls(
-        ca_certificate=directory / f"{name}-ca.pem",
-        leaf_certificate=directory / f"{name}-leaf.pem",
-        leaf_key=directory / f"{name}-leaf-key.pem",
-        leaf_spki_sha256_base64=_spki_sha256_base64(leaf),
-    )
-    tls.ca_certificate.write_bytes(ca.public_bytes(serialization.Encoding.PEM))
-    tls.leaf_certificate.write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
-    tls.leaf_key.touch(mode=PRIVATE_FILE_MODE)
-    tls.leaf_key.write_bytes(
-        leaf_key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-    )
-    return tls
 
 
 def _builder(

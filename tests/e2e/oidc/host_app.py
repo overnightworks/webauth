@@ -561,24 +561,13 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     ) -> str:
         return PAGE.substitute(headline=f"Album {html.escape(album_id)}", body=LOGOUT_BUTTON)
 
-    def refused(request: Request, refusal: SignInRefusal) -> Response:
-        current = world["world"]
-        cause = refusal.cause
-        reason = cause.reason.value if isinstance(cause, OidcRefusal) else cause.value
-        current.last_refusal = reason
-        rejection = cause.token_rejection if isinstance(cause, OidcRefusal) else None
-        current.last_token_rejection = rejection.value if rejection else None
-        return HTMLResponse(
-            PAGE.substitute(headline="Sign-in refused", body=html.escape(reason)), status_code=403
-        )
-
     install_sign_in_routes(
         app,
         paths=SIGN_IN_PATHS,
         relying_party=relying_party_of,
         admission=admission,
         transaction=sign_in_transaction,
-        refused=refused,
+        refused=_remembering_refusal(world),
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
@@ -597,6 +586,23 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     if settings.is_bearer_host:
         _add_bearer_routes(app, dependencies, settings, sign_in_transaction)
     return app
+
+
+def _remembering_refusal(world: dict[str, World]) -> Callable[[Request, SignInRefusal], Response]:
+    """The refusal page, which also records the refusal's reason for the observer."""
+
+    def refused(request: Request, refusal: SignInRefusal) -> Response:
+        current = world["world"]
+        cause = refusal.cause
+        reason = cause.reason.value if isinstance(cause, OidcRefusal) else cause.value
+        current.last_refusal = reason
+        rejection = cause.token_rejection if isinstance(cause, OidcRefusal) else None
+        current.last_token_rejection = rejection.value if rejection else None
+        return HTMLResponse(
+            PAGE.substitute(headline="Sign-in refused", body=html.escape(reason)), status_code=403
+        )
+
+    return refused
 
 
 def _add_token_routes(
