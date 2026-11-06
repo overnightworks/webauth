@@ -359,6 +359,7 @@ def _require_header_field_value(name: str, value: str) -> None:
 
 
 def _require_source_list(owner: str, sources: object) -> Sequence[str]:
+    require_collection_not_one_string(owner, sources, noun="source")
     if isinstance(sources, _TEXT_LIKE) or not isinstance(sources, Sequence):
         raise TypeError(
             f"{owner}: sources must be a sequence of str, not {type(sources).__name__}.",
