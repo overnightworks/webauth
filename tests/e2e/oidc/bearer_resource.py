@@ -49,12 +49,16 @@ from realm import ADMIN_NAME, OUTSIDER_NAME, RESOURCE_AUDIENCE_SCOPE, UNGROUPED_
 
 AGENT_SCOPE = f"openid {RESOURCE_SCOPE}"
 LEDGER = (
-    "accounts", "account_events", "sessions", "session_transactions", "privileged_accounts",
+    "accounts",
+    "account_events",
+    "sessions",
+    "session_transactions",
+    "privileged_accounts",
 )
 
 
-
 # --- the resource scenarios: an agent's token at the entry point ---
+
 
 def resource_challenge(run: BearerRun, error: str | None = None) -> str:
     metadata = f"{run.settings.app_origins[0]}/.well-known/oauth-protected-resource{RESOURCE_PATH}"
@@ -99,8 +103,10 @@ def no_group_and_unknown_subject_are_refused_plainly(run: BearerRun) -> str:
     reset_host(run.host)
     agent_post(run, "agent_user", 403)
     assert ledger(run) == (0, 0, 0, 0, 0), ledger(run)
-    return (f"{UNGROUPED_NAME} (known, no MCP group), {OUTSIDER_NAME}, an unknown subject: "
-            "403 Access denied, store untouched")
+    return (
+        f"{UNGROUPED_NAME} (known, no MCP group), {OUTSIDER_NAME}, an unknown subject: "
+        "403 Access denied, store untouched"
+    )
 
 
 def the_agent_token_opens_no_other_path(run: BearerRun) -> str:
@@ -116,7 +122,8 @@ def the_agent_token_opens_no_other_path(run: BearerRun) -> str:
 
 def tokens_the_resource_refuses(run: BearerRun) -> str:
     for name, status, error in (
-        ("user", 401, "invalid_token"), ("audience_app", 401, "invalid_token"),
+        ("user", 401, "invalid_token"),
+        ("audience_app", 401, "invalid_token"),
         ("agent_two_audiences", 401, "invalid_token"),
         ("agent_no_scope", 403, "insufficient_scope"),
     ):
@@ -179,7 +186,9 @@ def a_bearer_on_a_marked_route_is_not_the_resource_admission(run: BearerRun) -> 
     assert_person_answer(app_answer, 200)
     foreign = run.tokens["audience_app"]
     assert_person_answer(
-        run.send(Call("GET", MARKED_PERSON, foreign)), 401, PERSON_CHALLENGE_INVALID_TOKEN,
+        run.send(Call("GET", MARKED_PERSON, foreign)),
+        401,
+        PERSON_CHALLENGE_INVALID_TOKEN,
     )
     cookies = session_cookies(run.host_page(run.people["admin"]), run.settings.app_origins[0])
     ignored = run.send(Call("GET", MARKED, foreign, cookies=cookies))
@@ -192,10 +201,14 @@ def a_marked_route_keeps_session_and_csrf_without_a_bearer(run: BearerRun) -> st
     origin = run.settings.app_origins[0]
     cookies = session_cookies(run.host_page(run.people["admin"]), origin)
     assert_person_answer(run.send(Call("GET", MARKED, cookies=cookies)), 200)
-    refused = run.send(Call(
-        "POST", "/notes", cookies=cookies,
-        headers={"Origin": "https://evil.example.test", "Sec-Fetch-Site": "cross-site"},
-    ))
+    refused = run.send(
+        Call(
+            "POST",
+            "/notes",
+            cookies=cookies,
+            headers={"Origin": "https://evil.example.test", "Sec-Fetch-Site": "cross-site"},
+        )
+    )
     assert refused.status_code == 403, refused.status_code
     return "a cookie passes on a marked route; a cross-origin cookie POST: 403"
 
@@ -206,7 +219,10 @@ def marked_route_refuses_the_agent_beyond_its_mark(run: BearerRun) -> str:
     before = ledger(run)
     token = run.tokens["agent_user"]
     for method, path in (
-        ("DELETE", MARKED), ("HEAD", MARKED), ("GET", f"{MARKED}/"), ("GET", f"{MARKED}/more"),
+        ("DELETE", MARKED),
+        ("HEAD", MARKED),
+        ("GET", f"{MARKED}/"),
+        ("GET", f"{MARKED}/more"),
         ("GET", "/notes/%2e%2e"),
     ):
         answer = run.send(Call(method, path, token))

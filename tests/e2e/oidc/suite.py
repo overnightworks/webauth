@@ -43,7 +43,10 @@ def project_objects(project: str, kind: str) -> list[str]:
     found = subprocess.run(  # noqa: S603
         # The operator's own PATH by design
         ["docker", *listing, "--filter", f"label={PROJECT_LABEL}={project}", "-q"],  # noqa: S607
-        check=True, capture_output=True, text=True, timeout=LISTING_TIMEOUT_SECONDS,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=LISTING_TIMEOUT_SECONDS,
     ).stdout.split()
     return [f"{kind} {identifier}" for identifier in found]
 
@@ -85,7 +88,9 @@ class HeldSuite:
         return self
 
     def __exit__(
-        self, kind: type[BaseException] | None, error: BaseException | None,
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
         self.remove_everything()
@@ -119,15 +124,15 @@ class HeldSuite:
                 self.failures.append(describe_failure(f"listing the project's {kind}s", error))
         return self.leftovers
 
-    def _compose(
-        self, *arguments: str, timeout: int
-    ) -> subprocess.CompletedProcess[str]:
+    def _compose(self, *arguments: str, timeout: int) -> subprocess.CompletedProcess[str]:
         # Fixed command list
         finished = subprocess.run(  # noqa: S603
             # The operator's own PATH by design
             ["docker", "compose", "-p", self.project, "-f", str(COMPOSE_FILE), *arguments],  # noqa: S607
             env={**os.environ, "SUITE_HOST": self.host},
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         if finished.returncode:
             raise StackError(
@@ -173,8 +178,11 @@ class SuiteApi:
         self, name: str, variant: dict[str, str], configuration: dict[str, Any]
     ) -> dict[str, Any]:
         answer = self._call(
-            "POST", "/api/plan", params={"planName": name, "variant": json.dumps(variant)},
-            json=configuration, expected=201,
+            "POST",
+            "/api/plan",
+            params={"planName": name, "variant": json.dumps(variant)},
+            json=configuration,
+            expected=201,
         )
         return answer.json()
 
@@ -196,7 +204,8 @@ class SuiteApi:
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline and not stop_requested():
             answer = self._call(
-                "GET", f"/api/runner/{module_id}/wait-state",
+                "GET",
+                f"/api/runner/{module_id}/wait-state",
                 params={"states": wanted, "timeoutMs": WAIT_STATE_SLICE_SECONDS * 1000},
                 expected=200,
                 timeout=WAIT_STATE_SLICE_SECONDS + API_TIMEOUT_SECONDS,
@@ -220,8 +229,12 @@ class SuiteApi:
         return self._call("GET", f"/api/plan/export/{plan_id}", expected=200).content
 
     def _call(
-        self, method: str, path: str, expected: int | None = None,
-        timeout: float = API_TIMEOUT_SECONDS, **options: Any,
+        self,
+        method: str,
+        path: str,
+        expected: int | None = None,
+        timeout: float = API_TIMEOUT_SECONDS,
+        **options: Any,
     ) -> httpx.Response:
         answer = httpx.request(
             method, f"{self.base_url}{path}", timeout=timeout, headers=BEHIND_TLS_FRONT, **options

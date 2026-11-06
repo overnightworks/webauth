@@ -23,6 +23,9 @@ USER_NAME = "d1-user"
 USER_GROUP = "/apps/songmaker"
 OUTSIDER_NAME = "d1-outsider"
 ADMIN_NAME = "d1-admin"
+DISABLED_USER_NAME = "d1-disabled"
+KEYCLOAK_DISABLED_MESSAGE = "Account is disabled"
+KEYCLOAK_LOGOUT_CONFIRMATION = "#kc-logout"
 UNGROUPED_NAME = "d1-ungrouped"
 GROUPED_NAME = "d1-grouped"
 ADMIN_GROUP = f"{USER_GROUP}/admin"
@@ -32,8 +35,13 @@ ACCESS_TOKEN_TYPE_ATTRIBUTE = "access.token.header.type.rfc9068"  # noqa: S105  
 
 
 def host_settings(
-    tls: ThrowawayTls, shim_port: int, app_origins: tuple[str, ...], client_id: str,
-    client_secret: str, session_secret: str, cookie_samesite: CookieSameSite,
+    tls: ThrowawayTls,
+    shim_port: int,
+    app_origins: tuple[str, ...],
+    client_id: str,
+    client_secret: str,
+    session_secret: str,
+    cookie_samesite: CookieSameSite,
 ) -> HostSettings:
     return HostSettings(
         app_origins=app_origins,
@@ -58,15 +66,18 @@ def host_settings(
 def create_user(admin: Admin, username: str, password: str, groups: tuple[str, ...]) -> str:
     """A user with no pending required action: Keycloak adds the terms action to every new
     account whatever the request lists, so the full representation is put back without it."""
-    user_id = admin.create(f"/{REALM}/users", {
-        "username": username,
-        "enabled": True,
-        "email": f"{username}@d1.invalid",
-        "emailVerified": True,
-        "firstName": "D1",
-        "lastName": "User",
-        "credentials": [{"type": "password", "value": password, "temporary": False}],
-    })
+    user_id = admin.create(
+        f"/{REALM}/users",
+        {
+            "username": username,
+            "enabled": True,
+            "email": f"{username}@d1.invalid",
+            "emailVerified": True,
+            "firstName": "D1",
+            "lastName": "User",
+            "credentials": [{"type": "password", "value": password, "temporary": False}],
+        },
+    )
     user_path = f"/{REALM}/users/{user_id}"
     representation = admin.get(user_path)
     admin.put(user_path, {**representation, "requiredActions": []})
@@ -77,7 +88,9 @@ def create_user(admin: Admin, username: str, password: str, groups: tuple[str, .
 
 
 def client_representation(
-    client_id: str, client_secret: str, origins: tuple[str, ...],
+    client_id: str,
+    client_secret: str,
+    origins: tuple[str, ...],
     backchannel_logout_url: str | None = None,
 ) -> dict[str, Any]:
     attributes = {"post.logout.redirect.uris": "##".join(f"{origin}/" for origin in origins)}
@@ -127,7 +140,11 @@ def public_client_representation(
 
 
 def audience_scope_representation(
-    name: str, audience: str, *, resource: bool = False, in_token_scope: bool = False,
+    name: str,
+    audience: str,
+    *,
+    resource: bool = False,
+    in_token_scope: bool = False,
 ) -> dict[str, Any]:
     """A client scope that adds ``audience`` to the access token's ``aud``: a client id, or
     with ``resource`` a resource URL; ``in_token_scope`` also names the scope in ``scope``."""
@@ -138,19 +155,23 @@ def audience_scope_representation(
             "include.in.token.scope": str(in_token_scope).lower(),
             "display.on.consent.screen": "false",
         },
-        "protocolMappers": [{
-            "name": name,
-            "protocol": "openid-connect",
-            "protocolMapper": "oidc-audience-mapper",
-            "consentRequired": False,
-            "config": {
-                ("included.custom.audience" if resource else "included.client.audience"): audience,
-                "id.token.claim": "false",
-                "access.token.claim": "true",
-                "userinfo.token.claim": "false",
-                "introspection.token.claim": "true",
-            },
-        }],
+        "protocolMappers": [
+            {
+                "name": name,
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "consentRequired": False,
+                "config": {
+                    (
+                        "included.custom.audience" if resource else "included.client.audience"
+                    ): audience,
+                    "id.token.claim": "false",
+                    "access.token.claim": "true",
+                    "userinfo.token.claim": "false",
+                    "introspection.token.claim": "true",
+                },
+            }
+        ],
     }
 
 
@@ -160,9 +181,12 @@ def add_resource(admin: Admin, resource_url: str, members: tuple[str, ...]) -> t
     does not. The scope names."""
     scopes = (RESOURCE_SCOPE, RESOURCE_AUDIENCE_SCOPE)
     for name in scopes:
-        admin.create(f"/{REALM}/client-scopes", audience_scope_representation(
-            name, resource_url, resource=True, in_token_scope=name == RESOURCE_SCOPE
-        ))
+        admin.create(
+            f"/{REALM}/client-scopes",
+            audience_scope_representation(
+                name, resource_url, resource=True, in_token_scope=name == RESOURCE_SCOPE
+            ),
+        )
     parent = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")["id"]
     group = admin.create(f"/{REALM}/groups/{parent}/children", {"name": RESOURCE_GROUP_NAME})
     for name in members:
@@ -205,7 +229,8 @@ def short_lived_tokens(
         admin = fresh_admin()
         current = admin.get(path)
         attributes = {
-            name: value for name, value in current["attributes"].items()
+            name: value
+            for name, value in current["attributes"].items()
             if name != LIFESPAN_ATTRIBUTE
         }
         if previous is not None:
