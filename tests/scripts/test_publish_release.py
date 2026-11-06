@@ -256,7 +256,7 @@ def set_up_git_status_failing(release: Release) -> None:
 
 
 def set_up_git_tag_lookup_failing(release: Release) -> None:
-    fail_git_when(release, f'"$*" == *refs/tags/{release.tag}* && "$1" != ls-remote')
+    fail_git_when(release, '"$1" == for-each-ref')
 
 
 def set_up_local_main_ahead(release: Release) -> None:
@@ -300,7 +300,7 @@ def set_up_gh_missing(release: Release) -> None:
         ("{tag}", set_up_other_branch, "main"),
         ("{tag}", set_up_dirty_tree, "clean"),
         ("{tag}", set_up_git_status_failing, "git status failed: index corrupt"),
-        ("{tag}", set_up_git_tag_lookup_failing, "index corrupt"),
+        ("{tag}", set_up_git_tag_lookup_failing, "git for-each-ref failed: index corrupt"),
         ("{tag}", set_up_local_main_ahead, "origin/main"),
         ("{tag}", set_up_origin_main_ahead, "origin/main"),
         ("{tag}", set_up_tag_on_origin, "origin"),
