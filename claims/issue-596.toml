@@ -1,8 +1,0 @@
-claim_id = "5f121e5125a747d0b919182606bdfcf8"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "c511b2df769e3e0c327b9c4bbbe0ed06f6f11f50"
-branch = "claude/issue-596-suite-and-docs-drop-copies"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "tests/e2e/oidc/README.md", "tests/middleware/test_csrf.py", "tests/middleware/test_security_headers.py", "tests/test_oidc_client_config.py"]
-opened_commit = "d2c34164cf7ead9feaecae9c809f1f195508a84d"
-whole_reason = "One no-behaviour cleanup of three test modules and three documents, all from one audit's rows 2, 3 and 11, each edit a few lines."
