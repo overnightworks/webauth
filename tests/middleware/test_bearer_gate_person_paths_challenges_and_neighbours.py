@@ -1,6 +1,6 @@
 """The bearer gate's person paths beside the cookie, the other kind of path and the challenge.
 
-The arrangement is that of `test_bearer_gate_person_paths`.
+The arrangement is that of `tests/support/person_paths_arrangement.py`.
 """
 
 from __future__ import annotations
