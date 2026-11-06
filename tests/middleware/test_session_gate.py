@@ -24,6 +24,7 @@ from tests.support.gate_arrangement import (
     relayed,
     with_admitted_admin_routes,
 )
+from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     ALL_DEPENDENCIES_PATH,
@@ -45,7 +46,6 @@ from tests.support.webauth_arrangement import (
     a_web_auth_config,
     an_auth_app,
     an_http_scope,
-    assert_carries_policy_headers,
     drive,
     session_cookie_header,
     starts,

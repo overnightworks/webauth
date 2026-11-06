@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
+from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
@@ -18,7 +19,6 @@ from tests.support.webauth_arrangement import (
     a_signed_in_same_origin_request,
     a_web_auth_config,
     an_http_scope,
-    assert_carries_policy_headers,
     body_of,
     completed,
     drive,

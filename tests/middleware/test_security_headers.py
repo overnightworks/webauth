@@ -14,6 +14,7 @@ from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tests.support.oidc_arrangement import LogoutPage, a_relying_party
+from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     SessionRecordsInMemory,
@@ -21,7 +22,6 @@ from tests.support.webauth_arrangement import (
     WriteLockInMemory,
     a_web_auth_config,
     an_http_scope,
-    assert_carries_policy_headers,
     drive,
     no_receive,
     starts,

@@ -44,12 +44,6 @@ from webauth.middleware import (
     admitted_user,
     install_web_auth_middleware,
 )
-from webauth.middleware.security_headers import (
-    CONTENT_TYPE_OPTIONS,
-    FRAME_OPTIONS,
-    REFERRER_POLICY,
-    STRICT_TRANSPORT_SECURITY,
-)
 from webauth.policies import (
     CsrfPolicy,
     PathRules,
@@ -119,23 +113,6 @@ def a_web_auth_config(**overrides: Any) -> WebAuthConfig:
 
 
 SESSION_COOKIE_NAME = a_web_auth_config().session_cookie_name
-
-
-def assert_carries_policy_headers(
-    headers: Mapping[str, str], policy: SecurityHeadersPolicy, *, hsts: bool,
-) -> None:
-    """Every header ``policy`` puts on a response is there; HSTS only when ``hsts``."""
-    expected = {
-        "x-content-type-options": CONTENT_TYPE_OPTIONS,
-        "x-frame-options": FRAME_OPTIONS,
-        "content-security-policy": policy.content_security_policy,
-        "referrer-policy": REFERRER_POLICY,
-        "permissions-policy": policy.permissions_policy,
-    }
-    if hsts:
-        expected["strict-transport-security"] = STRICT_TRANSPORT_SECURITY
-    carried = {name: headers.get(name) for name in (*expected, "strict-transport-security")}
-    assert carried == {"strict-transport-security": None, **expected}
 
 
 def signed_without_bound(payload: str, secret: bytes) -> str:
@@ -311,9 +288,8 @@ class SessionRecordsInMemory:
     ) -> None:
         self._lock = lock
         self._records = {} if record is None else {record.id: record}
-        self._users = users if users is not None else UsersInMemory(
-            *(() if record is None else (record.user,)),
-        )
+        seeded_users = () if record is None else (record.user,)
+        self._users = users if users is not None else UsersInMemory(*seeded_users)
         self._ids = count(1)
         self.commit_failure: Exception | None = None
 
@@ -563,7 +539,7 @@ class AuthApp:
     route_threads: list[int]
 
     def get(
-        self, path: str, *, cookie: str | None = None, accept: str | None = None,
+        self, path: str, *, cookie: str | None = None, accept: str | None = None
     ) -> HttpxResponse:
         headers = {} if cookie is None else {"cookie": f"{SESSION_COOKIE_NAME}={cookie}"}
         if accept is not None:
@@ -592,7 +568,7 @@ class AuthApp:
 
 def seeded_session(
     sessions: SessionRecordsInMemory, hold: AbstractContextManager[None],
-    user_id: str, now: datetime, expires_at: datetime, refresh_token: SecretStr | None = None,
+    user_id: str, now: datetime, expires_at: datetime, refresh_token: SecretStr | None = None
 ) -> FakeSessionRecord:
     """A stored session of ``user_id``, created the way a host does: under its write lock."""
     with hold:
@@ -689,7 +665,7 @@ def _add_session_routes(
 ) -> None:
     @app.get("/me")
     def me(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user)
     ) -> dict[str, str]:
         route_runs.append(request.url.path)
         return {"username": user.username, "role": user.role}
@@ -711,12 +687,20 @@ def _add_session_routes(
 
     for path in OPEN_PATHS:
         app.add_api_route(
-            path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"],
+            path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"]
         )
 
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
         return {"username": user.username}
+
+
+def _install_the_session_gate(
+    app: FastAPI, session_gate: SessionGate, stack_policies: Mapping[str, Any] | None,
+) -> None:
+    install_web_auth_middleware(
+        app, **{**GATED_STACK_POLICIES, **(stack_policies or {})}, session_gate=session_gate
+    )
 
 
 def an_auth_app(
@@ -764,17 +748,14 @@ def an_auth_app(
     app = FastAPI(root_path=root_path)
     install_web_auth_config(app, config)
     if gate:
-        install_web_auth_middleware(
-            app,
-            **{**GATED_STACK_POLICIES, **(stack_policies or {})},
-            session_gate=SessionGate(
+        _install_the_session_gate(
+            app, SessionGate(
                 session_transaction=session_transaction or sessions.in_transaction,
                 login_redirect=login_redirect,
                 public=public,
                 optional=optional or PathRules(),
-            ),
+            ), stack_policies,
         )
-
     _add_session_routes(app, dependencies, sessions, route_runs, route_threads)
     _add_websocket_routes(app, sessions, websocket_outcomes)
 

@@ -23,6 +23,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.types import Message
 
 from tests.support.oidc_arrangement import a_relying_party
+from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
@@ -36,7 +37,6 @@ from tests.support.webauth_arrangement import (
     a_web_auth_config,
     an_auth_app,
     an_http_scope,
-    assert_carries_policy_headers,
     completed,
     drive,
     starts,
