@@ -721,7 +721,7 @@ def _add_marked_routes(
     current_user: Callable[..., AuthenticatedUser],
     admin_user: Callable[..., AuthenticatedUser],
 ) -> None:
-    """One route per marked route; ``/notes-admin`` reads ``admin_user``, the rest ``current_user``."""
+    """One route per marked route; only ``/notes-admin`` reads ``admin_user``."""
 
     def echo(user: AuthenticatedUser) -> dict[str, str]:
         return {"id": user.id, "username": user.username, "role": user.role}
