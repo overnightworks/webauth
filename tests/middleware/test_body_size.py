@@ -115,7 +115,10 @@ def a_body_limited_app(
         )
     else:
         install_web_auth_middleware(
-            app, security_headers=HEADERS_POLICY, body_size=body_size, csrf_origin=CsrfPolicy(),
+            app,
+            security_headers=HEADERS_POLICY,
+            body_size=body_size,
+            csrf_origin=CsrfPolicy(),
         )
     return app
 
@@ -168,7 +171,9 @@ async def test_a_start_still_in_its_send_when_the_body_overflows_stays_the_only_
     assert isinstance(raised, RequestBodyTooLarge)
 
 
-async def test_a_response_finished_before_the_overflow_is_noticed_stays_complete_and_the_error_reaches_the_server() -> None:  # noqa: E501
+async def test_a_response_finished_before_the_overflow_is_noticed_stays_complete_and_the_error_reaches_the_server() -> (
+    None
+):  # noqa: E501
     sent, raised = await drive_post(
         "/never-reads-without-await", SPEC_WITH_CONCURRENT_READER, TWO_CHUNKS_UNDER_THE_LIMIT_EACH
     )
@@ -196,7 +201,6 @@ async def test_a_streamed_body_over_the_limit_read_before_the_response_starts_an
     assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
 
 
-
 async def test_a_web_auth_error_handler_does_not_answer_in_place_of_the_413() -> None:
     app = a_body_limited_app()
 
@@ -213,7 +217,9 @@ async def test_a_web_auth_error_handler_does_not_answer_in_place_of_the_413() ->
     assert raised is None
 
 
-async def test_a_start_send_held_past_the_deadline_fails_after_the_policy_bound_without_a_second_start() -> None:  # noqa: E501
+async def test_a_start_send_held_past_the_deadline_fails_after_the_policy_bound_without_a_second_start() -> (
+    None
+):  # noqa: E501
     app = a_body_limited_app(
         policy=BodySizePolicy(default_max_bytes=LIMIT, start_send_seconds=START_SEND_BOUND_SECONDS)
     )
@@ -303,9 +309,7 @@ async def test_a_content_length_that_is_not_a_number_counts_as_undeclared_and_th
 
 
 async def test_a_disconnect_passes_uncounted_and_the_route_sees_it() -> None:
-    sent, raised = await drive_post(
-        "/sees-the-first-message", SPEC_WITHOUT_CONCURRENT_READER, None
-    )
+    sent, raised = await drive_post("/sees-the-first-message", SPEC_WITHOUT_CONCURRENT_READER, None)
 
     (start,) = starts(sent)
     assert start["status"] == 200

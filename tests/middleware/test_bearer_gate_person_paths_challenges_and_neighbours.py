@@ -57,7 +57,8 @@ def test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer(
     answers = [app.ask(path) for path in readers]
 
     assert [(answer.status_code, the_challenge(answer)) for answer in answers] == [
-        (401, PERSON_REALM), (401, PERSON_REALM),
+        (401, PERSON_REALM),
+        (401, PERSON_REALM),
     ]
     outside = app.ask(UNGATED_ME_PATH)
     assert (outside.status_code, the_challenge(outside)) == (401, None)
@@ -77,7 +78,9 @@ def test_a_navigation_to_a_person_path_still_gets_its_login_redirect(session_gat
     app = a_person_app(session_gate=session_gate, login_redirect=LOGIN_REDIRECT)
 
     navigation = app.ask(
-        PERSON_ME_PATH, headers={"accept": "text/html"}, follow_redirects=False,
+        PERSON_ME_PATH,
+        headers={"accept": "text/html"},
+        follow_redirects=False,
     )
     api_call = app.ask(PERSON_ME_PATH, headers={"accept": "application/json"})
 
@@ -87,14 +90,17 @@ def test_a_navigation_to_a_person_path_still_gets_its_login_redirect(session_gat
 
 @ADMIN_READERS
 def test_a_cookie_person_refused_by_the_admin_readers_gets_no_challenge(
-    session_gate: bool, path: str,
+    session_gate: bool,
+    path: str,
 ) -> None:
     app = a_person_app(session_gate=session_gate, cookie_role=MEMBER_ROLE)
 
     response = app.ask(path, cookie=True)
 
     assert (response.status_code, response.json(), the_challenge(response)) == (
-        403, {"detail": "Admin access required"}, None,
+        403,
+        {"detail": "Admin access required"},
+        None,
     )
 
 
@@ -102,7 +108,8 @@ def test_a_person_path_refuses_a_token_for_another_audience_with_invalid_token()
     app = a_person_app()
 
     response = app.ask(
-        PERSON_ME_PATH, authorization=bearing(a_token(aud="another-application")),
+        PERSON_ME_PATH,
+        authorization=bearing(a_token(aud="another-application")),
     )
 
     assert (response.status_code, the_challenge(response)) == (401, PERSON_INVALID_TOKEN)
@@ -117,8 +124,9 @@ def test_one_admin_token_opens_both_a_machine_path_and_a_person_path() -> None:
     assert (machine.status_code, person.status_code) == (200, 200)
 
 
-def test_a_user_token_that_opens_a_person_path_is_refused_on_a_machine_path_with_insufficient_scope(
-) -> None:
+def test_a_user_token_that_opens_a_person_path_is_refused_on_a_machine_path_with_insufficient_scope() -> (
+    None
+):
     app = a_person_app()
 
     person = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
@@ -131,14 +139,17 @@ def test_a_user_token_that_opens_a_person_path_is_refused_on_a_machine_path_with
 @BOTH_HOSTS
 @pytest.mark.parametrize("method", ["GET", "POST"])
 def test_a_foreign_bearer_secret_on_a_path_neither_rule_selects_reaches_its_route_untouched(
-    session_gate: bool, method: str,
+    session_gate: bool,
+    method: str,
 ) -> None:
     app = a_person_app(session_gate=session_gate)
 
     response = app.ask(FOREIGN_SECRET_PATH, method=method, authorization=("Bearer s3cret",))
 
     assert (response.status_code, response.json(), the_challenge(response)) == (
-        200, {"authorization": "Bearer s3cret"}, None,
+        200,
+        {"authorization": "Bearer s3cret"},
+        None,
     )
     assert app.key_sets.fetched_urls == []
 

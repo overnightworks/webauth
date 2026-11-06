@@ -22,7 +22,10 @@ ONLY_LOGIN_AND_HEALTH = (PublicRule(PathRules(exact=frozenset({LOGIN_PATH, "/hea
 
 
 def a_gated_app(
-    record: Any = None, *, public: tuple[PublicRule, ...] = (), **keywords: Any,
+    record: Any = None,
+    *,
+    public: tuple[PublicRule, ...] = (),
+    **keywords: Any,
 ) -> AuthApp:
     """A gated application with a login redirect, whose server errors answer 500."""
     return an_auth_app(

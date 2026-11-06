@@ -54,11 +54,16 @@ class TestARecordedAdmissionBelongsToItsRequest:
         record = a_session(user=first_user, now=now)
         sessions = SessionsRecordingTheirTransaction(record, users=users)
         second = sessions.create(
-            second_user.id, now=now, expires_at=now + timedelta(minutes=30), refresh_token=None,
+            second_user.id,
+            now=now,
+            expires_at=now + timedelta(minutes=30),
+            refresh_token=None,
             id_token=None,
         )
         first = a_gated_app(
-            record, sessions=sessions, public=ONLY_LOGIN_AND_HEALTH,
+            record,
+            sessions=sessions,
+            public=ONLY_LOGIN_AND_HEALTH,
         )
         relay = relayed(first)
         assert ask(first, "/me", cookie=signed_in(first)).json()["username"] == "alice"
@@ -69,8 +74,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
             first=first,
             first_relay=relay,
             gate_entries={
-                key: value for key, value in relay.added.items()
-                if key not in control_relay.added
+                key: value for key, value in relay.added.items() if key not in control_relay.added
             },
             users=users,
             sessions=sessions,
@@ -78,7 +82,8 @@ class TestARecordedAdmissionBelongsToItsRequest:
         )
 
     def test_a_replay_on_the_gated_app_is_decided_by_the_gate_itself(
-        self, arrangement: Arrangement,
+        self,
+        arrangement: Arrangement,
     ) -> None:
         assert arrangement.gate_entries
         arrangement.first_relay.replay = arrangement.gate_entries
@@ -87,12 +92,16 @@ class TestARecordedAdmissionBelongsToItsRequest:
 
     @pytest.mark.parametrize("planted", ["replayed", "an-account-under-each-key"])
     def test_a_replay_on_an_app_with_its_own_config_is_ignored(
-        self, arrangement: Arrangement, planted: str,
+        self,
+        arrangement: Arrangement,
+        planted: str,
     ) -> None:
         other = with_admitted_admin_routes(an_auth_app(None, login_redirect=LOGIN_REDIRECT))
         relay = relayed(other)
         relay.replay = (
-            arrangement.gate_entries if planted == "replayed" else {
+            arrangement.gate_entries
+            if planted == "replayed"
+            else {
                 key: AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
                 for key in arrangement.gate_entries
             }
@@ -105,19 +114,25 @@ class TestARecordedAdmissionBelongsToItsRequest:
             ask(other, ADMITTED_ADMIN_PATH, cookie=cookie)
 
     def test_a_replay_on_a_shared_config_is_ignored_for_another_sessions_cookie(
-        self, arrangement: Arrangement,
+        self,
+        arrangement: Arrangement,
     ) -> None:
-        shared = with_admitted_admin_routes(an_auth_app(
-            None, sessions=arrangement.sessions, config=arrangement.first.config,
-            login_redirect=LOGIN_REDIRECT,
-        ))
+        shared = with_admitted_admin_routes(
+            an_auth_app(
+                None,
+                sessions=arrangement.sessions,
+                config=arrangement.first.config,
+                login_redirect=LOGIN_REDIRECT,
+            )
+        )
         relay = relayed(shared)
         relay.replay = arrangement.gate_entries
         arrangement.sessions.events.clear()
         answer = ask(shared, "/me", cookie=arrangement.second_cookie)
         assert answer.json()["username"] == "bruno"
         assert (
-            counted(arrangement.sessions, "load"), counted(arrangement.sessions, "touch"),
+            counted(arrangement.sessions, "load"),
+            counted(arrangement.sessions, "touch"),
         ) == (1, 1)
         assert ask(shared, "/me").json() == {"detail": "Authentication required"}
         with pytest.raises(RuntimeError):
@@ -128,10 +143,13 @@ class TestARecordedAdmissionBelongsToItsRequest:
             ask(shared, "/health")
 
     def test_a_replay_for_the_same_cookie_is_reused_without_a_store_read(
-        self, arrangement: Arrangement,
+        self,
+        arrangement: Arrangement,
     ) -> None:
         shared = an_auth_app(
-            None, sessions=arrangement.sessions, config=arrangement.first.config,
+            None,
+            sessions=arrangement.sessions,
+            config=arrangement.first.config,
             login_redirect=LOGIN_REDIRECT,
         )
         relay = relayed(shared)
@@ -141,5 +159,6 @@ class TestARecordedAdmissionBelongsToItsRequest:
         assert ask(shared, "/me", cookie=cookie).json()["username"] == "alice"
         assert ask(shared, "/health", cookie=cookie).json() == {"username": "alice"}
         assert (
-            counted(arrangement.sessions, "load"), counted(arrangement.sessions, "touch"),
+            counted(arrangement.sessions, "load"),
+            counted(arrangement.sessions, "touch"),
         ) == (0, 0)

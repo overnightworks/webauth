@@ -53,7 +53,9 @@ def resource() -> ProtectedResource:
 @pytest.fixture
 def app(resource: ProtectedResource) -> BearerApp:
     return a_bearer_app(
-        person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
+        person_paths=PERSON_PATHS,
+        resource=resource,
+        known_accounts=(a_known_person(),),
     )
 
 
@@ -69,13 +71,22 @@ def assert_admitted_nothing(app: BearerApp) -> None:
     ids=["get", "post", "on-a-person-path"],
 )
 @pytest.mark.parametrize(
-    "sent", [{}, {"origin": "https://evil.example"}], ids=["plain", "foreign-origin"],
+    "sent",
+    [{}, {"origin": "https://evil.example"}],
+    ids=["plain", "foreign-origin"],
 )
 def test_an_agent_token_on_a_marked_route_is_the_capped_person_with_no_cookie_and_no_origin(
-    app: BearerApp, resource: ProtectedResource, method: str, path: str, sent: dict[str, str],
+    app: BearerApp,
+    resource: ProtectedResource,
+    method: str,
+    path: str,
+    sent: dict[str, str],
 ) -> None:
     response = app.ask(
-        path, method=method, authorization=bearing(an_agent_token(resource)), headers=sent,
+        path,
+        method=method,
+        authorization=bearing(an_agent_token(resource)),
+        headers=sent,
     )
 
     assert response.status_code == 200
@@ -84,10 +95,13 @@ def test_an_agent_token_on_a_marked_route_is_the_capped_person_with_no_cookie_an
 
 
 @pytest.mark.parametrize(
-    "path", [MARKED_RESOURCE_PERSON.template, MARKED_ADMITTED_USER.template],
+    "path",
+    [MARKED_RESOURCE_PERSON.template, MARKED_ADMITTED_USER.template],
 )
 def test_resource_person_and_admitted_user_read_the_capped_person_on_a_marked_route(
-    app: BearerApp, resource: ProtectedResource, path: str,
+    app: BearerApp,
+    resource: ProtectedResource,
+    path: str,
 ) -> None:
     response = app.ask(path, method="POST", authorization=bearing(an_agent_token(resource)))
 
@@ -95,7 +109,8 @@ def test_resource_person_and_admitted_user_read_the_capped_person_on_a_marked_ro
 
 
 def test_a_stored_admin_stays_the_person_role_and_a_marked_admin_route_is_the_plain_403(
-    resource: ProtectedResource, monkeypatch: pytest.MonkeyPatch,
+    resource: ProtectedResource,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = a_bearer_app(resource=resource, known_accounts=(a_known_person(ADMIN_ROLE),))
     assert app.accounts is not None
@@ -113,10 +128,14 @@ def test_a_stored_admin_stays_the_person_role_and_a_marked_admin_route_is_the_pl
 
 
 @pytest.mark.parametrize(
-    "groups", [[], ["/apps/x"], ["/apps/x/other"]], ids=["none", "login-group-only", "sibling"],
+    "groups",
+    [[], ["/apps/x"], ["/apps/x/other"]],
+    ids=["none", "login-group-only", "sibling"],
 )
 def test_a_person_without_the_group_gets_the_plain_403_and_the_store_is_untouched(
-    app: BearerApp, resource: ProtectedResource, groups: list[str],
+    app: BearerApp,
+    resource: ProtectedResource,
+    groups: list[str],
 ) -> None:
     token = a_resource_token(resource, groups=groups)
 
@@ -142,7 +161,9 @@ def test_an_unknown_subject_gets_the_plain_403_and_no_account_appears(
 
 @pytest.mark.parametrize("scope", [ABSENT, "mcp:other"], ids=["absent", "other"])
 def test_a_token_without_the_scope_is_an_insufficient_scope_beside_a_valid_cookie(
-    app: BearerApp, resource: ProtectedResource, scope: object,
+    app: BearerApp,
+    resource: ProtectedResource,
+    scope: object,
 ) -> None:
     token = an_agent_token(resource, scope=scope)
 
@@ -166,7 +187,9 @@ def test_a_token_without_the_scope_is_an_insufficient_scope_beside_a_valid_cooki
     ids=["expired", "two-audiences", "wrong-issuer", "unlisted-party"],
 )
 def test_an_invalid_token_is_a_401_with_the_challenge_and_a_valid_cookie_decides_nothing(
-    app: BearerApp, resource: ProtectedResource, claims: dict[str, object],
+    app: BearerApp,
+    resource: ProtectedResource,
+    claims: dict[str, object],
 ) -> None:
     token = an_agent_token(resource, **claims)
 
@@ -186,7 +209,9 @@ def test_an_invalid_token_is_a_401_with_the_challenge_and_a_valid_cookie_decides
     ],
 )
 def test_a_credential_the_gate_refuses_is_answered_with_the_challenge_beside_a_cookie(
-    app: BearerApp, authorization: tuple[str, ...], error: str,
+    app: BearerApp,
+    authorization: tuple[str, ...],
+    error: str,
 ) -> None:
     response = app.ask(A_NOTE, authorization=authorization, cookie=True)
 
@@ -206,7 +231,8 @@ def test_an_app_bearer_on_a_marked_person_path_is_admitted_as_a_sign_in_admits_i
 
 @pytest.mark.parametrize("claims", [{}, {"scope": "mcp:tools"}], ids=["app", "with-the-scope"])
 def test_a_token_of_another_audience_gets_todays_401_on_a_person_path_and_is_no_admission(
-    app: BearerApp, claims: dict[str, object],
+    app: BearerApp,
+    claims: dict[str, object],
 ) -> None:
     token = a_token(aud="https://other.example/mcp", groups=[RESOURCE_GROUP], **claims)
 
@@ -219,7 +245,8 @@ def test_a_token_of_another_audience_gets_todays_401_on_a_person_path_and_is_no_
 
 @pytest.mark.parametrize("claims", [{}, {"scope": "mcp:tools"}], ids=["app", "with-the-scope"])
 def test_a_token_of_another_audience_is_ignored_on_any_other_path_and_the_cookie_decides(
-    app: BearerApp, claims: dict[str, object],
+    app: BearerApp,
+    claims: dict[str, object],
 ) -> None:
     token = a_token(aud="https://other.example/mcp", groups=[RESOURCE_GROUP], **claims)
 
@@ -255,11 +282,15 @@ def test_a_cross_origin_cookie_post_on_a_marked_route_is_refused_and_a_same_orig
     app: BearerApp,
 ) -> None:
     refused = app.ask(
-        MARKED_NEW_NOTE.template, method="POST", cookie=True,
+        MARKED_NEW_NOTE.template,
+        method="POST",
+        cookie=True,
         headers={"origin": "https://evil.example"},
     )
     passed = app.ask(
-        MARKED_NEW_NOTE.template, method="POST", cookie=True,
+        MARKED_NEW_NOTE.template,
+        method="POST",
+        cookie=True,
         headers={"sec-fetch-site": "same-origin"},
     )
 
@@ -291,7 +322,11 @@ NO_SESSION = 401
     ],
 )
 def test_the_agent_token_is_refused_on_every_method_and_shape_a_mark_does_not_cover(
-    app: BearerApp, resource: ProtectedResource, method: str, path: str, status: int,
+    app: BearerApp,
+    resource: ProtectedResource,
+    method: str,
+    path: str,
+    status: int,
 ) -> None:
     response = app.ask(path, method=method, authorization=bearing(an_agent_token(resource)))
 
@@ -301,7 +336,8 @@ def test_the_agent_token_is_refused_on_every_method_and_shape_a_mark_does_not_co
 
 
 def test_a_marked_template_overlapping_a_machine_path_stays_a_machine_path(
-    app: BearerApp, resource: ProtectedResource,
+    app: BearerApp,
+    resource: ProtectedResource,
 ) -> None:
     response = app.ask(A_MACHINE_NOTE, authorization=bearing(an_agent_token(resource)))
 
@@ -330,10 +366,13 @@ def test_a_marked_route_at_the_entry_point_is_decided_as_the_entry_point() -> No
     ],
 )
 def test_every_reader_on_a_marked_route_refuses_a_request_changed_after_admission(
-    resource: ProtectedResource, path: str, changes: dict[str, object],
+    resource: ProtectedResource,
+    path: str,
+    changes: dict[str, object],
 ) -> None:
     app = a_bearer_app(
-        resource=resource, known_accounts=(a_known_person(),),
+        resource=resource,
+        known_accounts=(a_known_person(),),
         inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
     )
 
@@ -355,10 +394,35 @@ def test_a_marked_route_refuses_a_method_that_is_not_an_upper_case_token(method:
 @pytest.mark.parametrize(
     "template",
     [
-        "", "/", "notes", "/notes/", "//notes", "/notes//x", "/a/{x", "/a/x}", "/a/{}",
-        "/a/x{y}", "/a/{x}y", "/a/{x}{y}", "/a/{x:path}", "/a/{x:int}", "/a/{x-y}", "/a/b c",
-        "/a/%2e", "/a/%2F", "/a/./b", "/a/..", "/a/ü", "/a?x", "/a#f", "/a/*", "/a/{*x}",
-        "/a/\n", None, 7, b"/a",
+        "",
+        "/",
+        "notes",
+        "/notes/",
+        "//notes",
+        "/notes//x",
+        "/a/{x",
+        "/a/x}",
+        "/a/{}",
+        "/a/x{y}",
+        "/a/{x}y",
+        "/a/{x}{y}",
+        "/a/{x:path}",
+        "/a/{x:int}",
+        "/a/{x-y}",
+        "/a/b c",
+        "/a/%2e",
+        "/a/%2F",
+        "/a/./b",
+        "/a/..",
+        "/a/ü",
+        "/a?x",
+        "/a#f",
+        "/a/*",
+        "/a/{*x}",
+        "/a/\n",
+        None,
+        7,
+        b"/a",
     ],
 )
 def test_a_marked_route_refuses_a_template_that_is_not_literals_and_whole_segment_names(

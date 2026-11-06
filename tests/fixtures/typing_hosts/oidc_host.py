@@ -175,8 +175,13 @@ class HostAccounts:
 
 class HostSessions:
     def create(
-        self, user_id: str, *, now: datetime, expires_at: datetime,
-        refresh_token: SecretStr | None, id_token: SecretStr | None,
+        self,
+        user_id: str,
+        *,
+        now: datetime,
+        expires_at: datetime,
+        refresh_token: SecretStr | None,
+        id_token: SecretStr | None,
     ) -> HostSession:
         user = HostAccount(user_id, "someone", "user")
         return HostSession("id", user, now, expires_at, refresh_token, id_token)
@@ -234,7 +239,9 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
     install_sign_in_routes(
         app,
         paths=SignInPaths(
-            start="/login/oidc", callback="/auth/callback", logout="/logout",
+            start="/login/oidc",
+            callback="/auth/callback",
+            logout="/logout",
             backchannel_logout="/auth/backchannel-logout",
         ),
         relying_party=lambda _request: relying_party,
@@ -255,19 +262,31 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
 def a_host_derives_the_policies_of_its_sign_in_paths(
     paths: SignInPaths,
 ) -> tuple[
-    tuple[PublicRule, ...], PathRules, PathRules, BodySizeRule, CacheControlRule, LoginRedirect,
+    tuple[PublicRule, ...],
+    PathRules,
+    PathRules,
+    BodySizeRule,
+    CacheControlRule,
+    LoginRedirect,
 ]:
     return (
-        paths.public_rules, paths.browser_paths, paths.backchannel,
-        paths.backchannel_body_size_rule, paths.cache_control_rule, paths.login_redirect,
+        paths.public_rules,
+        paths.browser_paths,
+        paths.backchannel,
+        paths.backchannel_body_size_rule,
+        paths.cache_control_rule,
+        paths.login_redirect,
     )
 
 
 def a_host_gets_a_fresh_access_token(
-    relying_party: OidcRelyingParty, session_id: str, config: WebAuthConfig,
+    relying_party: OidcRelyingParty,
+    session_id: str,
+    config: WebAuthConfig,
 ) -> SecretStr | AccessTokenRefusalReason:
     outcome = fresh_access_token(
-        relying_party, session_id,
+        relying_party,
+        session_id,
         session_transaction=lambda: nullcontext(HostSessions()),
         config=config,
     )
@@ -287,10 +306,13 @@ def a_host_maps_an_access_token_refusal(refusal: AccessTokenRefusal) -> int:
 
 
 def a_host_gets_current_groups(
-    relying_party: OidcRelyingParty, session_id: str, config: WebAuthConfig,
+    relying_party: OidcRelyingParty,
+    session_id: str,
+    config: WebAuthConfig,
 ) -> tuple[str, ...] | int:
     outcome = current_groups(
-        relying_party, session_id,
+        relying_party,
+        session_id,
         session_transaction=lambda: nullcontext(HostSessions()),
         config=config,
     )
@@ -300,7 +322,8 @@ def a_host_gets_current_groups(
 
 
 def a_host_verifies_a_logout_token(
-    relying_party: OidcRelyingParty, logout_token: str,
+    relying_party: OidcRelyingParty,
+    logout_token: str,
 ) -> str | None:
     verified = relying_party.verify_logout_token(logout_token)
     return None if isinstance(verified, OidcRefusal) else verified.subject
@@ -311,21 +334,26 @@ def a_host_verifies_a_typed_token(verifier: JwtVerifier, token: str) -> Verified
 
 
 def a_host_verifies_a_token_of_several_media_types(
-    verifier: JwtVerifier, token: str,
+    verifier: JwtVerifier,
+    token: str,
 ) -> VerifiedClaims | Rejected:
     return verifier.verify(token, expected_media_types=frozenset({"at+jwt", "application/at+jwt"}))
 
 
 def a_host_verifies_an_access_token(
-    relying_party: OidcRelyingParty, access_token: str,
+    relying_party: OidcRelyingParty,
+    access_token: str,
 ) -> VerifiedAccessToken | OidcRefusal:
     return relying_party.verify_access_token(
-        access_token, authorized_parties=AuthorizedParties(frozenset({"hal"})),
+        access_token,
+        authorized_parties=AuthorizedParties(frozenset({"hal"})),
     )
 
 
 def a_host_verifies_a_resource_token(
-    relying_party: OidcRelyingParty, resource: ProtectedResource, access_token: str,
+    relying_party: OidcRelyingParty,
+    resource: ProtectedResource,
+    access_token: str,
 ) -> VerifiedAccessToken | OidcRefusal:
     verify = relying_party.resource_token_verifier(
         resource_url=resource.url,
@@ -336,31 +364,39 @@ def a_host_verifies_a_resource_token(
 
 
 def a_host_declares_its_machine_paths(
-    relying_party: OidcRelyingParty, config: AdmissionConfig,
+    relying_party: OidcRelyingParty,
+    config: AdmissionConfig,
 ) -> BearerGate:
     return BearerGate(
         relying_party=relying_party,
         admission=config,
         machine_paths=MachinePaths(
-            PathRules(prefixes=("/api/admin/",)), AuthorizedParties(frozenset({"hal"})),
+            PathRules(prefixes=("/api/admin/",)),
+            AuthorizedParties(frozenset({"hal"})),
         ),
     )
 
 
 def a_host_declares_its_person_paths(
-    relying_party: OidcRelyingParty, config: AdmissionConfig, transaction: SignInTransaction,
+    relying_party: OidcRelyingParty,
+    config: AdmissionConfig,
+    transaction: SignInTransaction,
 ) -> BearerGate:
     return BearerGate(
         relying_party=relying_party,
         admission=config,
         person_paths=PersonPaths(
-            PathRules(prefixes=("/api/",)), AuthorizedParties(frozenset({"hal"})), transaction,
+            PathRules(prefixes=("/api/",)),
+            AuthorizedParties(frozenset({"hal"})),
+            transaction,
         ),
     )
 
 
 def a_host_declares_its_resource(
-    relying_party: OidcRelyingParty, config: AdmissionConfig, transaction: SignInTransaction,
+    relying_party: OidcRelyingParty,
+    config: AdmissionConfig,
+    transaction: SignInTransaction,
 ) -> BearerGate:
     return BearerGate(
         relying_party=relying_party,
@@ -395,11 +431,14 @@ def a_host_serves_a_machine_route(app: FastAPI) -> None:
 
 
 def a_second_service_reads_the_app_role_of_its_token_groups(groups: list[str]) -> AppRole | None:
-    return app_role(groups, AdmissionConfig(
-        bound_issuer="https://keycloak.example/realms/host",
-        login_group="/apps/host",
-        admin_group="/apps/host/admin",
-    ))
+    return app_role(
+        groups,
+        AdmissionConfig(
+            bound_issuer="https://keycloak.example/realms/host",
+            login_group="/apps/host",
+            admin_group="/apps/host/admin",
+        ),
+    )
 
 
 def a_host_uses_the_production_transports() -> tuple[KeySetFetch, TokenRequestPost]:
@@ -433,7 +472,8 @@ async def a_host_accepts_a_websocket_only_for_a_signed_in_account(
 
 
 def a_host_admits_a_session_without_a_request(
-    session_id: str, config: WebAuthConfig,
+    session_id: str,
+    config: WebAuthConfig,
 ) -> AuthenticatedUser | ConnectionRefusal:
     return admit_session(session_id, sessions=HostSessions(), config=config)
 
@@ -491,38 +531,79 @@ def a_host_ends_a_session() -> None:
 
 def _surface_of_the_errors_and_the_verified_records() -> tuple[object, ...]:
     return (
-        TokenEndpointError, WebAuthError,
-        AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
-        AdmissionRefusal, EverySubject, NoAdmins, OidcIdentity, SessionRecord, UserRecord,
-        VerifiedAccessToken, VerifiedClaims, VerifiedLogout, WallClock, admit_session,
-        bearer_caller, install_web_auth_config,
-        is_https_url, session_id_from_request,
+        TokenEndpointError,
+        WebAuthError,
+        AccountEventKind.BACKCHANNEL_LOGOUT,
+        UsernameTakenError,
+        AdmissionRefusal,
+        EverySubject,
+        NoAdmins,
+        OidcIdentity,
+        SessionRecord,
+        UserRecord,
+        VerifiedAccessToken,
+        VerifiedClaims,
+        VerifiedLogout,
+        WallClock,
+        admit_session,
+        bearer_caller,
+        install_web_auth_config,
+        is_https_url,
+        session_id_from_request,
     )
 
 
 def _surface_of_the_gates_and_limits() -> tuple[object, ...]:
     return (
-        AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
-        MachinePaths, PersonPaths, ProtectedResource, install_resource_metadata,
-        BodySizePolicy, CsrfOriginMiddleware,
+        AuthorizedParties,
+        BearerCaller,
+        BearerGateMiddleware,
+        BodySizeLimitMiddleware,
+        MachinePaths,
+        PersonPaths,
+        ProtectedResource,
+        install_resource_metadata,
+        BodySizePolicy,
+        CsrfOriginMiddleware,
         DEFAULT_PERMISSIONS_POLICY,
-        DEFAULT_SESSION_COOKIE_NAME, ExchangeFailure, IpRateLimitMiddleware, JwtVerifier,
-        KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
-        MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
-        MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock,
+        DEFAULT_SESSION_COOKIE_NAME,
+        ExchangeFailure,
+        IpRateLimitMiddleware,
+        JwtVerifier,
+        KEY_SET_FETCH_DEADLINE_SECONDS,
+        KeySetFetchError,
+        LoginRedirect,
+        MAX_AUTHORIZATION_CODE_CHARS,
+        MAX_KEY_SET_BYTES,
+        MAX_KEY_SET_KEYS,
+        MAX_SESSION_COOKIE_CHARS,
+        MAX_TOKEN_RESPONSE_BYTES,
+        MonotonicClock,
     )
 
 
 def _surface_of_the_login_and_session_flow() -> tuple[object, ...]:
     return (
-        LOGOUT_TOKEN_MAX_AGE_SECONDS, OidcClientConfig,
+        LOGOUT_TOKEN_MAX_AGE_SECONDS,
+        OidcClientConfig,
         PENDING_LOGIN_MAX_AGE_SECONDS,
-        PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
-        Rejected, RedisRateLimitBackend, SecurityHeadersMiddleware, SessionLifetime,
+        PLAIN_SESSION_COOKIE_NAME,
+        PendingLogin,
+        RateLimitBackend,
+        Rejected,
+        RedisRateLimitBackend,
+        SecurityHeadersMiddleware,
+        SessionLifetime,
         MAX_SESSION_LIFETIME_SECONDS,
-        SessionGate, SessionGateMiddleware, SessionRecordStore, SessionTransaction,
-        PublicRule, admitted_admin, admitted_user,
-        SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
+        SessionGate,
+        SessionGateMiddleware,
+        SessionRecordStore,
+        SessionTransaction,
+        PublicRule,
+        admitted_admin,
+        admitted_user,
+        SingleProcessRateLimitBackend,
+        TOKEN_EXCHANGE_DEADLINE_SECONDS,
     )
 
 

@@ -76,7 +76,9 @@ BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
 ADMIN_GROUP = f"{LOGIN_GROUP}/admin"
 ADMISSION = AdmissionConfig(
-    bound_issuer=BOUND_ISSUER, login_group=LOGIN_GROUP, admin_group=ADMIN_GROUP,
+    bound_issuer=BOUND_ISSUER,
+    login_group=LOGIN_GROUP,
+    admin_group=ADMIN_GROUP,
 )
 SUBJECT = "5f0c2a1e-7d4b-4c55-9a51-2f8e3c6b1d90"
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
@@ -93,7 +95,9 @@ LOGOUT_LANGUAGE = "en-US"
 LOGOUT_PAGE_TEXT = LogoutPageText(language=LOGOUT_LANGUAGE, button_label=LOGOUT_BUTTON_LABEL)
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 SIGN_IN_PATHS = SignInPaths(
-    start=START_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH,
+    start=START_PATH,
+    callback=CALLBACK_PATH,
+    logout=LOGOUT_PATH,
     backchannel_logout=BACKCHANNEL_LOGOUT_PATH,
 )
 BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = SIGN_IN_PATHS.backchannel_body_size_rule.max_bytes
@@ -162,8 +166,10 @@ class _Guarded:
         return self._guard(member)
 
     def _guard(self, value: object) -> object:
-        return value if value is None or isinstance(value, (bool, int, str)) else (
-            _Guarded(value, self._window)
+        return (
+            value
+            if value is None or isinstance(value, (bool, int, str))
+            else (_Guarded(value, self._window))
         )
 
 
@@ -332,7 +338,9 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding
 
 
 def _install_the_host_middleware(
-    app: FastAPI, config: WebAuthConfig, address_budget: int | None,
+    app: FastAPI,
+    config: WebAuthConfig,
+    address_budget: int | None,
 ) -> None:
     install_web_auth_config(app, config)
     install_web_auth_middleware(
@@ -345,7 +353,9 @@ def _install_the_host_middleware(
             default_max_bytes=DEFAULT_MAX_BODY_BYTES,
             rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
         ),
-        rate_limit=None if address_budget is None else RateLimitPolicy(
+        rate_limit=None
+        if address_budget is None
+        else RateLimitPolicy(
             default=RateLimitBudget("host", address_budget, 60),
             exempt=SIGN_IN_PATHS.backchannel,
         ),
@@ -399,7 +409,8 @@ def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) ->
 
 
 def _an_issuer_side(
-    wall_clock: FakeClock, groups_claim: object,
+    wall_clock: FakeClock,
+    groups_claim: object,
 ) -> tuple[FakeIssuer, FakeKeySetEndpoint, OidcRelyingParty, list[str]]:
     issued_id_tokens: list[str] = []
 
@@ -440,7 +451,11 @@ def _the_stores_of_a_host(
     sessions = SessionRecordsInMemory(stored_session, users=accounts, lock=lock)
     audit = RecordingAuditSink()
     transaction = RecordingSignInTransaction(
-        transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
+        transaction_kind,
+        accounts=accounts,
+        sessions=sessions,
+        audit=audit,
+        lock=lock,
         strict=strict_records,
     )
     return _HostStores(lock, accounts, sessions, audit, transaction)
@@ -458,8 +473,12 @@ def _a_host_app(
 
 def _a_client_of(app: FastAPI, root_path: str) -> TestClient:
     return TestClient(
-        app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=root_path,
-        follow_redirects=False, raise_server_exceptions=False,
+        app,
+        base_url=HTTPS_TEST_SERVER,
+        cookies={},
+        root_path=root_path,
+        follow_redirects=False,
+        raise_server_exceptions=False,
     )
 
 
@@ -486,27 +505,33 @@ def an_oidc_host(
     app = _a_host_app(config, address_budget, behind_base_http_middleware)
     holder: list[OidcHost] = []
     _add_the_login_routes(
-        app, host=lambda: holder[0], transaction=stores.transaction,
-        max_sessions=max_sessions, keeps_id_token=keeps_id_token, admission=admission,
+        app,
+        host=lambda: holder[0],
+        transaction=stores.transaction,
+        max_sessions=max_sessions,
+        keeps_id_token=keeps_id_token,
+        admission=admission,
         logout_page_text=logout_page_text,
         backchannel_dependencies=backchannel_dependencies,
     )
     _add_the_signed_in_routes(app, stores.sessions)
-    holder.append(OidcHost(
-        client=_a_client_of(app, root_path),
-        issuer=issuer,
-        key_set=key_set,
-        wall_clock=wall_clock,
-        accounts=stores.accounts,
-        sessions=stores.sessions,
-        audit=stores.audit,
-        config=config,
-        lock=stores.lock,
-        relying_party=relying_party,
-        transaction=stores.transaction,
-        issued_id_tokens=issued_id_tokens,
-        refusals=[],
-    ))
+    holder.append(
+        OidcHost(
+            client=_a_client_of(app, root_path),
+            issuer=issuer,
+            key_set=key_set,
+            wall_clock=wall_clock,
+            accounts=stores.accounts,
+            sessions=stores.sessions,
+            audit=stores.audit,
+            config=config,
+            lock=stores.lock,
+            relying_party=relying_party,
+            transaction=stores.transaction,
+            issued_id_tokens=issued_id_tokens,
+            refusals=[],
+        )
+    )
     return holder[0]
 
 
@@ -558,10 +583,16 @@ OTHER_SUBJECT = "0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23"
 
 
 def stored_refresh_tokens(host: OidcHost) -> list[str]:
-    return [record.refresh_token.get_secret_value()
-            for record in host.sessions.list_active() if record.refresh_token is not None]
+    return [
+        record.refresh_token.get_secret_value()
+        for record in host.sessions.list_active()
+        if record.refresh_token is not None
+    ]
 
 
 def stored_id_tokens(host: OidcHost) -> list[str]:
-    return [record.id_token.get_secret_value()
-            for record in host.sessions.list_active() if record.id_token is not None]
+    return [
+        record.id_token.get_secret_value()
+        for record in host.sessions.list_active()
+        if record.id_token is not None
+    ]

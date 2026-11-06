@@ -66,15 +66,20 @@ def _install_the_derived_middleware(
             cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
         ),
         body_size=BodySizePolicy(
-            default_max_bytes=1024, rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
+            default_max_bytes=1024,
+            rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
         ),
-        rate_limit=None if rate_budget is None else RateLimitPolicy(
+        rate_limit=None
+        if rate_budget is None
+        else RateLimitPolicy(
             default=RateLimitBudget("host", 1000, 60),
             exempt=SIGN_IN_PATHS.backchannel if exempts_backchannel else PathRules(),
-            rules=(RateLimitRule(
-                paths=SIGN_IN_PATHS.browser_paths,
-                budget=RateLimitBudget("sign-in", rate_budget, 60),
-            ),),
+            rules=(
+                RateLimitRule(
+                    paths=SIGN_IN_PATHS.browser_paths,
+                    budget=RateLimitBudget("sign-in", rate_budget, 60),
+                ),
+            ),
         ),
         csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
         session_gate=SessionGate(
@@ -86,7 +91,9 @@ def _install_the_derived_middleware(
 
 
 def _a_gated_host(
-    rate_budget: int | None = None, *, exempts_backchannel: bool = True,
+    rate_budget: int | None = None,
+    *,
+    exempts_backchannel: bool = True,
 ) -> GatedHost:
     """A host whose gate, rate limit, cache, CSRF and body rules are the ones the paths derive.
 
@@ -116,7 +123,8 @@ def _a_gated_host(
         return album_id
 
     return GatedHost(
-        TestClient(app, base_url=HTTPS_TEST_SERVER, follow_redirects=False), issuer,
+        TestClient(app, base_url=HTTPS_TEST_SERVER, follow_redirects=False),
+        issuer,
     )
 
 
@@ -132,7 +140,8 @@ def test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_
 
     assert start.status_code == 303
     assert (deep_link.status_code, deep_link.headers["location"]) == (
-        302, f"{START_PATH}?next=%2Falbums%2F42",
+        302,
+        f"{START_PATH}?next=%2Falbums%2F42",
     )
 
 
@@ -177,8 +186,9 @@ def test_a_back_channel_post_reaches_the_route_past_the_gate_csrf_and_sign_in_bu
     host = _a_gated_host(rate_budget=1)
 
     statuses = [
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
-        .status_code
+        host.client.post(
+            BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER
+        ).status_code
         for _ in range(3)
     ]
 

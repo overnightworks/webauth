@@ -89,7 +89,9 @@ REALM_INVALID_REQUEST = f'{REALM}, error="invalid_request"'
 REALM_INVALID_TOKEN = f'{REALM}, error="invalid_token"'
 REALM_INSUFFICIENT_SCOPE = f'{REALM}, error="insufficient_scope"'
 ADMISSION = AdmissionConfig(
-    bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
+    bound_issuer=a_relying_party().issuer,
+    login_group="/apps/x",
+    admin_group="/apps/x/admin",
 )
 HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
 RESOURCE_URL = "https://app.example/mcp"
@@ -103,10 +105,17 @@ MARKED_PERSON_NOTE = MarkedRoute("GET", "/api/notes/{note}")
 MARKED_UNDER_MACHINE = MarkedRoute("GET", "/api/admin/notes/{note}")
 MARKED_RESOURCE_PERSON = MarkedRoute("POST", "/readers/resource-person")
 MARKED_ADMITTED_USER = MarkedRoute("POST", "/readers/admitted-user")
-MARKED_ROUTES = frozenset({
-    MARKED_NOTE, MARKED_NEW_NOTE, MARKED_ADMIN_NOTES, MARKED_PERSON_NOTE, MARKED_UNDER_MACHINE,
-    MARKED_RESOURCE_PERSON, MARKED_ADMITTED_USER,
-})
+MARKED_ROUTES = frozenset(
+    {
+        MARKED_NOTE,
+        MARKED_NEW_NOTE,
+        MARKED_ADMIN_NOTES,
+        MARKED_PERSON_NOTE,
+        MARKED_UNDER_MACHINE,
+        MARKED_RESOURCE_PERSON,
+        MARKED_ADMITTED_USER,
+    }
+)
 A_NOTE = "/notes/7"
 A_PERSON_NOTE = "/api/notes/7"
 A_MACHINE_NOTE = "/api/admin/notes/7"
@@ -142,7 +151,12 @@ def a_resource(
 ) -> ProtectedResource:
     """A resource whose transaction `a_bearer_app` binds to its own when none is given."""
     return ProtectedResource(
-        url, RESOURCE_SCOPE, required_group, parties, transaction, marked_routes,
+        url,
+        RESOURCE_SCOPE,
+        required_group,
+        parties,
+        transaction,
+        marked_routes,
     )
 
 
@@ -179,9 +193,7 @@ def a_bearer_gate(
     return BearerGate(
         relying_party=a_relying_party(fetch_key_set=key_sets, wall_clock=clock),
         admission=admission,
-        machine_paths=(
-            None if paths == PathRules() else MachinePaths(paths, machine_parties)
-        ),
+        machine_paths=(None if paths == PathRules() else MachinePaths(paths, machine_parties)),
         person_paths=person_paths,
         resource=resource,
     )
@@ -224,7 +236,8 @@ def add_machine_routes(auth: AuthApp) -> None:
 
     @auth.app.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
     def export(
-        request: Request, caller: BearerCaller = Depends(bearer_caller),
+        request: Request,
+        caller: BearerCaller = Depends(bearer_caller),
     ) -> dict[str, str]:
         ran(request)
         return {"subject": caller.subject}
@@ -241,14 +254,16 @@ def add_machine_routes(auth: AuthApp) -> None:
 
     @auth.app.api_route(UNGATED_EXPORT_PATH, methods=["GET", "DELETE"])
     def ungated_export(
-        request: Request, caller: BearerCaller = Depends(bearer_caller),
+        request: Request,
+        caller: BearerCaller = Depends(bearer_caller),
     ) -> dict[str, str]:
         ran(request)
         return {"subject": caller.subject}
 
     @auth.app.get(MACHINE_SESSION_PATH)
     def machine_session(
-        request: Request, _caller: BearerCaller = Depends(bearer_caller),
+        request: Request,
+        _caller: BearerCaller = Depends(bearer_caller),
     ) -> dict[str, str | None]:
         return {"session": session_id_from_request(request, web_auth_config(request))}
 
@@ -266,7 +281,8 @@ def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
     """
     install_resource_metadata(auth.app, resource, issuer=REALM_ISSUER)
     dependencies = current_user_dependency(
-        session_store=lambda: auth.sessions, on_authenticated=auth.authenticated.append,
+        session_store=lambda: auth.sessions,
+        on_authenticated=auth.authenticated.append,
     )
 
     def echo(request: Request, user: AuthenticatedUser) -> dict[str, str]:
@@ -279,13 +295,15 @@ def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
 
     @auth.app.patch(resource.entry_point)
     def current(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+        request: Request,
+        user: AuthenticatedUser = Depends(dependencies.current_user),
     ) -> dict[str, str]:
         return echo(request, user)
 
     @auth.app.delete(resource.entry_point)
     def admin(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.admin_user),
+        request: Request,
+        user: AuthenticatedUser = Depends(dependencies.admin_user),
     ) -> dict[str, str]:
         return echo(request, user)
 
@@ -298,7 +316,8 @@ def add_marked_routes(auth: AuthApp, resource: ProtectedResource) -> None:
     `resource_person` and `MARKED_ADMITTED_USER` reads `admitted_user`.
     """
     dependencies = current_user_dependency(
-        session_store=lambda: auth.sessions, on_authenticated=auth.authenticated.append,
+        session_store=lambda: auth.sessions,
+        on_authenticated=auth.authenticated.append,
     )
 
     def echo(request: Request, user: AuthenticatedUser | None) -> dict[str, str]:
@@ -307,12 +326,14 @@ def add_marked_routes(auth: AuthApp, resource: ProtectedResource) -> None:
         return {"id": user.id, "username": user.username, "role": user.role}
 
     def current(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+        request: Request,
+        user: AuthenticatedUser = Depends(dependencies.current_user),
     ) -> dict[str, str]:
         return echo(request, user)
 
     def admin(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.admin_user),
+        request: Request,
+        user: AuthenticatedUser = Depends(dependencies.admin_user),
     ) -> dict[str, str]:
         return echo(request, user)
 
@@ -329,7 +350,9 @@ def add_marked_routes(auth: AuthApp, resource: ProtectedResource) -> None:
     }
     for route in resource.marked_routes:
         auth.app.add_api_route(
-            route.template, readers.get(route.template, current), methods=list(EVERY_METHOD),
+            route.template,
+            readers.get(route.template, current),
+            methods=list(EVERY_METHOD),
             include_in_schema=False,
         )
 
@@ -359,13 +382,15 @@ def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None
 
     @auth.app.api_route(PERSON_ME_PATH, methods=["GET", "POST", "DELETE"])
     def me(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+        request: Request,
+        user: AuthenticatedUser = Depends(dependencies.current_user),
     ) -> dict[str, str | None]:
         return person(request, user)
 
     @auth.app.get(PERSON_ADMIN_ME_PATH)
     def admin_me(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.admin_user),
+        request: Request,
+        user: AuthenticatedUser = Depends(dependencies.admin_user),
     ) -> dict[str, str | None]:
         return person(request, user)
 
@@ -377,7 +402,8 @@ def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None
 
     @auth.app.get(PERSON_ADMITTED_ADMIN_PATH)
     def admitted_admin_me(
-        request: Request, user: AuthenticatedUser = Depends(admitted_admin),
+        request: Request,
+        user: AuthenticatedUser = Depends(admitted_admin),
     ) -> dict[str, str | None]:
         return person(request, user)
 
@@ -424,13 +450,20 @@ def _a_sign_in_side(
     sessions = sessions or SessionRecordsInMemory(record, users=accounts, lock=lock)
     audit = RecordingAuditSink()
     transaction = RecordingSignInTransaction(
-        kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock, strict=strict,
+        kind,
+        accounts=accounts,
+        sessions=sessions,
+        audit=audit,
+        lock=lock,
+        strict=strict,
     )
     return _SignInSide(record, accounts, sessions, audit, transaction)
 
 
 def _stack_policies(
-    gate: BearerGate | None, with_person_paths: bool, policies: dict[str, Any] | None,
+    gate: BearerGate | None,
+    with_person_paths: bool,
+    policies: dict[str, Any] | None,
 ) -> dict[str, Any]:
     stack: dict[str, Any] = {} if gate is None else {"bearer_gate": gate}
     if with_person_paths:
@@ -439,15 +472,22 @@ def _stack_policies(
 
 
 def _a_gate_over(
-    paths: PathRules, key_sets: FakeKeySetEndpoint, clock: FakeClock,
-    machine_parties: AuthorizedParties, person_paths: PathRules | None,
-    person_parties: AuthorizedParties, transaction: SignInTransaction,
+    paths: PathRules,
+    key_sets: FakeKeySetEndpoint,
+    clock: FakeClock,
+    machine_parties: AuthorizedParties,
+    person_paths: PathRules | None,
+    person_parties: AuthorizedParties,
+    transaction: SignInTransaction,
     resource: ProtectedResource | None,
 ) -> tuple[PersonPaths | None, BearerGate]:
     person = PersonPaths(person_paths, person_parties, transaction) if person_paths else None
     gate = a_bearer_gate(
-        paths=paths, key_sets=key_sets, clock=clock,
-        person_paths=person, machine_parties=machine_parties,
+        paths=paths,
+        key_sets=key_sets,
+        clock=clock,
+        person_paths=person,
+        machine_parties=machine_parties,
         resource=_bound_to(resource, transaction),
     )
     return person, gate
@@ -467,7 +507,9 @@ def _add_routes(
 
 
 def _public_rules(
-    given: tuple[PublicRule, ...], person: PersonPaths | None, resource: ProtectedResource | None,
+    given: tuple[PublicRule, ...],
+    person: PersonPaths | None,
+    resource: ProtectedResource | None,
 ) -> tuple[PublicRule, ...]:
     webhook = [FOREIGN_SECRET_PUBLIC] if person else []
     metadata = [resource.public_rule] if resource else []
@@ -475,7 +517,8 @@ def _public_rules(
 
 
 def _bound_to(
-    resource: ProtectedResource | None, transaction: SignInTransaction,
+    resource: ProtectedResource | None,
+    transaction: SignInTransaction,
 ) -> ProtectedResource | None:
     if resource is None or resource.transaction is not an_unbound_transaction:
         return resource
@@ -551,8 +594,13 @@ def a_bearer_app(
     )
     _add_routes(auth, person, resource, auth_app_keywords.get("login_redirect"))
     return BearerApp(
-        auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
-        accounts=side.accounts, audit=side.audit, transaction=sign_in,
+        auth,
+        key_sets,
+        clock,
+        cookie=session_cookie_header(auth.signed_cookie()),
+        accounts=side.accounts,
+        audit=side.audit,
+        transaction=sign_in,
     )
 
 
@@ -578,7 +626,8 @@ WEBSOCKET_ADMITTED_ADMIN_PATH = "/ws-admitted-admin"
 def with_admitted_admin_routes(app: AuthApp) -> AuthApp:
     """The routes that read ``admitted_admin``, added to an application of the arrangement."""
     dependencies = current_user_dependency(
-        session_store=lambda: app.sessions, on_authenticated=app.authenticated.append,
+        session_store=lambda: app.sessions,
+        on_authenticated=app.authenticated.append,
     )
 
     @app.app.get(ADMITTED_ADMIN_PATH)
@@ -588,14 +637,16 @@ def with_admitted_admin_routes(app: AuthApp) -> AuthApp:
 
     @app.app.get(ADMITTED_ADMIN_DEPENDENCY_PATH)
     def depending_on_admitted_admin(
-        request: Request, admin: AuthenticatedUser = Depends(admitted_admin),
+        request: Request,
+        admin: AuthenticatedUser = Depends(admitted_admin),
     ) -> dict[str, str]:
         app.route_runs.append(request.url.path)
         return {"username": admin.username}
 
     @app.app.get(ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH)
     def reading_admitted_admin_after_current_user(
-        request: Request, _account: AuthenticatedUser = Depends(dependencies.current_user),
+        request: Request,
+        _account: AuthenticatedUser = Depends(dependencies.current_user),
     ) -> dict[str, str]:
         return {"username": admitted_admin(request).username}
 
@@ -656,14 +707,21 @@ def relayed(app: AuthApp) -> ScopeRelay:
 
 
 def assert_no_bearer_admission(
-    app: BearerApp, added_to_scope: dict[str, object], path: str, authorization: str,
+    app: BearerApp,
+    added_to_scope: dict[str, object],
+    path: str,
+    authorization: str,
 ) -> None:
     """The request, as the gate left it, read through the public admission readers."""
-    connection = HTTPConnection({
-        "type": "http", "app": app.auth.app, "path": path,
-        "headers": [(b"authorization", authorization.encode("latin-1"))],
-        **added_to_scope,
-    })
+    connection = HTTPConnection(
+        {
+            "type": "http",
+            "app": app.auth.app,
+            "path": path,
+            "headers": [(b"authorization", authorization.encode("latin-1"))],
+            **added_to_scope,
+        }
+    )
     with pytest.raises(RuntimeError):
         bearer_caller(connection)
     with pytest.raises(RuntimeError):

@@ -83,10 +83,13 @@ A_SESSION_GATE = SessionGate(
 A_BEARER_GATE = BearerGate(
     relying_party=a_relying_party(),
     admission=AdmissionConfig(
-        bound_issuer=a_relying_party().issuer, login_group="/apps/x", admin_group="/apps/x/admin",
+        bound_issuer=a_relying_party().issuer,
+        login_group="/apps/x",
+        admin_group="/apps/x/admin",
     ),
     machine_paths=MachinePaths(
-        PathRules(prefixes=("/api/admin/",)), AuthorizedParties(frozenset({"hal"})),
+        PathRules(prefixes=("/api/admin/",)),
+        AuthorizedParties(frozenset({"hal"})),
     ),
 )
 FOREIGN = {"origin": FOREIGN_ORIGIN}
@@ -232,7 +235,10 @@ class TestLibraryRefusalsCarryTheSecurityHeaders:
         ("client_factory", "send", "refusal"),
         [
             pytest.param(
-                a_full_stack_client, post_oversized, Refusal(413), id="413-by-content-length",
+                a_full_stack_client,
+                post_oversized,
+                Refusal(413),
+                id="413-by-content-length",
             ),
             pytest.param(
                 lambda: a_full_stack_client(max_requests=1),
@@ -253,10 +259,15 @@ class TestLibraryRefusalsCarryTheSecurityHeaders:
                 id="503-limiter-unavailable",
             ),
             pytest.param(
-                a_full_stack_client, post_cross_origin, Refusal(403), id="403-foreign-origin",
+                a_full_stack_client,
+                post_cross_origin,
+                Refusal(403),
+                id="403-foreign-origin",
             ),
             pytest.param(
-                a_full_stack_client, post_without_provenance, Refusal(403),
+                a_full_stack_client,
+                post_without_provenance,
+                Refusal(403),
                 id="403-missing-provenance",
             ),
             pytest.param(
@@ -326,10 +337,16 @@ class TestAnExemptWebhookPrefix:
         ],
     )
     def test_decides_each_request_with_the_headers_set(
-        self, path: str, headers: dict[str, str], content_type: str, status: int,
+        self,
+        path: str,
+        headers: dict[str, str],
+        content_type: str,
+        status: int,
     ) -> None:
         response = self.a_client().post(
-            path, content=b"n=1", headers={**headers, "content-type": content_type},
+            path,
+            content=b"n=1",
+            headers={**headers, "content-type": content_type},
         )
         assert response.status_code == status
         assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
@@ -379,7 +396,8 @@ class TestRefusedInstallation:
         ],
     )
     def test_hand_added_subclass_of_library_middleware_is_refused_and_leaves_the_app_alone(
-        self, subclass: type,
+        self,
+        subclass: type,
     ) -> None:
         app = a_fresh_app()
         app.add_middleware(subclass, policy=HEADERS_POLICY)
@@ -434,7 +452,10 @@ class TestBudgetSemantics:
             pytest.param(post_oversized, 413, 200, id="content-length-413-spends-nothing"),
             pytest.param(post_without_provenance, 403, 429, id="csrf-403-spends-one"),
             pytest.param(
-                lambda client: client.get(RAISING_PATH), 500, 429, id="raising-route-spends-one",
+                lambda client: client.get(RAISING_PATH),
+                500,
+                429,
+                id="raising-route-spends-one",
             ),
         ],
     )
@@ -462,14 +483,17 @@ class TestBudgetSemantics:
 class TestARateLimitRuleIsChosenByThePathTheRouterRoutes:
     @pytest.mark.parametrize("encoded", ["%3F", "%23"])
     def test_a_shape_budget_is_spent_for_an_encoded_delimiter_in_a_path_parameter(
-        self, encoded: str,
+        self,
+        encoded: str,
     ) -> None:
         policy = RateLimitPolicy(
             default=RateLimitBudget("default", max_requests=1, window_seconds=60),
-            rules=(RateLimitRule(
-                PathRules(shapes=(PathShape("/api/people/", "/export"),)),
-                RateLimitBudget("export", max_requests=2, window_seconds=60),
-            ),),
+            rules=(
+                RateLimitRule(
+                    PathRules(shapes=(PathShape("/api/people/", "/export"),)),
+                    RateLimitBudget("export", max_requests=2, window_seconds=60),
+                ),
+            ),
         )
         auth = an_auth_app(
             None,
@@ -478,12 +502,13 @@ class TestARateLimitRuleIsChosenByThePathTheRouterRoutes:
             stack_policies={"rate_limit": policy},
         )
         auth.app.add_api_route(
-            "/api/people/{subject}/export", lambda: {"status": "ok"}, methods=["GET"],
+            "/api/people/{subject}/export",
+            lambda: {"status": "ok"},
+            methods=["GET"],
         )
 
         statuses = [
-            auth.client.get(f"/api/people/alice{encoded}x/export").status_code
-            for _ in range(3)
+            auth.client.get(f"/api/people/alice{encoded}x/export").status_code for _ in range(3)
         ]
 
         assert statuses == [200, 200, 429]

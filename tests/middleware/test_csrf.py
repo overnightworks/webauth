@@ -58,9 +58,12 @@ def a_protect_everything_client() -> tuple[TestClient, list[str]]:
     install_web_auth_config(app, a_web_auth_config())
     app.add_middleware(
         CsrfOriginMiddleware,
-        policy=CsrfPolicy(exempt=PathRules(
-            exact=frozenset({WEBHOOK_EXACT_PATH}), prefixes=(WEBHOOK_PREFIX,),
-        )),
+        policy=CsrfPolicy(
+            exempt=PathRules(
+                exact=frozenset({WEBHOOK_EXACT_PATH}),
+                prefixes=(WEBHOOK_PREFIX,),
+            )
+        ),
     )
     route_runs: list[str] = []
 
@@ -68,6 +71,7 @@ def a_protect_everything_client() -> tuple[TestClient, list[str]]:
         def run() -> dict[str, str]:
             route_runs.append(path)
             return OK
+
         return run
 
     for path in (API_PATH, WEBHOOK_EXACT_PATH, WEBHOOK_PATH, WEBHOOK_SIBLING_PATH):
@@ -214,7 +218,8 @@ PROVENANCE_FREE_BODIES = [
     pytest.param({"data": {"n": "1"}}, id="urlencoded"),
     pytest.param({"files": {"f": ("f.txt", b"x")}}, id="multipart"),
     pytest.param(
-        {"content": b"n=1", "headers": {"content-type": "text/plain"}}, id="text-plain",
+        {"content": b"n=1", "headers": {"content-type": "text/plain"}},
+        id="text-plain",
     ),
     pytest.param(
         {"content": b"n=1", "headers": {"content-type": "application/octet-stream"}},
@@ -226,7 +231,8 @@ PROVENANCE_FREE_BODIES = [
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 @pytest.mark.parametrize("body", PROVENANCE_FREE_BODIES)
 def test_a_state_changing_request_without_provenance_is_refused_whatever_its_body(
-    method: str, body: RequestBody,
+    method: str,
+    body: RequestBody,
 ) -> None:
     client = an_origin_guarded_client()
 
@@ -245,7 +251,9 @@ def test_a_state_changing_request_without_provenance_is_refused_whatever_its_bod
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
 @pytest.mark.parametrize("body", PROVENANCE_FREE_BODIES[1:3])
 def test_the_referer_is_not_read(
-    method: str, headers: dict[str, str], body: BodyContent,
+    method: str,
+    headers: dict[str, str],
+    body: BodyContent,
 ) -> None:
     client = an_origin_guarded_client()
 
@@ -262,7 +270,8 @@ def test_the_referer_is_not_read(
         pytest.param({"origin": "http://"}, id="an origin without a host"),
         pytest.param({"origin": "http://[bad"}, id="an origin that cannot be parsed"),
         pytest.param(
-            {"sec-fetch-site": "same-site", "origin": "null"}, id="a null origin on same-site",
+            {"sec-fetch-site": "same-site", "origin": "null"},
+            id="a null origin on same-site",
         ),
         pytest.param({"origin": ""}, id="an empty origin"),
         pytest.param(
@@ -270,7 +279,8 @@ def test_the_referer_is_not_read(
             id="an empty origin beside an allowed referer",
         ),
         pytest.param(
-            {"origin": f"{ALLOWED_ORIGIN}:evil"}, id="an origin with a non-numeric port",
+            {"origin": f"{ALLOWED_ORIGIN}:evil"},
+            id="an origin with a non-numeric port",
         ),
         pytest.param({"origin": "https://[::1]:evil"}, id="an IPv6 origin with a non-numeric port"),
         pytest.param(
@@ -297,7 +307,9 @@ def test_an_origin_that_names_no_host_is_refused_like_a_foreign_one(
 )
 def test_a_repeated_origin_header_is_refused_like_a_foreign_origin(origins: list[str]) -> None:
     response = an_origin_guarded_client().post(
-        API_PATH, json={"n": 1}, headers=[("origin", origin) for origin in origins],
+        API_PATH,
+        json={"n": 1},
+        headers=[("origin", origin) for origin in origins],
     )
 
     assert response.status_code == 403
@@ -345,11 +357,15 @@ def test_an_exact_entry_matches_a_bracketed_ipv6_origin(allowed_entry: str, orig
     ],
 )
 def test_listing_localhost_and_loopback_admits_their_origins_on_any_port(
-    origin: str, cookie_secure: bool,
+    origin: str,
+    cookie_secure: bool,
 ) -> None:
-    client = an_origin_guarded_client(a_web_auth_config(
-        allowed_hosts_exact=frozenset({"localhost", "127.0.0.1"}), cookie_secure=cookie_secure,
-    ))
+    client = an_origin_guarded_client(
+        a_web_auth_config(
+            allowed_hosts_exact=frozenset({"localhost", "127.0.0.1"}),
+            cookie_secure=cookie_secure,
+        )
+    )
 
     response = client.post(API_PATH, json={"n": 1}, headers={"origin": origin})
 
@@ -368,7 +384,10 @@ def test_listing_localhost_and_loopback_admits_their_origins_on_any_port(
     ],
 )
 def test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on(
-    origin: str, fetch_site: str | None, refused_while_secure: bool, cookie_secure: bool,
+    origin: str,
+    fetch_site: str | None,
+    refused_while_secure: bool,
+    cookie_secure: bool,
 ) -> None:
     client = an_origin_guarded_client(a_web_auth_config(cookie_secure=cookie_secure))
     headers = {"origin": origin, **({} if fetch_site is None else {"sec-fetch-site": fetch_site})}
@@ -460,7 +479,9 @@ def test_a_safe_method_without_provenance_reaches_its_route(method: str) -> None
 
 def test_a_valid_session_cookie_is_not_provenance() -> None:
     auth = an_auth_app(
-        a_session(), gate=True, stack_policies={"csrf_origin": CsrfPolicy()},
+        a_session(),
+        gate=True,
+        stack_policies={"csrf_origin": CsrfPolicy()},
     )
     cookie = session_cookie_header(auth.signed_cookie())
 
@@ -470,7 +491,8 @@ def test_a_valid_session_cookie_is_not_provenance() -> None:
     assert response.json() == MISSING_ORIGIN_DETAIL
     assert auth.route_runs == []
     passing = auth.client.post(
-        "/optional", headers={"cookie": cookie, "sec-fetch-site": "same-origin"},
+        "/optional",
+        headers={"cookie": cookie, "sec-fetch-site": "same-origin"},
     )
     assert passing.status_code == 200
     assert auth.route_runs == ["/optional"]
@@ -503,26 +525,45 @@ def a_stack_with_parametrised_post_routes(**stack_policies: CsrfPolicy) -> AuthA
 
 ROUTED_PATH_CASES = [
     pytest.param(
-        PERSON_EXPORT_SHAPE, "/api/people/alice/export", "/api/people/alice/export", False,
+        PERSON_EXPORT_SHAPE,
+        "/api/people/alice/export",
+        "/api/people/alice/export",
+        False,
         id="shape-plain",
     ),
     pytest.param(
-        PERSON_EXPORT_SHAPE, "/api/people/alice%3Fx/export", "/api/people/alice?x/export",
-        False, id="shape-encoded-question-mark",
+        PERSON_EXPORT_SHAPE,
+        "/api/people/alice%3Fx/export",
+        "/api/people/alice?x/export",
+        False,
+        id="shape-encoded-question-mark",
     ),
     pytest.param(
-        PERSON_EXPORT_SHAPE, "/api/people/alice%23x/export", "/api/people/alice#x/export",
-        False, id="shape-encoded-hash",
+        PERSON_EXPORT_SHAPE,
+        "/api/people/alice%23x/export",
+        "/api/people/alice#x/export",
+        False,
+        id="shape-encoded-hash",
     ),
     pytest.param(
-        HOOK_EXEMPTION, HOOK_EXEMPT_PATH, HOOK_EXEMPT_PATH, False, id="exempt-exact",
+        HOOK_EXEMPTION,
+        HOOK_EXEMPT_PATH,
+        HOOK_EXEMPT_PATH,
+        False,
+        id="exempt-exact",
     ),
     pytest.param(
-        HOOK_EXEMPTION, "/hooks/stripe%3Fx", "/hooks/stripe?x", True,
+        HOOK_EXEMPTION,
+        "/hooks/stripe%3Fx",
+        "/hooks/stripe?x",
+        True,
         id="exempt-exact-encoded-question-mark",
     ),
     pytest.param(
-        HOOK_EXEMPTION, "/hooks/stripe%23x", "/hooks/stripe#x", True,
+        HOOK_EXEMPTION,
+        "/hooks/stripe%23x",
+        "/hooks/stripe#x",
+        True,
         id="exempt-exact-encoded-hash",
     ),
 ]
@@ -530,7 +571,10 @@ ROUTED_PATH_CASES = [
 
 @pytest.mark.parametrize(("policy", "sent_path", "routed_path", "refused"), ROUTED_PATH_CASES)
 def test_the_csrf_origin_rule_is_chosen_by_the_path_the_router_routes(
-    policy: CsrfPolicy, sent_path: str, routed_path: str, refused: bool,
+    policy: CsrfPolicy,
+    sent_path: str,
+    routed_path: str,
+    refused: bool,
 ) -> None:
     auth = a_stack_with_parametrised_post_routes(csrf_origin=policy)
 

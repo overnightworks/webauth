@@ -37,7 +37,8 @@ OPTIONAL_PATH = "/optional"
 UNGATED_ME_PATH = "/me"
 
 BOTH_HOSTS = pytest.mark.parametrize(
-    "session_gate", [pytest.param(True, id="SG"), pytest.param(False, id="NG")],
+    "session_gate",
+    [pytest.param(True, id="SG"), pytest.param(False, id="NG")],
 )
 BOTH_TRANSACTIONS = pytest.mark.parametrize(
     "kind",
@@ -80,6 +81,7 @@ def the_challenge(response: Response) -> str | None:
 
 def ran(app: BearerApp) -> list[str]:
     return app.auth.route_runs
+
 
 ADMIN_READERS = pytest.mark.parametrize(
     ("session_gate", "path"),

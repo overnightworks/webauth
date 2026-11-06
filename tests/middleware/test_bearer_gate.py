@@ -79,10 +79,18 @@ class Answer:
 
 NO_CREDENTIALS = Answer(401, REALM, "Authentication required", logging.INFO, ("no-credentials",))
 INVALID_REQUEST = Answer(
-    401, REALM_INVALID_REQUEST, "Invalid request", logging.WARNING, ("invalid-request",),
+    401,
+    REALM_INVALID_REQUEST,
+    "Invalid request",
+    logging.WARNING,
+    ("invalid-request",),
 )
 NOT_A_TOKEN = Answer(
-    401, REALM_INVALID_TOKEN, "Invalid token", logging.WARNING, ("invalid-token",),
+    401,
+    REALM_INVALID_TOKEN,
+    "Invalid token",
+    logging.WARNING,
+    ("invalid-token",),
 )
 
 
@@ -91,7 +99,10 @@ def a_refused_token(*logged: str) -> Answer:
 
 
 INSUFFICIENT_SCOPE = Answer(
-    403, REALM_INSUFFICIENT_SCOPE, "Admin access required", logging.WARNING,
+    403,
+    REALM_INSUFFICIENT_SCOPE,
+    "Admin access required",
+    logging.WARNING,
     ("insufficient-scope",),
 )
 PLAIN_GET: dict[str, Any] = {}
@@ -105,39 +116,98 @@ REFUSED = [
     pytest.param(("",), "", None, NO_CREDENTIALS, PLAIN_GET, id="H01b-empty-value"),
     pytest.param(("Basic dXNlcjpwYXNz",), "", None, NO_CREDENTIALS, PLAIN_GET, id="H01c-basic"),
     pytest.param(("Bearerx abc",), "", None, NO_CREDENTIALS, PLAIN_GET, id="H01d-another-scheme"),
-    pytest.param((), "?access_token=throwaway", None, NO_CREDENTIALS, PLAIN_GET,
-                 id="H01e-query-alone"),
+    pytest.param(
+        (), "?access_token=throwaway", None, NO_CREDENTIALS, PLAIN_GET, id="H01e-query-alone"
+    ),
     pytest.param((), "", None, NO_CREDENTIALS, FORM_BODY_DELETE, id="H01f-form-body"),
-    pytest.param((f"Bearer {A_TOKEN}", f"Bearer {A_TOKEN}"), "", None, INVALID_REQUEST, PLAIN_GET,
-                 id="H02a-two-lines"),
-    pytest.param((f"Bearer {A_TOKEN}, Basic stray",), "", None, INVALID_REQUEST, PLAIN_GET,
-                 id="H02b-combined-credentials"),
+    pytest.param(
+        (f"Bearer {A_TOKEN}", f"Bearer {A_TOKEN}"),
+        "",
+        None,
+        INVALID_REQUEST,
+        PLAIN_GET,
+        id="H02a-two-lines",
+    ),
+    pytest.param(
+        (f"Bearer {A_TOKEN}, Basic stray",),
+        "",
+        None,
+        INVALID_REQUEST,
+        PLAIN_GET,
+        id="H02b-combined-credentials",
+    ),
     pytest.param(("Bearer",), "", None, INVALID_REQUEST, PLAIN_GET, id="H02c-no-credential"),
     pytest.param(("=abc",), "", None, INVALID_REQUEST, PLAIN_GET, id="H02d-no-scheme"),
     pytest.param((f"Bearer\t{A_TOKEN}",), "", None, INVALID_REQUEST, PLAIN_GET, id="H02e-tab"),
-    pytest.param((f"Bearer {A_TOKEN} stray",), "", None, INVALID_REQUEST, PLAIN_GET,
-                 id="H02f-second-word"),
-    pytest.param(bearing(A_TOKEN), "?access_token=throwaway", None, INVALID_REQUEST, PLAIN_GET,
-                 id="H02g-two-methods"),
+    pytest.param(
+        (f"Bearer {A_TOKEN} stray",), "", None, INVALID_REQUEST, PLAIN_GET, id="H02f-second-word"
+    ),
+    pytest.param(
+        bearing(A_TOKEN),
+        "?access_token=throwaway",
+        None,
+        INVALID_REQUEST,
+        PLAIN_GET,
+        id="H02g-two-methods",
+    ),
     pytest.param(("Bearer abc!def",), "", None, NOT_A_TOKEN, PLAIN_GET, id="H04-not-a-b64token"),
-    pytest.param(bearing(an_access_token(header={"typ": "JWT"})), "", None,
-                 a_refused_token("access-token-rejected", "invalid-token-type"), PLAIN_GET,
-                 id="T02a-another-type"),
-    pytest.param(bearing(a_token(aud=["notes-app", "another-app"])), "", None,
-                 a_refused_token("invalid-access-claim"), PLAIN_GET, id="T02b-two-audiences"),
-    pytest.param(bearing(A_TOKEN), "", KEY_SET_DOWN,
-                 a_refused_token("access-token-rejected", "key-set-unavailable"), PLAIN_GET,
-                 id="T02c-key-set-unavailable"),
-    pytest.param(bearing(a_token(azp="another-client")), "", None,
-                 a_refused_token("authorized-party-mismatch"), PLAIN_GET, id="T02d-another-client"),
-    pytest.param(bearing(ONLY_THE_APP_GROUP), "", None, INSUFFICIENT_SCOPE, PLAIN_GET,
-                 id="T03d-a-member-who-is-no-admin"),
-    pytest.param(bearing(a_token(groups=["/apps/x", "/apps/x/administrators"])), "", None,
-                 INSUFFICIENT_SCOPE, PLAIN_GET, id="T03b-a-group-that-is-not-below-admin"),
-    pytest.param(bearing(a_token(groups=ABSENT)), "", None, INSUFFICIENT_SCOPE, PLAIN_GET,
-                 id="T03c-no-groups"),
+    pytest.param(
+        bearing(an_access_token(header={"typ": "JWT"})),
+        "",
+        None,
+        a_refused_token("access-token-rejected", "invalid-token-type"),
+        PLAIN_GET,
+        id="T02a-another-type",
+    ),
+    pytest.param(
+        bearing(a_token(aud=["notes-app", "another-app"])),
+        "",
+        None,
+        a_refused_token("invalid-access-claim"),
+        PLAIN_GET,
+        id="T02b-two-audiences",
+    ),
+    pytest.param(
+        bearing(A_TOKEN),
+        "",
+        KEY_SET_DOWN,
+        a_refused_token("access-token-rejected", "key-set-unavailable"),
+        PLAIN_GET,
+        id="T02c-key-set-unavailable",
+    ),
+    pytest.param(
+        bearing(a_token(azp="another-client")),
+        "",
+        None,
+        a_refused_token("authorized-party-mismatch"),
+        PLAIN_GET,
+        id="T02d-another-client",
+    ),
+    pytest.param(
+        bearing(ONLY_THE_APP_GROUP),
+        "",
+        None,
+        INSUFFICIENT_SCOPE,
+        PLAIN_GET,
+        id="T03d-a-member-who-is-no-admin",
+    ),
+    pytest.param(
+        bearing(a_token(groups=["/apps/x", "/apps/x/administrators"])),
+        "",
+        None,
+        INSUFFICIENT_SCOPE,
+        PLAIN_GET,
+        id="T03b-a-group-that-is-not-below-admin",
+    ),
+    pytest.param(
+        bearing(a_token(groups=ABSENT)),
+        "",
+        None,
+        INSUFFICIENT_SCOPE,
+        PLAIN_GET,
+        id="T03c-no-groups",
+    ),
 ]
-
 
 
 @pytest.mark.parametrize(("lines", "query", "key_set_response", "answer", "sent"), REFUSED)
@@ -153,7 +223,9 @@ def test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge(
     response = app.ask(EXPORT_PATH + query, authorization=lines, cookie=True, **sent)
 
     assert (response.status_code, response.headers["www-authenticate"], response.json()) == (
-        answer.status, answer.challenge, {"detail": answer.detail},
+        answer.status,
+        answer.challenge,
+        {"detail": answer.detail},
     )
     assert_answers_no_store(response)
     assert app.auth.route_runs == []
@@ -194,14 +266,18 @@ SCHEMES = {"bearer", "basic"}
 
 
 def secrets_of(
-    lines: tuple[str, ...], query: str = "", sent: dict[str, Any] | None = None,
+    lines: tuple[str, ...],
+    query: str = "",
+    sent: dict[str, Any] | None = None,
 ) -> tuple[str, ...]:
     """What the scenario sends that must never be echoed: every word besides a scheme,
     every header value that carries one, the query's and the form's values, and the
     digests of each header value in every encoding a record could carry, the raw bytes'
     repr included."""
     words = {
-        word for line in lines for word in line.replace(",", " ").split()
+        word
+        for line in lines
+        for word in line.replace(",", " ").split()
         if word.lower() not in SCHEMES
     }
     carrying = {line for line in lines if any(word in line for word in words)}
@@ -218,13 +294,16 @@ def digests_of(value: str) -> tuple[str, ...]:
 
 
 def assert_nothing_leaks(
-    secrets: tuple[str, ...], caplog: pytest.LogCaptureFixture, *responses: Response,
+    secrets: tuple[str, ...],
+    caplog: pytest.LogCaptureFixture,
+    *responses: Response,
 ) -> None:
     headers = [
         f"{name}: {value}" for response in responses for name, value in response.headers.items()
     ]
     library_log = "\n".join(
-        caplog.handler.format(record) for record in caplog.records
+        caplog.handler.format(record)
+        for record in caplog.records
         if record.name.split(".")[0] == "webauth"
     )
     haystacks = (library_log, *(response.text for response in responses), *headers)
@@ -239,8 +318,9 @@ ADMITTED = [
     pytest.param(f"BEARER {A_TOKEN}", id="H03b-uppercase-scheme"),
     pytest.param(f"Bearer  {A_TOKEN}", id="H03c-two-spaces"),
     pytest.param(f"Bearer {A_TOKEN}", id="T01-the-admin-token"),
-    pytest.param(f"Bearer {a_token(groups=['/apps/x', '/apps/x/admin/ops'])}",
-                 id="T03a-a-group-below-admin"),
+    pytest.param(
+        f"Bearer {a_token(groups=['/apps/x', '/apps/x/admin/ops'])}", id="T03a-a-group-below-admin"
+    ),
 ]
 
 
@@ -275,7 +355,8 @@ def test_no_refusal_holds_the_token_the_header_or_its_digest_in_a_record_or_an_a
 
 @pytest.mark.parametrize("line", ADMITTED)
 def test_no_admission_holds_the_token_the_header_or_its_digest_in_a_record_or_an_answer(
-    line: str, caplog: pytest.LogCaptureFixture,
+    line: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     app = a_bearer_app()
 
@@ -357,7 +438,10 @@ async def test_a_blocked_key_set_fetch_stalls_no_other_request(
                 admitted = await asyncio.wait_for(blocked, FETCH_BOUND_SECONDS)
 
     assert (started, health.status_code, fetch_still_blocked, admitted.status_code) == (
-        True, 200, True, status,
+        True,
+        200,
+        True,
+        status,
     )
     assert_answers_no_store(admitted)
     assert_nothing_leaks(secrets_of(bearing(token)), caplog, health, admitted)
@@ -369,23 +453,33 @@ class TestAGateIsBuiltFromSoundParts:
         [
             pytest.param({"machine_paths": None}, ValueError, id="G01a-no-kind"),
             pytest.param(
-                {"admission": AdmissionConfig(
-                    bound_issuer=ADMISSION.bound_issuer, login_group="/apps/x",
-                    admin_group=NoAdmins.IN_THIS_APP,
-                )},
-                ValueError, id="G01b-no-admins",
+                {
+                    "admission": AdmissionConfig(
+                        bound_issuer=ADMISSION.bound_issuer,
+                        login_group="/apps/x",
+                        admin_group=NoAdmins.IN_THIS_APP,
+                    )
+                },
+                ValueError,
+                id="G01b-no-admins",
             ),
             pytest.param(
-                {"admission": AdmissionConfig(
-                    bound_issuer="https://login.example.org/realms/elsewhere",
-                    login_group="/apps/x", admin_group="/apps/x/admin",
-                )},
-                ValueError, id="G01c-another-issuer",
+                {
+                    "admission": AdmissionConfig(
+                        bound_issuer="https://login.example.org/realms/elsewhere",
+                        login_group="/apps/x",
+                        admin_group="/apps/x/admin",
+                    )
+                },
+                ValueError,
+                id="G01c-another-issuer",
             ),
         ],
     )
     def test_an_unsound_gate_is_refused_at_construction(
-        self, changes: dict[str, Any], error: type[Exception],
+        self,
+        changes: dict[str, Any],
+        error: type[Exception],
     ) -> None:
         arguments = {
             "relying_party": a_relying_party(),
@@ -417,7 +511,8 @@ class TestAGateIsBuiltFromSoundParts:
         ids=["machine", "person"],
     )
     def test_a_kind_of_path_refuses_parties_that_are_not_authorized_parties(
-        self, construct: Callable[[PathRules, Any], object],
+        self,
+        construct: Callable[[PathRules, Any], object],
     ) -> None:
         paths = PathRules(prefixes=("/api/",))
         bare_set = frozenset({"hal"})
@@ -434,7 +529,8 @@ class TestAGateIsBuiltFromSoundParts:
                 a_transaction_never_entered,
             ),
             admission=AdmissionConfig(
-                bound_issuer=ADMISSION.bound_issuer, login_group="/apps/x",
+                bound_issuer=ADMISSION.bound_issuer,
+                login_group="/apps/x",
                 admin_group=NoAdmins.IN_THIS_APP,
             ),
         )
@@ -454,7 +550,8 @@ class TestWithoutAGateTheAdminPathsStayWithTheSession:
         response = app.ask(authorization=bearing(A_TOKEN))
 
         assert (response.status_code, response.json()) == (
-            401, {"detail": "Authentication required"},
+            401,
+            {"detail": "Authentication required"},
         )
 
     def test_a_token_alone_on_a_delete_meets_the_csrf_origin_check(self) -> None:
@@ -463,7 +560,8 @@ class TestWithoutAGateTheAdminPathsStayWithTheSession:
         response = app.ask(method="DELETE", authorization=bearing(A_TOKEN))
 
         assert (response.status_code, response.json()) == (
-            403, {"detail": "Missing Origin header"},
+            403,
+            {"detail": "Missing Origin header"},
         )
 
 
@@ -514,12 +612,17 @@ class TestThePathIsTheOneTheRouterRoutes:
         ],
     )
     def test_a_root_path_the_server_supplies_is_stripped_from_the_path(
-        self, rule: str, gated: bool,
+        self,
+        rule: str,
+        gated: bool,
     ) -> None:
         app = a_bearer_app(paths=PathRules(prefixes=(rule,)))
 
         status, headers = an_answer_to(
-            app, f"/app{UNDECLARED_PATH}", root_path="/app", headers=the_cookie(app),
+            app,
+            f"/app{UNDECLARED_PATH}",
+            root_path="/app",
+            headers=the_cookie(app),
         )
 
         outcome = (status, app.auth.route_runs == [])
@@ -534,15 +637,24 @@ class TestThePathIsTheOneTheRouterRoutes:
         [
             pytest.param("/api/admin/", UNDECLARED_PATH, True, id="P03c-rule-below-the-root-path"),
             pytest.param(
-                "/api/admin/", f"/app{UNDECLARED_PATH}", True, id="P03d-the-unstripped-path",
+                "/api/admin/",
+                f"/app{UNDECLARED_PATH}",
+                True,
+                id="P03d-the-unstripped-path",
             ),
             pytest.param(
-                "/app/api/admin/", UNDECLARED_PATH, False, id="P03e-rule-with-the-root-path",
+                "/app/api/admin/",
+                UNDECLARED_PATH,
+                False,
+                id="P03e-rule-with-the-root-path",
             ),
         ],
     )
     def test_a_root_path_the_application_supplies_is_stripped_from_the_path(
-        self, rule: str, path: str, gated: bool,
+        self,
+        rule: str,
+        path: str,
+        gated: bool,
     ) -> None:
         app = a_bearer_app(paths=PathRules(prefixes=(rule,)), root_path="/app")
 
@@ -571,7 +683,8 @@ class TestEveryMethodIsGated:
 
     @pytest.mark.parametrize("method", ["HEAD", "OPTIONS"])
     def test_head_and_options_with_a_token_reach_the_router_that_knows_neither(
-        self, method: str,
+        self,
+        method: str,
     ) -> None:
         app = a_bearer_app()
 

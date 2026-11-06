@@ -89,7 +89,8 @@ def test_a_bearer_request_needs_no_csrf_origin_header_or_cookie() -> None:
 
 def test_the_cookie_counts_for_nothing_beside_a_token() -> None:
     app = a_bearer_app(
-        sessions=SessionsThatMustNotBeAsked(), session_transaction=never_asked,
+        sessions=SessionsThatMustNotBeAsked(),
+        session_transaction=never_asked,
     )
     other_accounts_cookie = session_cookie_header(app.auth.signed_cookie("another-account"))
 
@@ -119,15 +120,20 @@ def test_an_admin_cookie_alone_opens_no_machine_path_even_without_a_declared_dep
 @pytest.mark.parametrize("path", SESSION_PATHS)
 @pytest.mark.parametrize("accept", ["text/html", "application/json"])
 def test_a_session_dependency_on_a_bearer_admitted_request_is_a_host_mistake(
-    path: str, accept: str,
+    path: str,
+    accept: str,
 ) -> None:
     app = a_bearer_app(
-        paths=PathRules(exact=frozenset(SESSION_PATHS)), login_redirect=LOGIN_REDIRECT,
+        paths=PathRules(exact=frozenset(SESSION_PATHS)),
+        login_redirect=LOGIN_REDIRECT,
     )
     with_admitted_admin_routes(app.auth)
 
     response = app.ask(
-        path, authorization=bearing(A_TOKEN), cookie=True, headers={"accept": accept},
+        path,
+        authorization=bearing(A_TOKEN),
+        cookie=True,
+        headers={"accept": accept},
     )
 
     assert response.status_code == 500
@@ -188,7 +194,8 @@ def a_sub_app(auth: BearerApp, *, csrf: bool) -> FastAPI:
             csrf_origin=CsrfPolicy(),
         )
     sessions = current_user_dependency(
-        session_store=lambda: auth.auth.sessions, on_authenticated=lambda user: None,
+        session_store=lambda: auth.auth.sessions,
+        on_authenticated=lambda user: None,
     )
 
     @inner.api_route(EXPORT_PATH, methods=["DELETE"])
@@ -214,12 +221,15 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
         response = app.ask(f"/sub{EXPORT_PATH}", method="DELETE", authorization=bearing(A_TOKEN))
 
         assert (response.status_code, response.json()) == (
-            403, {"detail": "Missing Origin header"},
+            403,
+            {"detail": "Missing Origin header"},
         )
         assert_answers_no_store(response)
 
     @pytest.mark.parametrize(
-        "path", [EXPORT_PATH, ALL_DEPENDENCIES_PATH], ids=["bearer_caller", "current_user"],
+        "path",
+        [EXPORT_PATH, ALL_DEPENDENCIES_PATH],
+        ids=["bearer_caller", "current_user"],
     )
     def test_its_routes_raise_when_they_ask_for_the_admission(self, path: str) -> None:
         app = self.a_mounted_app(csrf=False)
@@ -241,9 +251,7 @@ class Relay:
         control.ask(authorization=bearing(A_TOKEN), cookie=True)
         app.auth.route_runs.clear()
         self.entries = {
-            key: value
-            for key, value in self.relay.added.items()
-            if key not in control_relay.added
+            key: value for key, value in self.relay.added.items() if key not in control_relay.added
         }
         assert self.entries, "the gate wrote no scope entry for the admission"
 
@@ -285,7 +293,8 @@ class TestAnAdmissionBelongsToItsPathAppAndHeader:
         response = app.ask(authorization=bearing(A_TOKEN))
 
         assert (response.status_code, response.headers["www-authenticate"]) == (
-            401, REALM_INVALID_TOKEN,
+            401,
+            REALM_INVALID_TOKEN,
         )
         assert_answers_no_store(response)
         assert app.auth.route_runs == []
@@ -327,7 +336,8 @@ def without_authorization(headers: list[tuple[bytes, bytes]]) -> list[tuple[byte
         ),
         pytest.param(without_authorization, id="M03b-removes"),
         pytest.param(
-            lambda headers: [*headers, (b"authorization", b"Bearer second")], id="M03c-duplicates",
+            lambda headers: [*headers, (b"authorization", b"Bearer second")],
+            id="M03c-duplicates",
         ),
     ],
 )
