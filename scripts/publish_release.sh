@@ -75,7 +75,7 @@ if ! output="$(git tag -a "$tag" -m "webauth ${version}" "$sha" 2>&1)"; then
   refuse "git tag failed: ${output}"
 fi
 if ! output="$(git push --no-follow-tags origin "refs/tags/${tag}:refs/tags/${tag}" 2>&1)"; then
-  git tag -d "$tag" >/dev/null
+  git tag -d "$tag" >/dev/null || refuse "git push failed: ${output}; the local tag ${tag} is left behind, delete it with: git tag -d ${tag}"
   refuse "git push failed: ${output}"
 fi
 echo "pushed ${tag}"

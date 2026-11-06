@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parent.parent / "scripts" / "publish_release.sh"
+SCRIPT = Path(__file__).parents[2] / "scripts" / "publish_release.sh"
 TOOLS = (
     "git",
     "sh",
