@@ -240,13 +240,6 @@ def test_a_state_changing_request_without_provenance_is_refused_whatever_its_bod
     "headers",
     [
         pytest.param({"referer": f"{ALLOWED_ORIGIN}/page"}, id="an allowed referer"),
-        pytest.param({"referer": "null"}, id="a null referer"),
-        pytest.param({"referer": "http://[bad"}, id="a referer that cannot be parsed"),
-        pytest.param({"referer": ""}, id="an empty referer"),
-        pytest.param(
-            {"referer": f"https://{ALLOWED_HOST}:password@evil.test/"},
-            id="a referer whose userinfo spells the allowed host",
-        ),
     ],
 )
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])

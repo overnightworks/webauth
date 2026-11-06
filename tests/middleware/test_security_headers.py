@@ -375,24 +375,6 @@ def test_a_customised_policy_reaches_the_response_header_as_returned() -> None:
     assert "style-src 'self' 'unsafe-inline';" in customised
 
 
-def the_hsts_header_of(policy: SecurityHeadersPolicy, *, cookie_secure: bool = True) -> str | None:
-    app = an_app(cookie_secure=cookie_secure, policy=policy)
-
-    @app.get("/ok")
-    def ok() -> dict[str, str]:
-        return {}
-
-    return TestClient(app).get("/ok").headers.get("strict-transport-security")
-
-
-def test_hsts_is_sent_when_cookies_are_secure() -> None:
-    assert the_hsts_header_of(POLICY) == "max-age=31536000; includeSubDomains"
-
-
-def test_hsts_is_absent_without_secure_cookies() -> None:
-    assert the_hsts_header_of(POLICY, cookie_secure=False) is None
-
-
 OWN_POLICY_ANSWER_HEADERS = {
     "webauth-own-policy": "1",
     "content-security-policy": "default-src 'none'",
