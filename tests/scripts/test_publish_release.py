@@ -240,15 +240,23 @@ def set_up_dirty_tree(release: Release) -> None:
     (release.work / "scripts" / "verify_release.sh").write_text("changed\n")
 
 
-def set_up_git_status_failing(release: Release) -> None:
+def fail_git_when(release: Release, condition: str) -> None:
     git = release.root / "tools" / "git"
     real_git = git.resolve()
     git.unlink()
     git.write_text(
-        f'#!/usr/bin/env bash\n[[ "$1" == status ]] && {{ echo "index corrupt" >&2; exit 128; }}\n'
+        f'#!/usr/bin/env bash\n[[ {condition} ]] && {{ echo "index corrupt" >&2; exit 128; }}\n'
         f'exec {real_git} "$@"\n'
     )
     git.chmod(0o755)
+
+
+def set_up_git_status_failing(release: Release) -> None:
+    fail_git_when(release, '"$1" == status')
+
+
+def set_up_git_tag_lookup_failing(release: Release) -> None:
+    fail_git_when(release, f'"$*" == *refs/tags/{release.tag}* && "$1" != ls-remote')
 
 
 def set_up_local_main_ahead(release: Release) -> None:
@@ -292,6 +300,7 @@ def set_up_gh_missing(release: Release) -> None:
         ("{tag}", set_up_other_branch, "main"),
         ("{tag}", set_up_dirty_tree, "clean"),
         ("{tag}", set_up_git_status_failing, "git status failed: index corrupt"),
+        ("{tag}", set_up_git_tag_lookup_failing, "index corrupt"),
         ("{tag}", set_up_local_main_ahead, "origin/main"),
         ("{tag}", set_up_origin_main_ahead, "origin/main"),
         ("{tag}", set_up_tag_on_origin, "origin"),

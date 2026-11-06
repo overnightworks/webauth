@@ -58,7 +58,10 @@ if ! remote_tag="$(git ls-remote --tags origin "refs/tags/${tag}" 2>&1)"; then
   refuse "git ls-remote failed: ${remote_tag}"
 fi
 [[ -z "$remote_tag" ]] || refuse "${tag} exists on origin"
-if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+if ! local_tag="$(git for-each-ref "refs/tags/${tag}" 2>&1)"; then
+  refuse "git for-each-ref failed: ${local_tag}"
+fi
+if [[ -n "$local_tag" ]]; then
   refuse "${tag} exists locally only; delete it with: git tag -d ${tag}"
 fi
 command -v gh >/dev/null || refuse "gh is not installed"
