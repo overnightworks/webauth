@@ -27,7 +27,6 @@ from webauth.config import (
 from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
-    _pending_login_cookie_name,
 )
 
 
@@ -153,194 +152,23 @@ def test_an_ipv6_budget_prefix_other_than_an_integer_within_its_bounds_is_refuse
         a_web_auth_config(ipv6_budget_prefix=prefix)
 
 
-FIELD = "session_cookie_name"
-NOT_A_NAME = "{field} must be a cookie name"
-NEEDS_SECURE = "needs cookie_secure=True"
-COOKIE_NAME_DEFAULTS = {True: DEFAULT_SESSION_COOKIE_NAME, False: PLAIN_SESSION_COOKIE_NAME}
-
-
-def a_config_reached_by(
-    how: str,
-    cookie_secure: bool,
-    **cookie_names: object,
-) -> WebAuthConfig:
-    if how == "construction":
-        return a_web_auth_config(cookie_secure=cookie_secure, **cookie_names)
-    if how == "replace-keeping-secure":
-        return replace(a_web_auth_config(cookie_secure=cookie_secure), **cookie_names)
-    return replace(
-        a_web_auth_config(cookie_secure=not cookie_secure),
-        cookie_secure=cookie_secure,
-        **cookie_names,
-    )
-
-
-@pytest.mark.parametrize("how", ["construction", "replace"])
-@pytest.mark.parametrize(
-    ("cookie_secure", "given_name"),
-    [
-        pytest.param(True, None, id="omitted-secure"),
-        pytest.param(False, None, id="omitted-not-secure"),
-        pytest.param(True, "sid", id="plain-secure"),
-        pytest.param(True, "a-b.c_d!", id="punctuated-token-secure"),
-        pytest.param(False, "a-b.c_d!", id="punctuated-token-not-secure"),
-        pytest.param(False, "sid", id="plain-not-secure"),
-        pytest.param(True, "__Host-own", id="host-prefixed-secure"),
-        pytest.param(True, "__Secure-own", id="secure-prefixed-secure"),
-    ],
-)
-def test_a_cookie_name_is_kept_or_resolved_by_cookie_secure_however_the_config_is_reached(
-    how: str,
-    cookie_secure: bool,
-    given_name: str | None,
-) -> None:
-    """A replace from the opposite Secure value must not mistake a resolved default for a choice."""
-    given = {} if given_name is None else {FIELD: given_name}
-
-    config = a_config_reached_by(how, cookie_secure, **given)
-
-    expected = COOKIE_NAME_DEFAULTS[cookie_secure] if given_name is None else given_name
-    assert config.session_cookie_name == expected
-
-
-@pytest.mark.parametrize("how", ["construction", "replace", "replace-keeping-secure"])
-@pytest.mark.parametrize(
-    ("cookie_secure", "given_name", "message"),
-    [
-        pytest.param(True, None, NOT_A_NAME, id="None-secure"),
-        pytest.param(False, None, NOT_A_NAME, id="None-not-secure"),
-        pytest.param(True, 7, NOT_A_NAME, id="int-secure"),
-        pytest.param(False, 7, NOT_A_NAME, id="int-not-secure"),
-        pytest.param(False, "__Host-own", NEEDS_SECURE, id="host-prefixed-not-secure"),
-        pytest.param(False, "__Secure-own", NEEDS_SECURE, id="secure-prefixed-not-secure"),
-    ],
-)
-def test_a_cookie_name_the_configuration_cannot_honour_is_refused_however_it_is_reached(
-    how: str,
-    cookie_secure: bool,
-    given_name: object,
-    message: str,
-) -> None:
-    with pytest.raises(ValueError, match=message.format(field=FIELD)):
-        a_config_reached_by(how, cookie_secure, **{FIELD: given_name})
-
-
-@pytest.mark.parametrize("how", ["construction", "replace"])
-@pytest.mark.parametrize("name", ["", "a b", "a;b"])
-def test_a_cookie_name_that_is_not_an_rfc_6265_token_is_refused_naming_its_field(
-    how: str,
-    name: str,
-) -> None:
-    with pytest.raises(ValueError, match=f"{FIELD} .* is not a valid cookie name"):
-        a_config_reached_by(how, True, **{FIELD: name})
-
-
-RESERVED_COOKIE_NAMES = [
-    pytest.param(_pending_login_cookie_name("state", secure=True), id="secure pending login"),
-    pytest.param(_pending_login_cookie_name("state", secure=False), id="plain pending login"),
-    pytest.param("__Host-oidc_pending_", id="secure pending prefix alone"),
-    pytest.param("oidc_pending_anything", id="plain pending prefix"),
-]
-
-
-@pytest.mark.parametrize("how", ["construction", "replace"])
 @pytest.mark.parametrize("cookie_secure", [True, False])
-@pytest.mark.parametrize("name", RESERVED_COOKIE_NAMES)
-def test_a_name_webauths_own_cookies_use_is_refused_naming_its_field(
-    how: str,
+def test_the_session_cookie_name_follows_cookie_secure_through_construction_and_replace(
     cookie_secure: bool,
-    name: str,
 ) -> None:
-    with pytest.raises(ValueError, match=f"{FIELD} .* webauth's own cookies use"):
-        a_config_reached_by(how, cookie_secure, **{FIELD: name})
+    expected = DEFAULT_SESSION_COOKIE_NAME if cookie_secure else PLAIN_SESSION_COOKIE_NAME
+    opposite = a_web_auth_config(cookie_secure=not cookie_secure)
+
+    built = a_web_auth_config(cookie_secure=cookie_secure)
+    replaced = replace(opposite, cookie_secure=cookie_secure)
+
+    assert built.session_cookie_name == expected
+    assert replaced.session_cookie_name == expected
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "my_oidc_pending_x",
-        "oidc_pending",
-        "oidc_pendin_x",
-        "__Host-oidc_pending",
-        "oidc_id_token_hint",
-        "__Secure-oidc_id_token_hint",
-        "oidc_id_token_hin",
-        "oidc_id_token_hint2",
-        "x__Secure-oidc_id_token_hint",
-    ],
-)
-def test_a_name_that_only_resembles_one_of_webauths_own_cookies_is_accepted(
-    name: str,
-) -> None:
-    config = a_web_auth_config(**{FIELD: name})
-
-    assert config.session_cookie_name == name
-
-
-def test_a_prefixed_name_that_is_not_a_token_is_refused_as_a_bad_name_first() -> None:
-    with pytest.raises(ValueError, match="is not a valid cookie name"):
-        a_web_auth_config(cookie_secure=False, session_cookie_name="__Host-a b")
-
-
-@pytest.mark.parametrize("name", ["__Host-own", "__Secure-own"])
-def test_replacing_cookie_secure_off_refuses_a_hosts_prefixed_name_it_carries(
-    name: str,
-) -> None:
-    config = a_web_auth_config(**{FIELD: name})
-
-    with pytest.raises(ValueError, match="needs cookie_secure=True"):
-        replace(config, cookie_secure=False)
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["__Host-session_id", "__host-own", "__Secure-sid", "__SECURE-sid"],
-)
-def test_a_host_only_cookie_name_without_cookie_secure_is_refused_at_configuration_time(
-    name: str,
-) -> None:
-    """A browser would drop the cookie silently and the login would loop."""
-    with pytest.raises(ValueError, match="needs cookie_secure=True"):
-        a_web_auth_config(cookie_secure=False, **{FIELD: name})
-
-
-@pytest.mark.parametrize(
-    ("built_with", "replaced_with", "session_cookie_name"),
-    [
-        pytest.param(
-            {},
-            {"cookie_secure": False},
-            PLAIN_SESSION_COOKIE_NAME,
-            id="an unnamed cookie follows Secure",
-        ),
-        pytest.param(
-            {},
-            {"session_cookie_name": "sid"},
-            "sid",
-            id="a name given while replacing becomes the host's own",
-        ),
-        pytest.param(
-            {"cookie_secure": False, "session_cookie_name": "sid"},
-            {"cookie_secure": True},
-            "sid",
-            id="a named cookie keeps its name when Secure is switched on",
-        ),
-        pytest.param(
-            {"session_cookie_name": "__Host-own"},
-            {"user_role": "member"},
-            "__Host-own",
-            id="a prefixed host name survives a replace that leaves Secure alone",
-        ),
-    ],
-)
-def test_a_replace_keeps_the_name_the_host_chose_and_follows_secure_otherwise(
-    built_with: dict[str, object],
-    replaced_with: dict[str, object],
-    session_cookie_name: str,
-) -> None:
-    config = replace(a_web_auth_config(**built_with), **replaced_with)
-
-    assert config.session_cookie_name == session_cookie_name
+def test_a_session_cookie_name_of_the_hosts_own_is_refused_at_construction() -> None:
+    with pytest.raises(TypeError, match="session_cookie_name"):
+        a_web_auth_config(session_cookie_name="sid")
 
 
 @pytest.mark.parametrize(

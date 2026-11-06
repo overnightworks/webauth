@@ -20,14 +20,9 @@ from webauth._validation import (
 )
 from webauth.cookies import (
     _DEFAULT_COOKIE_SAMESITE,
-    DEFAULT_SESSION_COOKIE_NAME,
     PLAIN_SESSION_COOKIE_NAME,
     CookieSameSite,
     _default_cookie_name,
-    _is_host_only_cookie_name,
-    _is_reserved_cookie_name,
-    _is_secure_prefixed_cookie_name,
-    _is_valid_cookie_name,
 )
 
 if TYPE_CHECKING:
@@ -58,18 +53,6 @@ _DEFAULT_ADMIN_ROLE: Final = "admin"
 _DEFAULT_USER_ROLE: Final = "user"
 
 _WEB_AUTH_STATE_ATTRIBUTE: Final = "webauth"
-
-
-class _DefaultCookieName(str):
-    """A cookie name the library chose because the host named none.
-
-    Every reader sees a plain ``str``. The type alone remembers that the host
-    left the name open: ``dataclasses.replace`` rebuilds a configuration from
-    its stored values, and a name it forwards must be resolved again against
-    the new ``cookie_secure`` instead of passing for the host's own choice.
-    """
-
-    __slots__ = ()
 
 
 MAX_SESSION_LIFETIME_SECONDS: Final = 400 * 24 * 60 * 60
@@ -130,18 +113,10 @@ class WebAuthConfig:
     works only with ``cookie_secure=False``, which drops ``Secure`` and HSTS
     together. Any value that is not a ``bool`` is refused.
 
-    ``session_cookie_name`` defaults to the ``__Host-`` name, or to the plain
-    name with ``cookie_secure=False``. A ``__Host-``
-    cookie carries ``Secure`` and ``Path=/`` and no ``Domain``, so only this
-    exact host can set it and a sibling subdomain cannot plant one with
-    ``Domain=parent``. A name a host sets itself is refused at construction
-    unless it is:
-
-    - an RFC 6265 token: ASCII letters, digits and ``!#$%&'*+-.^_`|~``;
-    - not a ``__Host-`` or ``__Secure-`` name with ``cookie_secure=False``,
-      which a browser drops and which would end in a silent login loop;
-    - not a name webauth's own cookies use: the pending-login cookies, in
-      both variants whatever ``cookie_secure`` is.
+    ``session_cookie_name`` follows ``cookie_secure``: ``__Host-session_id``, or
+    ``session_id`` without it. A ``__Host-`` cookie carries ``Secure`` and
+    ``Path=/`` and no ``Domain``, so only this exact host can set it and a
+    sibling subdomain cannot plant one with ``Domain=parent``.
 
     ``allowed_hosts_exact`` lists hostnames, not origins. The CSRF origin check
     compares them with the hostname of ``Origin``. An entry without a port
@@ -163,7 +138,6 @@ class WebAuthConfig:
     rate_limits: RateLimitBackend
     allowed_hosts_exact: frozenset[str]
     session_lifetime: SessionLifetime
-    session_cookie_name: str = _DefaultCookieName(DEFAULT_SESSION_COOKIE_NAME)
     cookie_samesite: CookieSameSite = _DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
     ipv6_budget_prefix: int = _DEFAULT_IPV6_BUDGET_PREFIX
@@ -200,7 +174,6 @@ class WebAuthConfig:
                 'To admit local development, use allowed_hosts_exact={"localhost", '
                 '"127.0.0.1"}',
             )
-        self._resolve_cookie_name("session_cookie_name", PLAIN_SESSION_COOKIE_NAME)
         if (
             type(self.ipv6_budget_prefix) is not int
             or self.ipv6_budget_prefix not in _IPV6_BUDGET_PREFIX_RANGE
@@ -224,33 +197,10 @@ class WebAuthConfig:
                 "every new account an admin",
             )
 
-    def _resolve_cookie_name(self, field: str, plain_name: str) -> None:
-        name = getattr(self, field)
-        if isinstance(name, _DefaultCookieName):
-            # The dataclass is frozen; resolving a default is part of construction.
-            resolved = _default_cookie_name(plain_name, secure=self.cookie_secure)
-            object.__setattr__(self, field, _DefaultCookieName(resolved))
-        elif not isinstance(name, str):
-            raise ValueError(
-                f"{field} must be a cookie name; leave it out for the library's default",
-            )
-        elif not _is_valid_cookie_name(name):
-            raise ValueError(
-                f"{field} {name!r} is not a valid cookie name; it must be an RFC 6265 "
-                "token (ASCII letters, digits and !#$%&'*+-.^_`|~)",
-            )
-        elif _is_reserved_cookie_name(name):
-            raise ValueError(
-                f"{field} {name!r} is a name webauth's own cookies use; choose "
-                "another, or the browser would send two cookies of that name",
-            )
-        elif (
-            _is_host_only_cookie_name(name) or _is_secure_prefixed_cookie_name(name)
-        ) and not self.cookie_secure:
-            raise ValueError(
-                f"{field} {name!r} needs cookie_secure=True; browsers drop a __Host- "
-                "or __Secure- cookie without Secure, so nobody could stay signed in",
-            )
+    @property
+    def session_cookie_name(self) -> str:
+        """The session cookie's name, which follows ``cookie_secure``."""
+        return _default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=self.cookie_secure)
 
     @property
     def signing_key(self) -> bytes:
