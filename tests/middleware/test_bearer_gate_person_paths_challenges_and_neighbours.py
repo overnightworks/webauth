@@ -124,7 +124,7 @@ def test_one_admin_token_opens_both_a_machine_path_and_a_person_path() -> None:
     assert (machine.status_code, person.status_code) == (200, 200)
 
 
-def test_a_user_token_that_opens_a_person_path_is_refused_on_a_machine_path_with_insufficient_scope() -> (
+def test_a_user_token_that_opens_a_person_path_is_refused_on_a_machine_path_with_insufficient_scope() -> (  # noqa: E501
     None
 ):
     app = a_person_app()

@@ -348,7 +348,7 @@ def test_a_refusal_answer_that_fails_before_start_answers_500_with_the_deletion(
     assert _is_refused_and_leaves_no_session_cookie(response, host, query)
 
 
-def test_a_refusal_hook_that_raises_before_the_pending_cookie_is_selected_answers_the_ordinary_500() -> (
+def test_a_refusal_hook_that_raises_before_the_pending_cookie_is_selected_answers_the_ordinary_500() -> (  # noqa: E501
     None
 ):
     host = an_oidc_host()
@@ -609,7 +609,7 @@ def _install_arguments() -> dict[str, object]:
     }
 
 
-def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_before_any_route() -> (
+def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_before_any_route() -> (  # noqa: E501
     None
 ):
     app = FastAPI()
