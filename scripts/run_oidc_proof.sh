@@ -18,7 +18,7 @@ state_root="${XDG_STATE_HOME:-$HOME/.local/state}/webauth-e2e-oidc"
 # together 225 s. conformance.py: worker join 15 s, host stop 30 s, first
 # teardown 90 s, backstop teardown 90 s, together 225 s. A full prove run
 # measured 134 s, so 900 s leaves a factor of about 6. CAP + K <= 1830 is the
-# fleet's bound for a lock holder (marketplace#291).
+# fleet's bound for a lock holder.
 run_cap_seconds=900
 kill_after_seconds=240
 # cleanup has no teardown on SIGTERM (bash -c and the docker CLI die, the daemon
@@ -84,7 +84,8 @@ run_locked() {
   return "$status"
 }
 
-# Ctrl-C reaches flock; setpriv (see run_locked) then sends timeout SIGTERM, which timeout
+# Ctrl-C reaches flock, which exits at once and frees the lock while the teardown goes on;
+# setpriv (see run_locked) then sends timeout SIGTERM, which timeout
 # passes to the driver, whose first SIGTERM or SIGINT ends the run through an
 # uninterruptible cleanup (further signals are ignored). SIGTERM sent to timeout or to the
 # python process ends the run the same way, but flock stays alive and keeps the lock until
