@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -21,11 +22,12 @@ TOOLS = (
     "wc",
     "tr",
     "head",
+    "jq",
     "env",
 )
 
 GH_STUB = r"""#!/usr/bin/env bash
-# Answer files: SEQUENCE__WORKFLOW__COMMIT__BRANCH, one line per query, the last repeats.
+# Answer files: SEQUENCE__WORKFLOW__COMMIT__BRANCH, one line of gh's JSON per query, the last repeats.
 # Like gh, a filter given narrows the runs and the newest remaining run answers.
 if [[ "$1 $2" == "auth status" ]]; then
   [[ -e "$STUB_DIR/not-logged-in" ]] && { echo "not logged in" >&2; exit 1; }
@@ -37,6 +39,7 @@ while (($#)); do
     --workflow) workflow="$2" ;;
     --commit) commit="$2" ;;
     --branch) branch="$2" ;;
+    --jq) filter="$2" ;;
   esac
   shift
 done
@@ -53,12 +56,12 @@ queries=$(($(cat "$answers.queries" 2>/dev/null || echo 0) + 1))
 echo "$queries" >"$answers.queries"
 total=$(wc -l <"$answers")
 line=$(sed -n "$((queries < total ? queries : total))p" "$answers")
-line=$(echo -e "$line")
 if [[ "$line" == ERROR* ]]; then
   echo "${line#ERROR }" >&2
   exit 1
 fi
-echo "$line"
+[[ -z "$line" ]] && line="[]"
+echo "$line" | jq -r "$filter"
 """
 
 SLEEP_STUB = r"""#!/usr/bin/env bash
@@ -98,16 +101,24 @@ class Release:
     def tag(self) -> str:
         return f"v{self.version}"
 
-    def run_line(self, status: str, run_id: int = 11) -> str:
-        return f"{run_id} {status} {self.run_url}"
+    def run_line(
+        self, status: str, conclusion: str = "", run_id: int = 11, url: str | None = None
+    ) -> str:
+        run = {
+            "databaseId": run_id,
+            "status": status,
+            "conclusion": conclusion,
+            "url": url or self.run_url,
+        }
+        return json.dumps([run])
 
     @property
     def success(self) -> str:
-        return self.run_line("completed success")
+        return self.run_line("completed", "success")
 
     @property
     def failure(self) -> str:
-        return self.run_line("completed failure")
+        return self.run_line("completed", "failure")
 
     def git(self, *arguments: str, cwd: Path | None = None) -> str:
         completed = subprocess.run(
@@ -297,26 +308,24 @@ def test_publish_refuses_before_any_tag(
 
 
 @pytest.mark.parametrize(
-    ("answers", "cause"),
+    ("answer", "cause"),
     [
-        (["{url_failure}"], "{url}"),
-        (["11 completed cancelled {url}"], "gh run rerun 11"),
-        (["ERROR api exploded"], "api exploded"),
-        (["not a run"], "not a run"),
-        (["11 completed success {url}\\nsurplus"], "surplus"),
-        (["11 sleeping - {url}"], "11 sleeping"),
+        (lambda r: r.failure, "https://example.test/runs/11"),
+        (lambda r: r.run_line("completed", "cancelled"), "gh run rerun 11"),
+        (lambda r: "ERROR api exploded", "api exploded"),
+        (lambda r: r.run_line("sleeping"), "11 sleeping"),
+        (lambda r: r.run_line("completed", "success", url="https://x\nsurplus"), "x\\nsurplus"),
     ],
 )
-def test_publish_refuses_when_ci_did_not_succeed(
-    release: Release, answers: list[str], cause: str
-) -> None:
-    values = {"url": release.run_url, "url_failure": release.failure}
-    release.answer("ci", release.main_commit, *(a.format(**values) for a in answers))
+def test_publish_refuses_when_ci_did_not_succeed(release: Release, answer, cause: str) -> None:
+    release.answer("ci", release.main_commit, answer(release))
 
     result = release.publish(release.tag)
 
     assert result.returncode == 1
-    assert cause.format(**values) in result.stderr
+    assert result.stderr.startswith("publish_release: ")
+    assert result.stderr.count("\n") == 1
+    assert cause in result.stderr
     assert release.local_tags() == []
     assert release.origin_tags() == []
 
@@ -334,9 +343,8 @@ def test_publish_never_reads_success_for_another_commit(release: Release) -> Non
 
 def test_publish_waits_for_a_missing_run_then_tags_the_recorded_commit(release: Release) -> None:
     commit = release.main_commit
-    release.answer("ci", commit, "", "", release.run_line("in_progress -", 12), release.success)
+    release.answer("ci", commit, "", "", release.run_line("in_progress", run_id=12), release.success)
     release.answer("release", commit, "", release.success)
-    release.answer("release", commit, release.failure, branch="v9.9.9")
     release.on_sleep(
         "echo moved > moved && git add moved && git commit -q -m moved\n"
     )
@@ -351,6 +359,17 @@ def test_publish_waits_for_a_missing_run_then_tags_the_recorded_commit(release: 
     assert release.git("rev-parse", f"{release.tag}^{{commit}}", cwd=release.origin) == commit
     assert len(release.sleeps()) == 4
     assert min(release.sleeps()) >= 60
+
+
+def test_publish_judges_only_the_release_run_of_its_tag(release: Release) -> None:
+    commit = release_on_green_ci(release)
+    release.answer("release", commit, release.success)
+    release.answer("release", commit, release.failure, branch="v9.9.9")
+
+    result = release.publish(release.tag)
+
+    assert result.returncode == 0, result.stderr
+    assert release.verified() == [release.tag]
 
 
 def test_publish_pushes_only_its_tag_and_keeps_it_when_release_run_fails(release: Release) -> None:

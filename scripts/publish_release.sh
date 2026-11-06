@@ -24,12 +24,12 @@ wait_for_run() {
   while true; do
     if ! answer="$(gh run list --workflow "$workflow" --commit "$sha" --event push "$@" --limit 1 \
       --json databaseId,status,conclusion,url \
-      --jq '.[0] // empty | "\(.databaseId) \(.status) \(.conclusion // "-") \(.url)"' 2>&1)"; then
+      --jq '.[0] // empty | "\(.databaseId) \(.status) \((.conclusion | select(. != null and . != "")) // "-") \(.url)"' 2>&1)"; then
       refuse "gh run list failed: ${answer}"
     fi
     if [[ -n "$answer" ]]; then
       if [[ ! "$answer" =~ ^[0-9]+\ (queued|requested|waiting|pending|in_progress|completed)\ [^[:space:]]+\ [^[:space:]]+$ ]]; then
-        refuse "cannot read the answer of gh run list: ${answer}"
+        refuse "cannot read the answer of gh run list: ${answer//$'\n'/\\n}"
       fi
       read -r run_id status run_conclusion run_url <<<"$answer"
       [[ "$status" == "completed" ]] && return 0
