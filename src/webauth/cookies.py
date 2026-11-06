@@ -52,7 +52,6 @@ __all__ = [
 ]
 
 _HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
-_SECURE_COOKIE_PREFIX: Final = "__Secure-"
 PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 _PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
 _MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 896
@@ -75,7 +74,6 @@ _MAX_PENDING_LOGINS: Final = 5
 _UNRANKED: Final = -1
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
-_COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
 # characters, so a field of any other shape was not minted as a pending secret.
 _PENDING_SECRET: Final = rf"[A-Za-z0-9_-]{{{math.ceil(4 * _PENDING_SECRET_BYTES / 3)}}}"
@@ -103,7 +101,9 @@ class _CookieAttributes(TypedDict):
 
 
 def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
-    """Return the name a cookie gets when the host names none.
+    """Return the cookie's name for ``secure``.
+
+    ``__Host-`` plus the plain name with ``Secure``, the plain name without it.
 
     A ``__Host-`` cookie can be set only by this exact host, so a sibling
     subdomain cannot toss one in with ``Domain=parent``. Browsers accept the
@@ -135,32 +135,6 @@ def _is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
     if not name.startswith(prefix):
         return False
     return _STATE_DIGEST.fullmatch(name.removeprefix(prefix)) is not None
-
-
-def _is_reserved_cookie_name(name: str) -> bool:
-    """Whether ``name`` is one webauth's own cookies use, in either variant.
-
-    A session cookie under such a name would meet the cookie webauth
-    sets there, and the browser would send both.
-    """
-    return any(
-        name.startswith(_pending_login_cookie_prefix(secure=secure)) for secure in (True, False)
-    )
-
-
-def _is_valid_cookie_name(name: str) -> bool:
-    """Whether ``name`` is an RFC 6265 ``cookie-name``; Starlette refuses most other names."""
-    return _COOKIE_NAME_TOKEN.fullmatch(name) is not None
-
-
-def _is_host_only_cookie_name(name: str) -> bool:
-    """Whether a browser treats ``name`` as a ``__Host-`` cookie (case-insensitively)."""
-    return name.lower().startswith(_HOST_ONLY_COOKIE_PREFIX.lower())
-
-
-def _is_secure_prefixed_cookie_name(name: str) -> bool:
-    """Whether a browser treats ``name`` as a ``__Secure-`` cookie (case-insensitively)."""
-    return name.lower().startswith(_SECURE_COOKIE_PREFIX.lower())
 
 
 def _cookie_pairs(connection: HTTPConnection) -> list[tuple[str, str]]:
