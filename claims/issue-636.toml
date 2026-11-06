@@ -1,0 +1,8 @@
+claim_id = "107c4b176b8d461081f8ba1bb05cafe5"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "e7e11be4a9743d1319ca02d87dfcfb6df9e6b9ab"
+branch = "claude/issue-636-sixteen-names-take-underscore"
+scope = ["docs/ARCHITECTURE.md", "src/webauth/config.py", "src/webauth/cookies.py", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "src/webauth/oidc/__init__.py", "src/webauth/oidc/_client_config.py", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc_transport.py", "src/webauth/policies.py", "src/webauth/ports.py", "src/webauth/service_callers.py", "tests"]
+opened_commit = "cd111817ce48409e185e5f03d3a62134fea4710f"
+whole_reason = "Sixteen behaviour-free renames that one surface guard and one typing host check; split, both would change twice for no review gain."
