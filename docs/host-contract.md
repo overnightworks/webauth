@@ -233,10 +233,6 @@ are in [test_session_gate_recorded_admission.py](../tests/middleware/test_sessio
   [The sign-in routes](#the-sign-in-routes).
   `test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise` in
   [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
-  The derived-policy proofs, among them `test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start`,
-  `test_the_derived_cache_rule_marks_the_sign_in_answers_no_store` and
-  `test_the_derived_browser_paths_spend_one_sign_in_budget`, are in
-  [test_sign_in_routes_derived_policies.py](../tests/test_sign_in_routes_derived_policies.py).
   A refusal carries no identity (`AdmissionRefusal` in
   [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
   [oidc](../src/webauth/oidc/_relying_party.py)), so the page shows no name. A
@@ -540,6 +536,11 @@ of OpenID Connect. The `webauth.sign_in_routes` module and `install_sign_in_rout
 `webauth.oidc_login` and `webauth.cookies` module docstrings hold the login and its
 cookies, and `build_app` in [`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py)
 is the worked host, type-checked and run against a real issuer.
+
+Proofs: `test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start`,
+`test_the_derived_cache_rule_marks_the_sign_in_answers_no_store` and
+`test_the_derived_browser_paths_spend_one_sign_in_budget`, among others, in
+[test_sign_in_routes_derived_policies.py](../tests/test_sign_in_routes_derived_policies.py).
 
 The host supplies a `SignInTransaction` (`webauth.ports`) and a `refused` hook. The
 callback enters the transaction once, only after the issuer's code exchange and the pure
