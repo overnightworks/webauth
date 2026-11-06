@@ -1,4 +1,4 @@
-"""Token checks of `JwtVerifier.verify`: audience, type, hostile tokens, header bounds, leeway.
+"""Token checks of `_JwtVerifier.verify`: audience, type, hostile tokens, header bounds, leeway.
 
 Every scenario hands the verifier a raw token string, the way a host's login or
 logout route will, against a fake key-set endpoint and fake clocks.
@@ -32,9 +32,8 @@ from tests.support.oidc_arrangement import (
     segment,
 )
 from webauth.jwt_verification import (
-    MAX_TOKEN_CHARACTERS,
-    Rejected,
     RejectionReason,
+    _Rejected,
 )
 
 MAX_HEADER_SEGMENT_CHARACTERS = 512
@@ -107,7 +106,7 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
     outcome = issuer.verifier.verify(issuer.token(header=header), expected_type=expected_type)
 
     assert outcome == (
-        issuer.verified() if accepted else Rejected(RejectionReason.INVALID_TOKEN_TYPE)
+        issuer.verified() if accepted else _Rejected(RejectionReason.INVALID_TOKEN_TYPE)
     )
 
 
@@ -257,7 +256,7 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
             id="header-b64-false",
         ),
         pytest.param(
-            lambda issuer: issuer.token({"padding": "x" * MAX_TOKEN_CHARACTERS}),
+            lambda issuer: issuer.token({"padding": "x" * 8 * 1024}),
             RejectionReason.TOKEN_TOO_LONG,
             id="oversized-token",
         ),
@@ -295,7 +294,7 @@ def test_a_hostile_token_is_refused_with_its_reason(
     build_token: Callable[[IssuerScenario], str],
     reason: RejectionReason,
 ) -> None:
-    assert issuer.verifier.verify(build_token(issuer)) == Rejected(reason)
+    assert issuer.verifier.verify(build_token(issuer)) == _Rejected(reason)
 
 
 def _token_with_header_of_bytes(issuer: IssuerScenario, header_bytes: int) -> str:
@@ -321,7 +320,7 @@ def test_a_header_segment_over_the_bound_is_refused_before_it_is_parsed(
 ) -> None:
     token = _token_with_header_of_bytes(issuer, header_bytes)
 
-    expected = issuer.verified() if outcome is None else Rejected(outcome)
+    expected = issuer.verified() if outcome is None else _Rejected(outcome)
     assert issuer.verifier.verify(token) == expected
 
 
@@ -343,7 +342,7 @@ def test_the_deepest_header_the_bound_allows_does_not_crash_a_small_stack_thread
         threading.stack_size(previous_stack_size)
     worker.join()
 
-    assert outcomes == [Rejected(RejectionReason.MALFORMED_TOKEN)]
+    assert outcomes == [_Rejected(RejectionReason.MALFORMED_TOKEN)]
 
 
 @pytest.mark.parametrize("member", ["jwk", "jku", "x5u", "x5c"])
@@ -384,5 +383,5 @@ def test_time_claims_hold_exactly_the_configured_leeway_on_the_wall_clock(
 ) -> None:
     changes = {claim: int(issuer.wall_clock.now) + offset}
 
-    expected = issuer.verified(changes) if outcome is None else Rejected(outcome)
+    expected = issuer.verified(changes) if outcome is None else _Rejected(outcome)
     assert issuer.verifier.verify(issuer.token(changes)) == expected

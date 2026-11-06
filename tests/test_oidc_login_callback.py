@@ -56,7 +56,6 @@ from webauth.cookies import (
     _sign_pending_login,
     _verify_pending_login,
 )
-from webauth.jwt_verification import MAX_TOKEN_CHARACTERS
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
 )
@@ -225,7 +224,7 @@ def test_the_callback_hands_the_browser_no_id_token_and_each_login_replaces_the_
 def test_an_id_token_of_the_verifiers_longest_length_is_stored_and_sent_whole() -> None:
     host = an_oidc_host()
     host.issuer.mint_id_token = lambda nonce: a_token_of_length(
-        MAX_TOKEN_CHARACTERS,
+        8 * 1024,
         lambda header_padding, groups_padding: an_id_token(
             nonce,
             host.wall_clock,
@@ -238,7 +237,7 @@ def test_an_id_token_of_the_verifiers_longest_length_is_stored_and_sent_whole() 
 
     response = post_logout(host, SAME_ORIGIN_FORM)
 
-    assert (len(stored), hint_of(response)) == (MAX_TOKEN_CHARACTERS, stored)
+    assert (len(stored), hint_of(response)) == (8 * 1024, stored)
 
 
 @dataclass(frozen=True)

@@ -1,11 +1,11 @@
 """Verification of RS256 tokens signed by a remote issuer's published keys.
 
-`JwtVerifier.verify` takes a raw compact JWS and answers `VerifiedClaims` or
-`Rejected(reason)`. The caller names the issuer, the audiences it accepts, the
+`_JwtVerifier.verify` takes a raw compact JWS and answers `_VerifiedClaims` or
+`_Rejected(reason)`. The caller names the issuer, the audiences it accepts, the
 URL of the issuer's key set and the clock leeway; what a protocol demands of
 the claims beyond signature, issuer, audience and time — an ID token's nonce,
 a logout token's events — belongs to the caller, which reads them from
-`VerifiedClaims.claims`.
+`_VerifiedClaims.claims`.
 
 PyJWT reads the token. This module bounds the token length and the header
 segment before PyJWT parses anything, accepts an RS256-only header whose
@@ -19,9 +19,9 @@ so a failed or poisoned refresh never evicts the last good set; that set
 expires one hour after it was fetched, on the injected monotonic clock. Keys
 published for another purpose — encryption, another algorithm or key type — are
 passed over, not refused, because issuers such as Keycloak publish them beside
-the signing keys. They do not count toward `MAX_KEY_SET_KEYS`, which bounds the
+the signing keys. They do not count toward `_MAX_KEY_SET_KEYS`, which bounds the
 RS256 verification keys, named or not, the only ones that cost key construction
-and cache space. The size of the whole document is bounded by `MAX_KEY_SET_BYTES`, so
+and cache space. The size of the whole document is bounded by `_MAX_KEY_SET_BYTES`, so
 passed-over entries cost a few lookups each and nothing more. Each entry is
 checked in this order: an object without a secret member, then RS256
 eligibility, then the count, then the key itself.
@@ -65,7 +65,7 @@ from jwt.types import Options
 
 from webauth._validation import _is_whole_number, require_non_negative_whole_number
 from webauth.https_client import (
-    MAX_KEY_SET_BYTES,
+    _MAX_KEY_SET_BYTES,
     KeySetFetchError,
     is_https_url,
 )
@@ -75,12 +75,12 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-MAX_TOKEN_CHARACTERS = 8 * 1024
+_MAX_TOKEN_CHARACTERS = 8 * 1024
 _MAX_HEADER_SEGMENT_CHARACTERS = 512
 _MAX_KEY_ID_CHARACTERS = 128
 _KEY_SET_TTL_SECONDS = 60 * 60
 KEY_SET_REFRESH_COOLDOWN_SECONDS = 30
-MAX_KEY_SET_KEYS = 10
+_MAX_KEY_SET_KEYS = 10
 _MIN_RSA_KEY_BITS = 2048
 
 _ALGORITHM = "RS256"
@@ -95,14 +95,9 @@ KeySetFetch = Callable[[str], bytes]
 
 __all__ = [
     "KEY_SET_REFRESH_COOLDOWN_SECONDS",
-    "MAX_KEY_SET_KEYS",
-    "MAX_TOKEN_CHARACTERS",
-    "JwtVerifier",
     "KeySetFetch",
     "MonotonicClock",
-    "Rejected",
     "RejectionReason",
-    "VerifiedClaims",
 ]
 
 
@@ -125,7 +120,7 @@ class RejectionReason(StrEnum):
 
 
 @dataclass(frozen=True)
-class VerifiedClaims:
+class _VerifiedClaims:
     """A token whose signature, issuer, audience and time claims held.
 
     `subject` is the `sub` claim, absent from some tokens (a logout token may
@@ -141,7 +136,7 @@ class VerifiedClaims:
 
 
 @dataclass(frozen=True)
-class Rejected:
+class _Rejected:
     reason: RejectionReason
 
 
@@ -184,7 +179,7 @@ class _KeySet:
     fetched_at: float
 
 
-class JwtVerifier:
+class _JwtVerifier:
     """Verifies RS256 tokens of one issuer for the audiences one caller accepts.
 
     Safe to share between request threads: the cached key set is an immutable
@@ -234,14 +229,14 @@ class JwtVerifier:
         *,
         expected_type: str | None = None,
         expected_media_types: frozenset[str] | None = None,
-    ) -> VerifiedClaims | Rejected:
+    ) -> _VerifiedClaims | _Rejected:
         """Verify ``token``; when ``expected_type`` is given, its header's
         ``typ`` must equal it exactly. ``expected_media_types`` instead compares
         ``typ`` as a media type (RFC 7515 section 4.1.9): an ASCII string whose
         ASCII-lowercase form is a member. It must be a ``frozenset`` of non-empty
         lowercase ASCII strings and exclude ``expected_type``, or ``ValueError``.
 
-        A token over ``MAX_TOKEN_CHARACTERS`` is refused as ``TOKEN_TOO_LONG``.
+        A token over ``_MAX_TOKEN_CHARACTERS`` is refused as ``TOKEN_TOO_LONG``.
         A token whose encoded header segment, the part before the first dot,
         exceeds 512 characters is refused as ``MALFORMED_TOKEN`` even when the
         whole token fits that limit; an issuer whose headers carry more than
@@ -250,15 +245,15 @@ class JwtVerifier:
         try:
             return self._verified_claims(token, expected_type, expected_media_types)
         except _VerificationRefusal as refusal:
-            return Rejected(refusal.reason)
+            return _Rejected(refusal.reason)
 
     def _verified_claims(
         self,
         token: str,
         expected_type: str | None,
         expected_media_types: frozenset[str] | None,
-    ) -> VerifiedClaims:
-        if len(token) > MAX_TOKEN_CHARACTERS:
+    ) -> _VerifiedClaims:
+        if len(token) > _MAX_TOKEN_CHARACTERS:
             raise _VerificationRefusal(RejectionReason.TOKEN_TOO_LONG)
         # RFC 7515's compact serialization is ASCII; PyJWT raises on a lone surrogate.
         if not token.isascii():
@@ -279,7 +274,7 @@ class JwtVerifier:
         key_id = _header_key_id(header)
         claims = self._verified_payload(token, self._signing_key(key_id))
         expires_at, issued_at = self._checked_time_claims(claims)
-        return VerifiedClaims(
+        return _VerifiedClaims(
             subject=_subject(claims),
             issuer=self._issuer,
             audiences=_audiences(claims),
@@ -491,7 +486,7 @@ def _json_object(document: bytes) -> dict[str, object] | None:
 def _parse_key_set(
     document: bytes,
 ) -> tuple[Mapping[str, RSAPublicKey], RSAPublicKey | None]:
-    if len(document) > MAX_KEY_SET_BYTES:
+    if len(document) > _MAX_KEY_SET_BYTES:
         raise _InvalidKeySetError(_RefreshFailure.TOO_LARGE)
     parsed = _json_object(document)
     if parsed is None:
@@ -510,7 +505,7 @@ def _rs256_verification_keys(
     eligible = 0
     last_key: RSAPublicKey | None = None
     for jwk in _rs256_verification_jwks(jwks):
-        if eligible == MAX_KEY_SET_KEYS:
+        if eligible == _MAX_KEY_SET_KEYS:
             raise _InvalidKeySetError(_RefreshFailure.KEY_COUNT_OUT_OF_RANGE)
         key_id, last_key = _public_signing_key(jwk)
         eligible += 1

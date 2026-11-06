@@ -3,7 +3,7 @@
 Every scenario begins a login, answers it with the callback query a browser
 would bring back and completes it. The token endpoint, the key-set endpoint
 and the clocks are fakes, so each refusal is observed offline; the ID tokens
-are real RS256 tokens verified by the relying party's own `JwtVerifier`.
+are real RS256 tokens verified by the relying party's own `_JwtVerifier`.
 """
 
 from __future__ import annotations
@@ -53,8 +53,6 @@ from tests.support.oidc_relying_party import (
 from webauth.cookies import PendingLogin
 from webauth.jwt_verification import RejectionReason
 from webauth.oidc import (
-    MAX_AUTHORIZATION_CODE_CHARS,
-    MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcIdentity,
     OidcRefusal,
@@ -151,7 +149,7 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
         ),
         pytest.param(Attempt(callback={"iss": ABSENT}), _IDENTITY, id="callback-without-iss"),
         pytest.param(
-            Attempt(callback={"code": "c" * MAX_AUTHORIZATION_CODE_CHARS}),
+            Attempt(callback={"code": "c" * 2048}),
             _IDENTITY,
             id="code-at-the-length-limit",
         ),
@@ -189,9 +187,7 @@ def _answered(
 
 
 def _padded_past_the_limit(id_token: str) -> TokenEndpointAnswer:
-    return token_endpoint_answer(
-        200, {"id_token": id_token, "padding": "x" * MAX_TOKEN_RESPONSE_BYTES}
-    )
+    return token_endpoint_answer(200, {"id_token": id_token, "padding": "x" * 64 * 1024})
 
 
 _CALLBACK_REFUSALS = [
@@ -231,7 +227,7 @@ _CALLBACK_REFUSALS = [
         id="code-empty",
     ),
     pytest.param(
-        Attempt(callback={"code": "c" * (MAX_AUTHORIZATION_CODE_CHARS + 1)}),
+        Attempt(callback={"code": "c" * (2048 + 1)}),
         OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK),
         id="code-past-the-length-limit",
     ),
@@ -319,7 +315,7 @@ _EXCHANGE_REFUSALS = [
         id="non-json-error",
     ),
     pytest.param(
-        Attempt(token_answer=_answered(200, b"[" * (MAX_TOKEN_RESPONSE_BYTES // 2))),
+        Attempt(token_answer=_answered(200, b"[" * (64 * 1024 // 2))),
         OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED),
         id="nested-past-the-parsers-recursion-limit",
     ),

@@ -48,14 +48,11 @@ from urllib3.util import create_urllib3_context
 from webauth import WebAuthError
 
 _KEY_SET_FETCH_TIMEOUT_SECONDS = 5
-KEY_SET_FETCH_DEADLINE_SECONDS = 10
-TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
-MAX_KEY_SET_BYTES = 64 * 1024
+_KEY_SET_FETCH_DEADLINE_SECONDS = 10
+_TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
+_MAX_KEY_SET_BYTES = 64 * 1024
 
 __all__ = [
-    "KEY_SET_FETCH_DEADLINE_SECONDS",
-    "MAX_KEY_SET_BYTES",
-    "TOKEN_EXCHANGE_DEADLINE_SECONDS",
     "ExchangeFailure",
     "KeySetFetchError",
     "fetch_key_set_over_https",
@@ -119,9 +116,9 @@ def fetch_key_set_over_https(
     url: str,
     *,
     timeout_seconds: float = _KEY_SET_FETCH_TIMEOUT_SECONDS,
-    deadline_seconds: float = KEY_SET_FETCH_DEADLINE_SECONDS,
+    deadline_seconds: float = _KEY_SET_FETCH_DEADLINE_SECONDS,
 ) -> bytes:
-    """The production `KeySetFetch`. At most one byte past `MAX_KEY_SET_BYTES`
+    """The production `KeySetFetch`. At most one byte past `_MAX_KEY_SET_BYTES`
     is read, so the verifier refuses an oversized answer without buffering it.
     A compressed answer reaches the verifier still compressed and fails as
     invalid JSON.
@@ -149,7 +146,7 @@ def fetch_key_set_over_https(
             accepts_status=_is_key_set_status,
             timeout_seconds=timeout_seconds,
             deadline_seconds=deadline_seconds,
-            max_body_bytes=MAX_KEY_SET_BYTES,
+            max_body_bytes=_MAX_KEY_SET_BYTES,
         )
     except _HttpsExchangeError as refusal:
         if refusal.failure is ExchangeFailure.TIMED_OUT:
@@ -172,7 +169,7 @@ def _post_form_over_https(
     authorization: SecretStr,
     max_body_bytes: int,
     timeout_seconds: float,
-    deadline_seconds: float = TOKEN_EXCHANGE_DEADLINE_SECONDS,
+    deadline_seconds: float = _TOKEN_EXCHANGE_DEADLINE_SECONDS,
 ) -> _HttpsAnswer:
     """POSTs `form` URL-encoded, sending `authorization` as the whole
     `Authorization` header and asking for JSON, and answers the status and

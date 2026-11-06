@@ -22,8 +22,8 @@ from tests.support.oidc_arrangement import (
 )
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import (
-    Rejected,
     RejectionReason,
+    _Rejected,
 )
 
 
@@ -70,7 +70,7 @@ def test_a_token_without_kid_is_refused_without_a_fetch_when_the_key_set_holds_s
 
     refused = issuer.verifier.verify(token_without_kid(issuer))
 
-    assert refused == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert refused == _Rejected(RejectionReason.INVALID_KEY_ID)
     assert len(issuer.endpoint.fetched_urls) == 1
 
 
@@ -84,13 +84,13 @@ def test_a_kidless_key_beside_a_named_one_is_admitted_but_verifies_nothing(
     signed_by_kidless_key = rs256(rsa_key("other"))
 
     assert issuer.verifier.verify(issuer.token()) == issuer.verified()
-    assert issuer.verifier.verify(token_without_kid(issuer)) == Rejected(
+    assert issuer.verifier.verify(token_without_kid(issuer)) == _Rejected(
         RejectionReason.INVALID_KEY_ID
     )
     assert issuer.verifier.verify(
         token_without_kid(issuer, sign=signed_by_kidless_key)
-    ) == Rejected(RejectionReason.INVALID_KEY_ID)
-    assert issuer.verifier.verify(issuer.token(sign=signed_by_kidless_key)) == Rejected(
+    ) == _Rejected(RejectionReason.INVALID_KEY_ID)
+    assert issuer.verifier.verify(issuer.token(sign=signed_by_kidless_key)) == _Rejected(
         RejectionReason.INVALID_SIGNATURE
     )
 
@@ -104,8 +104,8 @@ def test_several_kidless_keys_are_admitted_and_answer_every_token_as_ambiguous(
 
     named = issuer.verifier.verify(issuer.token(header={"kid": "x"}))
 
-    assert kidless == Rejected(RejectionReason.INVALID_KEY_ID)
-    assert named == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert kidless == _Rejected(RejectionReason.INVALID_KEY_ID)
+    assert named == _Rejected(RejectionReason.UNKNOWN_KEY_ID)
 
 
 def test_a_named_kid_unmatched_by_a_kidless_sole_key_is_unknown_once_the_refresh_succeeds(
@@ -117,7 +117,7 @@ def test_a_named_kid_unmatched_by_a_kidless_sole_key_is_unknown_once_the_refresh
 
     named = issuer.verifier.verify(issuer.token(header={"kid": "x"}))
 
-    assert named == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert named == _Rejected(RejectionReason.UNKNOWN_KEY_ID)
 
 
 def test_a_named_kid_is_unavailable_when_the_refresh_fails_and_while_it_cools_down(
@@ -129,8 +129,8 @@ def test_a_named_kid_is_unavailable_when_the_refresh_fails_and_while_it_cools_do
     issuer.after_cooldown()
     named = issuer.token(header={"kid": "x"})
 
-    assert issuer.verifier.verify(named) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
-    assert issuer.verifier.verify(named) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert issuer.verifier.verify(named) == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert issuer.verifier.verify(named) == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
 
 
 def test_a_signature_failure_without_kid_does_not_refresh_the_key_set(
@@ -141,7 +141,7 @@ def test_a_signature_failure_without_kid_does_not_refresh_the_key_set(
 
     refused = issuer.verifier.verify(token_without_kid(issuer, sign=rs256(rsa_key("other"))))
 
-    assert refused == Rejected(RejectionReason.INVALID_SIGNATURE)
+    assert refused == _Rejected(RejectionReason.INVALID_SIGNATURE)
     assert len(issuer.endpoint.fetched_urls) == 1
 
 
@@ -150,7 +150,7 @@ def test_a_token_without_kid_is_unavailable_when_no_key_set_can_be_fetched(
 ) -> None:
     issuer.serve(KeySetFetchError("GET answered 503"))
 
-    assert issuer.verifier.verify(token_without_kid(issuer)) == Rejected(
+    assert issuer.verifier.verify(token_without_kid(issuer)) == _Rejected(
         RejectionReason.KEY_SET_UNAVAILABLE
     )
 
@@ -179,7 +179,7 @@ def test_rotation_from_two_keys_to_one_is_seen_by_a_token_without_kid_after_the_
 
     after_ttl = issuer.verifier.verify(token_without_kid(issuer))
 
-    assert before_ttl == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert before_ttl == _Rejected(RejectionReason.INVALID_KEY_ID)
     assert after_ttl == issuer.verified()
 
 
@@ -196,9 +196,9 @@ def test_rotation_from_one_sole_key_to_another_is_seen_by_a_token_without_kid_af
     after_ttl = issuer.verifier.verify(new_key_token)
     retired_key = issuer.verifier.verify(token_without_kid(issuer))
 
-    assert before_ttl == Rejected(RejectionReason.INVALID_SIGNATURE)
+    assert before_ttl == _Rejected(RejectionReason.INVALID_SIGNATURE)
     assert after_ttl == issuer.verified()
-    assert retired_key == Rejected(RejectionReason.INVALID_SIGNATURE)
+    assert retired_key == _Rejected(RejectionReason.INVALID_SIGNATURE)
 
 
 def test_rotation_from_one_key_to_two_is_seen_by_a_token_without_kid_after_the_ttl(
@@ -213,7 +213,7 @@ def test_rotation_from_one_key_to_two_is_seen_by_a_token_without_kid_after_the_t
     after_ttl = issuer.verifier.verify(token_without_kid(issuer))
 
     assert before_ttl == issuer.verified()
-    assert after_ttl == Rejected(RejectionReason.INVALID_KEY_ID)
+    assert after_ttl == _Rejected(RejectionReason.INVALID_KEY_ID)
 
 
 def test_a_token_without_kid_verifies_again_once_an_expiry_refresh_has_failed_and_recovered(
@@ -228,5 +228,5 @@ def test_a_token_without_kid_verifies_again_once_an_expiry_refresh_has_failed_an
 
     after_recovery = issuer.verifier.verify(token_without_kid(issuer))
 
-    assert during_outage == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert during_outage == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert after_recovery == issuer.verified()

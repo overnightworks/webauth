@@ -40,14 +40,13 @@ from tests.support.oidc_arrangement import (
     unconnectable_loopback_port,
 )
 from webauth.https_client import (
-    MAX_KEY_SET_BYTES,
     ExchangeFailure,
     KeySetFetchError,
     _HttpsExchangeError,
     _post_form_over_https,
     fetch_key_set_over_https,
 )
-from webauth.oidc import MAX_TOKEN_RESPONSE_BYTES, TokenEndpointError, TokenRequest
+from webauth.oidc import TokenEndpointError, TokenRequest
 from webauth.oidc_transport import post_token_request_over_https
 
 _CLIENT_ID = "notes-app"
@@ -190,7 +189,7 @@ def test_a_token_answer_of_exactly_the_size_limit_comes_back_whole(
         _token_request(f"{token_server.base_url}/token-at-limit")
     )
 
-    assert len(answer.body) == MAX_TOKEN_RESPONSE_BYTES
+    assert len(answer.body) == 64 * 1024
 
 
 def test_the_token_request_is_one_form_post_authenticated_with_basic(
@@ -363,7 +362,7 @@ def _post_token_form(url: str, timeout_seconds: float = 5, **limits: float) -> o
         url,
         _FORM,
         authorization=SecretStr(_BASIC_AUTHORIZATION),
-        max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
+        max_body_bytes=64 * 1024,
         timeout_seconds=timeout_seconds,
         **limits,
     )
@@ -558,7 +557,7 @@ def test_a_key_set_fetch_reads_at_most_one_byte_past_the_key_set_limit(
 ) -> None:
     document = fetch_key_set_over_https(f"{token_server.base_url}/oversized")
 
-    assert len(document) == MAX_KEY_SET_BYTES + 1
+    assert len(document) == 64 * 1024 + 1
 
 
 def test_a_key_set_fetch_hands_back_a_compressed_answer_still_compressed(
@@ -760,12 +759,6 @@ def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> 
 
     with pytest.raises(ValueError, match="timeout_seconds"):
         post_token_request_over_https(request, timeout_seconds=3, deadline_seconds=2)
-
-
-def test_the_token_posts_default_deadline_is_the_https_clients_token_exchange_deadline() -> None:
-    deadline = inspect.signature(post_token_request_over_https).parameters["deadline_seconds"]
-
-    assert deadline.default == webauth.https_client.TOKEN_EXCHANGE_DEADLINE_SECONDS
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(

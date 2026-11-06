@@ -41,10 +41,8 @@ if TYPE_CHECKING:
     from webauth.config import WebAuthConfig
 
 __all__ = [
-    "COOKIE_PATH",
     "DEFAULT_SESSION_COOKIE_NAME",
     "MAX_SESSION_COOKIE_CHARS",
-    "PLAIN_SESSION_COOKIE_NAME",
     "CookieSameSite",
     "PendingLogin",
     "issue_session_cookies",
@@ -52,7 +50,7 @@ __all__ = [
 ]
 
 _HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
-PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
+_PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 _PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
 _MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 896
 # A signed session cookie is an identifier plus a hex digest; anything much
@@ -90,7 +88,7 @@ _PENDING_LOGIN_SIGNATURE: Final = re.compile(r"[0-9a-f]{64}")
 
 CookieSameSite = Literal["strict", "lax"]
 _DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
-COOKIE_PATH: Final = "/"
+_COOKIE_PATH: Final = "/"
 
 
 class _CookieAttributes(TypedDict):
@@ -100,7 +98,7 @@ class _CookieAttributes(TypedDict):
     samesite: CookieSameSite
 
 
-def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
+def _cookie_name(plain_name: str, *, secure: bool) -> str:
     """Return the cookie's name for ``secure``.
 
     ``__Host-`` plus the plain name with ``Secure``, the plain name without it.
@@ -113,12 +111,12 @@ def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
     return f"{_HOST_ONLY_COOKIE_PREFIX}{plain_name}" if secure else plain_name
 
 
-DEFAULT_SESSION_COOKIE_NAME: Final = _default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=True)
+DEFAULT_SESSION_COOKIE_NAME: Final = _cookie_name(_PLAIN_SESSION_COOKIE_NAME, secure=True)
 
 
 def _pending_login_cookie_prefix(*, secure: bool) -> str:
     """The part every pending-login cookie's name starts with."""
-    return f"{_default_cookie_name(_PLAIN_PENDING_LOGIN_COOKIE_NAME, secure=secure)}_"
+    return f"{_cookie_name(_PLAIN_PENDING_LOGIN_COOKIE_NAME, secure=secure)}_"
 
 
 def _pending_login_cookie_name(state: str, *, secure: bool) -> str:
@@ -196,7 +194,7 @@ def _verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
 def _cookie_attributes(config: WebAuthConfig, samesite: CookieSameSite) -> _CookieAttributes:
     """The attributes every cookie is set with, and repeated when it is taken back."""
     return _CookieAttributes(
-        path=COOKIE_PATH,
+        path=_COOKIE_PATH,
         secure=config.cookie_secure,
         httponly=True,
         samesite=samesite,

@@ -11,16 +11,16 @@ from __future__ import annotations
 from typing import Final
 
 from webauth.https_client import (
-    TOKEN_EXCHANGE_DEADLINE_SECONDS,
+    _TOKEN_EXCHANGE_DEADLINE_SECONDS,
     _HttpsExchangeError,
     _post_form_over_https,
 )
 from webauth.oidc import (
-    MAX_TOKEN_RESPONSE_BYTES,
     TokenEndpointAnswer,
     TokenEndpointError,
     TokenRequest,
 )
+from webauth.oidc._relying_party import _MAX_TOKEN_RESPONSE_BYTES
 
 __all__ = ["post_token_request_over_https"]
 
@@ -31,11 +31,11 @@ def post_token_request_over_https(
     request: TokenRequest,
     *,
     timeout_seconds: float = _TOKEN_REQUEST_TIMEOUT_SECONDS,
-    deadline_seconds: float = TOKEN_EXCHANGE_DEADLINE_SECONDS,
+    deadline_seconds: float = _TOKEN_EXCHANGE_DEADLINE_SECONDS,
 ) -> TokenEndpointAnswer:
     """The production ``TokenRequestPost``: the request POSTed under the
     bounded posture of ``webauth.https_client``, reading at most one byte past
-    ``MAX_TOKEN_RESPONSE_BYTES`` of the answer.
+    ``_MAX_TOKEN_RESPONSE_BYTES`` of the answer.
 
     Any answer but a redirect comes back whatever its status, so the relying
     party reads an issuer's refusal such as ``invalid_grant``. A redirect, an
@@ -62,7 +62,7 @@ def post_token_request_over_https(
             request.url,
             request.form,
             authorization=request.authorization,
-            max_body_bytes=MAX_TOKEN_RESPONSE_BYTES,
+            max_body_bytes=_MAX_TOKEN_RESPONSE_BYTES,
             timeout_seconds=timeout_seconds,
             deadline_seconds=deadline_seconds,
         )
