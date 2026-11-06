@@ -47,7 +47,6 @@ from tests.support.webauth_arrangement import (
     SessionsThatMustNotBeAsked,
     a_session,
     a_signed_in_same_origin_request,
-    a_web_auth_config,
     an_auth_app,
     an_http_scope,
     drive,
@@ -371,7 +370,6 @@ class TestAdmittedUser:
 
 AUTHENTICATION_REQUIRED = {"detail": "Authentication required"}
 ADMIN_REQUIRED = {"detail": "Admin access required"}
-OPERATOR_ROLE = "operator"
 
 
 def a_gated_app_of(role: str, **keywords: Any) -> AuthApp:
@@ -380,36 +378,21 @@ def a_gated_app_of(role: str, **keywords: Any) -> AuthApp:
 
 class TestAdmittedAdmin:
     @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
-    def test_a_session_with_the_admin_role_gets_its_account(self, path: str) -> None:
+    def test_a_stored_admins_session_gets_its_account(self, path: str) -> None:
         app = a_gated_app_of(ADMIN_ROLE)
         response = ask(app, path, cookie=signed_in(app))
         assert (response.status_code, response.json()) == (200, {"username": "alice"})
 
     @pytest.mark.parametrize("path", [*ADMITTED_ADMIN_PATHS, "/admin"])
+    @pytest.mark.parametrize("role", [MEMBER_ROLE, "operator"])
     def test_a_session_with_another_role_is_refused_as_admin_user_refuses_it(
         self,
         path: str,
+        role: str,
     ) -> None:
-        app = a_gated_app_of(MEMBER_ROLE)
+        app = a_gated_app_of(role)
         response = ask(app, path, cookie=signed_in(app))
         assert (response.status_code, response.json()) == (403, ADMIN_REQUIRED)
-
-    @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
-    @pytest.mark.parametrize(
-        ("role", "expected_status"),
-        [(OPERATOR_ROLE, 200), (ADMIN_ROLE, 403)],
-        ids=["the-configured-role", "the-literal-admin"],
-    )
-    def test_the_configured_admin_role_is_the_one_judged(
-        self,
-        path: str,
-        role: str,
-        expected_status: int,
-    ) -> None:
-        config = a_web_auth_config(admin_role=OPERATOR_ROLE)
-        app = a_gated_app_of(role, config=config)
-        response = ask(app, path, cookie=signed_in(app))
-        assert response.status_code == expected_status
 
     @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
     @pytest.mark.parametrize(

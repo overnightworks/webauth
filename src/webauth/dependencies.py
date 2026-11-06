@@ -35,6 +35,7 @@ from webauth import ports
 from webauth._media_types import prefers_html
 from webauth._origins import OriginVerdict, origin_verdict
 from webauth._paths import reads_as_another_host, requested_address, same_app_path
+from webauth.admission import AppRole
 from webauth.config import SessionLifetime, WebAuthConfig, web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
@@ -612,12 +613,12 @@ def _require_admin(
     connection: HTTPConnection,
     user: ports.AuthenticatedUser,
 ) -> ports.AuthenticatedUser:
-    """The account itself when its role is the configured admin role; else the 403.
+    """The account itself when its role is ``AppRole.ADMIN``; else the 403.
 
     The 403 of a person a person path admitted carries ``insufficient_scope``; a resource's
     admission is capped for good, so a new sign-in cannot help and its 403 carries no challenge.
     """
-    if user.role != web_auth_config(connection).admin_role:
+    if user.role != AppRole.ADMIN:
         admission = _bearer_admission(connection)
         is_person_path_token = (
             admission is not None

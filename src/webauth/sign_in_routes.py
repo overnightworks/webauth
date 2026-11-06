@@ -459,7 +459,7 @@ class _SignIn:
         identity = self.relying_party(request).complete_login(pending, request.url.query)
         if isinstance(identity, OidcRefusal):
             return self._refuse(request, identity)
-        admitted = _decide_admission(identity, admission=self.admission, config=config)
+        admitted = _decide_admission(identity, admission=self.admission)
         if isinstance(admitted, AdmissionRefusal):
             return self._refuse(request, admitted)
         replaced_session_id = session_id_from_request(request, config)

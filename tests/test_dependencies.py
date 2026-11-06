@@ -302,7 +302,7 @@ def test_a_touch_reporting_no_row_refuses_the_request_and_writes_nothing() -> No
     assert app.authenticated == []
 
 
-def test_the_admin_route_admits_the_configured_admin_role() -> None:
+def test_the_admin_route_admits_a_stored_admin() -> None:
     app = an_auth_app(a_session(user=FakeUser(role=ADMIN_ROLE)))
 
     response = app.get("/admin", cookie=app.signed_cookie())

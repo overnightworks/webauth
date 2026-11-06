@@ -87,7 +87,7 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
-    from webauth.admission import AdmissionConfig, AdmissionRefusal, AppRole
+    from webauth.admission import AdmissionConfig, AdmissionRefusal
     from webauth.config import WebAuthConfig
     from webauth.oidc import OidcIdentity, OidcRelyingParty, VerifiedAccessToken
     from webauth.ports import (
@@ -494,13 +494,12 @@ def _decide_admission(
     identity: OidcIdentity,
     *,
     admission: AdmissionConfig,
-    config: WebAuthConfig,
 ) -> _AdmittedLogin | AdmissionRefusal:
     """Whether ``identity`` may sign in, and as which role. Pure: it reads nothing but its
     arguments and writes nothing.
 
-    The role is ``admin_role`` when the identity is a member of ``admission.admin_group``
-    (or below it), otherwise ``user_role``, whatever role a stored account holds. The
+    The role is ``"admin"`` when the identity is a member of ``admission.admin_group``
+    (or below it), otherwise ``"user"``, whatever role a stored account holds. The
     order of refusals is ``FOREIGN_ISSUER``, then ``NOT_A_MEMBER`` (the identity's groups
     hold no path of ``admission.login_group``, or are missing or empty). Both write nothing and
     look up no account.
@@ -514,11 +513,7 @@ def _decide_admission(
     derived = _admission.app_role(identity.groups, admission)
     if derived is None:
         return _admission.AdmissionRefusal.NOT_A_MEMBER
-    return _AdmittedLogin(identity, _stored_role(derived, config))
-
-
-def _stored_role(derived: AppRole, config: WebAuthConfig) -> str:
-    return config.admin_role if derived is _admission.AppRole.ADMIN else config.user_role
+    return _AdmittedLogin(identity, derived.value)
 
 
 class _Claimant(Protocol):
@@ -536,7 +531,6 @@ def _admit_token_holder(
     verified: VerifiedAccessToken,
     *,
     admission: AdmissionConfig,
-    config: WebAuthConfig,
 ) -> AuthenticatedUser | AdmissionRefusal:
     """The account behind a verified access token, admitted as a sign-in admits it.
 
@@ -551,7 +545,7 @@ def _admit_token_holder(
     derived = _admission.app_role(verified.groups, admission)
     if derived is None:
         return _admission.AdmissionRefusal.NOT_A_MEMBER
-    role = _stored_role(derived, config)
+    role = derived.value
     try:
         with transaction() as stores:
             account = _admit_account(verified, role, accounts=stores.accounts, audit=stores.audit)
@@ -566,15 +560,14 @@ def _admit_resource_holder(
     *,
     required_group: str,
     admission: AdmissionConfig,
-    config: WebAuthConfig,
 ) -> AuthenticatedUser | None:
-    """The known account behind an agent's token, always with the person role, or ``None``.
+    """The known account behind an agent's token, always with the role "user", or ``None``.
 
     The token's groups must pass ``app_role`` against ``admission`` and hold
     ``required_group`` or a path below it; otherwise no store is touched. One
     ``SignInTransaction`` entry then calls only ``accounts.get``: an unknown subject
     answers ``None``, and nothing is provisioned, re-roled or audited. The answer is built
-    inside the block and takes its role from ``config.user_role``, never from the
+    inside the block and takes the role ``"user"``, never from the
     account, so an admin's agent token carries no admin right. Never commits; a store or
     exit failure propagates.
     """
@@ -586,7 +579,9 @@ def _admit_resource_holder(
         account = stores.accounts.get(verified.subject)
         if account is None:
             return None
-        return AuthenticatedUser(id=account.id, username=account.username, role=config.user_role)
+        return AuthenticatedUser(
+            id=account.id, username=account.username, role=_admission.AppRole.USER.value
+        )
 
 
 def _admit_account(

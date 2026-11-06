@@ -52,14 +52,12 @@ def test_the_secret_never_shows_up_in_the_configuration_it_belongs_to() -> None:
     assert "s" * MIN_SESSION_SECRET_CHARS not in repr(a_web_auth_config())
 
 
-def test_names_and_roles_default_to_the_conventional_ones() -> None:
+def test_names_default_to_the_conventional_ones() -> None:
     config = a_web_auth_config()
 
     assert config.session_cookie_name == DEFAULT_SESSION_COOKIE_NAME == "__Host-session_id"
     assert config.cookie_samesite == "strict"
     assert config.cookie_secure is True
-    assert config.admin_role == "admin"
-    assert config.user_role == "user"
 
 
 def test_a_configuration_built_positionally_is_refused() -> None:
@@ -155,39 +153,12 @@ def test_a_session_cookie_name_of_the_hosts_own_is_refused_at_construction() -> 
         a_web_auth_config(session_cookie_name="sid")
 
 
-@pytest.mark.parametrize(
-    ("overrides", "message"),
-    [
-        pytest.param(
-            {"admin_role": "user", "user_role": "user"},
-            "admin_role and user_role must differ",
-            id="equal roles",
-        ),
-        pytest.param({"admin_role": " "}, "admin_role must name a role", id="blank admin role"),
-        pytest.param({"user_role": ""}, "user_role must name a role", id="empty user role"),
-        pytest.param({"admin_role": None}, "admin_role must name a role", id="no admin role"),
-        pytest.param({"user_role": 5}, "user_role must name a role", id="a numeric user role"),
-    ],
-)
-def test_a_role_that_cannot_work_is_refused_at_configuration_time(
-    overrides: dict[str, object],
-    message: str,
+@pytest.mark.parametrize("removed_option", ["admin_role", "user_role"])
+def test_a_role_option_is_refused_because_app_role_alone_names_the_roles(
+    removed_option: str,
 ) -> None:
-    with pytest.raises(ValueError, match=message):
-        a_web_auth_config(**overrides)
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        pytest.param({}, id="the defaults"),
-        pytest.param({"admin_role": "operator", "user_role": "member"}, id="custom roles"),
-    ],
-)
-def test_distinct_roles_are_accepted(
-    overrides: dict[str, object],
-) -> None:
-    a_web_auth_config(**overrides)
+    with pytest.raises(TypeError, match=removed_option):
+        a_web_auth_config(**{removed_option: "admin"})
 
 
 def test_a_request_reads_the_configuration_installed_on_its_application() -> None:

@@ -33,7 +33,6 @@ from tests.support.webauth_arrangement import (
     UsersWithoutUniqueUsernames,
     WriteLockInMemory,
     _require_held_lock,
-    a_web_auth_config,
 )
 from webauth.admission import (
     AdmissionConfig,
@@ -73,7 +72,7 @@ class Host:
         identity: OidcIdentity,
         admission: AdmissionConfig = ADMISSION,
     ) -> UserRecord | AdmissionRefusal:
-        decided = _decide_admission(identity, admission=admission, config=a_web_auth_config())
+        decided = _decide_admission(identity, admission=admission)
         if isinstance(decided, AdmissionRefusal):
             return decided
         with self.lock.hold():
@@ -327,6 +326,27 @@ def test_an_account_gets_the_role_its_groups_derive_at_every_login(case: RoleCas
         else ([] if case.stored_role else [AccountEventKind.USER_CREATED])
     )
     assert kinds == expected
+
+
+def test_the_roles_a_sign_in_stores_and_audits_are_plain_strings() -> None:
+    host = a_host()
+
+    created = admitted_account(host, LENA)
+    promoted = admitted_account(host, LENA_IN_THE_ADMIN_GROUP)
+
+    created_event, changed_event = host.audit.account_events
+    assert (created_event.role, changed_event.previous_role, changed_event.role) == (
+        MEMBER_ROLE,
+        MEMBER_ROLE,
+        ADMIN_ROLE,
+    )
+    assert {
+        type(created_event.role),
+        type(changed_event.previous_role),
+        type(changed_event.role),
+        type(created.role),
+        type(promoted.role),
+    } == {str}
 
 
 def test_a_role_change_audit_event_carries_the_roles_and_no_username() -> None:

@@ -45,8 +45,6 @@ __all__ = [
 ]
 
 _MIN_SESSION_SECRET_CHARS: Final = 32
-_DEFAULT_ADMIN_ROLE: Final = "admin"
-_DEFAULT_USER_ROLE: Final = "user"
 
 _WEB_AUTH_STATE_ATTRIBUTE: Final = "webauth"
 
@@ -91,9 +89,6 @@ class WebAuthConfig:
     issues. With ``"strict"``, the page the login's callback redirects to
     carries the session cookie only when the app and the issuer share a site
     (a registrable domain); across sites that first page renders signed out.
-    ``admin_role`` (``"admin"``) and ``user_role`` (``"user"``) are the role
-    names the host stores; each must be non-blank and they must differ, or
-    every new account would be an admin.
     ``wall_clock`` is the one reading of now behind every HTTP and WebSocket
     session decision, so a test fixes it.
 
@@ -133,8 +128,6 @@ class WebAuthConfig:
     session_lifetime: SessionLifetime
     cookie_samesite: CookieSameSite = _DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
-    admin_role: str = _DEFAULT_ADMIN_ROLE
-    user_role: str = _DEFAULT_USER_ROLE
     wall_clock: WallClock = time.time
 
     def __post_init__(self) -> None:
@@ -165,18 +158,6 @@ class WebAuthConfig:
                 "list the hosts this application serves. "
                 'To admit local development, use allowed_hosts_exact={"localhost", '
                 '"127.0.0.1"}',
-            )
-        self._require_distinct_roles()
-
-    def _require_distinct_roles(self) -> None:
-        for field in ("admin_role", "user_role"):
-            value = getattr(self, field)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{field} must name a role")
-        if self.admin_role == self.user_role:
-            raise ValueError(
-                "admin_role and user_role must differ; equal roles would make "
-                "every new account an admin",
             )
 
     @property
