@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The terminal steps of the real-browser proofs in tests/e2e/oidc/ (see its README).
+# The terminal steps of the real-browser proofs in tests/e2e/oidc/ (see docs/runbooks/).
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -84,10 +84,20 @@ run_locked() {
   return "$status"
 }
 
-# Ctrl-C reaches flock, which holds the lock for the run: setpriv then sends timeout
-# SIGTERM, timeout passes it to the driver, and the run ends through its own cleanup.
-# timeout's KILL reaches only its direct child, uv, not the driver (see the README's "Stop a
-# run"). Stop a run with SIGTERM to timeout or the python process.
+# Ctrl-C reaches flock, which holds the lock for the run. When flock dies the kernel
+# frees the lock at once and setpriv sends timeout SIGTERM; timeout passes it to the
+# driver, whose first SIGTERM or SIGINT ends the run through an uninterruptible cleanup
+# (further signals are ignored). So the lock is free while that teardown runs, and a new
+# proof can take it; the window is bounded by the driver's teardown budget (225 s, under
+# kill-after 240 s for a run; cleanup has 30 s and no teardown of its own). SIGTERM sent
+# to timeout or to the python process ends the run the same way, but flock stays alive
+# and keeps the lock until the teardown ends. flock exits 69 when setpriv cannot run:
+# setpriv is never left out, or the lock would not outlive the command.
+# timeout's KILL reaches only its direct child, uv: bash -c execs uv run, which starts
+# python as its own child (measured on uutils coreutils 0.10.0: a child that ignores TERM
+# is killed, its grandchild survives). So an overrunning teardown is not cut short and
+# the driver then runs on with no lock held. The processes that can outlive a run are
+# listed in docs/runbooks/stop-a-run.md.
 # The load is read again once the lock is held, because the wait for it can be long.
 # The run directory is made under the lock and handed to the driver as --scratch.
 run_under_lock() {

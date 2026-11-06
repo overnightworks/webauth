@@ -2,7 +2,7 @@
 
     scripts/run_oidc_proof.sh conformance
 
-``README.md`` beside this file is the runbook. The run creates
+``docs/runbooks/run-the-conformance-suite.md`` is the runbook. The run creates
 ``oidcc-client-basic-certification-test-plan`` (OpenID Foundation conformance
 suite release v5.3.3, server and mongo images pinned by digest in
 ``suite-compose.yaml``) with a throwaway client secret, lists the plan's 14
@@ -11,7 +11,7 @@ drives every module the expectation table does not skip, with the host app
 (``host_app.py``) as the relying party under test and a real Chromium following
 the redirects. A module without a table row, or a row without a module, fails
 the run. It writes one row per module and exports the plan into the run
-directory's ``export/`` (``README.md`` says how to handle it). It needs Docker
+directory's ``export/`` (the runbook says how to handle it). It needs Docker
 and no hal checkout. The host's ``login_group`` and ``admin_group`` do not apply:
 the suite's tokens carry no ``groups`` claim, so this driver states the value of
 ``EverySubject.OF_THE_BOUND_ISSUER`` and of ``NoAdmins.IN_THIS_APP``.
@@ -269,13 +269,13 @@ PLAN_TABLE: tuple[Expectation | Skip, ...] = (
         ACCEPTED,
         "OIDCCClientTestKidAbsentSingleJwks publishes one RSA signing key and signs without "
         "a kid, and expects acceptance (OIDC Core 10.1); webauth verifies a kid-less token "
-        "against a set with exactly one RS256 verification key (#160).",
+        "against a set with exactly one RS256 verification key.",
     ),
     Expectation(
         "oidcc-client-test-kid-absent-multiple-jwks",
         token_rejected(RejectionReason.INVALID_KEY_ID),
         "OIDCCClientTestKidAbsentMultipleMatchingKeysInJwks accepts either answer; webauth "
-        "refuses a kid-less header against several RS256 verification keys (OIDC Core 10.1, #160).",
+        "refuses a kid-less header against several RS256 verification keys (OIDC Core 10.1).",
     ),
     Expectation(
         "oidcc-client-test-idtoken-sig-rs256",
