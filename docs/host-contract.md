@@ -503,7 +503,10 @@ synchronous, so an async service runs it in a thread.
 It returns a `PersonCaller` (the app, the client id, the person's `Principal` and groups, and the person's
 `AppRole`) or a `CallerRefusal`. It never says which token a refusal concerns. Both tokens are verified and
 read before any check that compares them, so every `UNAUTHENTICATED` and `UNAVAILABLE` refusal comes before
-any `FORBIDDEN` one. The first fault of this order is the refusal; `CallerRefusal.refusal_class` names its
+any `FORBIDDEN` one. The checks run in this order: the workload token is checked for a missing token and then
+by the verifier, then the person token the same way; then the workload token's subject and groups, then the
+person token's; then the rows from `NOT_A_WORKLOAD` down, in table order. The table lists each reason where it
+is first checked, and the first fault is the refusal. `CallerRefusal.refusal_class` names its
 `CallerRefusalClass`, and the host owns the wire codes, here the recommended ones:
 
 | Reason | Fault | Class |
@@ -528,6 +531,10 @@ The verifier stage keeps the verifier's own order: a malformed header or unsuppo
 the verifier's refusal when the key set cannot be fetched and the token's key is not among the
 cached ones, also when other keys are cached; with a usable cached key, a failed refresh still
 verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
+
+By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
+`INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
+`UNREGISTERED_CLIENT`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and `NOT_A_MEMBER`.
 
 A group claim that is a JSON `null` is `MALFORMED_GROUPS`; only an absent claim means no groups.
 

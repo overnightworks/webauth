@@ -1,4 +1,4 @@
-"""A service that admits an app acting as itself, typed against the public surface.
+"""A service that admits an app acting for a person, typed against the public surface.
 
 CI checks this file with a pinned pyright against the built wheel, so a change
 to the service caller check or an export a service cannot import fails the
