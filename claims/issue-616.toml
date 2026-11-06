@@ -1,8 +1,0 @@
-claim_id = "361dd2cdaa2a415ba79ada281d7e9d02"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "9966431a527d9541acb19d4e00642dea754e7d1e"
-branch = "claude/issue-616-release-notes-leave-the-tree-docs-change"
-scope = ["AGENTS.md", "README.md", "docs/CHANGELOG.md", "pyproject.toml", "tests/test_webauth_changelog.py"]
-opened_commit = "4ad7a1dba5add0573daaf43cc31fd065dcd5cea7"
-whole_reason = "One owner move: the notes leave one file for the release item and pages, and every pin of that file changes in the same landing so no pointer dangles."
