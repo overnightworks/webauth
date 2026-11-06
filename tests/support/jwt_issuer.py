@@ -17,6 +17,7 @@ from tests.support.oidc_arrangement import (
     REALM_JWKS_URL,
     FakeClock,
     FakeKeySetEndpoint,
+    an_id_token_claims,
     changed,
     jws,
     public_jwk,
@@ -45,16 +46,9 @@ class IssuerScenario:
 
     def claims(self, changes: dict[str, Any] | None = None) -> dict[str, Any]:
         now = int(self.wall_clock.now)
-        issued_claims = {
-            "iss": REALM_ISSUER,
-            "aud": APP_CLIENT_ID,
-            "sub": "7335d417-61da-459d-899c-0a01c76a2f94",
-            "exp": now + 300,
-            "iat": now - 10,
-            "nbf": now - 10,
-            "sid": "4c2a9f0e-session",
-            "preferred_username": "operator",
-        }
+        issued_claims = an_id_token_claims(
+            now, nbf=now - 10, sid="4c2a9f0e-session", preferred_username="operator"
+        )
         return changed(issued_claims, changes or {})
 
     def token(
