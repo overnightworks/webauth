@@ -48,7 +48,8 @@ version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/webauth/__init__.py 2>/d
   refuse "cannot read src/webauth/__init__.py"
 [[ "$tag" == "v${version}" ]] || refuse "${tag} differs from v${version}, the webauth.__version__ of this checkout"
 [[ "$(git symbolic-ref --short -q HEAD || true)" == "main" ]] || refuse "the checkout is not on main"
-[[ -z "$(git status --porcelain)" ]] || refuse "the tree is not clean"
+status="$(git status --porcelain 2>&1)" || refuse "git status failed: ${status}"
+[[ -z "$status" ]] || refuse "the tree is not clean"
 run_hidden git fetch --no-tags origin
 sha="$(git rev-parse refs/heads/main 2>/dev/null)" || refuse "main does not exist locally"
 origin_sha="$(git rev-parse refs/remotes/origin/main 2>/dev/null)" || refuse "origin has no main"

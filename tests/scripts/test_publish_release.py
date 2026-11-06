@@ -240,6 +240,17 @@ def set_up_dirty_tree(release: Release) -> None:
     (release.work / "scripts" / "verify_release.sh").write_text("changed\n")
 
 
+def set_up_git_status_failing(release: Release) -> None:
+    git = release.root / "tools" / "git"
+    real_git = git.resolve()
+    git.unlink()
+    git.write_text(
+        f'#!/usr/bin/env bash\n[[ "$1" == status ]] && {{ echo "index corrupt" >&2; exit 128; }}\n'
+        f'exec {real_git} "$@"\n'
+    )
+    git.chmod(0o755)
+
+
 def set_up_local_main_ahead(release: Release) -> None:
     release.commit("ahead")
 
@@ -280,6 +291,7 @@ def set_up_gh_missing(release: Release) -> None:
         ("v1.2.4", None, "{version}"),
         ("{tag}", set_up_other_branch, "main"),
         ("{tag}", set_up_dirty_tree, "clean"),
+        ("{tag}", set_up_git_status_failing, "git status failed: index corrupt"),
         ("{tag}", set_up_local_main_ahead, "origin/main"),
         ("{tag}", set_up_origin_main_ahead, "origin/main"),
         ("{tag}", set_up_tag_on_origin, "origin"),
