@@ -399,6 +399,8 @@ def test_publish_deletes_its_local_tag_when_the_push_fails(release: Release) -> 
     result = release.publish(release.tag)
 
     assert result.returncode == 1
+    assert result.stderr.startswith("publish_release: ")
+    assert result.stderr.count("\n") == 1
     assert "rejected by origin" in result.stderr
     assert release.local_tags() == []
     assert release.origin_tags() == []

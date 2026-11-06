@@ -5,7 +5,7 @@
 set -euo pipefail
 
 refuse() {
-  echo "publish_release: $1" >&2
+  echo "publish_release: ${1//$'\n'/\\n}" >&2
   exit 1
 }
 
@@ -29,7 +29,7 @@ wait_for_run() {
     fi
     if [[ -n "$answer" ]]; then
       if [[ ! "$answer" =~ ^[0-9]+\ (queued|requested|waiting|pending|in_progress|completed)\ [^[:space:]]+\ [^[:space:]]+$ ]]; then
-        refuse "cannot read the answer of gh run list: ${answer//$'\n'/\\n}"
+        refuse "cannot read the answer of gh run list: ${answer}"
       fi
       read -r run_id status run_conclusion run_url <<<"$answer"
       [[ "$status" == "completed" ]] && return 0
@@ -75,7 +75,9 @@ if ! output="$(git tag -a "$tag" -m "webauth ${version}" "$sha" 2>&1)"; then
   refuse "git tag failed: ${output}"
 fi
 if ! output="$(git push --no-follow-tags origin "refs/tags/${tag}:refs/tags/${tag}" 2>&1)"; then
-  git tag -d "$tag" >/dev/null || refuse "git push failed: ${output}; the local tag ${tag} is left behind, delete it with: git tag -d ${tag}"
+  if ! deleted="$(git tag -d "$tag" 2>&1)"; then
+    refuse "git push failed: ${output}; deleting the local tag ${tag} failed: ${deleted}; delete it with: git tag -d ${tag}"
+  fi
   refuse "git push failed: ${output}"
 fi
 echo "pushed ${tag}"
