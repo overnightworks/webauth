@@ -45,10 +45,10 @@ def docker(*arguments: str) -> str:
     # Fixed command list
     return subprocess.run(  # noqa: S603
         # The operator's own PATH by design
-        ["docker", *arguments],
+        ["docker", *arguments],  # noqa: S607
         check=True,
         capture_output=True,
-        text=True,  # noqa: S607
+        text=True,
         timeout=DOCKER_TIMEOUT_SECONDS,
     ).stdout
 
@@ -57,10 +57,10 @@ def _git(hal: Path, *arguments: str) -> str:
     # Fixed command list
     return subprocess.run(  # noqa: S603
         # The operator's own PATH by design
-        ["git", "-C", str(hal), *arguments],
+        ["git", "-C", str(hal), *arguments],  # noqa: S607
         check=True,
         capture_output=True,
-        text=True,  # noqa: S607
+        text=True,
     ).stdout
 
 
