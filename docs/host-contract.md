@@ -32,8 +32,8 @@ admin role. The details are in the sections below.
 `/apps/notes/admin`, are admins. Both are decided again at every login, so a
 change in Keycloak takes effect at the person's next sign-in; an app session
 that is already open keeps its access until it ends; a changed admin role
-reaches every open session at the person's next sign-in. The session's absolute
-cap bounds the delay before a login-group removal takes effect. The issuer's
+which lives on the account, reaches every open session at the person's next
+sign-in. The session's absolute cap bounds the delay before a login-group removal takes effect. The issuer's
 SSO session makes a fresh login a redirect the person does not notice; an
 immediate removal requires disabling the user at the issuer together with
 [back-channel logout](ARCHITECTURE.md#back-channel-logout). See
@@ -43,13 +43,11 @@ A person is a member when one of their groups is the group's path or a subgroup 
 it, compared character for character and by path segment, so `/apps/notes/admin`
 counts for `/apps/notes` and `/apps/notes2` does not. The groups claim must carry
 full paths (Keycloak's group mapper with `full.path` on); a missing or empty claim
-means no membership. Only the issuer's groups decide the role. It is rewritten at
-every login and lives on the account, so a person taken out of the admin group is a
-plain user from the next login on every device at once. The check runs before any
-account is looked up or created, so a person removed from the group is refused at
-their next login while their account and data stay, and a person put back returns to
-the same account. `app_role` is that rule's public form, for a second service that
-verifies the issuer's token itself.
+means no membership. The check runs before any account is looked up or created, so
+a person removed from the group is refused at their next login while their account
+and data stay, and a person put back returns to the same account. `app_role` is
+that rule's public form, for a second service that verifies the issuer's token
+itself.
 
 Admission never looks up a username and has no local active-user flag; disabling
 people belongs to the issuer ([#279](https://github.com/overnightworks/webauth/issues/279),
