@@ -8,10 +8,11 @@ their own. Around that it guards every app the same way: it turns away requests 
 apply its protections, limits how often one address may try, and records what happened for a later security review. An
 app tells it where to keep what must last and has nothing else of its own to build.
 
-Every app integrates it the same way, from its documentation alone, without reading its code. A security fix is made once
-and reaches every app with the next release.
+Every app integrates it the same way, from its documentation alone, without reading its code. A security fix is made
+once, and every app gets it by taking the next release.
 
-It follows OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0 (RFC 6749) with bearer tokens (RFC 6750), JSON Web Token (RFC 7519) and Fetch Metadata.
+It follows OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0 (RFC 6749) with
+bearer tokens (RFC 6750), JSON Web Token (RFC 7519) and Fetch Metadata.
 
 It is made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot
 derive from the code, and the code is clean enough that the next agent changes it without fear.
@@ -19,7 +20,7 @@ derive from the code, and the code is clean enough that the next agent changes i
 ## Who uses it today
 
 The operator, the people who sign in to his apps, the programs that call those apps on their own behalf, and the agents
-that build and integrate them. One app's need shapes webauth for all of them, so all of them are asked.
+that build and integrate them. One app's need shapes webauth for every app, so every app is asked.
 
 ## Deliberate non-goals
 
