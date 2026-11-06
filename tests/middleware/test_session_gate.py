@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -20,17 +20,22 @@ from tests.support.gate_arrangement import (
     ADMITTED_ADMIN_PATH,
     ADMITTED_ADMIN_PATHS,
     WEBSOCKET_ADMITTED_ADMIN_PATH,
-    ScopeRelay,
-    relayed,
     with_admitted_admin_routes,
 )
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
+from tests.support.session_gate_arrangement import (
+    ONLY_LOGIN_AND_HEALTH,
+    a_gated_app,
+    a_plain_app,
+    ask,
+    counted,
+    signed_in,
+)
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     ALL_DEPENDENCIES_PATH,
     ALLOWED_ORIGIN,
     GATED_APP_HEADERS_POLICY,
-    LOGIN_REDIRECT,
     MEMBER_ROLE,
     WEBSOCKET_ADMITTED_PATH,
     WEBSOCKET_PATH,
@@ -40,7 +45,6 @@ from tests.support.webauth_arrangement import (
     SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
     SessionsThatMustNotBeAsked,
-    UsersInMemory,
     a_session,
     a_signed_in_same_origin_request,
     a_web_auth_config,
@@ -59,69 +63,22 @@ from webauth.policies import (
     RateLimitBudget,
     RateLimitPolicy,
 )
-from webauth.ports import AuthenticatedUser, SessionTransaction
+from webauth.ports import SessionTransaction
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-LOGIN_PATH = "/login"
 HTML = "text/html"
 OUTSIDE_LIFETIME = timedelta(minutes=-5)
 FOREIGN_ORIGIN = "https://evil.test"
 BODY_LIMIT_BYTES = 100
-
-ONLY_LOGIN_AND_HEALTH = (PublicRule(PathRules(exact=frozenset({LOGIN_PATH, "/health"}))),)
-
-
-def a_gated_app(
-    record: Any = None, *, public: tuple[PublicRule, ...] = (), **keywords: Any,
-) -> AuthApp:
-    """A gated application with a login redirect, whose server errors answer 500."""
-    return an_auth_app(
-        a_session() if record is None else record,
-        gate=True,
-        login_redirect=LOGIN_REDIRECT,
-        public=public,
-        raise_server_exceptions=False,
-        **keywords,
-    )
-
-
-def a_plain_app(record: Any, **keywords: Any) -> AuthApp:
-    """The same application guarded by the route dependency alone."""
-    return an_auth_app(record, login_redirect=LOGIN_REDIRECT, **keywords)
-
-
-def ask(
-    app: AuthApp,
-    path: str,
-    *,
-    method: str = "GET",
-    cookie: str | None = None,
-    accept: str | None = None,
-    headers: dict[str, str] | None = None,
-) -> Response:
-    sent = dict(headers or {})
-    if cookie is not None:
-        sent["cookie"] = cookie
-    if accept is not None:
-        sent["accept"] = accept
-    return app.client.request(method, path, headers=sent, follow_redirects=False)
-
-
-def signed_in(app: AuthApp) -> str:
-    return session_cookie_header(app.signed_cookie())
 
 
 def assert_answers_alike(gated: Response, plain: Response) -> None:
     assert gated.status_code == plain.status_code
     assert gated.content == plain.content
     assert {name: gated.headers[name] for name in plain.headers} == dict(plain.headers)
-
-
-def counted(sessions: SessionsRecordingTheirTransaction, name: str) -> int:
-    return sessions.event_names.count(name)
 
 
 class TestPublicPaths:
@@ -554,37 +511,37 @@ class TestTheGatesAdmissionIsTheDependencys:
         assert len(gated.authenticated) == case.authenticated
 
 
+def _a_full_stack_app() -> AuthApp:
+    return a_gated_app(
+        None,
+        sessions=SessionsThatMustNotBeAsked(),
+        stack_policies={
+            "body_size": BodySizePolicy(default_max_bytes=BODY_LIMIT_BYTES),
+            "rate_limit": RateLimitPolicy(default=RateLimitBudget("api", 1, 60)),
+            "csrf_origin": CsrfPolicy(),
+        },
+    )
+
+
+def _post_to_optional(
+    app: AuthApp, *, body: bytes = b"{}", headers: Mapping[str, str],
+) -> Response:
+    passing = dict(
+        (name.decode(), value.decode())
+        for name, value in a_signed_in_same_origin_request(app.config)
+    )
+    passing.update(headers)
+    return app.client.post("/optional", content=body, headers=passing, follow_redirects=False)
+
+
 class TestOrder:
     def test_a_forged_state_changing_request_is_refused_before_a_session_lookup(self) -> None:
-        def a_full_stack_app() -> AuthApp:
-            return a_gated_app(
-                None,
-                sessions=SessionsThatMustNotBeAsked(),
-                stack_policies={
-                    "body_size": BodySizePolicy(default_max_bytes=BODY_LIMIT_BYTES),
-                    "rate_limit": RateLimitPolicy(default=RateLimitBudget("api", 1, 60)),
-                    "csrf_origin": CsrfPolicy(),
-                },
-            )
-
-        def post(
-            app: AuthApp, *, body: bytes = b"{}", headers: Mapping[str, str],
-        ) -> Response:
-            passing = dict(
-                (name.decode(), value.decode())
-                for name, value in a_signed_in_same_origin_request(app.config)
-            )
-            passing.update(headers)
-            return app.client.post(
-                "/optional", content=body, headers=passing, follow_redirects=False,
-            )
-
-        assert post(
-            a_full_stack_app(),
+        assert _post_to_optional(
+            _a_full_stack_app(),
             headers={"origin": FOREIGN_ORIGIN, "sec-fetch-site": "cross-site"},
         ).status_code == 403
         same_origin = {"origin": ALLOWED_ORIGIN}
-        app = a_full_stack_app()
+        app = _a_full_stack_app()
         without_provenance = {
             name.decode(): value.decode()
             for name, value in a_signed_in_same_origin_request(app.config)
@@ -593,118 +550,9 @@ class TestOrder:
         assert app.client.post(
             "/optional", content=b"{}", headers=without_provenance,
         ).status_code == 403
-        assert post(
-            a_full_stack_app(), body=b"x" * (BODY_LIMIT_BYTES + 1), headers=same_origin,
+        assert _post_to_optional(
+            _a_full_stack_app(), body=b"x" * (BODY_LIMIT_BYTES + 1), headers=same_origin,
         ).status_code == 413
-        spent = a_full_stack_app()
-        post(spent, headers=same_origin)
-        assert post(spent, headers=same_origin).status_code == 429
-
-
-class TestARecordedAdmissionBelongsToItsRequest:
-    @dataclass
-    class Arrangement:
-        first: AuthApp
-        first_relay: ScopeRelay
-        gate_entries: dict[str, Any]
-        users: UsersInMemory
-        sessions: SessionsRecordingTheirTransaction
-        second_cookie: str
-
-    @pytest.fixture
-    def arrangement(self) -> TestARecordedAdmissionBelongsToItsRequest.Arrangement:
-        first_user, second_user = FakeUser("user-1", "alice"), FakeUser("user-2", "bruno")
-        users = UsersInMemory(first_user, second_user)
-        now = datetime.now(UTC)
-        record = a_session(user=first_user, now=now)
-        sessions = SessionsRecordingTheirTransaction(record, users=users)
-        second = sessions.create(
-            second_user.id, now=now, expires_at=now + timedelta(minutes=30), refresh_token=None,
-            id_token=None,
-        )
-        first = a_gated_app(
-            record, sessions=sessions, public=ONLY_LOGIN_AND_HEALTH,
-        )
-        relay = relayed(first)
-        assert ask(first, "/me", cookie=signed_in(first)).json()["username"] == "alice"
-        control = a_plain_app(a_session())
-        control_relay = relayed(control)
-        ask(control, "/me", cookie=signed_in(control))
-        return self.Arrangement(
-            first=first,
-            first_relay=relay,
-            gate_entries={
-                key: value for key, value in relay.added.items()
-                if key not in control_relay.added
-            },
-            users=users,
-            sessions=sessions,
-            second_cookie=session_cookie_header(first.signed_cookie(second.id)),
-        )
-
-    def test_a_replay_on_the_gated_app_is_decided_by_the_gate_itself(
-        self, arrangement: Arrangement,
-    ) -> None:
-        assert arrangement.gate_entries
-        arrangement.first_relay.replay = arrangement.gate_entries
-        assert ask(arrangement.first, "/me").json() == {"detail": "Authentication required"}
-        assert ask(arrangement.first, "/health").json() == {"username": None}
-
-    @pytest.mark.parametrize("planted", ["replayed", "an-account-under-each-key"])
-    def test_a_replay_on_an_app_with_its_own_config_is_ignored(
-        self, arrangement: Arrangement, planted: str,
-    ) -> None:
-        other = with_admitted_admin_routes(an_auth_app(None, login_redirect=LOGIN_REDIRECT))
-        relay = relayed(other)
-        relay.replay = (
-            arrangement.gate_entries if planted == "replayed" else {
-                key: AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
-                for key in arrangement.gate_entries
-            }
-        )
-        cookie = signed_in(arrangement.first)
-        assert ask(other, "/me", cookie=cookie).json() == {"detail": "Session expired"}
-        with pytest.raises(RuntimeError):
-            ask(other, "/health", cookie=cookie)
-        with pytest.raises(RuntimeError):
-            ask(other, ADMITTED_ADMIN_PATH, cookie=cookie)
-
-    def test_a_replay_on_a_shared_config_is_ignored_for_another_sessions_cookie(
-        self, arrangement: Arrangement,
-    ) -> None:
-        shared = with_admitted_admin_routes(an_auth_app(
-            None, sessions=arrangement.sessions, config=arrangement.first.config,
-            login_redirect=LOGIN_REDIRECT,
-        ))
-        relay = relayed(shared)
-        relay.replay = arrangement.gate_entries
-        arrangement.sessions.events.clear()
-        answer = ask(shared, "/me", cookie=arrangement.second_cookie)
-        assert answer.json()["username"] == "bruno"
-        assert (
-            counted(arrangement.sessions, "load"), counted(arrangement.sessions, "touch"),
-        ) == (1, 1)
-        assert ask(shared, "/me").json() == {"detail": "Authentication required"}
-        with pytest.raises(RuntimeError):
-            ask(shared, "/health", cookie=arrangement.second_cookie)
-        with pytest.raises(RuntimeError):
-            ask(shared, ADMITTED_ADMIN_PATH, cookie=arrangement.second_cookie)
-        with pytest.raises(RuntimeError):
-            ask(shared, "/health")
-
-    def test_a_replay_for_the_same_cookie_is_reused_without_a_store_read(
-        self, arrangement: Arrangement,
-    ) -> None:
-        shared = an_auth_app(
-            None, sessions=arrangement.sessions, config=arrangement.first.config,
-            login_redirect=LOGIN_REDIRECT,
-        )
-        relay = relayed(shared)
-        relay.replay = arrangement.gate_entries
-        arrangement.sessions.events.clear()
-        cookie = signed_in(arrangement.first)
-        assert ask(shared, "/me", cookie=cookie).json()["username"] == "alice"
-        assert ask(shared, "/health", cookie=cookie).json() == {"username": "alice"}
-        assert (
-            counted(arrangement.sessions, "load"), counted(arrangement.sessions, "touch"),
-        ) == (0, 0)
+        spent = _a_full_stack_app()
+        _post_to_optional(spent, headers=same_origin)
+        assert _post_to_optional(spent, headers=same_origin).status_code == 429
