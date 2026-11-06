@@ -15,15 +15,15 @@ from tests.support.oidc_arrangement import (
     CLIENT_SECRET,
     ISSUED_ACCESS_TOKEN_CANARY,
     ISSUED_REFRESH_TOKEN,
+    ISSUED_SUBJECT,
     REALM_ISSUER,
     FakeClock,
-    FakeKeySetEndpoint,
     FakeTokenEndpoint,
     a_realm_client_config,
+    a_relying_party,
+    an_id_token_claims,
     changed,
     jws,
-    key_set_document,
-    public_jwk,
     rs256,
     rsa_key,
     token_endpoint_answer,
@@ -40,7 +40,7 @@ from webauth.oidc import (
 
 OTHER_REALM = "https://login.example.org/realms/elsewhere"
 CODE = "authorization-code-from-the-callback"
-SUBJECT = "7335d417-61da-459d-899c-0a01c76a2f94"
+SUBJECT = ISSUED_SUBJECT
 SESSION_ID = "4c2a9f0e-session"
 # The grammar's two ends: a space and a tilde.
 TOKEN_AT_BOTH_ENDS = " ~"  # noqa: S105
@@ -94,15 +94,7 @@ class Attempt:
 def a_relying_party_for(
     token_endpoint: TokenRequestPost, config: OidcClientConfig, wall_clock: FakeClock
 ) -> OidcRelyingParty:
-    return OidcRelyingParty(
-        config,
-        post_token_request=token_endpoint,
-        fetch_key_set=FakeKeySetEndpoint(
-            key_set_document(public_jwk(rsa_key("current"), "current-key"))
-        ),
-        wall_clock=wall_clock,
-        monotonic_clock=FakeClock(5_000.0),
-    )
+    return a_relying_party(config=config, post_token_request=token_endpoint, wall_clock=wall_clock)
 
 
 @dataclass
@@ -117,18 +109,13 @@ class LoginScenario:
         self.relying_party = a_relying_party_for(self.token_endpoint, self.config, self.wall_clock)
 
     def id_token(self, pending: PendingLogin, changes: dict[str, Any]) -> str:
-        now = int(self.wall_clock.now)
-        claims = {
-            "iss": REALM_ISSUER,
-            "aud": APP_CLIENT_ID,
-            "sub": SUBJECT,
-            "exp": now + 300,
-            "iat": now - 10,
-            "nonce": pending.nonce,
-            "sid": SESSION_ID,
-            "preferred_username": "operator",
-            "groups": list(GROUPS),
-        }
+        claims = an_id_token_claims(
+            int(self.wall_clock.now),
+            nonce=pending.nonce,
+            sid=SESSION_ID,
+            preferred_username="operator",
+            groups=list(GROUPS),
+        )
         id_token = jws(
             {"alg": "RS256", "kid": "current-key", "typ": "JWT"},
             changed(claims, changes),

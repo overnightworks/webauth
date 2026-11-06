@@ -4,7 +4,8 @@
 login and logout at a real Keycloak (hal's `hold` stack) against a small host
 application whose routes are `build_app` in `host_app.py`; `conformance.py` runs the OpenID Foundation's
 conformance suite against the same host. The OIDC path is not faked. What each
-driver proves, scenario by scenario, is stated in its docstring; how the browser and Keycloak reach the apps is stated in
+driver (`prove.py`, `engines.py`, `conformance.py`, `bearer.py`, `bearer_resource.py`, `bearer_groups.py`)
+proves, scenario by scenario, is stated in its docstring; how the browser and Keycloak reach the apps is stated in
 `harness.py` and `shim.py`. `bearer.py` is the bearer proof: it plays hal, the machine caller, against the same Keycloak. `bearer_resource.py` drives the protected resource, `bearer_groups.py` drives `current_groups`, and `bearer_run.py` holds the shared helpers. `realm.py` holds the
 realm's facts and the admin calls that shape it.
 

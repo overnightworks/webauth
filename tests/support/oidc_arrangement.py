@@ -276,25 +276,54 @@ def a_realm_client_config(**changes: Any) -> OidcClientConfig:
     return OidcClientConfig(**{**arguments, **changes})
 
 
+ISSUED_SUBJECT = "7335d417-61da-459d-899c-0a01c76a2f94"
+ID_TOKEN_LIFETIME_SECONDS = 300
+
+
+def an_id_token_claims(
+    now: int,
+    *,
+    issuer: str = REALM_ISSUER,
+    audience: str = APP_CLIENT_ID,
+    subject: str = ISSUED_SUBJECT,
+    **members: Any,
+) -> dict[str, Any]:
+    """The claims an issuer signs into a token at `now`: living 300 seconds, issued
+    10 seconds ago; `members` (nonce, sid, groups, ...) are what the caller's scenario adds."""
+    return {
+        "iss": issuer,
+        "aud": audience,
+        "sub": subject,
+        "exp": now + ID_TOKEN_LIFETIME_SECONDS,
+        "iat": now - 10,
+        **members,
+    }
+
+
+def a_key_set_endpoint(key_name: str = "current") -> FakeKeySetEndpoint:
+    """An endpoint publishing the public half of `rsa_key(key_name)` as `<key_name>-key`."""
+    return FakeKeySetEndpoint(served_key_set(key_name))
+
+
 def a_relying_party(
     *,
+    config: OidcClientConfig | None = None,
     post_token_request: TokenRequestPost | None = None,
     fetch_key_set: KeySetFetch | None = None,
     wall_clock: WallClock | None = None,
     monotonic_clock: MonotonicClock | None = None,
 ) -> OidcRelyingParty:
-    """The relying party of `APP_CLIENT_ID` at `REALM_ISSUER`, publishing the
-    "current" key by default, that makes no token request unless the caller passes a poster."""
+    """The relying party of `config` (default: `APP_CLIENT_ID` at `REALM_ISSUER`),
+    publishing the "current" key by default, that makes no token request unless the
+    caller passes a poster."""
 
     def post_no_token_request(request: TokenRequest) -> TokenEndpointAnswer:
         raise AssertionError(f"a token request was posted to {request.url}")
 
-    config = a_realm_client_config(client_secret=SecretStr(secrets.token_urlsafe(16)))
     return OidcRelyingParty(
-        config,
+        config or a_realm_client_config(client_secret=SecretStr(secrets.token_urlsafe(16))),
         post_token_request=post_token_request or post_no_token_request,
-        fetch_key_set=fetch_key_set
-        or FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key"))),
+        fetch_key_set=fetch_key_set or a_key_set_endpoint(),
         wall_clock=wall_clock or FakeClock(float(ACCESS_TOKEN_NOW)),
         monotonic_clock=monotonic_clock or FakeClock(5_000.0),
     )
@@ -466,8 +495,8 @@ class LoopbackHttpsServer:
         return [request.path for request in self.received]
 
 
-def served_key_set() -> bytes:
-    return key_set_document(public_jwk(rsa_key("current"), "current-key"))
+def served_key_set(key_name: str = "current") -> bytes:
+    return key_set_document(public_jwk(rsa_key(key_name), f"{key_name}-key"))
 
 
 @contextlib.contextmanager

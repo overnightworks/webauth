@@ -22,9 +22,11 @@ from tests.support.oidc_arrangement import (
     FakeIssuer,
     FakeKeySetEndpoint,
     LogoutPage,
+    a_key_set_endpoint,
+    a_realm_client_config,
+    a_relying_party,
+    an_id_token_claims,
     jws,
-    key_set_document,
-    public_jwk,
     rs256,
     rsa_key,
 )
@@ -99,7 +101,7 @@ DEFAULT_MAX_BODY_BYTES = 1024
 
 
 def a_client_config() -> OidcClientConfig:
-    return OidcClientConfig(
+    return a_realm_client_config(
         issuer=BOUND_ISSUER,
         authorization_endpoint=f"{BOUND_ISSUER}/protocol/openid-connect/auth",
         token_endpoint=f"{BOUND_ISSUER}/protocol/openid-connect/token",
@@ -109,7 +111,7 @@ def a_client_config() -> OidcClientConfig:
         client_secret=SecretStr("client-secret"),
         redirect_uri=f"{HTTPS_TEST_SERVER}{CALLBACK_PATH}",
         post_logout_redirect_uri=f"{HTTPS_TEST_SERVER}/",
-        leeway_seconds=30,
+        scopes=("openid",),
     )
 
 
@@ -314,17 +316,15 @@ class OidcHost:
 
 
 def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding: str = "") -> str:
-    now = int(wall_clock.now)
-    claims = {
-        "iss": BOUND_ISSUER,
-        "aud": CLIENT_ID,
-        "sub": SUBJECT,
-        "exp": now + 300,
-        "iat": now - 10,
-        "nonce": nonce,
-        "preferred_username": "lena",
-        "groups": groups_claim,
-    }
+    claims = an_id_token_claims(
+        int(wall_clock.now),
+        issuer=BOUND_ISSUER,
+        audience=CLIENT_ID,
+        subject=SUBJECT,
+        nonce=nonce,
+        preferred_username="lena",
+        groups=groups_claim,
+    )
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
     if padding:
         header["padding"] = padding
@@ -408,13 +408,12 @@ def _an_issuer_side(
         return issued_id_tokens[-1]
 
     issuer = FakeIssuer(mint_id_token=mint_id_token)
-    key_set = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("issuer"), "issuer-key")))
-    relying_party = OidcRelyingParty(
-        a_client_config(),
+    key_set = a_key_set_endpoint("issuer")
+    relying_party = a_relying_party(
+        config=a_client_config(),
         post_token_request=issuer,
         fetch_key_set=key_set,
         wall_clock=wall_clock,
-        monotonic_clock=FakeClock(5_000.0),
     )
     return issuer, key_set, relying_party, issued_id_tokens
 
