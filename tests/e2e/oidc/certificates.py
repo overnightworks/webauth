@@ -31,43 +31,9 @@ def issue_throwaway_tls(directory: Path, name: str, dns_names: list[str]) -> Thr
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"{name} throwaway CA")])
     now = datetime.datetime.now(datetime.UTC)
-    ca = (
-        _builder(ca_subject, ca_subject, ca_key.public_key(), now)
-        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=False, content_commitment=False, key_encipherment=False,
-                data_encipherment=False, key_agreement=False, key_cert_sign=True,
-                crl_sign=False, encipher_only=False, decipher_only=False,
-            ),
-            critical=True,
-        )
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), False)
-        .sign(ca_key, hashes.SHA256())
-    )
+    ca = _ca_certificate(ca_key, ca_subject, now)
     leaf_key = ec.generate_private_key(ec.SECP256R1())
-    leaf = (
-        _builder(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"{name} throwaway leaf")]),
-            ca_subject, leaf_key.public_key(), now,
-        )
-        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=True, content_commitment=False, key_encipherment=False,
-                data_encipherment=False, key_agreement=False, key_cert_sign=False,
-                crl_sign=False, encipher_only=False, decipher_only=False,
-            ),
-            critical=True,
-        )
-        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName(n) for n in dns_names]), False)
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(leaf_key.public_key()), False)
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), False
-        )
-        .sign(ca_key, hashes.SHA256())
-    )
+    leaf = _leaf_certificate(leaf_key, ca_key, ca_subject, f"{name} throwaway leaf", dns_names, now)
     tls = ThrowawayTls(
         ca_certificate=directory / f"{name}-ca.pem",
         leaf_certificate=directory / f"{name}-leaf.pem",
@@ -87,8 +53,75 @@ def issue_throwaway_tls(directory: Path, name: str, dns_names: list[str]) -> Thr
     return tls
 
 
+def _ca_certificate(
+    ca_key: ec.EllipticCurvePrivateKey, subject: x509.Name, now: datetime.datetime
+) -> x509.Certificate:
+    return (
+        _builder(subject, subject, ca_key.public_key(), now)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), False)
+        .sign(ca_key, hashes.SHA256())
+    )
+
+
+def _leaf_certificate(
+    leaf_key: ec.EllipticCurvePrivateKey,
+    ca_key: ec.EllipticCurvePrivateKey,
+    ca_subject: x509.Name,
+    common_name: str,
+    dns_names: list[str],
+    now: datetime.datetime,
+) -> x509.Certificate:
+    return (
+        _builder(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]),
+            ca_subject,
+            leaf_key.public_key(),
+            now,
+        )
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(n) for n in dns_names]), False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(leaf_key.public_key()), False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), False
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+
+
 def _builder(
-    subject: x509.Name, issuer: x509.Name, public_key: ec.EllipticCurvePublicKey,
+    subject: x509.Name,
+    issuer: x509.Name,
+    public_key: ec.EllipticCurvePublicKey,
     now: datetime.datetime,
 ) -> x509.CertificateBuilder:
     return (

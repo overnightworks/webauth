@@ -52,10 +52,20 @@ from host_app import BACKCHANNEL_LOGOUT_MAX_BODY_BYTES, BACKCHANNEL_LOGOUT_PATH,
 from stack import StackError, docker
 
 LOOPBACK = "127.0.0.1"
-HOP_BY_HOP = frozenset({
-    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer",
-    "transfer-encoding", "upgrade", "content-length", "host",
-})
+HOP_BY_HOP = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "content-length",
+        "host",
+    }
+)
 UPSTREAM_TIMEOUT_SECONDS = 30
 BRIDGE_TIMEOUT_SECONDS = 10
 RELAY_IMAGE = (
@@ -118,7 +128,9 @@ class TlsShim:
         return self
 
     def __exit__(
-        self, kind: type[BaseException] | None, error: BaseException | None,
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
         self._server.shutdown()
@@ -152,7 +164,8 @@ def _forwarding_handler(
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else None
             headers = {
-                name: value for name, value in self.headers.items()
+                name: value
+                for name, value in self.headers.items()
                 if name.lower() not in HOP_BY_HOP
             }
             headers["Host"] = public_host
@@ -227,17 +240,36 @@ class CallbackBridge:
         return self
 
     def __exit__(
-        self, kind: type[BaseException] | None, error: BaseException | None,
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
         self._exit.close()
 
     def _run_relay(self, directory: Path) -> None:
         docker(
-            "run", "--detach", "--rm", "--name", self._name, "--network", self._network,
-            "--user", f"{os.getuid()}:{os.getgid()}", "--read-only", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges", "--volume", f"{directory}:/bridge:ro",
-            RELAY_IMAGE, "python", "-I", "-c", RELAY_SOURCE,
+            "run",
+            "--detach",
+            "--rm",
+            "--name",
+            self._name,
+            "--network",
+            self._network,
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--volume",
+            f"{directory}:/bridge:ro",
+            RELAY_IMAGE,
+            "python",
+            "-I",
+            "-c",
+            RELAY_SOURCE,
         )
 
     def _wait_for_relay(self) -> None:
@@ -251,9 +283,7 @@ class CallbackBridge:
         docker("rm", "--force", self._name)
 
 
-def _callback_handler(
-    host_port: int, host_trust: ssl.SSLContext
-) -> type[BaseHTTPRequestHandler]:
+def _callback_handler(host_port: int, host_trust: ssl.SSLContext) -> type[BaseHTTPRequestHandler]:
     class Callback(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         timeout = BRIDGE_TIMEOUT_SECONDS
@@ -280,11 +310,13 @@ def _callback_handler(
             )
             try:
                 host.request(
-                    "POST", BACKCHANNEL_LOGOUT_PATH, body=body,
+                    "POST",
+                    BACKCHANNEL_LOGOUT_PATH,
+                    body=body,
                     headers={"Content-Type": self.headers.get("Content-Type", FORM_CONTENT_TYPE)},
                 )
                 return host.getresponse().status
-            except (OSError, http.client.HTTPException):
+            except OSError, http.client.HTTPException:
                 return HTTPStatus.BAD_GATEWAY
             finally:
                 host.close()

@@ -122,10 +122,18 @@ def start_host(run: RunRecord, runtime: Path, settings: HostSettings, ca_certifi
     log_file = log_path.open("wb")
     # Fixed command list
     process = subprocess.Popen(  # noqa: S603
-        [sys.executable, str(Path(__file__).with_name("host_app.py")),
-         "--settings", str(settings_file), "--parent-pid", str(os.getpid())],
+        [
+            sys.executable,
+            str(Path(__file__).with_name("host_app.py")),
+            "--settings",
+            str(settings_file),
+            "--parent-pid",
+            str(os.getpid()),
+        ],
         env={"PATH": os.environ["PATH"], "SSL_CERT_FILE": str(ca_certificate)},
-        stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
     try:
         wait_until_serving(run, process, settings.observe_port, settings.port)
@@ -155,10 +163,12 @@ def launch_pinned_chromium(
     browser_tmp.mkdir(exist_ok=True)
     os.environ["TMPDIR"] = str(browser_tmp)
     rules = ", ".join(f"MAP {name} {LOOPBACK}:{port}" for name, port in mapped_hosts.items())
-    return playwright.chromium.launch(args=[
-        f"--host-resolver-rules={rules}",
-        f"--ignore-certificate-errors-spki-list={spki_sha256_base64}",
-    ])
+    return playwright.chromium.launch(
+        args=[
+            f"--host-resolver-rules={rules}",
+            f"--ignore-certificate-errors-spki-list={spki_sha256_base64}",
+        ]
+    )
 
 
 class HostMappingProxy(socketserver.ThreadingTCPServer):
@@ -268,7 +278,9 @@ def containers_left(name_filter: str) -> list[str]:
     return subprocess.run(  # noqa: S603
         # The operator's own PATH by design
         ["docker", "ps", "-a", "--filter", f"name={name_filter}", "--format", "{{.Names}}"],  # noqa: S607
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.split()
 
 

@@ -43,7 +43,12 @@ class EngineRun:
 
 
 def logout_through_the_page(
-    run: EngineRun, browser: Browser, width: Width, scenario: str, *, javascript: bool,
+    run: EngineRun,
+    browser: Browser,
+    width: Width,
+    scenario: str,
+    *,
+    javascript: bool,
     back_button: bool = False,
 ) -> str:
     proof = run.proof
@@ -93,21 +98,39 @@ def logout_through_the_page(
 
 
 def other_engine(
-    run: EngineRun, engine: BrowserType, mapped_hosts: dict[str, int], width: Width, number: int,
+    run: EngineRun,
+    engine: BrowserType,
+    mapped_hosts: dict[str, int],
+    width: Width,
+    number: int,
 ) -> str:
     with launch_behind_host_mapping(engine, mapped_hosts) as browser:
         scripted = logout_through_the_page(
-            run, browser, width, f"{number}-{width.label}", javascript=True, back_button=True,
+            run,
+            browser,
+            width,
+            f"{number}-{width.label}",
+            javascript=True,
+            back_button=True,
         )
         pressed = logout_through_the_page(
-            run, browser, width, f"{number}-{width.label}-no-javascript", javascript=False,
+            run,
+            browser,
+            width,
+            f"{number}-{width.label}-no-javascript",
+            javascript=False,
         )
     return f"{scripted}; {pressed}"
 
 
 def drive_engine_phase(
-    run: EngineRun, playwright: Playwright, runtime: Path, tls: ThrowawayTls,
-    mapped_hosts: dict[str, int], host: Host, widths: tuple[Width, ...],
+    run: EngineRun,
+    playwright: Playwright,
+    runtime: Path,
+    tls: ThrowawayTls,
+    mapped_hosts: dict[str, int],
+    host: Host,
+    widths: tuple[Width, ...],
 ) -> None:
     run.proof.host = host
     chromium = launch_pinned_chromium(
@@ -118,7 +141,11 @@ def drive_engine_phase(
             run.proof.held_or_failed(
                 f"SCENARIO 52 {width.label} {run.app_origin}",
                 lambda width=width: logout_through_the_page(
-                    run, chromium, width, f"52-{width.label}", javascript=False,
+                    run,
+                    chromium,
+                    width,
+                    f"52-{width.label}",
+                    javascript=False,
                 ),
             )
     finally:
