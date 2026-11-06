@@ -45,10 +45,6 @@ __all__ = [
 ]
 
 _MIN_SESSION_SECRET_CHARS: Final = 32
-_DEFAULT_IPV6_BUDGET_PREFIX: Final = 64
-# Shorter than /32 would pool whole providers into one budget; longer than /128
-# is not an IPv6 prefix at all.
-_IPV6_BUDGET_PREFIX_RANGE: Final = range(32, 129)
 _DEFAULT_ADMIN_ROLE: Final = "admin"
 _DEFAULT_USER_ROLE: Final = "user"
 
@@ -99,10 +95,7 @@ class WebAuthConfig:
     names the host stores; each must be non-blank and they must differ, or
     every new account would be an admin.
     ``wall_clock`` is the one reading of now behind every HTTP and WebSocket
-    session decision, so a test fixes it. ``ipv6_budget_prefix`` (``64``, from
-    ``32`` to ``128``) sizes the network whose IPv6 addresses share one
-    rate-limit budget, so users behind one ``/64`` limit each other; IPv4
-    keeps a budget per address.
+    session decision, so a test fixes it.
 
     ``cookie_secure`` alone decides whether the session cookie carries
     ``Secure``, when it is set and when it is cleared, and whether
@@ -140,7 +133,6 @@ class WebAuthConfig:
     session_lifetime: SessionLifetime
     cookie_samesite: CookieSameSite = _DEFAULT_COOKIE_SAMESITE
     cookie_secure: bool = True
-    ipv6_budget_prefix: int = _DEFAULT_IPV6_BUDGET_PREFIX
     admin_role: str = _DEFAULT_ADMIN_ROLE
     user_role: str = _DEFAULT_USER_ROLE
     wall_clock: WallClock = time.time
@@ -173,16 +165,6 @@ class WebAuthConfig:
                 "list the hosts this application serves. "
                 'To admit local development, use allowed_hosts_exact={"localhost", '
                 '"127.0.0.1"}',
-            )
-        if (
-            type(self.ipv6_budget_prefix) is not int
-            or self.ipv6_budget_prefix not in _IPV6_BUDGET_PREFIX_RANGE
-        ):
-            raise ValueError(
-                "ipv6_budget_prefix must be an integer between "
-                f"{_IPV6_BUDGET_PREFIX_RANGE.start} "
-                f"and {_IPV6_BUDGET_PREFIX_RANGE.stop - 1}; it is the network size "
-                "whose addresses share one rate-limit budget",
             )
         self._require_distinct_roles()
 
