@@ -1,0 +1,8 @@
+claim_id = "cd67590df79841b99a3b1be2144bc77c"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "837e93f214470528e535425c19bc64198a6b1070"
+branch = "claude/issue-628-ipv6-budget-fixed-at-64"
+scope = ["src/webauth/config.py", "src/webauth/middleware/rate_limit.py", "src/webauth/proxies.py", "tests/test_config.py", "tests/test_proxies.py", "tests/test_rate_limit_single_process.py"]
+opened_commit = "153fa5142a8fb87571534a17ac631ae1c3bd8525"
+whole_reason = "One option leaves: its one reader in the middleware and the budget function take the fixed /64 in the same landing, and its tests in three modules go with it."
