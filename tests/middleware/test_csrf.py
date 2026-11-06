@@ -289,6 +289,22 @@ def test_an_origin_that_names_no_host_is_refused_like_a_foreign_one(
 
 
 @pytest.mark.parametrize(
+    "origins",
+    [
+        pytest.param([ALLOWED_ORIGIN, ALLOWED_ORIGIN], id="two allowed origins"),
+        pytest.param([ALLOWED_ORIGIN, FOREIGN_ORIGIN], id="an allowed and a foreign origin"),
+    ],
+)
+def test_a_repeated_origin_header_is_refused_like_a_foreign_origin(origins: list[str]) -> None:
+    response = an_origin_guarded_client().post(
+        API_PATH, json={"n": 1}, headers=[("origin", origin) for origin in origins],
+    )
+
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
+
+
+@pytest.mark.parametrize(
     "origin",
     [
         pytest.param("https://notes.example.evil.test", id="the host as a prefix"),

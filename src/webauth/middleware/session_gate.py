@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from anyio import to_thread
-from anyio.lowlevel import checkpoint_if_cancelled
 from starlette.requests import HTTPConnection
 
 from webauth._paths import _has_dot_segment
@@ -32,6 +30,7 @@ from webauth.dependencies import (
 )
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
+from webauth.middleware._worker import on_worker
 from webauth.policies import PathRules, PublicRule
 from webauth.ports import AuthenticatedUser
 
@@ -98,10 +97,7 @@ class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
         optional = self._is_optional(routed_path)
         if isinstance(reading, ConnectionRefusal):
             return self._refused_or_passed(request, config, reading, reading, optional)
-        try:
-            admission = await to_thread.run_sync(partial(self._admit, reading, config))
-        finally:
-            await checkpoint_if_cancelled()
+        admission = await on_worker(partial(self._admit, reading, config))
         return self._refused_or_passed(request, config, reading, admission, optional)
 
     def _refused_or_passed(

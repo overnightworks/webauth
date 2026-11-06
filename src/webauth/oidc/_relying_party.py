@@ -67,7 +67,7 @@ from webauth.jwt_verification import (
     _json_object,
 )
 from webauth.oidc._client_config import OidcClientConfig
-from webauth.policies import AuthorizedParties
+from webauth.policies import AuthorizedParties, _require_authorized_parties
 
 if TYPE_CHECKING:
     from webauth.ports import WallClock
@@ -515,8 +515,7 @@ class OidcRelyingParty:
         and `groups` absent or a list of strings. `client_id`,
         `jti` and `scope` are not read. `TypeError` for anything but
         `AuthorizedParties`."""
-        if not isinstance(authorized_parties, AuthorizedParties):
-            raise TypeError("authorized_parties must be an AuthorizedParties")
+        _require_authorized_parties(authorized_parties)
         outcome = _verify_access_jwt(self._jwt_verifier, access_token)
         if isinstance(outcome, OidcRefusal):
             return outcome
@@ -534,8 +533,7 @@ class OidcRelyingParty:
         its `scope` claim, a string of space-separated tokens, must include `scope`
         exactly, or the refusal is `INSUFFICIENT_SCOPE`. `TypeError` for anything
         but `AuthorizedParties`."""
-        if not isinstance(authorized_parties, AuthorizedParties):
-            raise TypeError("authorized_parties must be an AuthorizedParties")
+        _require_authorized_parties(authorized_parties)
         jwt_verifier = self._verifier_for(resource_url)
 
         def verify(access_token: str) -> VerifiedAccessToken | OidcRefusal:
@@ -732,10 +730,16 @@ def _identity_of(
 
 
 def _group_paths(claims: Mapping[str, object]) -> tuple[str, ...] | None:
-    groups = claims.get("groups", [])
+    groups = _groups_claim(claims, "groups")
+    return None if groups is None else tuple(groups)
+
+
+def _groups_claim(claims: Mapping[str, object], claim_name: str) -> list[str] | None:
+    """The listed groups; none when the claim is missing, ``None`` when it is no list of strings."""
+    groups = claims.get(claim_name, [])
     if not isinstance(groups, list) or not all(isinstance(group, str) for group in groups):
         return None
-    return tuple(groups)
+    return groups
 
 
 def _verify_access_jwt(verifier: JwtVerifier, access_token: str) -> VerifiedClaims | OidcRefusal:

@@ -130,13 +130,16 @@ in [test_bearer_gate_admission.py](../tests/middleware/test_bearer_gate_admissio
 
 The `Origin` fallback matches exact hosts in `WebAuthConfig.allowed_hosts_exact`,
 never host patterns; its docstring owns port matching. With `cookie_secure` on,
-the origin must use HTTPS; with it off, the scheme is not compared. This also
-holds for WebSocket handshakes, which check `Origin` directly
+the origin must use HTTPS; with it off, the scheme is not compared. A repeated
+`Origin` header counts as foreign. This also holds for WebSocket handshakes, which
+check `Origin` directly
 ([#429 S-4 and P-3](https://github.com/overnightworks/webauth/issues/429), operator
 ruling 23.10.2026). Proofs: `test_an_origin_that_only_resembles_the_exact_host_is_refused`
 in [test_csrf.py](../tests/middleware/test_csrf.py), and
 `test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on` in both that
-module and [test_dependencies_websocket_auth.py](../tests/test_dependencies_websocket_auth.py).
+module and [test_dependencies_websocket_auth.py](../tests/test_dependencies_websocket_auth.py),
+and `test_a_repeated_origin_header_is_refused_like_a_foreign_origin` in test_csrf.py
+with the "two Origins, both allowed" case of test_dependencies_websocket_auth.py.
 
 An old CSRF cookie changes no decision and is neither read nor cleared; it
 expires by its own `Max-Age` ([#429 P-2](https://github.com/overnightworks/webauth/issues/429),

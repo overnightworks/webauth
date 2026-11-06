@@ -11,8 +11,6 @@ from functools import partial
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
-from anyio import to_thread
-from anyio.lowlevel import checkpoint_if_cancelled
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
@@ -28,6 +26,7 @@ from webauth.dependencies import (
 )
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
+from webauth.middleware._worker import on_worker
 from webauth.oidc import (
     OidcRefusal,
     OidcRefusalReason,
@@ -46,7 +45,12 @@ from webauth.oidc_login import (
     _require_group_path,
     app_role,
 )
-from webauth.policies import AuthorizedParties, PathRules, PublicRule
+from webauth.policies import (
+    AuthorizedParties,
+    PathRules,
+    PublicRule,
+    _require_authorized_parties,
+)
 from webauth.ports import AuthenticatedUser, BearerCaller
 
 if TYPE_CHECKING:
@@ -85,11 +89,6 @@ _BEARER_SCHEME: Final = "bearer"
 _ACCESS_TOKEN_QUERY_PARAMETER: Final = "access_token"  # noqa: S105 - query parameter name not a credential
 
 
-def _require_parties(authorized_parties: AuthorizedParties) -> None:
-    if not isinstance(authorized_parties, AuthorizedParties):
-        raise TypeError("authorized_parties must be an AuthorizedParties")
-
-
 @dataclass(frozen=True)
 class MachinePaths:
     """The paths where a token is a machine's, and the clients allowed to hold it.
@@ -104,7 +103,7 @@ class MachinePaths:
     authorized_parties: AuthorizedParties
 
     def __post_init__(self) -> None:
-        _require_parties(self.authorized_parties)
+        _require_authorized_parties(self.authorized_parties)
         if self.paths == PathRules():
             raise ValueError("machine paths must select at least one path")
 
@@ -125,7 +124,7 @@ class PersonPaths:
     transaction: SignInTransaction
 
     def __post_init__(self) -> None:
-        _require_parties(self.authorized_parties)
+        _require_authorized_parties(self.authorized_parties)
         if self.paths == PathRules():
             raise ValueError("person paths must select at least one path")
 
@@ -227,7 +226,7 @@ class ProtectedResource:
     marked_routes: frozenset[MarkedRoute] = frozenset()
 
     def __post_init__(self) -> None:
-        _require_parties(self.authorized_parties)
+        _require_authorized_parties(self.authorized_parties)
         if not isinstance(self.marked_routes, frozenset) or not all(
             isinstance(route, MarkedRoute) for route in self.marked_routes
         ):
@@ -449,7 +448,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             if on_marked_route and credential is _Refusal.NO_CREDENTIALS:
                 return _Continue.AS_UNMARKED
             return self._refused(credential, challenge=challenge)
-        verified = await _on_worker(partial(verify, credential))
+        verified = await on_worker(partial(verify, credential))
         if isinstance(verified, OidcRefusal):
             if on_marked_route and _names_another_audience(verified):
                 return _Continue.AS_UNMARKED
@@ -459,7 +458,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 else _Refusal.INVALID_TOKEN
             )
             return self._refused(refusal, verified, challenge=challenge)
-        person = await _on_worker(
+        person = await on_worker(
             partial(
                 _admit_resource_holder,
                 resource.transaction,
@@ -485,7 +484,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         verified = await self._verified(credential, person_paths.authorized_parties)
         if isinstance(verified, OidcRefusal):
             return self._refused(_Refusal.INVALID_TOKEN, verified)
-        person = await _on_worker(
+        person = await on_worker(
             partial(
                 _admit_token_holder,
                 person_paths.transaction,
@@ -502,7 +501,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     async def _verified(
         self, credential: str, authorized_parties: AuthorizedParties,
     ) -> VerifiedAccessToken | OidcRefusal:
-        return await _on_worker(
+        return await on_worker(
             partial(
                 self._policy.relying_party.verify_access_token,
                 credential,
@@ -529,13 +528,6 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 None if reason.token_rejection is None else reason.token_rejection.value,
             )
         return refusal.response(challenge)
-
-
-async def _on_worker[Result](work: Callable[[], Result]) -> Result:
-    try:
-        return await to_thread.run_sync(work)
-    finally:
-        await checkpoint_if_cancelled()
 
 
 def _credential_of(request: Request) -> str | _Refusal:
