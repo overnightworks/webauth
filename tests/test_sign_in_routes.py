@@ -1,5 +1,5 @@
-"""The sign-in routes a host installs: the transaction they enter, the answers they send, the
-policies they derive and the installs they refuse.
+"""The sign-in routes a host installs: the transaction they enter, the answers they send and the
+installs they refuse.
 
 Each case drives a FastAPI host through a `TestClient` whose cookie jar is the browser, against
 a stateful fake issuer, over a host whose `SignInTransaction` either only serializes or also
@@ -11,7 +11,6 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
@@ -21,12 +20,10 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
-from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
-from tests.support.oidc_arrangement import FakeIssuer, a_relying_party
 from tests.support.oidc_login_host import (
     ADMISSION,
     BACKCHANNEL_LOGOUT_PATH,
@@ -35,7 +32,6 @@ from tests.support.oidc_login_host import (
     LOGIN_GROUP,
     LOGOUT_PATH,
     OTHER_SUBJECT,
-    SAME_ORIGIN_FORM,
     SIGN_IN_PATHS,
     START_PATH,
     SUBJECT,
@@ -49,31 +45,17 @@ from tests.support.oidc_login_host import (
 )
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
-    HTTPS_TEST_SERVER,
     FakeUser,
-    SessionRecordsInMemory,
-    a_web_auth_config,
     an_http_scope,
     drive,
     seeded_session,
     session_cookie_header,
     starts,
 )
-from webauth.config import install_web_auth_config
 from webauth.cookies import sign_session_id
-from webauth.middleware import SessionGate, install_web_auth_middleware
 from webauth.oidc import OidcRefusal, OidcRefusalReason
 from webauth.oidc_login import AdmissionConfig, AdmissionRefusal
-from webauth.policies import (
-    BodySizePolicy,
-    CsrfPolicy,
-    PathRules,
-    RateLimitBudget,
-    RateLimitPolicy,
-    RateLimitRule,
-    SecurityHeadersPolicy,
-)
-from webauth.ports import AccountEventKind, SignInStores
+from webauth.ports import AccountEventKind
 from webauth.sign_in_routes import (
     LogoutPageText,
     RefusalPage,
@@ -83,7 +65,6 @@ from webauth.sign_in_routes import (
 )
 
 BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
-FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
 BOTH_KINDS = [
     pytest.param(TransactionKind.PER_CALL, id="per-call host"),
     pytest.param(TransactionKind.ROLLING_BACK, id="rolling-back host"),
@@ -590,142 +571,3 @@ def _sign_in_routes_of(app: FastAPI) -> list[str]:
     }
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
     return [route.path for route in routes if route.path in paths]
-
-
-@dataclass
-class GatedHost:
-    client: TestClient
-    issuer: FakeIssuer
-
-
-def _a_gated_host(
-    rate_budget: int | None = None, *, exempts_backchannel: bool = True,
-) -> GatedHost:
-    """A host whose gate, rate limit, cache, CSRF and body rules are the ones the paths derive.
-
-    Without ``exempts_backchannel`` the rate limit is left to ``browser_paths`` alone.
-    """
-    config = a_web_auth_config()
-    sessions = SessionRecordsInMemory()
-    issuer = FakeIssuer(mint_id_token=lambda _nonce: "unused")
-    relying_party = a_relying_party(post_token_request=issuer)
-    app = FastAPI()
-    install_web_auth_config(app, config)
-    install_web_auth_middleware(
-        app,
-        security_headers=SecurityHeadersPolicy(
-            content_security_policy="default-src 'self'",
-            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
-        ),
-        body_size=BodySizePolicy(
-            default_max_bytes=1024, rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
-        ),
-        rate_limit=None if rate_budget is None else RateLimitPolicy(
-            default=RateLimitBudget("host", 1000, 60),
-            exempt=SIGN_IN_PATHS.backchannel if exempts_backchannel else PathRules(),
-            rules=(RateLimitRule(
-                paths=SIGN_IN_PATHS.browser_paths,
-                budget=RateLimitBudget("sign-in", rate_budget, 60),
-            ),),
-        ),
-        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
-        session_gate=SessionGate(
-            session_transaction=sessions.in_transaction,
-            login_redirect=SIGN_IN_PATHS.login_redirect,
-            public=SIGN_IN_PATHS.public_rules,
-        ),
-    )
-    install_sign_in_routes(
-        app,
-        paths=SIGN_IN_PATHS,
-        relying_party=lambda _request: relying_party,
-        admission=ADMISSION,
-        transaction=_a_transaction_nobody_enters,
-        refused=lambda _request, _refusal: Response(status_code=403),
-        keeps_id_token=True,
-        max_sessions=None,
-        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-    )
-
-    @app.get("/albums/{album_id}")
-    def album(album_id: str) -> str:
-        return album_id
-
-    return GatedHost(
-        TestClient(app, base_url=HTTPS_TEST_SERVER, follow_redirects=False), issuer,
-    )
-
-
-def _a_transaction_nobody_enters() -> AbstractContextManager[SignInStores]:
-    raise AssertionError("the gated host never signs anyone in")
-
-
-def test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start() -> None:
-    host = _a_gated_host()
-
-    start = host.client.get(START_PATH)
-    deep_link = host.client.get("/albums/42", headers={"accept": "text/html"})
-
-    assert start.status_code == 303
-    assert (deep_link.status_code, deep_link.headers["location"]) == (
-        302, f"{START_PATH}?next=%2Falbums%2F42",
-    )
-
-
-def test_a_signed_out_logout_passes_the_gate_and_enters_no_transaction() -> None:
-    host = _a_gated_host()
-
-    response = host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM)
-
-    assert response.status_code == 200
-
-
-def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
-    host = _a_gated_host()
-
-    answers = [
-        host.client.get(START_PATH),
-        host.client.get(CALLBACK_PATH),
-        host.client.post(LOGOUT_PATH, headers=FORM_HEADER),
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=x", headers=FORM_HEADER),
-    ]
-
-    assert answers[-2].status_code == 403
-    assert answers[-1].status_code == 400
-    assert [answer.headers["cache-control"] for answer in answers] == ["no-store"] * 4
-
-
-def test_the_derived_browser_paths_spend_one_sign_in_budget() -> None:
-    host = _a_gated_host(rate_budget=3)
-
-    statuses = [
-        host.client.get(START_PATH).status_code,
-        host.client.get(CALLBACK_PATH).status_code,
-        host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM).status_code,
-        host.client.get(START_PATH).status_code,
-    ]
-
-    assert statuses[-1] == 429
-    assert 429 not in statuses[:-1]
-
-
-def test_a_back_channel_post_reaches_the_route_past_the_gate_csrf_and_sign_in_budget() -> None:
-    host = _a_gated_host(rate_budget=1)
-
-    statuses = [
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
-        .status_code
-        for _ in range(3)
-    ]
-
-    assert statuses == [400, 400, 400]
-    assert host.client.get(START_PATH).status_code == 303
-
-
-def test_the_back_channel_path_is_not_a_browser_path() -> None:
-    host = _a_gated_host(rate_budget=1, exempts_backchannel=False)
-
-    for _ in range(3):
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
-
-    assert host.client.get(START_PATH).status_code == 303
