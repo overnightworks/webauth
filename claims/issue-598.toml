@@ -1,0 +1,8 @@
+claim_id = "cee97826c28142e39774579f64c2849b"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "47f1616560200604c6ed03ea193bf70271c5bdc8"
+branch = "claude/issue-598-four-rules-one-owner"
+scope = ["docs/CHANGELOG.md", "docs/host-contract.md", "src/webauth/_origins.py", "src/webauth/dependencies.py", "src/webauth/middleware", "src/webauth/oidc/_relying_party.py", "src/webauth/policies.py", "src/webauth/service_callers.py", "tests/middleware/test_csrf.py"]
+opened_commit = "299088c2d996a221919a9aea16c453352e7924f2"
+whole_reason = "Four rules of a few lines each get one owner apiece across the private helper modules; one review covers them better than four lanes would for about twenty lines."
