@@ -86,7 +86,9 @@ class SessionLifetime:
     def __post_init__(self) -> None:
         require_positive_whole_number("idle_seconds", self.idle_seconds, unit="seconds")
         require_positive_whole_number(
-            "absolute_max_age_seconds", self.absolute_max_age_seconds, unit="seconds",
+            "absolute_max_age_seconds",
+            self.absolute_max_age_seconds,
+            unit="seconds",
         )
         if self.absolute_max_age_seconds > MAX_SESSION_LIFETIME_SECONDS:
             raise ValueError(
@@ -186,7 +188,9 @@ class WebAuthConfig:
                 "cookies carry Secure and responses carry HSTS",
             )
         require_collection_not_one_string(
-            "allowed_hosts_exact", self.allowed_hosts_exact, noun="host",
+            "allowed_hosts_exact",
+            self.allowed_hosts_exact,
+            noun="host",
             example='{"notes.example"}',
         )
         if not self.allowed_hosts_exact:

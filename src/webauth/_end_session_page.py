@@ -82,13 +82,15 @@ def _content_security_policy(form: EndSessionForm) -> str:
     form_targets = dict.fromkeys(
         _origin(url) for url in (form.end_session_endpoint, form.post_logout_redirect_uri)
     )
-    return "; ".join((
-        "default-src 'none'",
-        f"script-src 'sha256-{_SCRIPT_HASH}'",
-        f"form-action {' '.join(form_targets)}",
-        "base-uri 'none'",
-        "frame-ancestors 'none'",
-    ))
+    return "; ".join(
+        (
+            "default-src 'none'",
+            f"script-src 'sha256-{_SCRIPT_HASH}'",
+            f"form-action {' '.join(form_targets)}",
+            "base-uri 'none'",
+            "frame-ancestors 'none'",
+        )
+    )
 
 
 def _origin(url: str) -> str:

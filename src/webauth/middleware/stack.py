@@ -124,8 +124,12 @@ def install_web_auth_middleware(
     """
     _refuse_an_unsound_stack(app)
     entries = _library_middleware(
-        security_headers=security_headers, body_size=body_size, rate_limit=rate_limit,
-        bearer_gate=bearer_gate, csrf_origin=csrf_origin, session_gate=session_gate,
+        security_headers=security_headers,
+        body_size=body_size,
+        rate_limit=rate_limit,
+        bearer_gate=bearer_gate,
+        csrf_origin=csrf_origin,
+        session_gate=session_gate,
     )
     for entry in reversed(entries):
         app.add_middleware(entry.cls, *entry.args, **entry.kwargs)

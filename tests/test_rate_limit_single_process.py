@@ -162,7 +162,9 @@ class TestThreadSafety:
             second_is_settled.set()
 
         with patch.object(
-            webauth.rate_limit, "time", SimpleNamespace(monotonic=scripted_monotonic),
+            webauth.rate_limit,
+            "time",
+            SimpleNamespace(monotonic=scripted_monotonic),
         ):
             first = threading.Thread(target=check)
             first.start()
@@ -217,7 +219,9 @@ class TestMiddlewareOverSingleProcessBackend:
 
     def test_a_configured_ipv6_budget_prefix_pools_a_wider_network(self) -> None:
         client = a_rate_limited_client(
-            SingleProcessRateLimitBackend(), max_requests=1, ipv6_budget_prefix=48,
+            SingleProcessRateLimitBackend(),
+            max_requests=1,
+            ipv6_budget_prefix=48,
         )
         assert _from_peer(client, "2001:db8:1:2::1").get(RATE_LIMITED_PATH).status_code == 200
         assert _from_peer(client, "2001:db8:1:ff::1").get(RATE_LIMITED_PATH).status_code == 429
@@ -231,7 +235,9 @@ class TestMiddlewareOverSingleProcessBackend:
     @pytest.mark.parametrize("exhausted_path", [API_PATH, BULK_PATH, OTHER_PATH])
     def test_exhausting_one_budget_leaves_the_others_answering(self, exhausted_path: str) -> None:
         client = a_policy_rate_limited_client(
-            SingleProcessRateLimitBackend(), _a_three_budget_policy(), paths=THREE_PATHS,
+            SingleProcessRateLimitBackend(),
+            _a_three_budget_policy(),
+            paths=THREE_PATHS,
         )
         assert client.get(exhausted_path).status_code == 200
         assert client.get(exhausted_path).status_code == 429
@@ -241,13 +247,17 @@ class TestMiddlewareOverSingleProcessBackend:
     def test_a_429_carries_the_retry_after_of_the_budget_the_path_spent(self) -> None:
         policy = RateLimitPolicy(
             default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests=1, window_seconds=60),
-            rules=(RateLimitRule(
-                PathRules(prefixes=("/bulk/",)),
-                RateLimitBudget(BULK_BUDGET_NAME, max_requests=1, window_seconds=30),
-            ),),
+            rules=(
+                RateLimitRule(
+                    PathRules(prefixes=("/bulk/",)),
+                    RateLimitBudget(BULK_BUDGET_NAME, max_requests=1, window_seconds=30),
+                ),
+            ),
         )
         client = a_policy_rate_limited_client(
-            SingleProcessRateLimitBackend(), policy, paths=(API_PATH, BULK_PATH),
+            SingleProcessRateLimitBackend(),
+            policy,
+            paths=(API_PATH, BULK_PATH),
         )
         for path in (API_PATH, BULK_PATH):
             client.get(path)
@@ -258,14 +268,18 @@ class TestMiddlewareOverSingleProcessBackend:
     def test_an_exempt_path_claimed_by_a_rule_spends_no_budget(self) -> None:
         policy = RateLimitPolicy(
             default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests=1, window_seconds=60),
-            rules=(RateLimitRule(
-                PathRules(exact=frozenset({EXEMPT_PATH, BULK_PATH})),
-                RateLimitBudget(BULK_BUDGET_NAME, max_requests=1, window_seconds=60),
-            ),),
+            rules=(
+                RateLimitRule(
+                    PathRules(exact=frozenset({EXEMPT_PATH, BULK_PATH})),
+                    RateLimitBudget(BULK_BUDGET_NAME, max_requests=1, window_seconds=60),
+                ),
+            ),
             exempt=PathRules(exact=frozenset({EXEMPT_PATH})),
         )
         client = a_policy_rate_limited_client(
-            SingleProcessRateLimitBackend(), policy, paths=(API_PATH, BULK_PATH, EXEMPT_PATH),
+            SingleProcessRateLimitBackend(),
+            policy,
+            paths=(API_PATH, BULK_PATH, EXEMPT_PATH),
         )
         assert [client.get(EXEMPT_PATH).status_code for _ in range(3)] == [200, 200, 200]
         assert client.get(BULK_PATH).status_code == 200
@@ -273,14 +287,18 @@ class TestMiddlewareOverSingleProcessBackend:
 
     def test_each_budget_admits_its_own_limit_of_requests(self) -> None:
         client = a_policy_rate_limited_client(
-            SingleProcessRateLimitBackend(), _a_budget_pair_policy(), paths=(API_PATH, BULK_PATH),
+            SingleProcessRateLimitBackend(),
+            _a_budget_pair_policy(),
+            paths=(API_PATH, BULK_PATH),
         )
         assert [client.get(API_PATH).status_code for _ in range(4)] == [200, 200, 200, 429]
         assert [client.get(BULK_PATH).status_code for _ in range(2)] == [200, 429]
 
     def test_each_budget_expires_after_its_own_window(self) -> None:
         client = a_policy_rate_limited_client(
-            SingleProcessRateLimitBackend(), _a_budget_pair_policy(), paths=(API_PATH, BULK_PATH),
+            SingleProcessRateLimitBackend(),
+            _a_budget_pair_policy(),
+            paths=(API_PATH, BULK_PATH),
         )
         with _monotonic_clock_at(100.0) as clock:
             for _ in range(3):
@@ -302,10 +320,12 @@ LONG_WINDOW_SECONDS = 60
 def _a_budget_pair_policy() -> RateLimitPolicy:
     return RateLimitPolicy(
         default=RateLimitBudget(DEFAULT_BUDGET_NAME, 3, LONG_WINDOW_SECONDS),
-        rules=(RateLimitRule(
-            PathRules(prefixes=("/bulk/",)),
-            RateLimitBudget(BULK_BUDGET_NAME, 1, SHORT_WINDOW_SECONDS),
-        ),),
+        rules=(
+            RateLimitRule(
+                PathRules(prefixes=("/bulk/",)),
+                RateLimitBudget(BULK_BUDGET_NAME, 1, SHORT_WINDOW_SECONDS),
+            ),
+        ),
     )
 
 

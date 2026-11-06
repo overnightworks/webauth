@@ -68,12 +68,18 @@ MAX_PENDING_LOGIN_COOKIE_CHARS = 896
 MAX_PENDING_LOGINS = 5
 
 
-@pytest.mark.parametrize(("cookie_secure", "prefix", "secure_attribute"), [
-    pytest.param(True, "__Host-oidc_pending_", {"secure"}, id="secure"),
-    pytest.param(False, "oidc_pending_", set(), id="insecure-development"),
-])
+@pytest.mark.parametrize(
+    ("cookie_secure", "prefix", "secure_attribute"),
+    [
+        pytest.param(True, "__Host-oidc_pending_", {"secure"}, id="secure"),
+        pytest.param(False, "oidc_pending_", set(), id="insecure-development"),
+    ],
+)
 def test_a_start_sets_one_lax_http_only_pending_cookie_and_answers_the_issuer_url(
-    *, cookie_secure: bool, prefix: str, secure_attribute: set[str],
+    *,
+    cookie_secure: bool,
+    prefix: str,
+    secure_attribute: set[str],
 ) -> None:
     host = an_oidc_host(cookie_secure=cookie_secure)
 
@@ -100,8 +106,12 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
 
     response = host.callback(host.sign_in_at_issuer())
 
-    configured = {"path=/", f"max-age={host.config.session_lifetime.absolute_max_age_seconds}",
-                  f"samesite={host.config.cookie_samesite}", "secure"}
+    configured = {
+        "path=/",
+        f"max-age={host.config.session_lifetime.absolute_max_age_seconds}",
+        f"samesite={host.config.cookie_samesite}",
+        "secure",
+    }
     assert (response.status_code, response.headers["location"]) == (303, "/")
     assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
     assert set(host.client.cookies) == {host.config.session_cookie_name}
@@ -121,16 +131,21 @@ def test_an_admitted_callback_stores_the_refresh_token_and_nothing_of_the_access
     assert_holds_only_the_refresh_token(record)
 
 
-@pytest.mark.parametrize(("members", "stored"), [
-    pytest.param({"refresh_token": ABSENT}, [], id="an-answer-without-a-refresh-token"),
-    pytest.param(
-        {"access_token": ABSENT, "token_type": ABSENT}, [ISSUED_REFRESH_TOKEN],
-        id="an-answer-without-an-access-token",
-    ),
-    pytest.param({"refresh_token": " ~"}, [" ~"], id="a-refresh-token-at-the-grammars-ends"),
-])
+@pytest.mark.parametrize(
+    ("members", "stored"),
+    [
+        pytest.param({"refresh_token": ABSENT}, [], id="an-answer-without-a-refresh-token"),
+        pytest.param(
+            {"access_token": ABSENT, "token_type": ABSENT},
+            [ISSUED_REFRESH_TOKEN],
+            id="an-answer-without-an-access-token",
+        ),
+        pytest.param({"refresh_token": " ~"}, [" ~"], id="a-refresh-token-at-the-grammars-ends"),
+    ],
+)
 def test_an_admitted_callback_stores_what_the_code_answer_issued(
-    members: dict[str, object], stored: list[str],
+    members: dict[str, object],
+    stored: list[str],
 ) -> None:
     host = an_oidc_host()
     host.issuer.code_answer_members.update(members)
@@ -160,12 +175,16 @@ def test_a_refresh_token_outside_the_grammar_refuses_the_login_and_provisions_no
     assert host.accounts.list() == []
 
 
-@pytest.mark.parametrize(("seconds_into_the_instant", "seconds_per_reading"), [
-    pytest.param(0.0, 0.0, id="a fixed clock"),
-    pytest.param(0.9, 0.4, id="an advancing clock"),
-])
+@pytest.mark.parametrize(
+    ("seconds_into_the_instant", "seconds_per_reading"),
+    [
+        pytest.param(0.0, 0.0, id="a fixed clock"),
+        pytest.param(0.9, 0.4, id="an advancing clock"),
+    ],
+)
 def test_an_admitted_callback_opens_the_session_for_one_idle_from_one_whole_second_reading(
-    seconds_into_the_instant: float, seconds_per_reading: float,
+    seconds_into_the_instant: float,
+    seconds_per_reading: float,
 ) -> None:
     clock = FakeClock(FIXED_INSTANT.timestamp() + seconds_into_the_instant, seconds_per_reading)
     host = an_oidc_host(wall_clock=clock)
@@ -174,14 +193,16 @@ def test_an_admitted_callback_opens_the_session_for_one_idle_from_one_whole_seco
 
     record = host.sessions.stored_record
     assert (record.created_at, record.expires_at) == (
-        FIXED_INSTANT, FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
+        FIXED_INSTANT,
+        FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
     )
     assert host.client.get("/me").json() == {"username": "lena"}
 
 
 @pytest.mark.parametrize("cookie_secure", [True, False])
 def test_the_callback_hands_the_browser_no_id_token_and_each_login_replaces_the_rows_token(
-    *, cookie_secure: bool,
+    *,
+    cookie_secure: bool,
 ) -> None:
     host = an_oidc_host(cookie_secure=cookie_secure)
     host.callback(host.sign_in_at_issuer())
@@ -189,10 +210,12 @@ def test_the_callback_hands_the_browser_no_id_token_and_each_login_replaces_the_
     response = host.callback(host.sign_in_at_issuer())
 
     first, second = host.issued_id_tokens
-    shown = " ".join([
-        repr(host.sessions.list_active()),
-        *(value for _, value in response.headers.multi_items()),
-    ])
+    shown = " ".join(
+        [
+            repr(host.sessions.list_active()),
+            *(value for _, value in response.headers.multi_items()),
+        ]
+    )
     assert first != second
     assert second not in shown
     assert not [name for name in set_cookies(response) if "id_token" in name]
@@ -204,7 +227,10 @@ def test_an_id_token_of_the_verifiers_longest_length_is_stored_and_sent_whole() 
     host.issuer.mint_id_token = lambda nonce: a_token_of_length(
         MAX_TOKEN_CHARACTERS,
         lambda header_padding, groups_padding: an_id_token(
-            nonce, host.wall_clock, [LOGIN_GROUP, groups_padding], header_padding,
+            nonce,
+            host.wall_clock,
+            [LOGIN_GROUP, groups_padding],
+            header_padding,
         ),
     )
     host.callback(host.sign_in_at_issuer())
@@ -316,12 +342,18 @@ def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
     assert host.audit.account_events == []
 
 
-@pytest.mark.parametrize(("before", "after", "status_before", "status_after"), [
-    pytest.param([LOGIN_GROUP], [ADMIN_GROUP], 403, 200, id="put into the admin group"),
-    pytest.param([ADMIN_GROUP], [LOGIN_GROUP], 200, 403, id="taken out of the admin group"),
-])
+@pytest.mark.parametrize(
+    ("before", "after", "status_before", "status_after"),
+    [
+        pytest.param([LOGIN_GROUP], [ADMIN_GROUP], 403, 200, id="put into the admin group"),
+        pytest.param([ADMIN_GROUP], [LOGIN_GROUP], 200, 403, id="taken out of the admin group"),
+    ],
+)
 def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
-    before: list[str], after: list[str], status_before: int, status_after: int,
+    before: list[str],
+    after: list[str],
+    status_before: int,
+    status_after: int,
 ) -> None:
     groups = list(before)
     host = an_oidc_host(groups_claim=groups)
@@ -338,12 +370,16 @@ def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
     assert host.client.get("/admin").status_code == status_after
 
 
-@pytest.mark.parametrize(("asked_for", "returned"), [
-    pytest.param("/albums/42", "/albums/42", id="a deep link"),
-    pytest.param("//evil.example", "/", id="another host"),
-])
+@pytest.mark.parametrize(
+    ("asked_for", "returned"),
+    [
+        pytest.param("/albums/42", "/albums/42", id="a deep link"),
+        pytest.param("//evil.example", "/", id="another host"),
+    ],
+)
 def test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_app_root(
-    asked_for: str, returned: str,
+    asked_for: str,
+    returned: str,
 ) -> None:
     host = an_oidc_host()
 
@@ -370,7 +406,8 @@ def test_a_return_path_signed_by_another_build_is_judged_again_at_the_callback(
     pending = _verify_pending_login(host.client.cookies[name], host.config.signing_key)
     assert pending is not None
     resigned = _sign_pending_login(
-        replace(pending, return_to=signed), host.config.signing_key,
+        replace(pending, return_to=signed),
+        host.config.signing_key,
     )
 
     response = host.callback(query, cookie=f"{name}={resigned}")
@@ -455,35 +492,41 @@ def _forged(host: OidcHost, query: str, issued_at: int, *, secret: bytes | None 
     return f"{host.pending_cookie_name(query)}={value}"
 
 
-@pytest.mark.parametrize(("pending_cookie", "refusal"), [
-    pytest.param(_absent, "state-mismatch", id="no pending cookie for the state"),
-    pytest.param(_tampered, "state-mismatch", id="a tampered signature"),
-    pytest.param(_signed_under_another_key, "state-mismatch", id="signed under another key"),
-    pytest.param(_signed_as_a_session, "state-mismatch", id="signed as a session cookie"),
-    pytest.param(_oversized, "state-mismatch", id="oversized"),
-    pytest.param(_of_another_version, "state-mismatch", id="another version"),
-    pytest.param(
-        _with_a_return_path_added_after_signing, "state-mismatch",
-        id="a return path altered after signing",
-    ),
-    pytest.param(_twice, "state-mismatch", id="the genuine cookie twice"),
-    pytest.param(
-        _another_logins_under_this_name, "state-mismatch",
-        id="another login's genuine cookie under this state's name",
-    ),
-    pytest.param(
-        lambda host, query: _forged(host, query, NOW - PENDING_LOGIN_MAX_AGE_SECONDS - 1),
-        "pending-login-expired",
-        id="signed but issued before the lifetime",
-    ),
-    pytest.param(
-        lambda host, query: _forged(host, query, NOW + 1),
-        "pending-login-expired",
-        id="signed but dated in the future",
-    ),
-])
+@pytest.mark.parametrize(
+    ("pending_cookie", "refusal"),
+    [
+        pytest.param(_absent, "state-mismatch", id="no pending cookie for the state"),
+        pytest.param(_tampered, "state-mismatch", id="a tampered signature"),
+        pytest.param(_signed_under_another_key, "state-mismatch", id="signed under another key"),
+        pytest.param(_signed_as_a_session, "state-mismatch", id="signed as a session cookie"),
+        pytest.param(_oversized, "state-mismatch", id="oversized"),
+        pytest.param(_of_another_version, "state-mismatch", id="another version"),
+        pytest.param(
+            _with_a_return_path_added_after_signing,
+            "state-mismatch",
+            id="a return path altered after signing",
+        ),
+        pytest.param(_twice, "state-mismatch", id="the genuine cookie twice"),
+        pytest.param(
+            _another_logins_under_this_name,
+            "state-mismatch",
+            id="another login's genuine cookie under this state's name",
+        ),
+        pytest.param(
+            lambda host, query: _forged(host, query, NOW - PENDING_LOGIN_MAX_AGE_SECONDS - 1),
+            "pending-login-expired",
+            id="signed but issued before the lifetime",
+        ),
+        pytest.param(
+            lambda host, query: _forged(host, query, NOW + 1),
+            "pending-login-expired",
+            id="signed but dated in the future",
+        ),
+    ],
+)
 def test_an_invalid_pending_cookie_is_refused_before_any_token_request_and_cleared(
-    pending_cookie: Callable[[OidcHost, str], str], refusal: str,
+    pending_cookie: Callable[[OidcHost, str], str],
+    refusal: str,
 ) -> None:
     host = an_oidc_host()
     query = host.sign_in_at_issuer()
@@ -498,18 +541,32 @@ def test_an_invalid_pending_cookie_is_refused_before_any_token_request_and_clear
     assert host.accounts.list() == []
 
 
-@pytest.mark.parametrize(("returned_query", "refusal"), [
-    pytest.param(lambda query: query.replace("state=", "other="), "state-mismatch",
-                 id="without a state"),
-    pytest.param(lambda query: f"{query}&{query.partition('&')[0]}", "malformed-callback",
-                 id="naming its state twice"),
-    pytest.param(lambda query: query.replace("state=", "state=&other=", 1), "state-mismatch",
-                 id="naming an empty state"),
-    pytest.param(lambda query: query.replace("state=", "state=%ff", 1), "malformed-callback",
-                 id="naming an undecodable state"),
-])
+@pytest.mark.parametrize(
+    ("returned_query", "refusal"),
+    [
+        pytest.param(
+            lambda query: query.replace("state=", "other="), "state-mismatch", id="without a state"
+        ),
+        pytest.param(
+            lambda query: f"{query}&{query.partition('&')[0]}",
+            "malformed-callback",
+            id="naming its state twice",
+        ),
+        pytest.param(
+            lambda query: query.replace("state=", "state=&other=", 1),
+            "state-mismatch",
+            id="naming an empty state",
+        ),
+        pytest.param(
+            lambda query: query.replace("state=", "state=%ff", 1),
+            "malformed-callback",
+            id="naming an undecodable state",
+        ),
+    ],
+)
 def test_a_callback_without_one_state_is_refused_and_selects_no_cookie(
-    returned_query: Callable[[str], str], refusal: str,
+    returned_query: Callable[[str], str],
+    refusal: str,
 ) -> None:
     host = an_oidc_host()
     query = host.sign_in_at_issuer()
@@ -557,7 +614,8 @@ def test_a_concurrent_replay_of_one_callback_signs_in_exactly_once() -> None:
 
 @pytest.mark.parametrize("second_returns_first", [False, True], ids=["in order", "reversed"])
 def test_two_tabs_both_sign_in_and_the_later_session_replaces_the_earlier(
-    *, second_returns_first: bool,
+    *,
+    second_returns_first: bool,
 ) -> None:
     host = an_oidc_host()
     tabs = [host.sign_in_at_issuer(), host.sign_in_at_issuer()]
@@ -597,10 +655,13 @@ def _the_newest_genuine_pending_cookie_twice(host: OidcHost) -> str:
     return name
 
 
-@pytest.mark.parametrize("unranked_cookie", [
-    pytest.param(_a_forged_pending_cookie, id="a forged value"),
-    pytest.param(_the_newest_genuine_pending_cookie_twice, id="a name sent twice"),
-])
+@pytest.mark.parametrize(
+    "unranked_cookie",
+    [
+        pytest.param(_a_forged_pending_cookie, id="a forged value"),
+        pytest.param(_the_newest_genuine_pending_cookie_twice, id="a name sent twice"),
+    ],
+)
 def test_a_start_at_the_cap_evicts_an_unranked_pending_cookie_before_any_genuine_one(
     unranked_cookie: Callable[[OidcHost], str],
 ) -> None:
@@ -623,7 +684,5 @@ def test_a_start_at_the_cap_leaves_a_prefixed_cookie_of_another_shape_alone() ->
 
     response = host.client.get("/login/oidc")
 
-    newest = host.pending_cookie_name(
-        urllib.parse.urlsplit(response.headers["location"]).query
-    )
+    newest = host.pending_cookie_name(urllib.parse.urlsplit(response.headers["location"]).query)
     assert host.pending_cookie_names() == genuine | {stranger, newest}

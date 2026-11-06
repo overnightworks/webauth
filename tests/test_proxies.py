@@ -80,16 +80,24 @@ _CLIENT_BEYOND_THE_HOP_BOUND = ", ".join(
         pytest.param([], _TRUSTED_PEER, id="no header at all"),
         pytest.param([_CLIENT], _CLIENT, id="single hop"),
         pytest.param(
-            [f"{_CLIENT}, {_TRUSTED_HOP}"], _CLIENT, id="rightmost untrusted hop",
+            [f"{_CLIENT}, {_TRUSTED_HOP}"],
+            _CLIENT,
+            id="rightmost untrusted hop",
         ),
         pytest.param(
-            [_CLIENT, _TRUSTED_HOP], _CLIENT, id="chain split across fields",
+            [_CLIENT, _TRUSTED_HOP],
+            _CLIENT,
+            id="chain split across fields",
         ),
         pytest.param(
-            ["10.9.9.9", _CLIENT], _CLIENT, id="a later field is not hidden by the first",
+            ["10.9.9.9", _CLIENT],
+            _CLIENT,
+            id="a later field is not hidden by the first",
         ),
         pytest.param(
-            [f"{_TRUSTED_HOP}, 172.18.0.8"], _TRUSTED_PEER, id="every hop trusted",
+            [f"{_TRUSTED_HOP}, 172.18.0.8"],
+            _TRUSTED_PEER,
+            id="every hop trusted",
         ),
         pytest.param(["   "], _TRUSTED_PEER, id="whitespace only"),
         pytest.param([""], _TRUSTED_PEER, id="empty header"),
@@ -97,11 +105,14 @@ _CLIENT_BEYOND_THE_HOP_BOUND = ", ".join(
         pytest.param([f", {_CLIENT}"], _CLIENT, id="empty entry left of the client"),
         pytest.param(["garbage"], _TRUSTED_PEER, id="not an address"),
         pytest.param(
-            [f"garbage, {_CLIENT}, {_TRUSTED_HOP}"], _CLIENT,
+            [f"garbage, {_CLIENT}, {_TRUSTED_HOP}"],
+            _CLIENT,
             id="poisoned prefix left of a trusted hop",
         ),
         pytest.param(
-            ["garbage", _CLIENT], _CLIENT, id="poisoned prefix in an earlier field",
+            ["garbage", _CLIENT],
+            _CLIENT,
+            id="poisoned prefix in an earlier field",
         ),
         pytest.param([f"{_CLIENT}:443"], _TRUSTED_PEER, id="address with a port"),
         pytest.param(["fe80::1%eth0"], _TRUSTED_PEER, id="zone-scoped hop"),
@@ -109,12 +120,15 @@ _CLIENT_BEYOND_THE_HOP_BOUND = ", ".join(
         pytest.param(["2001:0DB8:0000::0001"], "2001:db8::1", id="uncompressed IPv6 hop"),
         pytest.param([_CLIENT_AT_THE_HOP_BOUND], _CLIENT, id="client at the hop bound"),
         pytest.param(
-            [_CLIENT_BEYOND_THE_HOP_BOUND], _TRUSTED_PEER, id="client beyond the hop bound",
+            [_CLIENT_BEYOND_THE_HOP_BOUND],
+            _TRUSTED_PEER,
+            id="client beyond the hop bound",
         ),
     ],
 )
 def test_client_ip_behind_a_trusted_proxy(
-    forwarded_for: list[str], expected: str,
+    forwarded_for: list[str],
+    expected: str,
 ) -> None:
     """The chain is read from the right, where our own proxies appended.
 
@@ -173,17 +187,20 @@ _HOPS_BEYOND_ANY_DEPLOYMENT = 10_000
     ("chain", "expected"),
     [
         pytest.param(
-            [*[_TRUSTED_HOP] * _HOPS_BEYOND_ANY_DEPLOYMENT, _CLIENT], _CLIENT,
+            [*[_TRUSTED_HOP] * _HOPS_BEYOND_ANY_DEPLOYMENT, _CLIENT],
+            _CLIENT,
             id="the client sits at the right end",
         ),
         pytest.param(
-            [_TRUSTED_HOP] * _HOPS_BEYOND_ANY_DEPLOYMENT, _TRUSTED_PEER,
+            [_TRUSTED_HOP] * _HOPS_BEYOND_ANY_DEPLOYMENT,
+            _TRUSTED_PEER,
             id="every read hop is trusted",
         ),
     ],
 )
 def test_a_huge_chain_costs_only_the_entries_it_reads(
-    chain: list[str], expected: str,
+    chain: list[str],
+    expected: str,
 ) -> None:
     """A client may send as many entries as the header size allows, and the
     hop bound must limit the work rather than only the parsing: the entries
@@ -211,9 +228,14 @@ def test_an_entry_too_long_to_be_an_address_is_never_parsed(
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     entry_of_nothing_but_separators = "1." * _HOPS_BEYOND_ANY_DEPLOYMENT
 
-    assert _get_client_ip(
-        _TRUSTED_PEER, [entry_of_nothing_but_separators], trusted,
-    ) == _TRUSTED_PEER
+    assert (
+        _get_client_ip(
+            _TRUSTED_PEER,
+            [entry_of_nothing_but_separators],
+            trusted,
+        )
+        == _TRUSTED_PEER
+    )
     assert all(len(host) <= MAX_ADDRESS_CHARS for host in parsed_hosts)
 
 
@@ -222,12 +244,14 @@ def test_an_entry_too_long_to_be_an_address_is_never_parsed(
     [
         pytest.param(["garbage"], id="an entry that is not an address"),
         pytest.param(
-            [_CLIENT_BEYOND_THE_HOP_BOUND], id="more trusted hops than the bound",
+            [_CLIENT_BEYOND_THE_HOP_BOUND],
+            id="more trusted hops than the bound",
         ),
     ],
 )
 def test_a_chain_that_names_nobody_is_logged(
-    forwarded_for: list[str], caplog: pytest.LogCaptureFixture,
+    forwarded_for: list[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Keying on the peer pools unrelated visitors into one budget, so a chain
     the proxy should have written correctly is a fault to see, not a default."""
@@ -312,19 +336,24 @@ def test_an_application_without_a_configuration_names_nobody() -> None:
 # -- Budget address ----------------------------------------------------------
 
 
-@pytest.mark.parametrize(("address", "prefix", "budget"), [
-    ("203.0.113.7", 64, "203.0.113.7"),
-    ("::ffff:203.0.113.7", 64, "203.0.113.7"),
-    ("2001:db8:1:2::1", 64, "2001:db8:1:2::/64"),
-    ("2001:db8:1:2:ffff:ffff:ffff:ffff", 64, "2001:db8:1:2::/64"),
-    ("2001:db8:1:3::1", 64, "2001:db8:1:3::/64"),
-    ("2001:db8:1:ff::1", 48, "2001:db8:1::/48"),
-    ("2001:db8:1:2::1", 128, "2001:db8:1:2::1/128"),
-    ("2001:0DB8:0001:0002:0000:0000:0000:0001", 64, "2001:db8:1:2::/64"),
-    ("testclient", 64, "testclient"),
-])
+@pytest.mark.parametrize(
+    ("address", "prefix", "budget"),
+    [
+        ("203.0.113.7", 64, "203.0.113.7"),
+        ("::ffff:203.0.113.7", 64, "203.0.113.7"),
+        ("2001:db8:1:2::1", 64, "2001:db8:1:2::/64"),
+        ("2001:db8:1:2:ffff:ffff:ffff:ffff", 64, "2001:db8:1:2::/64"),
+        ("2001:db8:1:3::1", 64, "2001:db8:1:3::/64"),
+        ("2001:db8:1:ff::1", 48, "2001:db8:1::/48"),
+        ("2001:db8:1:2::1", 128, "2001:db8:1:2::1/128"),
+        ("2001:0DB8:0001:0002:0000:0000:0000:0001", 64, "2001:db8:1:2::/64"),
+        ("testclient", 64, "testclient"),
+    ],
+)
 def test_the_budget_of_an_address_pools_its_ipv6_network(
-    address: str, prefix: int, budget: str,
+    address: str,
+    prefix: int,
+    budget: str,
 ) -> None:
     assert _budget_address(address, prefix) == budget
 
@@ -343,23 +372,39 @@ def _scheme_app() -> FastAPI:
     return app
 
 
-@pytest.mark.parametrize(("base_url", "peer", "forwarded_proto", "https"), [
-    pytest.param("https://testserver", "testclient", None, True, id="own-https-connection"),
-    pytest.param("http://testserver", _TRUSTED_PEER, "https", True, id="trusted-proxy-says-https"),
-    pytest.param(
-        "http://testserver", _TRUSTED_PEER, "http, https", True,
-        id="trusted-proxy-appended-https-last",
-    ),
-    pytest.param(
-        "http://testserver", _TRUSTED_PEER, "https, http", False,
-        id="client-prepended-https-before-trusted-http",
-    ),
-    pytest.param("http://testserver", _TRUSTED_PEER, None, False, id="trusted-proxy-says-nothing"),
-    pytest.param("http://testserver", _CLIENT, "https", False, id="untrusted-peer-says-https"),
-    pytest.param("http://testserver", _CLIENT, None, False, id="untrusted-plain-http"),
-])
+@pytest.mark.parametrize(
+    ("base_url", "peer", "forwarded_proto", "https"),
+    [
+        pytest.param("https://testserver", "testclient", None, True, id="own-https-connection"),
+        pytest.param(
+            "http://testserver", _TRUSTED_PEER, "https", True, id="trusted-proxy-says-https"
+        ),
+        pytest.param(
+            "http://testserver",
+            _TRUSTED_PEER,
+            "http, https",
+            True,
+            id="trusted-proxy-appended-https-last",
+        ),
+        pytest.param(
+            "http://testserver",
+            _TRUSTED_PEER,
+            "https, http",
+            False,
+            id="client-prepended-https-before-trusted-http",
+        ),
+        pytest.param(
+            "http://testserver", _TRUSTED_PEER, None, False, id="trusted-proxy-says-nothing"
+        ),
+        pytest.param("http://testserver", _CLIENT, "https", False, id="untrusted-peer-says-https"),
+        pytest.param("http://testserver", _CLIENT, None, False, id="untrusted-plain-http"),
+    ],
+)
 def test_https_counts_only_from_the_connection_or_a_trusted_proxy(
-    base_url: str, peer: str, forwarded_proto: str | None, https: bool,
+    base_url: str,
+    peer: str,
+    forwarded_proto: str | None,
+    https: bool,
 ) -> None:
     headers = {} if forwarded_proto is None else {"x-forwarded-proto": forwarded_proto}
 

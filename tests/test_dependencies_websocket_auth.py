@@ -118,8 +118,11 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
     admitted = a_session(now=FIXED_INSTANT, remaining=timedelta(seconds=1))
     admitted_app = an_auth_app(admitted, wall_clock=FIXED_WALL_CLOCK)
 
-    with pytest.raises(WebSocketDisconnect), expired_app.connect(
-        cookie=expired_app.signed_cookie(),
+    with (
+        pytest.raises(WebSocketDisconnect),
+        expired_app.connect(
+            cookie=expired_app.signed_cookie(),
+        ),
     ):
         pass
     with admitted_app.connect(cookie=admitted_app.signed_cookie()) as socket:
@@ -142,7 +145,8 @@ def test_a_handshake_decides_at_the_configured_clock_like_a_request_does() -> No
     ],
 )
 def test_an_origin_from_the_configured_hosts_is_admitted(
-    origin: str, loopback_cookie_secure: bool | None,
+    origin: str,
+    loopback_cookie_secure: bool | None,
 ) -> None:
     app = (
         an_auth_app(a_session())
@@ -160,7 +164,8 @@ def test_an_origin_from_the_configured_hosts_is_admitted(
 
 def test_the_allowlist_decides_whatever_fetch_metadata_claims(auth_app: AuthApp) -> None:
     with auth_app.connect(
-        cookie=auth_app.signed_cookie(), headers=[("sec-fetch-site", "cross-site")],
+        cookie=auth_app.signed_cookie(),
+        headers=[("sec-fetch-site", "cross-site")],
     ) as socket:
         assert socket.receive_json()["username"] == "alice"
 
@@ -227,7 +232,10 @@ def test_a_handshake_without_one_valid_session_cookie_is_refused(
         pytest.param("null", [], ConnectionRefusal.FOREIGN_ORIGIN, id="the null Origin"),
         pytest.param("", [], ConnectionRefusal.FOREIGN_ORIGIN, id="an empty Origin"),
         pytest.param(
-            "http://[::1", [], ConnectionRefusal.FOREIGN_ORIGIN, id="an unparsable Origin",
+            "http://[::1",
+            [],
+            ConnectionRefusal.FOREIGN_ORIGIN,
+            id="an unparsable Origin",
         ),
         pytest.param(
             f"https://user@{ALLOWED_HOST}",
@@ -286,7 +294,8 @@ def test_a_refused_origin_leaves_the_session_untouched() -> None:
     ],
 )
 def test_a_refused_origin_never_asks_the_store(
-    origin: str | None, refusal: ConnectionRefusal,
+    origin: str | None,
+    refusal: ConnectionRefusal,
 ) -> None:
     app = an_auth_app(None, sessions=SessionsThatMustNotBeAsked(a_session()))
 
@@ -303,7 +312,9 @@ def test_a_refused_origin_never_asks_the_store(
     ],
 )
 def test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on(
-    origin: str, is_plain_http: bool, cookie_secure: bool,
+    origin: str,
+    is_plain_http: bool,
+    cookie_secure: bool,
 ) -> None:
     refused = cookie_secure and is_plain_http
     sessions = SessionsThatMustNotBeAsked(a_session()) if refused else None

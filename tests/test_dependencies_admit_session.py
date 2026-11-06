@@ -63,7 +63,9 @@ def test_a_session_inside_its_lifetime_returns_its_account_and_is_renewed() -> N
     outcome = admit(record.id, SessionRecordsInMemory(record))
 
     assert outcome == AuthenticatedUser(
-        id=record.user.id, username=record.user.username, role=record.user.role,
+        id=record.user.id,
+        username=record.user.username,
+        role=record.user.role,
     )
     assert record.expires_at == FIXED_INSTANT + IDLE
 
@@ -73,35 +75,63 @@ def test_a_session_inside_its_lifetime_returns_its_account_and_is_renewed() -> N
     [
         pytest.param(FIVE_MINUTES, IDLE, True, IDLE, id="admitted at the idle bound"),
         pytest.param(
-            FIVE_MINUTES, IDLE + TOLERANCE, True, IDLE, id="admitted at the tolerance bound",
+            FIVE_MINUTES,
+            IDLE + TOLERANCE,
+            True,
+            IDLE,
+            id="admitted at the tolerance bound",
         ),
         pytest.param(
-            CAP - HALF_AN_HOUR, HALF_AN_HOUR, True, HALF_AN_HOUR,
+            CAP - HALF_AN_HOUR,
+            HALF_AN_HOUR,
+            True,
+            HALF_AN_HOUR,
             id="admitted at the cap bound, renewed only to the cap",
         ),
         pytest.param(FIVE_MINUTES, timedelta(0), True, IDLE, id="admitted at the expiry itself"),
         pytest.param(
-            FIVE_MINUTES, HALF_AN_HOUR, True, IDLE, id="admitted and renewed by a full idle window",
+            FIVE_MINUTES,
+            HALF_AN_HOUR,
+            True,
+            IDLE,
+            id="admitted and renewed by a full idle window",
         ),
         pytest.param(
-            CAP - 1000 * SECOND, 500 * SECOND, True, 1000 * SECOND,
+            CAP - 1000 * SECOND,
+            500 * SECOND,
+            True,
+            1000 * SECOND,
             id="renewed to exactly the cap when the cap is sooner",
         ),
         pytest.param(FIVE_MINUTES, -SECOND, False, None, id="refused one second past the expiry"),
         pytest.param(
-            CAP - HALF_AN_HOUR, HALF_AN_HOUR + SECOND, False, None,
+            CAP - HALF_AN_HOUR,
+            HALF_AN_HOUR + SECOND,
+            False,
+            None,
             id="refused one second past the cap",
         ),
         pytest.param(
-            FIVE_MINUTES, IDLE + TOLERANCE + SECOND, False, None,
+            FIVE_MINUTES,
+            IDLE + TOLERANCE + SECOND,
+            False,
+            None,
             id="refused past the tolerance",
         ),
         pytest.param(
-            FIVE_MINUTES, THIRTY_DAYS, False, None, id="refused when a store wrote a 30-day expiry",
+            FIVE_MINUTES,
+            THIRTY_DAYS,
+            False,
+            None,
+            id="refused when a store wrote a 30-day expiry",
         ),
         pytest.param(-TOLERANCE, IDLE, True, IDLE, id="admitted created at the tolerance ahead"),
         pytest.param(
-            -TOLERANCE - SECOND, IDLE, False, None, id="refused created past the tolerance ahead",
+            -TOLERANCE - SECOND,
+            IDLE,
+            False,
+            None,
+            id="refused created past the tolerance ahead",
         ),
     ],
 )
@@ -163,7 +193,8 @@ def test_a_session_whose_store_never_renews_ends_once_its_old_expiry_passes() ->
     ],
 )
 def test_an_unknown_id_or_a_row_touch_no_longer_finds_is_refused(
-    session_id: str, make_store: Callable[[FakeSessionRecord], SessionRecordsInMemory],
+    session_id: str,
+    make_store: Callable[[FakeSessionRecord], SessionRecordsInMemory],
 ) -> None:
     record = a_session(now=FIXED_INSTANT)
     stored_expiry = record.expires_at
@@ -202,7 +233,9 @@ CAP_INSTANT_ACROSS_THE_CLOCK_CHANGE = datetime(2026, 10, 25, 1, 30, tzinfo=UTC)
 
 
 def admit_a_berlin_session(
-    *, now: datetime, expires_at: datetime,
+    *,
+    now: datetime,
+    expires_at: datetime,
 ) -> tuple[FakeSessionRecord, AuthenticatedUser | ConnectionRefusal]:
     record = a_session(now=now)
     record.created_at = CREATED_BEFORE_THE_CLOCK_CHANGE

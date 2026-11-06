@@ -56,7 +56,11 @@ def require_positive_whole_number(field: str, value: object, *, unit: str) -> No
 
 
 def require_collection_not_one_string(
-    field: str, value: object, *, noun: str, example: str | None = None,
+    field: str,
+    value: object,
+    *,
+    noun: str,
+    example: str | None = None,
 ) -> None:
     """Refuse one string where a set of ``noun`` belongs.
 
