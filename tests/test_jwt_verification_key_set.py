@@ -51,10 +51,18 @@ def _mixed_keys(count: int) -> list[dict[str, Any]]:
     return keys
 
 
+_KEY_SET_BYTE_LIMIT = 64 * 1024
+
+
+def _key_set_of_bytes(size: int) -> bytes:
+    document = key_set_document(public_jwk(rsa_key("current"), "current-key"))
+    return document + b" " * (size - len(document))
+
+
 def _undeliverable_key_sets() -> list[Any]:
     return [
         pytest.param(KeySetFetchError("timed out"), "fetch-failed", id="fetch-failure"),
-        pytest.param(b" " * 64 * 1024 + b"{}", "too-large", id="oversized-response"),
+        pytest.param(_key_set_of_bytes(_KEY_SET_BYTE_LIMIT + 1), "too-large", id="oversized-response"),
     ]
 
 
@@ -269,6 +277,12 @@ def test_a_defective_key_set_is_refused_as_a_whole(
     assert refused == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     [logged] = _logged_refresh_failures(caplog)
     assert logged.endswith(failure)
+
+
+def test_a_key_set_of_exactly_the_byte_limit_is_accepted(issuer: IssuerScenario) -> None:
+    issuer.serve(_key_set_of_bytes(_KEY_SET_BYTE_LIMIT))
+
+    assert issuer.verifier.verify(issuer.token()) == issuer.verified()
 
 
 def test_keys_passed_over_do_not_count_toward_the_key_bound(issuer: IssuerScenario) -> None:
