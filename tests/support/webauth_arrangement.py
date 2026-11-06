@@ -91,7 +91,6 @@ if TYPE_CHECKING:
 DRIVE_DEADLINE_SECONDS: Final = 5
 
 
-
 def web_auth_config_arguments() -> dict[str, Any]:
     """Every argument a complete configuration is built from."""
     return {
@@ -566,8 +565,12 @@ class AuthApp:
 
 
 def seeded_session(
-    sessions: SessionRecordsInMemory, hold: AbstractContextManager[None],
-    user_id: str, now: datetime, expires_at: datetime, refresh_token: SecretStr | None = None
+    sessions: SessionRecordsInMemory,
+    hold: AbstractContextManager[None],
+    user_id: str,
+    now: datetime,
+    expires_at: datetime,
+    refresh_token: SecretStr | None = None,
 ) -> FakeSessionRecord:
     """A stored session of ``user_id``, created the way a host does: under its write lock."""
     with hold:
@@ -687,9 +690,7 @@ def _add_session_routes(auth: AuthApp, login_redirect: LoginRedirect | None) -> 
         return {"username": None if user is None else user.username}
 
     for path in OPEN_PATHS:
-        app.add_api_route(
-            path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"]
-        )
+        app.add_api_route(path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"])
 
     @app.get("/admin")
     def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
@@ -738,7 +739,9 @@ def an_auth_app(
         )
     auth = AuthApp(
         client=TestClient(
-            app, base_url=HTTPS_TEST_SERVER, cookies={},
+            app,
+            base_url=HTTPS_TEST_SERVER,
+            cookies={},
             raise_server_exceptions=raise_server_exceptions,
         ),
         sessions=sessions,
@@ -785,11 +788,19 @@ def an_http_scope(
     if spec_version is not None:
         asgi["spec_version"] = spec_version
     return {
-        "type": "http", "asgi": asgi, "http_version": "1.1", "method": method,
-        "scheme": "https", "path": path,
-        "raw_path": path.encode() if raw_path is None else raw_path, "query_string": b"",
-        "headers": list(headers), "client": ("203.0.113.7", 1234), "server": ("testserver", 443),
-        "root_path": root_path, "app": app,
+        "type": "http",
+        "asgi": asgi,
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "https",
+        "path": path,
+        "raw_path": path.encode() if raw_path is None else raw_path,
+        "query_string": b"",
+        "headers": list(headers),
+        "client": ("203.0.113.7", 1234),
+        "server": ("testserver", 443),
+        "root_path": root_path,
+        "app": app,
     }
 
 
