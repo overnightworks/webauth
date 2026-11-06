@@ -13,7 +13,7 @@ reading the library's code. A security fix lands once and reaches every app with
 It follows the standards it implements:
 
 - OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0;
-- OAuth 2.0 (RFC 6749), its bearer tokens (RFC 6750) and its Security Best Current Practice (RFC 9700);
+- OAuth 2.0 (RFC 6749), and its bearer tokens (RFC 6750);
 - JSON Web Token (RFC 7519);
 - Fetch Metadata for cross-site requests.
 
