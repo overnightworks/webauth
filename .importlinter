@@ -68,3 +68,15 @@ protected_modules =
     redis
 allowed_importers =
     webauth.rate_limit
+
+# webauth.admission is the leaf the sign-in steps, the bearer gate and services all
+# apply, so it imports only the standard library: no sibling module and no web framework.
+[importlinter:contract:admission-imports-only-the-standard-library]
+name = webauth.admission imports no other webauth module, no fastapi and no starlette
+type = forbidden
+source_modules =
+    webauth.admission
+forbidden_modules =
+    webauth.*
+    fastapi
+    starlette

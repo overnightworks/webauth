@@ -7,8 +7,8 @@ build instead of the service's next upgrade.
 
 from __future__ import annotations
 
+from webauth.admission import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.jwt_verification import KeySetFetch, MonotonicClock
-from webauth.oidc_login import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.ports import WallClock
 from webauth.service_callers import (
     CallerRefusal,

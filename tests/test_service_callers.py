@@ -25,9 +25,9 @@ from tests.support.oidc_arrangement import (
     an_access_token,
     served_key_set,
 )
+from webauth.admission import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import RejectionReason
-from webauth.oidc_login import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.service_callers import (
     CallerRefusal,
     CallerRefusalReason,

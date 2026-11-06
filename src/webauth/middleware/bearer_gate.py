@@ -15,6 +15,14 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
 from webauth._validation import is_scope_token_tuple
+from webauth.admission import (
+    AdmissionConfig,
+    AdmissionRefusal,
+    AppRole,
+    NoAdmins,
+    _require_group_path,
+    app_role,
+)
 from webauth.config import web_auth_config
 from webauth.dependencies import (
     _ADMIN_REQUIRED_DETAIL,
@@ -35,16 +43,7 @@ from webauth.oidc import (
 )
 from webauth.oidc._client_config import _PLAIN_AUTHORITY, _is_endpoint_url
 from webauth.oidc._relying_party import _ACCESS_TOKEN, _names_another_audience
-from webauth.oidc_login import (
-    AdmissionConfig,
-    AdmissionRefusal,
-    AppRole,
-    NoAdmins,
-    _admit_resource_holder,
-    _admit_token_holder,
-    _require_group_path,
-    app_role,
-)
+from webauth.oidc_login import _admit_resource_holder, _admit_token_holder
 from webauth.policies import (
     AuthorizedParties,
     PathRules,

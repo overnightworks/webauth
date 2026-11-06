@@ -41,6 +41,7 @@ from tests.support.webauth_arrangement import (
     an_auth_app,
     session_cookie_header,
 )
+from webauth.admission import AdmissionConfig
 from webauth.config import web_auth_config
 from webauth.dependencies import (
     LoginRedirect,
@@ -60,7 +61,6 @@ from webauth.middleware import (
     install_web_auth_middleware,
     resource_person,
 )
-from webauth.oidc_login import AdmissionConfig
 from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PublicRule
 from webauth.ports import AuthenticatedUser, BearerCaller
 

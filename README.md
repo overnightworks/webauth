@@ -23,7 +23,7 @@ from pydantic import SecretStr
 from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
-from webauth.oidc_login import AdmissionConfig
+from webauth.admission import AdmissionConfig
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,

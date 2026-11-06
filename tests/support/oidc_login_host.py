@@ -41,6 +41,7 @@ from tests.support.webauth_arrangement import (
     WriteLockInMemory,
     a_web_auth_config,
 )
+from webauth.admission import AdmissionConfig
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     _pending_login_cookie_name,
@@ -53,7 +54,6 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRelyingParty,
 )
-from webauth.oidc_login import AdmissionConfig
 from webauth.policies import (
     BodySizePolicy,
     CsrfPolicy,

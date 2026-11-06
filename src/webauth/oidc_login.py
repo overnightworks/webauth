@@ -58,7 +58,6 @@ module's.
 
 from __future__ import annotations
 
-import unicodedata
 import urllib.parse
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -66,9 +65,11 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import SecretStr
 
+from webauth import admission as _admission
 from webauth._end_session_page import end_session_page
 from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
+from webauth.admission import _is_member_of
 from webauth.cookies import _begin_pending_login, _clear_session_cookies
 from webauth.dependencies import (
     _is_admitted,
@@ -84,11 +85,10 @@ from webauth.oidc import (
 from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser, UsernameTakenError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from starlette.requests import Request
     from starlette.responses import Response
 
+    from webauth.admission import AdmissionConfig, AdmissionRefusal, AppRole
     from webauth.config import WebAuthConfig
     from webauth.oidc import OidcIdentity, OidcRelyingParty, VerifiedAccessToken
     from webauth.ports import (
@@ -102,128 +102,11 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
-    "AdmissionConfig",
-    "AdmissionRefusal",
     "AccessTokenRefusal",
     "AccessTokenRefusalReason",
-    "AppRole",
-    "EverySubject",
-    "NoAdmins",
-    "app_role",
     "current_groups",
     "fresh_access_token",
 ]
-
-
-class EverySubject(Enum):
-    """Admit every subject of the bound issuer, whatever their groups.
-
-    That includes the issuer's people who belong to other apps, so a host
-    states it on purpose and only when the issuer already limits who can sign
-    in."""
-
-    OF_THE_BOUND_ISSUER = "every-subject"
-
-
-class NoAdmins(Enum):
-    """This app has no admins: every account is ``user_role``, and a stored
-    ``admin_role`` is overwritten at the next login."""
-
-    IN_THIS_APP = "no-admins"
-
-
-@dataclass(frozen=True, kw_only=True)
-class AdmissionConfig:
-    """Who may enter and who is admin: the issuer the host's store is bound to,
-    the group path of the app (or ``EverySubject.OF_THE_BOUND_ISSUER``), and the
-    group path of its admins (or ``NoAdmins.IN_THIS_APP``).
-
-    ``bound_issuer`` is the ``issuer`` of the host's ``OidcClientConfig``. Whether
-    a group exists at the issuer is not checked.
-
-    ``ValueError`` at construction names a ``login_group`` or ``admin_group``
-    that is not a group path: one that does not start with ``/``, ends with
-    ``/``, has an empty segment, whitespace around a segment, or a control,
-    format or line-separator character. Under a ``login_group`` path, the
-    ``admin_group`` must lie strictly below it, such as ``/apps/notes/admin``."""
-
-    bound_issuer: str
-    login_group: str | EverySubject
-    admin_group: str | NoAdmins
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.login_group, EverySubject):
-            if not isinstance(self.login_group, str):
-                raise ValueError("login_group must be a group path or EverySubject")
-            _require_group_path("login_group", self.login_group)
-        if isinstance(self.admin_group, NoAdmins):
-            return
-        if not isinstance(self.admin_group, str):
-            raise ValueError("admin_group must be a group path or NoAdmins")
-        _require_group_path("admin_group", self.admin_group)
-        if isinstance(self.login_group, str) and not _is_below(self.login_group, self.admin_group):
-            raise ValueError(
-                f"admin_group must lie below login_group, such as {self.login_group}/admin"
-            )
-
-
-_FORBIDDEN_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
-
-
-def _require_group_path(field: str, path: str) -> None:
-    segments = path.split("/")
-    if segments[0] != "" or len(segments) < 2 or not all(segments[1:]):
-        raise ValueError(f"{field} must be a group path such as /apps/name")
-    if any(segment != segment.strip() for segment in segments):
-        raise ValueError(f"{field} must not have whitespace around a segment")
-    if any(unicodedata.category(character) in _FORBIDDEN_PATH_CATEGORIES for character in path):
-        raise ValueError(f"{field} must not contain control, format or line-separator characters")
-
-
-def _is_below(group_path: str, group: str) -> bool:
-    return group.startswith(group_path + "/")
-
-
-def _is_member_of(group_path: str, groups: Sequence[str]) -> bool:
-    return any(group == group_path or _is_below(group_path, group) for group in groups)
-
-
-class AppRole(StrEnum):
-    """The kind of role an app's groups carry, not the host's spelling of it."""
-
-    ADMIN = "admin"
-    USER = "user"
-
-
-def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | None:
-    """The role ``groups`` carry in the app ``admission`` describes.
-
-    ``None`` means no member: the groups hold no path of ``admission.login_group``
-    (under ``EverySubject`` every set of groups is a member, the empty one
-    included). ``ADMIN`` means they hold ``admission.admin_group`` or a path below
-    it, which ``NoAdmins`` never matches; ``USER`` is every other member.
-
-    It reads nothing but its arguments. It does not look at
-    ``admission.bound_issuer``: the caller has checked that the groups come from
-    that issuer, as the callback's admission does. The caller also validates the raw
-    groups claim, refusing any shape but a list of strings as webauth's login
-    does, and passes the normalized sequence of strings.
-    """
-    login_group = admission.login_group
-    if isinstance(login_group, str) and not _is_member_of(login_group, groups):
-        return None
-    admin_group = admission.admin_group
-    if isinstance(admin_group, str) and _is_member_of(admin_group, groups):
-        return AppRole.ADMIN
-    return AppRole.USER
-
-
-class AdmissionRefusal(StrEnum):
-    """Why a verified identity does not become a signed-in account."""
-
-    FOREIGN_ISSUER = "foreign-issuer"
-    NOT_A_MEMBER = "not-a-member"
-    USERNAME_TAKEN = "username-taken"
 
 
 class _UsernameTakenSignal(Exception):  # noqa: N818  # a signal inside the transaction, not an error
@@ -628,15 +511,15 @@ def _decide_admission(
     A missing claim is an empty list of groups.
     """
     if identity.issuer != admission.bound_issuer:
-        return AdmissionRefusal.FOREIGN_ISSUER
-    derived = app_role(identity.groups, admission)
+        return _admission.AdmissionRefusal.FOREIGN_ISSUER
+    derived = _admission.app_role(identity.groups, admission)
     if derived is None:
-        return AdmissionRefusal.NOT_A_MEMBER
+        return _admission.AdmissionRefusal.NOT_A_MEMBER
     return _AdmittedLogin(identity, _stored_role(derived, config))
 
 
 def _stored_role(derived: AppRole, config: WebAuthConfig) -> str:
-    return config.admin_role if derived is AppRole.ADMIN else config.user_role
+    return config.admin_role if derived is _admission.AppRole.ADMIN else config.user_role
 
 
 class _Claimant(Protocol):
@@ -666,16 +549,16 @@ def _admit_token_holder(
     exit failure propagates; a refused new username answers ``USERNAME_TAKEN`` once
     the exit returned.
     """
-    derived = app_role(verified.groups, admission)
+    derived = _admission.app_role(verified.groups, admission)
     if derived is None:
-        return AdmissionRefusal.NOT_A_MEMBER
+        return _admission.AdmissionRefusal.NOT_A_MEMBER
     role = _stored_role(derived, config)
     try:
         with transaction() as stores:
             account = _admit_account(verified, role, accounts=stores.accounts, audit=stores.audit)
             return AuthenticatedUser(id=account.id, username=account.username, role=account.role)
     except _UsernameTakenSignal:
-        return AdmissionRefusal.USERNAME_TAKEN
+        return _admission.AdmissionRefusal.USERNAME_TAKEN
 
 
 def _admit_resource_holder(
@@ -696,7 +579,7 @@ def _admit_resource_holder(
     account, so an admin's agent token carries no admin right. Never commits; a store or
     exit failure propagates.
     """
-    if app_role(verified.groups, admission) is None:
+    if _admission.app_role(verified.groups, admission) is None:
         return None
     if not _is_member_of(required_group, verified.groups):
         return None
