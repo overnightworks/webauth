@@ -198,13 +198,12 @@ def authenticate_websocket(
 
 
 def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
-    match origin_verdict(connection.headers, web_auth_config(connection)):
-        case OriginVerdict.ABSENT:
-            return ConnectionRefusal.MISSING_ORIGIN
-        case OriginVerdict.FOREIGN:
-            return ConnectionRefusal.FOREIGN_ORIGIN
-        case OriginVerdict.ALLOWED:
-            return None
+    verdict = origin_verdict(connection.headers, web_auth_config(connection))
+    if verdict is OriginVerdict.ABSENT:
+        return ConnectionRefusal.MISSING_ORIGIN
+    if verdict is OriginVerdict.FOREIGN:
+        return ConnectionRefusal.FOREIGN_ORIGIN
+    return None
 
 
 def _unauthenticated(

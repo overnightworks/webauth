@@ -47,13 +47,12 @@ def _origin_check_refusal(request: Request) -> JSONResponse | None:
             return None
         if allowed is False:
             return _cross_origin_rejection()
-    match origin_verdict(request.headers, web_auth_config(request)):
-        case OriginVerdict.ABSENT:
-            return JSONResponse({"detail": "Missing Origin header"}, status_code=403)
-        case OriginVerdict.FOREIGN:
-            return _cross_origin_rejection()
-        case OriginVerdict.ALLOWED:
-            return None
+    verdict = origin_verdict(request.headers, web_auth_config(request))
+    if verdict is OriginVerdict.ABSENT:
+        return JSONResponse({"detail": "Missing Origin header"}, status_code=403)
+    if verdict is OriginVerdict.FOREIGN:
+        return _cross_origin_rejection()
+    return None
 
 
 class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
