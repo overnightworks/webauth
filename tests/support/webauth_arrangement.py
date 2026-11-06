@@ -31,6 +31,7 @@ from webauth.config import (
 )
 from webauth.cookies import sign_session_id
 from webauth.dependencies import (
+    AuthDependencies,
     ConnectionRefusal,
     LoginRedirect,
     authenticate_websocket,
@@ -679,6 +680,45 @@ def _add_websocket_routes(
         await websocket.close()
 
 
+def _add_session_routes(
+    app: FastAPI,
+    dependencies: AuthDependencies,
+    sessions: SessionRecordStore,
+    route_runs: list[str],
+    route_threads: list[int],
+) -> None:
+    @app.get("/me")
+    def me(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
+    ) -> dict[str, str]:
+        route_runs.append(request.url.path)
+        return {"username": user.username, "role": user.role}
+
+    @app.get(ALL_DEPENDENCIES_PATH)
+    def all_dependencies(
+        user: AuthenticatedUser = Depends(dependencies.current_user),
+        admin: AuthenticatedUser = Depends(dependencies.admin_user),
+    ) -> dict[str, str]:
+        return {"username": user.username, "admin": admin.username}
+
+    async def reading_admission(request: Request) -> dict[str, str | None]:
+        route_runs.append(request.url.path)
+        route_threads.append(get_ident())
+        if isinstance(sessions, SessionsRecordingTheirTransaction):
+            sessions.events.append(("route", get_ident()))
+        user = admitted_user(request)
+        return {"username": None if user is None else user.username}
+
+    for path in OPEN_PATHS:
+        app.add_api_route(
+            path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"],
+        )
+
+    @app.get("/admin")
+    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
+        return {"username": user.username}
+
+
 def an_auth_app(
     record: FakeSessionRecord | None,
     *,
@@ -735,37 +775,7 @@ def an_auth_app(
             ),
         )
 
-    @app.get("/me")
-    def me(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user),
-    ) -> dict[str, str]:
-        route_runs.append(request.url.path)
-        return {"username": user.username, "role": user.role}
-
-    @app.get(ALL_DEPENDENCIES_PATH)
-    def all_dependencies(
-        user: AuthenticatedUser = Depends(dependencies.current_user),
-        admin: AuthenticatedUser = Depends(dependencies.admin_user),
-    ) -> dict[str, str]:
-        return {"username": user.username, "admin": admin.username}
-
-    async def reading_admission(request: Request) -> dict[str, str | None]:
-        route_runs.append(request.url.path)
-        route_threads.append(get_ident())
-        if isinstance(sessions, SessionsRecordingTheirTransaction):
-            sessions.events.append(("route", get_ident()))
-        user = admitted_user(request)
-        return {"username": None if user is None else user.username}
-
-    for path in OPEN_PATHS:
-        app.add_api_route(
-            path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"],
-        )
-
-    @app.get("/admin")
-    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
-        return {"username": user.username}
-
+    _add_session_routes(app, dependencies, sessions, route_runs, route_threads)
     _add_websocket_routes(app, sessions, websocket_outcomes)
 
     return AuthApp(
