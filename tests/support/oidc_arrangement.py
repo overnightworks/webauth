@@ -302,7 +302,7 @@ def an_id_token_claims(
 
 def a_key_set_endpoint(key_name: str = "current") -> FakeKeySetEndpoint:
     """An endpoint publishing the public half of `rsa_key(key_name)` as `<key_name>-key`."""
-    return FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key(key_name), f"{key_name}-key")))
+    return FakeKeySetEndpoint(served_key_set(key_name))
 
 
 def a_relying_party(
@@ -495,8 +495,8 @@ class LoopbackHttpsServer:
         return [request.path for request in self.received]
 
 
-def served_key_set() -> bytes:
-    return key_set_document(public_jwk(rsa_key("current"), "current-key"))
+def served_key_set(key_name: str = "current") -> bytes:
+    return key_set_document(public_jwk(rsa_key(key_name), f"{key_name}-key"))
 
 
 @contextlib.contextmanager

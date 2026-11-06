@@ -20,9 +20,7 @@ from tests.support.oidc_arrangement import (
     FakeKeySetEndpoint,
     a_relying_party,
     an_access_token,
-    key_set_document,
-    public_jwk,
-    rsa_key,
+    served_key_set,
 )
 from tests.support.oidc_login_host import (
     RecordingSignInTransaction,
@@ -190,8 +188,7 @@ def a_bearer_gate(
 
 
 def a_key_set_answering(response: bytes | Exception | None = None) -> FakeKeySetEndpoint:
-    document = key_set_document(public_jwk(rsa_key("current"), "current-key"))
-    return FakeKeySetEndpoint(document if response is None else response)
+    return FakeKeySetEndpoint(served_key_set() if response is None else response)
 
 
 @dataclass
