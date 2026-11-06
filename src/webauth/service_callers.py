@@ -265,7 +265,7 @@ class ServiceCallerCheck:
 @dataclass(frozen=True)
 class _Workload:
     registered: RegisteredApp
-    client_id: str
+    client_id: str = field(repr=False)
 
 
 @dataclass(frozen=True)
