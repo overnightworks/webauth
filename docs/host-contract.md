@@ -30,8 +30,8 @@ admin role. The details are in the sections below.
 **Who gets in.** Only members of the app's `login_group`, such as
 `/apps/notes`, get in. Members of its `admin_group`, a path below it such as
 `/apps/notes/admin`, are admins. An `AdmissionConfig` binds the issuer whose
-groups count, and only that issuer's groups decide the role. Both are decided
-again at every login, so a change in Keycloak takes effect at the person's next
+groups count, and only that issuer's groups decide the role. Membership and role
+are decided again at every login, so a change in Keycloak takes effect at the person's next
 sign-in; an app session that is already open keeps its access until it ends; a
 changed admin role, which lives on the account, reaches every open session at
 the person's next sign-in. The session's absolute cap bounds the delay before a
