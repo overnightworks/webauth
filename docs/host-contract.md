@@ -15,7 +15,7 @@ address, and every visitor that reaches the app through it shares that address
 and its rate-limit budget. With a CDN, a tunnel and a reverse proxy in front of
 the app, list whichever of their addresses appear in the chain. The operator's
 [hal](https://github.com/overnightworks/hal) project owns that reachability
-infrastructure; the project was named edge until 29.10.2026.
+infrastructure.
 `trusted_proxies` decides alone only when the ASGI server does not rewrite the
 client address or scheme from those headers, so the host turns the server's own
 forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
@@ -459,7 +459,7 @@ The host's duties: the gate runs before routing, so the host proves that every r
 Proofs: [test_bearer_gate_resource_admission.py](../tests/middleware/test_bearer_gate_resource_admission.py)
 [test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py)
 and [test_bearer_gate_marked_routes.py](../tests/middleware/test_bearer_gate_marked_routes.py)
-in CI, and scenarios 61 to 72 of [bearer_resource.py](../tests/e2e/oidc/bearer_resource.py) against real
+in CI, and [bearer_resource.py](../tests/e2e/oidc/bearer_resource.py) against real
 Keycloak in the hand-run harness.
 
 ## A service's callers

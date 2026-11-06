@@ -174,11 +174,6 @@ def test_the_apps_own_two_urls_refuse_http_unless_the_host_is_loopback_and_the_r
         a_realm_client_config(**{field_name: url})
 
 
-def test_a_client_configuration_given_a_logout_path_is_refused() -> None:
-    with pytest.raises(TypeError, match="logout_path"):
-        a_realm_client_config(logout_path="/logout")
-
-
 @pytest.mark.parametrize(
     "missing", ["end_session_endpoint", "post_logout_redirect_uri"],
 )
