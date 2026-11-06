@@ -1,0 +1,8 @@
+claim_id = "bfeec2024cc14d468c024d3e101e889a"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "47f1616560200604c6ed03ea193bf70271c5bdc8"
+branch = "claude/issue-599-oidc-builders-one-recipe"
+scope = ["tests/e2e/oidc/README.md", "tests/support"]
+opened_commit = "f04515d4fc5eb8b79b50dabb3c5e0fe5abe1ba47"
+whole_reason = "One test-only refactor of the four OIDC support modules, which share these recipes, plus one README sentence."
