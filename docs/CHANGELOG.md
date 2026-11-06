@@ -7,6 +7,12 @@ Releases before 0.20 are in the [changelog at tag v0.23.0](https://github.com/ov
 releases without an entry are described in the
 [GitHub release notes](https://github.com/overnightworks/webauth/releases).
 
+## 0.30.1 - Unreleased
+
+**Changed**
+
+- `CsrfOriginMiddleware` refuses a state-changing request that carries more than one `Origin` header with the cross-origin refusal, as the WebSocket handshake already does. Browsers send one `Origin`.
+
 ## 0.30.0 - 2026-11-04
 
 **Breaking**

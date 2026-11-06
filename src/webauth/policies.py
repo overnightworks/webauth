@@ -342,6 +342,11 @@ _HEADER_FIELD_VALUE: Final = re.compile(r"[\x21-\x7e](?:[\t\x20-\x7e]*[\x21-\x7e
 _FIXED_DIRECTIVES: Final = ("default-src 'none'", "base-uri 'self'")
 
 
+def _require_authorized_parties(authorized_parties: object) -> None:
+    if not isinstance(authorized_parties, AuthorizedParties):
+        raise TypeError("authorized_parties must be an AuthorizedParties")
+
+
 def _require_header_field_value(name: str, value: str) -> None:
     if not _HEADER_FIELD_VALUE.fullmatch(value):
         raise ValueError(

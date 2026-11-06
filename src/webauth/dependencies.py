@@ -33,7 +33,7 @@ from starlette.responses import JSONResponse, Response
 
 from webauth import ports
 from webauth._media_types import prefers_html
-from webauth._origins import origin_is_allowed
+from webauth._origins import OriginVerdict, origin_verdict
 from webauth._paths import reads_as_another_host, requested_address, same_app_path
 from webauth.config import SessionLifetime, WebAuthConfig, web_auth_config
 from webauth.cookies import (
@@ -198,12 +198,13 @@ def authenticate_websocket(
 
 
 def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
-    origins = connection.headers.getlist("origin")
-    if not origins:
-        return ConnectionRefusal.MISSING_ORIGIN
-    if len(origins) > 1 or not origin_is_allowed(origins[0], web_auth_config(connection)):
-        return ConnectionRefusal.FOREIGN_ORIGIN
-    return None
+    match origin_verdict(connection.headers, web_auth_config(connection)):
+        case OriginVerdict.ABSENT:
+            return ConnectionRefusal.MISSING_ORIGIN
+        case OriginVerdict.FOREIGN:
+            return ConnectionRefusal.FOREIGN_ORIGIN
+        case OriginVerdict.ALLOWED:
+            return None
 
 
 def _unauthenticated(

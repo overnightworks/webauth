@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Final
 
 from starlette.responses import JSONResponse
 
-from webauth._origins import origin_is_allowed
+from webauth._origins import OriginVerdict, origin_verdict
 from webauth.config import web_auth_config
 from webauth.dependencies import _bearer_admission
 from webauth.middleware._refusal import RefusalMiddleware
@@ -47,12 +47,13 @@ def _origin_check_refusal(request: Request) -> JSONResponse | None:
             return None
         if allowed is False:
             return _cross_origin_rejection()
-    origin = request.headers.get("origin")
-    if origin is None:
-        return JSONResponse({"detail": "Missing Origin header"}, status_code=403)
-    if origin_is_allowed(origin, web_auth_config(request)):
-        return None
-    return _cross_origin_rejection()
+    match origin_verdict(request.headers, web_auth_config(request)):
+        case OriginVerdict.ABSENT:
+            return JSONResponse({"detail": "Missing Origin header"}, status_code=403)
+        case OriginVerdict.FOREIGN:
+            return _cross_origin_rejection()
+        case OriginVerdict.ALLOWED:
+            return None
 
 
 class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):

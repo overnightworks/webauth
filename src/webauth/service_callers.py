@@ -35,6 +35,7 @@ from webauth.jwt_verification import (
     RejectionReason,
     VerifiedClaims,
 )
+from webauth.oidc._relying_party import _groups_claim
 from webauth.oidc_login import AdmissionConfig, AppRole, app_role
 from webauth.ports import WallClock
 
@@ -317,12 +318,8 @@ def _verifier_refusal(reason: RejectionReason) -> CallerRefusal:
 
 
 def _groups(claims: Mapping[str, object], group_claim: str) -> frozenset[str] | None:
-    if group_claim not in claims:
-        return frozenset()
-    claim = claims[group_claim]
-    if isinstance(claim, list) and all(isinstance(group, str) for group in claim):
-        return frozenset(claim)
-    return None
+    groups = _groups_claim(claims, group_claim)
+    return None if groups is None else frozenset(groups)
 
 
 def _has_role(claims: Mapping[str, object], role: str) -> bool:
