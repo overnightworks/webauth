@@ -1,7 +1,7 @@
 # Repository agent guidance
 
 webauth is a library with no deployment of its own; hosts pin its tag by git. `tests/e2e/` is a hand-run proof harness
-(driven through `scripts/run_oidc_proof.sh`, described in `tests/e2e/oidc/README.md`); CI only lints it.
+(driven through `scripts/run_oidc_proof.sh`, run through the runbooks in `docs/runbooks/`); CI only lints it.
 
 ## Boundaries
 

@@ -2,7 +2,7 @@
 
     scripts/run_oidc_proof.sh prove --hal PATH
 
-``README.md`` beside this file is the runbook. Nothing of the OIDC path is faked:
+``docs/runbooks/run-the-browser-proof.md`` is the runbook. Nothing of the OIDC path is faked:
 the browser fills Keycloak's own form, the host's library talks to the real
 token and key-set endpoints, and the only seams are the connection routing and
 the one throwaway certificate key the browser is told to accept.

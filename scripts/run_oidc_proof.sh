@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The terminal steps of the real-browser proofs in tests/e2e/oidc/ (see its README).
+# The terminal steps of the real-browser proofs in tests/e2e/oidc/ (see docs/runbooks/).
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -18,7 +18,7 @@ state_root="${XDG_STATE_HOME:-$HOME/.local/state}/webauth-e2e-oidc"
 # together 225 s. conformance.py: worker join 15 s, host stop 30 s, first
 # teardown 90 s, backstop teardown 90 s, together 225 s. A full prove run
 # measured 134 s, so 900 s leaves a factor of about 6. CAP + K <= 1830 is the
-# fleet's bound for a lock holder (marketplace#291).
+# fleet's bound for a lock holder.
 run_cap_seconds=900
 kill_after_seconds=240
 # cleanup has no teardown on SIGTERM (bash -c and the docker CLI die, the daemon
@@ -84,10 +84,17 @@ run_locked() {
   return "$status"
 }
 
-# Ctrl-C reaches flock, which holds the lock for the run: setpriv then sends timeout
-# SIGTERM, timeout passes it to the driver, and the run ends through its own cleanup.
-# timeout's KILL reaches only its direct child, uv, not the driver (see the README's "Stop a
-# run"). Stop a run with SIGTERM to timeout or the python process.
+# Ctrl-C reaches flock, which exits at once;
+# setpriv (see run_locked) then sends timeout SIGTERM, which timeout
+# passes to the driver, whose first SIGTERM or SIGINT ends the run through an
+# uninterruptible cleanup (further signals are ignored). SIGTERM sent to timeout or to the
+# python process ends the run the same way, but flock stays alive and keeps the lock until
+# the teardown has ended.
+# timeout's KILL reaches only its direct child, uv: bash -c execs uv run, which starts
+# python as its own child (measured on uutils coreutils 0.10.0: a child that ignores TERM
+# is killed, its grandchild survives). So an overrunning teardown is not cut short and
+# the driver then runs on with no lock held. The processes that can outlive a run are
+# listed in docs/runbooks/stop-a-run.md.
 # The load is read again once the lock is held, because the wait for it can be long.
 # The run directory is made under the lock and handed to the driver as --scratch.
 run_under_lock() {
