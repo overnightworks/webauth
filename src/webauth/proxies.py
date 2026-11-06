@@ -128,18 +128,22 @@ def _canonical_host(host: str) -> str:
     return host if address is None else str(address)
 
 
-def _budget_address(address: str, ipv6_prefix: int) -> str:
+_IPV6_BUDGET_PREFIX_BITS: Final = 64
+
+
+def _budget_address(address: str) -> str:
     """The rate-limit identity of a client ``address``: whom its budget pools with.
 
     One IPv6 subscriber holds a whole network (a /64 at least), so counting
     each address alone would let them mint a fresh budget per request; their
-    budget is the network of ``ipv6_prefix`` bits instead. An IPv4 address,
-    mapped or not, keeps a budget of its own, and an identity that is not an
-    address stays what it is.
+    budget is their /64 instead. A client that holds a wider network, such as
+    a /56 or a /48, gets one budget per /64 in it. An IPv4 address, mapped or
+    not, keeps a budget of its own, and an identity that is not an address
+    stays what it is.
     """
     canonical = _canonical_address(address)
     if isinstance(canonical, IPv6Address):
-        return str(IPv6Network((canonical, ipv6_prefix), strict=False))
+        return str(IPv6Network((canonical, _IPV6_BUDGET_PREFIX_BITS), strict=False))
     return address if canonical is None else str(canonical)
 
 
