@@ -405,7 +405,7 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   the rotation is omitted or echoed, as [Trust](ARCHITECTURE.md#trust), item 9, says.
 
 Proofs: [test_oidc_login_current_groups.py](../tests/test_oidc_login_current_groups.py) in CI,
-and `CHECK refreshed-id-token-facts` with scenarios 73 to 76 of
+and `CHECK refreshed-id-token-facts` in
 [bearer_groups.py](../tests/e2e/oidc/bearer_groups.py) against real Keycloak in the hand-run
 harness.
 
