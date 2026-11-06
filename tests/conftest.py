@@ -24,10 +24,8 @@ def issuer() -> IssuerScenario:
         ACCESS_TOKEN_NOW,
         FakeClock,
         FakeKeySetEndpoint,
-        key_set_document,
-        public_jwk,
-        rsa_key,
+        served_key_set,
     )
 
-    endpoint = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    endpoint = FakeKeySetEndpoint(served_key_set())
     return IssuerScenario(endpoint, FakeClock(float(ACCESS_TOKEN_NOW)), FakeClock(5_000.0))

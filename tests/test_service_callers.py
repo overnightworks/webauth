@@ -23,9 +23,7 @@ from tests.support.oidc_arrangement import (
     FakeClock,
     FakeKeySetEndpoint,
     an_access_token,
-    key_set_document,
-    public_jwk,
-    rsa_key,
+    served_key_set,
 )
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import RejectionReason
@@ -97,7 +95,7 @@ def a_check(
         identity or a_service_identity(),
         registered_apps=a_registry() if registered_apps is None else registered_apps,
         fetch_key_set=fetch_key_set
-        or FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key"))),
+        or FakeKeySetEndpoint(served_key_set()),
         wall_clock=FakeClock(float(ACCESS_TOKEN_NOW)),
         monotonic_clock=monotonic_clock or FakeClock(5_000.0),
     )
@@ -174,7 +172,7 @@ def test_a_key_set_that_cannot_be_fetched_is_unavailable_not_rejected() -> None:
 
 
 def test_a_cached_key_set_still_verifies_after_a_failed_refresh() -> None:
-    endpoint = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    endpoint = FakeKeySetEndpoint(served_key_set())
     monotonic = FakeClock(5_000.0)
     check = a_check(fetch_key_set=endpoint, monotonic_clock=monotonic)
     assert isinstance(check.workload_caller(a_workload_token()), WorkloadCaller)
@@ -737,7 +735,7 @@ def test_a_person_key_set_that_is_down_is_unavailable_before_workload_faults(
     rotated_person = an_access_token(
         key_id="rotated-key", claims={"aud": CALLEE, "azp": WORKLOAD_CLIENT}
     )
-    endpoint = FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    endpoint = FakeKeySetEndpoint(served_key_set())
     monotonic = FakeClock(5_000.0)
     check = a_check(fetch_key_set=endpoint, monotonic_clock=monotonic)
     assert isinstance(check.person_caller(a_workload_token(), a_person_token()), PersonCaller)

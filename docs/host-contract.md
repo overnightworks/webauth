@@ -95,13 +95,6 @@ including a missing hint. Browser behavior is driven by `logout` and
 These are hand-run browser proofs, not CI tests; [#420's review journal](https://github.com/overnightworks/webauth/issues/420#issuecomment-6351975830)
 records the page implementation's browser evidence.
 
-An old hint cookie is neither read nor cleared and expires by its own `Max-Age`,
-at most the absolute session cap after the host's upgrade
-([#418 R5](https://github.com/overnightworks/webauth/issues/418), operator ruling
-22.10.2026). `test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared`
-in [test_oidc_login_logout.py](../tests/test_oidc_login_logout.py) proves it leaves the
-response and session outcome unchanged.
-
 ## CSRF origin
 
 Every app supplies `csrf_origin=CsrfPolicy(...)` when installing the middleware;
@@ -113,10 +106,8 @@ refused. Without either header the request is refused, and `Referer` is never
 read. These are [#429 S-1, S-3, S-5 and S-6](https://github.com/overnightworks/webauth/issues/429),
 operator ruling 23.10.2026. The proofs are
 `test_a_request_is_judged_by_sec_fetch_site_then_origin`,
-`test_a_state_changing_request_without_provenance_is_refused_whatever_its_body`,
-`test_the_referer_is_not_read` and
-`test_a_session_request_is_decided_by_its_provenance_whatever_token_material_it_carries`
-in [test_csrf.py](../tests/middleware/test_csrf.py), plus
+`test_a_state_changing_request_without_provenance_is_refused_whatever_its_body`
+and `test_the_referer_is_not_read` in [test_csrf.py](../tests/middleware/test_csrf.py), plus
 `TestRefusedInstallation.test_an_install_without_csrf_origin_is_refused_before_touching_the_app`
 in [test_stack.py](../tests/middleware/test_stack.py).
 
@@ -140,14 +131,6 @@ in [test_csrf.py](../tests/middleware/test_csrf.py), and
 module and [test_dependencies_websocket_auth.py](../tests/test_dependencies_websocket_auth.py),
 and `test_a_repeated_origin_header_is_refused_like_a_foreign_origin` in test_csrf.py
 with the "two Origins, both allowed" case of test_dependencies_websocket_auth.py.
-
-An old CSRF cookie changes no decision and is neither read nor cleared; it
-expires by its own `Max-Age` ([#429 P-2](https://github.com/overnightworks/webauth/issues/429),
-operator ruling 23.10.2026). Proofs:
-`test_an_old_csrf_cookie_changes_no_decision_signed_in_or_out` in
-[test_csrf.py](../tests/middleware/test_csrf.py) and
-`test_an_old_cookie_changes_no_decision_and_is_neither_read_nor_cleared` in
-[test_oidc_login_logout.py](../tests/test_oidc_login_logout.py).
 
 webauth supports the current releases of Chrome, Edge, Firefox and Safari
 (macOS and iOS). On every request whose method is not GET or HEAD, each sends

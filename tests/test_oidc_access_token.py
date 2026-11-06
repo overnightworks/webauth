@@ -24,9 +24,7 @@ from tests.support.oidc_arrangement import (
     FakeKeySetEndpoint,
     a_relying_party,
     an_access_token,
-    key_set_document,
-    public_jwk,
-    rsa_key,
+    served_key_set,
 )
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import JwtVerifier, RejectionReason
@@ -43,7 +41,7 @@ OTHER_APP = "another-app"
 
 
 def a_key_set() -> FakeKeySetEndpoint:
-    return FakeKeySetEndpoint(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    return FakeKeySetEndpoint(served_key_set())
 
 
 def verified(
