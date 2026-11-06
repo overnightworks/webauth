@@ -561,7 +561,7 @@ def _admit_resource_holder(
     required_group: str,
     admission: AdmissionConfig,
 ) -> AuthenticatedUser | None:
-    """The known account behind an agent's token, always with the person role, or ``None``.
+    """The known account behind an agent's token, always with the role "user", or ``None``.
 
     The token's groups must pass ``app_role`` against ``admission`` and hold
     ``required_group`` or a path below it; otherwise no store is touched. One
