@@ -6,7 +6,7 @@ import enum
 import urllib.parse
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -41,7 +41,7 @@ from tests.support.webauth_arrangement import (
     WriteLockInMemory,
     a_web_auth_config,
 )
-from webauth.admission import AdmissionConfig
+from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.cookies import (
     _pending_login_cookie_name,
@@ -80,6 +80,9 @@ ADMISSION = AdmissionConfig(
     login_group=LOGIN_GROUP,
     admin_group=ADMIN_GROUP,
 )
+EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
+NO_ADMINS = replace(ADMISSION, admin_group=NoAdmins.IN_THIS_APP)
+EVERYONE_WITH_ADMIN_GROUP = replace(EVERYONE, admin_group="/apps/other/admin")
 SUBJECT = "5f0c2a1e-7d4b-4c55-9a51-2f8e3c6b1d90"
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
 

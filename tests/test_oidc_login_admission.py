@@ -1,6 +1,6 @@
 """Admitting an identity the bound issuer vouched for: groups, roles, accounts.
 
-These tests drive the callback's admission steps and `app_role` on their own: an
+These tests drive the callback's admission steps on their own: an
 identity the bound issuer vouched for is decided, then becomes or reuses an account.
 """
 
@@ -16,8 +16,11 @@ from tests.support.oidc_login_host import (
     ADMIN_GROUP,
     ADMISSION,
     BOUND_ISSUER,
+    EVERYONE,
+    EVERYONE_WITH_ADMIN_GROUP,
     LEGACY_ADMIN,
     LOGIN_GROUP,
+    NO_ADMINS,
     SUBJECT,
 )
 from tests.support.webauth_arrangement import (
@@ -35,8 +38,6 @@ from tests.support.webauth_arrangement import (
 from webauth.admission import (
     AdmissionConfig,
     AdmissionRefusal,
-    EverySubject,
-    NoAdmins,
 )
 from webauth.oidc import (
     OidcIdentity,
@@ -183,7 +184,6 @@ def test_a_person_taken_out_of_the_group_is_refused_and_back_in_returns_to_the_a
 
 
 FOREIGN_ISSUER = "https://other.example/realms/lab"
-EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
 
 
 @pytest.mark.parametrize(
@@ -246,10 +246,6 @@ class RoleCase:
     admission: AdmissionConfig
     role: str
     changed: bool
-
-
-NO_ADMINS = replace(ADMISSION, admin_group=NoAdmins.IN_THIS_APP)
-EVERYONE_WITH_ADMIN_GROUP = replace(EVERYONE, admin_group="/apps/other/admin")
 
 
 @pytest.mark.parametrize(

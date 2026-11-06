@@ -69,7 +69,6 @@ from webauth import admission as _admission
 from webauth._end_session_page import end_session_page
 from webauth._media_types import media_type_of
 from webauth._paths import same_app_path
-from webauth.admission import _is_member_of
 from webauth.cookies import _begin_pending_login, _clear_session_cookies
 from webauth.dependencies import (
     _is_admitted,
@@ -581,7 +580,7 @@ def _admit_resource_holder(
     """
     if _admission.app_role(verified.groups, admission) is None:
         return None
-    if not _is_member_of(required_group, verified.groups):
+    if not _admission._is_member_of(required_group, verified.groups):
         return None
     with transaction() as stores:
         account = stores.accounts.get(verified.subject)

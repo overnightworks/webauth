@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
-from tests.support.oidc_login_host import ADMIN_GROUP, ADMISSION, BOUND_ISSUER, LOGIN_GROUP
+from tests.support.oidc_login_host import (
+    ADMIN_GROUP,
+    ADMISSION,
+    BOUND_ISSUER,
+    EVERYONE,
+    EVERYONE_WITH_ADMIN_GROUP,
+    LOGIN_GROUP,
+    NO_ADMINS,
+)
 from webauth.admission import AdmissionConfig, AppRole, EverySubject, NoAdmins, app_role
-
-EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
-NO_ADMINS = replace(ADMISSION, admin_group=NoAdmins.IN_THIS_APP)
-EVERYONE_WITH_ADMIN_GROUP = replace(EVERYONE, admin_group="/apps/other/admin")
 
 
 @pytest.mark.parametrize(
