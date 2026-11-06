@@ -61,7 +61,7 @@ _PENDING = PendingLogin(
         ("custom", False, "custom"),
     ],
 )
-def test_default_cookie_name_prefixes_any_name_only_when_secure(
+def test_a_cookie_name_is_prefixed_only_when_secure(
     plain_name: str,
     *,
     secure: bool,
