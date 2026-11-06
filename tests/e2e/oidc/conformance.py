@@ -219,7 +219,9 @@ class Expectation:
             return Verdict.HELD
         finding = self.finding
         if finding and (decision, rs256_eligible_keys, suite_state) == (
-            finding.decision, finding.rs256_eligible_keys, finding.suite_state
+            finding.decision,
+            finding.rs256_eligible_keys,
+            finding.suite_state,
         ):
             return Verdict.FAILED_AS_FOUND
         return Verdict.FAILED
@@ -233,12 +235,14 @@ class Skip:
 
 PLAN_TABLE: tuple[Expectation | Skip, ...] = (
     Expectation(
-        "oidcc-client-test", ACCEPTED,
+        "oidcc-client-test",
+        ACCEPTED,
         "OIDCCClientTest, the success case: a well-formed code flow must be admitted and "
         "the module finishes on the UserInfo request that follows.",
     ),
     Expectation(
-        "oidcc-client-test-invalid-iss", token_rejected(RejectionReason.INVALID_ISSUER),
+        "oidcc-client-test-invalid-iss",
+        token_rejected(RejectionReason.INVALID_ISSUER),
         "OIDCCClientTestInvalidIssuerInIdToken: the client must reject a wrong iss; "
         "the verifier's issuer check refuses it.",
     ),
@@ -249,17 +253,20 @@ PLAN_TABLE: tuple[Expectation | Skip, ...] = (
         "the verifier admits it, and the login refuses an identity without a subject.",
     ),
     Expectation(
-        "oidcc-client-test-invalid-aud", token_rejected(RejectionReason.INVALID_AUDIENCE),
+        "oidcc-client-test-invalid-aud",
+        token_rejected(RejectionReason.INVALID_AUDIENCE),
         "OIDCCClientTestInvalidAudInIdToken: the client must reject an aud that is not its "
         "client id; the verifier's audience check refuses it.",
     ),
     Expectation(
-        "oidcc-client-test-missing-iat", token_rejected(RejectionReason.INVALID_CLAIM),
+        "oidcc-client-test-missing-iat",
+        token_rejected(RejectionReason.INVALID_CLAIM),
         "OIDCCClientTestMissingIatInIdToken: the client must reject an ID token without iat; "
         "the verifier requires an integer iat.",
     ),
     Expectation(
-        "oidcc-client-test-kid-absent-single-jwks", ACCEPTED,
+        "oidcc-client-test-kid-absent-single-jwks",
+        ACCEPTED,
         "OIDCCClientTestKidAbsentSingleJwks publishes one RSA signing key and signs without "
         "a kid, and expects acceptance (OIDC Core 10.1); webauth verifies a kid-less token "
         "against a set with exactly one RS256 verification key (#160).",
@@ -271,12 +278,14 @@ PLAN_TABLE: tuple[Expectation | Skip, ...] = (
         "refuses a kid-less header against several RS256 verification keys (OIDC Core 10.1, #160).",
     ),
     Expectation(
-        "oidcc-client-test-idtoken-sig-rs256", ACCEPTED,
+        "oidcc-client-test-idtoken-sig-rs256",
+        ACCEPTED,
         "OIDCCClientTestIdTokenSignedUsingRS256: the client must accept an RS256 ID token, "
         "the one algorithm the verifier supports.",
     ),
     Expectation(
-        "oidcc-client-test-idtoken-sig-none", token_rejected(RejectionReason.UNSUPPORTED_ALGORITHM),
+        "oidcc-client-test-idtoken-sig-none",
+        token_rejected(RejectionReason.UNSUPPORTED_ALGORITHM),
         "OIDCCClientTestIdTokenSigAlgNone: clients need not support unsigned ID tokens; "
         "webauth refuses alg none, and the suite ends the module skipped after its timeout.",
         suite_state=FINISHED_SKIPPED,
@@ -293,17 +302,20 @@ PLAN_TABLE: tuple[Expectation | Skip, ...] = (
         "verified ID token and never reads a UserInfo answer, so there is no sub to compare.",
     ),
     Expectation(
-        "oidcc-client-test-nonce-invalid", refused(OidcRefusalReason.NONCE_MISMATCH),
+        "oidcc-client-test-nonce-invalid",
+        refused(OidcRefusalReason.NONCE_MISMATCH),
         "OIDCCClientTestNonceInvalid: the client must reject a nonce it did not send; "
         "the login refuses it.",
     ),
     Expectation(
-        "oidcc-client-test-scope-userinfo-claims", ACCEPTED,
+        "oidcc-client-test-scope-userinfo-claims",
+        ACCEPTED,
         "OIDCCClientTestScopeUserInfoClaims: the authorize request must carry one of profile, "
         "email, phone or address, which the host's scopes do; the login is admitted.",
     ),
     Expectation(
-        "oidcc-client-test-client-secret-basic", ACCEPTED,
+        "oidcc-client-test-client-secret-basic",
+        ACCEPTED,
         "OIDCCClientTestClientSecretBasic: the token request must use client_secret_basic, "
         "which the library sends; the login is admitted.",
     ),
@@ -365,8 +377,15 @@ def drive_suite(run: RunRecord, runtime: Path, suite: HeldSuite, export_dir: Pat
 
 
 def drive_plan(
-    run: RunRecord, runtime: Path, api: SuiteApi, tls: ThrowawayTls, shim: TlsShim, host: Host,
-    settings: HostSettings, export_dir: Path, client_secret: str,
+    run: RunRecord,
+    runtime: Path,
+    api: SuiteApi,
+    tls: ThrowawayTls,
+    shim: TlsShim,
+    host: Host,
+    settings: HostSettings,
+    export_dir: Path,
+    client_secret: str,
 ) -> None:
     plan = api.create_plan(PLAN_NAME, PLAN_VARIANT, plan_configuration(client_secret))
     modules = [entry["testModule"] for entry in plan["modules"]]
@@ -401,12 +420,20 @@ def rows_for_plan(run: RunRecord, modules: list[str]) -> list[Expectation | Skip
 
 
 def drive_modules(
-    run: RunRecord, runtime: Path, api: SuiteApi, tls: ThrowawayTls, shim: TlsShim, host: Host,
-    settings: HostSettings, plan_id: str, rows: list[Expectation | Skip],
+    run: RunRecord,
+    runtime: Path,
+    api: SuiteApi,
+    tls: ThrowawayTls,
+    shim: TlsShim,
+    host: Host,
+    settings: HostSettings,
+    plan_id: str,
+    rows: list[Expectation | Skip],
 ) -> None:
     with sync_playwright() as playwright:
         browser = launch_pinned_chromium(
-            playwright, runtime,
+            playwright,
+            runtime,
             {SUITE_HOST: shim.port, APP_HOST: host.app_port},
             tls.leaf_spki_sha256_base64,
         )
@@ -423,13 +450,21 @@ def drive_modules(
 
 
 def run_module(
-    run: RunRecord, api: SuiteApi, tls: ThrowawayTls, host: Host, settings: HostSettings,
-    browser: Browser, plan_id: str, expectation: Expectation,
+    run: RunRecord,
+    api: SuiteApi,
+    tls: ThrowawayTls,
+    host: Host,
+    settings: HostSettings,
+    browser: Browser,
+    plan_id: str,
+    expectation: Expectation,
 ) -> None:
     module_id = api.create_module(plan_id, expectation.module)
     try:
         state = api.state_within(
-            module_id, ["CONFIGURED", "WAITING"], MODULE_REACHES_WAITING_SECONDS,
+            module_id,
+            ["CONFIGURED", "WAITING"],
+            MODULE_REACHES_WAITING_SECONDS,
             run.stop_requested.is_set,
         )
         if run.stop_requested.is_set():
@@ -456,7 +491,10 @@ def run_module(
         if run.stop_requested.is_set():
             return
         report_row(
-            run, expectation, api.module_info(module_id), Decision.of(host_state(host)),
+            run,
+            expectation,
+            api.module_info(module_id),
+            Decision.of(host_state(host)),
             rs256_eligible_keys,
         )
     finally:
@@ -475,14 +513,21 @@ def cancel_unless_finished(api: SuiteApi, module_id: str) -> None:
 
 
 def report_row(
-    run: RunRecord, expectation: Expectation, info: dict[str, Any], decision: Decision,
+    run: RunRecord,
+    expectation: Expectation,
+    info: dict[str, Any],
+    decision: Decision,
     rs256_eligible_keys: int,
 ) -> None:
     suite_state = SuiteState(info["status"], info.get("result"))
     verdict = expectation.judge(suite_state, decision, rs256_eligible_keys)
     row = table_row(
-        expectation.module, suite_state.describe(), decision.describe(),
-        expectation.decision.describe(), verdict, expectation.justification,
+        expectation.module,
+        suite_state.describe(),
+        decision.describe(),
+        expectation.decision.describe(),
+        verdict,
+        expectation.justification,
     )
     if verdict is Verdict.FAILED:
         run.fail(row)

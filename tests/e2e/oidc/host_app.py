@@ -113,7 +113,9 @@ CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
 BACKCHANNEL_LOGOUT_PATH = "/auth/backchannel-logout"
 SIGN_IN_PATHS = SignInPaths(
-    start=LOGIN_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH,
+    start=LOGIN_PATH,
+    callback=CALLBACK_PATH,
+    logout=LOGOUT_PATH,
     backchannel_logout=BACKCHANNEL_LOGOUT_PATH,
 )
 LOGOUT_PAGE_TEXT = LogoutPageText(language="en", button_label="Log out")
@@ -201,11 +203,13 @@ class HostSettings:
     @staticmethod
     def read(path: Path) -> HostSettings:
         fields = json.loads(path.read_text())
-        return HostSettings(**{
-            **fields,
-            "app_origins": tuple(fields["app_origins"]),
-            "bearer_authorized_parties": tuple(fields["bearer_authorized_parties"]),
-        })
+        return HostSettings(
+            **{
+                **fields,
+                "app_origins": tuple(fields["app_origins"]),
+                "bearer_authorized_parties": tuple(fields["bearer_authorized_parties"]),
+            }
+        )
 
     def write(self, path: Path) -> None:
         path.touch(mode=0o600)
@@ -228,7 +232,7 @@ class AccessTokenKept:
     def _access_token_in(self, answer: TokenEndpointAnswer) -> str | None:
         try:
             token = json.loads(answer.body).get("access_token")
-        except (ValueError, AttributeError):
+        except ValueError, AttributeError:
             return None  # the relying party judges an answer that is no token answer
         if token is None:
             return None
@@ -295,9 +299,7 @@ class World:
 class _Observation:
     """The counts-only listener the scenarios read and reset through."""
 
-    def __init__(
-        self, port: int, world: dict[str, World], new_world: Callable[[], World]
-    ) -> None:
+    def __init__(self, port: int, world: dict[str, World], new_world: Callable[[], World]) -> None:
         holder = world
 
         class Handler(BaseHTTPRequestHandler):
@@ -379,7 +381,10 @@ def _sign_in_transaction(world: dict[str, World]) -> SignInTransaction:
 
 
 def _install_stack(
-    app: FastAPI, settings: HostSettings, world: dict[str, World], transaction: SignInTransaction,
+    app: FastAPI,
+    settings: HostSettings,
+    world: dict[str, World],
+    transaction: SignInTransaction,
 ) -> None:
     install_web_auth_middleware(
         app,
@@ -397,7 +402,9 @@ def _install_stack(
 
 
 def _bearer_policies(
-    settings: HostSettings, world: dict[str, World], transaction: SignInTransaction,
+    settings: HostSettings,
+    world: dict[str, World],
+    transaction: SignInTransaction,
 ) -> dict[str, Any]:
     """The policies only the bearer host installs; the host without the setting has none."""
     if not settings.is_bearer_host:
@@ -421,9 +428,11 @@ def _bearer_policies(
             # The gate would answer a dead cookie with 401 before the route runs; the call
             # answers `session-ended` itself.
             public=(
-                *SIGN_IN_PATHS.public_rules, resource.public_rule,
+                *SIGN_IN_PATHS.public_rules,
+                resource.public_rule,
                 PublicRule(
-                    PathRules(exact=frozenset({CURRENT_GROUPS_PATH})), methods=frozenset({"GET"}),
+                    PathRules(exact=frozenset({CURRENT_GROUPS_PATH})),
+                    methods=frozenset({"GET"}),
                 ),
             ),
             optional=PathRules(exact=frozenset({"/"})),
@@ -436,7 +445,9 @@ def _bearer_policies(
             ),
             admission=_admission_of(settings),
             person_paths=PersonPaths(
-                PathRules(prefixes=(PERSON_ROUTES_PREFIX,)), parties, transaction,
+                PathRules(prefixes=(PERSON_ROUTES_PREFIX,)),
+                parties,
+                transaction,
             ),
         ),
     }
@@ -483,7 +494,8 @@ def _install_counters(
 ) -> None:
     @app.middleware("http")
     async def count_callbacks_and_back_channel_answers(
-        request: Request, call_next: Any,
+        request: Request,
+        call_next: Any,
     ) -> Response:
         current = world["world"]
         if request.url.path == BACKCHANNEL_LOGOUT_PATH:
@@ -519,7 +531,8 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         relying_parties = world["world"].relying_parties
         # The issuer posts the back-channel to the bridge's own Host, which names no app origin.
         return relying_parties.get(
-            f"https://{request.headers['host']}", next(iter(relying_parties.values())),
+            f"https://{request.headers['host']}",
+            next(iter(relying_parties.values())),
         )
 
     dependencies = current_user_dependency(
@@ -625,8 +638,10 @@ def _add_token_routes(
         current = world["world"]
         session_id = session_of(request)
         outcome = fresh_access_token(
-            relying_party_of(request), session_id,
-            session_transaction=current.sessions.in_transaction, config=config,
+            relying_party_of(request),
+            session_id,
+            session_transaction=current.sessions.in_transaction,
+            config=config,
         )
         current.remember_refresh_token_of(session_id)
         return {
@@ -640,12 +655,15 @@ def _add_token_routes(
         current = world["world"]
         session_id = session_of(request)
         outcome = current_groups(
-            relying_party_of(request), session_id,
-            session_transaction=current.sessions.in_transaction, config=config,
+            relying_party_of(request),
+            session_id,
+            session_transaction=current.sessions.in_transaction,
+            config=config,
         )
         current.remember_refresh_token_of(session_id)
         return {
-            **_groups_outcome(outcome), "refresh_tokens_stored": len(current.stored_refresh_tokens),
+            **_groups_outcome(outcome),
+            "refresh_tokens_stored": len(current.stored_refresh_tokens),
         }
 
     @app.get(WORKLOAD_TOKEN_PATH)
@@ -664,14 +682,13 @@ def _groups_outcome(
         return {"outcome": "groups", "groups": list(outcome), "issuer_refusal": None}
     refusal = outcome.issuer_refusal
     return {
-        "outcome": outcome.reason.value, "groups": [],
+        "outcome": outcome.reason.value,
+        "groups": [],
         "issuer_refusal": None if refusal is None else refusal.reason.value,
     }
 
 
-def _add_machine_routes(
-    app: FastAPI, current_user: Callable[..., AuthenticatedUser]
-) -> None:
+def _add_machine_routes(app: FastAPI, current_user: Callable[..., AuthenticatedUser]) -> None:
     """The routes under the bearer gate; they echo the caller and change nothing."""
 
     @app.get(f"{MACHINE_ROUTES_PREFIX}people/{{subject}}/export")
@@ -687,9 +704,7 @@ def _add_machine_routes(
         return {"caller": caller.subject, "subject": subject}
 
     @app.get(f"{MACHINE_ROUTES_PREFIX}session-probe")
-    def session_probe(
-        user: AuthenticatedUser = Depends(current_user)
-    ) -> dict[str, str]:
+    def session_probe(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
         return {"username": user.username}
 
 
@@ -706,8 +721,7 @@ def _add_marked_routes(
     current_user: Callable[..., AuthenticatedUser],
     admin_user: Callable[..., AuthenticatedUser],
 ) -> None:
-    """One route per marked route; ``/notes-admin`` reads ``admin_user``, the rest ``current_user``.
-    """
+    """One route per marked route; ``/notes-admin`` reads ``admin_user``, the rest ``current_user``."""
 
     def echo(user: AuthenticatedUser) -> dict[str, str]:
         return {"id": user.id, "username": user.username, "role": user.role}

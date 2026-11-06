@@ -291,6 +291,7 @@ EXPIRY_MARGIN_SECONDS = 2
 @dataclass(frozen=True)
 class Width:
     """A browser window the scenarios run at; the phone is touch with mobile emulation."""
+
     pixels_wide: int
     pixels_high: int
     touch: bool
@@ -350,15 +351,15 @@ def app_cookies(page: Page, origin: str = APP_ORIGIN) -> list[Cookie]:
     """Every cookie the browser holds for the app's host, on every path."""
     host = urllib.parse.urlsplit(origin).hostname
     return [
-        cookie for cookie in page.context.cookies()
-        if cookie.get("domain", "").lstrip(".") == host
+        cookie for cookie in page.context.cookies() if cookie.get("domain", "").lstrip(".") == host
     ]
 
 
 def jws_cookies(page: Page, origin: str = APP_ORIGIN) -> list[str]:
     """The names of the app's cookies whose value has the shape of a compact JWS."""
     return [
-        name for name, value in map(cookie_name_and_value, app_cookies(page, origin))
+        name
+        for name, value in map(cookie_name_and_value, app_cookies(page, origin))
         if COMPACT_JWS.fullmatch(value)
     ]
 
@@ -465,7 +466,11 @@ class Proof(RunRecord):
         self.press(page, "#kc-login")
 
     def sign_in(
-        self, page: Page, scenario: str | None, origin: str = APP_ORIGIN, username: str = USER_NAME,
+        self,
+        page: Page,
+        scenario: str | None,
+        origin: str = APP_ORIGIN,
+        username: str = USER_NAME,
         password: str | None = None,
     ) -> None:
         self.start_sign_in(page, scenario, origin)
@@ -543,9 +548,7 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
     proof.set_user_enabled(proof.disabled_user_id, False)
     with proof.browsing(width) as page:
         proof.start_sign_in(page, scenario)
-        proof.fill_keycloak_form(
-            page, scenario, proof.disabled_user_password, DISABLED_USER_NAME
-        )
+        proof.fill_keycloak_form(page, scenario, proof.disabled_user_password, DISABLED_USER_NAME)
         page.get_by_text(KEYCLOAK_DISABLED_MESSAGE).wait_for()
         assert urllib.parse.urlsplit(page.url).hostname == IDP_HOST, "left Keycloak's form"
         proof.assert_fits(
@@ -557,7 +560,9 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
     proof.set_user_enabled(proof.disabled_user_id, True)
     with proof.browsing(width) as page:
         proof.sign_in(
-            page, f"{scenario}-enabled", username=DISABLED_USER_NAME,
+            page,
+            f"{scenario}-enabled",
+            username=DISABLED_USER_NAME,
             password=proof.disabled_user_password,
         )
         page.goto(f"{APP_ORIGIN}/")
@@ -575,9 +580,7 @@ def outsider_is_refused(proof: Proof, width: Width) -> str:
     scenario = f"7-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
-        proof.sign_in(
-            page, scenario, username=OUTSIDER_NAME, password=proof.outsider_password
-        )
+        proof.sign_in(page, scenario, username=OUTSIDER_NAME, password=proof.outsider_password)
         assert proof.headline(page) == "Sign-in refused", f"the page says {proof.headline(page)!r}"
         assert "not-a-member" in page.inner_text("body"), "the page does not name the reason"
         proof.assert_fits(page, "h1")
@@ -668,8 +671,10 @@ def pages_fit_the_window(proof: Proof, width: Width) -> str:
 def cookie_names(request: Request) -> list[str]:
     return [
         pair.split("=", 1)[0].strip()
-        for header in request.headers_array() if header["name"].lower() == "cookie"
-        for pair in header["value"].split(";") if pair.strip()
+        for header in request.headers_array()
+        if header["name"].lower() == "cookie"
+        for pair in header["value"].split(";")
+        if pair.strip()
     ]
 
 
@@ -700,8 +705,7 @@ def session_cookie_after_redirect(
         callback = next(r for r in requests if r.url.startswith(f"{origin}{CALLBACK_PATH}"))
         landing = next(r for r in requests if r.redirected_from is callback)
         assert any(
-            _is_pending_login_cookie_name(name, secure=True)
-            for name in cookie_names(callback)
+            _is_pending_login_cookie_name(name, secure=True) for name in cookie_names(callback)
         ), "the callback carried no pending-login cookie; request cookies are not measured"
         names = [recorded_cookie_name(name) for name in cookie_names(landing)]
         site = raw_header(landing, "sec-fetch-site")
@@ -924,8 +928,13 @@ def backchannel_apps(
             client_secret = secrets.token_urlsafe(24)
             session_secret = secrets.token_urlsafe(48)
             settings = host_settings(
-                tls, shim_port, (configuration.origin,), configuration.client_id,
-                client_secret, session_secret, configuration.cookie_samesite,
+                tls,
+                shim_port,
+                (configuration.origin,),
+                configuration.client_id,
+                client_secret,
+                session_secret,
+                configuration.cookie_samesite,
             )
             host = start_host(proof, runtime, settings, tls.ca_certificate)
             running.callback(stop_host, host.process)
@@ -935,7 +944,9 @@ def backchannel_apps(
             proof.fresh_admin().create(
                 f"/{REALM}/clients",
                 client_representation(
-                    configuration.client_id, client_secret, (configuration.origin,),
+                    configuration.client_id,
+                    client_secret,
+                    (configuration.origin,),
                     bridge.url,
                 ),
             )
@@ -958,15 +969,22 @@ def run_proof(proof: Proof, hal: Path, runtime: Path) -> None:
         prepare_keycloak(admin, proof, proof.client_secret)
         edge_port = urllib.parse.urlsplit(stack.edge_url).port
         assert edge_port is not None
-        with TlsShim(tls, edge_port, IDP_HOST) as shim, \
-                TlsShim(untrusted, edge_port, IDP_HOST) as untrusted_shim:
+        with (
+            TlsShim(tls, edge_port, IDP_HOST) as shim,
+            TlsShim(untrusted, edge_port, IDP_HOST) as untrusted_shim,
+        ):
             hosts: list[Host] = []
             proof.ca_certificate = tls.ca_certificate
             try:
                 for cookie_samesite in SAMESITE_VALUES:
                     settings = host_settings(
-                        tls, shim.port, (APP_ORIGIN, SECOND_APP_ORIGIN), CLIENT_ID,
-                        proof.client_secret, proof.session_secret, cookie_samesite,
+                        tls,
+                        shim.port,
+                        (APP_ORIGIN, SECOND_APP_ORIGIN),
+                        CLIENT_ID,
+                        proof.client_secret,
+                        proof.session_secret,
+                        cookie_samesite,
                     )
                     hosts.append(start_host(proof, runtime, settings, tls.ca_certificate))
                 with backchannel_apps(proof, runtime, tls, shim.port) as apps:
@@ -985,7 +1003,11 @@ def run_proof(proof: Proof, hal: Path, runtime: Path) -> None:
 
 
 def drive_browser(
-    proof: Proof, runtime: Path, tls: ThrowawayTls, shim_port: int, untrusted_port: int,
+    proof: Proof,
+    runtime: Path,
+    tls: ThrowawayTls,
+    shim_port: int,
+    untrusted_port: int,
     hosts: list[Host],
 ) -> None:
     with sync_playwright() as playwright:
@@ -996,28 +1018,48 @@ def drive_browser(
                 return
         default_host = next(h for h in hosts if h.cookie_samesite == SHIPPED_COOKIE_SAMESITE)
         drive_engine_phase(
-            EngineRun(proof, APP_ORIGIN, KEYCLOAK_LOGOUT_CONFIRMATION), playwright, runtime, tls,
-            {IDP_HOST: shim_port, APP_HOST: default_host.app_port}, default_host, WIDTHS,
+            EngineRun(proof, APP_ORIGIN, KEYCLOAK_LOGOUT_CONFIRMATION),
+            playwright,
+            runtime,
+            tls,
+            {IDP_HOST: shim_port, APP_HOST: default_host.app_port},
+            default_host,
+            WIDTHS,
         )
         drive_backchannel_phase(proof, playwright, runtime, tls, shim_port, untrusted_port)
         drive_bearer_phase(
-            proof, playwright, runtime, tls, shim_port,
+            proof,
+            playwright,
+            runtime,
+            tls,
+            shim_port,
             host_settings(
-                tls, shim_port, (APP_ORIGIN,), CLIENT_ID, proof.client_secret,
-                secrets.token_urlsafe(48), SHIPPED_COOKIE_SAMESITE,
+                tls,
+                shim_port,
+                (APP_ORIGIN,),
+                CLIENT_ID,
+                proof.client_secret,
+                secrets.token_urlsafe(48),
+                SHIPPED_COOKIE_SAMESITE,
             ),
         )
 
 
 def drive_host_scenarios(
-    proof: Proof, playwright: Playwright, runtime: Path, tls: ThrowawayTls, shim_port: int,
-    untrusted_port: int, host: Host,
+    proof: Proof,
+    playwright: Playwright,
+    runtime: Path,
+    tls: ThrowawayTls,
+    shim_port: int,
+    untrusted_port: int,
+    host: Host,
 ) -> bool:
     """One host in its own Chromium: the default scenarios where the host has the shipped cookie
     policy, and scenario 5 for both origins; False when the default scenarios stopped the run."""
     proof.host = host
     proof.browser = launch_pinned_chromium(
-        playwright, runtime,
+        playwright,
+        runtime,
         {
             IDP_HOST: shim_port,
             APP_HOST: host.app_port,
@@ -1033,8 +1075,8 @@ def drive_host_scenarios(
         for origin in (APP_ORIGIN, SECOND_APP_ORIGIN):
             proof.held_or_failed(
                 f"SCENARIO 5 {origin} {host.cookie_samesite}",
-                lambda origin=origin, samesite=host.cookie_samesite: (
-                    session_cookie_after_redirect(proof, origin, samesite)
+                lambda origin=origin, samesite=host.cookie_samesite: session_cookie_after_redirect(
+                    proof, origin, samesite
                 ),
             )
         return True
@@ -1103,7 +1145,8 @@ def a_client_without_service_account_is_refused_its_workload_token(
 ) -> str:
     refused = host_answer(proof, WORKLOAD_TOKEN_PATH).json()
     assert refused == {
-        "outcome": "token-request-refused", "issuer_error": "unauthorized_client",
+        "outcome": "token-request-refused",
+        "issuer_error": "unauthorized_client",
     }, f"the workload call answered {refused}"
     return (
         f"the probe's client, created with serviceAccountsEnabled false, was refused its "
@@ -1132,7 +1175,7 @@ CROSS_ORIGIN_REFUSAL = "Cross-origin request rejected"
 
 def cross_site_logout_page(target_origin: str) -> str:
     return (
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>another site</title></head>"
+        '<!doctype html><html><head><meta charset="utf-8"><title>another site</title></head>'
         "<body><h1>Another site</h1>"
         f'<form method="post" action="{target_origin}{LOGOUT_PATH}">'
         '<button id="logout" type="submit">Log out</button></form></body></html>'
@@ -1213,13 +1256,18 @@ BACKCHANNEL_DESKTOP_SCENARIOS = (
 
 
 def drive_backchannel_phase(
-    proof: Proof, playwright: Playwright, runtime: Path, tls: ThrowawayTls, shim_port: int,
+    proof: Proof,
+    playwright: Playwright,
+    runtime: Path,
+    tls: ThrowawayTls,
+    shim_port: int,
     untrusted_port: int,
 ) -> None:
     """The apps are two hosts; the browser reaches each on its own origin."""
     app_a, app_b = proof.apps
     proof.browser = launch_pinned_chromium(
-        playwright, runtime,
+        playwright,
+        runtime,
         {
             IDP_HOST: shim_port,
             APP_HOST: app_a.host.app_port,
@@ -1245,7 +1293,10 @@ def drive_backchannel_phase(
 
 
 SCENARIOS_PER_WIDTH = (
-    (1, login), (2, logout), (4, disabled_user_is_refused), (6, pages_fit_the_window),
+    (1, login),
+    (2, logout),
+    (4, disabled_user_is_refused),
+    (6, pages_fit_the_window),
     (7, outsider_is_refused),
 )
 

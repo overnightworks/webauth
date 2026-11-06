@@ -83,7 +83,9 @@ class BearerRun:
         if call.cookies:
             headers["Cookie"] = "; ".join(f"{name}={value}" for name, value in call.cookies.items())
         answer = httpx.request(
-            call.method, f"https://localhost:{self.host.app_port}{call.path}", headers=headers,
+            call.method,
+            f"https://localhost:{self.host.app_port}{call.path}",
+            headers=headers,
             verify=ssl.create_default_context(cafile=str(self.ca_certificate)),
         )
         self.answers.append(answer)
@@ -150,11 +152,18 @@ class BearerRun:
         verifier = secrets.token_urlsafe(48)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
         state = secrets.token_urlsafe(16)
-        query = urllib.parse.urlencode({
-            "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
-            "scope": scope, "state": state, "code_challenge": challenge.rstrip(b"=").decode(),
-            "code_challenge_method": "S256", **({} if nonce is None else {"nonce": nonce}),
-        })
+        query = urllib.parse.urlencode(
+            {
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "scope": scope,
+                "state": state,
+                "code_challenge": challenge.rstrip(b"=").decode(),
+                "code_challenge_method": "S256",
+                **({} if nonce is None else {"nonce": nonce}),
+            }
+        )
         page = self.sso_page(person)
         authorization_url = f"{self.settings.authorization_endpoint}?{query}"
         landing = self.follow_to_loopback(page, authorization_url, person, redirect_uri)
@@ -163,14 +172,16 @@ class BearerRun:
         exchange = httpx.post(
             self.settings.token_endpoint,
             data={
-                "grant_type": "authorization_code", "code": answer["code"][0],
-                "redirect_uri": redirect_uri, "client_id": client_id, "code_verifier": verifier,
+                "grant_type": "authorization_code",
+                "code": answer["code"][0],
+                "redirect_uri": redirect_uri,
+                "client_id": client_id,
+                "code_verifier": verifier,
             },
             verify=ssl.create_default_context(cafile=str(self.ca_certificate)),
         )
         assert exchange.status_code == 200, f"the code exchange answered {exchange.status_code}"
         return exchange.json()
-
 
 
 def token_part(token: str, index: int) -> dict[str, Any]:
@@ -185,7 +196,6 @@ def claims_of(token: str) -> dict[str, Any]:
 
 def as_list(claim: str | list[str]) -> list[str]:
     return [claim] if isinstance(claim, str) else claim
-
 
 
 def assert_answer(

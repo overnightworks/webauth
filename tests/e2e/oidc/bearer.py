@@ -137,7 +137,9 @@ HOST_SCOPE = "openid aud-d1-host"
 SHORT_LIFESPAN_SECONDS = 15
 EXPIRY_MARGIN_SECONDS = 2
 AUDIENCE_SCOPES = {
-    "aud-d1-host": HOST_AUDIENCE, "aud-d1-app-c": AUDIENCE_APP, "aud-account": "account",
+    "aud-d1-host": HOST_AUDIENCE,
+    "aud-d1-app-c": AUDIENCE_APP,
+    "aud-account": "account",
 }
 EXPECTED_AUDIENCES = {
     "admin": {HOST_AUDIENCE},
@@ -172,9 +174,17 @@ def admission_leaves_no_trace(run: BearerRun) -> str:
 
 
 def delete_needs_no_csrf_proof(run: BearerRun) -> str:
-    answer = run.send(Call("DELETE", DELETE, run.tokens["admin"], headers={
-        "Origin": "https://evil.example.test", "Sec-Fetch-Site": "cross-site",
-    }))
+    answer = run.send(
+        Call(
+            "DELETE",
+            DELETE,
+            run.tokens["admin"],
+            headers={
+                "Origin": "https://evil.example.test",
+                "Sec-Fetch-Site": "cross-site",
+            },
+        )
+    )
     assert_answer(answer, 200)
     assert answer.json()["caller"] == run.admin_id
     return "D with Origin evil.example.test, cross-site and no cookie: 200"
@@ -185,14 +195,13 @@ def delete_ignores_another_persons_session(run: BearerRun) -> str:
     cookies = session_cookies(run.host_page(run.people["user"]), origin)
     run.host_page(run.people["admin"])
     before = run.state()
-    answer = run.send(Call(
-        "DELETE", DELETE, run.tokens["admin"], cookies
-    ))
+    answer = run.send(Call("DELETE", DELETE, run.tokens["admin"], cookies))
     assert_answer(answer, 200)
     assert answer.json()["caller"] == run.admin_id, "the cookie's person became the caller"
     after = run.state()
     assert (after["sessions"], after["session_transactions"]) == (
-        before["sessions"], before["session_transactions"]
+        before["sessions"],
+        before["session_transactions"],
     ), (before, after)
     return (
         f"D with the admin token, {USER_NAME}'s session cookie: 200, caller "
@@ -207,9 +216,7 @@ def cookie_only_calls(run: BearerRun) -> dict[str, Call]:
     cookies = session_cookies(page, origin)
     return {
         "export": Call("GET", EXPORT, cookies=cookies),
-        "delete": Call(
-            "DELETE", DELETE, cookies=cookies, headers={"Origin": origin}
-        ),
+        "delete": Call("DELETE", DELETE, cookies=cookies, headers={"Origin": origin}),
         "probe": Call("GET", PROBE, cookies=cookies),
     }
 
@@ -224,6 +231,7 @@ def a_cookie_alone_is_refused(name: str) -> Callable[[BearerRun], str]:
             f"{name} with d1-admin's session cookie only: 401, challenge, "
             f"log: {run.last_gate_reason()}"
         )
+
     return refuse
 
 
@@ -238,6 +246,7 @@ def a_cookie_cannot_save_the_session_route(run: BearerRun) -> str:
 
 
 # --- the token scenarios ---
+
 
 @dataclass(frozen=True)
 class Refused:
@@ -258,6 +267,7 @@ def token_is_refused(refused: Refused) -> Callable[[BearerRun], str]:
         reason = run.last_gate_reason()
         assert refused.log_names is None or refused.log_names in reason, reason
         return f"{refused.description}: {refused.status} {refused.error}, log: {reason}"
+
     return refuse
 
 
@@ -312,7 +322,7 @@ def short_token_fails_after_exp_and_leeway(run: BearerRun) -> str:
 def flipped_signature_is_refused(run: BearerRun) -> str:
     token = run.tokens["admin"]
     position = len(token) - 10
-    flipped = token[:position] + ("A" if token[position] != "A" else "B") + token[position + 1:]
+    flipped = token[:position] + ("A" if token[position] != "A" else "B") + token[position + 1 :]
     answer = run.send(Call("GET", EXPORT, flipped))
     assert_answer(answer, 401, "invalid_token", "Invalid token")
     return f"one signature character flipped: 401, log: {run.last_gate_reason()}"
@@ -344,6 +354,7 @@ def no_token_is_shown_and_refusals_are_logged(run: BearerRun) -> str:
 
 
 # --- the person-path scenarios ---
+
 
 def member_token_creates_the_account(run: BearerRun) -> str:
     reset_host(run.host)
@@ -414,13 +425,22 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (39, token_is_refused(Refused("audience_app", "a token for d1-app-c only"))),
     (40, token_is_refused(Refused("audience_host_and_app", "a token for d1-host and d1-app-c"))),
     (41, token_is_refused(Refused("audience_host_and_account", "a token for d1-host and account"))),
-    (42, token_is_refused(Refused(
-        "other_client", "a token of d1-other (azp d1-other, aud d1-host)",
-        log_names="authorized-party-mismatch",
-    ))),
-    (43, token_is_refused(Refused(
-        "user", "a d1-user token", 403, "insufficient_scope", "Admin access required"
-    ))),
+    (
+        42,
+        token_is_refused(
+            Refused(
+                "other_client",
+                "a token of d1-other (azp d1-other, aud d1-host)",
+                log_names="authorized-party-mismatch",
+            )
+        ),
+    ),
+    (
+        43,
+        token_is_refused(
+            Refused("user", "a d1-user token", 403, "insufficient_scope", "Admin access required")
+        ),
+    ),
     (44, outsider_is_refused_and_recorded),
     (45, disabled_person_keeps_the_token),
     (46, sign_out_leaves_the_token),
@@ -456,12 +476,14 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
 
 # --- the phase ---
 
+
 def mint_tokens(run: BearerRun) -> str:
     """One authorization request per scope variant; each person signs in at Keycloak once."""
     people = run.people
     first = run.mint(people["admin"], HAL, HOST_SCOPE)
     run.tokens |= {
-        "admin": first["access_token"], "id_token": first["id_token"],
+        "admin": first["access_token"],
+        "id_token": first["id_token"],
         "refresh_token": first["refresh_token"],
     }
     run.tokens["user"] = run.mint(people["user"], HAL, HOST_SCOPE)["access_token"]
@@ -515,9 +537,7 @@ def drive_scenarios(run: BearerRun) -> None:
     origin = run.settings.app_origins[0]
     if not proof.held_or_failed("CHECK bearer-tokens-minted", lambda: mint_tokens(run)):
         return
-    proof.held_or_failed(
-        "CHECK bearer-token-header-type", lambda: access_token_type_is_at_jwt(run)
-    )
+    proof.held_or_failed("CHECK bearer-token-header-type", lambda: access_token_type_is_at_jwt(run))
     if not proof.held_or_failed(
         "CHECK refreshed-id-token-facts",
         lambda: refreshed_id_token_facts(run, run.people["grouped"], proof),
@@ -535,7 +555,11 @@ def drive_scenarios(run: BearerRun) -> None:
 
 
 def drive_bearer_phase(
-    proof: Proof, playwright: Playwright, runtime: Path, tls: ThrowawayTls, shim_port: int,
+    proof: Proof,
+    playwright: Playwright,
+    runtime: Path,
+    tls: ThrowawayTls,
+    shim_port: int,
     settings: HostSettings,
 ) -> None:
     """The bearer host, started and stopped here; hal's tokens come through a browser."""
@@ -553,23 +577,31 @@ def drive_bearer_phase(
         "ungrouped": Person(UNGROUPED_NAME, secrets.token_urlsafe(18)),
         "grouped": Person(GROUPED_NAME, secrets.token_urlsafe(18)),
     }
-    create_user(
-        proof.fresh_admin(), UNGROUPED_NAME, people["ungrouped"].password, (USER_GROUP,)
-    )
+    create_user(proof.fresh_admin(), UNGROUPED_NAME, people["ungrouped"].password, (USER_GROUP,))
     create_user(proof.fresh_admin(), GROUPED_NAME, people["grouped"].password, (USER_GROUP,))
     host = start_host(proof, runtime, settings, tls.ca_certificate)
     try:
         proof.browser = launch_pinned_chromium(
-            playwright, runtime, {IDP_HOST: shim_port, hostname: host.app_port},
+            playwright,
+            runtime,
+            {IDP_HOST: shim_port, hostname: host.app_port},
             tls.leaf_spki_sha256_base64,
         )
         try:
             with contextlib.ExitStack() as stack:
-                drive_scenarios(BearerRun(
-                    proof, host, settings, tls.ca_certificate,
-                    people, client_uuids, redirect_uris,
-                    stack, admin_id=admin_id,
-                ))
+                drive_scenarios(
+                    BearerRun(
+                        proof,
+                        host,
+                        settings,
+                        tls.ca_certificate,
+                        people,
+                        client_uuids,
+                        redirect_uris,
+                        stack,
+                        admin_id=admin_id,
+                    )
+                )
         finally:
             proof.browser.close()
     finally:

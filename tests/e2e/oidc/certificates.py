@@ -61,9 +61,15 @@ def _ca_certificate(
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         .add_extension(
             x509.KeyUsage(
-                digital_signature=False, content_commitment=False, key_encipherment=False,
-                data_encipherment=False, key_agreement=False, key_cert_sign=True,
-                crl_sign=False, encipher_only=False, decipher_only=False,
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
             ),
             critical=True,
         )
@@ -73,20 +79,32 @@ def _ca_certificate(
 
 
 def _leaf_certificate(
-    leaf_key: ec.EllipticCurvePrivateKey, ca_key: ec.EllipticCurvePrivateKey,
-    ca_subject: x509.Name, common_name: str, dns_names: list[str], now: datetime.datetime,
+    leaf_key: ec.EllipticCurvePrivateKey,
+    ca_key: ec.EllipticCurvePrivateKey,
+    ca_subject: x509.Name,
+    common_name: str,
+    dns_names: list[str],
+    now: datetime.datetime,
 ) -> x509.Certificate:
     return (
         _builder(
             x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]),
-            ca_subject, leaf_key.public_key(), now,
+            ca_subject,
+            leaf_key.public_key(),
+            now,
         )
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(
             x509.KeyUsage(
-                digital_signature=True, content_commitment=False, key_encipherment=False,
-                data_encipherment=False, key_agreement=False, key_cert_sign=False,
-                crl_sign=False, encipher_only=False, decipher_only=False,
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
             ),
             critical=True,
         )
@@ -101,7 +119,9 @@ def _leaf_certificate(
 
 
 def _builder(
-    subject: x509.Name, issuer: x509.Name, public_key: ec.EllipticCurvePublicKey,
+    subject: x509.Name,
+    issuer: x509.Name,
+    public_key: ec.EllipticCurvePublicKey,
     now: datetime.datetime,
 ) -> x509.CertificateBuilder:
     return (
