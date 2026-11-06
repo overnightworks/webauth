@@ -119,8 +119,8 @@ class SessionRecord(Protocol):
         """The login's ID token, a secret of the session that goes back only to
         the issuer as the logout hint. It is part of the row and ends with it.
         The host writes it with ``get_secret_value()`` and returns it wrapped in
-        ``SecretStr``; it is at most ``MAX_TOKEN_CHARACTERS`` (8192) ASCII
-        characters, the verifier's bound, so the column takes no less. ``None``
+        ``SecretStr``; it is at most 8192 ASCII characters,
+        the verifier's bound, so the column takes no less. ``None``
         for a row stored before the host held ID tokens, or for a session
         the callback route opened for a host that keeps none (``keeps_id_token=False``)."""
         ...

@@ -25,7 +25,6 @@ from webauth.config import (
 )
 from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
-    PLAIN_SESSION_COOKIE_NAME,
 )
 
 
@@ -138,7 +137,7 @@ def test_an_ipv6_budget_prefix_is_refused_at_construction() -> None:
 def test_the_session_cookie_name_follows_cookie_secure_through_construction_and_replace(
     cookie_secure: bool,
 ) -> None:
-    expected = DEFAULT_SESSION_COOKIE_NAME if cookie_secure else PLAIN_SESSION_COOKIE_NAME
+    expected = DEFAULT_SESSION_COOKIE_NAME if cookie_secure else "session_id"
     opposite = a_web_auth_config(cookie_secure=not cookie_secure)
 
     built = a_web_auth_config(cookie_secure=cookie_secure)

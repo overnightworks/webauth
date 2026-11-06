@@ -26,7 +26,6 @@ from tests.support.oidc_relying_party import (
 )
 from webauth.jwt_verification import RejectionReason
 from webauth.oidc import (
-    LOGOUT_TOKEN_MAX_AGE_SECONDS,
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
@@ -51,7 +50,7 @@ def _logout_token(
 
 
 _EVENT = BACKCHANNEL_LOGOUT_EVENT
-_MAX_LOGOUT_AGE = LOGOUT_TOKEN_MAX_AGE_SECONDS + ACCESS_TOKEN_LEEWAY_SECONDS
+_MAX_LOGOUT_AGE = 120 + ACCESS_TOKEN_LEEWAY_SECONDS
 
 
 def _a_logout_relying_party() -> OidcRelyingParty:

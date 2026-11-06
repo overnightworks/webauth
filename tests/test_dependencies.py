@@ -32,7 +32,6 @@ from tests.support.webauth_arrangement import (
 from webauth.config import install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
-    PLAIN_SESSION_COOKIE_NAME,
     sign_session_id,
 )
 from webauth.dependencies import (
@@ -251,11 +250,11 @@ def test_one_session_cookie_among_others_still_authenticates(
     assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
 
 
-def test_a_signed_cookie_under_the_pre_upgrade_name_signs_nobody_in(auth_app: AuthApp) -> None:
+def test_a_signed_cookie_under_the_plain_name_signs_nobody_in(auth_app: AuthApp) -> None:
     """Only the configured ``__Host-`` name is read; a sibling host can plant the plain one."""
-    old_cookie = f"{PLAIN_SESSION_COOKIE_NAME}={auth_app.signed_cookie()}"
+    plain_cookie = f"session_id={auth_app.signed_cookie()}"
 
-    response = auth_app.client.get("/me", headers={"cookie": old_cookie})
+    response = auth_app.client.get("/me", headers={"cookie": plain_cookie})
 
     assert response.status_code == 401
     assert response.json()["detail"] == AUTHENTICATION_REQUIRED_DETAIL

@@ -23,7 +23,6 @@ from webauth._validation import (
 )
 
 __all__ = [
-    "DEFAULT_PERMISSIONS_POLICY",
     "AuthorizedParties",
     "BodySizePolicy",
     "BodySizeRule",
@@ -273,7 +272,7 @@ class CacheControlRule:
         _require_header_field_value("CacheControlRule.value", self.value)
 
 
-DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
+_DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
 
 
 @dataclass(frozen=True)
@@ -292,7 +291,7 @@ class SecurityHeadersPolicy:
 
     content_security_policy: str
     cache_control_rules: tuple[CacheControlRule, ...] = ()
-    permissions_policy: str = DEFAULT_PERMISSIONS_POLICY
+    permissions_policy: str = _DEFAULT_PERMISSIONS_POLICY
 
     def __post_init__(self) -> None:
         _require_header_field_value("content_security_policy", self.content_security_policy)

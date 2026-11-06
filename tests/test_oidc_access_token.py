@@ -27,7 +27,7 @@ from tests.support.oidc_arrangement import (
     served_key_set,
 )
 from webauth.https_client import KeySetFetchError
-from webauth.jwt_verification import JwtVerifier, RejectionReason
+from webauth.jwt_verification import RejectionReason, _JwtVerifier
 from webauth.oidc import (
     OidcRefusal,
     OidcRefusalReason,
@@ -101,8 +101,8 @@ def test_a_token_of_another_type_is_refused_before_any_key_set_is_fetched(typ: A
     assert (outcome, key_sets.fetched_urls) == (rejected(RejectionReason.INVALID_TOKEN_TYPE), [])
 
 
-def a_jwt_verifier() -> JwtVerifier:
-    return JwtVerifier(
+def a_jwt_verifier() -> _JwtVerifier:
+    return _JwtVerifier(
         issuer=REALM_ISSUER,
         audiences=[APP_CLIENT_ID],
         jwks_url=REALM_JWKS_URL,

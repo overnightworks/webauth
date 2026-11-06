@@ -30,7 +30,7 @@ from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
     _clear_session_cookies,
-    _default_cookie_name,
+    _cookie_name,
     _pending_login_cookie_name,
     _sign_pending_login,
     _verify_pending_login,
@@ -61,13 +61,13 @@ _PENDING = PendingLogin(
         ("custom", False, "custom"),
     ],
 )
-def test_default_cookie_name_prefixes_any_name_only_when_secure(
+def test_a_cookie_name_is_prefixed_only_when_secure(
     plain_name: str,
     *,
     secure: bool,
     expected: str,
 ) -> None:
-    assert _default_cookie_name(plain_name, secure=secure) == expected
+    assert _cookie_name(plain_name, secure=secure) == expected
 
 
 def test_sign_and_verify_session() -> None:

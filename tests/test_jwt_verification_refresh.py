@@ -20,12 +20,13 @@ from tests.support.oidc_arrangement import (
     public_jwk,
     rs256,
     rsa_key,
+    served_key_set,
     weak_public_jwk,
 )
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import (
-    Rejected,
     RejectionReason,
+    _Rejected,
 )
 
 # Canary whose recognisable text is the point
@@ -79,7 +80,7 @@ def test_the_key_set_is_cached_on_the_monotonic_clock_until_its_ttl(
     issuer: IssuerScenario,
 ) -> None:
     issuer.verifier.verify(issuer.token())
-    issuer.serve(key_set_document(public_jwk(rsa_key("other"), "other-key")))
+    issuer.serve(served_key_set("other"))
 
     issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS - 1
     cached = issuer.verifier.verify(issuer.token())
@@ -87,7 +88,7 @@ def test_the_key_set_is_cached_on_the_monotonic_clock_until_its_ttl(
     refetched = issuer.verifier.verify(issuer.token())
 
     assert cached == issuer.verified()
-    assert refetched == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert refetched == _Rejected(RejectionReason.UNKNOWN_KEY_ID)
 
 
 def test_an_unknown_kid_refreshes_at_most_once_per_cooldown(issuer: IssuerScenario) -> None:
@@ -145,7 +146,7 @@ def test_parallel_unknown_kids_share_one_fetch_and_each_fails_closed(
         release_fetch.set()
         outcomes = [refreshing.result(timeout=10), *while_refreshing]
 
-    assert outcomes == [Rejected(RejectionReason.UNKNOWN_KEY_ID)] * 8
+    assert outcomes == [_Rejected(RejectionReason.UNKNOWN_KEY_ID)] * 8
     assert len(issuer.endpoint.fetched_urls) == 2
 
 

@@ -29,12 +29,12 @@ from webauth._validation import (
 )
 from webauth.admission import AdmissionConfig, AppRole, app_role
 from webauth.jwt_verification import (
-    JwtVerifier,
     KeySetFetch,
     MonotonicClock,
-    Rejected,
     RejectionReason,
-    VerifiedClaims,
+    _JwtVerifier,
+    _Rejected,
+    _VerifiedClaims,
 )
 from webauth.oidc._relying_party import _groups_claim
 from webauth.ports import WallClock
@@ -196,7 +196,7 @@ class ServiceCallerCheck:
         _require_registry(registered_apps, identity.issuer)
         self._identity = identity
         self._registered_apps: Mapping[str, RegisteredApp] = MappingProxyType(dict(registered_apps))
-        self._verifier = JwtVerifier(
+        self._verifier = _JwtVerifier(
             issuer=identity.issuer,
             audiences=(identity.audience,),
             jwks_url=identity.jwks_url,
@@ -255,15 +255,15 @@ class ServiceCallerCheck:
             role=role,
         )
 
-    def _verified(self, token: str | None) -> VerifiedClaims | CallerRefusal:
+    def _verified(self, token: str | None) -> _VerifiedClaims | CallerRefusal:
         if not token:
             return CallerRefusal(CallerRefusalReason.MISSING_TOKEN, None)
         verified = self._verifier.verify(token)
-        if isinstance(verified, Rejected):
+        if isinstance(verified, _Rejected):
             return _verifier_refusal(verified.reason)
         return verified
 
-    def _identified(self, verified: VerifiedClaims) -> _Identity | CallerRefusal:
+    def _identified(self, verified: _VerifiedClaims) -> _Identity | CallerRefusal:
         subject = verified.subject
         if subject is None or not is_utf8(subject):
             return CallerRefusal(CallerRefusalReason.INVALID_SUBJECT, None)
@@ -273,7 +273,7 @@ class ServiceCallerCheck:
         return _Identity(Principal(issuer=verified.issuer, subject=subject), groups)
 
     def _workload(
-        self, verified: VerifiedClaims, identified: _Identity
+        self, verified: _VerifiedClaims, identified: _Identity
     ) -> WorkloadCaller | CallerRefusal:
         claims = verified.claims
         if not _has_role(claims, self._identity.workload_role):

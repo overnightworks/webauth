@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from webauth.oidc._client_config import OidcClientConfig
 from webauth.oidc._relying_party import (
-    LOGOUT_TOKEN_MAX_AGE_SECONDS,
-    MAX_AUTHORIZATION_CODE_CHARS,
-    MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
     AuthorizationRequest,
     OidcIdentity,
@@ -23,9 +20,6 @@ from webauth.oidc._relying_party import (
 )
 
 __all__ = [
-    "MAX_AUTHORIZATION_CODE_CHARS",
-    "MAX_TOKEN_RESPONSE_BYTES",
-    "LOGOUT_TOKEN_MAX_AGE_SECONDS",
     "PENDING_LOGIN_MAX_AGE_SECONDS",
     "AuthorizationRequest",
     "OidcClientConfig",

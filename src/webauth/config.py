@@ -20,9 +20,9 @@ from webauth._validation import (
 )
 from webauth.cookies import (
     _DEFAULT_COOKIE_SAMESITE,
-    PLAIN_SESSION_COOKIE_NAME,
+    _PLAIN_SESSION_COOKIE_NAME,
     CookieSameSite,
-    _default_cookie_name,
+    _cookie_name,
 )
 
 if TYPE_CHECKING:
@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from webauth.proxies import TrustedProxies
 
 __all__ = [
-    "MAX_SESSION_LIFETIME_SECONDS",
     "SessionLifetime",
     "WebAuthConfig",
     "install_web_auth_config",
@@ -49,7 +48,7 @@ _MIN_SESSION_SECRET_CHARS: Final = 32
 _WEB_AUTH_STATE_ATTRIBUTE: Final = "webauth"
 
 
-MAX_SESSION_LIFETIME_SECONDS: Final = 400 * 24 * 60 * 60
+_MAX_SESSION_LIFETIME_SECONDS: Final = 400 * 24 * 60 * 60
 """Browsers cap a cookie's lifetime at 400 days, so no session may be configured longer."""
 
 
@@ -67,10 +66,10 @@ class SessionLifetime:
             self.absolute_max_age_seconds,
             unit="seconds",
         )
-        if self.absolute_max_age_seconds > MAX_SESSION_LIFETIME_SECONDS:
+        if self.absolute_max_age_seconds > _MAX_SESSION_LIFETIME_SECONDS:
             raise ValueError(
                 "absolute_max_age_seconds must not exceed "
-                f"{MAX_SESSION_LIFETIME_SECONDS} seconds (400 days)",
+                f"{_MAX_SESSION_LIFETIME_SECONDS} seconds (400 days)",
             )
         if self.idle_seconds > self.absolute_max_age_seconds:
             raise ValueError(
@@ -163,7 +162,7 @@ class WebAuthConfig:
     @property
     def session_cookie_name(self) -> str:
         """The session cookie's name, which follows ``cookie_secure``."""
-        return _default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=self.cookie_secure)
+        return _cookie_name(_PLAIN_SESSION_COOKIE_NAME, secure=self.cookie_secure)
 
     @property
     def signing_key(self) -> bytes:

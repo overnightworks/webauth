@@ -26,8 +26,8 @@ from tests.support.oidc_arrangement import (
 )
 from webauth.jwt_verification import (
     KEY_SET_REFRESH_COOLDOWN_SECONDS,
-    JwtVerifier,
-    VerifiedClaims,
+    _JwtVerifier,
+    _VerifiedClaims,
 )
 
 KEY_SET_TTL_SECONDS = 60 * 60
@@ -38,7 +38,7 @@ class IssuerScenario:
     endpoint: FakeKeySetEndpoint
     wall_clock: FakeClock
     monotonic_clock: FakeClock
-    verifier: JwtVerifier = field(init=False)
+    verifier: _JwtVerifier = field(init=False)
     key_id: str = "current-key"
 
     def __post_init__(self) -> None:
@@ -63,10 +63,10 @@ class IssuerScenario:
             sign or rs256(rsa_key("current")),
         )
 
-    def verified(self, claims: dict[str, Any] | None = None) -> VerifiedClaims:
+    def verified(self, claims: dict[str, Any] | None = None) -> _VerifiedClaims:
         issued = self.claims(claims)
         audience = issued["aud"]
-        return VerifiedClaims(
+        return _VerifiedClaims(
             subject=issued.get("sub"),
             issuer=REALM_ISSUER,
             audiences=(audience,) if isinstance(audience, str) else tuple(audience),
@@ -81,7 +81,7 @@ class IssuerScenario:
     def after_cooldown(self) -> None:
         self.monotonic_clock.now += KEY_SET_REFRESH_COOLDOWN_SECONDS
 
-    def verifier_with(self, **changes: Any) -> JwtVerifier:
+    def verifier_with(self, **changes: Any) -> _JwtVerifier:
         arguments = {
             "issuer": REALM_ISSUER,
             "audiences": [APP_CLIENT_ID],
@@ -91,7 +91,7 @@ class IssuerScenario:
             "wall_clock": self.wall_clock,
             "monotonic_clock": self.monotonic_clock,
         }
-        return JwtVerifier(**{**arguments, **changes})
+        return _JwtVerifier(**{**arguments, **changes})
 
 
 def kidless_keys(count: int) -> list[dict[str, Any]]:

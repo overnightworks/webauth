@@ -19,8 +19,8 @@ from tests.support.oidc_arrangement import (
 )
 from webauth.https_client import fetch_key_set_over_https
 from webauth.jwt_verification import (
-    Rejected,
     RejectionReason,
+    _Rejected,
 )
 
 
@@ -53,8 +53,8 @@ def test_a_request_during_a_stalled_key_set_fetch_is_refused_without_waiting(
         refreshing = pool.submit(verifier.verify, token)
         assert https_key_set_server.silent_request_arrived.wait(timeout=10)
 
-        assert verifier.verify(token) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+        assert verifier.verify(token) == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
         assert not refreshing.done()
 
         https_key_set_server.release_silent_request.set()
-        assert refreshing.result(timeout=10) == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+        assert refreshing.result(timeout=10) == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
