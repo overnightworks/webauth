@@ -1,0 +1,7 @@
+claim_id = "98481cb540f64674adc4e9113c45449a"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "35208b148b9b5f27b65adbde9fd801ed185f3cae"
+branch = "claude/issue-620-csp-source-list-refuses-one-string"
+scope = ["src/webauth/_validation.py", "src/webauth/policies.py", "tests/test_policies.py"]
+opened_commit = "85f90c059903d6af9eba1a5e87a42bd19bb8d7e1"
