@@ -8,14 +8,14 @@
 "_surface_of_source" = 20
 
 [file_lines]
-"tests/e2e/oidc/prove.py" = 1344
+"tests/e2e/oidc/prove.py" = 1395
 "tests/support/webauth_arrangement.py" = 898
 
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63
 
 [function_lines."tests/e2e/oidc/host_app.py"]
-"build_app" = 83
+"build_app" = 84
 
 [function_lines."tests/support/oidc_arrangement.py"]
 "loopback_https_server" = 115
