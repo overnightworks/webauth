@@ -1,7 +1,0 @@
-claim_id = "a85d7b9659c04e5d9deaea6edf8fef0a"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "d44f6928e97ffc9ac04b9fcb2b6e07b4c9272c55"
-branch = "claude/issue-630-testing-a-host-in-host-contract"
-scope = ["README.md", "docs/host-contract.md", "docs/testing-a-host.md"]
-opened_commit = "3c7fdbddce43308105273a5e00d87cfbdce1d045"
