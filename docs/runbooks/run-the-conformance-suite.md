@@ -15,4 +15,4 @@ Rollback: none needed.
 
 ## Escalate
 - A module that fails twice with the same stderr tail: open an issue in overnightworks/webauth with the result table, without the `export/` directory.
-- The run was killed or printed `the browser worker did not stop`: `evidence/` is not trusted; follow `clean-up-after-a-killed-run.md`.
+- The run was killed or printed `the browser worker did not stop`: follow `clean-up-after-a-killed-run.md`.

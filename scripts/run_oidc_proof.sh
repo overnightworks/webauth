@@ -84,15 +84,11 @@ run_locked() {
   return "$status"
 }
 
-# Ctrl-C reaches flock, which holds the lock for the run. When flock dies the kernel
-# frees the lock at once and setpriv sends timeout SIGTERM; timeout passes it to the
-# driver, whose first SIGTERM or SIGINT ends the run through an uninterruptible cleanup
-# (further signals are ignored). So the lock is free while that teardown runs, and a new
-# proof can take it; the window is bounded by the driver's teardown budget (225 s, under
-# kill-after 240 s for a run; cleanup has 30 s and no teardown of its own). SIGTERM sent
-# to timeout or to the python process ends the run the same way, but flock stays alive
-# and keeps the lock until the teardown ends. flock exits 69 when setpriv cannot run:
-# setpriv is never left out, or the lock would not outlive the command.
+# Ctrl-C reaches flock; setpriv (see run_locked) then sends timeout SIGTERM, which timeout
+# passes to the driver, whose first SIGTERM or SIGINT ends the run through an
+# uninterruptible cleanup (further signals are ignored). SIGTERM sent to timeout or to the
+# python process ends the run the same way, but flock stays alive and keeps the lock until
+# the teardown ends.
 # timeout's KILL reaches only its direct child, uv: bash -c execs uv run, which starts
 # python as its own child (measured on uutils coreutils 0.10.0: a child that ignores TERM
 # is killed, its grandchild survives). So an overrunning teardown is not cut short and

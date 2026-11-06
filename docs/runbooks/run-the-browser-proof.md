@@ -5,7 +5,7 @@ Purpose: prove login and logout of a webauth host in a real browser against hal'
 Prerequisites for `prove` and `conformance`:
 - Docker is running.
 - A hal checkout sits at the commit in `tests/e2e/oidc/hal_sha.txt`, with no change in `compose.yaml`, `keycloak`, `probe/keycloak`, `src/hal`, `traefik.yml` or `dynamic`. The run refuses otherwise.
-- Playwright's Chromium, Firefox and WebKit, the relay image and the conformance suite's images are installed. WebKit's system libraries are not: `prepare` cannot install them.
+- Playwright's Chromium, Firefox and WebKit, the relay image and the conformance suite's images are installed. WebKit's system libraries are installed by hand; `prepare` cannot install them.
 - The 1-minute load average is at most 1.5 times the cores; the script refuses otherwise.
 
 ## Fix
@@ -18,4 +18,4 @@ Rollback: none needed. A failed or interrupted run ends through its own cleanup;
 
 ## Escalate
 - A row other than `held` and `FAILED-as-found`, or a non-zero exit, after a second run: open an issue in overnightworks/webauth with the result table.
-- The run printed `the browser worker did not stop`: `evidence/` is not trusted; follow `clean-up-after-a-killed-run.md`.
+- The run printed `the browser worker did not stop`: follow `clean-up-after-a-killed-run.md`.
