@@ -150,6 +150,8 @@ added the enforcing gate. Its page, API and public-path proofs are
 `test_an_api_call_without_a_session_gets_401_authentication_required` and
 `test_a_public_path_passes_untouched_and_asks_no_store` in
 [test_session_gate.py](../tests/middleware/test_session_gate.py).
+The recorded-admission proofs, among them `test_a_replay_on_the_gated_app_is_decided_by_the_gate_itself`,
+are in [test_session_gate_recorded_admission.py](../tests/middleware/test_session_gate_recorded_admission.py).
 
 - **A page without a session** sends the browser straight to the app's start
   route, with `next` naming the page, so the person lands there after signing
@@ -231,6 +233,10 @@ added the enforcing gate. Its page, API and public-path proofs are
   [The sign-in routes](#the-sign-in-routes).
   `test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise` in
   [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
+  The derived-policy proofs, among them `test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start`,
+  `test_the_derived_cache_rule_marks_the_sign_in_answers_no_store` and
+  `test_the_derived_browser_paths_spend_one_sign_in_budget`, are in
+  [test_sign_in_routes_derived_policies.py](../tests/test_sign_in_routes_derived_policies.py).
   A refusal carries no identity (`AdmissionRefusal` in
   [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
   [oidc](../src/webauth/oidc/_relying_party.py)), so the page shows no name. A
