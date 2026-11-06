@@ -1,5 +1,5 @@
 # Runbook: stop a run
-Symptom: a `prove` or `conformance` run must end now (wrong checkout, wrong pin, stuck). Impact: the run ends, and its teardown takes at most 225 s.
+Symptom: a `prove` or `conformance` run must end now (wrong checkout, wrong pin, stuck). Impact: the run ends after its teardown.
 
 ## Check
 - `scripts/run_oidc_proof.sh` prints `run directory: <path>` when a run starts; that run is the one to stop.
