@@ -1,0 +1,8 @@
+claim_id = "25fa1a772876472a9e2bab24bec187ef"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "be2bdf8474abeb74b14957ee39cef3db92e0f635"
+branch = "claude/issue-624-harness-runbooks"
+scope = [".github/dependabot.yml", "AGENTS.md", "README.md", "docs/runbooks", "scripts/run_oidc_proof.sh", "tests/e2e/oidc/README.md", "tests/e2e/oidc/conformance.py", "tests/e2e/oidc/prove.py"]
+opened_commit = "263bf8d2e053fdeebd5e95a3eddbff6841addbc4"
+whole_reason = "One owner move: the harness runbook leaves one file for five task runbooks, and every pointer to it changes in the same landing, so none dangles."
