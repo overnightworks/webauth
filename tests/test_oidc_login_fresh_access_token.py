@@ -66,7 +66,7 @@ _SHAPES = pytest.mark.parametrize(
     "provider_of",
     [
         pytest.param(lambda sessions: sessions.in_transaction, id="transaction"),
-        pytest.param(lambda sessions: (lambda: nullcontext(sessions)), id="nullcontext"),
+        pytest.param(lambda sessions: lambda: nullcontext(sessions), id="nullcontext"),
     ],
 )
 
@@ -82,7 +82,9 @@ class Arrangement:
     relying_party: OidcRelyingParty
 
     def fresh_access_token(
-        self, provider: SessionTransaction, session_id: str = _SESSION_ID,
+        self,
+        provider: SessionTransaction,
+        session_id: str = _SESSION_ID,
     ) -> SecretStr | AccessTokenRefusal:
         return fresh_access_token(
             self.relying_party,
@@ -123,10 +125,15 @@ def an_arrangement(
         refresh_token=None if refresh_token is None else SecretStr(refresh_token),
     )
     relying_party = a_relying_party(
-        post_token_request=issuer if token_endpoint is None else token_endpoint, wall_clock=clock,
+        post_token_request=issuer if token_endpoint is None else token_endpoint,
+        wall_clock=clock,
     )
     return Arrangement(
-        issuer, sessions_of(record), clock, config, relying_party,
+        issuer,
+        sessions_of(record),
+        clock,
+        config,
+        relying_party,
     )
 
 
@@ -155,7 +162,14 @@ class TestTheTwoTransactions:
 
         assert isinstance(outcome, SecretStr)
         assert sessions.event_names == [
-            "open", "load", "commit", "grant", "open", "load", "replace", "commit",
+            "open",
+            "load",
+            "commit",
+            "grant",
+            "open",
+            "load",
+            "replace",
+            "commit",
         ]
 
     @_SHAPES
@@ -206,7 +220,8 @@ class TestTheTwoTransactions:
 
     @_SHAPES
     def test_overlapping_calls_that_complete_in_reverse_order_leave_the_last_written_token(
-        self, provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
+        self,
+        provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
     ) -> None:
         arrangement = an_arrangement()
         provider = provider_of(arrangement.sessions)
@@ -227,7 +242,8 @@ class TestTheTwoTransactions:
         assert isinstance(second, SecretStr)
         assert outer != second
         assert [request.form["refresh_token"] for request in arrangement.issuer.requests] == [
-            ISSUED_REFRESH_TOKEN, ISSUED_REFRESH_TOKEN,
+            ISSUED_REFRESH_TOKEN,
+            ISSUED_REFRESH_TOKEN,
         ]
         stored = arrangement.stored_refresh_token
         assert stored not in (None, ISSUED_REFRESH_TOKEN, *stored_by_second_call)
@@ -236,7 +252,8 @@ class TestTheTwoTransactions:
 
     @_SHAPES
     def test_a_call_whose_grant_echoes_the_token_it_sent_does_not_write_it_over_a_newer_one(
-        self, provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
+        self,
+        provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
     ) -> None:
         arrangement = an_arrangement()
         provider = provider_of(arrangement.sessions)
@@ -259,7 +276,8 @@ class TestTheTwoTransactions:
 class TestAGrantedToken:
     @_SHAPES
     def test_a_live_session_yields_the_grants_token_and_stores_the_rotated_refresh_token(
-        self, provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
+        self,
+        provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
     ) -> None:
         arrangement = an_arrangement()
         arrangement.issuer.refresh_answer_members = {"access_token": GRANTED_ACCESS_TOKEN}
@@ -278,7 +296,8 @@ class TestAGrantedToken:
 
     @_SHAPES
     def test_two_calls_in_a_row_yield_two_tokens_and_the_second_sends_the_rotated_one(
-        self, provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
+        self,
+        provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
     ) -> None:
         arrangement = an_arrangement()
         provider = provider_of(arrangement.sessions)
@@ -310,7 +329,8 @@ class TestAGrantedToken:
         sessions = arrangement.sessions
         assert isinstance(sessions, SessionsRecordingTheirTransaction)
         arrangement.issuer.refresh_answer_members = {
-            "access_token": GRANTED_ACCESS_TOKEN, **refresh_answer_members,
+            "access_token": GRANTED_ACCESS_TOKEN,
+            **refresh_answer_members,
         }
 
         before = arrangement.instants
@@ -356,7 +376,8 @@ _ISSUER_FAILURES = [
 class TestRefusals:
     @_SHAPES
     def test_a_refresh_token_the_issuer_ended_means_sign_in_again_and_nothing_is_written(
-        self, provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
+        self,
+        provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
     ) -> None:
         arrangement = an_arrangement(SessionsRecordingTheirTransaction)
         sessions = arrangement.sessions
@@ -376,7 +397,8 @@ class TestRefusals:
 
     @_SHAPES
     def test_a_session_without_a_refresh_token_means_sign_in_again_without_asking_the_issuer(
-        self, provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
+        self,
+        provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
     ) -> None:
         arrangement = an_arrangement(refresh_token=None)
 
@@ -412,7 +434,10 @@ class TestRefusals:
             pytest.param("session-nobody-holds", timedelta(minutes=5), 0, id="no-row"),
             pytest.param(_SESSION_ID, timedelta(minutes=5), SESSION_IDLE_SECONDS + 1, id="idle"),
             pytest.param(
-                _SESSION_ID, timedelta(seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS), 0, id="past-cap",
+                _SESSION_ID,
+                timedelta(seconds=SESSION_ABSOLUTE_MAX_AGE_SECONDS),
+                0,
+                id="past-cap",
             ),
         ],
     )
@@ -473,7 +498,9 @@ class TestAFailingStore:
         arrangement = an_arrangement()
         failure = RuntimeError("commit failed")
         arrangement.issuer.before_exchange = lambda: setattr(
-            arrangement.sessions, "commit_failure", failure,
+            arrangement.sessions,
+            "commit_failure",
+            failure,
         )
 
         with pytest.raises(RuntimeError, match="commit failed"):

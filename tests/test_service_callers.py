@@ -94,8 +94,7 @@ def a_check(
     return ServiceCallerCheck(
         identity or a_service_identity(),
         registered_apps=a_registry() if registered_apps is None else registered_apps,
-        fetch_key_set=fetch_key_set
-        or FakeKeySetEndpoint(served_key_set()),
+        fetch_key_set=fetch_key_set or FakeKeySetEndpoint(served_key_set()),
         wall_clock=FakeClock(float(ACCESS_TOKEN_NOW)),
         monotonic_clock=monotonic_clock or FakeClock(5_000.0),
     )

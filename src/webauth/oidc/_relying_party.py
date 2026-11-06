@@ -506,7 +506,10 @@ class OidcRelyingParty:
         return VerifiedLogout(subject=outcome.subject)
 
     def verify_access_token(
-        self, access_token: str, *, authorized_parties: AuthorizedParties,
+        self,
+        access_token: str,
+        *,
+        authorized_parties: AuthorizedParties,
     ) -> VerifiedAccessToken | OidcRefusal:
         """The subject and groups of an access token presented to this app, or the refusal.
 
@@ -524,7 +527,11 @@ class OidcRelyingParty:
         )
 
     def resource_token_verifier(
-        self, *, resource_url: str, scope: str, authorized_parties: AuthorizedParties,
+        self,
+        *,
+        resource_url: str,
+        scope: str,
+        authorized_parties: AuthorizedParties,
     ) -> Callable[[str], VerifiedAccessToken | OidcRefusal]:
         """A check of an access token presented to the resource at `resource_url`.
 
@@ -548,7 +555,11 @@ class OidcRelyingParty:
         return verify
 
     def _access_token_profile(
-        self, token: VerifiedClaims, authorized_parties: AuthorizedParties, *, audience: str,
+        self,
+        token: VerifiedClaims,
+        authorized_parties: AuthorizedParties,
+        *,
+        audience: str,
     ) -> VerifiedAccessToken | OidcRefusal:
         if token.subject is None or token.audiences != (audience,):
             return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)

@@ -271,7 +271,11 @@ def _start_login(
     authorization = relying_party.begin_login()
     pending = authorization.pending.returning_to(same_app_path(request, return_to))
     _begin_pending_login(
-        request, response, pending, max_age_seconds=PENDING_LOGIN_MAX_AGE_SECONDS, config=config,
+        request,
+        response,
+        pending,
+        max_age_seconds=PENDING_LOGIN_MAX_AGE_SECONDS,
+        config=config,
     )
     return authorization.url
 
@@ -298,7 +302,10 @@ def _write_sign_in(
     Raises ``_UsernameTakenSignal`` before any session is touched.
     """
     account = _admit_account(
-        admitted.identity, admitted.role, accounts=stores.accounts, audit=stores.audit,
+        admitted.identity,
+        admitted.role,
+        accounts=stores.accounts,
+        audit=stores.audit,
     )
     now = _whole_second_now(config)
     if replaced_session_id is not None:
@@ -313,7 +320,6 @@ def _write_sign_in(
         refresh_token=identity.refresh_token,
         id_token=SecretStr(identity.id_token) if keeps_id_token else None,
     ).id
-
 
 
 def _log_out(
@@ -433,21 +439,31 @@ def fresh_access_token(
     if isinstance(renewed, OidcRefusal):
         return _refusal_of_grant(renewed)
     stands = _kept_after_grant(
-        session_id, session_transaction, config, sent=sent, rotated=renewed.refresh_token,
+        session_id,
+        session_transaction,
+        config,
+        sent=sent,
+        rotated=renewed.refresh_token,
     )
     return renewed.access_token if stands else _SESSION_ENDED
 
 
 def _kept_after_grant(
-    session_id: str, session_transaction: SessionTransaction, config: WebAuthConfig,
-    *, sent: SecretStr, rotated: SecretStr | None,
+    session_id: str,
+    session_transaction: SessionTransaction,
+    config: WebAuthConfig,
+    *,
+    sent: SecretStr,
+    rotated: SecretStr | None,
 ) -> bool:
     """Whether the session still stands after the grant, storing the rotated refresh
     token when it does and differs from the one sent. A deleted session is never recreated."""
     with session_transaction() as sessions:
         record = sessions.load(session_id)
         stands = record is not None and _is_admitted(
-            config.session_lifetime, record, _whole_second_now(config),
+            config.session_lifetime,
+            record,
+            _whole_second_now(config),
         )
         if stands and rotated is not None and rotated != sent:
             stands = _stored(sessions, session_id, rotated)
@@ -481,8 +497,11 @@ def current_groups(
     if isinstance(refreshed, OidcRefusal):
         return _refusal_of_grant(refreshed)
     if not _kept_after_grant(
-        session_id, session_transaction, config,
-        sent=held.refresh_token, rotated=refreshed.refresh_token,
+        session_id,
+        session_transaction,
+        config,
+        sent=held.refresh_token,
+        rotated=refreshed.refresh_token,
     ):
         return _SESSION_ENDED
     if isinstance(refreshed.groups, OidcRefusal):
@@ -491,12 +510,16 @@ def current_groups(
 
 
 def _evidence_of_standing_session(
-    session_id: str, session_transaction: SessionTransaction, config: WebAuthConfig,
+    session_id: str,
+    session_transaction: SessionTransaction,
+    config: WebAuthConfig,
 ) -> _StandingEvidence | AccessTokenRefusal:
     with session_transaction() as sessions:
         record = sessions.load(session_id)
         if record is None or not _is_admitted(
-            config.session_lifetime, record, _whole_second_now(config),
+            config.session_lifetime,
+            record,
+            _whole_second_now(config),
         ):
             return _SESSION_ENDED
         if record.refresh_token is None:
@@ -559,11 +582,13 @@ def _receive_backchannel_logout(
     with transaction() as stores:
         account = stores.accounts.get(logout.subject)
         if account is not None and stores.sessions.delete_for_user(account.id):
-            stores.audit.account_event(AccountEvent(
-                kind=AccountEventKind.BACKCHANNEL_LOGOUT,
-                actor_id=None,
-                subject_id=account.id,
-            ))
+            stores.audit.account_event(
+                AccountEvent(
+                    kind=AccountEventKind.BACKCHANNEL_LOGOUT,
+                    actor_id=None,
+                    subject_id=account.id,
+                )
+            )
     return _BackchannelLogoutResult.ACCEPTED
 
 
@@ -572,7 +597,10 @@ def _logout_token_of(form_body: bytes, content_type: str | None) -> str | None:
         return None
     try:
         fields = urllib.parse.parse_qsl(
-            form_body.decode(), keep_blank_values=True, strict_parsing=True, errors="strict",
+            form_body.decode(),
+            keep_blank_values=True,
+            strict_parsing=True,
+            errors="strict",
         )
     except ValueError:
         return None
@@ -581,7 +609,10 @@ def _logout_token_of(form_body: bytes, content_type: str | None) -> str | None:
 
 
 def _decide_admission(
-    identity: OidcIdentity, *, admission: AdmissionConfig, config: WebAuthConfig,
+    identity: OidcIdentity,
+    *,
+    admission: AdmissionConfig,
+    config: WebAuthConfig,
 ) -> _AdmittedLogin | AdmissionRefusal:
     """Whether ``identity`` may sign in, and as which role. Pure: it reads nothing but its
     arguments and writes nothing.
@@ -677,7 +708,11 @@ def _admit_resource_holder(
 
 
 def _admit_account(
-    claimant: _Claimant, role: str, *, accounts: SubjectUserStore, audit: AuditSink,
+    claimant: _Claimant,
+    role: str,
+    *,
+    accounts: SubjectUserStore,
+    audit: AuditSink,
 ) -> UserRecord:
     """The account ``claimant`` signs in as, created on its first visit.
 
@@ -706,19 +741,25 @@ def _admit_account(
 
 
 def _with_role(
-    account: UserRecord, role: str, *, accounts: SubjectUserStore, audit: AuditSink,
+    account: UserRecord,
+    role: str,
+    *,
+    accounts: SubjectUserStore,
+    audit: AuditSink,
 ) -> UserRecord:
     previous_role = account.role
     if previous_role == role:
         return account
     updated = accounts.set_role(account.id, role)
-    audit.account_event(AccountEvent(
-        kind=AccountEventKind.ROLE_CHANGED,
-        actor_id=None,
-        subject_id=updated.id,
-        role=role,
-        previous_role=previous_role,
-    ))
+    audit.account_event(
+        AccountEvent(
+            kind=AccountEventKind.ROLE_CHANGED,
+            actor_id=None,
+            subject_id=updated.id,
+            role=role,
+            previous_role=previous_role,
+        )
+    )
     return updated
 
 
@@ -734,12 +775,14 @@ def _provision(
         account = accounts.create_for_subject(claimant.subject, username, role)
     except UsernameTakenError as refused:
         raise _UsernameTakenSignal from refused
-    audit.account_event(AccountEvent(
-        kind=AccountEventKind.USER_CREATED,
-        actor_id=None,
-        subject_id=account.id,
-        role=account.role,
-    ))
+    audit.account_event(
+        AccountEvent(
+            kind=AccountEventKind.USER_CREATED,
+            actor_id=None,
+            subject_id=account.id,
+            role=account.role,
+        )
+    )
     return account
 
 

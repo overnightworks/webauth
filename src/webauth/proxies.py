@@ -158,14 +158,15 @@ def _forwarded_entries(header_values: Sequence[str]) -> Iterator[str]:
         end = len(header_value)
         while True:
             separator = header_value.rfind(",", 0, end)
-            yield header_value[separator + 1:end].strip()
+            yield header_value[separator + 1 : end].strip()
             if separator < 0:
                 break
             end = separator
 
 
 def _client_from_chain(
-    entries: Iterator[str], trusted_proxies: TrustedProxies,
+    entries: Iterator[str],
+    trusted_proxies: TrustedProxies,
 ) -> _IpAddress | None:
     """The rightmost hop no trusted proxy vouches for, or None when there is none.
 
@@ -192,13 +193,16 @@ def _client_from_chain(
     if next(entries, None) is not None:
         _log.warning(
             "X-Forwarded-For names more than %d trusted hops in a row; keying this "
-            "request on the direct peer.", _MAX_FORWARDED_FOR_HOPS,
+            "request on the direct peer.",
+            _MAX_FORWARDED_FOR_HOPS,
         )
     return None
 
 
 def _get_client_ip(
-    peer: str, forwarded_for_fields: Sequence[str], trusted_proxies: TrustedProxies,
+    peer: str,
+    forwarded_for_fields: Sequence[str],
+    trusted_proxies: TrustedProxies,
 ) -> str:
     """The client's identity: the rightmost hop no trusted proxy vouches for.
 

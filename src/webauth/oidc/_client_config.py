@@ -15,7 +15,11 @@ __all__ = ["OidcClientConfig"]
 
 _OPENID_SCOPE = "openid"
 _ENDPOINT_URL_FIELDS = (
-    "issuer", "authorization_endpoint", "token_endpoint", "jwks_url", "end_session_endpoint",
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "jwks_url",
+    "end_session_endpoint",
 )
 _APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
 # The logout page posts to `end_session_endpoint`; the issuer then redirects to
@@ -26,8 +30,7 @@ _PLAIN_AUTHORITY = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d+)?",
 # `urlsplit` lowercases the hostname and drops the brackets of an IPv6 literal.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _URL_RULE = (
-    "a host, a valid port if any, and no control character, space,"
-    " credentials, query or fragment"
+    "a host, a valid port if any, and no control character, space, credentials, query or fragment"
 )
 
 

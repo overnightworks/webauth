@@ -73,13 +73,15 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
             await checkpoint_if_cancelled()
             _log.exception("IP rate limiter unavailable -- rejecting request")
             return JSONResponse(
-                {"detail": "Rate limiter unavailable"}, status_code=503,
+                {"detail": "Rate limiter unavailable"},
+                status_code=503,
                 headers={"Retry-After": str(_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
             )
         await checkpoint_if_cancelled()
         if not allowed:
             return JSONResponse(
-                {"detail": "Too many requests"}, status_code=429,
+                {"detail": "Too many requests"},
+                status_code=429,
                 headers={"Retry-After": str(budget.window_seconds)},
             )
         return None

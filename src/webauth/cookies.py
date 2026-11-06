@@ -144,8 +144,7 @@ def _is_reserved_cookie_name(name: str) -> bool:
     sets there, and the browser would send both.
     """
     return any(
-        name.startswith(_pending_login_cookie_prefix(secure=secure))
-        for secure in (True, False)
+        name.startswith(_pending_login_cookie_prefix(secure=secure)) for secure in (True, False)
     )
 
 
@@ -223,12 +222,17 @@ def _verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
 def _cookie_attributes(config: WebAuthConfig, samesite: CookieSameSite) -> _CookieAttributes:
     """The attributes every cookie is set with, and repeated when it is taken back."""
     return _CookieAttributes(
-        path=COOKIE_PATH, secure=config.cookie_secure, httponly=True, samesite=samesite,
+        path=COOKIE_PATH,
+        secure=config.cookie_secure,
+        httponly=True,
+        samesite=samesite,
     )
 
 
 def issue_session_cookies(
-    response: Response, session_id: str, config: WebAuthConfig,
+    response: Response,
+    session_id: str,
+    config: WebAuthConfig,
 ) -> None:
     """Hand the browser its signed session.
 
@@ -254,7 +258,8 @@ def _clear_session_cookies(response: Response, config: WebAuthConfig) -> None:
     that only lets a secure context overwrite a ``Secure`` cookie accepts it.
     """
     response.delete_cookie(
-        config.session_cookie_name, **_cookie_attributes(config, config.cookie_samesite),
+        config.session_cookie_name,
+        **_cookie_attributes(config, config.cookie_samesite),
     )
 
 
@@ -281,7 +286,11 @@ class PendingLogin:
 
 
 def _issue_pending_login_cookie(
-    response: Response, pending: PendingLogin, *, max_age_seconds: int, config: WebAuthConfig,
+    response: Response,
+    pending: PendingLogin,
+    *,
+    max_age_seconds: int,
+    config: WebAuthConfig,
 ) -> None:
     """Hand the browser the signed pending login, in a cookie named for its state."""
     response.set_cookie(
@@ -313,7 +322,10 @@ def _begin_pending_login(
 
 
 def _take_pending_login(
-    request: Request, response: Response, state: str, config: WebAuthConfig,
+    request: Request,
+    response: Response,
+    state: str,
+    config: WebAuthConfig,
 ) -> PendingLogin | None:
     """The pending login of ``state`` the browser carried back, or ``None`` when
     its cookie is missing, repeated or does not verify; its cookie is cleared
@@ -350,14 +362,16 @@ def _sign_pending_login(pending: PendingLogin, secret: bytes) -> str:
     Raises ``ValueError`` for a pending login ``webauth.oidc`` cannot have
     begun, since its cookie would never verify.
     """
-    payload = ".".join((
-        _PENDING_LOGIN_VERSION,
-        pending.state,
-        pending.nonce,
-        pending.code_verifier,
-        str(pending.issued_at),
-        _encoded_return_to(pending.return_to),
-    ))
+    payload = ".".join(
+        (
+            _PENDING_LOGIN_VERSION,
+            pending.state,
+            pending.nonce,
+            pending.code_verifier,
+            str(pending.issued_at),
+            _encoded_return_to(pending.return_to),
+        )
+    )
     if not _PENDING_LOGIN_VALUE.fullmatch(payload):
         raise ValueError("the pending login does not fit the pending-login cookie")
     return f"{payload}.{_pending_login_signature(payload, secret)}"

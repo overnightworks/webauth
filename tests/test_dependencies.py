@@ -102,7 +102,9 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
         ),
         pytest.param("unsigned", INVALID_SESSION_DETAIL, id="a cookie without a signature"),
         pytest.param(
-            r'"abc.\351"', INVALID_SESSION_DETAIL, id="a cookie with non-ASCII characters",
+            r'"abc.\351"',
+            INVALID_SESSION_DETAIL,
+            id="a cookie with non-ASCII characters",
         ),
         pytest.param(
             sign_session_id(SESSION_ID, b"a different signing key entirely"),
@@ -112,7 +114,9 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
     ],
 )
 def test_a_cookie_that_was_not_issued_here_authenticates_nobody(
-    auth_app: AuthApp, cookie: str | None, detail: str,
+    auth_app: AuthApp,
+    cookie: str | None,
+    detail: str,
 ) -> None:
     response = auth_app.get("/me", cookie=cookie)
 
@@ -164,13 +168,15 @@ FORGED_COOKIE = sign_session_id(SESSION_ID, b"a different signing key entirely")
 )
 @pytest.mark.parametrize("path", ["/me", "/admin"])
 def test_a_request_carrying_more_than_one_session_cookie_authenticates_nobody(
-    cookie_headers: list[str], path: str,
+    cookie_headers: list[str],
+    path: str,
 ) -> None:
     """Whichever cookie a dict kept, the request could run in a tossed account."""
     app = an_auth_app(a_session(user=FakeUser(id="user-2", username="mallory")))
 
     response = app.client.get(
-        path, headers=[("cookie", header) for header in cookie_headers],
+        path,
+        headers=[("cookie", header) for header in cookie_headers],
     )
 
     assert response.status_code == 401
@@ -189,7 +195,9 @@ def a_bare_request(*cookie_headers: str) -> Request:
     ("cookie_headers", "session_id"),
     [
         pytest.param(
-            [session_cookie_header(STORED_SESSION_COOKIE)], SESSION_ID, id="one cookie",
+            [session_cookie_header(STORED_SESSION_COOKIE)],
+            SESSION_ID,
+            id="one cookie",
         ),
         pytest.param([], None, id="no cookie"),
         pytest.param(
@@ -206,7 +214,8 @@ def a_bare_request(*cookie_headers: str) -> Request:
     ],
 )
 def test_the_session_cookie_reader_names_only_the_one_signed_session(
-    cookie_headers: list[str], session_id: str | None,
+    cookie_headers: list[str],
+    session_id: str | None,
 ) -> None:
     request = a_bare_request(*cookie_headers)
 
@@ -233,7 +242,8 @@ def test_the_session_cookie_reader_names_only_the_one_signed_session(
     ],
 )
 def test_one_session_cookie_among_others_still_authenticates(
-    auth_app: AuthApp, cookie_header: str,
+    auth_app: AuthApp,
+    cookie_header: str,
 ) -> None:
     response = auth_app.client.get("/me", headers={"cookie": cookie_header})
 
@@ -378,7 +388,8 @@ def test_a_browser_with_an_invalid_signature_is_sent_to_the_login_page() -> None
 
 def test_a_browser_whose_session_expired_is_sent_to_the_login_page() -> None:
     app = an_auth_app(
-        a_session(remaining=-timedelta(seconds=1)), login_redirect=A_LOGIN_REDIRECT,
+        a_session(remaining=-timedelta(seconds=1)),
+        login_redirect=A_LOGIN_REDIRECT,
     )
 
     response = app.get("/me", cookie=app.signed_cookie(), accept="text/html")
@@ -395,7 +406,8 @@ def test_a_browser_whose_session_expired_is_sent_to_the_login_page() -> None:
     ],
 )
 def test_the_redirect_keeps_the_asked_for_query_string_under_the_configured_key(
-    login_redirect: LoginRedirect, expected_location: str,
+    login_redirect: LoginRedirect,
+    expected_location: str,
 ) -> None:
     app = an_auth_app(None, login_redirect=login_redirect)
 
@@ -424,22 +436,31 @@ def a_guarded_catch_all_app() -> FastAPI:
     ("asked_for", "carried"),
     [
         pytest.param(
-            "/%5Cevil.example/x", "/%5Cevil.example/x", id="an encoded backslash stays inert",
+            "/%5Cevil.example/x",
+            "/%5Cevil.example/x",
+            id="an encoded backslash stays inert",
         ),
         pytest.param(
-            "/%09/evil.example/x", "/%09/evil.example/x", id="an encoded tab stays inert",
+            "/%09/evil.example/x",
+            "/%09/evil.example/x",
+            id="an encoded tab stays inert",
         ),
         pytest.param(
-            "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="the raw path is not decoded",
+            "/lieder/%C3%BC%3Fx?y=1",
+            "/lieder/%C3%BC%3Fx?y=1",
+            id="the raw path is not decoded",
         ),
         pytest.param("/songs/1?x=2", "/songs/1?x=2", id="an ordinary path keeps its query"),
     ],
 )
 def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
-    asked_for: str, carried: str,
+    asked_for: str,
+    carried: str,
 ) -> None:
     response = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER).get(
-        asked_for, headers={"accept": "text/html"}, follow_redirects=False,
+        asked_for,
+        headers={"accept": "text/html"},
+        follow_redirects=False,
     )
 
     assert response.status_code == 302
@@ -449,10 +470,18 @@ def test_the_redirect_carries_the_raw_path_and_query_of_the_request(
 def test_the_redirect_falls_back_for_a_literal_backslash_in_the_raw_path() -> None:
     sent: list[Message] = []
     scope = {
-        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
-        "scheme": "https", "server": ("testserver", 443), "client": ("127.0.0.1", 1),
-        "root_path": "", "path": "/\\evil.example/x", "raw_path": b"/\\evil.example/x",
-        "query_string": b"", "headers": [(b"host", b"testserver"), (b"accept", b"text/html")],
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "server": ("testserver", 443),
+        "client": ("127.0.0.1", 1),
+        "root_path": "",
+        "path": "/\\evil.example/x",
+        "raw_path": b"/\\evil.example/x",
+        "query_string": b"",
+        "headers": [(b"host", b"testserver"), (b"accept", b"text/html")],
     }
 
     async def receive() -> Message:
@@ -478,42 +507,60 @@ def a_redirect_location(client: TestClient, asked_for: str) -> str:
     ("root_path", "asked_for", "carried"),
     [
         pytest.param(
-            "/app", "/app/albums/42", "/app/albums/42",
+            "/app",
+            "/app/albums/42",
+            "/app/albums/42",
             id="a path the server left prefixed",
         ),
         pytest.param(
-            "/app", "/albums/42", "/app/albums/42",
+            "/app",
+            "/albums/42",
+            "/app/albums/42",
             id="a path a proxy stripped of the prefix",
         ),
         pytest.param("/app", "/app/%FF", "/app/%FF", id="invalid UTF-8 below the prefix"),
         pytest.param(
-            "/app", "/app/app/x", "/app/app/x",
+            "/app",
+            "/app/app/x",
+            "/app/app/x",
             id="a prefix repeated by the host's own route",
         ),
         pytest.param(
-            "/app", "/application", "/app/application",
+            "/app",
+            "/application",
+            "/app/application",
             id="a sibling of the prefix's name",
         ),
         pytest.param(
-            "/café", "/caf%C3%A9/albums/42", "/",
+            "/café",
+            "/caf%C3%A9/albums/42",
+            "/",
             id="a non-ASCII root the server left prefixed falls back",
         ),
         pytest.param(
-            "/café", "/albums/42", "/",
+            "/café",
+            "/albums/42",
+            "/",
             id="a non-ASCII root a proxy stripped falls back",
         ),
         pytest.param(
-            "/my-app", "/my-app/albums/42", "/my-app/albums/42",
+            "/my-app",
+            "/my-app/albums/42",
+            "/my-app/albums/42",
             id="a hyphenated root the server left prefixed",
         ),
         pytest.param(
-            "/my-app", "/albums/42", "/my-app/albums/42",
+            "/my-app",
+            "/albums/42",
+            "/my-app/albums/42",
             id="a hyphenated root a proxy stripped",
         ),
     ],
 )
 def test_the_redirect_carries_the_path_below_the_root_path_prefixed_once(
-    root_path: str, asked_for: str, carried: str,
+    root_path: str,
+    asked_for: str,
+    carried: str,
 ) -> None:
     client = TestClient(a_guarded_catch_all_app(), base_url=HTTPS_TEST_SERVER, root_path=root_path)
 
@@ -527,7 +574,8 @@ def test_the_redirect_of_a_mounted_app_carries_the_mount_prefix() -> None:
     host.mount("/sub", a_guarded_catch_all_app())
 
     location = a_redirect_location(
-        TestClient(host, base_url=HTTPS_TEST_SERVER), "/sub/albums/42",
+        TestClient(host, base_url=HTTPS_TEST_SERVER),
+        "/sub/albums/42",
     )
 
     assert location == f"/login?{urlencode({'next': '/sub/albums/42'})}"

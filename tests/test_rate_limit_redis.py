@@ -205,13 +205,17 @@ class TestRedisKeysOfNamedBudgets:
     def a_client(redis_client, default_max_requests: int = 5) -> TestClient:
         policy = RateLimitPolicy(
             default=RateLimitBudget(DEFAULT_BUDGET_NAME, default_max_requests, WINDOW_SECONDS),
-            rules=(RateLimitRule(
-                PathRules(prefixes=("/bulk/",)),
-                RateLimitBudget(BULK_BUDGET_NAME, 5, WINDOW_SECONDS),
-            ),),
+            rules=(
+                RateLimitRule(
+                    PathRules(prefixes=("/bulk/",)),
+                    RateLimitBudget(BULK_BUDGET_NAME, 5, WINDOW_SECONDS),
+                ),
+            ),
         )
         return a_policy_rate_limited_client(
-            RedisRateLimitBackend(redis_client, HOST_PREFIX), policy, paths=(API_PATH, BULK_PATH),
+            RedisRateLimitBackend(redis_client, HOST_PREFIX),
+            policy,
+            paths=(API_PATH, BULK_PATH),
         )
 
     def test_keys_hold_the_budget_name_and_the_budget_address(self, fake_redis) -> None:
@@ -243,7 +247,8 @@ class TestRedisKeysOfNamedBudgets:
             ),
         )
         client = a_policy_rate_limited_client(
-            RedisRateLimitBackend(fake_redis, HOST_PREFIX), policy,
+            RedisRateLimitBackend(fake_redis, HOST_PREFIX),
+            policy,
             paths=(API_PATH, BULK_PATH, "/other/thing"),
         )
         assert client.get(BULK_PATH).status_code == 200
@@ -253,10 +258,13 @@ class TestRedisKeysOfNamedBudgets:
         assert client.get(API_PATH).status_code == 200
 
     def test_an_exhausted_key_of_the_fixed_classes_does_not_limit_the_new_default(
-        self, fake_redis,
+        self,
+        fake_redis,
     ) -> None:
         RedisRateLimitBackend(fake_redis, HOST_PREFIX).is_allowed(
-            "API:203.0.113.7", limit=1, window_seconds=WINDOW_SECONDS,
+            "API:203.0.113.7",
+            limit=1,
+            window_seconds=WINDOW_SECONDS,
         )
         client = self.a_client(fake_redis, default_max_requests=1)
         peer = TestClient(client.app, base_url=HTTPS_TEST_SERVER, client=("203.0.113.7", 50000))

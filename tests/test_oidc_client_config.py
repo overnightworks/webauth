@@ -72,15 +72,18 @@ def _text_of(value: object) -> str:
         ),
         pytest.param("issuer", f"\n{REALM_ISSUER}", id="issuer-led-by-a-newline"),
         pytest.param(
-            "end_session_endpoint", f"{END_SESSION_ENDPOINT}?client_id=x",
+            "end_session_endpoint",
+            f"{END_SESSION_ENDPOINT}?client_id=x",
             id="end-session-endpoint-with-a-query",
         ),
         pytest.param(
-            "post_logout_redirect_uri", "http://notes.example.org/",
+            "post_logout_redirect_uri",
+            "http://notes.example.org/",
             id="post-logout-redirect-uri-over-http",
         ),
         pytest.param(
-            "post_logout_redirect_uri", f"{POST_LOGOUT_REDIRECT_URI}#signed-out",
+            "post_logout_redirect_uri",
+            f"{POST_LOGOUT_REDIRECT_URI}#signed-out",
             id="post-logout-redirect-uri-with-a-fragment",
         ),
         pytest.param("end_session_endpoint", "https://id.example;x/logout", id="host-semicolon"),
@@ -126,9 +129,7 @@ _LOOPBACK_HTTP_URLS = [
 
 @pytest.mark.parametrize("field_name", ["redirect_uri", "post_logout_redirect_uri"])
 @pytest.mark.parametrize("url", _LOOPBACK_HTTP_URLS)
-def test_the_apps_own_two_urls_may_be_http_on_a_loopback_host(
-    field_name: str, url: str
-) -> None:
+def test_the_apps_own_two_urls_may_be_http_on_a_loopback_host(field_name: str, url: str) -> None:
     config = a_realm_client_config(**{field_name: url})
 
     assert getattr(config, field_name) == url
@@ -175,7 +176,8 @@ def test_the_apps_own_two_urls_refuse_http_unless_the_host_is_loopback_and_the_r
 
 
 @pytest.mark.parametrize(
-    "missing", ["end_session_endpoint", "post_logout_redirect_uri"],
+    "missing",
+    ["end_session_endpoint", "post_logout_redirect_uri"],
 )
 def test_a_client_configuration_missing_a_logout_field_fails_at_construction(
     missing: str,

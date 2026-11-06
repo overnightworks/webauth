@@ -74,7 +74,7 @@ _SHAPES = pytest.mark.parametrize(
     "provider_of",
     [
         pytest.param(lambda sessions: sessions.in_transaction, id="transaction"),
-        pytest.param(lambda sessions: (lambda: nullcontext(sessions)), id="nullcontext"),
+        pytest.param(lambda sessions: lambda: nullcontext(sessions), id="nullcontext"),
     ],
 )
 _ROTATIONS = pytest.mark.parametrize(
@@ -113,10 +113,15 @@ class _RecordThatForbidsReadingItsIdToken(FakeSessionRecord):
 
 
 def _unreadable_id_token_of(record: FakeSessionRecord) -> SessionRecordsInMemory:
-    return SessionRecordsInMemory(_RecordThatForbidsReadingItsIdToken(
-        id=record.id, user=record.user, created_at=record.created_at,
-        expires_at=record.expires_at, refresh_token=record.refresh_token,
-    ))
+    return SessionRecordsInMemory(
+        _RecordThatForbidsReadingItsIdToken(
+            id=record.id,
+            user=record.user,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+            refresh_token=record.refresh_token,
+        )
+    )
 
 
 @dataclass
@@ -140,13 +145,18 @@ class Arrangement:
         now = int(self.clock.now)
         claims = changed(
             {
-                "iss": REALM_ISSUER, "aud": APP_CLIENT_ID, "sub": "user-1", "exp": now + 300,
-                "iat": now, "groups": _GROUPS,
+                "iss": REALM_ISSUER,
+                "aud": APP_CLIENT_ID,
+                "sub": "user-1",
+                "exp": now + 300,
+                "iat": now,
+                "groups": _GROUPS,
             },
             claim_changes,
         )
         token = jws(
-            {"alg": "RS256", "kid": "current-key", "typ": "JWT"}, claims,
+            {"alg": "RS256", "kid": "current-key", "typ": "JWT"},
+            claims,
             rs256(rsa_key("current")),
         )
         self.issuer.refresh_answer_members["id_token"] = token
@@ -154,10 +164,14 @@ class Arrangement:
         return token
 
     def current_groups(
-        self, provider: SessionTransaction,
+        self,
+        provider: SessionTransaction,
     ) -> tuple[str, ...] | AccessTokenRefusal:
         return current_groups(
-            self.relying_party, _SESSION_ID, session_transaction=provider, config=self.config,
+            self.relying_party,
+            _SESSION_ID,
+            session_transaction=provider,
+            config=self.config,
         )
 
     @property
@@ -194,7 +208,9 @@ def an_arrangement(
         id_token=id_token,
     )
     relying_party = a_relying_party_for(
-        issuer, a_realm_client_config(leeway_seconds=leeway_seconds), clock,
+        issuer,
+        a_realm_client_config(leeway_seconds=leeway_seconds),
+        clock,
     )
     arrangement = Arrangement(issuer, sessions_of(record), clock, config, relying_party)
     if answer:
@@ -225,7 +241,8 @@ class TestTheGroupsReturned:
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == ()
 
     @pytest.mark.parametrize(
-        "groups", ["/apps/notes", [1], ["/apps/notes", None], {"path": "/apps/notes"}, None],
+        "groups",
+        ["/apps/notes", [1], ["/apps/notes", None], {"path": "/apps/notes"}, None],
         ids=["string", "number", "null-member", "object", "null"],
     )
     def test_a_malformed_groups_claim_is_refused_and_never_empty(self, groups: object) -> None:
@@ -254,8 +271,11 @@ class TestTheStoredIdTokenPlaysNoPart:
     @pytest.mark.parametrize(
         "stored",
         [
-            None, _STORED_ID_TOKEN, a_stored_id_token(exp=1),
-            SecretStr("not-a-compact-jws"), SecretStr(f"e30.{segment({'nonce': 7})}.sig"),
+            None,
+            _STORED_ID_TOKEN,
+            a_stored_id_token(exp=1),
+            SecretStr("not-a-compact-jws"),
+            SecretStr(f"e30.{segment({'nonce': 7})}.sig"),
         ],
         ids=["none", "readable", "expired", "unreadable", "unreadable-nonce"],
     )
@@ -272,7 +292,8 @@ class TestTheStoredIdTokenPlaysNoPart:
     @pytest.mark.parametrize(
         ("record_change", "expected"),
         [
-            ("delete", SESSION_ENDED), ("outside-its-lifetime", SESSION_ENDED),
+            ("delete", SESSION_ENDED),
+            ("outside-its-lifetime", SESSION_ENDED),
             ("no-refresh-token", SIGN_IN_AGAIN),
         ],
     )
@@ -307,7 +328,8 @@ _ISSUER_REFUSALS = [
     pytest.param({"sub": ABSENT}, _SUBJECT, id="no-sub"),
     pytest.param({"exp": 1}, _REJECTED, id="expired"),
     pytest.param(
-        {"exp": int(FIXED_INSTANT.timestamp()) - _LEEWAY - 1}, _REJECTED,
+        {"exp": int(FIXED_INSTANT.timestamp()) - _LEEWAY - 1},
+        _REJECTED,
         id="expired-past-the-leeway",
     ),
     pytest.param({"iat": 4_000_000_000}, _REJECTED, id="iat-in-the-future"),
@@ -317,7 +339,9 @@ _ISSUER_REFUSALS = [
     pytest.param({"nonce": None}, _NONCE_REFUSED, id="null-nonce"),
     pytest.param({"nonce": 7}, _NONCE_REFUSED, id="non-string-nonce"),
     pytest.param(
-        {"iat": int(FIXED_INSTANT.timestamp()) - _LEEWAY - 1}, _STALE, id="older-than-the-leeway",
+        {"iat": int(FIXED_INSTANT.timestamp()) - _LEEWAY - 1},
+        _STALE,
+        id="older-than-the-leeway",
     ),
 ]
 
@@ -326,7 +350,10 @@ class TestTheNewIdTokenIsVerified:
     @_SHAPES
     @pytest.mark.parametrize(("changes", "reason"), _ISSUER_REFUSALS)
     def test_each_failure_is_named_and_the_rotation_is_still_stored(
-        self, provider_of: Any, changes: dict[str, Any], reason: OidcRefusalReason,
+        self,
+        provider_of: Any,
+        changes: dict[str, Any],
+        reason: OidcRefusalReason,
     ) -> None:
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(**changes)
@@ -342,8 +369,13 @@ class TestTheNewIdTokenIsVerified:
         arrangement = an_arrangement()
         forged = jws(
             {"alg": "RS256", "kid": "current-key", "typ": "JWT"},
-            {"iss": REALM_ISSUER, "aud": APP_CLIENT_ID, "sub": "user-1", "exp": 4_000_000_000,
-             "iat": int(arrangement.clock.now)},
+            {
+                "iss": REALM_ISSUER,
+                "aud": APP_CLIENT_ID,
+                "sub": "user-1",
+                "exp": 4_000_000_000,
+                "iat": int(arrangement.clock.now),
+            },
             rs256(rsa_key("forger")),
         )
         arrangement.issuer.refresh_answer_members["id_token"] = forged
@@ -357,8 +389,13 @@ class TestTheNewIdTokenIsVerified:
         now = int(arrangement.clock.now)
         other = jws(
             {"alg": "HS256", "kid": "current-key", "typ": "JWT"},
-            {"iss": REALM_ISSUER, "aud": APP_CLIENT_ID, "sub": "user-1", "exp": now + 300,
-             "iat": now},
+            {
+                "iss": REALM_ISSUER,
+                "aud": APP_CLIENT_ID,
+                "sub": "user-1",
+                "exp": now + 300,
+                "iat": now,
+            },
             rs256(rsa_key("current")),
         )
         arrangement.issuer.refresh_answer_members["id_token"] = other
@@ -419,7 +456,9 @@ class TestFreshness:
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token()
         arrangement.issuer.before_exchange = lambda: setattr(
-            arrangement.clock, "now", arrangement.clock.now + _LEEWAY + 1,
+            arrangement.clock,
+            "now",
+            arrangement.clock.now + _LEEWAY + 1,
         )
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(_GROUPS)
@@ -440,14 +479,17 @@ class TestFreshness:
 class TestTheReply:
     @_ROTATIONS
     @pytest.mark.parametrize(
-        "id_token", [ABSENT, None, 7], ids=["absent", "null", "not-a-string"],
+        "id_token",
+        [ABSENT, None, 7],
+        ids=["absent", "null", "not-a-string"],
     )
     def test_a_reply_without_an_id_token_is_refused_after_the_rotation_is_stored(
         self, id_token: object, rotation: dict[str, Any]
     ) -> None:
         arrangement = an_arrangement(answer=False)
         arrangement.issuer.refresh_answer_members = {
-            **rotation, **({} if id_token is ABSENT else {"id_token": id_token}),
+            **rotation,
+            **({} if id_token is ABSENT else {"id_token": id_token}),
         }
 
         outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
@@ -477,7 +519,9 @@ class TestTheReply:
         arrangement = an_arrangement()
         endpoint = FakeTokenEndpoint(answer=answer)  # type: ignore[arg-type]
         arrangement.relying_party = a_relying_party_for(
-            endpoint, a_realm_client_config(), arrangement.clock,
+            endpoint,
+            a_realm_client_config(),
+            arrangement.clock,
         )
 
         outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
@@ -495,7 +539,10 @@ class TestTheRotationSurvives:
     @_ROTATIONS
     @pytest.mark.parametrize("id_token_holds", [True, False], ids=["holds", "refused"])
     def test_a_replacement_refresh_token_is_stored_whatever_the_id_token_said(
-        self, provider_of: Any, rotation: dict[str, Any], id_token_holds: bool,
+        self,
+        provider_of: Any,
+        rotation: dict[str, Any],
+        id_token_holds: bool,
     ) -> None:
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(sub="x" if not id_token_holds else "user-1")
@@ -513,7 +560,10 @@ class TestADeletedSessionIsNeverRecreated:
     @_ROTATIONS
     @pytest.mark.parametrize("id_token_holds", [True, False], ids=["holds", "refused"])
     def test_a_session_deleted_during_the_grant_ends_whatever_the_id_token_said(
-        self, provider_of: Any, rotation: dict[str, Any], id_token_holds: bool,
+        self,
+        provider_of: Any,
+        rotation: dict[str, Any],
+        id_token_holds: bool,
     ) -> None:
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(sub="user-1" if id_token_holds else "x")
@@ -529,14 +579,20 @@ class TestADeletedSessionIsNeverRecreated:
     @_ROTATIONS
     @pytest.mark.parametrize("id_token_holds", [True, False], ids=["holds", "refused"])
     def test_a_session_past_its_expiry_after_the_grant_ends_and_keeps_its_row(
-        self, provider_of: Any, rotation: dict[str, Any], id_token_holds: bool,
+        self,
+        provider_of: Any,
+        rotation: dict[str, Any],
+        id_token_holds: bool,
     ) -> None:
         arrangement = an_arrangement(answer=False)
         arrangement.issuer.before_exchange = lambda: setattr(
-            arrangement.clock, "now", arrangement.clock.now + SESSION_IDLE_SECONDS + 1,
+            arrangement.clock,
+            "now",
+            arrangement.clock.now + SESSION_IDLE_SECONDS + 1,
         )
         arrangement.answer_with_id_token(
-            exp=4_000_000_000, sub="user-1" if id_token_holds else "x",
+            exp=4_000_000_000,
+            sub="user-1" if id_token_holds else "x",
         )
         arrangement.issuer.refresh_answer_members |= rotation
 
@@ -555,10 +611,12 @@ class TestADeletedSessionIsNeverRecreated:
 
     @pytest.mark.parametrize("id_token_holds", [True, False], ids=["holds", "refused"])
     def test_a_replace_that_stores_nothing_ends_the_session_whatever_the_id_token_said(
-        self, id_token_holds: bool,
+        self,
+        id_token_holds: bool,
     ) -> None:
         arrangement = an_arrangement(
-            lambda record: SessionsAnsweringReplace(record, False), answer=False,
+            lambda record: SessionsAnsweringReplace(record, False),
+            answer=False,
         )
         arrangement.answer_with_id_token(sub="user-1" if id_token_holds else "x")
 
@@ -589,7 +647,14 @@ class TestTheTransactions:
 
         assert outcome == tuple(_GROUPS)
         assert sessions.event_names == [
-            "open", "load", "commit", "grant", "open", "load", "replace", "commit",
+            "open",
+            "load",
+            "commit",
+            "grant",
+            "open",
+            "load",
+            "replace",
+            "commit",
         ]
 
     def test_a_load_failing_in_the_first_transaction_raises_before_any_grant(self) -> None:
@@ -624,7 +689,9 @@ class TestTheTransactions:
     def test_an_exit_failing_in_the_second_transaction_raises_with_the_groups_in_hand(self) -> None:
         arrangement = an_arrangement()
         arrangement.issuer.before_exchange = lambda: setattr(
-            arrangement.sessions, "commit_failure", RuntimeError("commit failed"),
+            arrangement.sessions,
+            "commit_failure",
+            RuntimeError("commit failed"),
         )
 
         with pytest.raises(RuntimeError, match="commit failed"):
@@ -642,7 +709,9 @@ class TestTheTransactions:
 class TestTheTokenNeverLeaves:
     @pytest.mark.parametrize("id_token_holds", [True, False], ids=["holds", "refused"])
     def test_no_token_is_in_the_outcome_its_repr_or_the_log(
-        self, id_token_holds: bool, caplog: pytest.LogCaptureFixture,
+        self,
+        id_token_holds: bool,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(sub="user-1" if id_token_holds else "someone-else")
@@ -655,7 +724,8 @@ class TestTheTokenNeverLeaves:
         assert not any(secret in shown for secret in _secrets_of(arrangement))
 
     def test_no_token_is_in_the_text_of_a_raised_exception(
-        self, caplog: pytest.LogCaptureFixture,
+        self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         arrangement = an_arrangement(lambda record: SessionsAnsweringReplace(record, "yes"))
         arrangement.answer_with_access_token()
@@ -671,7 +741,8 @@ class TestTheTokenNeverLeaves:
 def _secrets_of(arrangement: Arrangement) -> list[str]:
     return [
         *arrangement.answered_tokens,
-        *arrangement.issuer.refresh_tokens, _STORED_ID_TOKEN.get_secret_value(),
+        *arrangement.issuer.refresh_tokens,
+        _STORED_ID_TOKEN.get_secret_value(),
     ]
 
 
@@ -708,8 +779,10 @@ class TestOverlap:
             echoed = arrangement.issuer.refresh_answer_members.pop("refresh_token")
             replaced.append(
                 fresh_access_token(
-                    arrangement.relying_party, _SESSION_ID,
-                    session_transaction=provider, config=arrangement.config,
+                    arrangement.relying_party,
+                    _SESSION_ID,
+                    session_transaction=provider,
+                    config=arrangement.config,
                 )
             )
             stored_by_other.append(arrangement.stored_refresh_token)

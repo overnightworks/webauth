@@ -85,7 +85,7 @@ def _ascii(path: str) -> str:
 def _carries_root(raw_path: bytes, root: bytes) -> bool:
     if not root or not raw_path.startswith(root):
         return not root
-    return raw_path[len(root):len(root) + 1] in (b"", b"/")
+    return raw_path[len(root) : len(root) + 1] in (b"", b"/")
 
 
 def _has_dot_segment(path: str) -> bool:

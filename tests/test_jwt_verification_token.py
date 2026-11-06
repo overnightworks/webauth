@@ -359,9 +359,7 @@ def test_a_header_member_naming_a_key_is_ignored_and_only_the_configured_key_set
 @pytest.mark.parametrize(
     ("claim", "offset", "outcome"),
     [
-        pytest.param(
-            "exp", -ACCESS_TOKEN_LEEWAY_SECONDS + 1, None, id="exp-inside-the-leeway"
-        ),
+        pytest.param("exp", -ACCESS_TOKEN_LEEWAY_SECONDS + 1, None, id="exp-inside-the-leeway"),
         pytest.param(
             "exp", -ACCESS_TOKEN_LEEWAY_SECONDS, RejectionReason.EXPIRED, id="exp-at-the-leeway"
         ),

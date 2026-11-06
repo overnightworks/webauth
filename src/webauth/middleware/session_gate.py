@@ -114,7 +114,9 @@ class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
         return None
 
     def _admit(
-        self, session_id: str, config: WebAuthConfig,
+        self,
+        session_id: str,
+        config: WebAuthConfig,
     ) -> AuthenticatedUser | ConnectionRefusal:
         with self._policy.session_transaction() as sessions:
             return admit_session(session_id, sessions=sessions, config=config)

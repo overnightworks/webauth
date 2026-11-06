@@ -47,24 +47,37 @@ class OpeningHost:
     """A host holding sessions of ``ACCOUNT`` and ``BYSTANDER``, which ``ACCOUNT`` signs in to."""
 
     def __init__(
-        self, *, max_sessions: int | None = None,
+        self,
+        *,
+        max_sessions: int | None = None,
         transaction_kind: TransactionKind = TransactionKind.PER_CALL,
         stored_session: FakeSessionRecord | None = None,
     ) -> None:
         self.host: OidcHost = an_oidc_host(
-            ACCOUNT, BYSTANDER, wall_clock=FIXED_WALL_CLOCK, max_sessions=max_sessions,
-            transaction_kind=transaction_kind, stored_session=stored_session,
+            ACCOUNT,
+            BYSTANDER,
+            wall_clock=FIXED_WALL_CLOCK,
+            max_sessions=max_sessions,
+            transaction_kind=transaction_kind,
+            stored_session=stored_session,
         )
 
     @classmethod
     def holding_session_named(cls, session_id: str) -> OpeningHost:
-        return cls(stored_session=FakeSessionRecord(
-            id=session_id, user=ACCOUNT, created_at=FIRST_EXPIRY, expires_at=FIRST_EXPIRY,
-        ))
+        return cls(
+            stored_session=FakeSessionRecord(
+                id=session_id,
+                user=ACCOUNT,
+                created_at=FIRST_EXPIRY,
+                expires_at=FIRST_EXPIRY,
+            )
+        )
 
     @classmethod
     def holding(
-        cls, *owners: FakeUser, max_sessions: int | None = None,
+        cls,
+        *owners: FakeUser,
+        max_sessions: int | None = None,
         transaction_kind: TransactionKind = TransactionKind.PER_CALL,
     ) -> OpeningHost:
         """One session per owner, each created a minute after the one before."""
@@ -75,7 +88,11 @@ class OpeningHost:
 
     def create_for(self, owner: FakeUser, now: datetime) -> str:
         return seeded_session(
-            self.host.sessions, self.host.lock.hold(), owner.id, now, now + IDLE,
+            self.host.sessions,
+            self.host.lock.hold(),
+            owner.id,
+            now,
+            now + IDLE,
         ).id
 
     def ids(self) -> list[str]:
@@ -107,7 +124,8 @@ def test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_logi
     session = store.open_session()
 
     assert (session.refresh_token, session.id_token) == (
-        SecretStr(ISSUED_REFRESH_TOKEN), SecretStr(store.host.issued_id_tokens[-1]),
+        SecretStr(ISSUED_REFRESH_TOKEN),
+        SecretStr(store.host.issued_id_tokens[-1]),
     )
     assert store.host.sessions.load(session.id) == session
 
@@ -121,21 +139,29 @@ def test_a_new_session_has_a_fresh_id() -> None:
     assert session.id != replaced
     assert store.ids() == [session.id]
     assert (session.user.id, session.created_at, session.expires_at) == (
-        ACCOUNT.id, FIXED_INSTANT, FIXED_INSTANT + IDLE,
+        ACCOUNT.id,
+        FIXED_INSTANT,
+        FIXED_INSTANT + IDLE,
     )
 
 
-@pytest.mark.parametrize(("cookie_values_of", "ended"), [
-    pytest.param(lambda store, ids: [store.signed(ids[0])], [0], id="verified-same-account"),
-    pytest.param(lambda store, ids: [store.signed(ids[1])], [1], id="verified-other-account"),
-    pytest.param(lambda _store, ids: [f"{ids[0]}.{'0' * 64}"], [], id="forged"),
-    pytest.param(lambda _store, ids: [ids[0]], [], id="unsigned"),
-    pytest.param(
-        lambda store, ids: [store.signed(ids[0]), store.signed(ids[0])], [], id="duplicated",
-    ),
-])
+@pytest.mark.parametrize(
+    ("cookie_values_of", "ended"),
+    [
+        pytest.param(lambda store, ids: [store.signed(ids[0])], [0], id="verified-same-account"),
+        pytest.param(lambda store, ids: [store.signed(ids[1])], [1], id="verified-other-account"),
+        pytest.param(lambda _store, ids: [f"{ids[0]}.{'0' * 64}"], [], id="forged"),
+        pytest.param(lambda _store, ids: [ids[0]], [], id="unsigned"),
+        pytest.param(
+            lambda store, ids: [store.signed(ids[0]), store.signed(ids[0])],
+            [],
+            id="duplicated",
+        ),
+    ],
+)
 def test_only_the_session_a_verified_cookie_names_is_ended_whoever_it_belongs_to(
-    cookie_values_of: Callable[[OpeningHost, list[str]], list[str]], ended: list[int],
+    cookie_values_of: Callable[[OpeningHost, list[str]], list[str]],
+    ended: list[int],
 ) -> None:
     store = OpeningHost.holding(ACCOUNT, BYSTANDER)
     before = store.ids()
@@ -148,12 +174,16 @@ def test_only_the_session_a_verified_cookie_names_is_ended_whoever_it_belongs_to
     ]
 
 
-@pytest.mark.parametrize(("cookie_chars", "ended"), [
-    pytest.param(MAX_SESSION_COOKIE_CHARS, True, id="at-the-bound"),
-    pytest.param(MAX_SESSION_COOKIE_CHARS + 1, False, id="above-the-bound"),
-])
+@pytest.mark.parametrize(
+    ("cookie_chars", "ended"),
+    [
+        pytest.param(MAX_SESSION_COOKIE_CHARS, True, id="at-the-bound"),
+        pytest.param(MAX_SESSION_COOKIE_CHARS + 1, False, id="above-the-bound"),
+    ],
+)
 def test_a_signed_cookie_longer_than_the_bound_ends_nothing_though_the_store_holds_its_session(
-    cookie_chars: int, ended: bool,
+    cookie_chars: int,
+    ended: bool,
 ) -> None:
     signature_chars = len(sign_session_id("x", OpeningHost().host.config.signing_key)) - 1
     long_id = "x" * (cookie_chars - signature_chars)
@@ -166,15 +196,21 @@ def test_a_signed_cookie_longer_than_the_bound_ends_nothing_though_the_store_hol
     assert store.ids() == ([] if ended else [long_id]) + [session.id]
 
 
-@pytest.mark.parametrize(("existing", "cookie", "max_sessions", "surviving"), [
-    pytest.param(2, 1, 2, [0], id="the-replaced-session-never-counts-against-the-cap"),
-    pytest.param(3, None, 2, [2], id="the-oldest-above-the-cap-are-ended"),
-    pytest.param(2, None, 1, [], id="a-cap-of-one-keeps-only-the-new-session"),
-    pytest.param(1, None, 3, [0], id="a-session-below-the-cap-is-kept"),
-    pytest.param(3, None, None, [0, 1, 2], id="no-cap-prunes-nothing"),
-])
+@pytest.mark.parametrize(
+    ("existing", "cookie", "max_sessions", "surviving"),
+    [
+        pytest.param(2, 1, 2, [0], id="the-replaced-session-never-counts-against-the-cap"),
+        pytest.param(3, None, 2, [2], id="the-oldest-above-the-cap-are-ended"),
+        pytest.param(2, None, 1, [], id="a-cap-of-one-keeps-only-the-new-session"),
+        pytest.param(1, None, 3, [0], id="a-session-below-the-cap-is-kept"),
+        pytest.param(3, None, None, [0, 1, 2], id="no-cap-prunes-nothing"),
+    ],
+)
 def test_the_account_holds_at_most_its_cap_afterwards_with_the_oldest_ended(
-    existing: int, cookie: int | None, max_sessions: int | None, surviving: list[int],
+    existing: int,
+    cookie: int | None,
+    max_sessions: int | None,
+    surviving: list[int],
 ) -> None:
     store = OpeningHost.holding(*[ACCOUNT] * existing, max_sessions=max_sessions)
     bystander = store.create_for(BYSTANDER, FIRST_CREATED_AT)
