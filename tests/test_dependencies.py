@@ -250,7 +250,7 @@ def test_one_session_cookie_among_others_still_authenticates(
     assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
 
 
-def test_a_signed_cookie_under_the_pre_upgrade_name_signs_nobody_in(auth_app: AuthApp) -> None:
+def test_a_signed_cookie_under_the_plain_name_signs_nobody_in(auth_app: AuthApp) -> None:
     """Only the configured ``__Host-`` name is read; a sibling host can plant the plain one."""
     old_cookie = f"session_id={auth_app.signed_cookie()}"
 

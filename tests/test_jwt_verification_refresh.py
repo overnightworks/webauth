@@ -20,6 +20,7 @@ from tests.support.oidc_arrangement import (
     public_jwk,
     rs256,
     rsa_key,
+    served_key_set,
     weak_public_jwk,
 )
 from webauth.https_client import KeySetFetchError
@@ -79,7 +80,7 @@ def test_the_key_set_is_cached_on_the_monotonic_clock_until_its_ttl(
     issuer: IssuerScenario,
 ) -> None:
     issuer.verifier.verify(issuer.token())
-    issuer.serve(key_set_document(public_jwk(rsa_key("other"), "other-key")))
+    issuer.serve(served_key_set("other"))
 
     issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS - 1
     cached = issuer.verifier.verify(issuer.token())

@@ -27,6 +27,7 @@ from tests.support.oidc_arrangement import (
     public_jwk,
     rs256,
     rsa_key,
+    served_key_set,
     weak_public_jwk,
 )
 from webauth.https_client import KeySetFetchError
@@ -55,7 +56,7 @@ _KEY_SET_BYTE_LIMIT = 64 * 1024
 
 
 def _key_set_of_bytes(size: int) -> bytes:
-    document = key_set_document(public_jwk(rsa_key("current"), "current-key"))
+    document = served_key_set()
     return document + b" " * (size - len(document))
 
 
@@ -457,7 +458,7 @@ def test_an_unknown_kid_is_forged_again_once_a_refresh_succeeds_after_a_failed_o
     issuer.serve(KeySetFetchError("GET answered 503"))
     issuer.after_cooldown()
     during_outage = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
-    issuer.serve(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    issuer.serve(served_key_set())
     issuer.after_cooldown()
 
     after_recovery = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
