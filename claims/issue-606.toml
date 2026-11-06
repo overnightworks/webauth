@@ -1,8 +1,0 @@
-claim_id = "b40b24563f6b4ac6b303618fba62c10d"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "3bb9d62713793e9cab3062e4a1323cc81315f875"
-branch = "claude/issue-606-webauth-formats-its-python-with-ruff-for"
-scope = ["pyproject.toml", "scripts/run_static_checks.sh", "src", "tests"]
-opened_commit = "65d2062e5c430b626e7514465fd57c7a1c1011c3"
-whole_reason = "A formatter's first run touches every module it covers at once; split, it would leave the check unable to pass until the last slice."
