@@ -101,7 +101,9 @@ class _CookieAttributes(TypedDict):
 
 
 def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
-    """Return the name a cookie gets when the host names none.
+    """Return the cookie's name for ``secure``.
+
+    ``__Host-`` plus the plain name with ``Secure``, the plain name without it.
 
     A ``__Host-`` cookie can be set only by this exact host, so a sibling
     subdomain cannot toss one in with ``Domain=parent``. Browsers accept the

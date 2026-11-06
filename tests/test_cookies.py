@@ -295,7 +295,6 @@ def with_security_headers(app: FastAPI) -> None:
 
 class CookieOverrides(TypedDict, total=False):
     cookie_secure: bool
-    session_cookie_name: str
 
 
 def a_cookie_app(
