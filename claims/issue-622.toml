@@ -1,0 +1,7 @@
+claim_id = "7c7882bb5819410b9e15a32b90ab4ba0"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "35208b148b9b5f27b65adbde9fd801ed185f3cae"
+branch = "claude/issue-622-vision-in-good-words"
+scope = ["docs/VISION.md"]
+opened_commit = "249018b52715552ff64ff450266db05578522e6b"
