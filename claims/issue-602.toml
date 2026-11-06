@@ -1,0 +1,8 @@
+claim_id = "828943d1a113417c983f74a759e355cf"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "6f1c3e5144adb2b63870ba186b44f101a8d89fe6"
+branch = "claude/issue-602-import-contracts-checked-once"
+scope = ["AGENTS.md", "pyproject.toml", "scripts/run_static_checks.sh", "uv.lock"]
+opened_commit = "3c68cda9dc4a15338ec0616f3562178d3c108b45"
+whole_reason = "One duplicate check leaves together with its dependency, its lock entry and the one AGENTS.md sentence that names it."
