@@ -139,9 +139,6 @@ pass and how a release is made. The commands live under `scripts/`:
 - `scripts/run_static_checks.sh` runs every static check CI's `checks` job runs;
 - `scripts/regenerate_build_constraints.sh` regenerates the hash-pinned build
   constraints from the setuptools floor in `pyproject.toml`;
-- `scripts/publish_release.sh vX.Y.Z` releases the merged version: it waits for
-  main's CI, tags that commit, pushes the tag, waits for the release run and
-  verifies the release;
 - `scripts/verify_release.sh` downloads a release and checks the checksums and
   build-provenance attestations of its wheel and sdist.
 
