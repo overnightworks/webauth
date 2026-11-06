@@ -1,8 +1,0 @@
-claim_id = "11d649ac1b4c403fb8b8211e2fe8f55d"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "05d02328d940e99b0a5e972b49c270ec7ee96d65"
-branch = "claude/issue-606-ruff-format"
-scope = ["pyproject.toml", "scripts/run_static_checks.sh", "src", "tests"]
-opened_commit = "290e36e39f2a51abe21d0645b6c8d33022b5691a"
-whole_reason = "A formatter's first run touches every module it covers at once; split, it would leave the check unable to pass until the last slice."
