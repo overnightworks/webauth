@@ -105,9 +105,9 @@ from playwright.sync_api import Browser, sync_playwright
 from shim import TlsShim
 from suite import HeldSuite, SuiteApi
 
+from webauth.admission import EverySubject, NoAdmins
 from webauth.jwt_verification import RejectionReason, _is_rs256_verification_key
 from webauth.oidc import OidcRefusalReason
-from webauth.oidc_login import EverySubject, NoAdmins
 
 SUITE_HOST = "conformance.example.test"
 APP_HOST = "rp.example.test"

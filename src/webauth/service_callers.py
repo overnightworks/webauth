@@ -27,6 +27,7 @@ from webauth._validation import (
     require_non_empty_string,
     require_non_negative_whole_number,
 )
+from webauth.admission import AdmissionConfig, AppRole, app_role
 from webauth.jwt_verification import (
     JwtVerifier,
     KeySetFetch,
@@ -36,7 +37,6 @@ from webauth.jwt_verification import (
     VerifiedClaims,
 )
 from webauth.oidc._relying_party import _groups_claim
-from webauth.oidc_login import AdmissionConfig, AppRole, app_role
 from webauth.ports import WallClock
 
 __all__ = [

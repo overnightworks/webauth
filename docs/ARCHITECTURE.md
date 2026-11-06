@@ -28,6 +28,7 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout and fresh tokens.
 
 - `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes, selects `SignInPaths` policies and answers failures.
+- `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `oidc_login` and the bearer gate apply it and services call `app_role`.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
 - `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission (a machine caller, or on a person path the account behind the token).
 - `middleware` enforces body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.

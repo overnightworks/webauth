@@ -44,6 +44,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import SecretStr
 
+from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.dependencies import (
     AuthDependencies,
@@ -71,14 +72,7 @@ from webauth.oidc import (
     TokenRequest,
     TokenRequestPost,
 )
-from webauth.oidc_login import (
-    AccessTokenRefusal,
-    AdmissionConfig,
-    EverySubject,
-    NoAdmins,
-    current_groups,
-    fresh_access_token,
-)
+from webauth.oidc_login import AccessTokenRefusal, current_groups, fresh_access_token
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     AuthorizedParties,

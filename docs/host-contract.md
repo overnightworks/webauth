@@ -48,7 +48,7 @@ full paths (Keycloak's group mapper with `full.path` on); a missing or empty cla
 means no membership. The check runs before any account is looked up or created, so
 a person removed from the group is refused at their next login while their account
 and data stay, and a person put back returns to the same account. `app_role` is
-that rule's public form, for a second service that verifies the issuer's token
+that rule's public form in `webauth.admission`, for a second service that verifies the issuer's token
 itself.
 
 Admission never looks up a username and has no local active-user flag; disabling
@@ -266,7 +266,7 @@ are in [test_session_gate_recorded_admission.py](../tests/middleware/test_sessio
   `test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise` in
   [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
   A refusal carries no identity (`AdmissionRefusal` in
-  [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
+  [admission.py](../src/webauth/admission.py), `OidcRefusal` in
   [oidc](../src/webauth/oidc/_relying_party.py)), so the page shows no name. A
   `NOT_A_MEMBER` login stores no session, so signing out from "no access"
   follows the missing-ID-token case in [Signing out](#what-every-app-gets).

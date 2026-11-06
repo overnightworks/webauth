@@ -26,9 +26,9 @@ from tests.support.webauth_arrangement import (
     no_receive,
     starts,
 )
+from webauth.admission import AdmissionConfig
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
-from webauth.oidc_login import AdmissionConfig
 from webauth.policies import (
     CacheControlRule,
     CspDirective,

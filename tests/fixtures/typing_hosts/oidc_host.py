@@ -17,6 +17,14 @@ from fastapi import Depends, FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
 
 from webauth import WebAuthError
+from webauth.admission import (
+    AdmissionConfig,
+    AdmissionRefusal,
+    AppRole,
+    EverySubject,
+    NoAdmins,
+    app_role,
+)
 from webauth.config import (
     MAX_SESSION_LIFETIME_SECONDS,
     SessionLifetime,
@@ -93,12 +101,6 @@ from webauth.oidc import (
 from webauth.oidc_login import (
     AccessTokenRefusal,
     AccessTokenRefusalReason,
-    AdmissionConfig,
-    AdmissionRefusal,
-    AppRole,
-    EverySubject,
-    NoAdmins,
-    app_role,
     current_groups,
     fresh_access_token,
 )
