@@ -202,9 +202,10 @@ added the enforcing gate. Its page, API and public-path proofs are
   follows RFC 7235 section 3.1 and RFC 6750 section 3; a malformed header answers 401, not
   the 400 RFC 6750 section 3.1 recommends, as the machine paths do. A host's own 401 on a
   person path carries no challenge unless the host adds it.
-  `test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_without_realm`
-  and `test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer` in
+  `test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_without_realm` in
   [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
+  and `test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer` in
+  [test_bearer_gate_person_paths_challenges_and_neighbours.py](../tests/middleware/test_bearer_gate_person_paths_challenges_and_neighbours.py)
   prove the table.
 
   The machine refusal contract comes from
@@ -345,6 +346,7 @@ layer), with the applied lines of
   enters the host's serialized transaction once. A WebSocket handshake is not gated.
 
 Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
+and [test_bearer_gate_person_paths_challenges_and_neighbours.py](../tests/middleware/test_bearer_gate_person_paths_challenges_and_neighbours.py)
 in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
 Keycloak in the hand-run harness.
 
