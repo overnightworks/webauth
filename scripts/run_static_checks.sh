@@ -10,7 +10,6 @@ step() {
 }
 
 step "Ruff" uv run --locked ruff check src tests
-step "Import boundaries" uv run --locked lint-imports
 step "Declared dependencies" uv run --locked deptry src
 step "Pyright" uv run --locked --group dev --group e2e pyright --stats
 step "Public types are fully annotated" uv run --locked --group dev pyright --verifytypes webauth --ignoreexternal

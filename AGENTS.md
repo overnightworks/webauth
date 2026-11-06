@@ -7,8 +7,8 @@ webauth is a library with no deployment of its own; hosts pin its tag by git. `t
 
 - Durable state reaches the library only through the Protocols in `webauth.ports`, which the host implements. What the host
   owns and what the library owns is the Building Blocks section of `docs/ARCHITECTURE.md`.
-- A host without the `redis` extra must still import everything; `tests/test_webauth_public_api.py` proves it. `lint-imports` and
-  `deptry src` enforce the confinement in `.importlinter` and `pyproject.toml`, and run in `scripts/run_static_checks.sh`.
+- A host without the `redis` extra must still import everything; `tests/test_webauth_public_api.py` proves it. Quality's gate
+  (its `import-contract` rule) checks the contracts in `.importlinter`; `deptry src` checks `pyproject.toml` and runs in `scripts/run_static_checks.sh`.
 - A name is private when it, or a module on its path, starts with `_`. Tests take public names, or the functions and
   classes a module defines, never its private values or the names it only imports; `tests/test_webauth_public_api.py` enforces it.
 
