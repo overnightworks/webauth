@@ -494,6 +494,7 @@ def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
     [
         pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
         pytest.param(_post_form_over_https, id="token-post"),
+        pytest.param(post_token_request_over_https, id="token-request"),
     ],
 )
 def test_each_calls_default_deadline_is_exactly_ten_seconds(call: Callable[..., object]) -> None:
