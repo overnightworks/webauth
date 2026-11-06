@@ -27,7 +27,8 @@ TOOLS = (
 )
 
 GH_STUB = r"""#!/usr/bin/env bash
-# Answer files: SEQUENCE__WORKFLOW__COMMIT__BRANCH, one line of gh's JSON per query, the last repeats.
+# Answer files: SEQUENCE__WORKFLOW__COMMIT__BRANCH, one line of gh's JSON per query, the last
+# repeats.
 # Like gh, a filter given narrows the runs and the newest remaining run answers.
 if [[ "$1 $2" == "auth status" ]]; then
   [[ -e "$STUB_DIR/not-logged-in" ]] && { echo "not logged in" >&2; exit 1; }
@@ -343,7 +344,8 @@ def test_publish_never_reads_success_for_another_commit(release: Release) -> Non
 
 def test_publish_waits_for_a_missing_run_then_tags_the_recorded_commit(release: Release) -> None:
     commit = release.main_commit
-    release.answer("ci", commit, "", "", release.run_line("in_progress", run_id=12), release.success)
+    running = release.run_line("in_progress", run_id=12)
+    release.answer("ci", commit, "", "", running, release.success)
     release.answer("release", commit, "", release.success)
     release.on_sleep(
         "echo moved > moved && git add moved && git commit -q -m moved\n"
