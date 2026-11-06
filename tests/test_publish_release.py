@@ -8,11 +8,6 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "publish_release.sh"
-VERSION = "1.2.3"
-TAG = f"v{VERSION}"
-RUN_URL = "https://example.test/runs/11"
-SUCCESS = f"11 completed success {RUN_URL}"
-FAILURE = f"11 completed failure {RUN_URL}"
 TOOLS = (
     "git",
     "sh",
@@ -30,7 +25,8 @@ TOOLS = (
 )
 
 GH_STUB = r"""#!/usr/bin/env bash
-# Answers keyed by workflow and commit: one line per query, the last line repeats.
+# Answer files: SEQUENCE__WORKFLOW__COMMIT__BRANCH, one line per query, the last repeats.
+# Like gh, a filter given narrows the runs and the newest remaining run answers.
 if [[ "$1 $2" == "auth status" ]]; then
   [[ -e "$STUB_DIR/not-logged-in" ]] && { echo "not logged in" >&2; exit 1; }
   exit 0
@@ -40,15 +36,24 @@ while (($#)); do
   case "$1" in
     --workflow) workflow="$2" ;;
     --commit) commit="$2" ;;
+    --branch) branch="$2" ;;
   esac
   shift
 done
-answers="$STUB_DIR/answers/${workflow%.yml}-$commit"
-[[ -e "$answers" ]] || exit 0
+answers=""
+for candidate in "$STUB_DIR"/answers/*__"${workflow%.yml}"__*; do
+  [[ -e "$candidate" && "$candidate" != *.queries ]] || continue
+  read -r _ _ file_commit file_branch <<<"$(echo "${candidate##*/}" | sed 's/__/ /g')"
+  [[ -z "${commit:-}" || "$file_commit" == "$commit" ]] || continue
+  [[ -z "${branch:-}" || "$file_branch" == "$branch" ]] || continue
+  answers="$candidate"
+done
+[[ -n "$answers" ]] || exit 0
 queries=$(($(cat "$answers.queries" 2>/dev/null || echo 0) + 1))
 echo "$queries" >"$answers.queries"
 total=$(wc -l <"$answers")
 line=$(sed -n "$((queries < total ? queries : total))p" "$answers")
+line=$(echo -e "$line")
 if [[ "$line" == ERROR* ]]; then
   echo "${line#ERROR }" >&2
   exit 1
@@ -58,6 +63,11 @@ echo "$line"
 
 SLEEP_STUB = r"""#!/usr/bin/env bash
 echo "$1" >>"$STUB_DIR/sleeps"
+if [[ -e "$STUB_DIR/on-sleep" ]]; then
+  hook=$(cat "$STUB_DIR/on-sleep")
+  rm "$STUB_DIR/on-sleep"
+  eval "$hook"
+fi
 # A wait that never ends is cut here, with the script as its parent.
 (($(wc -l <"$STUB_DIR/sleeps") > 6)) && kill -TERM "$PPID"
 exit 0
@@ -81,6 +91,23 @@ class Release:
     work: Path
     origin: Path
     environment: dict[str, str]
+    version: str = "1.2.3"
+    run_url: str = "https://example.test/runs/11"
+
+    @property
+    def tag(self) -> str:
+        return f"v{self.version}"
+
+    def run_line(self, status: str, run_id: int = 11) -> str:
+        return f"{run_id} {status} {self.run_url}"
+
+    @property
+    def success(self) -> str:
+        return self.run_line("completed success")
+
+    @property
+    def failure(self) -> str:
+        return self.run_line("completed failure")
 
     def git(self, *arguments: str, cwd: Path | None = None) -> str:
         completed = subprocess.run(
@@ -99,14 +126,23 @@ class Release:
         self.git("commit", "-m", name, cwd=cwd)
         return self.git("rev-parse", "HEAD", cwd=cwd)
 
-    def answer(self, workflow: str, commit: str, *lines: str) -> None:
+    def answer(
+        self, workflow: str, commit: str, *lines: str, branch: str | None = None
+    ) -> None:
         answers = self.root / "stub" / "answers"
         answers.mkdir(exist_ok=True)
-        (answers / f"{workflow}-{commit}").write_text("\n".join(lines) + "\n")
+        branch = branch or ("main" if workflow == "ci" else self.tag)
+        sequence = len(list(answers.iterdir()))
+        (answers / f"{sequence:03d}__{workflow}__{commit}__{branch}").write_text(
+            "\n".join(lines) + "\n"
+        )
 
-    def publish(self, argument: str = TAG) -> subprocess.CompletedProcess[str]:
+    def on_sleep(self, script: str) -> None:
+        (self.root / "stub" / "on-sleep").write_text(script)
+
+    def publish(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["bash", str(self.work / "scripts" / "publish_release.sh"), argument],
+            ["bash", str(self.work / "scripts" / "publish_release.sh"), *arguments],
             cwd=self.work,
             env=self.environment,
             capture_output=True,
@@ -163,7 +199,7 @@ def release(tmp_path: Path) -> Release:
     arrangement.git("remote", "add", "origin", str(origin))
     package = work / "src" / "webauth"
     package.mkdir(parents=True)
-    (package / "__init__.py").write_text(f'__version__ = "{VERSION}"\n')
+    (package / "__init__.py").write_text(f'__version__ = "{arrangement.version}"\n')
     (work / "scripts").mkdir()
     shutil.copy(SCRIPT, work / "scripts" / "publish_release.sh")
     verify = work / "scripts" / "verify_release.sh"
@@ -177,7 +213,7 @@ def release(tmp_path: Path) -> Release:
 
 def release_on_green_ci(release: Release) -> str:
     commit = release.main_commit
-    release.answer("ci", commit, SUCCESS)
+    release.answer("ci", commit, release.success)
     return commit
 
 
@@ -205,12 +241,12 @@ def set_up_other_branch(release: Release) -> None:
 
 
 def set_up_tag_on_origin(release: Release) -> None:
-    release.git("tag", "-a", TAG, "-m", "old")
-    release.git("push", "origin", f"refs/tags/{TAG}")
+    release.git("tag", "-a", release.tag, "-m", "old")
+    release.git("push", "origin", f"refs/tags/{release.tag}")
 
 
 def set_up_tag_only_local(release: Release) -> None:
-    release.git("tag", "-a", TAG, "-m", "old")
+    release.git("tag", "-a", release.tag, "-m", "old")
 
 
 def set_up_not_logged_in(release: Release) -> None:
@@ -222,37 +258,40 @@ def set_up_gh_missing(release: Release) -> None:
 
 
 @pytest.mark.parametrize(
-    ("argument", "set_up", "cause"),
+    ("arguments", "set_up", "cause"),
     [
-        ("1.2.3", None, "vMAJOR.MINOR.PATCH"),
+        ("", None, "vMAJOR.MINOR.PATCH"),
+        ("{tag} extra", None, "vMAJOR.MINOR.PATCH"),
+        ("{version}", None, "vMAJOR.MINOR.PATCH"),
         ("v1.2", None, "vMAJOR.MINOR.PATCH"),
-        ("v1.2.3-rc1", None, "vMAJOR.MINOR.PATCH"),
-        ("v1.2.4", None, "1.2.3"),
-        (TAG, set_up_other_branch, "main"),
-        (TAG, set_up_dirty_tree, "clean"),
-        (TAG, set_up_local_main_ahead, "origin/main"),
-        (TAG, set_up_origin_main_ahead, "origin/main"),
-        (TAG, set_up_tag_on_origin, "origin"),
-        (TAG, set_up_tag_only_local, f"git tag -d {TAG}"),
-        (TAG, set_up_gh_missing, "gh"),
-        (TAG, set_up_not_logged_in, "gh"),
+        ("{tag}-rc1", None, "vMAJOR.MINOR.PATCH"),
+        ("v1.2.4", None, "{version}"),
+        ("{tag}", set_up_other_branch, "main"),
+        ("{tag}", set_up_dirty_tree, "clean"),
+        ("{tag}", set_up_local_main_ahead, "origin/main"),
+        ("{tag}", set_up_origin_main_ahead, "origin/main"),
+        ("{tag}", set_up_tag_on_origin, "origin"),
+        ("{tag}", set_up_tag_only_local, "git tag -d {tag}"),
+        ("{tag}", set_up_gh_missing, "gh"),
+        ("{tag}", set_up_not_logged_in, "gh"),
     ],
 )
 def test_publish_refuses_before_any_tag(
-    release: Release, argument: str, set_up, cause: str
+    release: Release, arguments: str, set_up, cause: str
 ) -> None:
     release_on_green_ci(release)
     if set_up:
         set_up(release)
     local_tags_before = release.local_tags()
     origin_tags_before = release.origin_tags()
+    values = {"tag": release.tag, "version": release.version}
 
-    result = release.publish(argument)
+    result = release.publish(*arguments.format(**values).split())
 
     assert result.returncode == 1
     assert result.stderr.startswith("publish_release: ")
     assert result.stderr.count("\n") == 1
-    assert cause in result.stderr
+    assert cause.format(**values) in result.stderr
     assert release.local_tags() == local_tags_before
     assert release.origin_tags() == origin_tags_before
 
@@ -260,29 +299,32 @@ def test_publish_refuses_before_any_tag(
 @pytest.mark.parametrize(
     ("answers", "cause"),
     [
-        ([FAILURE], RUN_URL),
-        ([f"11 completed cancelled {RUN_URL}"], "gh run rerun 11"),
+        (["{url_failure}"], "{url}"),
+        (["11 completed cancelled {url}"], "gh run rerun 11"),
         (["ERROR api exploded"], "api exploded"),
         (["not a run"], "not a run"),
+        (["11 completed success {url}\\nsurplus"], "surplus"),
+        (["11 sleeping - {url}"], "11 sleeping"),
     ],
 )
 def test_publish_refuses_when_ci_did_not_succeed(
     release: Release, answers: list[str], cause: str
 ) -> None:
-    release.answer("ci", release.main_commit, *answers)
+    values = {"url": release.run_url, "url_failure": release.failure}
+    release.answer("ci", release.main_commit, *(a.format(**values) for a in answers))
 
-    result = release.publish()
+    result = release.publish(release.tag)
 
     assert result.returncode == 1
-    assert cause in result.stderr
+    assert cause.format(**values) in result.stderr
     assert release.local_tags() == []
     assert release.origin_tags() == []
 
 
 def test_publish_never_reads_success_for_another_commit(release: Release) -> None:
-    release.answer("ci", "0" * 40, SUCCESS)
+    release.answer("ci", "0" * 40, release.success)
 
-    result = release.publish()
+    result = release.publish(release.tag)
 
     assert result.returncode != 0
     assert len(release.sleeps()) > 1
@@ -292,33 +334,38 @@ def test_publish_never_reads_success_for_another_commit(release: Release) -> Non
 
 def test_publish_waits_for_a_missing_run_then_tags_the_recorded_commit(release: Release) -> None:
     commit = release.main_commit
-    release.answer("ci", commit, "", "", f"12 in_progress - {RUN_URL}", SUCCESS)
-    release.answer("release", commit, "", SUCCESS)
+    release.answer("ci", commit, "", "", release.run_line("in_progress -", 12), release.success)
+    release.answer("release", commit, "", release.success)
+    release.answer("release", commit, release.failure, branch="v9.9.9")
+    release.on_sleep(
+        "echo moved > moved && git add moved && git commit -q -m moved\n"
+    )
 
-    result = release.publish()
+    result = release.publish(release.tag)
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-1] == "verified"
-    assert release.verified() == [TAG]
-    assert release.origin_tags() == [TAG]
-    assert release.git("rev-parse", f"{TAG}^{{commit}}", cwd=release.origin) == commit
-    assert len(release.sleeps()) >= 4
+    assert release.verified() == [release.tag]
+    assert release.origin_tags() == [release.tag]
+    assert release.main_commit != commit
+    assert release.git("rev-parse", f"{release.tag}^{{commit}}", cwd=release.origin) == commit
+    assert len(release.sleeps()) == 4
     assert min(release.sleeps()) >= 60
 
 
 def test_publish_pushes_only_its_tag_and_keeps_it_when_release_run_fails(release: Release) -> None:
     commit = release_on_green_ci(release)
-    release.answer("release", commit, FAILURE)
+    release.answer("release", commit, release.failure)
     release.git("tag", "-a", "stray", "-m", "stray")
     release.git("config", "push.followTags", "true")
 
-    result = release.publish()
+    result = release.publish(release.tag)
 
     assert result.returncode == 1
-    assert RUN_URL in result.stderr
-    assert release.origin_tags() == [TAG]
-    assert release.git("rev-parse", f"{TAG}^{{commit}}", cwd=release.origin) == commit
-    assert TAG in release.local_tags()
+    assert release.run_url in result.stderr
+    assert release.origin_tags() == [release.tag]
+    assert release.git("rev-parse", f"{release.tag}^{{commit}}", cwd=release.origin) == commit
+    assert release.tag in release.local_tags()
     assert release.verified() == []
 
 
@@ -328,7 +375,7 @@ def test_publish_deletes_its_local_tag_when_the_push_fails(release: Release) -> 
     hook.write_text("#!/bin/sh\necho rejected by origin >&2\nexit 1\n")
     hook.chmod(0o755)
 
-    result = release.publish()
+    result = release.publish(release.tag)
 
     assert result.returncode == 1
     assert "rejected by origin" in result.stderr
