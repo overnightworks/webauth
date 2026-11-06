@@ -60,15 +60,21 @@ def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
 
 @pytest.mark.parametrize("method", ["GET", "POST", "PUT"])
 @pytest.mark.parametrize(
-    "sent", [{}, {"origin": "https://evil.example"}], ids=["plain", "foreign-origin"],
+    "sent",
+    [{}, {"origin": "https://evil.example"}],
+    ids=["plain", "foreign-origin"],
 )
 def test_a_known_person_in_the_group_is_admitted_with_no_cookie_and_the_person_role(
-    resource: ProtectedResource, method: str, sent: dict[str, str],
+    resource: ProtectedResource,
+    method: str,
+    sent: dict[str, str],
 ) -> None:
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
     response = app.ask(
-        resource.entry_point, method=method, authorization=bearing(an_agent_token(resource)),
+        resource.entry_point,
+        method=method,
+        authorization=bearing(an_agent_token(resource)),
         headers=sent,
     )
 
@@ -79,10 +85,13 @@ def test_a_known_person_in_the_group_is_admitted_with_no_cookie_and_the_person_r
 
 
 @pytest.mark.parametrize(
-    "groups", [["/apps/x/mcp/sub"], ["/apps/x/mcp", "/apps/x/admin"]], ids=["subgroup", "admin"],
+    "groups",
+    [["/apps/x/mcp/sub"], ["/apps/x/mcp", "/apps/x/admin"]],
+    ids=["subgroup", "admin"],
 )
 def test_a_subgroup_of_the_required_group_counts_and_an_admin_group_adds_nothing(
-    resource: ProtectedResource, groups: list[str],
+    resource: ProtectedResource,
+    groups: list[str],
 ) -> None:
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
@@ -94,10 +103,13 @@ def test_a_subgroup_of_the_required_group_counts_and_an_admin_group_adds_nothing
 
 
 def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
-    resource: ProtectedResource, monkeypatch: pytest.MonkeyPatch,
+    resource: ProtectedResource,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = a_bearer_app(
-        paths=PathRules(), resource=resource, known_accounts=(a_known_person(ADMIN_ROLE),),
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=(a_known_person(ADMIN_ROLE),),
     )
     assert app.accounts is not None
     failing(app.accounts, "set_role", monkeypatch)
@@ -115,16 +127,19 @@ def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
 
 
 @pytest.mark.parametrize(
-    "groups", [[], ["/apps/x"], ["/apps/x/mcp2"], ["/apps/x/other"]],
+    "groups",
+    [[], ["/apps/x"], ["/apps/x/mcp2"], ["/apps/x/other"]],
     ids=["none", "login-group-only", "sibling-prefix", "sibling"],
 )
 def test_a_person_without_the_required_group_gets_the_plain_403_and_the_store_is_untouched(
-    resource: ProtectedResource, groups: list[str],
+    resource: ProtectedResource,
+    groups: list[str],
 ) -> None:
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
     response = app.ask(
-        resource.entry_point, method="POST",
+        resource.entry_point,
+        method="POST",
         authorization=bearing(a_resource_token(resource, groups=groups)),
     )
 
@@ -139,7 +154,8 @@ def test_a_person_outside_the_login_group_gets_the_plain_403_with_the_group_held
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
     response = app.ask(
-        resource.entry_point, authorization=bearing(an_agent_token(resource, "/other/mcp")),
+        resource.entry_point,
+        authorization=bearing(an_agent_token(resource, "/other/mcp")),
     )
 
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
@@ -152,7 +168,9 @@ def test_an_unknown_subject_gets_the_plain_403_and_no_account_or_event_appears(
     app = a_bearer_app(paths=PathRules(), resource=resource)
 
     response = app.ask(
-        resource.entry_point, method="POST", authorization=bearing(an_agent_token(resource)),
+        resource.entry_point,
+        method="POST",
+        authorization=bearing(an_agent_token(resource)),
     )
 
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
@@ -175,14 +193,18 @@ class ATransactionThatCannotBeEntered:
 
 @pytest.mark.parametrize("failure", ["creation", "entry", "lookup", "exit"])
 def test_a_store_failure_in_the_admission_is_the_library_500_and_admits_nothing(
-    resource: ProtectedResource, failure: str, monkeypatch: pytest.MonkeyPatch,
+    resource: ProtectedResource,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     broken_transactions = {
         "creation": a_transaction_that_cannot_be_created,
         "entry": ATransactionThatCannotBeEntered,
     }
     app = a_bearer_app(
-        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=(a_known_person(),),
         transaction=broken_transactions.get(failure),
     )
     assert app.accounts is not None
@@ -198,7 +220,10 @@ def test_a_store_failure_in_the_admission_is_the_library_500_and_admits_nothing(
     assert response.status_code == 500
     assert app.auth.route_runs == []
     assert_no_bearer_admission(
-        app, {**relay.added, "method": "POST"}, resource.entry_point, token[0],
+        app,
+        {**relay.added, "method": "POST"},
+        resource.entry_point,
+        token[0],
     )
 
 
@@ -206,7 +231,9 @@ def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
     resource: ProtectedResource,
 ) -> None:
     app = a_bearer_app(
-        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=(a_known_person(),),
         strict_records=True,
     )
 
@@ -253,23 +280,30 @@ def between_the_bearer_gate_and_csrf(app: BearerApp, rewriting: Middleware) -> N
         pytest.param({"method": "GET"}, REFUSED_AS_RUNTIME_ERROR, id="method-to-another-reader"),
         pytest.param({"app": FastAPI()}, REFUSED_AS_RUNTIME_ERROR, id="sub-app"),
         pytest.param(
-            {"headers": [(b"authorization", b"Bearer other")]}, REFUSED_AS_RUNTIME_ERROR,
+            {"headers": [(b"authorization", b"Bearer other")]},
+            REFUSED_AS_RUNTIME_ERROR,
             id="header",
         ),
         pytest.param({}, 200, id="unchanged"),
     ],
 )
 def test_the_resource_person_and_current_user_refuse_a_request_changed_after_admission(
-    resource: ProtectedResource, changes: dict[str, object], status: int,
+    resource: ProtectedResource,
+    changes: dict[str, object],
+    status: int,
 ) -> None:
     app = a_bearer_app(
-        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=(a_known_person(),),
         inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
     )
     answering_a_runtime_error_with_418(app)
 
     response = app.ask(
-        resource.entry_point, method="POST", authorization=bearing(an_agent_token(resource)),
+        resource.entry_point,
+        method="POST",
+        authorization=bearing(an_agent_token(resource)),
     )
 
     assert response.status_code == status
@@ -283,17 +317,24 @@ def test_the_resource_person_and_current_user_refuse_a_request_changed_after_adm
     ],
 )
 def test_admitted_user_reads_the_resource_person_and_refuses_a_method_changed_after_admission(
-    resource: ProtectedResource, sent: str, changes: dict[str, object], status: int,
+    resource: ProtectedResource,
+    sent: str,
+    changes: dict[str, object],
+    status: int,
 ) -> None:
     app = a_bearer_app(
-        paths=PathRules(), resource=resource, known_accounts=(a_known_person(),),
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=(a_known_person(),),
         inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
     )
     an_admitted_user_reader(app, resource)
     answering_a_runtime_error_with_418(app)
 
     response = app.ask(
-        resource.entry_point, method=sent, authorization=bearing(an_agent_token(resource)),
+        resource.entry_point,
+        method=sent,
+        authorization=bearing(an_agent_token(resource)),
     )
 
     assert response.status_code == status
@@ -306,13 +347,17 @@ def test_admitted_user_reads_the_resource_person_and_refuses_a_method_changed_af
     [pytest.param({"method": "POST"}, 403, id="method-changed"), pytest.param({}, 200, id="same")],
 )
 def test_csrf_refuses_a_request_made_mutating_after_admission(
-    resource: ProtectedResource, changes: dict[str, object], status: int,
+    resource: ProtectedResource,
+    changes: dict[str, object],
+    status: int,
 ) -> None:
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
     between_the_bearer_gate_and_csrf(app, Middleware(RewritingTheRequest, changes=changes))
 
     response = app.ask(
-        resource.entry_point, method="GET", authorization=bearing(an_agent_token(resource)),
+        resource.entry_point,
+        method="GET",
+        authorization=bearing(an_agent_token(resource)),
     )
 
     assert response.status_code == status
@@ -325,15 +370,21 @@ def test_csrf_refuses_a_request_made_mutating_after_admission(
         pytest.param("/plain", {"cookie": True}, id="session"),
         pytest.param(f"{PERSON_ME_PATH}-reader", {"authorization": bearing(A_TOKEN)}, id="person"),
         pytest.param(
-            f"{EXPORT_PATH}-reader", {"authorization": bearing(A_TOKEN)}, id="machine",
+            f"{EXPORT_PATH}-reader",
+            {"authorization": bearing(A_TOKEN)},
+            id="machine",
         ),
     ],
 )
 def test_the_resource_person_raises_on_a_session_person_and_machine_request(
-    resource: ProtectedResource, path: str, asked: dict[str, object],
+    resource: ProtectedResource,
+    path: str,
+    asked: dict[str, object],
 ) -> None:
     app = a_bearer_app(
-        person_paths=PERSON_PATHS, resource=resource, known_accounts=(a_known_person(),),
+        person_paths=PERSON_PATHS,
+        resource=resource,
+        known_accounts=(a_known_person(),),
     )
     a_resource_person_reader(app, path)
     answering_a_runtime_error_with_418(app)
@@ -344,7 +395,8 @@ def test_the_resource_person_raises_on_a_session_person_and_machine_request(
 
 
 @pytest.mark.parametrize(
-    "group", ["", "apps/x/mcp", "/", "/apps//mcp", "/apps/x/mcp ", "/a\u200bb"],
+    "group",
+    ["", "apps/x/mcp", "/", "/apps//mcp", "/apps/x/mcp ", "/a\u200bb"],
 )
 def test_a_required_group_that_is_not_a_group_path_is_refused(group: str) -> None:
     with pytest.raises(ValueError, match="required_group"):

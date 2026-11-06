@@ -9,7 +9,7 @@
 
 [file_lines]
 "tests/e2e/oidc/prove.py" = 1545
-"tests/support/webauth_arrangement.py" = 898
+"tests/support/webauth_arrangement.py" = 878
 
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63
@@ -19,8 +19,5 @@
 
 [function_lines."tests/support/oidc_arrangement.py"]
 "loopback_https_server" = 115
-
-[function_lines."tests/support/webauth_arrangement.py"]
-"an_auth_app" = 105
 
 [clones]

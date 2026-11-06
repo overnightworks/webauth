@@ -1,5 +1,5 @@
-"""The sign-in routes a host installs: the transaction they enter, the answers they send, the
-policies they derive and the installs they refuse.
+"""The sign-in routes a host installs: the transaction they enter, the answers they send and the
+installs they refuse.
 
 Each case drives a FastAPI host through a `TestClient` whose cookie jar is the browser, against
 a stateful fake issuer, over a host whose `SignInTransaction` either only serializes or also
@@ -11,7 +11,6 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
@@ -21,12 +20,10 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
-from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
-from tests.support.oidc_arrangement import FakeIssuer, a_relying_party
 from tests.support.oidc_login_host import (
     ADMISSION,
     BACKCHANNEL_LOGOUT_PATH,
@@ -35,7 +32,6 @@ from tests.support.oidc_login_host import (
     LOGIN_GROUP,
     LOGOUT_PATH,
     OTHER_SUBJECT,
-    SAME_ORIGIN_FORM,
     SIGN_IN_PATHS,
     START_PATH,
     SUBJECT,
@@ -49,31 +45,17 @@ from tests.support.oidc_login_host import (
 )
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
-    HTTPS_TEST_SERVER,
     FakeUser,
-    SessionRecordsInMemory,
-    a_web_auth_config,
     an_http_scope,
     drive,
     seeded_session,
     session_cookie_header,
     starts,
 )
-from webauth.config import install_web_auth_config
 from webauth.cookies import sign_session_id
-from webauth.middleware import SessionGate, install_web_auth_middleware
 from webauth.oidc import OidcRefusal, OidcRefusalReason
 from webauth.oidc_login import AdmissionConfig, AdmissionRefusal
-from webauth.policies import (
-    BodySizePolicy,
-    CsrfPolicy,
-    PathRules,
-    RateLimitBudget,
-    RateLimitPolicy,
-    RateLimitRule,
-    SecurityHeadersPolicy,
-)
-from webauth.ports import AccountEventKind, SignInStores
+from webauth.ports import AccountEventKind
 from webauth.sign_in_routes import (
     LogoutPageText,
     RefusalPage,
@@ -83,7 +65,6 @@ from webauth.sign_in_routes import (
 )
 
 BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
-FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
 BOTH_KINDS = [
     pytest.param(TransactionKind.PER_CALL, id="per-call host"),
     pytest.param(TransactionKind.ROLLING_BACK, id="rolling-back host"),
@@ -114,7 +95,11 @@ def _signed_in_holding_session_of_bystander(host: OidcHost) -> tuple[str, str]:
     the session of the bystander, which that login replaces."""
     now = FIXED_INSTANT
     replaced = seeded_session(
-        host.sessions, host.lock.hold(), BYSTANDER.id, now, now + timedelta(hours=1),
+        host.sessions,
+        host.lock.hold(),
+        BYSTANDER.id,
+        now,
+        now + timedelta(hours=1),
     )
     query = host.sign_in_at_issuer()
     session_cookie = session_cookie_header(sign_session_id(replaced.id, host.config.signing_key))
@@ -130,7 +115,9 @@ def _state_of(host: OidcHost) -> tuple[list[tuple[str, str]], list[str], list[Ac
 
 
 def _is_refused_and_leaves_no_session_cookie(
-    response: HttpxResponse, host: OidcHost, query: str,
+    response: HttpxResponse,
+    host: OidcHost,
+    query: str,
 ) -> bool:
     return (
         response.status_code == 500
@@ -147,13 +134,17 @@ def test_a_start_enters_no_sign_in_transaction() -> None:
     assert (response.status_code, host.transaction.entries) == (303, 0)
 
 
-@pytest.mark.parametrize(("asked_for", "landing"), [
-    pytest.param("/app/albums/42", "/app/albums/42", id="a deep link below the mount"),
-    pytest.param("/albums/42", "/app/", id="a path outside the mount"),
-    pytest.param(None, "/app/", id="no return path"),
-])
+@pytest.mark.parametrize(
+    ("asked_for", "landing"),
+    [
+        pytest.param("/app/albums/42", "/app/albums/42", id="a deep link below the mount"),
+        pytest.param("/albums/42", "/app/", id="a path outside the mount"),
+        pytest.param(None, "/app/", id="no return path"),
+    ],
+)
 def test_a_mounted_host_returns_below_its_root_path_and_otherwise_to_the_mount_root(
-    asked_for: str | None, landing: str,
+    asked_for: str | None,
+    landing: str,
 ) -> None:
     host = an_oidc_host(root_path="/app")
 
@@ -175,19 +166,26 @@ def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     assert (host.transaction.entries, host.sessions.count_active()) == (1, 1)
 
 
-@pytest.mark.parametrize(("groups_claim", "admission", "refusal"), [
-    pytest.param((), ADMISSION, AdmissionRefusal.NOT_A_MEMBER, id="not a member"),
-    pytest.param(
-        (LOGIN_GROUP,),
-        AdmissionConfig(
-            bound_issuer="https://other.example/realms/lab", login_group=LOGIN_GROUP,
-            admin_group=f"{LOGIN_GROUP}/admin",
+@pytest.mark.parametrize(
+    ("groups_claim", "admission", "refusal"),
+    [
+        pytest.param((), ADMISSION, AdmissionRefusal.NOT_A_MEMBER, id="not a member"),
+        pytest.param(
+            (LOGIN_GROUP,),
+            AdmissionConfig(
+                bound_issuer="https://other.example/realms/lab",
+                login_group=LOGIN_GROUP,
+                admin_group=f"{LOGIN_GROUP}/admin",
+            ),
+            AdmissionRefusal.FOREIGN_ISSUER,
+            id="a foreign issuer",
         ),
-        AdmissionRefusal.FOREIGN_ISSUER, id="a foreign issuer",
-    ),
-])
+    ],
+)
 def test_an_identity_refused_before_admission_writes_nothing_and_enters_no_transaction(
-    groups_claim: tuple[str, ...], admission: AdmissionConfig, refusal: AdmissionRefusal,
+    groups_claim: tuple[str, ...],
+    admission: AdmissionConfig,
+    refusal: AdmissionRefusal,
 ) -> None:
     host = an_oidc_host(BYSTANDER, groups_claim=groups_claim, admission=admission)
     query, cookie = _signed_in_holding_session_of_bystander(host)
@@ -213,7 +211,8 @@ def test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed
     cause: OidcRefusal | AdmissionRefusal,
 ) -> None:
     expected = (
-        RefusalPage.NO_ACCESS if cause is AdmissionRefusal.NOT_A_MEMBER
+        RefusalPage.NO_ACCESS
+        if cause is AdmissionRefusal.NOT_A_MEMBER
         else RefusalPage.LOGIN_FAILED
     )
 
@@ -225,7 +224,9 @@ def test_a_taken_username_refuses_through_the_hook_and_changes_nothing(
     kind: TransactionKind,
 ) -> None:
     host = an_oidc_host(
-        BYSTANDER, FakeUser(id="user-7", username="lena"), transaction_kind=kind,
+        BYSTANDER,
+        FakeUser(id="user-7", username="lena"),
+        transaction_kind=kind,
     )
     query, cookie = _signed_in_holding_session_of_bystander(host)
     before = _state_of(host)
@@ -291,7 +292,9 @@ _BLOCK_FAULTS = [
 @pytest.mark.parametrize("fault", _BLOCK_FAULTS)
 @pytest.mark.parametrize("kind", BOTH_KINDS)
 def test_a_failure_in_the_block_answers_500_with_the_deletion_and_keeps_only_what_the_host_keeps(
-    fault: BlockFault, kind: TransactionKind, monkeypatch: pytest.MonkeyPatch,
+    fault: BlockFault,
+    kind: TransactionKind,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     host = an_oidc_host(*deepcopy(fault.stored_users), transaction_kind=kind)
     query, cookie = _signed_in_holding_session_of_bystander(host)
@@ -319,7 +322,8 @@ def test_a_failing_commit_answers_500_with_the_deletion_and_issues_no_session_co
 
 @pytest.mark.parametrize("behind_base_http_middleware", [False, True], ids=["plain", "base-http"])
 def test_a_refusal_hook_that_raises_answers_500_with_the_deletion(
-    *, behind_base_http_middleware: bool,
+    *,
+    behind_base_http_middleware: bool,
 ) -> None:
     host = an_oidc_host(groups_claim=(), behind_base_http_middleware=behind_base_http_middleware)
     host.answer_refusals = _raise_in_the_hook
@@ -332,7 +336,8 @@ def test_a_refusal_hook_that_raises_answers_500_with_the_deletion(
 
 @pytest.mark.parametrize("behind_base_http_middleware", [False, True], ids=["plain", "base-http"])
 def test_a_refusal_answer_that_fails_before_start_answers_500_with_the_deletion(
-    *, behind_base_http_middleware: bool,
+    *,
+    behind_base_http_middleware: bool,
 ) -> None:
     host = an_oidc_host(groups_claim=(), behind_base_http_middleware=behind_base_http_middleware)
     host.answer_refusals = _answer_failing_before_its_start
@@ -343,8 +348,9 @@ def test_a_refusal_answer_that_fails_before_start_answers_500_with_the_deletion(
     assert _is_refused_and_leaves_no_session_cookie(response, host, query)
 
 
-def test_a_refusal_hook_that_raises_before_the_pending_cookie_is_selected_answers_the_ordinary_500(
-) -> None:
+def test_a_refusal_hook_that_raises_before_the_pending_cookie_is_selected_answers_the_ordinary_500() -> (  # noqa: E501
+    None
+):
     host = an_oidc_host()
     host.answer_refusals = _raise_in_the_hook
     query = host.sign_in_at_issuer().replace("state=", "other=")
@@ -414,10 +420,12 @@ def test_two_concurrent_callbacks_exchange_outside_the_transaction_and_keep_the_
     host.issuer.before_exchange = threading.Barrier(2, timeout=10).wait
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(
-            lambda attempt: host.callback(attempt[0], cookie=attempt[1]),
-            zip((first, second), cookies, strict=True),
-        ))
+        responses = list(
+            pool.map(
+                lambda attempt: host.callback(attempt[0], cookie=attempt[1]),
+                zip((first, second), cookies, strict=True),
+            )
+        )
 
     assert [response.status_code for response in responses] == [303, 303]
     assert host.transaction.entries == 2
@@ -444,13 +452,16 @@ def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises()
     assert not _sign_in_routes_of(app)
 
 
-@pytest.mark.parametrize("max_sessions", [
-    pytest.param(0, id="zero"),
-    pytest.param(-1, id="negative"),
-    pytest.param(True, id="bool"),
-    pytest.param("2", id="text"),
-    pytest.param(2.0, id="float"),
-])
+@pytest.mark.parametrize(
+    "max_sessions",
+    [
+        pytest.param(0, id="zero"),
+        pytest.param(-1, id="negative"),
+        pytest.param(True, id="bool"),
+        pytest.param("2", id="text"),
+        pytest.param(2.0, id="float"),
+    ],
+)
 def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_is_registered(
     max_sessions: object,
 ) -> None:
@@ -464,37 +475,43 @@ def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_i
 
 
 _VALID_PATHS = {
-    "start": "/login", "callback": "/callback", "logout": "/logout",
+    "start": "/login",
+    "callback": "/callback",
+    "logout": "/logout",
     "backchannel_logout": "/backchannel",
 }
 
 
-@pytest.mark.parametrize("override", [
-    pytest.param({"start": "login"}, id="a relative start"),
-    pytest.param({"callback": "callback"}, id="a relative callback"),
-    pytest.param({"logout": "logout"}, id="a relative logout"),
-    pytest.param({"backchannel_logout": "backchannel"}, id="a relative back-channel"),
-    pytest.param({"start": "//evil.example/login"}, id="a start another host serves"),
-    pytest.param({"callback": "/\\evil.example"}, id="a callback another host serves"),
-    pytest.param({"callback": "/\t/evil.example"}, id="a callback a browser strips"),
-    pytest.param({"logout": "//evil.example/logout"}, id="a logout another host serves"),
-    pytest.param(
-        {"backchannel_logout": "//evil.example/back"}, id="a back-channel another host serves",
-    ),
-    pytest.param({"start": "/a/../login"}, id="a dot segment in start"),
-    pytest.param({"callback": "/a/%2e%2e/callback"}, id="an encoded dot segment"),
-    pytest.param({"logout": "/a/../logout"}, id="a dot segment in logout"),
-    pytest.param({"backchannel_logout": "/a/../back"}, id="a dot segment in the back-channel"),
-    pytest.param({"start": "/login?x=1"}, id="a query in start"),
-    pytest.param({"callback": "/callback#top"}, id="a fragment in callback"),
-    pytest.param({"logout": "/logout?x=1"}, id="a query in logout"),
-    pytest.param({"backchannel_logout": "/back?x=1"}, id="a query in the back-channel"),
-    pytest.param({"callback": "/login"}, id="one path for start and callback"),
-    pytest.param({"logout": "/login"}, id="one path for start and logout"),
-    pytest.param({"logout": "/callback"}, id="one path for callback and logout"),
-    pytest.param({"backchannel_logout": "/logout"}, id="the back-channel equal to logout"),
-    pytest.param({"backchannel_logout": "/callback"}, id="the back-channel equal to callback"),
-])
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param({"start": "login"}, id="a relative start"),
+        pytest.param({"callback": "callback"}, id="a relative callback"),
+        pytest.param({"logout": "logout"}, id="a relative logout"),
+        pytest.param({"backchannel_logout": "backchannel"}, id="a relative back-channel"),
+        pytest.param({"start": "//evil.example/login"}, id="a start another host serves"),
+        pytest.param({"callback": "/\\evil.example"}, id="a callback another host serves"),
+        pytest.param({"callback": "/\t/evil.example"}, id="a callback a browser strips"),
+        pytest.param({"logout": "//evil.example/logout"}, id="a logout another host serves"),
+        pytest.param(
+            {"backchannel_logout": "//evil.example/back"},
+            id="a back-channel another host serves",
+        ),
+        pytest.param({"start": "/a/../login"}, id="a dot segment in start"),
+        pytest.param({"callback": "/a/%2e%2e/callback"}, id="an encoded dot segment"),
+        pytest.param({"logout": "/a/../logout"}, id="a dot segment in logout"),
+        pytest.param({"backchannel_logout": "/a/../back"}, id="a dot segment in the back-channel"),
+        pytest.param({"start": "/login?x=1"}, id="a query in start"),
+        pytest.param({"callback": "/callback#top"}, id="a fragment in callback"),
+        pytest.param({"logout": "/logout?x=1"}, id="a query in logout"),
+        pytest.param({"backchannel_logout": "/back?x=1"}, id="a query in the back-channel"),
+        pytest.param({"callback": "/login"}, id="one path for start and callback"),
+        pytest.param({"logout": "/login"}, id="one path for start and logout"),
+        pytest.param({"logout": "/callback"}, id="one path for callback and logout"),
+        pytest.param({"backchannel_logout": "/logout"}, id="the back-channel equal to logout"),
+        pytest.param({"backchannel_logout": "/callback"}, id="the back-channel equal to callback"),
+    ],
+)
 def test_a_path_that_is_not_an_absolute_distinct_path_of_this_app_is_refused_at_construction(
     override: dict[str, str],
 ) -> None:
@@ -507,10 +524,28 @@ def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(lang
     assert LogoutPageText(language=language, button_label="Out").language == language
 
 
-@pytest.mark.parametrize("language", [
-    "", "en_US", '"', "<", "en US", "ä", "de\n", "d", "-de", "de-", "de--CH", "1de", "de-123456789",
-    "de-ä", "\u212a\u212a", 42, None,
-])
+@pytest.mark.parametrize(
+    "language",
+    [
+        "",
+        "en_US",
+        '"',
+        "<",
+        "en US",
+        "ä",
+        "de\n",
+        "d",
+        "-de",
+        "de-",
+        "de--CH",
+        "1de",
+        "de-123456789",
+        "de-ä",
+        "\u212a\u212a",
+        42,
+        None,
+    ],
+)
 def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
     language: object,
 ) -> None:
@@ -518,15 +553,20 @@ def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
         LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize(("logout", "page_text"), [
-    pytest.param(LOGOUT_PATH, None, id="a logout path without page text"),
-    pytest.param(
-        None, lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        id="page text without a logout path",
-    ),
-])
+@pytest.mark.parametrize(
+    ("logout", "page_text"),
+    [
+        pytest.param(LOGOUT_PATH, None, id="a logout path without page text"),
+        pytest.param(
+            None,
+            lambda _request: LogoutPageText(language="en", button_label="Sign out"),
+            id="page text without a logout path",
+        ),
+    ],
+)
 def test_a_logout_path_and_page_text_come_together_or_install_refuses_before_any_route(
-    logout: str | None, page_text: Callable[[Request], LogoutPageText] | None,
+    logout: str | None,
+    page_text: Callable[[Request], LogoutPageText] | None,
 ) -> None:
     app = FastAPI()
     arguments = {
@@ -569,8 +609,9 @@ def _install_arguments() -> dict[str, object]:
     }
 
 
-def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_before_any_route(
-) -> None:
+def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_before_any_route() -> (  # noqa: E501
+    None
+):
     app = FastAPI()
     arguments = {
         **_install_arguments(),
@@ -586,146 +627,10 @@ def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_be
 
 def _sign_in_routes_of(app: FastAPI) -> list[str]:
     paths = {
-        SIGN_IN_PATHS.start, SIGN_IN_PATHS.callback, LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH,
+        SIGN_IN_PATHS.start,
+        SIGN_IN_PATHS.callback,
+        LOGOUT_PATH,
+        BACKCHANNEL_LOGOUT_PATH,
     }
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
     return [route.path for route in routes if route.path in paths]
-
-
-@dataclass
-class GatedHost:
-    client: TestClient
-    issuer: FakeIssuer
-
-
-def _a_gated_host(
-    rate_budget: int | None = None, *, exempts_backchannel: bool = True,
-) -> GatedHost:
-    """A host whose gate, rate limit, cache, CSRF and body rules are the ones the paths derive.
-
-    Without ``exempts_backchannel`` the rate limit is left to ``browser_paths`` alone.
-    """
-    config = a_web_auth_config()
-    sessions = SessionRecordsInMemory()
-    issuer = FakeIssuer(mint_id_token=lambda _nonce: "unused")
-    relying_party = a_relying_party(post_token_request=issuer)
-    app = FastAPI()
-    install_web_auth_config(app, config)
-    install_web_auth_middleware(
-        app,
-        security_headers=SecurityHeadersPolicy(
-            content_security_policy="default-src 'self'",
-            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
-        ),
-        body_size=BodySizePolicy(
-            default_max_bytes=1024, rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
-        ),
-        rate_limit=None if rate_budget is None else RateLimitPolicy(
-            default=RateLimitBudget("host", 1000, 60),
-            exempt=SIGN_IN_PATHS.backchannel if exempts_backchannel else PathRules(),
-            rules=(RateLimitRule(
-                paths=SIGN_IN_PATHS.browser_paths,
-                budget=RateLimitBudget("sign-in", rate_budget, 60),
-            ),),
-        ),
-        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
-        session_gate=SessionGate(
-            session_transaction=sessions.in_transaction,
-            login_redirect=SIGN_IN_PATHS.login_redirect,
-            public=SIGN_IN_PATHS.public_rules,
-        ),
-    )
-    install_sign_in_routes(
-        app,
-        paths=SIGN_IN_PATHS,
-        relying_party=lambda _request: relying_party,
-        admission=ADMISSION,
-        transaction=_a_transaction_nobody_enters,
-        refused=lambda _request, _refusal: Response(status_code=403),
-        keeps_id_token=True,
-        max_sessions=None,
-        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-    )
-
-    @app.get("/albums/{album_id}")
-    def album(album_id: str) -> str:
-        return album_id
-
-    return GatedHost(
-        TestClient(app, base_url=HTTPS_TEST_SERVER, follow_redirects=False), issuer,
-    )
-
-
-def _a_transaction_nobody_enters() -> AbstractContextManager[SignInStores]:
-    raise AssertionError("the gated host never signs anyone in")
-
-
-def test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start() -> None:
-    host = _a_gated_host()
-
-    start = host.client.get(START_PATH)
-    deep_link = host.client.get("/albums/42", headers={"accept": "text/html"})
-
-    assert start.status_code == 303
-    assert (deep_link.status_code, deep_link.headers["location"]) == (
-        302, f"{START_PATH}?next=%2Falbums%2F42",
-    )
-
-
-def test_a_signed_out_logout_passes_the_gate_and_enters_no_transaction() -> None:
-    host = _a_gated_host()
-
-    response = host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM)
-
-    assert response.status_code == 200
-
-
-def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
-    host = _a_gated_host()
-
-    answers = [
-        host.client.get(START_PATH),
-        host.client.get(CALLBACK_PATH),
-        host.client.post(LOGOUT_PATH, headers=FORM_HEADER),
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=x", headers=FORM_HEADER),
-    ]
-
-    assert answers[-2].status_code == 403
-    assert answers[-1].status_code == 400
-    assert [answer.headers["cache-control"] for answer in answers] == ["no-store"] * 4
-
-
-def test_the_derived_browser_paths_spend_one_sign_in_budget() -> None:
-    host = _a_gated_host(rate_budget=3)
-
-    statuses = [
-        host.client.get(START_PATH).status_code,
-        host.client.get(CALLBACK_PATH).status_code,
-        host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM).status_code,
-        host.client.get(START_PATH).status_code,
-    ]
-
-    assert statuses[-1] == 429
-    assert 429 not in statuses[:-1]
-
-
-def test_a_back_channel_post_reaches_the_route_past_the_gate_csrf_and_sign_in_budget() -> None:
-    host = _a_gated_host(rate_budget=1)
-
-    statuses = [
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
-        .status_code
-        for _ in range(3)
-    ]
-
-    assert statuses == [400, 400, 400]
-    assert host.client.get(START_PATH).status_code == 303
-
-
-def test_the_back_channel_path_is_not_a_browser_path() -> None:
-    host = _a_gated_host(rate_budget=1, exempts_backchannel=False)
-
-    for _ in range(3):
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
-
-    assert host.client.get(START_PATH).status_code == 303

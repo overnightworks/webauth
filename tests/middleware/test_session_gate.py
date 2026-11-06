@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -20,16 +20,22 @@ from tests.support.gate_arrangement import (
     ADMITTED_ADMIN_PATH,
     ADMITTED_ADMIN_PATHS,
     WEBSOCKET_ADMITTED_ADMIN_PATH,
-    ScopeRelay,
-    relayed,
     with_admitted_admin_routes,
+)
+from tests.support.security_headers_arrangement import assert_carries_policy_headers
+from tests.support.session_gate_arrangement import (
+    ONLY_LOGIN_AND_HEALTH,
+    a_gated_app,
+    a_plain_app,
+    ask,
+    counted,
+    signed_in,
 )
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     ALL_DEPENDENCIES_PATH,
     ALLOWED_ORIGIN,
     GATED_APP_HEADERS_POLICY,
-    LOGIN_REDIRECT,
     MEMBER_ROLE,
     WEBSOCKET_ADMITTED_PATH,
     WEBSOCKET_PATH,
@@ -39,13 +45,11 @@ from tests.support.webauth_arrangement import (
     SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
     SessionsThatMustNotBeAsked,
-    UsersInMemory,
     a_session,
     a_signed_in_same_origin_request,
     a_web_auth_config,
     an_auth_app,
     an_http_scope,
-    assert_carries_policy_headers,
     drive,
     session_cookie_header,
     starts,
@@ -59,59 +63,16 @@ from webauth.policies import (
     RateLimitBudget,
     RateLimitPolicy,
 )
-from webauth.ports import AuthenticatedUser, SessionTransaction
+from webauth.ports import SessionTransaction
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-LOGIN_PATH = "/login"
 HTML = "text/html"
 OUTSIDE_LIFETIME = timedelta(minutes=-5)
 FOREIGN_ORIGIN = "https://evil.test"
 BODY_LIMIT_BYTES = 100
-
-ONLY_LOGIN_AND_HEALTH = (PublicRule(PathRules(exact=frozenset({LOGIN_PATH, "/health"}))),)
-
-
-def a_gated_app(
-    record: Any = None, *, public: tuple[PublicRule, ...] = (), **keywords: Any,
-) -> AuthApp:
-    """A gated application with a login redirect, whose server errors answer 500."""
-    return an_auth_app(
-        a_session() if record is None else record,
-        gate=True,
-        login_redirect=LOGIN_REDIRECT,
-        public=public,
-        raise_server_exceptions=False,
-        **keywords,
-    )
-
-
-def a_plain_app(record: Any, **keywords: Any) -> AuthApp:
-    """The same application guarded by the route dependency alone."""
-    return an_auth_app(record, login_redirect=LOGIN_REDIRECT, **keywords)
-
-
-def ask(
-    app: AuthApp,
-    path: str,
-    *,
-    method: str = "GET",
-    cookie: str | None = None,
-    accept: str | None = None,
-    headers: dict[str, str] | None = None,
-) -> Response:
-    sent = dict(headers or {})
-    if cookie is not None:
-        sent["cookie"] = cookie
-    if accept is not None:
-        sent["accept"] = accept
-    return app.client.request(method, path, headers=sent, follow_redirects=False)
-
-
-def signed_in(app: AuthApp) -> str:
-    return session_cookie_header(app.signed_cookie())
 
 
 def assert_answers_alike(gated: Response, plain: Response) -> None:
@@ -120,17 +81,16 @@ def assert_answers_alike(gated: Response, plain: Response) -> None:
     assert {name: gated.headers[name] for name in plain.headers} == dict(plain.headers)
 
 
-def counted(sessions: SessionsRecordingTheirTransaction, name: str) -> int:
-    return sessions.event_names.count(name)
-
-
 class TestPublicPaths:
     @pytest.mark.parametrize("signed_in_session", [False, True], ids=["signed-out", "signed-in"])
     def test_a_public_path_passes_untouched_and_asks_no_store(
-        self, signed_in_session: bool,
+        self,
+        signed_in_session: bool,
     ) -> None:
         app = a_gated_app(
-            None, public=ONLY_LOGIN_AND_HEALTH, sessions=SessionsThatMustNotBeAsked(),
+            None,
+            public=ONLY_LOGIN_AND_HEALTH,
+            sessions=SessionsThatMustNotBeAsked(),
         )
         response = ask(app, "/health", cookie=signed_in(app) if signed_in_session else None)
         assert (response.status_code, response.json()) == (200, {"username": None})
@@ -139,13 +99,16 @@ class TestPublicPaths:
         hooks = PublicRule(PathRules(prefixes=("/hooks/",)), methods=frozenset({"POST"}))
         sessionless_hook = CsrfPolicy(exempt=PathRules(prefixes=("/hooks/",)))
         app = a_gated_app(
-            None, public=(hooks,), sessions=SessionsThatMustNotBeAsked(),
+            None,
+            public=(hooks,),
+            sessions=SessionsThatMustNotBeAsked(),
             stack_policies={"csrf_origin": sessionless_hook},
         )
         assert ask(app, "/hooks/x", method="POST").status_code == 200
         navigation = ask(app, "/hooks/x", accept=HTML)
         assert (navigation.status_code, navigation.headers["location"]) == (
-            302, "/login?next=%2Fhooks%2Fx",
+            302,
+            "/login?next=%2Fhooks%2Fx",
         )
         for method in ("HEAD", "OPTIONS"):
             assert ask(app, "/hooks/x", method=method).status_code == 401
@@ -161,7 +124,9 @@ class TestRefusalsAreTheDependencysBytes:
         gated, plain = a_gated_app(), a_plain_app(a_session())
         response = ask(gated, "/me", accept=HTML)
         assert (response.status_code, response.headers["location"], response.json()) == (
-            302, "/login?next=%2Fme", {"detail": "Found"},
+            302,
+            "/login?next=%2Fme",
+            {"detail": "Found"},
         )
         assert_answers_alike(response, ask(plain, "/me", accept=HTML))
         assert_carries_policy_headers(response.headers, GATED_APP_HEADERS_POLICY, hsts=True)
@@ -170,7 +135,8 @@ class TestRefusalsAreTheDependencysBytes:
         gated, plain = a_gated_app(), a_plain_app(a_session())
         response = ask(gated, "/me")
         assert (response.status_code, response.json()) == (
-            401, {"detail": "Authentication required"},
+            401,
+            {"detail": "Authentication required"},
         )
         assert_answers_alike(response, ask(plain, "/me"))
         assert_carries_policy_headers(response.headers, GATED_APP_HEADERS_POLICY, hsts=True)
@@ -180,16 +146,21 @@ class TestRefusalsAreTheDependencysBytes:
         ("detail", "record", "cookie_of"),
         [
             pytest.param(
-                "Invalid session", a_session, lambda app: session_cookie_header("forged.signature"),
+                "Invalid session",
+                a_session,
+                lambda app: session_cookie_header("forged.signature"),
                 id="forged",
             ),
             pytest.param(
-                "Invalid session", a_session,
+                "Invalid session",
+                a_session,
                 lambda app: session_cookie_header(app.signed_cookie(), app.signed_cookie()),
                 id="doubled",
             ),
             pytest.param(
-                "Session expired", lambda: a_session(remaining=OUTSIDE_LIFETIME), signed_in,
+                "Session expired",
+                lambda: a_session(remaining=OUTSIDE_LIFETIME),
+                signed_in,
                 id="outside-its-lifetime",
             ),
             pytest.param("Session expired", lambda: None, signed_in, id="deleted"),
@@ -218,11 +189,12 @@ class TestAdmission:
         "provider_of",
         [
             pytest.param(lambda sessions: sessions.in_transaction, id="transaction"),
-            pytest.param(lambda sessions: (lambda: nullcontext(sessions)), id="nullcontext"),
+            pytest.param(lambda sessions: lambda: nullcontext(sessions), id="nullcontext"),
         ],
     )
     def test_a_live_session_is_admitted_and_renewed_once_with_either_provider(
-        self, provider_of: Callable[[SessionsRecordingTheirTransaction], SessionTransaction],
+        self,
+        provider_of: Callable[[SessionsRecordingTheirTransaction], SessionTransaction],
     ) -> None:
         record = a_session()
         before = record.expires_at
@@ -247,7 +219,8 @@ class TestRouterPaths:
 
     def test_a_mounted_app_is_judged_by_its_full_path_under_the_top_apps_gate(self) -> None:
         app = a_gated_app(
-            None, public=(PublicRule(PathRules(exact=frozenset({"/sub/health"}))),),
+            None,
+            public=(PublicRule(PathRules(exact=frozenset({"/sub/health"}))),),
         )
         sub = FastAPI()
         sub.add_api_route("/health", lambda: {"mounted": True})
@@ -256,7 +229,8 @@ class TestRouterPaths:
         assert ask(app, "/sub/health").status_code == 200
         redirect = ask(app, "/sub/me", accept=HTML)
         assert (redirect.status_code, redirect.headers["location"]) == (
-            302, "/login?next=%2Fsub%2Fme",
+            302,
+            "/login?next=%2Fsub%2Fme",
         )
 
     @pytest.mark.parametrize(
@@ -267,10 +241,13 @@ class TestRouterPaths:
             pytest.param(b"/static/%2E/x.css", "/static/./x.css", id="encoded-dot"),
             pytest.param(b"/static%2F..%2Fme", "/static/../me", id="encoded-slashes"),
             pytest.param(
-                b"/static/x%3f/%2e%2e/secret", "/static/x?/../secret", id="encoded-question-mark",
+                b"/static/x%3f/%2e%2e/secret",
+                "/static/x?/../secret",
+                id="encoded-question-mark",
             ),
             pytest.param(
-                b"/opt/x%3f/%2e%2e/secret", "/opt/x?/../secret",
+                b"/opt/x%3f/%2e%2e/secret",
+                "/opt/x?/../secret",
                 id="optional-encoded-question-mark",
             ),
             pytest.param(b"/health/", "/health/", id="trailing-slash"),
@@ -279,7 +256,9 @@ class TestRouterPaths:
         ],
     )
     def test_a_path_that_is_not_the_one_a_rule_names_is_gated(
-        self, raw_path: bytes, path: str,
+        self,
+        raw_path: bytes,
+        path: str,
     ) -> None:
         public = PublicRule(PathRules(prefixes=("/static/",), exact=frozenset({"/health"})))
         app = a_gated_app(None, public=(public,), optional=PathRules(prefixes=("/opt/",)))
@@ -309,8 +288,12 @@ class TestWebSocket:
 
     def test_the_admitted_user_of_a_websocket_is_an_error_behind_the_gate(self) -> None:
         app = a_gated_app()
-        with pytest.raises(RuntimeError), app.connect(
-            WEBSOCKET_ADMITTED_PATH, cookie=app.signed_cookie(),
+        with (
+            pytest.raises(RuntimeError),
+            app.connect(
+                WEBSOCKET_ADMITTED_PATH,
+                cookie=app.signed_cookie(),
+            ),
         ):
             pass
 
@@ -320,7 +303,9 @@ class TestOptionalPaths:
 
     def test_without_a_session_the_route_runs_with_no_user_and_asks_no_store(self) -> None:
         app = a_gated_app(
-            None, optional=self.OPTIONAL, sessions=SessionsThatMustNotBeAsked(),
+            None,
+            optional=self.OPTIONAL,
+            sessions=SessionsThatMustNotBeAsked(),
         )
         assert ask(app, "/optional").json() == {"username": None}
 
@@ -337,7 +322,9 @@ class TestOptionalPaths:
 
     def test_a_failing_store_is_the_library_500_never_an_anonymous_pass(self) -> None:
         app = a_gated_app(
-            a_session(), optional=self.OPTIONAL, sessions=SessionsFailingToLoad(a_session()),
+            a_session(),
+            optional=self.OPTIONAL,
+            sessions=SessionsFailingToLoad(a_session()),
         )
         response = ask(app, "/optional", cookie=signed_in(app))
         assert response.status_code == 500
@@ -369,9 +356,7 @@ class TestTransaction:
         sessions = SessionsRecordingTheirTransaction(a_session())
         app = a_gated_app(None, sessions=sessions)
         ask(app, "/optional", cookie=signed_in(app))
-        worker_threads = {
-            thread for name, thread in sessions.events if name != "route"
-        }
+        worker_threads = {thread for name, thread in sessions.events if name != "route"}
         assert len(worker_threads) == 1
         assert worker_threads.isdisjoint(app.route_threads)
 
@@ -402,7 +387,8 @@ class TestAdmittedAdmin:
 
     @pytest.mark.parametrize("path", [*ADMITTED_ADMIN_PATHS, "/admin"])
     def test_a_session_with_another_role_is_refused_as_admin_user_refuses_it(
-        self, path: str,
+        self,
+        path: str,
     ) -> None:
         app = a_gated_app_of(MEMBER_ROLE)
         response = ask(app, path, cookie=signed_in(app))
@@ -415,7 +401,10 @@ class TestAdmittedAdmin:
         ids=["the-configured-role", "the-literal-admin"],
     )
     def test_the_configured_admin_role_is_the_one_judged(
-        self, path: str, role: str, expected_status: int,
+        self,
+        path: str,
+        role: str,
+        expected_status: int,
     ) -> None:
         config = a_web_auth_config(admin_role=OPERATOR_ROLE)
         app = a_gated_app_of(role, config=config)
@@ -424,10 +413,15 @@ class TestAdmittedAdmin:
 
     @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
     @pytest.mark.parametrize(
-        ("accept", "expected_status"), [(HTML, 302), (None, 401)], ids=["page", "fetch"],
+        ("accept", "expected_status"),
+        [(HTML, 302), (None, 401)],
+        ids=["page", "fetch"],
     )
     def test_the_gate_refuses_a_signed_out_request_on_a_gated_path_before_the_route(
-        self, path: str, accept: str | None, expected_status: int,
+        self,
+        path: str,
+        accept: str | None,
+        expected_status: int,
     ) -> None:
         app = with_admitted_admin_routes(a_gated_app())
         response = ask(app, path, accept=accept)
@@ -437,7 +431,9 @@ class TestAdmittedAdmin:
     @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
     @pytest.mark.parametrize("accept", [HTML, None], ids=["page", "fetch"])
     def test_where_the_gate_admitted_no_account_it_answers_401_and_never_redirects(
-        self, path: str, accept: str | None,
+        self,
+        path: str,
+        accept: str | None,
     ) -> None:
         app = with_admitted_admin_routes(
             a_gated_app(optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS))),
@@ -449,16 +445,21 @@ class TestAdmittedAdmin:
     @pytest.mark.parametrize("path", ADMITTED_ADMIN_PATHS)
     @pytest.mark.parametrize("dead", ["expired", "deleted"])
     def test_a_dead_admin_session_on_an_optional_path_is_401_and_asked_once_by_the_gate(
-        self, path: str, dead: str,
+        self,
+        path: str,
+        dead: str,
     ) -> None:
         record = a_session(
             user=FakeUser(role=ADMIN_ROLE),
             remaining=OUTSIDE_LIFETIME if dead == "expired" else timedelta(minutes=30),
         )
         sessions = SessionsRecordingTheirTransaction(None if dead == "deleted" else record)
-        app = with_admitted_admin_routes(a_gated_app(
-            optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS)), sessions=sessions,
-        ))
+        app = with_admitted_admin_routes(
+            a_gated_app(
+                optional=PathRules(exact=frozenset(ADMITTED_ADMIN_PATHS)),
+                sessions=sessions,
+            )
+        )
         response = ask(app, path, cookie=signed_in(app))
         assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
         assert counted(sessions, "load") == 1
@@ -478,8 +479,12 @@ class TestAdmittedAdmin:
 
     def test_the_admitted_admin_of_a_websocket_is_an_error_behind_the_gate(self) -> None:
         app = a_gated_app_of(ADMIN_ROLE)
-        with pytest.raises(RuntimeError), app.connect(
-            WEBSOCKET_ADMITTED_ADMIN_PATH, cookie=app.signed_cookie(),
+        with (
+            pytest.raises(RuntimeError),
+            app.connect(
+                WEBSOCKET_ADMITTED_ADMIN_PATH,
+                cookie=app.signed_cookie(),
+            ),
         ):
             pass
 
@@ -508,14 +513,19 @@ class TestTheGatesAdmissionIsTheDependencys:
             pytest.param(Reuse("/me"), id="current-user"),
             pytest.param(Reuse("/admin", role=ADMIN_ROLE), id="admin"),
             pytest.param(
-                Reuse("/admin", expected_status=403, authenticated=1), id="non-admin",
+                Reuse("/admin", expected_status=403, authenticated=1),
+                id="non-admin",
             ),
             pytest.param(Reuse(ALL_DEPENDENCIES_PATH, role=ADMIN_ROLE), id="every-dependency"),
             pytest.param(Reuse("/me", mode=Rule.OPTIONAL), id="optional-live"),
             pytest.param(
                 Reuse(
-                    "/me", mode=Rule.OPTIONAL, dead=True, expected_status=401,
-                    gate_counts=(1, 0), authenticated=0,
+                    "/me",
+                    mode=Rule.OPTIONAL,
+                    dead=True,
+                    expected_status=401,
+                    gate_counts=(1, 0),
+                    authenticated=0,
                 ),
                 id="optional-dead",
             ),
@@ -523,7 +533,8 @@ class TestTheGatesAdmissionIsTheDependencys:
         ],
     )
     def test_a_route_costs_one_load_and_one_touch_and_answers_as_without_the_gate(
-        self, case: Reuse,
+        self,
+        case: Reuse,
     ) -> None:
         def fresh() -> tuple[Any, SessionsRecordingTheirTransaction]:
             record = a_session(
@@ -554,157 +565,64 @@ class TestTheGatesAdmissionIsTheDependencys:
         assert len(gated.authenticated) == case.authenticated
 
 
+def _a_full_stack_app() -> AuthApp:
+    return a_gated_app(
+        None,
+        sessions=SessionsThatMustNotBeAsked(),
+        stack_policies={
+            "body_size": BodySizePolicy(default_max_bytes=BODY_LIMIT_BYTES),
+            "rate_limit": RateLimitPolicy(default=RateLimitBudget("api", 1, 60)),
+            "csrf_origin": CsrfPolicy(),
+        },
+    )
+
+
+def _post_to_optional(
+    app: AuthApp,
+    *,
+    body: bytes = b"{}",
+    headers: Mapping[str, str],
+) -> Response:
+    passing = dict(
+        (name.decode(), value.decode())
+        for name, value in a_signed_in_same_origin_request(app.config)
+    )
+    passing.update(headers)
+    return app.client.post("/optional", content=body, headers=passing, follow_redirects=False)
+
+
 class TestOrder:
     def test_a_forged_state_changing_request_is_refused_before_a_session_lookup(self) -> None:
-        def a_full_stack_app() -> AuthApp:
-            return a_gated_app(
-                None,
-                sessions=SessionsThatMustNotBeAsked(),
-                stack_policies={
-                    "body_size": BodySizePolicy(default_max_bytes=BODY_LIMIT_BYTES),
-                    "rate_limit": RateLimitPolicy(default=RateLimitBudget("api", 1, 60)),
-                    "csrf_origin": CsrfPolicy(),
-                },
-            )
-
-        def post(
-            app: AuthApp, *, body: bytes = b"{}", headers: Mapping[str, str],
-        ) -> Response:
-            passing = dict(
-                (name.decode(), value.decode())
-                for name, value in a_signed_in_same_origin_request(app.config)
-            )
-            passing.update(headers)
-            return app.client.post(
-                "/optional", content=body, headers=passing, follow_redirects=False,
-            )
-
-        assert post(
-            a_full_stack_app(),
-            headers={"origin": FOREIGN_ORIGIN, "sec-fetch-site": "cross-site"},
-        ).status_code == 403
+        assert (
+            _post_to_optional(
+                _a_full_stack_app(),
+                headers={"origin": FOREIGN_ORIGIN, "sec-fetch-site": "cross-site"},
+            ).status_code
+            == 403
+        )
         same_origin = {"origin": ALLOWED_ORIGIN}
-        app = a_full_stack_app()
+        app = _a_full_stack_app()
         without_provenance = {
             name.decode(): value.decode()
             for name, value in a_signed_in_same_origin_request(app.config)
             if name != b"sec-fetch-site"
         }
-        assert app.client.post(
-            "/optional", content=b"{}", headers=without_provenance,
-        ).status_code == 403
-        assert post(
-            a_full_stack_app(), body=b"x" * (BODY_LIMIT_BYTES + 1), headers=same_origin,
-        ).status_code == 413
-        spent = a_full_stack_app()
-        post(spent, headers=same_origin)
-        assert post(spent, headers=same_origin).status_code == 429
-
-
-class TestARecordedAdmissionBelongsToItsRequest:
-    @dataclass
-    class Arrangement:
-        first: AuthApp
-        first_relay: ScopeRelay
-        gate_entries: dict[str, Any]
-        users: UsersInMemory
-        sessions: SessionsRecordingTheirTransaction
-        second_cookie: str
-
-    @pytest.fixture
-    def arrangement(self) -> TestARecordedAdmissionBelongsToItsRequest.Arrangement:
-        first_user, second_user = FakeUser("user-1", "alice"), FakeUser("user-2", "bruno")
-        users = UsersInMemory(first_user, second_user)
-        now = datetime.now(UTC)
-        record = a_session(user=first_user, now=now)
-        sessions = SessionsRecordingTheirTransaction(record, users=users)
-        second = sessions.create(
-            second_user.id, now=now, expires_at=now + timedelta(minutes=30), refresh_token=None,
-            id_token=None,
-        )
-        first = a_gated_app(
-            record, sessions=sessions, public=ONLY_LOGIN_AND_HEALTH,
-        )
-        relay = relayed(first)
-        assert ask(first, "/me", cookie=signed_in(first)).json()["username"] == "alice"
-        control = a_plain_app(a_session())
-        control_relay = relayed(control)
-        ask(control, "/me", cookie=signed_in(control))
-        return self.Arrangement(
-            first=first,
-            first_relay=relay,
-            gate_entries={
-                key: value for key, value in relay.added.items()
-                if key not in control_relay.added
-            },
-            users=users,
-            sessions=sessions,
-            second_cookie=session_cookie_header(first.signed_cookie(second.id)),
-        )
-
-    def test_a_replay_on_the_gated_app_is_decided_by_the_gate_itself(
-        self, arrangement: Arrangement,
-    ) -> None:
-        assert arrangement.gate_entries
-        arrangement.first_relay.replay = arrangement.gate_entries
-        assert ask(arrangement.first, "/me").json() == {"detail": "Authentication required"}
-        assert ask(arrangement.first, "/health").json() == {"username": None}
-
-    @pytest.mark.parametrize("planted", ["replayed", "an-account-under-each-key"])
-    def test_a_replay_on_an_app_with_its_own_config_is_ignored(
-        self, arrangement: Arrangement, planted: str,
-    ) -> None:
-        other = with_admitted_admin_routes(an_auth_app(None, login_redirect=LOGIN_REDIRECT))
-        relay = relayed(other)
-        relay.replay = (
-            arrangement.gate_entries if planted == "replayed" else {
-                key: AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
-                for key in arrangement.gate_entries
-            }
-        )
-        cookie = signed_in(arrangement.first)
-        assert ask(other, "/me", cookie=cookie).json() == {"detail": "Session expired"}
-        with pytest.raises(RuntimeError):
-            ask(other, "/health", cookie=cookie)
-        with pytest.raises(RuntimeError):
-            ask(other, ADMITTED_ADMIN_PATH, cookie=cookie)
-
-    def test_a_replay_on_a_shared_config_is_ignored_for_another_sessions_cookie(
-        self, arrangement: Arrangement,
-    ) -> None:
-        shared = with_admitted_admin_routes(an_auth_app(
-            None, sessions=arrangement.sessions, config=arrangement.first.config,
-            login_redirect=LOGIN_REDIRECT,
-        ))
-        relay = relayed(shared)
-        relay.replay = arrangement.gate_entries
-        arrangement.sessions.events.clear()
-        answer = ask(shared, "/me", cookie=arrangement.second_cookie)
-        assert answer.json()["username"] == "bruno"
         assert (
-            counted(arrangement.sessions, "load"), counted(arrangement.sessions, "touch"),
-        ) == (1, 1)
-        assert ask(shared, "/me").json() == {"detail": "Authentication required"}
-        with pytest.raises(RuntimeError):
-            ask(shared, "/health", cookie=arrangement.second_cookie)
-        with pytest.raises(RuntimeError):
-            ask(shared, ADMITTED_ADMIN_PATH, cookie=arrangement.second_cookie)
-        with pytest.raises(RuntimeError):
-            ask(shared, "/health")
-
-    def test_a_replay_for_the_same_cookie_is_reused_without_a_store_read(
-        self, arrangement: Arrangement,
-    ) -> None:
-        shared = an_auth_app(
-            None, sessions=arrangement.sessions, config=arrangement.first.config,
-            login_redirect=LOGIN_REDIRECT,
+            app.client.post(
+                "/optional",
+                content=b"{}",
+                headers=without_provenance,
+            ).status_code
+            == 403
         )
-        relay = relayed(shared)
-        relay.replay = arrangement.gate_entries
-        arrangement.sessions.events.clear()
-        cookie = signed_in(arrangement.first)
-        assert ask(shared, "/me", cookie=cookie).json()["username"] == "alice"
-        assert ask(shared, "/health", cookie=cookie).json() == {"username": "alice"}
         assert (
-            counted(arrangement.sessions, "load"), counted(arrangement.sessions, "touch"),
-        ) == (0, 0)
+            _post_to_optional(
+                _a_full_stack_app(),
+                body=b"x" * (BODY_LIMIT_BYTES + 1),
+                headers=same_origin,
+            ).status_code
+            == 413
+        )
+        spent = _a_full_stack_app()
+        _post_to_optional(spent, headers=same_origin)
+        assert _post_to_optional(spent, headers=same_origin).status_code == 429
