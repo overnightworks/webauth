@@ -312,7 +312,7 @@ def test_the_client_identity_keeps_the_full_ipv6_address() -> None:
     """Only the rate-limit budget pools a network; the identity keeps the
     address the client actually used."""
     app = _client_ip_app()
-    install_web_auth_config(app, a_web_auth_config(ipv6_budget_prefix=48))
+    install_web_auth_config(app, a_web_auth_config())
 
     with TestClient(app, client=("2001:db8:1:2::1", 55000)) as client:
         response = client.get("/client-ip")
@@ -337,25 +337,23 @@ def test_an_application_without_a_configuration_names_nobody() -> None:
 
 
 @pytest.mark.parametrize(
-    ("address", "prefix", "budget"),
+    ("address", "budget"),
     [
-        ("203.0.113.7", 64, "203.0.113.7"),
-        ("::ffff:203.0.113.7", 64, "203.0.113.7"),
-        ("2001:db8:1:2::1", 64, "2001:db8:1:2::/64"),
-        ("2001:db8:1:2:ffff:ffff:ffff:ffff", 64, "2001:db8:1:2::/64"),
-        ("2001:db8:1:3::1", 64, "2001:db8:1:3::/64"),
-        ("2001:db8:1:ff::1", 48, "2001:db8:1::/48"),
-        ("2001:db8:1:2::1", 128, "2001:db8:1:2::1/128"),
-        ("2001:0DB8:0001:0002:0000:0000:0000:0001", 64, "2001:db8:1:2::/64"),
-        ("testclient", 64, "testclient"),
+        ("203.0.113.7", "203.0.113.7"),
+        ("::ffff:203.0.113.7", "203.0.113.7"),
+        ("2001:db8:1:2::1", "2001:db8:1:2::/64"),
+        ("2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"),
+        ("2001:db8:1:3::1", "2001:db8:1:3::/64"),
+        ("2001:db8:1:ff::1", "2001:db8:1:ff::/64"),
+        ("2001:0DB8:0001:0002:0000:0000:0000:0001", "2001:db8:1:2::/64"),
+        ("testclient", "testclient"),
     ],
 )
 def test_the_budget_of_an_address_pools_its_ipv6_network(
     address: str,
-    prefix: int,
     budget: str,
 ) -> None:
-    assert _budget_address(address, prefix) == budget
+    assert _budget_address(address) == budget
 
 
 # -- Forwarded protocol ------------------------------------------------------
