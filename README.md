@@ -113,7 +113,7 @@ The host's lock records the commit of the tag. A build needs git and builds weba
 
 A host's Dependabot entry for uv ignores `overnightworks-*`, because Dependabot looks the name up on PyPI. Real uv Dependabot runs in hosts end green with this pin, both with webauth alone and with other overnightworks libraries pinned by git beside it.
 
-Do not pin the wheel URL: one in a resolved tree fails a uv Dependabot run. The wheel stays on each tag's [release page](https://github.com/overnightworks/webauth/releases), and `scripts/verify_release.sh` checks it.
+Do not pin the wheel URL: one in a resolved tree fails a uv Dependabot run. The wheel stays on each tag's [release pages](https://github.com/overnightworks/webauth/releases), and `scripts/verify_release.sh` checks it.
 
 Tags are never moved; a broken release gets the next patch tag.
 
@@ -121,7 +121,7 @@ Tags are never moved; a broken release gets the next patch tag.
 
 The version follows [semantic versioning](https://semver.org/). While it is 0.x,
 a minor release may break a public contract and says so under **Breaking** in the
-[CHANGELOG](docs/CHANGELOG.md); a patch release never does. Only the latest minor
+[release pages](https://github.com/overnightworks/webauth/releases); a patch release never does. Only the latest minor
 release receives security fixes, as [SECURITY.md](.github/SECURITY.md) says.
 
 A module's public names are the names its `__all__` lists. Every other name it
