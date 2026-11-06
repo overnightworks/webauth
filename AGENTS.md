@@ -27,6 +27,9 @@ from a directory without `src`, so a port change or an export a host cannot impo
 
 ## Releasing
 
+- The operator's release step is `scripts/publish_release.sh vX.Y.Z`, run from the primary checkout once the release pull request is
+  merged: it waits for main's CI, tags that commit, pushes only the tag, waits for the release run and runs
+  `scripts/verify_release.sh` (checksums and attestations; also usable alone on any tag).
 - A tag is never moved: a broken release gets the next patch tag. The tag ruleset forbids updating and deleting tags.
 - `webauth.__version__` alone is raised, in the pull request that precedes the tag, and stays a plain string literal:
   setuptools reads it without importing the package, whose dependencies the isolated build lacks. The same pull request turns
@@ -37,4 +40,3 @@ from a directory without `src`, so a port change or an export a host cannot impo
   re-create the tag, and never bump the version for it.
 - The setuptools floor lives in `[build-system]` of `pyproject.toml`; after changing it run
   `scripts/regenerate_build_constraints.sh`. A setuptools bump is an ordinary Dependabot pull request (`pip`, `/.github`).
-- `scripts/verify_release.sh TAG` checks a release's checksums and attestations.
