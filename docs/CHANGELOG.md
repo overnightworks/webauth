@@ -11,7 +11,7 @@ releases without an entry are described in the
 
 **Changed**
 
-- `CsrfOriginMiddleware` refuses a state-changing request that carries more than one `Origin` header with the cross-origin refusal, as the WebSocket handshake already does. Browsers send one `Origin`.
+- Where `CsrfOriginMiddleware` falls back to the `Origin` header (no `Sec-Fetch-Site`, or `same-site`), it refuses a state-changing request that carries more than one `Origin` header with the cross-origin refusal, as the WebSocket handshake already does. Browsers send one `Origin`.
 
 ## 0.30.0 - 2026-11-04
 
