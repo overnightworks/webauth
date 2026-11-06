@@ -24,6 +24,7 @@ from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_LEEWAY_SECONDS,
     APP_CLIENT_ID,
+    a_token_of_length,
     REALM_ISSUER,
     REALM_JWKS_URL,
     jws,
@@ -34,10 +35,23 @@ from tests.support.oidc_arrangement import (
 from webauth.jwt_verification import (
     RejectionReason,
     _Rejected,
+    _VerifiedClaims,
 )
 
 MAX_HEADER_SEGMENT_CHARACTERS = 512
 MAX_KEY_ID_CHARACTERS = 128
+
+
+_TOKEN_CHARACTER_LIMIT = 8 * 1024
+
+
+def _token_of_length(issuer: IssuerScenario, length: int) -> str:
+    return a_token_of_length(
+        length,
+        lambda header_padding, claim_padding: issuer.token(
+            {"padding": claim_padding}, header={"pad": header_padding}
+        ),
+    )
 
 
 def _hs256_with_public_key(key: rsa.RSAPrivateKey) -> Callable[[bytes], bytes]:
@@ -256,7 +270,7 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
             id="header-b64-false",
         ),
         pytest.param(
-            lambda issuer: issuer.token({"padding": "x" * 8 * 1024}),
+            lambda issuer: _token_of_length(issuer, _TOKEN_CHARACTER_LIMIT + 1),
             RejectionReason.TOKEN_TOO_LONG,
             id="oversized-token",
         ),
@@ -302,6 +316,12 @@ def _token_with_header_of_bytes(issuer: IssuerScenario, header_bytes: int) -> st
     return jws(
         header + " " * (header_bytes - len(header)), issuer.claims(), rs256(rsa_key("current"))
     )
+
+
+def test_a_token_of_exactly_the_character_limit_is_accepted(issuer: IssuerScenario) -> None:
+    result = issuer.verifier.verify(_token_of_length(issuer, _TOKEN_CHARACTER_LIMIT))
+
+    assert isinstance(result, _VerifiedClaims)
 
 
 @pytest.mark.parametrize(
