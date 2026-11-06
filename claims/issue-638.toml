@@ -1,8 +1,0 @@
-claim_id = "69c4b759f014419eaa8ff2cac6651e27"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "e864b31cda4c6ec16174a491f6a4f32fe0e87bab"
-branch = "claude/issue-638-workload-caller-leaves"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/service_callers.py", "tests/fixtures/typing_hosts/service_host.py", "tests/test_service_callers.py"]
-opened_commit = "3a9bc4ca7b26fedb42933cc734919cb969b20bec"
-whole_reason = "One public method leaves: its one production file, the two documents that describe it and its proofs change in one landing."
