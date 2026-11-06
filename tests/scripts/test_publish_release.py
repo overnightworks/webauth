@@ -259,6 +259,18 @@ def set_up_git_tag_lookup_failing(release: Release) -> None:
     fail_git_when(release, '"$1" == for-each-ref')
 
 
+def set_up_branch_lookup_failing(release: Release) -> None:
+    fail_git_when(release, '"$1" == symbolic-ref')
+
+
+def set_up_local_main_lookup_failing(release: Release) -> None:
+    fail_git_when(release, '"$1" == rev-parse && "$*" == *refs/heads/main')
+
+
+def set_up_origin_main_lookup_failing(release: Release) -> None:
+    fail_git_when(release, '"$1" == rev-parse && "$*" == *refs/remotes/origin/main')
+
+
 def set_up_local_main_ahead(release: Release) -> None:
     release.commit("ahead")
 
@@ -300,6 +312,9 @@ def set_up_gh_missing(release: Release) -> None:
         ("{tag}", set_up_other_branch, "main"),
         ("{tag}", set_up_dirty_tree, "clean"),
         ("{tag}", set_up_git_status_failing, "git status failed: index corrupt"),
+        ("{tag}", set_up_branch_lookup_failing, "git symbolic-ref failed: index corrupt"),
+        ("{tag}", set_up_local_main_lookup_failing, "git rev-parse failed: index corrupt"),
+        ("{tag}", set_up_origin_main_lookup_failing, "git rev-parse failed: index corrupt"),
         ("{tag}", set_up_git_tag_lookup_failing, "git for-each-ref failed: index corrupt"),
         ("{tag}", set_up_local_main_ahead, "origin/main"),
         ("{tag}", set_up_origin_main_ahead, "origin/main"),

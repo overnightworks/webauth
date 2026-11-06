@@ -47,12 +47,23 @@ cd "$(dirname "$0")/.."
 version="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/webauth/__init__.py 2>/dev/null)" ||
   refuse "cannot read src/webauth/__init__.py"
 [[ "$tag" == "v${version}" ]] || refuse "${tag} differs from v${version}, the webauth.__version__ of this checkout"
-[[ "$(git symbolic-ref --short -q HEAD || true)" == "main" ]] || refuse "the checkout is not on main"
+branch_status=0
+branch="$(git symbolic-ref --short -q HEAD 2>&1)" || branch_status=$?
+((branch_status <= 1)) || refuse "git symbolic-ref failed: ${branch}"
+[[ "$branch" == "main" ]] || refuse "the checkout is not on main"
 status="$(git status --porcelain 2>&1)" || refuse "git status failed: ${status}"
 [[ -z "$status" ]] || refuse "the tree is not clean"
 run_hidden git fetch --no-tags origin
-sha="$(git rev-parse refs/heads/main 2>/dev/null)" || refuse "main does not exist locally"
-origin_sha="$(git rev-parse refs/remotes/origin/main 2>/dev/null)" || refuse "origin has no main"
+resolve_ref() {
+  local ref="$1" missing="$2" status=0
+  resolved="$(git rev-parse -q --verify "$ref" 2>&1)" || status=$?
+  [[ "$status" -ne 1 ]] || refuse "$missing"
+  [[ "$status" -eq 0 ]] || refuse "git rev-parse failed: ${resolved}"
+}
+resolve_ref refs/heads/main "main does not exist locally"
+sha="$resolved"
+resolve_ref refs/remotes/origin/main "origin has no main"
+origin_sha="$resolved"
 [[ "$sha" == "$origin_sha" ]] || refuse "local main differs from origin/main"
 if ! remote_tag="$(git ls-remote --tags origin "refs/tags/${tag}" 2>&1)"; then
   refuse "git ls-remote failed: ${remote_tag}"
