@@ -287,6 +287,7 @@ def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
 
     def echo(request: Request, user: AuthenticatedUser) -> dict[str, str]:
         auth.route_runs.append(request.scope["path"])
+        auth.resource_persons.append(user)
         return {"id": user.id, "username": user.username, "role": user.role}
 
     @auth.app.api_route(resource.entry_point, methods=["GET", "POST", "PUT", "HEAD", "OPTIONS"])

@@ -119,7 +119,8 @@ def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
     admin_only = app.ask(resource.entry_point, method="DELETE", authorization=token)
 
     assert (posted.status_code, posted.json()["role"]) == (200, MEMBER_ROLE)
-    assert type(posted.json()["role"]) is str
+    [admitted] = app.auth.resource_persons
+    assert type(admitted.role) is str
     assert admin_only.status_code == 403
     stored = the_account_of_the_token(app)
     assert stored is not None
