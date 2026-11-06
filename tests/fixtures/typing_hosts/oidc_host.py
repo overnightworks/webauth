@@ -489,7 +489,18 @@ def a_host_ends_a_session() -> None:
     HostSessions().delete("session-id")
 
 
-def a_host_names_the_documented_surface() -> tuple[object, ...]:
+def _surface_of_the_errors_and_the_verified_records() -> tuple[object, ...]:
+    return (
+        TokenEndpointError, WebAuthError,
+        AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
+        AdmissionRefusal, EverySubject, NoAdmins, OidcIdentity, SessionRecord, UserRecord,
+        VerifiedAccessToken, VerifiedClaims, VerifiedLogout, WallClock, admit_session,
+        bearer_caller, install_web_auth_config,
+        is_https_url, session_id_from_request,
+    )
+
+
+def _surface_of_the_gates_and_limits() -> tuple[object, ...]:
     return (
         AuthorizedParties, BearerCaller, BearerGateMiddleware, BodySizeLimitMiddleware,
         MachinePaths, PersonPaths, ProtectedResource, install_resource_metadata,
@@ -499,6 +510,11 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         KEY_SET_FETCH_DEADLINE_SECONDS, KeySetFetchError, LoginRedirect,
         MAX_AUTHORIZATION_CODE_CHARS, MAX_KEY_SET_BYTES, MAX_KEY_SET_KEYS,
         MAX_SESSION_COOKIE_CHARS, MAX_TOKEN_RESPONSE_BYTES, MonotonicClock,
+    )
+
+
+def _surface_of_the_login_and_session_flow() -> tuple[object, ...]:
+    return (
         LOGOUT_TOKEN_MAX_AGE_SECONDS, OidcClientConfig,
         PENDING_LOGIN_MAX_AGE_SECONDS,
         PLAIN_SESSION_COOKIE_NAME, PendingLogin, RateLimitBackend,
@@ -507,10 +523,12 @@ def a_host_names_the_documented_surface() -> tuple[object, ...]:
         SessionGate, SessionGateMiddleware, SessionRecordStore, SessionTransaction,
         PublicRule, admitted_admin, admitted_user,
         SingleProcessRateLimitBackend, TOKEN_EXCHANGE_DEADLINE_SECONDS,
-        TokenEndpointError, WebAuthError,
-        AccountEventKind.BACKCHANNEL_LOGOUT, UsernameTakenError,
-        AdmissionRefusal, EverySubject, NoAdmins, OidcIdentity, SessionRecord, UserRecord,
-        VerifiedAccessToken, VerifiedClaims, VerifiedLogout, WallClock, admit_session,
-        bearer_caller, install_web_auth_config,
-        is_https_url, session_id_from_request,
+    )
+
+
+def a_host_names_the_documented_surface() -> tuple[object, ...]:
+    return (
+        *_surface_of_the_gates_and_limits(),
+        *_surface_of_the_login_and_session_flow(),
+        *_surface_of_the_errors_and_the_verified_records(),
     )

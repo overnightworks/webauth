@@ -59,12 +59,7 @@ TOO_LARGE_BODY = b'{"detail":"Request body too large"}'
 START_SEND_BOUND_SECONDS = 0.05
 
 
-def a_body_limited_app(
-    *, full_stack: bool = False, policy: BodySizePolicy | None = None
-) -> FastAPI:
-    app = FastAPI()
-    install_web_auth_config(app, A_CONFIG)
-
+def _add_the_body_reading_routes(app: FastAPI) -> None:
     @app.post("/reads-after-first-chunk")
     async def reads_after_first_chunk(request: Request) -> StreamingResponse:
         async def stream() -> AsyncIterator[bytes]:
@@ -102,6 +97,13 @@ def a_body_limited_app(
     async def reads_stream(request: Request) -> dict[str, int]:
         return {"length": sum([len(chunk) async for chunk in request.stream()])}
 
+
+def a_body_limited_app(
+    *, full_stack: bool = False, policy: BodySizePolicy | None = None
+) -> FastAPI:
+    app = FastAPI()
+    install_web_auth_config(app, A_CONFIG)
+    _add_the_body_reading_routes(app)
     body_size = policy or BodySizePolicy(default_max_bytes=LIMIT)
     if full_stack:
         install_web_auth_middleware(
