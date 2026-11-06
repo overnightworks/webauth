@@ -1,0 +1,8 @@
+claim_id = "33c391ef19914265b254cd6be8445c1b"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "744553941ab1d52c64943133f3ac87f8af6c65ea"
+branch = "claude/issue-604-old-cookie-proofs-leave"
+scope = ["docs/host-contract.md", "tests/conftest.py", "tests/middleware/test_csrf.py", "tests/support/oidc_arrangement.py", "tests/test_oidc_access_token.py", "tests/test_oidc_login_logout.py", "tests/test_service_callers.py"]
+opened_commit = "18328445f5bb7b2aca32e69bf8fe549e4b2f5cfe"
+whole_reason = "One test-only cleanup from #595's cut, a few lines per file: the old-cookie proofs with their two host-contract paragraphs, and #599's key-set follow-up."
