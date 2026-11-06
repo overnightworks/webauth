@@ -14,6 +14,7 @@ from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tests.support.oidc_arrangement import LogoutPage, a_relying_party
+from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     SessionRecordsInMemory,
@@ -21,7 +22,6 @@ from tests.support.webauth_arrangement import (
     WriteLockInMemory,
     a_web_auth_config,
     an_http_scope,
-    assert_carries_policy_headers,
     drive,
     no_receive,
     starts,
@@ -176,17 +176,26 @@ def test_a_missing_configuration_answers_a_500_without_hsts_before_the_route_run
         client.get("/side-effect")
 
 
-@pytest.mark.parametrize(("path", "status"), [
-    pytest.param("/moved", 307, id="redirect"),
-    pytest.param("/forbidden", 403, id="handled-error"),
-    pytest.param("/route-pins-https", 200, id="route-sets-its-own-hsts"),
-])
-@pytest.mark.parametrize(("cookie_secure", "hsts"), [
-    pytest.param(True, "max-age=31536000; includeSubDomains", id="secure"),
-    pytest.param(False, None, id="secure-off"),
-])
+@pytest.mark.parametrize(
+    ("path", "status"),
+    [
+        pytest.param("/moved", 307, id="redirect"),
+        pytest.param("/forbidden", 403, id="handled-error"),
+        pytest.param("/route-pins-https", 200, id="route-sets-its-own-hsts"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("cookie_secure", "hsts"),
+    [
+        pytest.param(True, "max-age=31536000; includeSubDomains", id="secure"),
+        pytest.param(False, None, id="secure-off"),
+    ],
+)
 def test_every_answer_carries_exactly_the_hsts_cookie_secure_decides(
-    path: str, status: int, cookie_secure: bool, hsts: str | None,
+    path: str,
+    status: int,
+    cookie_secure: bool,
+    hsts: str | None,
 ) -> None:
     app = an_app(cookie_secure=cookie_secure)
 
@@ -235,8 +244,9 @@ async def test_a_start_without_headers_gains_them_and_keeps_its_other_fields() -
     app = an_app()
 
     async def bare_app(_scope: Scope, _receive: Receive, send: Send) -> None:
-        await send({"type": "http.response.start", "status": 204, "trailers": True,
-                    "extension": "kept"})
+        await send(
+            {"type": "http.response.start", "status": 204, "trailers": True, "extension": "kept"}
+        )
         await send({"type": "http.response.body", "body": b"x", "more_body": True})
         await send({"type": "http.response.trailers", "headers": [(b"x-trailer", b"1")]})
 
@@ -246,7 +256,9 @@ async def test_a_start_without_headers_gains_them_and_keeps_its_other_fields() -
     assert raised is None
     assert_carries_policy_headers(Headers(raw=start["headers"]), POLICY, hsts=True)
     assert {key: start[key] for key in ("status", "trailers", "extension")} == {
-        "status": 204, "trailers": True, "extension": "kept",
+        "status": 204,
+        "trailers": True,
+        "extension": "kept",
     }
     assert body == {"type": "http.response.body", "body": b"x", "more_body": True}
     assert trailers == {"type": "http.response.trailers", "headers": [(b"x-trailer", b"1")]}
@@ -322,7 +334,8 @@ def test_a_cache_control_rule_applies_to_a_normal_response_and_to_the_library_50
 
     assert (normal.status_code, failed.status_code) == (200, 500)
     assert (normal.headers["cache-control"], failed.headers["cache-control"]) == (
-        cacheable, cacheable,
+        cacheable,
+        cacheable,
     )
 
 
@@ -400,7 +413,9 @@ OWN_POLICY_ANSWER_HEADERS = {
     ],
 )
 def test_an_answer_with_the_own_policy_marker_keeps_its_policy_and_loses_the_marker(
-    answer_headers: dict[str, str], expected_policy: str, expected_cache_control: str,
+    answer_headers: dict[str, str],
+    expected_policy: str,
+    expected_cache_control: str,
 ) -> None:
     policy = SecurityHeadersPolicy(
         POLICY.content_security_policy,
@@ -420,7 +435,9 @@ def test_an_answer_with_the_own_policy_marker_keeps_its_policy_and_loses_the_mar
     assert response.headers["cache-control"] == expected_cache_control
     assert "webauth-own-policy" not in response.headers
     assert_carries_policy_headers(
-        response.headers, replace(policy, content_security_policy=expected_policy), hsts=True,
+        response.headers,
+        replace(policy, content_security_policy=expected_policy),
+        hsts=True,
     )
 
 
@@ -476,7 +493,8 @@ def the_logout_page(
         paths=SignInPaths(start="/login", callback="/callback", logout=LOGOUT_PATH),
         relying_party=lambda _request: relying_party,
         admission=AdmissionConfig(
-            bound_issuer="https://login.example.org", login_group="/apps/notes",
+            bound_issuer="https://login.example.org",
+            login_group="/apps/notes",
             admin_group="/apps/notes/admin",
         ),
         transaction=lambda: nullcontext(stores),
@@ -490,13 +508,15 @@ def the_logout_page(
 
 
 def the_logout_policy_of(page: HttpxResponse) -> str:
-    return "; ".join((
-        "default-src 'none'",
-        f"script-src {LogoutPage(page.text).script_source}",
-        "form-action https://login.example.org https://notes.example.org",
-        "base-uri 'none'",
-        "frame-ancestors 'none'",
-    ))
+    return "; ".join(
+        (
+            "default-src 'none'",
+            f"script-src {LogoutPage(page.text).script_source}",
+            "form-action https://login.example.org https://notes.example.org",
+            "base-uri 'none'",
+            "frame-ancestors 'none'",
+        )
+    )
 
 
 @pytest.mark.parametrize("cookie_secure", HSTS_SETTINGS)
@@ -514,10 +534,13 @@ def test_the_logout_page_keeps_its_policy_and_no_store_and_gets_the_other_header
     )
 
 
-@pytest.mark.parametrize("host_middleware", [
-    pytest.param(add_a_base_http_host_middleware, id="base-http-middleware"),
-    pytest.param(add_a_pure_asgi_host_middleware, id="pure-asgi-middleware"),
-])
+@pytest.mark.parametrize(
+    "host_middleware",
+    [
+        pytest.param(add_a_base_http_host_middleware, id="base-http-middleware"),
+        pytest.param(add_a_pure_asgi_host_middleware, id="pure-asgi-middleware"),
+    ],
+)
 def test_a_host_middleware_inside_the_stack_does_not_cost_the_page_its_policy(
     host_middleware: Callable[[FastAPI], None],
 ) -> None:

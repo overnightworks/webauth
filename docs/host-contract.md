@@ -150,6 +150,8 @@ added the enforcing gate. Its page, API and public-path proofs are
 `test_an_api_call_without_a_session_gets_401_authentication_required` and
 `test_a_public_path_passes_untouched_and_asks_no_store` in
 [test_session_gate.py](../tests/middleware/test_session_gate.py).
+The recorded-admission proofs, among them `test_a_replay_on_the_gated_app_is_decided_by_the_gate_itself`,
+are in [test_session_gate_recorded_admission.py](../tests/middleware/test_session_gate_recorded_admission.py).
 
 - **A page without a session** sends the browser straight to the app's start
   route, with `next` naming the page, so the person lands there after signing
@@ -202,9 +204,10 @@ added the enforcing gate. Its page, API and public-path proofs are
   follows RFC 7235 section 3.1 and RFC 6750 section 3; a malformed header answers 401, not
   the 400 RFC 6750 section 3.1 recommends, as the machine paths do. A host's own 401 on a
   person path carries no challenge unless the host adds it.
-  `test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_without_realm`
-  and `test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer` in
+  `test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_without_realm` in
   [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
+  and `test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer` in
+  [test_bearer_gate_person_paths_challenges_and_neighbours.py](../tests/middleware/test_bearer_gate_person_paths_challenges_and_neighbours.py)
   prove the table.
 
   The machine refusal contract comes from
@@ -345,6 +348,7 @@ layer), with the applied lines of
   enters the host's serialized transaction once. A WebSocket handshake is not gated.
 
 Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
+and [test_bearer_gate_person_paths_challenges_and_neighbours.py](../tests/middleware/test_bearer_gate_person_paths_challenges_and_neighbours.py)
 in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
 Keycloak in the hand-run harness.
 
@@ -532,6 +536,11 @@ of OpenID Connect. The `webauth.sign_in_routes` module and `install_sign_in_rout
 `webauth.oidc_login` and `webauth.cookies` module docstrings hold the login and its
 cookies, and `build_app` in [`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py)
 is the worked host, type-checked and run against a real issuer.
+
+Proofs: `test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start`,
+`test_the_derived_cache_rule_marks_the_sign_in_answers_no_store` and
+`test_the_derived_browser_paths_spend_one_sign_in_budget`, among others, in
+[test_sign_in_routes_derived_policies.py](../tests/test_sign_in_routes_derived_policies.py).
 
 The host supplies a `SignInTransaction` (`webauth.ports`) and a `refused` hook. The
 callback enters the transaction once, only after the issuer's code exchange and the pure

@@ -23,7 +23,9 @@ from webauth.service_callers import (
 
 
 def a_service_builds_its_check(
-    fetch_key_set: KeySetFetch, wall_clock: WallClock, monotonic_clock: MonotonicClock,
+    fetch_key_set: KeySetFetch,
+    wall_clock: WallClock,
+    monotonic_clock: MonotonicClock,
 ) -> ServiceCallerCheck:
     identity = ServiceIdentity(
         issuer="https://login.example.org/realms/workshop",

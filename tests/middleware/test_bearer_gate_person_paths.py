@@ -9,34 +9,24 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Iterator
-from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
 import pytest
 from fastapi import Depends, FastAPI, Request
-from httpx import Response
 
 from tests.support.gate_arrangement import (
-    A_TOKEN,
     EXPORT_PATH,
-    FOREIGN_SECRET_PATH,
     MACHINE_AS_PERSON_PATH,
     MACHINE_SESSION_PATH,
-    PERSON_ADMIN_ME_PATH,
-    PERSON_ADMITTED_ADMIN_PATH,
     PERSON_ADMITTED_ME_PATH,
     PERSON_CALLER_PATH,
     PERSON_INSUFFICIENT_SCOPE,
     PERSON_INVALID_REQUEST,
     PERSON_INVALID_TOKEN,
     PERSON_ME_PATH,
-    PERSON_PATHS,
     PERSON_PREFIX,
     PERSON_REALM,
     REALM_INSUFFICIENT_SCOPE,
-    BearerApp,
-    a_bearer_app,
     a_key_set_answering,
     a_token,
     bearing,
@@ -49,75 +39,37 @@ from tests.support.oidc_login_host import (
     TransactionKind,
     failing,
 )
+from tests.support.person_paths_arrangement import (
+    ADMIN_READERS,
+    ADMIN_TOKEN,
+    BOTH_HOSTS,
+    BOTH_TRANSACTIONS,
+    LENA_TOKEN,
+    MEMBER_TOKEN,
+    OPTIONAL_PATH,
+    OUTSIDER_TOKEN,
+    UNGATED_ME_PATH,
+    a_lena,
+    a_person_app,
+    a_transaction_failing_to_be_created,
+    a_transaction_failing_to_be_entered,
+    ran,
+    the_account,
+    the_challenge,
+)
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
-    LOGIN_REDIRECT,
     MEMBER_ROLE,
-    FakeUser,
 )
 from webauth.dependencies import current_user_dependency
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import admitted_user
 from webauth.policies import (
     AuthorizedParties,
-    PathRules,
-    PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
 )
-from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser, SignInStores
-
-ADMIN_TOKEN = A_TOKEN
-MEMBER_TOKEN = a_token(groups=["/apps/x"])
-OUTSIDER_TOKEN = a_token(groups=["/apps/elsewhere"])
-LENA_TOKEN = a_token(preferred_username="lena")
-OPTIONAL_PATH = "/optional"
-UNGATED_ME_PATH = "/me"
-
-BOTH_HOSTS = pytest.mark.parametrize(
-    "session_gate", [pytest.param(True, id="SG"), pytest.param(False, id="NG")],
-)
-BOTH_TRANSACTIONS = pytest.mark.parametrize(
-    "kind",
-    [
-        pytest.param(TransactionKind.PER_CALL, id="PC"),
-        pytest.param(TransactionKind.ROLLING_BACK, id="RB"),
-    ],
-)
-
-
-def a_lena() -> FakeUser:
-    return FakeUser(id=OPERATOR_SUBJECT, username="lena", role=MEMBER_ROLE)
-
-
-def a_transaction_failing_to_be_created() -> AbstractContextManager[SignInStores]:
-    raise StoreDown
-
-
-def a_transaction_failing_to_be_entered() -> AbstractContextManager[SignInStores]:
-    @contextmanager
-    def never_entered() -> Iterator[SignInStores]:
-        raise StoreDown
-        yield  # pragma: no cover
-
-    return never_entered()
-
-
-def a_person_app(**keywords: Any) -> BearerApp:
-    return a_bearer_app(person_paths=PERSON_PATHS, **keywords)
-
-
-def the_account(app: BearerApp) -> Any:
-    assert app.accounts is not None
-    return next((user for user in app.accounts.list() if user.id == OPERATOR_SUBJECT), None)
-
-
-def the_challenge(response: Response) -> str | None:
-    return response.headers.get("www-authenticate")
-
-
-def ran(app: BearerApp) -> list[str]:
-    return app.auth.route_runs
+from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser
 
 
 @BOTH_HOSTS
@@ -127,7 +79,8 @@ def test_a_token_on_a_person_path_is_the_account_behind_its_subject(session_gate
     response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
 
     assert (response.status_code, response.json()) == (
-        200, {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE, "session": None},
+        200,
+        {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE, "session": None},
     )
     assert app.auth.authenticated == [AuthenticatedUser(OPERATOR_SUBJECT, "lena", MEMBER_ROLE)]
 
@@ -141,7 +94,9 @@ def test_a_token_on_a_person_path_is_the_account_behind_its_subject(session_gate
     ],
 )
 def test_the_first_token_of_a_new_subject_creates_its_account_as_a_sign_in_does(
-    kind: TransactionKind, token: str, username: str,
+    kind: TransactionKind,
+    token: str,
+    username: str,
 ) -> None:
     app = a_person_app(transaction_kind=kind)
 
@@ -149,13 +104,17 @@ def test_the_first_token_of_a_new_subject_creates_its_account_as_a_sign_in_does(
     second = app.ask(PERSON_ME_PATH, authorization=bearing(token))
 
     assert (first.status_code, first.json()["username"], second.json()["username"]) == (
-        200, username, username,
+        200,
+        username,
+        username,
     )
     assert app.audit is not None
     assert app.audit.account_events == [
         AccountEvent(
-            kind=AccountEventKind.USER_CREATED, actor_id=None,
-            subject_id=OPERATOR_SUBJECT, role=ADMIN_ROLE,
+            kind=AccountEventKind.USER_CREATED,
+            actor_id=None,
+            subject_id=OPERATOR_SUBJECT,
+            role=ADMIN_ROLE,
         ),
     ]
     assert the_account(app).username == username
@@ -176,17 +135,26 @@ def test_the_role_follows_the_tokens_groups_and_is_stored_as_at_sign_in(
     demoted = asked_with(MEMBER_TOKEN)
 
     assert (unchanged, promoted, promoted_again, demoted) == (
-        MEMBER_ROLE, ADMIN_ROLE, ADMIN_ROLE, MEMBER_ROLE,
+        MEMBER_ROLE,
+        ADMIN_ROLE,
+        ADMIN_ROLE,
+        MEMBER_ROLE,
     )
     assert app.audit is not None
     assert app.audit.account_events == [
         AccountEvent(
-            kind=AccountEventKind.ROLE_CHANGED, actor_id=None, subject_id=OPERATOR_SUBJECT,
-            role=ADMIN_ROLE, previous_role=MEMBER_ROLE,
+            kind=AccountEventKind.ROLE_CHANGED,
+            actor_id=None,
+            subject_id=OPERATOR_SUBJECT,
+            role=ADMIN_ROLE,
+            previous_role=MEMBER_ROLE,
         ),
         AccountEvent(
-            kind=AccountEventKind.ROLE_CHANGED, actor_id=None, subject_id=OPERATOR_SUBJECT,
-            role=MEMBER_ROLE, previous_role=ADMIN_ROLE,
+            kind=AccountEventKind.ROLE_CHANGED,
+            actor_id=None,
+            subject_id=OPERATOR_SUBJECT,
+            role=MEMBER_ROLE,
+            previous_role=ADMIN_ROLE,
         ),
     ]
     assert the_account(app).role == MEMBER_ROLE
@@ -201,7 +169,9 @@ def test_a_token_of_a_person_outside_the_app_is_refused_before_any_store_is_touc
     response = app.ask(PERSON_ME_PATH, authorization=bearing(OUTSIDER_TOKEN))
 
     assert (response.status_code, response.json(), the_challenge(response)) == (
-        403, {"detail": "No access"}, PERSON_INSUFFICIENT_SCOPE,
+        403,
+        {"detail": "No access"},
+        PERSON_INSUFFICIENT_SCOPE,
     )
     assert isinstance(app.transaction, RecordingSignInTransaction)
     assert (app.transaction.entries, the_account(app), ran(app)) == (0, None, [])
@@ -217,7 +187,9 @@ def test_a_username_the_store_refuses_answers_403_login_failed_without_a_challen
     response = app.ask(PERSON_ME_PATH, authorization=bearing(taken))
 
     assert (response.status_code, response.json(), the_challenge(response)) == (
-        403, {"detail": "Login failed"}, None,
+        403,
+        {"detail": "Login failed"},
+        None,
     )
     assert app.audit is not None
     assert (the_account(app), app.audit.account_events, ran(app)) == (None, [], [])
@@ -234,7 +206,9 @@ NO_BEARER_CREDENTIAL = [
 @BOTH_HOSTS
 @pytest.mark.parametrize(("credentials", "request_keywords"), NO_BEARER_CREDENTIAL)
 def test_without_a_bearer_credential_a_person_path_is_decided_by_the_session(
-    session_gate: bool, credentials: dict[str, Any], request_keywords: dict[str, Any],
+    session_gate: bool,
+    credentials: dict[str, Any],
+    request_keywords: dict[str, Any],
 ) -> None:
     app = a_person_app(session_gate=session_gate)
 
@@ -242,7 +216,9 @@ def test_without_a_bearer_credential_a_person_path_is_decided_by_the_session(
     admitted = app.ask(PERSON_ME_PATH, cookie=True, **credentials, **request_keywords)
 
     assert (refused.status_code, refused.json(), the_challenge(refused)) == (
-        401, {"detail": "Authentication required"}, PERSON_REALM,
+        401,
+        {"detail": "Authentication required"},
+        PERSON_REALM,
     )
     assert (admitted.status_code, admitted.json()["username"]) == (200, "alice")
     assert isinstance(app.transaction, RecordingSignInTransaction)
@@ -251,33 +227,68 @@ def test_without_a_bearer_credential_a_person_path_is_decided_by_the_session(
 
 MALFORMED_OR_INVALID = [
     pytest.param(
-        (f"Bearer {ADMIN_TOKEN}", f"Bearer {ADMIN_TOKEN}"), {}, None,
-        PERSON_INVALID_REQUEST, "Invalid request", id="two-lines",
+        (f"Bearer {ADMIN_TOKEN}", f"Bearer {ADMIN_TOKEN}"),
+        {},
+        None,
+        PERSON_INVALID_REQUEST,
+        "Invalid request",
+        id="two-lines",
     ),
     pytest.param(
-        (f"Bearer {ADMIN_TOKEN} extra",), {}, None,
-        PERSON_INVALID_REQUEST, "Invalid request", id="two-credentials",
+        (f"Bearer {ADMIN_TOKEN} extra",),
+        {},
+        None,
+        PERSON_INVALID_REQUEST,
+        "Invalid request",
+        id="two-credentials",
     ),
     pytest.param(
-        (f"Bearer {ADMIN_TOKEN}",), {"params": {"access_token": "second"}}, None,
-        PERSON_INVALID_REQUEST, "Invalid request", id="a-second-method",
+        (f"Bearer {ADMIN_TOKEN}",),
+        {"params": {"access_token": "second"}},
+        None,
+        PERSON_INVALID_REQUEST,
+        "Invalid request",
+        id="a-second-method",
     ),
     pytest.param(
-        ("Bearer",), {}, None, PERSON_INVALID_REQUEST, "Invalid request", id="no-credential",
+        ("Bearer",),
+        {},
+        None,
+        PERSON_INVALID_REQUEST,
+        "Invalid request",
+        id="no-credential",
     ),
     pytest.param(
-        ("=x",), {}, None, PERSON_INVALID_REQUEST, "Invalid request", id="no-scheme",
+        ("=x",),
+        {},
+        None,
+        PERSON_INVALID_REQUEST,
+        "Invalid request",
+        id="no-scheme",
     ),
     pytest.param(
-        ("Bearer a$b",), {}, None, PERSON_INVALID_TOKEN, "Invalid token", id="not-a-b64token",
+        ("Bearer a$b",),
+        {},
+        None,
+        PERSON_INVALID_TOKEN,
+        "Invalid token",
+        id="not-a-b64token",
     ),
     pytest.param(
-        (f"Bearer {a_token(sub=ABSENT)}",), {}, None,
-        PERSON_INVALID_TOKEN, "Invalid token", id="no-subject",
+        (f"Bearer {a_token(sub=ABSENT)}",),
+        {},
+        None,
+        PERSON_INVALID_TOKEN,
+        "Invalid token",
+        id="no-subject",
     ),
     pytest.param(
-        (f"Bearer {ADMIN_TOKEN}",), {}, KeySetFetchError("down"),
-        PERSON_INVALID_TOKEN, "Invalid token", id="key-set-down",
+        (f"Bearer {ADMIN_TOKEN}",),
+        {},
+        KeySetFetchError("down"),
+        PERSON_INVALID_TOKEN,
+        "Invalid token",
+        id="key-set-down",
     ),
 ]
 
@@ -298,7 +309,9 @@ def test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_wit
     response = app.ask(PERSON_ME_PATH, authorization=authorization, **request_keywords)
 
     assert (response.status_code, response.json(), the_challenge(response)) == (
-        401, {"detail": detail}, challenge,
+        401,
+        {"detail": detail},
+        challenge,
     )
     assert isinstance(app.transaction, RecordingSignInTransaction)
     assert (app.transaction.entries, ran(app)) == (0, [])
@@ -313,7 +326,8 @@ def test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_wit
     ],
 )
 def test_with_the_same_parties_on_both_kinds_they_admit_exactly_the_same_clients(
-    claims: dict[str, Any], admitted: bool,
+    claims: dict[str, Any],
+    admitted: bool,
 ) -> None:
     app = a_person_app()
     token = bearing(a_token(**claims))
@@ -332,7 +346,10 @@ def test_with_the_same_parties_on_both_kinds_they_admit_exactly_the_same_clients
     ],
 )
 def test_a_party_listed_on_one_kind_of_path_is_refused_on_the_other(
-    machine_parties: set[str], person_parties: set[str], machine_status: int, person_status: int,
+    machine_parties: set[str],
+    person_parties: set[str],
+    machine_status: int,
+    person_status: int,
 ) -> None:
     app = a_person_app(
         machine_parties=AuthorizedParties(frozenset(machine_parties)),
@@ -349,7 +366,8 @@ def test_a_party_listed_on_one_kind_of_path_is_refused_on_the_other(
 @BOTH_HOSTS
 @pytest.mark.parametrize("method", ["POST", "DELETE"])
 def test_a_token_post_on_a_person_path_needs_no_origin_and_no_cookie(
-    session_gate: bool, method: str,
+    session_gate: bool,
+    method: str,
 ) -> None:
     app = a_person_app(session_gate=session_gate)
 
@@ -360,7 +378,8 @@ def test_a_token_post_on_a_person_path_needs_no_origin_and_no_cookie(
 
 @BOTH_HOSTS
 def test_beside_a_token_the_cookie_decides_nothing_and_names_no_session(
-    session_gate: bool, monkeypatch: pytest.MonkeyPatch,
+    session_gate: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = a_person_app(session_gate=session_gate)
     failing(app.auth.sessions, "load", monkeypatch)
@@ -369,8 +388,13 @@ def test_beside_a_token_the_cookie_decides_nothing_and_names_no_session(
     response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN), cookie=True)
 
     assert (response.status_code, response.json()) == (
-        200, {"id": OPERATOR_SUBJECT, "username": OPERATOR_SUBJECT, "role": MEMBER_ROLE,
-              "session": None},
+        200,
+        {
+            "id": OPERATOR_SUBJECT,
+            "username": OPERATOR_SUBJECT,
+            "role": MEMBER_ROLE,
+            "session": None,
+        },
     )
 
 
@@ -382,19 +406,10 @@ def test_a_machine_admission_beside_a_cookie_names_no_session() -> None:
     assert (response.status_code, response.json()) == (200, {"session": None})
 
 
-ADMIN_READERS = pytest.mark.parametrize(
-    ("session_gate", "path"),
-    [
-        pytest.param(True, PERSON_ADMITTED_ADMIN_PATH, id="SG-admitted_admin"),
-        pytest.param(True, PERSON_ADMIN_ME_PATH, id="SG-admin_user"),
-        pytest.param(False, PERSON_ADMIN_ME_PATH, id="NG-admin_user"),
-    ],
-)
-
-
 @ADMIN_READERS
 def test_the_admin_readers_admit_an_admin_token_and_refuse_a_user_token_with_insufficient_scope(
-    session_gate: bool, path: str,
+    session_gate: bool,
+    path: str,
 ) -> None:
     app = a_person_app(session_gate=session_gate)
 
@@ -403,7 +418,9 @@ def test_the_admin_readers_admit_an_admin_token_and_refuse_a_user_token_with_ins
 
     assert (admitted.status_code, admitted.json()["role"]) == (200, ADMIN_ROLE)
     assert (refused.status_code, refused.json(), the_challenge(refused)) == (
-        403, {"detail": "Admin access required"}, PERSON_INSUFFICIENT_SCOPE,
+        403,
+        {"detail": "Admin access required"},
+        PERSON_INSUFFICIENT_SCOPE,
     )
 
 
@@ -448,14 +465,17 @@ class TestAPathBothRulesSelectIsAMachinePath:
         response = app.ask(EXPORT_PATH, authorization=bearing(MEMBER_TOKEN))
 
         assert (response.status_code, response.json(), the_challenge(response)) == (
-            403, {"detail": "Admin access required"}, REALM_INSUFFICIENT_SCOPE,
+            403,
+            {"detail": "Admin access required"},
+            REALM_INSUFFICIENT_SCOPE,
         )
 
 
 class TestAFailingTransactionIsTheLibrary500:
     @pytest.mark.parametrize("entry", ["creating", "entering"])
     def test_a_failure_creating_or_entering_the_transaction_propagates_and_runs_no_route(
-        self, entry: str,
+        self,
+        entry: str,
     ) -> None:
         transaction = (
             a_transaction_failing_to_be_created
@@ -469,7 +489,10 @@ class TestAFailingTransactionIsTheLibrary500:
 
         assert app.audit is not None
         assert (response.status_code, ran(app), the_account(app), app.audit.account_events) == (
-            500, [], None, [],
+            500,
+            [],
+            None,
+            [],
         )
 
     @BOTH_TRANSACTIONS
@@ -503,8 +526,10 @@ class TestAFailingTransactionIsTheLibrary500:
 
         response = app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
 
-        kept = kept_by_a_per_call_host if kind is TransactionKind.PER_CALL else (
-            MEMBER_ROLE if promoted else None
+        kept = (
+            kept_by_a_per_call_host
+            if kind is TransactionKind.PER_CALL
+            else (MEMBER_ROLE if promoted else None)
         )
         account = the_account(app)
         assert (response.status_code, ran(app)) == (500, [])
@@ -563,7 +588,9 @@ class TestAStrictReaderRefusesAPersonAdmissionMadeForAnotherPathOrHeader:
         ],
     )
     def test_a_planted_admission_is_read_by_no_session_reader(
-        self, path: str, with_header: bool,
+        self,
+        path: str,
+        with_header: bool,
     ) -> None:
         app = a_person_app()
         relay = relayed(app.auth)
@@ -572,7 +599,9 @@ class TestAStrictReaderRefusesAPersonAdmissionMadeForAnotherPathOrHeader:
         relay.replay = dict(relay.added)
 
         response = app.ask(
-            path, cookie=True, authorization=bearing(ADMIN_TOKEN) if with_header else (),
+            path,
+            cookie=True,
+            authorization=bearing(ADMIN_TOKEN) if with_header else (),
         )
 
         assert response.status_code == 500
@@ -582,13 +611,15 @@ class TestAStrictReaderRefusesAPersonAdmissionMadeForAnotherPathOrHeader:
 class TestAPersonAdmissionIsNotHonouredByAnotherApplication:
     @pytest.mark.parametrize("route", ["current_user", "admitted_user"])
     def test_a_sub_app_below_a_person_path_raises_when_it_asks_for_the_account(
-        self, route: str,
+        self,
+        route: str,
     ) -> None:
         app = a_person_app()
         inner = FastAPI()
         app.auth.app.mount(f"{PERSON_PREFIX}sub", inner)
         dependencies = current_user_dependency(
-            session_store=lambda: app.auth.sessions, on_authenticated=lambda user: None,
+            session_store=lambda: app.auth.sessions,
+            on_authenticated=lambda user: None,
         )
 
         @inner.get("/current")
@@ -606,150 +637,3 @@ class TestAPersonAdmissionIsNotHonouredByAnotherApplication:
         response = app.ask(path, authorization=bearing(ADMIN_TOKEN))
 
         assert response.status_code == 500
-
-
-@BOTH_HOSTS
-def test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer(
-    session_gate: bool,
-) -> None:
-    app = a_person_app(session_gate=session_gate)
-
-    readers = [PERSON_ME_PATH, PERSON_ADMIN_ME_PATH]
-    answers = [app.ask(path) for path in readers]
-
-    assert [(answer.status_code, the_challenge(answer)) for answer in answers] == [
-        (401, PERSON_REALM), (401, PERSON_REALM),
-    ]
-    outside = app.ask(UNGATED_ME_PATH)
-    assert (outside.status_code, the_challenge(outside)) == (401, None)
-
-
-def test_the_admitted_admin_401_of_a_person_path_without_a_gate_admission_challenges() -> None:
-    opened = PublicRule(PathRules(exact=frozenset({PERSON_ADMITTED_ADMIN_PATH})))
-    app = a_person_app(public=(opened,))
-
-    response = app.ask(PERSON_ADMITTED_ADMIN_PATH)
-
-    assert (response.status_code, the_challenge(response)) == (401, PERSON_REALM)
-
-
-@BOTH_HOSTS
-def test_a_navigation_to_a_person_path_still_gets_its_login_redirect(session_gate: bool) -> None:
-    app = a_person_app(session_gate=session_gate, login_redirect=LOGIN_REDIRECT)
-
-    navigation = app.ask(
-        PERSON_ME_PATH, headers={"accept": "text/html"}, follow_redirects=False,
-    )
-    api_call = app.ask(PERSON_ME_PATH, headers={"accept": "application/json"})
-
-    assert (navigation.status_code, the_challenge(navigation)) == (302, None)
-    assert (api_call.status_code, the_challenge(api_call)) == (401, PERSON_REALM)
-
-
-@ADMIN_READERS
-def test_a_cookie_person_refused_by_the_admin_readers_gets_no_challenge(
-    session_gate: bool, path: str,
-) -> None:
-    app = a_person_app(session_gate=session_gate, cookie_role=MEMBER_ROLE)
-
-    response = app.ask(path, cookie=True)
-
-    assert (response.status_code, response.json(), the_challenge(response)) == (
-        403, {"detail": "Admin access required"}, None,
-    )
-
-
-def test_a_person_path_refuses_a_token_for_another_audience_with_invalid_token() -> None:
-    app = a_person_app()
-
-    response = app.ask(
-        PERSON_ME_PATH, authorization=bearing(a_token(aud="another-application")),
-    )
-
-    assert (response.status_code, the_challenge(response)) == (401, PERSON_INVALID_TOKEN)
-
-
-def test_one_admin_token_opens_both_a_machine_path_and_a_person_path() -> None:
-    app = a_person_app()
-
-    machine = app.ask(EXPORT_PATH, authorization=bearing(ADMIN_TOKEN))
-    person = app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
-
-    assert (machine.status_code, person.status_code) == (200, 200)
-
-
-def test_a_user_token_that_opens_a_person_path_is_refused_on_a_machine_path_with_insufficient_scope(
-) -> None:
-    app = a_person_app()
-
-    person = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
-    machine = app.ask(EXPORT_PATH, authorization=bearing(MEMBER_TOKEN))
-
-    assert person.status_code == 200
-    assert (machine.status_code, the_challenge(machine)) == (403, REALM_INSUFFICIENT_SCOPE)
-
-
-@BOTH_HOSTS
-@pytest.mark.parametrize("method", ["GET", "POST"])
-def test_a_foreign_bearer_secret_on_a_path_neither_rule_selects_reaches_its_route_untouched(
-    session_gate: bool, method: str,
-) -> None:
-    app = a_person_app(session_gate=session_gate)
-
-    response = app.ask(FOREIGN_SECRET_PATH, method=method, authorization=("Bearer s3cret",))
-
-    assert (response.status_code, response.json(), the_challenge(response)) == (
-        200, {"authorization": "Bearer s3cret"}, None,
-    )
-    assert app.key_sets.fetched_urls == []
-
-
-@BOTH_HOSTS
-@pytest.mark.parametrize(
-    ("authorization", "request_keywords"),
-    [
-        pytest.param((f"Bearer {ADMIN_TOKEN}", f"Bearer {ADMIN_TOKEN}"), {}, id="malformed"),
-        pytest.param((f"Bearer {ADMIN_TOKEN}x",), {}, id="invalid"),
-    ],
-)
-def test_an_invalid_or_malformed_token_beside_a_valid_cookie_never_falls_back_to_the_cookie(
-    session_gate: bool,
-    authorization: tuple[str, ...],
-    request_keywords: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    app = a_person_app(session_gate=session_gate)
-    failing(app.auth.sessions, "load", monkeypatch)
-
-    response = app.ask(PERSON_ME_PATH, authorization=authorization, cookie=True)
-
-    assert response.status_code == 401
-    assert the_challenge(response) in {PERSON_INVALID_REQUEST, PERSON_INVALID_TOKEN}
-    assert ran(app) == []
-
-
-@BOTH_HOSTS
-def test_a_cookie_only_post_on_a_person_path_without_origin_is_still_refused_by_csrf(
-    session_gate: bool,
-) -> None:
-    app = a_person_app(session_gate=session_gate)
-
-    response = app.ask(PERSON_ME_PATH, method="POST", cookie=True)
-
-    assert (response.status_code, response.json()) == (403, {"detail": "Missing Origin header"})
-
-
-def test_the_gate_names_no_machine_paths_when_it_has_person_paths_alone() -> None:
-    app = a_bearer_app(paths=PathRules(), person_paths=PERSON_PATHS)
-
-    response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
-
-    assert response.status_code == 200
-
-
-def test_a_gate_with_person_paths_alone_adds_no_store_to_no_path() -> None:
-    app = a_bearer_app(paths=PathRules(), person_paths=PERSON_PATHS)
-
-    response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
-
-    assert "no-store" not in response.headers.get("cache-control", "")

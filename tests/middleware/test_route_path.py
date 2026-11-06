@@ -44,20 +44,25 @@ class RouteFailure(RuntimeError):
     pass
 
 
-@pytest.mark.parametrize(("root_path", "asked_for", "routed"), [
-    pytest.param("", "/api/x", "/api/x", id="an-empty-root-keeps-the-path"),
-    pytest.param("/app", "/app/api/x", "/api/x", id="the-root-is-stripped"),
-    pytest.param("/app", "/api/x", "/api/x", id="a-path-outside-the-root-stays-whole"),
-    pytest.param("/app", "/application/x", "/application/x", id="a-segment-boundary-is-kept"),
-    pytest.param("/app", "/app", "", id="a-path-equal-to-the-root-is-empty"),
-    pytest.param("/app", "/app/", "/", id="the-root-with-a-slash-is-the-slash"),
-    pytest.param("/app/", "/app/x", "/app/x", id="a-trailing-slash-root-is-not-trimmed"),
-    pytest.param("/app/", "/app/", "", id="a-trailing-slash-root-equal-to-the-path-is-empty"),
-    pytest.param("/a%20b", "/a b/x", "/a b/x", id="a-percent-encoded-root-is-not-decoded"),
-    pytest.param("/a%20b", "/a%20b/x", "/x", id="a-percent-encoded-root-matches-literally"),
-])
+@pytest.mark.parametrize(
+    ("root_path", "asked_for", "routed"),
+    [
+        pytest.param("", "/api/x", "/api/x", id="an-empty-root-keeps-the-path"),
+        pytest.param("/app", "/app/api/x", "/api/x", id="the-root-is-stripped"),
+        pytest.param("/app", "/api/x", "/api/x", id="a-path-outside-the-root-stays-whole"),
+        pytest.param("/app", "/application/x", "/application/x", id="a-segment-boundary-is-kept"),
+        pytest.param("/app", "/app", "", id="a-path-equal-to-the-root-is-empty"),
+        pytest.param("/app", "/app/", "/", id="the-root-with-a-slash-is-the-slash"),
+        pytest.param("/app/", "/app/x", "/app/x", id="a-trailing-slash-root-is-not-trimmed"),
+        pytest.param("/app/", "/app/", "", id="a-trailing-slash-root-equal-to-the-path-is-empty"),
+        pytest.param("/a%20b", "/a b/x", "/a b/x", id="a-percent-encoded-root-is-not-decoded"),
+        pytest.param("/a%20b", "/a%20b/x", "/x", id="a-percent-encoded-root-matches-literally"),
+    ],
+)
 def test_the_router_path_strips_the_root_path_as_starlettes_router_does(
-    root_path: str, asked_for: str, routed: str,
+    root_path: str,
+    asked_for: str,
+    routed: str,
 ) -> None:
     scope = an_http_scope(FastAPI(), asked_for, root_path=root_path)
 
@@ -78,7 +83,8 @@ EVERY_ROOT_PATH_FORM = [
     pytest.param(RootPathForm("", "", ROUTED_PATH), id="no-root-path"),
     pytest.param(RootPathForm("/app", "", ROUTED_PATH), id="application-root-path-stripped"),
     pytest.param(
-        RootPathForm("/app", "", f"/app{ROUTED_PATH}"), id="application-root-path-unstripped",
+        RootPathForm("/app", "", f"/app{ROUTED_PATH}"),
+        id="application-root-path-unstripped",
     ),
     pytest.param(RootPathForm("", "/app", f"/app{ROUTED_PATH}"), id="server-root-path"),
 ]
@@ -102,7 +108,10 @@ def a_routed_app(form: RootPathForm, **stack_policies: object) -> AuthApp:
         stack_policies=stack_policies,
     )
     server_client = TestClient(
-        auth.app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=form.server_root_path,
+        auth.app,
+        base_url=HTTPS_TEST_SERVER,
+        cookies={},
+        root_path=form.server_root_path,
     )
     return replace(auth, client=server_client)
 
@@ -110,7 +119,8 @@ def a_routed_app(form: RootPathForm, **stack_policies: object) -> AuthApp:
 @pytest.mark.parametrize("form", EVERY_ROOT_PATH_FORM)
 class TestEveryPolicySelectsByThePathTheRouterRoutes:
     def test_an_origin_rule_that_exempts_the_routed_path_lets_the_route_run(
-        self, form: RootPathForm,
+        self,
+        form: RootPathForm,
     ) -> None:
         auth = a_routed_app(form, csrf_origin=CsrfPolicy(exempt=THE_ROUTED_PATH))
 
@@ -119,13 +129,17 @@ class TestEveryPolicySelectsByThePathTheRouterRoutes:
         assert (response.status_code, len(auth.route_runs)) == (200, 1)
 
     def test_a_rate_limit_rule_for_the_routed_path_spends_its_own_budget(
-        self, form: RootPathForm,
+        self,
+        form: RootPathForm,
     ) -> None:
         policy = RateLimitPolicy(
             default=RateLimitBudget("default", max_requests=100, window_seconds=60),
-            rules=(RateLimitRule(
-                THE_ROUTED_PATH, RateLimitBudget("tight", max_requests=1, window_seconds=60),
-            ),),
+            rules=(
+                RateLimitRule(
+                    THE_ROUTED_PATH,
+                    RateLimitBudget("tight", max_requests=1, window_seconds=60),
+                ),
+            ),
         )
         auth = a_routed_app(form, rate_limit=policy)
 
@@ -134,7 +148,8 @@ class TestEveryPolicySelectsByThePathTheRouterRoutes:
         assert statuses == [200, 429]
 
     def test_a_rate_limit_exemption_for_the_routed_path_spends_no_budget(
-        self, form: RootPathForm,
+        self,
+        form: RootPathForm,
     ) -> None:
         policy = RateLimitPolicy(
             default=RateLimitBudget("default", max_requests=1, window_seconds=60),
@@ -147,21 +162,26 @@ class TestEveryPolicySelectsByThePathTheRouterRoutes:
         assert statuses == [200, 200, 200]
 
     def test_a_body_size_rule_for_the_routed_path_applies_its_limit(
-        self, form: RootPathForm,
+        self,
+        form: RootPathForm,
     ) -> None:
         policy = BodySizePolicy(
-            default_max_bytes=10, rules=(BodySizeRule(THE_ROUTED_PATH, max_bytes=1_000),),
+            default_max_bytes=10,
+            rules=(BodySizeRule(THE_ROUTED_PATH, max_bytes=1_000),),
         )
         auth = a_routed_app(form, body_size=policy)
 
         response = auth.client.post(
-            form.asked_for, content=b"x" * 50, headers=SAME_ORIGIN_REQUEST,
+            form.asked_for,
+            content=b"x" * 50,
+            headers=SAME_ORIGIN_REQUEST,
         )
 
         assert (response.status_code, len(auth.route_runs)) == (200, 1)
 
     def test_a_cache_control_rule_for_the_routed_path_sends_its_value(
-        self, form: RootPathForm,
+        self,
+        form: RootPathForm,
     ) -> None:
         auth = a_routed_app(form, security_headers=a_no_store_policy(THE_ROUTED_PATH))
 
@@ -200,12 +220,17 @@ class TestAPathNextToTheRootPathIsNotStripped:
         client = TestClient(app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path="/app")
         return client, route_runs
 
-    @pytest.mark.parametrize(("rule_prefix", "cache_control"), [
-        pytest.param("/application/api/x/", NO_STORE, id="written-as-the-router-routes"),
-        pytest.param("/api/x/", None, id="written-below-a-root-path-it-does-not-have"),
-    ])
+    @pytest.mark.parametrize(
+        ("rule_prefix", "cache_control"),
+        [
+            pytest.param("/application/api/x/", NO_STORE, id="written-as-the-router-routes"),
+            pytest.param("/api/x/", None, id="written-below-a-root-path-it-does-not-have"),
+        ],
+    )
     def test_a_cache_control_rule_selects_the_path_only_when_it_names_it(
-        self, rule_prefix: str, cache_control: str | None,
+        self,
+        rule_prefix: str,
+        cache_control: str | None,
     ) -> None:
         client, route_runs = self.an_app_serving_next_to_the_root_path(
             security_headers=a_no_store_policy(PathRules(prefixes=(rule_prefix,))),
@@ -214,15 +239,22 @@ class TestAPathNextToTheRootPathIsNotStripped:
         response = client.get(NEXT_TO_THE_ROOT_PATH)
 
         assert (response.status_code, response.headers.get("cache-control"), len(route_runs)) == (
-            200, cache_control, 1,
+            200,
+            cache_control,
+            1,
         )
 
-    @pytest.mark.parametrize(("rule_prefix", "exempted"), [
-        pytest.param("/application/api/x/", True, id="written-as-the-router-routes"),
-        pytest.param("/api/x/", False, id="written-below-a-root-path-it-does-not-have"),
-    ])
+    @pytest.mark.parametrize(
+        ("rule_prefix", "exempted"),
+        [
+            pytest.param("/application/api/x/", True, id="written-as-the-router-routes"),
+            pytest.param("/api/x/", False, id="written-below-a-root-path-it-does-not-have"),
+        ],
+    )
     def test_an_exempt_rule_exempts_the_path_only_when_it_names_it(
-        self, rule_prefix: str, exempted: bool,
+        self,
+        rule_prefix: str,
+        exempted: bool,
     ) -> None:
         exempting = CsrfPolicy(exempt=PathRules(prefixes=(rule_prefix,)))
         client, route_runs = self.an_app_serving_next_to_the_root_path(csrf_origin=exempting)
@@ -235,13 +267,18 @@ class TestAPathNextToTheRootPathIsNotStripped:
 
 
 class TestACacheControlRuleOfTheParentSelectsThroughAMount:
-    @pytest.mark.parametrize(("asked_for", "status"), [
-        pytest.param("/api/x/y", 200, id="the-route-answers"),
-        pytest.param("/api/x/boom", 500, id="the-route-raises"),
-        pytest.param("/api/x/raw/z", 500, id="the-library-answers-500"),
-    ])
+    @pytest.mark.parametrize(
+        ("asked_for", "status"),
+        [
+            pytest.param("/api/x/y", 200, id="the-route-answers"),
+            pytest.param("/api/x/boom", 500, id="the-route-raises"),
+            pytest.param("/api/x/raw/z", 500, id="the-library-answers-500"),
+        ],
+    )
     def test_the_rule_for_the_full_path_is_sent_whatever_the_mount_does_to_the_scope(
-        self, asked_for: str, status: int,
+        self,
+        asked_for: str,
+        status: int,
     ) -> None:
         async def raising_app(scope: Scope, receive: Receive, send: Send) -> None:
             raise RouteFailure(asked_for)
@@ -249,11 +286,13 @@ class TestACacheControlRuleOfTheParentSelectsThroughAMount:
         def failing() -> None:
             raise RouteFailure(asked_for)
 
-        sub = Starlette(routes=[
-            Route("/x/y", lambda request: JSONResponse({"ok": True})),
-            Route("/x/boom", failing),
-            Mount("/x/raw", app=raising_app),
-        ])
+        sub = Starlette(
+            routes=[
+                Route("/x/y", lambda request: JSONResponse({"ok": True})),
+                Route("/x/boom", failing),
+                Mount("/x/raw", app=raising_app),
+            ]
+        )
         parent = FastAPI()
         install_web_auth_config(parent, a_web_auth_config())
         install_web_auth_middleware(
