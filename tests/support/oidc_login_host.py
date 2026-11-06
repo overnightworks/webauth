@@ -418,6 +418,34 @@ def _an_issuer_side(
     return issuer, key_set, relying_party, issued_id_tokens
 
 
+@dataclass(frozen=True)
+class _HostStores:
+    """The host's accounts, sessions, audit and sign-in transaction over one write lock."""
+
+    lock: WriteLockInMemory
+    accounts: UsersWithSnapshots
+    sessions: SessionRecordsInMemory
+    audit: RecordingAuditSink
+    transaction: RecordingSignInTransaction
+
+
+def _the_stores_of_a_host(
+    users: tuple[FakeUser, ...],
+    stored_session: FakeSessionRecord | None,
+    transaction_kind: TransactionKind,
+    strict_records: bool,
+) -> _HostStores:
+    lock = WriteLockInMemory()
+    accounts = UsersWithSnapshots(*users, lock=lock)
+    sessions = SessionRecordsInMemory(stored_session, users=accounts, lock=lock)
+    audit = RecordingAuditSink()
+    transaction = RecordingSignInTransaction(
+        transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
+        strict=strict_records,
+    )
+    return _HostStores(lock, accounts, sessions, audit, transaction)
+
+
 def _a_host_app(
     config: WebAuthConfig, address_budget: int | None, behind_base_http_middleware: bool
 ) -> FastAPI:
@@ -452,37 +480,30 @@ def an_oidc_host(
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
-    lock = WriteLockInMemory()
-    accounts = UsersWithSnapshots(*users, lock=lock)
-    sessions = SessionRecordsInMemory(stored_session, users=accounts, lock=lock)
-    audit = RecordingAuditSink()
+    stores = _the_stores_of_a_host(users, stored_session, transaction_kind, strict_records)
     wall_clock = FakeClock(float(NOW))
     issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(wall_clock, groups_claim)
-    transaction = RecordingSignInTransaction(
-        transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
-        strict=strict_records,
-    )
     app = _a_host_app(config, address_budget, behind_base_http_middleware)
     holder: list[OidcHost] = []
     _add_the_login_routes(
-        app, host=lambda: holder[0], transaction=transaction,
+        app, host=lambda: holder[0], transaction=stores.transaction,
         max_sessions=max_sessions, keeps_id_token=keeps_id_token, admission=admission,
         logout_page_text=logout_page_text,
         backchannel_dependencies=backchannel_dependencies,
     )
-    _add_the_signed_in_routes(app, sessions)
+    _add_the_signed_in_routes(app, stores.sessions)
     holder.append(OidcHost(
         client=_a_client_of(app, root_path),
         issuer=issuer,
         key_set=key_set,
         wall_clock=wall_clock,
-        accounts=accounts,
-        sessions=sessions,
-        audit=audit,
+        accounts=stores.accounts,
+        sessions=stores.sessions,
+        audit=stores.audit,
         config=config,
-        lock=lock,
+        lock=stores.lock,
         relying_party=relying_party,
-        transaction=transaction,
+        transaction=stores.transaction,
         issued_id_tokens=issued_id_tokens,
         refusals=[],
     ))

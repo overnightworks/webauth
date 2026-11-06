@@ -31,7 +31,6 @@ from webauth.config import (
 )
 from webauth.cookies import sign_session_id
 from webauth.dependencies import (
-    AuthDependencies,
     ConnectionRefusal,
     LoginRedirect,
     authenticate_websocket,
@@ -656,13 +655,15 @@ def _add_websocket_routes(
         await websocket.close()
 
 
-def _add_session_routes(
-    app: FastAPI,
-    dependencies: AuthDependencies,
-    sessions: SessionRecordStore,
-    route_runs: list[str],
-    route_threads: list[int],
-) -> None:
+def _add_session_routes(auth: AuthApp, login_redirect: LoginRedirect | None) -> None:
+    app, sessions = auth.app, auth.sessions
+    route_runs, route_threads = auth.route_runs, auth.route_threads
+    dependencies = current_user_dependency(
+        session_store=lambda: sessions,
+        on_authenticated=auth.authenticated.append,
+        login_redirect=login_redirect,
+    )
+
     @app.get("/me")
     def me(
         request: Request, user: AuthenticatedUser = Depends(dependencies.current_user)
@@ -695,14 +696,6 @@ def _add_session_routes(
         return {"username": user.username}
 
 
-def _install_the_session_gate(
-    app: FastAPI, session_gate: SessionGate, stack_policies: Mapping[str, Any] | None,
-) -> None:
-    install_web_auth_middleware(
-        app, **{**GATED_STACK_POLICIES, **(stack_policies or {})}, session_gate=session_gate
-    )
-
-
 def an_auth_app(
     record: FakeSessionRecord | None,
     *,
@@ -720,61 +713,46 @@ def an_auth_app(
 ) -> AuthApp:
     """An application serving one protected, one admin, one session-id route.
 
-    It also serves the WebSocket routes of ``_add_websocket_routes`` and, at
-    ``OPEN_PATHS``, a route that reads ``admitted_user``. A keyword replaces
-    the configuration field it names; ``config`` is an existing instance
-    instead (no overrides then). ``gate`` installs the library middleware with
-    a ``SessionGate`` over ``public`` and ``optional``, its transaction
-    ``session_transaction`` or else the store's ``in_transaction``;
-    ``stack_policies`` adds the other policies the installer takes, or replaces
-    the headers.
+    It also serves the WebSocket routes of ``_add_websocket_routes`` and, at ``OPEN_PATHS``, a
+    route that reads ``admitted_user``. A keyword replaces the configuration field it names;
+    ``config`` is an existing instance instead (no overrides then). ``gate`` installs the library
+    middleware with a ``SessionGate`` over ``public`` and ``optional``, its transaction
+    ``session_transaction`` or else the store's ``in_transaction``; ``stack_policies`` adds the
+    other policies the installer takes, or replaces the headers.
     """
     if config is None:
         config = a_web_auth_config(admin_role=ADMIN_ROLE, **config_overrides)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
-    authenticated: list[AuthenticatedUser] = []
-    websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal] = []
-
-    dependencies = current_user_dependency(
-        session_store=lambda: sessions,
-        on_authenticated=authenticated.append,
-        login_redirect=login_redirect,
-    )
-
-    route_runs: list[str] = []
-    route_threads: list[int] = []
-
     app = FastAPI(root_path=root_path)
     install_web_auth_config(app, config)
     if gate:
-        _install_the_session_gate(
-            app, SessionGate(
-                session_transaction=session_transaction or sessions.in_transaction,
-                login_redirect=login_redirect,
-                public=public,
-                optional=optional or PathRules(),
-            ), stack_policies,
+        session_gate = SessionGate(
+            session_transaction=session_transaction or sessions.in_transaction,
+            login_redirect=login_redirect,
+            public=public,
+            optional=optional or PathRules(),
         )
-    _add_session_routes(app, dependencies, sessions, route_runs, route_threads)
-    _add_websocket_routes(app, sessions, websocket_outcomes)
-
-    return AuthApp(
+        install_web_auth_middleware(
+            app, **{**GATED_STACK_POLICIES, **(stack_policies or {})}, session_gate=session_gate
+        )
+    auth = AuthApp(
         client=TestClient(
-            app,
-            base_url=HTTPS_TEST_SERVER,
-            cookies={},
+            app, base_url=HTTPS_TEST_SERVER, cookies={},
             raise_server_exceptions=raise_server_exceptions,
         ),
         sessions=sessions,
-        authenticated=authenticated,
-        websocket_outcomes=websocket_outcomes,
+        authenticated=[],
+        websocket_outcomes=[],
         signing_key=config.signing_key,
         app=app,
         config=config,
-        route_runs=route_runs,
-        route_threads=route_threads,
+        route_runs=[],
+        route_threads=[],
     )
+    _add_session_routes(auth, login_redirect)
+    _add_websocket_routes(app, sessions, auth.websocket_outcomes)
+    return auth
 
 
 class StartSend(enum.Enum):

@@ -536,24 +536,23 @@ def a_bearer_app(
     `resource` adds a protected resource, its public metadata and a host route at its entry point.
     """
     key_sets, clock = key_sets or a_key_set_answering(), FakeClock(float(ACCESS_TOKEN_NOW))
+    stored_sessions = auth_app_keywords.pop("sessions", None)
     side = _a_sign_in_side(
-        transaction_kind, strict_records, cookie_role, known_accounts,
-        auth_app_keywords.pop("sessions", None),
+        transaction_kind, strict_records, cookie_role, known_accounts, stored_sessions
     )
-    used_transaction = transaction or side.transaction
+    sign_in = transaction or side.transaction
     person, gate = _a_gate_over(
-        paths, key_sets, clock, machine_parties, person_paths, person_parties,
-        used_transaction, resource,
+        paths, key_sets, clock, machine_parties, person_paths, person_parties, sign_in, resource
     )
     public = _public_rules(auth_app_keywords.pop("public", ()), person, resource)
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
     auth = _an_auth_app_behind_the_stack(
-        side, session_gate, public, stack_policies, inner_middleware, auth_app_keywords,
+        side, session_gate, public, stack_policies, inner_middleware, auth_app_keywords
     )
     _add_routes(auth, person, resource, auth_app_keywords.get("login_redirect"))
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
-        accounts=side.accounts, audit=side.audit, transaction=used_transaction,
+        accounts=side.accounts, audit=side.audit, transaction=sign_in,
     )
 
 
