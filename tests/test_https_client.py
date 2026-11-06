@@ -157,7 +157,9 @@ def test_a_urllib3_module_loaded_later_logs_nothing_during_an_exchange(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        urllib3.PoolManager, "request", _logging_the_url(urllib3.PoolManager.request, module_name),
+        urllib3.PoolManager,
+        "request",
+        _logging_the_url(urllib3.PoolManager.request, module_name),
     )
 
     post_token_request_over_https(_token_request(f"{token_server.base_url}/token?{_URL_QUERY}"))
@@ -176,9 +178,7 @@ def test_urllib3_still_logs_for_the_host_outside_an_exchange(
 def test_an_issuer_refusal_comes_back_as_an_answer_not_an_error(
     token_server: LoopbackHttpsServer,
 ) -> None:
-    answer = post_token_request_over_https(
-        _token_request(f"{token_server.base_url}/token-refused")
-    )
+    answer = post_token_request_over_https(_token_request(f"{token_server.base_url}/token-refused"))
 
     assert (answer.status, answer.body) == (400, REFUSED_TOKEN_ANSWER)
 

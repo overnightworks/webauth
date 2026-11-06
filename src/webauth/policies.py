@@ -140,7 +140,9 @@ class RateLimitBudget:
         label = f"RateLimitBudget {self.name!r}"
         require_positive_whole_number(f"{label} max_requests", self.max_requests, unit="requests")
         require_positive_whole_number(
-            f"{label} window_seconds", self.window_seconds, unit="seconds",
+            f"{label} window_seconds",
+            self.window_seconds,
+            unit="seconds",
         )
 
 

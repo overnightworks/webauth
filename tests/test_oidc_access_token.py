@@ -65,7 +65,8 @@ NOT_AN_AUTHORIZED_PARTY = OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATC
 
 def test_a_perfect_access_token_yields_its_subject_and_groups() -> None:
     assert verified(an_access_token()) == VerifiedAccessToken(
-        subject=OPERATOR_SUBJECT, groups=("/apps/x/admin",),
+        subject=OPERATOR_SUBJECT,
+        groups=("/apps/x/admin",),
     )
 
 
@@ -74,7 +75,8 @@ def test_the_relying_party_names_its_issuer() -> None:
 
 
 @pytest.mark.parametrize(
-    "media_type", ["at+jwt", "application/at+jwt", "at+JWT", "APPLICATION/AT+JWT"],
+    "media_type",
+    ["at+jwt", "application/at+jwt", "at+JWT", "APPLICATION/AT+JWT"],
 )
 def test_an_access_token_type_is_compared_as_a_media_type(media_type: str) -> None:
     outcome = verified(an_access_token(header={"typ": media_type}))
@@ -134,7 +136,8 @@ def test_the_verifier_refuses_media_types_it_cannot_compare(keywords: dict[str, 
     ("claims", "refusal"),
     [
         pytest.param(
-            {"aud": OTHER_APP}, rejected(RejectionReason.INVALID_AUDIENCE),
+            {"aud": OTHER_APP},
+            rejected(RejectionReason.INVALID_AUDIENCE),
             id="another-client-only",
         ),
         pytest.param({"aud": [APP_CLIENT_ID, OTHER_APP]}, INVALID_CLAIM, id="own-and-another-app"),
@@ -142,7 +145,8 @@ def test_the_verifier_refuses_media_types_it_cannot_compare(keywords: dict[str, 
     ],
 )
 def test_the_audience_must_be_the_app_alone(
-    claims: dict[str, Any], refusal: OidcRefusal,
+    claims: dict[str, Any],
+    refusal: OidcRefusal,
 ) -> None:
     assert verified(an_access_token(claims=claims)) == refusal
 
@@ -225,12 +229,15 @@ def test_a_token_whose_subject_or_groups_are_unusable_is_an_invalid_claim(
     ],
 )
 def test_the_preferred_username_of_an_access_token_is_read_or_none(
-    claims: dict[str, object], expected: str | None,
+    claims: dict[str, object],
+    expected: str | None,
 ) -> None:
     outcome = verified(an_access_token(claims=claims))
 
     assert outcome == VerifiedAccessToken(
-        subject=OPERATOR_SUBJECT, groups=("/apps/x/admin",), preferred_username=expected,
+        subject=OPERATOR_SUBJECT,
+        groups=("/apps/x/admin",),
+        preferred_username=expected,
     )
 
 
@@ -251,12 +258,15 @@ def test_a_token_of_another_issuer_signed_with_the_right_key_is_refused() -> Non
     [
         pytest.param(ACCESS_TOKEN_LEEWAY_SECONDS - 1, None, id="one-second-inside-the-leeway"),
         pytest.param(
-            ACCESS_TOKEN_LEEWAY_SECONDS, RejectionReason.EXPIRED, id="at-expiry-plus-leeway",
+            ACCESS_TOKEN_LEEWAY_SECONDS,
+            RejectionReason.EXPIRED,
+            id="at-expiry-plus-leeway",
         ),
     ],
 )
 def test_an_expired_token_is_admitted_until_expiry_plus_leeway(
-    seconds_past_expiry: int, expected: RejectionReason | None,
+    seconds_past_expiry: int,
+    expected: RejectionReason | None,
 ) -> None:
     outcome = verified(an_access_token(), clock=FakeClock(float(EXPIRY + seconds_past_expiry)))
 
@@ -271,16 +281,19 @@ def test_an_expired_token_is_admitted_until_expiry_plus_leeway(
     [
         pytest.param(
             {"iat": ACCESS_TOKEN_NOW + ACCESS_TOKEN_LEEWAY_SECONDS + 1},
-            RejectionReason.ISSUED_IN_FUTURE, id="issued-in-the-future",
+            RejectionReason.ISSUED_IN_FUTURE,
+            id="issued-in-the-future",
         ),
         pytest.param(
             {"nbf": ACCESS_TOKEN_NOW + ACCESS_TOKEN_LEEWAY_SECONDS + 1},
-            RejectionReason.NOT_YET_VALID, id="not-yet-valid",
+            RejectionReason.NOT_YET_VALID,
+            id="not-yet-valid",
         ),
     ],
 )
 def test_a_token_dated_ahead_of_the_leeway_is_refused(
-    claims: dict[str, Any], reason: RejectionReason,
+    claims: dict[str, Any],
+    reason: RejectionReason,
 ) -> None:
     assert verified(an_access_token(claims=claims)) == rejected(reason)
 
@@ -304,7 +317,9 @@ def test_an_unavailable_key_set_refuses_the_token() -> None:
 
 def resource_verified(token: str, *, scope: str = "mcp:tools") -> VerifiedAccessToken | OidcRefusal:
     verifier = a_relying_party(fetch_key_set=a_key_set()).resource_token_verifier(
-        resource_url=RESOURCE_URL, scope=scope, authorized_parties=HAL,
+        resource_url=RESOURCE_URL,
+        scope=scope,
+        authorized_parties=HAL,
     )
     return verifier(token)
 
@@ -313,7 +328,9 @@ def test_a_resource_token_yields_its_subject_and_groups_when_it_holds_the_scope(
     token = an_access_token(claims={"aud": RESOURCE_URL, "scope": "openid mcp:tools"})
 
     assert resource_verified(token) == VerifiedAccessToken(
-        subject=OPERATOR_SUBJECT, groups=("/apps/x/admin",), preferred_username=None,
+        subject=OPERATOR_SUBJECT,
+        groups=("/apps/x/admin",),
+        preferred_username=None,
     )
 
 
@@ -326,7 +343,8 @@ def test_a_resource_token_yields_its_subject_and_groups_when_it_holds_the_scope(
     ids=["the-app-alone", "two-audiences"],
 )
 def test_a_resource_token_must_name_the_resource_as_its_only_audience(
-    audience: Any, refusal: OidcRefusal,
+    audience: Any,
+    refusal: OidcRefusal,
 ) -> None:
     token = an_access_token(claims={"aud": audience, "scope": "mcp:tools"})
 
@@ -355,7 +373,8 @@ def test_a_resource_token_without_the_scope_is_an_insufficient_scope(scope: Any)
     ids=["unlisted-party", "two-audiences"],
 )
 def test_the_scope_is_read_only_after_the_profile_holds(
-    claims: dict[str, Any], reason: OidcRefusalReason,
+    claims: dict[str, Any],
+    reason: OidcRefusalReason,
 ) -> None:
     token = an_access_token(claims={"aud": RESOURCE_URL, "scope": ABSENT, **claims})
 
@@ -368,5 +387,7 @@ def test_a_resource_verifier_for_anything_but_authorized_parties_raises(parties:
 
     with pytest.raises(TypeError, match="authorized_parties"):
         relying_party.resource_token_verifier(
-            resource_url=RESOURCE_URL, scope="mcp:tools", authorized_parties=parties,
+            resource_url=RESOURCE_URL,
+            scope="mcp:tools",
+            authorized_parties=parties,
         )

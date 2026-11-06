@@ -15,7 +15,10 @@ _RETURN_PATH_CASES = [
     pytest.param("", "/albums/42?x=1", "/albums/42?x=1", id="a deep link with its query"),
     pytest.param("", "/%2F%2Fevil.example", "/%2F%2Fevil.example", id="an encoded path"),
     pytest.param(
-        "", "/lieder/%C3%BC%3Fx?y=1", "/lieder/%C3%BC%3Fx?y=1", id="encoded characters stay raw",
+        "",
+        "/lieder/%C3%BC%3Fx?y=1",
+        "/lieder/%C3%BC%3Fx?y=1",
+        id="encoded characters stay raw",
     ),
     pytest.param("", "/lieder/\u00fc", "/lieder/%C3%BC", id="a non-ASCII path is encoded"),
     pytest.param("", "/", "/", id="the root"),
@@ -44,7 +47,10 @@ _RETURN_PATH_CASES = [
     pytest.param("/app", "/other", None, id="another path outside the app"),
     pytest.param("/app", "/application", None, id="a sibling of the app's name"),
     pytest.param(
-        "/café", "/caf%C3%A9/albums/42", None, id="an encoded path under a non-ASCII root",
+        "/café",
+        "/caf%C3%A9/albums/42",
+        None,
+        id="an encoded path under a non-ASCII root",
     ),
     pytest.param("/café", "/café/albums/42", None, id="a path under a non-ASCII root"),
     pytest.param("/a%20b", "/a%20b/albums/42", None, id="a root with a percent sign"),
@@ -68,7 +74,9 @@ _RETURN_PATH_CASES = [
 
 @pytest.mark.parametrize(("root_path", "asked_for", "returned"), _RETURN_PATH_CASES)
 def test_only_a_path_of_this_app_is_a_return_path(
-    root_path: str, asked_for: str, returned: str | None,
+    root_path: str,
+    asked_for: str,
+    returned: str | None,
 ) -> None:
     scope = {**an_http_scope(FastAPI()), "root_path": root_path}
 

@@ -44,12 +44,15 @@ _UPLOAD_RULE = RateLimitRule(paths=PathRules(prefixes=("/bulk/up",)), budget=_UP
 
 
 class TestPathRules:
-    @pytest.mark.parametrize("path", [
-        "/exactly/this",
-        "/by-prefix/anything",
-        "/api/items/some-id/stream",
-        "/pattern/42",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/exactly/this",
+            "/by-prefix/anything",
+            "/api/items/some-id/stream",
+            "/pattern/42",
+        ],
+    )
     def test_selects_a_path_named_any_of_the_four_ways(self, path: str) -> None:
         rules = PathRules(
             exact=frozenset({"/exactly/this"}),
@@ -60,12 +63,15 @@ class TestPathRules:
 
         assert rules.matches(path) is True
 
-    @pytest.mark.parametrize("path", [
-        "/exactly/this/plus-more",
-        "/by-prefix",
-        "/api/items/some-id/streaming",
-        "/pattern/not-a-number",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/exactly/this/plus-more",
+            "/by-prefix",
+            "/api/items/some-id/streaming",
+            "/pattern/not-a-number",
+        ],
+    )
     def test_leaves_a_path_no_rule_names(self, path: str) -> None:
         rules = PathRules(
             exact=frozenset({"/exactly/this"}),
@@ -85,7 +91,9 @@ class TestPathRules:
 
     @pytest.mark.parametrize(("path", "expected"), [("/hooks/stripe", True), ("/", False)])
     def test_a_frozenset_of_one_path_selects_that_path_only(
-        self, path: str, expected: bool,
+        self,
+        path: str,
+        expected: bool,
     ) -> None:
         assert PathRules(exact=frozenset({"/hooks/stripe"})).matches(path) is expected
 
@@ -105,24 +113,35 @@ class TestRateLimitPolicy:
             exempt=PathRules(prefixes=("/static/",)),
         )
 
-    @pytest.mark.parametrize(("path", "expected"), [
-        ("/bulk/item", _BULK),
-        ("/feed", _UPLOAD),
-        ("/api/items", _DEFAULT),
-        ("/nothing-serves-this", _DEFAULT),
-        ("/", _DEFAULT),
-    ])
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("/bulk/item", _BULK),
+            ("/feed", _UPLOAD),
+            ("/api/items", _DEFAULT),
+            ("/nothing-serves-this", _DEFAULT),
+            ("/", _DEFAULT),
+        ],
+    )
     def test_a_path_spends_from_the_first_matching_rule_else_the_default(
-        self, path: str, expected: RateLimitBudget,
+        self,
+        path: str,
+        expected: RateLimitBudget,
     ) -> None:
         assert self._policy().budget_for(path) == expected
 
-    @pytest.mark.parametrize(("rules", "expected"), [
-        ((_BULK_RULE, _UPLOAD_RULE), _BULK),
-        ((_UPLOAD_RULE, _BULK_RULE), _UPLOAD),
-    ], ids=["bulk-first", "upload-first"])
+    @pytest.mark.parametrize(
+        ("rules", "expected"),
+        [
+            ((_BULK_RULE, _UPLOAD_RULE), _BULK),
+            ((_UPLOAD_RULE, _BULK_RULE), _UPLOAD),
+        ],
+        ids=["bulk-first", "upload-first"],
+    )
     def test_the_earlier_of_two_overlapping_rules_decides(
-        self, rules: tuple[RateLimitRule, ...], expected: RateLimitBudget,
+        self,
+        rules: tuple[RateLimitRule, ...],
+        expected: RateLimitBudget,
     ) -> None:
         policy = RateLimitPolicy(default=_DEFAULT, rules=rules)
 
@@ -134,9 +153,23 @@ class TestRateLimitPolicy:
         assert policy.budget_for("/bulk/item") == _DEFAULT
         assert policy.budget_for("/") == _DEFAULT
 
-    @pytest.mark.parametrize("name", [
-        "", "API", "Media", "1a", "-a", "a:b", "a b", "a{b}", "a*", "a/b", "api\n", "ä",
-    ])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "",
+            "API",
+            "Media",
+            "1a",
+            "-a",
+            "a:b",
+            "a b",
+            "a{b}",
+            "a*",
+            "a/b",
+            "api\n",
+            "ä",
+        ],
+    )
     def test_a_budget_name_outside_the_grammar_is_refused(self, name: str) -> None:
         with pytest.raises(ValueError, match=re.escape(repr(name))):
             RateLimitBudget(name, max_requests=1, window_seconds=60)
@@ -150,11 +183,22 @@ class TestRateLimitPolicy:
             RateLimitBudget("API", max_requests=1, window_seconds=0)
 
     @pytest.mark.parametrize("field", ["max_requests", "window_seconds"])
-    @pytest.mark.parametrize("value", [0, -1, True, 1.5, "5", None], ids=[
-        "zero", "negative", "bool", "float", "str", "none",
-    ])
+    @pytest.mark.parametrize(
+        "value",
+        [0, -1, True, 1.5, "5", None],
+        ids=[
+            "zero",
+            "negative",
+            "bool",
+            "float",
+            "str",
+            "none",
+        ],
+    )
     def test_a_budget_field_that_is_not_a_positive_whole_number_is_refused_and_named(
-        self, field: str, value: object,
+        self,
+        field: str,
+        value: object,
     ) -> None:
         fields = {"max_requests": 1, "window_seconds": 60, field: value}
 
@@ -166,19 +210,32 @@ class TestRateLimitPolicy:
 
     @pytest.mark.parametrize(("max_requests", "window_seconds"), [(1, 1), (300, 3600)])
     def test_a_budget_with_positive_whole_numbers_is_accepted(
-        self, max_requests: int, window_seconds: int,
+        self,
+        max_requests: int,
+        window_seconds: int,
     ) -> None:
         budget = RateLimitBudget("api", max_requests, window_seconds)
 
         assert (budget.max_requests, budget.window_seconds) == (max_requests, window_seconds)
 
-    @pytest.mark.parametrize(("default", "rules", "expected"), [
-        (_DEFAULT, (RateLimitRule(PathRules(), _BULK), RateLimitRule(PathRules(), _BULK)), "bulk"),
-        (_DEFAULT, (RateLimitRule(PathRules(), _a_budget("default", 99)),), "default"),
-        (_DEFAULT, (RateLimitRule(PathRules(), _DEFAULT),), "default"),
-    ], ids=["two-rules", "rule-and-default", "equal-limits"])
+    @pytest.mark.parametrize(
+        ("default", "rules", "expected"),
+        [
+            (
+                _DEFAULT,
+                (RateLimitRule(PathRules(), _BULK), RateLimitRule(PathRules(), _BULK)),
+                "bulk",
+            ),
+            (_DEFAULT, (RateLimitRule(PathRules(), _a_budget("default", 99)),), "default"),
+            (_DEFAULT, (RateLimitRule(PathRules(), _DEFAULT),), "default"),
+        ],
+        ids=["two-rules", "rule-and-default", "equal-limits"],
+    )
     def test_a_repeated_budget_name_is_refused_and_named(
-        self, default: RateLimitBudget, rules: tuple[RateLimitRule, ...], expected: str,
+        self,
+        default: RateLimitBudget,
+        rules: tuple[RateLimitRule, ...],
+        expected: str,
     ) -> None:
         with pytest.raises(ValueError, match=rf"repeated: {expected}\."):
             RateLimitPolicy(default=default, rules=rules)
@@ -196,10 +253,14 @@ class TestAMethodsFieldRefusesASingleString:
             rule(A_PATH, methods=methods)
 
     @pytest.mark.parametrize(
-        ("methods", "applies_to_get"), [(frozenset({"POST"}), False), (None, True)],
+        ("methods", "applies_to_get"),
+        [(frozenset({"POST"}), False), (None, True)],
     )
     def test_a_frozenset_or_none_is_accepted_and_selects_its_methods(
-        self, rule: Callable[..., Any], methods: frozenset[str] | None, applies_to_get: bool,
+        self,
+        rule: Callable[..., Any],
+        methods: frozenset[str] | None,
+        applies_to_get: bool,
     ) -> None:
         accepted = rule(A_PATH, methods=methods)
 
@@ -213,7 +274,8 @@ class TestBodySizePolicy:
             default_max_bytes=1_000,
             rules=(
                 BodySizeRule(
-                    paths=PathRules(exact=frozenset({"/upload"})), max_bytes=50_000,
+                    paths=PathRules(exact=frozenset({"/upload"})),
+                    max_bytes=50_000,
                 ),
                 BodySizeRule(
                     paths=PathRules(exact=frozenset({"/cover"})),
@@ -223,29 +285,38 @@ class TestBodySizePolicy:
             ),
         )
 
-    @pytest.mark.parametrize(("path", "method", "expected"), [
-        ("/upload", "POST", 50_000),
-        ("/cover", "POST", 9_000),
-        ("/cover", "post", 9_000),
-        ("/cover", "PUT", 1_000),
-        ("/songs", "POST", 1_000),
-        ("/upload", "", 50_000),
-    ])
+    @pytest.mark.parametrize(
+        ("path", "method", "expected"),
+        [
+            ("/upload", "POST", 50_000),
+            ("/cover", "POST", 9_000),
+            ("/cover", "post", 9_000),
+            ("/cover", "PUT", 1_000),
+            ("/songs", "POST", 1_000),
+            ("/upload", "", 50_000),
+        ],
+    )
     def test_a_route_gets_its_own_budget_and_every_other_the_default(
-        self, path: str, method: str, expected: int,
+        self,
+        path: str,
+        method: str,
+        expected: int,
     ) -> None:
         assert self._policy().max_bytes(path, method) == expected
 
     @pytest.mark.parametrize("seconds", [0, -1.5, math.nan, math.inf])
     def test_a_start_send_bound_that_is_not_a_positive_finite_number_is_refused(
-        self, seconds: float,
+        self,
+        seconds: float,
     ) -> None:
         with pytest.raises(ValueError, match="start_send_seconds"):
             BodySizePolicy(default_max_bytes=1_000, start_send_seconds=seconds)
 
 
 RAW_HEADER_VALUE_FIELDS = [
-    "content_security_policy", "permissions_policy", "CacheControlRule.value",
+    "content_security_policy",
+    "permissions_policy",
+    "CacheControlRule.value",
 ]
 
 
@@ -266,28 +337,33 @@ class TestSecurityHeadersPolicy:
         assert policy.cache_control("/api/songs") == "no-store"
         assert policy.cache_control("/about") is None
 
-    @pytest.mark.parametrize(("policy", "expected"), [
-        pytest.param(
-            SecurityHeadersPolicy(content_security_policy="default-src 'none'"),
-            "camera=(), microphone=(), geolocation=()",
-            id="without-the-field",
-        ),
-        pytest.param(
-            SecurityHeadersPolicy(
-                content_security_policy="default-src 'none'",
-                permissions_policy="camera=(), microphone=(self), geolocation=()",
+    @pytest.mark.parametrize(
+        ("policy", "expected"),
+        [
+            pytest.param(
+                SecurityHeadersPolicy(content_security_policy="default-src 'none'"),
+                "camera=(), microphone=(), geolocation=()",
+                id="without-the-field",
             ),
-            "camera=(), microphone=(self), geolocation=()",
-            id="with-microphone-for-this-origin",
-        ),
-        pytest.param(
-            SecurityHeadersPolicy("default-src 'none'", ()),
-            "camera=(), microphone=(), geolocation=()",
-            id="two-positional-arguments",
-        ),
-    ])
+            pytest.param(
+                SecurityHeadersPolicy(
+                    content_security_policy="default-src 'none'",
+                    permissions_policy="camera=(), microphone=(self), geolocation=()",
+                ),
+                "camera=(), microphone=(self), geolocation=()",
+                id="with-microphone-for-this-origin",
+            ),
+            pytest.param(
+                SecurityHeadersPolicy("default-src 'none'", ()),
+                "camera=(), microphone=(), geolocation=()",
+                id="two-positional-arguments",
+            ),
+        ],
+    )
     def test_every_response_answers_the_policy_permissions(
-        self, policy: SecurityHeadersPolicy, expected: str,
+        self,
+        policy: SecurityHeadersPolicy,
+        expected: str,
     ) -> None:
         app = FastAPI()
         install_web_auth_config(app, a_web_auth_config())
@@ -299,14 +375,27 @@ class TestSecurityHeadersPolicy:
         assert response.headers["Permissions-Policy"] == expected
 
     @pytest.mark.parametrize("field", RAW_HEADER_VALUE_FIELDS)
-    @pytest.mark.parametrize("refused", [
-        "camera=()\rX-Injected: 1", "camera=()\nX-Injected: 1", "camera=()\r\nX-Injected: 1",
-        "camera=()\x00", "camera=()\x7f", "camera=()ä",
-        " camera=()", "\tcamera=()", "camera=() ", "camera=()\t",
-        "", " ",
-    ])
+    @pytest.mark.parametrize(
+        "refused",
+        [
+            "camera=()\rX-Injected: 1",
+            "camera=()\nX-Injected: 1",
+            "camera=()\r\nX-Injected: 1",
+            "camera=()\x00",
+            "camera=()\x7f",
+            "camera=()ä",
+            " camera=()",
+            "\tcamera=()",
+            "camera=() ",
+            "camera=()\t",
+            "",
+            " ",
+        ],
+    )
     def test_refuses_an_empty_edged_control_or_non_ascii_raw_header_value(
-        self, field: str, refused: str,
+        self,
+        field: str,
+        refused: str,
     ) -> None:
         with pytest.raises(ValueError, match=field):
             a_policy_with_raw_header_value(field, refused)
@@ -314,7 +403,9 @@ class TestSecurityHeadersPolicy:
     @pytest.mark.parametrize("field", RAW_HEADER_VALUE_FIELDS)
     @pytest.mark.parametrize("value", ["camera=()\tmicrophone=()", "no-store, no-cache", "a"])
     def test_accepts_an_inner_space_or_tab_in_a_raw_header_value(
-        self, field: str, value: str,
+        self,
+        field: str,
+        value: str,
     ) -> None:
         policy = a_policy_with_raw_header_value(field, value)
 
@@ -363,10 +454,13 @@ def styled(sources: object) -> dict[str, object]:
 
 
 class TestDefaultContentSecurityPolicy:
-    @pytest.mark.parametrize("sources", [
-        pytest.param(["'nonce-AbC'", "'nonce-abc'"], id="nonces"),
-        pytest.param(["https://cdn.example/A", "https://cdn.example/a"], id="host-paths"),
-    ])
+    @pytest.mark.parametrize(
+        "sources",
+        [
+            pytest.param(["'nonce-AbC'", "'nonce-abc'"], id="nonces"),
+            pytest.param(["https://cdn.example/A", "https://cdn.example/a"], id="host-paths"),
+        ],
+    )
     def test_sources_whose_case_carries_meaning_stay_apart(self, sources: list[str]) -> None:
         policy = default_content_security_policy(added_sources={CspDirective.SCRIPT_SRC: sources})
 
@@ -434,10 +528,19 @@ class TestDefaultContentSecurityPolicy:
     @pytest.mark.parametrize(
         "source",
         [
-            *(pytest.param(f"'{keyword}'", id=keyword) for keyword in (
-                "self", "unsafe-inline", "unsafe-eval", "strict-dynamic", "unsafe-hashes",
-                "report-sample", "unsafe-allow-redirects", "wasm-unsafe-eval",
-            )),
+            *(
+                pytest.param(f"'{keyword}'", id=keyword)
+                for keyword in (
+                    "self",
+                    "unsafe-inline",
+                    "unsafe-eval",
+                    "strict-dynamic",
+                    "unsafe-hashes",
+                    "report-sample",
+                    "unsafe-allow-redirects",
+                    "wasm-unsafe-eval",
+                )
+            ),
             pytest.param(f"'nonce-{A_DIGEST}'", id="nonce"),
             pytest.param("'NONCE-ab_c-d=='", id="mixed-case-nonce"),
             pytest.param("'SELF'", id="upper-case-keyword"),
@@ -488,7 +591,9 @@ class TestDefaultContentSecurityPolicy:
     )
     @pytest.mark.parametrize("directive", ALL_DIRECTIVES)
     def test_refuses_an_added_source_that_is_not_one_ascii_token_naming_the_directive(
-        self, directive: CspDirective, source: str,
+        self,
+        directive: CspDirective,
+        source: str,
     ) -> None:
         with pytest.raises(ValueError, match=f"{directive}.*one token"):
             default_content_security_policy(added_sources={directive: [source]})
@@ -499,7 +604,8 @@ class TestDefaultContentSecurityPolicy:
         )
 
         assert policy == THE_DEFAULT_POLICY.replace(
-            "style-src 'self'", "style-src 'self' 'unsafe-inline'",
+            "style-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
         )
 
     def test_keeps_the_default_directive_order_whatever_the_mapping_order(self) -> None:
@@ -511,9 +617,9 @@ class TestDefaultContentSecurityPolicy:
         )
 
         assert policy == (
-            THE_DEFAULT_POLICY
-            .replace("style-src 'self'", "style-src 'self' styles.example.test")
-            .replace("font-src 'self'", "font-src 'self' fonts.example.test")
+            THE_DEFAULT_POLICY.replace(
+                "style-src 'self'", "style-src 'self' styles.example.test"
+            ).replace("font-src 'self'", "font-src 'self' fonts.example.test")
         )
 
     def test_a_framing_parent_replaces_none_in_frame_ancestors(self) -> None:
@@ -556,16 +662,22 @@ class TestDefaultContentSecurityPolicy:
             pytest.param([], ["a.test", "a.test"], "'self' a.test", id="duplicate-addition"),
             pytest.param([], ["'self'", "a.test"], "'self' a.test", id="duplicate-of-default"),
             pytest.param(
-                ["sha256-abc"], ["'sha256-abc'", "a.test"], "'self' 'sha256-abc' a.test",
+                ["sha256-abc"],
+                ["'sha256-abc'", "a.test"],
+                "'self' 'sha256-abc' a.test",
                 id="hash-given-twice",
             ),
         ],
     )
     def test_lists_a_source_once_at_its_first_position(
-        self, hashes: list[str], added: list[str], expected: str,
+        self,
+        hashes: list[str],
+        added: list[str],
+        expected: str,
     ) -> None:
         policy = default_content_security_policy(
-            hashes, added_sources={CspDirective.SCRIPT_SRC: added},
+            hashes,
+            added_sources={CspDirective.SCRIPT_SRC: added},
         )
 
         assert directive_sources(policy, CspDirective.SCRIPT_SRC) == expected
@@ -607,7 +719,9 @@ class TestDefaultContentSecurityPolicy:
         ],
     )
     def test_refuses_a_wrong_type_with_a_type_error(
-        self, kwargs: dict[str, object], owner: str,
+        self,
+        kwargs: dict[str, object],
+        owner: str,
     ) -> None:
         with pytest.raises(TypeError, match=owner):
             default_content_security_policy(**kwargs)  # type: ignore[arg-type]

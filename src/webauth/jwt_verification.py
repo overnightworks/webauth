@@ -398,7 +398,8 @@ def _library_checks() -> Options:
 
 
 def _require_comparable_types(
-    expected_type: str | None, expected_media_types: frozenset[str] | None,
+    expected_type: str | None,
+    expected_media_types: frozenset[str] | None,
 ) -> None:
     if expected_media_types is None:
         return
@@ -482,7 +483,7 @@ def _json_object(document: bytes) -> dict[str, object] | None:
     a member named twice keeps its last value."""
     try:
         parsed = json.loads(document)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         return None
     return parsed if isinstance(parsed, dict) else None
 

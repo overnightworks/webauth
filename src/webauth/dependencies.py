@@ -153,7 +153,9 @@ def current_user_dependency(
 
 
 def authenticate_websocket(
-    connection: HTTPConnection, *, sessions: SessionRecordStore,
+    connection: HTTPConnection,
+    *,
+    sessions: SessionRecordStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The account behind a WebSocket handshake, or why the handshake is refused.
 
@@ -207,7 +209,9 @@ def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
 
 
 def _unauthenticated(
-    request: Request, detail: str, login_redirect: LoginRedirect | None,
+    request: Request,
+    detail: str,
+    login_redirect: LoginRedirect | None,
 ) -> HTTPException:
     """The refusal for a missing or dead session: a 401, or a login redirect.
 
@@ -226,7 +230,9 @@ def _unauthenticated(
 def _unauthenticated_without_redirect(connection: HTTPConnection, detail: str) -> HTTPException:
     challenge = _PERSON_PATH_CHALLENGE if _is_person_path(connection) else None
     return HTTPException(
-        401, detail, headers=None if challenge is None else {"WWW-Authenticate": challenge},
+        401,
+        detail,
+        headers=None if challenge is None else {"WWW-Authenticate": challenge},
     )
 
 
@@ -288,7 +294,8 @@ def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -
 
 
 def _read_session_cookie(
-    connection: HTTPConnection, config: WebAuthConfig,
+    connection: HTTPConnection,
+    config: WebAuthConfig,
 ) -> str | ConnectionRefusal:
     values = _cookie_values(connection, config.session_cookie_name)
     if len(values) > 1:
@@ -300,14 +307,18 @@ def _read_session_cookie(
 
 
 def _http_refusal(
-    request: Request, refusal: ConnectionRefusal, login_redirect: LoginRedirect | None,
+    request: Request,
+    refusal: ConnectionRefusal,
+    login_redirect: LoginRedirect | None,
 ) -> HTTPException:
     detail = _HTTP_DETAIL_OF_SESSION_REFUSAL[refusal]
     return _unauthenticated(request, detail, login_redirect)
 
 
 def _refusal_response(
-    request: Request, refusal: ConnectionRefusal, login_redirect: LoginRedirect | None,
+    request: Request,
+    refusal: ConnectionRefusal,
+    login_redirect: LoginRedirect | None,
 ) -> Response:
     """``_http_refusal`` as the response FastAPI's default handler builds from it.
 
@@ -342,7 +353,10 @@ def _whole_second_now(config: WebAuthConfig) -> datetime:
 
 
 def _renewed_expiry(
-    lifetime: SessionLifetime, *, now: datetime, created_at: datetime,
+    lifetime: SessionLifetime,
+    *,
+    now: datetime,
+    created_at: datetime,
 ) -> datetime:
     idle = timedelta(seconds=lifetime.idle_seconds)
     remaining_cap = timedelta(seconds=lifetime.absolute_max_age_seconds) - (now - created_at)
@@ -350,7 +364,9 @@ def _renewed_expiry(
 
 
 def _is_admitted(
-    lifetime: SessionLifetime, record: ports.SessionRecord, now: datetime,
+    lifetime: SessionLifetime,
+    record: ports.SessionRecord,
+    now: datetime,
 ) -> bool:
     created_at = _as_instant(record.created_at)
     expires_at = _as_instant(record.expires_at)
@@ -363,7 +379,10 @@ def _is_admitted(
 
 
 def admit_session(
-    session_id: str, *, sessions: SessionRecordStore, config: WebAuthConfig,
+    session_id: str,
+    *,
+    sessions: SessionRecordStore,
+    config: WebAuthConfig,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """Decide whether a session id speaks for an account, and renew it if so.
 
@@ -392,7 +411,9 @@ def admit_session(
     renewed = sessions.touch(
         session_id,
         expires_at=_renewed_expiry(
-            config.session_lifetime, now=now, created_at=_as_instant(record.created_at),
+            config.session_lifetime,
+            now=now,
+            created_at=_as_instant(record.created_at),
         ),
     )
     if type(renewed) is not bool:
@@ -410,7 +431,8 @@ def admit_session(
 
 
 def _resolve_session(
-    connection: HTTPConnection, sessions: SessionRecordStore,
+    connection: HTTPConnection,
+    sessions: SessionRecordStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The one decision whom a connection's session cookie speaks for.
 
@@ -546,7 +568,8 @@ def _is_person_admitted(connection: HTTPConnection) -> bool:
     """The loose reader for a person path's or a resource's record, whatever request carries it."""
     record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
     return type(record) is _BearerAdmission and isinstance(
-        record.principal, ports.AuthenticatedUser,
+        record.principal,
+        ports.AuthenticatedUser,
     )
 
 
@@ -586,7 +609,8 @@ def _is_person_path(connection: HTTPConnection) -> bool:
 
 
 def _require_admin(
-    connection: HTTPConnection, user: ports.AuthenticatedUser,
+    connection: HTTPConnection,
+    user: ports.AuthenticatedUser,
 ) -> ports.AuthenticatedUser:
     """The account itself when its role is the configured admin role; else the 403.
 
@@ -610,7 +634,8 @@ def _require_admin(
 
 
 def _gate_or_own_admission(
-    connection: HTTPConnection, sessions: SessionRecordStore,
+    connection: HTTPConnection,
+    sessions: SessionRecordStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     person = _admitted_token_person(connection)
     if person is not None:

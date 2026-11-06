@@ -289,7 +289,7 @@ def _exchange(
         failure = ExchangeFailure.UNREACHABLE
     except urllib3.exceptions.TimeoutError:
         failure = ExchangeFailure.TIMED_OUT
-    except (urllib3.exceptions.HTTPError, OSError):
+    except urllib3.exceptions.HTTPError, OSError:
         failure = ExchangeFailure.BROKEN_OFF
     if deadline.has_passed():
         failure = ExchangeFailure.TIMED_OUT

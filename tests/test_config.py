@@ -97,7 +97,8 @@ LIFETIMES: dict[str, Callable[[object], object]] = {
         SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     ),
     "absolute_max_age_seconds": lambda seconds: SessionLifetime(
-        1, seconds,  # pyright: ignore[reportArgumentType] -- not an int on purpose
+        1,
+        seconds,  # pyright: ignore[reportArgumentType] -- not an int on purpose
     ),
 }
 
@@ -105,7 +106,8 @@ LIFETIMES: dict[str, Callable[[object], object]] = {
 @pytest.mark.parametrize("lifetime", LIFETIMES)
 @pytest.mark.parametrize("seconds", [True, 60.0, 1.5, "60", 0, -1])
 def test_a_lifetime_other_than_a_positive_whole_number_of_seconds_is_refused_at_construction(
-    lifetime: str, seconds: object,
+    lifetime: str,
+    seconds: object,
 ) -> None:
     field = lifetime.split()[-1]
     with pytest.raises(ValueError, match=f"{field} must be a positive whole number of seconds"):
@@ -145,7 +147,8 @@ def test_an_ipv6_budget_prefix_other_than_an_integer_within_its_bounds_is_refuse
     prefix: object,
 ) -> None:
     with pytest.raises(
-        ValueError, match="ipv6_budget_prefix must be an integer between 32 and 128",
+        ValueError,
+        match="ipv6_budget_prefix must be an integer between 32 and 128",
     ):
         a_web_auth_config(ipv6_budget_prefix=prefix)
 
@@ -157,7 +160,9 @@ COOKIE_NAME_DEFAULTS = {True: DEFAULT_SESSION_COOKIE_NAME, False: PLAIN_SESSION_
 
 
 def a_config_reached_by(
-    how: str, cookie_secure: bool, **cookie_names: object,
+    how: str,
+    cookie_secure: bool,
+    **cookie_names: object,
 ) -> WebAuthConfig:
     if how == "construction":
         return a_web_auth_config(cookie_secure=cookie_secure, **cookie_names)
@@ -185,7 +190,9 @@ def a_config_reached_by(
     ],
 )
 def test_a_cookie_name_is_kept_or_resolved_by_cookie_secure_however_the_config_is_reached(
-    how: str, cookie_secure: bool, given_name: str | None,
+    how: str,
+    cookie_secure: bool,
+    given_name: str | None,
 ) -> None:
     """A replace from the opposite Secure value must not mistake a resolved default for a choice."""
     given = {} if given_name is None else {FIELD: given_name}
@@ -209,7 +216,10 @@ def test_a_cookie_name_is_kept_or_resolved_by_cookie_secure_however_the_config_i
     ],
 )
 def test_a_cookie_name_the_configuration_cannot_honour_is_refused_however_it_is_reached(
-    how: str, cookie_secure: bool, given_name: object, message: str,
+    how: str,
+    cookie_secure: bool,
+    given_name: object,
+    message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message.format(field=FIELD)):
         a_config_reached_by(how, cookie_secure, **{FIELD: given_name})
@@ -218,7 +228,8 @@ def test_a_cookie_name_the_configuration_cannot_honour_is_refused_however_it_is_
 @pytest.mark.parametrize("how", ["construction", "replace"])
 @pytest.mark.parametrize("name", ["", "a b", "a;b"])
 def test_a_cookie_name_that_is_not_an_rfc_6265_token_is_refused_naming_its_field(
-    how: str, name: str,
+    how: str,
+    name: str,
 ) -> None:
     with pytest.raises(ValueError, match=f"{FIELD} .* is not a valid cookie name"):
         a_config_reached_by(how, True, **{FIELD: name})
@@ -236,7 +247,9 @@ RESERVED_COOKIE_NAMES = [
 @pytest.mark.parametrize("cookie_secure", [True, False])
 @pytest.mark.parametrize("name", RESERVED_COOKIE_NAMES)
 def test_a_name_webauths_own_cookies_use_is_refused_naming_its_field(
-    how: str, cookie_secure: bool, name: str,
+    how: str,
+    cookie_secure: bool,
+    name: str,
 ) -> None:
     with pytest.raises(ValueError, match=f"{FIELD} .* webauth's own cookies use"):
         a_config_reached_by(how, cookie_secure, **{FIELD: name})
@@ -280,7 +293,8 @@ def test_replacing_cookie_secure_off_refuses_a_hosts_prefixed_name_it_carries(
 
 
 @pytest.mark.parametrize(
-    "name", ["__Host-session_id", "__host-own", "__Secure-sid", "__SECURE-sid"],
+    "name",
+    ["__Host-session_id", "__host-own", "__Secure-sid", "__SECURE-sid"],
 )
 def test_a_host_only_cookie_name_without_cookie_secure_is_refused_at_configuration_time(
     name: str,
@@ -294,20 +308,27 @@ def test_a_host_only_cookie_name_without_cookie_secure_is_refused_at_configurati
     ("built_with", "replaced_with", "session_cookie_name"),
     [
         pytest.param(
-            {}, {"cookie_secure": False}, PLAIN_SESSION_COOKIE_NAME,
+            {},
+            {"cookie_secure": False},
+            PLAIN_SESSION_COOKIE_NAME,
             id="an unnamed cookie follows Secure",
         ),
         pytest.param(
-            {}, {"session_cookie_name": "sid"}, "sid",
+            {},
+            {"session_cookie_name": "sid"},
+            "sid",
             id="a name given while replacing becomes the host's own",
         ),
         pytest.param(
-            {"cookie_secure": False, "session_cookie_name": "sid"}, {"cookie_secure": True},
+            {"cookie_secure": False, "session_cookie_name": "sid"},
+            {"cookie_secure": True},
             "sid",
             id="a named cookie keeps its name when Secure is switched on",
         ),
         pytest.param(
-            {"session_cookie_name": "__Host-own"}, {"user_role": "member"}, "__Host-own",
+            {"session_cookie_name": "__Host-own"},
+            {"user_role": "member"},
+            "__Host-own",
             id="a prefixed host name survives a replace that leaves Secure alone",
         ),
     ],
@@ -326,7 +347,8 @@ def test_a_replace_keeps_the_name_the_host_chose_and_follows_secure_otherwise(
     ("overrides", "message"),
     [
         pytest.param(
-            {"admin_role": "user", "user_role": "user"}, "admin_role and user_role must differ",
+            {"admin_role": "user", "user_role": "user"},
+            "admin_role and user_role must differ",
             id="equal roles",
         ),
         pytest.param({"admin_role": " "}, "admin_role must name a role", id="blank admin role"),
@@ -336,7 +358,8 @@ def test_a_replace_keeps_the_name_the_host_chose_and_follows_secure_otherwise(
     ],
 )
 def test_a_role_that_cannot_work_is_refused_at_configuration_time(
-    overrides: dict[str, object], message: str,
+    overrides: dict[str, object],
+    message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
         a_web_auth_config(**overrides)

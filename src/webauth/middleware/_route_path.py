@@ -24,4 +24,4 @@ def route_path(scope: Scope) -> str:
         return path
     if path == root_path:
         return ""
-    return path[len(root_path):] if path[len(root_path)] == "/" else path
+    return path[len(root_path) :] if path[len(root_path)] == "/" else path

@@ -68,8 +68,10 @@ def test_rotation_and_renewal_keep_no_id_token_for_a_host_that_keeps_none() -> N
 
     renewed = admit_session(session.id, sessions=host.sessions, config=host.config)
     rotated = fresh_access_token(
-        host.relying_party, session.id,
-        session_transaction=host.sessions.in_transaction, config=host.config,
+        host.relying_party,
+        session.id,
+        session_transaction=host.sessions.in_transaction,
+        config=host.config,
     )
 
     assert isinstance(renewed, AuthenticatedUser)

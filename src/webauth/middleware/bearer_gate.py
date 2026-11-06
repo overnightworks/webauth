@@ -265,7 +265,8 @@ class ProtectedResource:
     def public_rule(self) -> PublicRule:
         """``GET`` of the metadata path, for ``SessionGate.public``."""
         return PublicRule(
-            PathRules(exact=frozenset({self.metadata_path})), methods=frozenset({"GET"}),
+            PathRules(exact=frozenset({self.metadata_path})),
+            methods=frozenset({"GET"}),
         )
 
     @property
@@ -391,11 +392,15 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     def __init__(self, app: ASGIApp, policy: BearerGate) -> None:
         super().__init__(app, policy)
         resource = policy.resource
-        self._resource_verifier = None if resource is None else (
-            policy.relying_party.resource_token_verifier(
-                resource_url=resource.url,
-                scope=resource.scope,
-                authorized_parties=resource.authorized_parties,
+        self._resource_verifier = (
+            None
+            if resource is None
+            else (
+                policy.relying_party.resource_token_verifier(
+                    resource_url=resource.url,
+                    scope=resource.scope,
+                    authorized_parties=resource.authorized_parties,
+                )
             )
         )
 
@@ -411,7 +416,10 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             on_entry_point = resource.entry_point_rule.matches(path)
             if on_entry_point or resource.marks(request.method, path):
                 decided = await self._resource_refusal(
-                    request, resource, verify, on_marked_route=not on_entry_point,
+                    request,
+                    resource,
+                    verify,
+                    on_marked_route=not on_entry_point,
                 )
                 if decided is not _Continue.AS_UNMARKED:
                     return decided
@@ -421,7 +429,9 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         return None
 
     async def _machine_refusal(
-        self, request: Request, machine_paths: MachinePaths,
+        self,
+        request: Request,
+        machine_paths: MachinePaths,
     ) -> Response | None:
         credential = _credential_of(request)
         if isinstance(credential, _Refusal):
@@ -474,7 +484,9 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         return None
 
     async def _person_refusal(
-        self, request: Request, person_paths: PersonPaths,
+        self,
+        request: Request,
+        person_paths: PersonPaths,
     ) -> Response | None:
         credential = _credential_of(request)
         if credential is _Refusal.NO_CREDENTIALS:
@@ -499,7 +511,9 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         return None
 
     async def _verified(
-        self, credential: str, authorized_parties: AuthorizedParties,
+        self,
+        credential: str,
+        authorized_parties: AuthorizedParties,
     ) -> VerifiedAccessToken | OidcRefusal:
         return await on_worker(
             partial(

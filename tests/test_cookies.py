@@ -86,12 +86,14 @@ def _session_id_read_back_after_issuing(session_id: str) -> str | None:
     issue_session_cookies(response, session_id, config)
     issued = SimpleCookie(response.headers.getlist("set-cookie")[0])
     cookie = issued[config.session_cookie_name].value
-    request = Request({
-        "type": "http",
-        "method": "GET",
-        "path": "/",
-        "headers": [(b"cookie", session_cookie_header(cookie).encode())],
-    })
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [(b"cookie", session_cookie_header(cookie).encode())],
+        }
+    )
     return session_id_from_request(request, config)
 
 
@@ -170,27 +172,33 @@ def test_a_signed_pending_login_verifies_to_the_same_pending_login() -> None:
     assert _verify_pending_login(signed, _TEST_SECRET) == _PENDING
 
 
-@pytest.mark.parametrize("return_to", [
-    pytest.param("/albums/42?x=1", id="a deep link"),
-    pytest.param("/lieder/%C3%BC%3Fx?y=1", id="an encoded deep link"),
-    pytest.param("/" + "a" * 511, id="the longest return path"),
-])
+@pytest.mark.parametrize(
+    "return_to",
+    [
+        pytest.param("/albums/42?x=1", id="a deep link"),
+        pytest.param("/lieder/%C3%BC%3Fx?y=1", id="an encoded deep link"),
+        pytest.param("/" + "a" * 511, id="the longest return path"),
+    ],
+)
 def test_a_signed_pending_login_carries_its_return_path_within_the_cookie_cap(
     return_to: str,
 ) -> None:
     signed = _sign_pending_login(
-        dataclasses.replace(_PENDING, return_to=return_to), _TEST_SECRET,
+        dataclasses.replace(_PENDING, return_to=return_to),
+        _TEST_SECRET,
     )
 
     assert len(signed) <= MAX_PENDING_LOGIN_COOKIE_CHARS
     assert _verify_pending_login(signed, _TEST_SECRET) == dataclasses.replace(
-        _PENDING, return_to=return_to,
+        _PENDING,
+        return_to=return_to,
     )
 
 
 def test_a_pending_login_cookie_with_another_return_path_than_signed_does_not_verify() -> None:
     signed = _sign_pending_login(
-        dataclasses.replace(_PENDING, return_to="/albums/42"), _TEST_SECRET,
+        dataclasses.replace(_PENDING, return_to="/albums/42"),
+        _TEST_SECRET,
     )
     *fields, return_path, signature = signed.split(".")
     other_path = base64.urlsafe_b64encode(b"/albums/43").decode().rstrip("=")
@@ -292,7 +300,10 @@ class CookieOverrides(TypedDict, total=False):
 
 
 def a_cookie_app(
-    *, base_url: str = OVER_HTTPS, peer: str = UNTRUSTED_PEER, **config_overrides: object,
+    *,
+    base_url: str = OVER_HTTPS,
+    peer: str = UNTRUSTED_PEER,
+    **config_overrides: object,
 ) -> CookieApp:
     """The cookie routes behind the security headers a deployment installs.
 
@@ -340,7 +351,8 @@ def test_the_session_cookie_is_kept_from_scripts_and_from_other_sites(
     cookie_app: CookieApp,
 ) -> None:
     header = cookie_app.set_cookie_header(
-        cookie_app.issue(), cookie_app.config.session_cookie_name,
+        cookie_app.issue(),
+        cookie_app.config.session_cookie_name,
     )
 
     assert "HttpOnly" in header
@@ -374,7 +386,9 @@ def test_a_host_that_configures_nothing_gets_host_only_set_cookie_bytes() -> Non
 @pytest.mark.parametrize("samesite", ["strict", "lax"])
 @pytest.mark.parametrize("cookie_secure", [True, False])
 def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
-    *, cookie_secure: bool, samesite: str,
+    *,
+    cookie_secure: bool,
+    samesite: str,
 ) -> None:
     app = a_cookie_app(
         base_url=OVER_HTTPS if cookie_secure else PLAIN_HTTP,
@@ -392,22 +406,34 @@ def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
     assert ("Secure" in attributes) is cookie_secure
 
 
-@pytest.mark.parametrize(("base_url", "config_overrides", "session_name"), [
-    pytest.param(OVER_HTTPS, {}, "__Host-session_id", id="secure-default"),
-    pytest.param(
-        PLAIN_HTTP, {"cookie_secure": False}, "session_id",
-        id="secure-off-falls-back-to-the-plain-name",
-    ),
-    pytest.param(
-        OVER_HTTPS, {"session_cookie_name": "sid"}, "sid", id="own-name-stays-when-secure",
-    ),
-    pytest.param(
-        PLAIN_HTTP, {"cookie_secure": False, "session_cookie_name": "sid"}, "sid",
-        id="own-name-stays-when-secure-off",
-    ),
-])
+@pytest.mark.parametrize(
+    ("base_url", "config_overrides", "session_name"),
+    [
+        pytest.param(OVER_HTTPS, {}, "__Host-session_id", id="secure-default"),
+        pytest.param(
+            PLAIN_HTTP,
+            {"cookie_secure": False},
+            "session_id",
+            id="secure-off-falls-back-to-the-plain-name",
+        ),
+        pytest.param(
+            OVER_HTTPS,
+            {"session_cookie_name": "sid"},
+            "sid",
+            id="own-name-stays-when-secure",
+        ),
+        pytest.param(
+            PLAIN_HTTP,
+            {"cookie_secure": False, "session_cookie_name": "sid"},
+            "sid",
+            id="own-name-stays-when-secure-off",
+        ),
+    ],
+)
 def test_the_cookie_is_issued_and_cleared_under_the_resolved_name(
-    base_url: str, config_overrides: CookieOverrides, session_name: str,
+    base_url: str,
+    config_overrides: CookieOverrides,
+    session_name: str,
 ) -> None:
     app = a_cookie_app(base_url=base_url, **config_overrides)
 
@@ -425,14 +451,22 @@ def test_a_host_that_configures_lax_gets_lax_on_the_clearing() -> None:
     assert "SameSite=strict" not in header
 
 
-@pytest.mark.parametrize(("base_url", "cookie_secure", "session_clearing"), [
-    pytest.param(OVER_HTTPS, True, CLEARED_SESSION_SET_COOKIE, id="secure-by-default"),
-    pytest.param(
-        PLAIN_HTTP, False, CLEARED_SESSION_WITHOUT_SECURE, id="switched-off-for-plain-http",
-    ),
-])
+@pytest.mark.parametrize(
+    ("base_url", "cookie_secure", "session_clearing"),
+    [
+        pytest.param(OVER_HTTPS, True, CLEARED_SESSION_SET_COOKIE, id="secure-by-default"),
+        pytest.param(
+            PLAIN_HTTP,
+            False,
+            CLEARED_SESSION_WITHOUT_SECURE,
+            id="switched-off-for-plain-http",
+        ),
+    ],
+)
 def test_clearing_repeats_the_attributes_the_cookie_was_set_with(
-    base_url: str, cookie_secure: bool, session_clearing: str,
+    base_url: str,
+    cookie_secure: bool,
+    session_clearing: str,
 ) -> None:
     app = a_cookie_app(base_url=base_url, cookie_secure=cookie_secure)
 
@@ -442,17 +476,26 @@ def test_clearing_repeats_the_attributes_the_cookie_was_set_with(
     assert session_header == session_clearing
 
 
-@pytest.mark.parametrize(("base_url", "peer", "headers"), [
-    pytest.param(OVER_HTTPS, UNTRUSTED_PEER, None, id="over-https"),
-    pytest.param(
-        PLAIN_HTTP, UNTRUSTED_PEER, UNTRUSTED_PROXY_SAYS_HTTPS,
-        id="behind-an-untrusted-tls-proxy",
-    ),
-    pytest.param(PLAIN_HTTP, TRUSTED_PEER, TRUSTED_PROXY_SAYS_HTTP, id="trusted-proxy-says-http"),
-    pytest.param(PLAIN_HTTP, UNTRUSTED_PEER, None, id="over-plain-http"),
-])
+@pytest.mark.parametrize(
+    ("base_url", "peer", "headers"),
+    [
+        pytest.param(OVER_HTTPS, UNTRUSTED_PEER, None, id="over-https"),
+        pytest.param(
+            PLAIN_HTTP,
+            UNTRUSTED_PEER,
+            UNTRUSTED_PROXY_SAYS_HTTPS,
+            id="behind-an-untrusted-tls-proxy",
+        ),
+        pytest.param(
+            PLAIN_HTTP, TRUSTED_PEER, TRUSTED_PROXY_SAYS_HTTP, id="trusted-proxy-says-http"
+        ),
+        pytest.param(PLAIN_HTTP, UNTRUSTED_PEER, None, id="over-plain-http"),
+    ],
+)
 def test_a_host_that_configures_nothing_gets_secure_cookies_and_hsts_however_reached(
-    base_url: str, peer: str, headers: dict[str, str] | None,
+    base_url: str,
+    peer: str,
+    headers: dict[str, str] | None,
 ) -> None:
     app = a_cookie_app(base_url=base_url, peer=peer)
 
@@ -496,22 +539,37 @@ def test_logging_out_takes_the_cookie_back(cookie_app: CookieApp) -> None:
         *[
             pytest.param(name, True, id=f"accepts-{name}")
             for name in (
-                "__Host-session_id", "session_id",
-                "sid", "a-b", "a_b", "a.b", "A9",
+                "__Host-session_id",
+                "session_id",
+                "sid",
+                "a-b",
+                "a_b",
+                "a.b",
+                "A9",
                 *[f"a{char}b" for char in "!#$%&'*+^`|~"],
             )
         ],
         *[
             pytest.param(name, False, id=f"refuses-{name!r}")
             for name in (
-                "", "a b", "a\tb", "a;b", "a=b", "a,b", 'a"b',
-                "a\x01b", "a\x7fb", "a\n", "café",
+                "",
+                "a b",
+                "a\tb",
+                "a;b",
+                "a=b",
+                "a,b",
+                'a"b',
+                "a\x01b",
+                "a\x7fb",
+                "a\n",
+                "café",
                 *[f"a{char}b" for char in "()<>@:\\/[]?{}"],
             )
         ],
     ],
 )
 def test_a_cookie_name_is_valid_only_when_it_is_an_rfc_6265_token(
-    name: str, valid: bool,
+    name: str,
+    valid: bool,
 ) -> None:
     assert _is_valid_cookie_name(name) is valid

@@ -210,9 +210,11 @@ class SignInPaths:
     def browser_paths(self) -> PathRules:
         """The paths a browser reaches the sign-in with, for the sign-in rate budget: the
         back-channel, which the issuer posts to, is not one."""
-        return PathRules(exact=frozenset(
-            path for name, path in self._named_paths if name != "backchannel_logout"
-        ))
+        return PathRules(
+            exact=frozenset(
+                path for name, path in self._named_paths if name != "backchannel_logout"
+            )
+        )
 
     @property
     def backchannel(self) -> PathRules:
@@ -220,23 +222,28 @@ class SignInPaths:
         ``RateLimitPolicy.exempt``: the issuer sends neither an Origin nor a cookie and posts
         from shared server addresses. It exempts nothing when there is no such path, and
         logout is never exempt."""
-        return PathRules(exact=frozenset(
-            () if self.backchannel_logout is None else (self.backchannel_logout,),
-        ))
+        return PathRules(
+            exact=frozenset(
+                () if self.backchannel_logout is None else (self.backchannel_logout,),
+            )
+        )
 
     @property
     def backchannel_body_size_rule(self) -> BodySizeRule:
         """A bound of 32 KiB for ``POST`` of the back-channel path, which admits a Logout
         Token where a host's default may not."""
         return BodySizeRule(
-            self.backchannel, _BACKCHANNEL_MAX_BODY_BYTES, methods=frozenset({"POST"}),
+            self.backchannel,
+            _BACKCHANNEL_MAX_BODY_BYTES,
+            methods=frozenset({"POST"}),
         )
 
     @property
     def cache_control_rule(self) -> CacheControlRule:
         """``no-store`` for every path: the answers carry cookies, or are the issuer's."""
         return CacheControlRule(
-            PathRules(exact=frozenset(path for _, path in self._named_paths)), "no-store",
+            PathRules(exact=frozenset(path for _, path in self._named_paths)),
+            "no-store",
         )
 
     @property
@@ -251,7 +258,8 @@ class SignInPaths:
     def _named_paths(self) -> tuple[tuple[str, str], ...]:
         optional = (("logout", self.logout), ("backchannel_logout", self.backchannel_logout))
         return (
-            ("start", self.start), ("callback", self.callback),
+            ("start", self.start),
+            ("callback", self.callback),
             *((name, path) for name, path in optional if path is not None),
         )
 
@@ -367,8 +375,11 @@ def _register_routes(
             return await routes.backchannel_logout(request)
 
         app.add_api_route(
-            paths.backchannel_logout, backchannel_logout, methods=["POST"],
-            dependencies=list(backchannel_dependencies), include_in_schema=False,
+            paths.backchannel_logout,
+            backchannel_logout,
+            methods=["POST"],
+            dependencies=list(backchannel_dependencies),
+            include_in_schema=False,
         )
 
 
@@ -384,7 +395,10 @@ class _SignIn:
     def start(self, request: Request, return_to: str | None) -> Response:
         answer = Response(status_code=303)
         answer.headers["location"] = _start_login(
-            self.relying_party(request), request, answer, web_auth_config(request),
+            self.relying_party(request),
+            request,
+            answer,
+            web_auth_config(request),
             return_to=return_to,
         )
         return answer
@@ -393,8 +407,11 @@ class _SignIn:
         try:
             text = page_text(request)
             return _log_out(
-                self.relying_party(request), request, web_auth_config(request),
-                transaction=self.transaction, language=text.language,
+                self.relying_party(request),
+                request,
+                web_auth_config(request),
+                transaction=self.transaction,
+                language=text.language,
                 button_label=text.button_label,
             )
         except Exception as failure:
@@ -404,10 +421,15 @@ class _SignIn:
         form_body = await request.body()
         try:
             relying_party = self.relying_party(request)
-            result = await anyio.to_thread.run_sync(partial(
-                _receive_backchannel_logout, relying_party, form_body,
-                request.headers.get("content-type"), transaction=self.transaction,
-            ))
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    _receive_backchannel_logout,
+                    relying_party,
+                    form_body,
+                    request.headers.get("content-type"),
+                    transaction=self.transaction,
+                )
+            )
         except Exception as failure:
             return _RouteAnswer(Response(), failure, _empty_bad_request)
         if result is _BackchannelLogoutResult.ACCEPTED:
@@ -428,7 +450,10 @@ class _SignIn:
         return _RouteAnswer(carrier, answer, _plain_server_error)
 
     def _answer(
-        self, request: Request, config: WebAuthConfig, pending: PendingLogin | None,
+        self,
+        request: Request,
+        config: WebAuthConfig,
+        pending: PendingLogin | None,
     ) -> Response:
         if pending is None:
             return self._refuse(request, OidcRefusal(OidcRefusalReason.STATE_MISMATCH))
@@ -444,17 +469,22 @@ class _SignIn:
         except _UsernameTakenSignal:
             return self._refuse(request, AdmissionRefusal.USERNAME_TAKEN)
         answer = RedirectResponse(
-            same_app_path(request, pending.return_to) or _app_root(request), status_code=303,
+            same_app_path(request, pending.return_to) or _app_root(request),
+            status_code=303,
         )
         issue_session_cookies(answer, session_id, config)
         return answer
 
     def _write(
-        self, admitted: _AdmittedLogin, config: WebAuthConfig, replaced_session_id: str | None,
+        self,
+        admitted: _AdmittedLogin,
+        config: WebAuthConfig,
+        replaced_session_id: str | None,
     ) -> str:
         with self.transaction() as stores:
             return _write_sign_in(
-                stores, admitted,
+                stores,
+                admitted,
                 config=config,
                 replaced_session_id=replaced_session_id,
                 max_sessions=self.max_sessions,
@@ -484,7 +514,9 @@ class _RouteAnswer(Response):
     handler answers instead."""
 
     def __init__(
-        self, carrier: Response, outcome: Response | Exception,
+        self,
+        carrier: Response,
+        outcome: Response | Exception,
         failure_answer: Callable[[], Response],
     ) -> None:
         super().__init__()

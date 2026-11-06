@@ -82,7 +82,15 @@ def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoi
     assert "content-language" not in response.headers
     assert (page.texts["button"], page.texts["title"]) == (LOGOUT_BUTTON_LABEL, LOGOUT_BUTTON_LABEL)
     assert {tag for tag, _ in page.elements} == {
-        "html", "head", "meta", "title", "body", "form", "input", "button", "script",
+        "html",
+        "head",
+        "meta",
+        "title",
+        "body",
+        "form",
+        "input",
+        "button",
+        "script",
     }
 
 
@@ -95,8 +103,9 @@ def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two
     policy = content_security_policy_of(response)
     assert policy["script-src"] == [page.script_source]
     assert policy["form-action"] == [BOUND_ISSUER_ORIGIN, HTTPS_TEST_SERVER]
-    assert [name for _, attributes in page.elements for name in attributes
-            if name.startswith("on")] == []
+    assert [
+        name for _, attributes in page.elements for name in attributes if name.startswith("on")
+    ] == []
 
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
@@ -110,8 +119,10 @@ def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
 
     renewed = host.client.get("/me")
     rotated = fresh_access_token(
-        host.relying_party, session.id,
-        session_transaction=host.sessions.in_transaction, config=host.config,
+        host.relying_party,
+        session.id,
+        session_transaction=host.sessions.in_transaction,
+        config=host.config,
     )
     held_after_rotation = stored_id_tokens(host)
     response = post_logout(host, SAME_ORIGIN_FORM)
@@ -141,7 +152,9 @@ def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings(
     assert rows_token not in header_values
     assert hint_of(response) == rows_token
     assert (host.sessions.count_active(), stored_id_tokens(host), stored_refresh_tokens(host)) == (
-        0, [], [],
+        0,
+        [],
+        [],
     )
 
 
@@ -178,14 +191,17 @@ def _row_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
     return {}
 
 
-@pytest.mark.parametrize(("arrange", "sessions_kept", "hint_sent", "entered"), [
-    pytest.param(_no_session, 0, False, False, id="no-session"),
-    pytest.param(_forged_session_cookie, 1, False, False, id="forged-cookie-ends-nothing"),
-    pytest.param(_session_cookie_dropped, 1, False, False, id="session-cookie-gone"),
-    pytest.param(_session_ended_in_the_store, 0, False, True, id="session-already-ended"),
-    pytest.param(_session_expired_but_stored, 0, True, True, id="session-expired-but-stored"),
-    pytest.param(_row_stored_before_the_upgrade, 0, False, True, id="stored-before-upgrade"),
-])
+@pytest.mark.parametrize(
+    ("arrange", "sessions_kept", "hint_sent", "entered"),
+    [
+        pytest.param(_no_session, 0, False, False, id="no-session"),
+        pytest.param(_forged_session_cookie, 1, False, False, id="forged-cookie-ends-nothing"),
+        pytest.param(_session_cookie_dropped, 1, False, False, id="session-cookie-gone"),
+        pytest.param(_session_ended_in_the_store, 0, False, True, id="session-already-ended"),
+        pytest.param(_session_expired_but_stored, 0, True, True, id="session-expired-but-stored"),
+        pytest.param(_row_stored_before_the_upgrade, 0, False, True, id="stored-before-upgrade"),
+    ],
+)
 def test_a_same_origin_logout_still_answers_the_page(
     arrange: Callable[[OidcHost], dict[str, str]],
     sessions_kept: int,
@@ -210,11 +226,14 @@ def test_a_same_origin_logout_still_answers_the_page(
     assert host.transaction.entries - entries_before == entered
 
 
-@pytest.mark.parametrize("headers", [
-    pytest.param({"sec-fetch-site": "cross-site"}, id="cross-site-fetch-metadata"),
-    pytest.param({"origin": "https://evil.test"}, id="foreign-origin"),
-    pytest.param({}, id="form-with-neither-header"),
-])
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param({"sec-fetch-site": "cross-site"}, id="cross-site-fetch-metadata"),
+        pytest.param({"origin": "https://evil.test"}, id="foreign-origin"),
+        pytest.param({}, id="form-with-neither-header"),
+    ],
+)
 def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]) -> None:
     host = after_signing_in(an_oidc_host())
 
@@ -246,14 +265,18 @@ def test_a_logout_reaches_no_issuer_endpoint() -> None:
 
 def test_the_logout_form_carries_the_configured_values_whatever_the_request_names() -> None:
     host = after_signing_in(an_oidc_host())
-    query = urllib.parse.urlencode({
-        "post_logout_redirect_uri": "https://evil.test/",
-        "redirect": "https://evil.test/",
-        "client_id": "someone-else",
-    })
+    query = urllib.parse.urlencode(
+        {
+            "post_logout_redirect_uri": "https://evil.test/",
+            "redirect": "https://evil.test/",
+            "client_id": "someone-else",
+        }
+    )
 
     response = host.client.post(
-        f"{LOGOUT_PATH}?{query}", headers=SAME_ORIGIN_FORM, content=query,
+        f"{LOGOUT_PATH}?{query}",
+        headers=SAME_ORIGIN_FORM,
+        content=query,
     )
 
     assert LogoutPage(response.text).hidden_fields == {
@@ -275,7 +298,9 @@ def test_a_get_of_the_logout_path_ends_nothing() -> None:
 @pytest.mark.parametrize("strict_records", [False, True], ids=["plain", "strict"])
 @pytest.mark.parametrize("kind", list(TransactionKind), ids=lambda kind: kind.name.lower())
 def test_a_logout_enters_the_transaction_once_and_reads_no_record_after_its_exit(
-    kind: TransactionKind, *, strict_records: bool,
+    kind: TransactionKind,
+    *,
+    strict_records: bool,
 ) -> None:
     host = after_signing_in(an_oidc_host(transaction_kind=kind, strict_records=strict_records))
     entries_before = host.transaction.entries
@@ -298,7 +323,9 @@ def _answers_a_plain_500_and_clears_no_cookie(response: HttpxResponse) -> bool:
 @pytest.mark.parametrize("store_call", ["load", "delete"])
 @pytest.mark.parametrize("kind", list(TransactionKind), ids=lambda kind: kind.name.lower())
 def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
-    kind: TransactionKind, store_call: str, monkeypatch: pytest.MonkeyPatch,
+    kind: TransactionKind,
+    store_call: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     host = after_signing_in(an_oidc_host(transaction_kind=kind))
     with monkeypatch.context() as patch:
@@ -384,11 +411,14 @@ def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
 
 
 def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -> None:
-    host = after_signing_in(an_oidc_host(
-        logout_page_text=lambda request: LogoutPageText(
-            language=request.headers["x-language"], button_label=request.headers["x-label"],
-        ),
-    ))
+    host = after_signing_in(
+        an_oidc_host(
+            logout_page_text=lambda request: LogoutPageText(
+                language=request.headers["x-language"],
+                button_label=request.headers["x-label"],
+            ),
+        )
+    )
 
     response = post_logout(host, {**SAME_ORIGIN_FORM, "x-label": "Abmelden", "x-language": "de"})
 
@@ -396,10 +426,12 @@ def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -
     assert (page.texts["button"], page.attributes_of("html")) == ("Abmelden", [{"lang": "de"}])
 
     after_the_cookie_is_cleared = post_logout(
-        host, {**SAME_ORIGIN_FORM, "x-label": "Sign out", "x-language": "en"},
+        host,
+        {**SAME_ORIGIN_FORM, "x-label": "Sign out", "x-language": "en"},
     )
 
     second_page = LogoutPage(after_the_cookie_is_cleared.text)
     assert (second_page.texts["button"], second_page.attributes_of("html")) == (
-        "Sign out", [{"lang": "en"}],
+        "Sign out",
+        [{"lang": "en"}],
     )

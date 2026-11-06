@@ -141,8 +141,7 @@ class SingleProcessRateLimitBackend:
         expired = [
             key
             for key, entry in self._events.items()
-            if not entry.timestamps
-            or entry.timestamps[-1] + entry.window_seconds <= now
+            if not entry.timestamps or entry.timestamps[-1] + entry.window_seconds <= now
         ]
         for key in expired:
             del self._events[key]

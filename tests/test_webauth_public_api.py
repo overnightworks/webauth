@@ -29,11 +29,7 @@ WEBAUTH_MODULES = [
     *(module.name for module in pkgutil.walk_packages(webauth.__path__, "webauth.")),
 ]
 TYPING_HOSTS = sorted((TESTS / "fixtures" / "typing_hosts").glob("*.py"))
-OTHER_CONSUMERS = sorted(
-    path
-    for path in TESTS.rglob("*.py")
-    if path not in TYPING_HOSTS
-)
+OTHER_CONSUMERS = sorted(path for path in TESTS.rglob("*.py") if path not in TYPING_HOSTS)
 
 
 def _relative_id(path: Path) -> str:
@@ -242,9 +238,7 @@ def _names_bound_outside_the_statements_the_guard_reads(
 
 
 PUBLIC_MODULES = [
-    name
-    for name in WEBAUTH_MODULES
-    if not any(part.startswith("_") for part in name.split("."))
+    name for name in WEBAUTH_MODULES if not any(part.startswith("_") for part in name.split("."))
 ]
 
 
@@ -376,7 +370,9 @@ class NameTaken:
 
 
 def _name_taken_by_chain(
-    path: Path, chain: ast.Attribute, module_aliases: dict[str, str],
+    path: Path,
+    chain: ast.Attribute,
+    module_aliases: dict[str, str],
 ) -> list[NameTaken]:
     parts: list[str] = []
     root: ast.expr = chain
@@ -507,7 +503,8 @@ def test_every_module_imports_when_the_login_module_is_imported_first() -> None:
     ],
 )
 def test_every_public_operational_error_is_caught_as_web_auth_error_with_its_payload(
-    error: Exception, failure: ExchangeFailure | None,
+    error: Exception,
+    failure: ExchangeFailure | None,
 ) -> None:
     with pytest.raises(WebAuthError) as caught:
         raise error
