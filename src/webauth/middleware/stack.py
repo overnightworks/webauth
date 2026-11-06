@@ -119,23 +119,8 @@ def install_web_auth_middleware(
     500 follows, because a second start cannot be sent; the exception reaches
     the server alone.
 
-    Where a host's own middleware goes: added before this call it sits inside
-    the library stack, so a request the library refuses early (413 by
-    Content-Length, 429, 503, the CSRF 403s, the session gate's 302 and 401)
-    never reaches it; put one that must see only admitted requests (session
-    lookups, audit) there. Added after the call it sits outside, sees every
-    library refusal with its headers already set, and is the place for
-    access logs and metrics; a response or exception it produces itself does
-    not carry the library headers. A host ``BaseHTTPMiddleware`` or
-    ``@app.middleware("http")`` makes a response that fails mid-stream look
-    complete wherever it sits, and added before the call it also turns the 413
-    for a streamed body the route reads into the library 500; write a
-    middleware that must see admitted requests as pure ASGI. The library
-    middleware run the app in the caller's task, so a ``ContextVar`` that the
-    app or an inner middleware sets is visible to an outer host middleware
-    after the call returns; a host that relied on ``BaseHTTPMiddleware``'s
-    task isolation restores its own context, for example by resetting the
-    token it set.
+    Where a host's own middleware goes is in ``docs/host-contract.md``, "Where the host's own
+    middleware goes".
     """
     _refuse_an_unsound_stack(app)
     entries = _library_middleware(

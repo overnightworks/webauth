@@ -39,6 +39,18 @@ immediate removal requires disabling the user at the issuer together with
 [back-channel logout](ARCHITECTURE.md#back-channel-logout). See
 [Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
 
+A person is a member when one of their groups is the group's path or a subgroup of
+it, compared character for character and by path segment, so `/apps/notes/admin`
+counts for `/apps/notes` and `/apps/notes2` does not. The groups claim must carry
+full paths (Keycloak's group mapper with `full.path` on); a missing or empty claim
+means no membership. Only the issuer's groups decide the role. It is rewritten at
+every login and lives on the account, so a person taken out of the admin group is a
+plain user from the next login on every device at once. The check runs before any
+account is looked up or created, so a person removed from the group is refused at
+their next login while their account and data stay, and a person put back returns to
+the same account. `app_role` is that rule's public form, for a second service that
+verifies the issuer's token itself.
+
 Admission never looks up a username and has no local active-user flag; disabling
 people belongs to the issuer ([#279](https://github.com/overnightworks/webauth/issues/279),
 operator ruling 19.10.2026). A host store may still reject a new account's name
@@ -94,6 +106,26 @@ including a missing hint. Browser behavior is driven by `logout` and
 `logout_through_the_page` in [engines.py](../tests/e2e/oidc/engines.py).
 These are hand-run browser proofs, not CI tests; [#420's review journal](https://github.com/overnightworks/webauth/issues/420#issuecomment-6351975830)
 records the page implementation's browser evidence.
+
+## Where the host's own middleware goes
+
+Added before `install_web_auth_middleware`, a host middleware sits inside the library
+stack, so a request the library refuses early (413 by `Content-Length`, 429, 503, the
+CSRF 403s, the session gate's 302 and 401) never reaches it; put one that must see only
+admitted requests (session lookups, audit) there. Added after the call it sits outside,
+sees every library refusal with its headers already set, and is the place for access
+logs and metrics; a response or exception it produces itself does not carry the library
+headers.
+
+A host `BaseHTTPMiddleware` or `@app.middleware("http")` makes a response that fails
+mid-stream look complete wherever it sits, and added before the call it also turns the
+413 for a streamed body the route reads into the library 500; write a middleware that
+must see admitted requests as pure ASGI.
+
+The library middleware run the app in the caller's task, so a `ContextVar` that the app
+or an inner middleware sets is visible to an outer host middleware after the call
+returns; a host that relied on `BaseHTTPMiddleware`'s task isolation restores its own
+context, for example by resetting the token it set.
 
 ## CSRF origin
 
