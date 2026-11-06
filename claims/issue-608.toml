@@ -3,6 +3,6 @@ agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
 role = "builder"
 base = "20dc7168a1de1ba2322f899c55aabf8e1de405b0"
 branch = "claude/issue-608-tests-room-for-ruff-format"
-scope = ["quality/baseline.toml", "tests/fixtures/typing_hosts", "tests/middleware", "tests/support", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_derived_policies.py"]
+scope = ["docs/host-contract.md", "quality/baseline.toml", "tests/fixtures/typing_hosts", "tests/middleware", "tests/support", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_derived_policies.py"]
 opened_commit = "7eba6a5ddfa384e8d83900c861c4fbb05185e95d"
 whole_reason = "One test-only refactor whose single measure is the formatter's size outcome; split by file, each slice would need the same scratch reformat to prove itself."
