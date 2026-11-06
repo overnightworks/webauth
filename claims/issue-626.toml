@@ -1,0 +1,8 @@
+claim_id = "99e1482539484c1da50453d93c65865a"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "1aefd694bce14bc54702634a6250e089a1d91d0a"
+branch = "claude/issue-626-session-cookie-name-derived"
+scope = ["src/webauth/config.py", "src/webauth/cookies.py", "tests/test_config.py", "tests/test_cookies.py"]
+opened_commit = "0cd569ada68cf7cbf8848fae9172592e7a8aade6"
+whole_reason = "One field leaves with its machinery: its validators in cookies.py and its tests in both test modules go in the same landing, so nothing is left without a caller."
