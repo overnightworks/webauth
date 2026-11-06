@@ -62,7 +62,9 @@ def _key_set_of_bytes(size: int) -> bytes:
 def _undeliverable_key_sets() -> list[Any]:
     return [
         pytest.param(KeySetFetchError("timed out"), "fetch-failed", id="fetch-failure"),
-        pytest.param(_key_set_of_bytes(_KEY_SET_BYTE_LIMIT + 1), "too-large", id="oversized-response"),
+        pytest.param(
+            _key_set_of_bytes(_KEY_SET_BYTE_LIMIT + 1), "too-large", id="oversized-response"
+        ),
     ]
 
 
