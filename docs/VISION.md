@@ -1,18 +1,24 @@
 # webauth vision
 
-## The wish
+## What webauth is for
 
-> "eine auth library die mir alles abnimmt, damit ich sie in all meine repos easy wiederverwenden kann"
+webauth takes authentication off every app. It is the OpenID Connect relying-party library that signs people in, keeps
+their sessions, checks CSRF and origin, sets the security headers, admits machine callers on bearer routes, limits each
+address's rate, raises audit events, and logs people out at the app and at the issuer. An app implements the ports,
+wires the README's quick start and has nothing else to write.
 
-> "gemacht von und für agenten? sauber etc?"
+Every app integrates it the same way, from the [README](../README.md) and the [host contract](host-contract.md), without
+reading the library's code. A security fix lands once and reaches every app with the next tag.
 
-A professional library: sign-in through the operator's Keycloak, sessions, CSRF and origin checks, security headers,
-machine bearer routes and logout are taken off every app. It works the same in every app, so an agent integrates it from
-the README and the host contract without reading the library's code. An app implements the ports, wires the README's quick
-start and has nothing else to write; a security fix lands once and reaches every app with the next tag.
+It follows the standards it implements:
 
-Made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot derive
-from the code, and the code is clean enough that the next agent changes it without fear.
+- OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0;
+- OAuth 2.0 (RFC 6749), its bearer tokens (RFC 6750) and its Security Best Current Practice (RFC 9700);
+- JSON Web Token (RFC 7519);
+- Fetch Metadata for cross-site requests.
+
+It is made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot
+derive from the code, and the code is clean enough that the next agent changes it without fear.
 
 ## Who uses it today
 
