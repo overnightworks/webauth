@@ -132,6 +132,10 @@ def key_set_document(*jwks: object) -> bytes:
     return json.dumps({"keys": list(jwks)}).encode()
 
 
+def served_key_set(key_name: str = "current") -> bytes:
+    return key_set_document(public_jwk(rsa_key(key_name), f"{key_name}-key"))
+
+
 BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"
 
 
@@ -493,10 +497,6 @@ class LoopbackHttpsServer:
     @property
     def requested_paths(self) -> list[str]:
         return [request.path for request in self.received]
-
-
-def served_key_set(key_name: str = "current") -> bytes:
-    return key_set_document(public_jwk(rsa_key(key_name), f"{key_name}-key"))
 
 
 @contextlib.contextmanager
