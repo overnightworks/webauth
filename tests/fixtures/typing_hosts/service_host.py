@@ -18,7 +18,6 @@ from webauth.service_callers import (
     RegisteredApp,
     ServiceCallerCheck,
     ServiceIdentity,
-    WorkloadCaller,
 )
 
 
@@ -54,15 +53,6 @@ _WIRE_CODES = {
     CallerRefusalClass.UNAVAILABLE: 503,
     CallerRefusalClass.FORBIDDEN: 403,
 }
-
-
-def a_service_maps_the_outcome_to_a_wire_code(check: ServiceCallerCheck, token: str | None) -> int:
-    outcome = check.workload_caller(token)
-    if isinstance(outcome, WorkloadCaller):
-        principal: Principal = outcome.principal
-        return len(outcome.groups) + len(principal.issuer)
-    refusal: CallerRefusal = outcome
-    return _WIRE_CODES[refusal.refusal_class]
 
 
 def a_service_maps_a_person_outcome_to_a_wire_code(

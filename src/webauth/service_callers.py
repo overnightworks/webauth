@@ -1,11 +1,10 @@
 """The proof a service runs on the token an app presents as itself.
 
 A service builds one `ServiceCallerCheck` per process from the facts it owns
-(`ServiceIdentity`) and the apps it registered, and calls `workload_caller` with
-the bearer token of each request, or `person_caller` with that token and the
-token of the person the app acts for. The first fault is the refusal, in
-the order of `docs/host-contract.md` (for `person_caller` the two tokens' stages
-interleave: both verified before either is read); the host maps its
+(`ServiceIdentity`) and the apps it registered, and calls `person_caller` with
+the bearer token of each request and the token of the person the app acts for.
+The first fault is the refusal, in the order of `docs/host-contract.md` (the two
+tokens' stages interleave: both verified before either is read); the host maps its
 `CallerRefusal.refusal_class` to a wire code, recommended as 503 for `UNAVAILABLE`
 (`KEY_SET_UNAVAILABLE`), 401 for `UNAUTHENTICATED` (`MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT`, `MALFORMED_GROUPS`) and 403 for `FORBIDDEN` (the rest). Policy stays
@@ -48,7 +47,6 @@ __all__ = [
     "RegisteredApp",
     "ServiceCallerCheck",
     "ServiceIdentity",
-    "WorkloadCaller",
 ]
 
 
@@ -95,16 +93,6 @@ class Principal:
 
 
 @dataclass(frozen=True)
-class WorkloadCaller:
-    """An app acting as itself. Its repr shows ``app`` only."""
-
-    app: str
-    client_id: str = field(repr=False)
-    principal: Principal = field(repr=False)
-    groups: frozenset[str] = field(repr=False)
-
-
-@dataclass(frozen=True)
 class PersonCaller:
     """An app acting for a person. Its repr shows ``app`` and ``role`` only.
 
@@ -118,8 +106,7 @@ class PersonCaller:
 
 
 class CallerRefusalReason(StrEnum):
-    """The refusals. `workload_caller` checks them in this order; `person_caller` follows
-    the eight steps of `docs/host-contract.md`."""
+    """The refusals. `person_caller` checks them in the order of `docs/host-contract.md`."""
 
     MISSING_TOKEN = "missing-token"  # noqa: S105 - refusal reason not a credential
     KEY_SET_UNAVAILABLE = "key-set-unavailable"
@@ -206,16 +193,6 @@ class ServiceCallerCheck:
             monotonic_clock=monotonic_clock,
         )
 
-    def workload_caller(self, token: str | None) -> WorkloadCaller | CallerRefusal:
-        """The app that presented ``token`` as itself, or the first refusal."""
-        verified = self._verified(token)
-        if isinstance(verified, CallerRefusal):
-            return verified
-        identified = self._identified(verified)
-        if isinstance(identified, CallerRefusal):
-            return identified
-        return self._workload(verified, identified)
-
     def person_caller(
         self, workload_token: str | None, person_token: str | None
     ) -> PersonCaller | CallerRefusal:
@@ -236,19 +213,19 @@ class ServiceCallerCheck:
         person_identity = self._identified(verified_person)
         if isinstance(person_identity, CallerRefusal):
             return person_identity
-        workload = self._workload(verified_workload, workload_identity)
+        workload = self._workload(verified_workload)
         if isinstance(workload, CallerRefusal):
             return workload
         if _authorized_party(verified_person.claims) != workload.client_id:
             return CallerRefusal(CallerRefusalReason.CLIENT_MISMATCH, None)
-        if person_identity.principal.subject == workload.principal.subject:
+        if person_identity.principal.subject == workload_identity.principal.subject:
             return CallerRefusal(CallerRefusalReason.SAME_SUBJECT, None)
-        admission = self._registered_apps[workload.client_id].admission
+        admission = workload.registered.admission
         role = app_role(sorted(person_identity.groups), admission)
         if role is None:
             return CallerRefusal(CallerRefusalReason.NOT_A_MEMBER, None)
         return PersonCaller(
-            app=workload.app,
+            app=workload.registered.app,
             client_id=workload.client_id,
             principal=person_identity.principal,
             groups=person_identity.groups,
@@ -272,9 +249,7 @@ class ServiceCallerCheck:
             return CallerRefusal(CallerRefusalReason.MALFORMED_GROUPS, None)
         return _Identity(Principal(issuer=verified.issuer, subject=subject), groups)
 
-    def _workload(
-        self, verified: _VerifiedClaims, identified: _Identity
-    ) -> WorkloadCaller | CallerRefusal:
+    def _workload(self, verified: _VerifiedClaims) -> _Workload | CallerRefusal:
         claims = verified.claims
         if not _has_role(claims, self._identity.workload_role):
             return CallerRefusal(CallerRefusalReason.NOT_A_WORKLOAD, None)
@@ -284,12 +259,13 @@ class ServiceCallerCheck:
         registered = self._registered_apps.get(client_id)
         if registered is None:
             return CallerRefusal(CallerRefusalReason.UNREGISTERED_CLIENT, None)
-        return WorkloadCaller(
-            app=registered.app,
-            client_id=client_id,
-            principal=identified.principal,
-            groups=identified.groups,
-        )
+        return _Workload(registered, client_id)
+
+
+@dataclass(frozen=True)
+class _Workload:
+    registered: RegisteredApp
+    client_id: str
 
 
 @dataclass(frozen=True)

@@ -35,7 +35,7 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 - `proxies` derives client identity from trusted peers; `rate_limit` measures sliding windows in Redis or in process.
 - `ports` defines host Protocols, `AuthenticatedUser` and `BearerCaller`; `jwt_verification` verifies RS256 against cached issuer keys.
 - `oidc` owns authorization URLs, PKCE, callback/code/ID-token checks, access-token verification, refresh and client-credentials grants.
-- `service_callers` is how a service proves the caller of its API: `ServiceCallerCheck.workload_caller` verifies an app's own token and returns the `WorkloadCaller`, and `person_caller` also binds a person's token to it and checks the person's membership, returning the `PersonCaller`; each returns the first `CallerRefusal` otherwise, under the service's `ServiceIdentity` and its registered apps; it holds no policy and logs nothing.
+- `service_callers` is how a service proves the caller of its API: `ServiceCallerCheck.person_caller` verifies an app's own token, binds a person's token to it and checks the person's membership, returning the `PersonCaller` or else the first `CallerRefusal`, under the service's `ServiceIdentity` and its registered apps; it holds no policy and logs nothing.
 - `https_client` owns outbound HTTPS; `oidc_transport.post_token_request_over_https` implements the injected `TokenRequestPost`.
 
 The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
