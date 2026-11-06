@@ -16,24 +16,8 @@ host's accounts, never a configuration change. This module builds on
 ``webauth.oidc``.
 
 Admission runs inside the host's ``SignInTransaction`` and never commits: the host's
-exit commits or rolls back, and a refusal writes nothing. An ``AdmissionConfig`` states who
-may enter and who is admin: the bound issuer, the app's ``login_group``, a
-Keycloak group path such as ``/apps/notes``, and its ``admin_group``, a
-path below it such as ``/apps/notes/admin`` (or ``NoAdmins``). Only the
-issuer's groups decide the role: it is rewritten at every login, so a person
-taken out of the admin group is a plain user from the next login and, the
-role living on the account, on every device at once. Until that login an open
-session keeps the old role. A person is a member when one of their
-groups is that path or a subgroup of it, compared character for character
-and by path segment, so ``/apps/notes/admin`` counts and
-``/apps/notes2`` does not. ``app_role`` is that rule's public form, for a second
-service that verifies the issuer's token itself. The check runs on every login, before any
-account is looked up or created, so a person removed from the group is
-refused at their next login while their account and data stay, and a person
-put back returns to the same account. It ends no session that is already
-open; that lasts until the host's session lifetime runs out. The groups claim
-must carry full paths (Keycloak's group mapper with ``full.path`` on); a
-missing or empty claim means no membership.
+exit commits or rolls back, and a refusal writes nothing. Who gets in, and when a
+change of group takes effect, is in ``docs/host-contract.md``, "Who gets in".
 
 After the callback admits an account, one ``SignInTransaction`` ends the session the
 request's cookie names, prunes the account to a cap, and creates its new session,
