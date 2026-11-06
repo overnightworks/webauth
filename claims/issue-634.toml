@@ -1,0 +1,8 @@
+claim_id = "8cdab0af322641b2a20205ebf5e9a2f4"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "c021e5c1cd5893378d727ef93952af0469b7fa60"
+branch = "claude/issue-634-approle-alone-names-roles"
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/__init__.py", "src/webauth/admission.py", "src/webauth/config.py", "src/webauth/dependencies.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc_login.py", "src/webauth/sign_in_routes.py", "tests"]
+opened_commit = "c475b22826e48c024c47eb28d291ebc1af2585c2"
+whole_reason = "Two options leave only once every reader is gone; the readers, their docstrings, the persisted-contract sentence and the tests change in one landing."
