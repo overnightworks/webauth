@@ -722,7 +722,7 @@ def an_auth_app(
     other policies the installer takes, or replaces the headers.
     """
     if config is None:
-        config = a_web_auth_config(admin_role=ADMIN_ROLE, **config_overrides)
+        config = a_web_auth_config(**config_overrides)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
     app = FastAPI(root_path=root_path)

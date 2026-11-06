@@ -15,6 +15,7 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 
 from tests.support.gate_arrangement import (
+    ADMISSION,
     EXPORT_PATH,
     MACHINE_AS_PERSON_PATH,
     MACHINE_SESSION_PATH,
@@ -60,12 +61,15 @@ from tests.support.person_paths_arrangement import (
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     MEMBER_ROLE,
+    FakeUser,
 )
+from webauth.admission import AdmissionConfig, NoAdmins
 from webauth.dependencies import current_user_dependency
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import admitted_user
 from webauth.policies import (
     AuthorizedParties,
+    PathRules,
     RateLimitBudget,
     RateLimitPolicy,
 )
@@ -158,6 +162,50 @@ def test_the_role_follows_the_tokens_groups_and_is_stored_as_at_sign_in(
         ),
     ]
     assert the_account(app).role == MEMBER_ROLE
+
+
+@BOTH_TRANSACTIONS
+def test_the_roles_a_token_admission_stores_and_audits_are_plain_strings(
+    kind: TransactionKind,
+) -> None:
+    app = a_person_app(transaction_kind=kind, known_accounts=(a_lena(),))
+
+    app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
+
+    assert app.audit is not None
+    [event] = app.audit.account_events
+    assert {type(event.role), type(event.previous_role), type(the_account(app).role)} == {str}
+
+
+@BOTH_TRANSACTIONS
+def test_where_the_app_has_no_admins_a_token_admission_demotes_a_stored_admin(
+    kind: TransactionKind,
+) -> None:
+    admin = FakeUser(id=OPERATOR_SUBJECT, username="lena", role=ADMIN_ROLE)
+    app = a_person_app(
+        paths=PathRules(),
+        transaction_kind=kind,
+        known_accounts=(admin,),
+        admission=AdmissionConfig(
+            bound_issuer=ADMISSION.bound_issuer,
+            login_group="/apps/x",
+            admin_group=NoAdmins.IN_THIS_APP,
+        ),
+    )
+
+    response = app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
+
+    assert (response.status_code, response.json()["role"]) == (200, MEMBER_ROLE)
+    assert app.audit is not None
+    assert app.audit.account_events == [
+        AccountEvent(
+            kind=AccountEventKind.ROLE_CHANGED,
+            actor_id=None,
+            subject_id=OPERATOR_SUBJECT,
+            role=MEMBER_ROLE,
+            previous_role=ADMIN_ROLE,
+        ),
+    ]
 
 
 @BOTH_HOSTS

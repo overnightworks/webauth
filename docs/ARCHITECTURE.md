@@ -38,7 +38,7 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 - `service_callers` is how a service proves the caller of its API: `ServiceCallerCheck.workload_caller` verifies an app's own token and returns the `WorkloadCaller`, and `person_caller` also binds a person's token to it and checks the person's membership, returning the `PersonCaller`; each returns the first `CallerRefusal` otherwise, under the service's `ServiceIdentity` and its registered apps; it holds no policy and logs nothing.
 - `https_client` owns outbound HTTPS; `oidc_transport.post_token_request_over_https` implements the injected `TokenRequestPost`.
 
-The host owns users/role names; the library writes the group-derived role and authorizes only the admin check.
+The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
 The sign-in callback, the logout route and the back-channel logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores.
 Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.

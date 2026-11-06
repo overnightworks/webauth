@@ -37,8 +37,8 @@ class EverySubject(Enum):
 
 
 class NoAdmins(Enum):
-    """This app has no admins: every account is ``user_role``, and a stored
-    ``admin_role`` is overwritten at the next login."""
+    """This app has no admins: every account is ``"user"``, and a stored
+    ``"admin"`` is demoted at the next sign-in or person-token admission."""
 
     IN_THIS_APP = "no-admins"
 
@@ -100,7 +100,8 @@ def _is_member_of(group_path: str, groups: Sequence[str]) -> bool:
 
 
 class AppRole(StrEnum):
-    """The kind of role an app's groups carry, not the host's spelling of it."""
+    """The role an app's groups carry. Its values, ``"admin"`` and ``"user"``, are the
+    strings webauth stores and checks."""
 
     ADMIN = "admin"
     USER = "user"

@@ -23,7 +23,6 @@ from webauth.admission import (
     _require_group_path,
     app_role,
 )
-from webauth.config import web_auth_config
 from webauth.dependencies import (
     _ADMIN_REQUIRED_DETAIL,
     _AUTHENTICATION_REQUIRED_DETAIL,
@@ -201,7 +200,7 @@ class ProtectedResource:
     no other kind's parties extend, and groups that hold ``required_group`` or a path below it
     besides the admission's login group. The gate then looks the token's subject up in one
     entry of ``transaction``, a read: a person must have signed in once, and is admitted
-    with the configured person role whatever role is stored. ``TypeError`` for
+    with the role ``"user"`` whatever role is stored. ``TypeError`` for
     ``authorized_parties`` that is not an ``AuthorizedParties``. ``ValueError`` for a
     ``required_group`` that is not a group path, and for a ``url`` that is
     not an endpoint URL with a plain host, an optional port and a path of one or more
@@ -474,7 +473,6 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 verified,
                 required_group=resource.required_group,
                 admission=self._policy.admission,
-                config=web_auth_config(request),
             ),
         )
         if person is None:
@@ -501,7 +499,6 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 person_paths.transaction,
                 verified,
                 admission=self._policy.admission,
-                config=web_auth_config(request),
             ),
         )
         if isinstance(person, AdmissionRefusal):

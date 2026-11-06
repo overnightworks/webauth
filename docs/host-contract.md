@@ -41,6 +41,13 @@ user at the issuer together with
 [back-channel logout](ARCHITECTURE.md#back-channel-logout). See
 [Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
 
+The stored role is a plain string. webauth writes `"admin"` for an admin and
+`"user"` for every other member, and the host's store keeps them. The admin
+checks admit exactly `"admin"`. Only a Breaking release that names the migration
+of stored accounts changes these values. `NoAdmins` demotes a stored admin to
+`"user"` at its next sign-in or person-token admission. Resource admission
+rewrites no role.
+
 A person is a member when one of their groups is the group's path or a subgroup of
 it, compared character for character and by path segment, so `/apps/notes/admin`
 counts for `/apps/notes` and `/apps/notes2` does not. The groups claim must carry

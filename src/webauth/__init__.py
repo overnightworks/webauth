@@ -3,7 +3,7 @@
 Owns sessions the store decides on every request, HMAC-signed cookies, CSRF, admin
 checks, rate limits, and the audit events they raise, all through the host
 ports in `webauth.ports`.
-The user model, schema, configured role names, transaction boundaries and HTTP
+The user model, schema, transaction boundaries and HTTP
 routes stay with the host application, and so does every response but the
 library's own refusals and its 500.
 
