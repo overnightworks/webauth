@@ -1,7 +1,0 @@
-claim_id = "7402cec5a4cd4e18b050284fc0538541"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "37cb77bd3da4c4b41f9874d96c7f1276d9187a91"
-branch = "docs/readme-dependabot-proof"
-scope = ["AGENTS.md", "README.md"]
-opened_commit = "08e38d014fa59127d9e70ecb1c4f21535a3e5fdd"
