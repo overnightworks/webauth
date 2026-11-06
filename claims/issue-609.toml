@@ -1,0 +1,8 @@
+claim_id = "495cd6b03bf84768a54f609a468babdc"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "20dc7168a1de1ba2322f899c55aabf8e1de405b0"
+branch = "claude/issue-609-harness-room-for-ruff-format"
+scope = ["quality/baseline.toml", "tests/e2e/oidc"]
+opened_commit = "e9f5e1bf2009fcb7638b162388aed4441a1d5e2a"
+whole_reason = "One refactor of the hand-run harness, proven by one full harness run; split, each slice would need its own probe-stack run."
