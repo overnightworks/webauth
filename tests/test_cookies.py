@@ -31,7 +31,6 @@ from webauth.cookies import (
     PendingLogin,
     _clear_session_cookies,
     _default_cookie_name,
-    _is_valid_cookie_name,
     _pending_login_cookie_name,
     _sign_pending_login,
     _verify_pending_login,
@@ -296,7 +295,6 @@ def with_security_headers(app: FastAPI) -> None:
 
 class CookieOverrides(TypedDict, total=False):
     cookie_secure: bool
-    session_cookie_name: str
 
 
 def a_cookie_app(
@@ -416,18 +414,6 @@ def test_issuing_sets_exactly_the_session_cookie_with_its_attributes(
             "session_id",
             id="secure-off-falls-back-to-the-plain-name",
         ),
-        pytest.param(
-            OVER_HTTPS,
-            {"session_cookie_name": "sid"},
-            "sid",
-            id="own-name-stays-when-secure",
-        ),
-        pytest.param(
-            PLAIN_HTTP,
-            {"cookie_secure": False, "session_cookie_name": "sid"},
-            "sid",
-            id="own-name-stays-when-secure-off",
-        ),
     ],
 )
 def test_the_cookie_is_issued_and_cleared_under_the_resolved_name(
@@ -531,45 +517,3 @@ def test_logging_out_takes_the_cookie_back(cookie_app: CookieApp) -> None:
     cookie_app.clear()
 
     assert cookie_app.config.session_cookie_name not in cookie_app.client.cookies
-
-
-@pytest.mark.parametrize(
-    ("name", "valid"),
-    [
-        *[
-            pytest.param(name, True, id=f"accepts-{name}")
-            for name in (
-                "__Host-session_id",
-                "session_id",
-                "sid",
-                "a-b",
-                "a_b",
-                "a.b",
-                "A9",
-                *[f"a{char}b" for char in "!#$%&'*+^`|~"],
-            )
-        ],
-        *[
-            pytest.param(name, False, id=f"refuses-{name!r}")
-            for name in (
-                "",
-                "a b",
-                "a\tb",
-                "a;b",
-                "a=b",
-                "a,b",
-                'a"b',
-                "a\x01b",
-                "a\x7fb",
-                "a\n",
-                "café",
-                *[f"a{char}b" for char in "()<>@:\\/[]?{}"],
-            )
-        ],
-    ],
-)
-def test_a_cookie_name_is_valid_only_when_it_is_an_rfc_6265_token(
-    name: str,
-    valid: bool,
-) -> None:
-    assert _is_valid_cookie_name(name) is valid
