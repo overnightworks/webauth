@@ -418,6 +418,23 @@ def _an_issuer_side(
     return issuer, key_set, relying_party, issued_id_tokens
 
 
+def _a_host_app(
+    config: WebAuthConfig, address_budget: int | None, behind_base_http_middleware: bool
+) -> FastAPI:
+    app = FastAPI()
+    _install_the_host_middleware(app, config, address_budget)
+    if behind_base_http_middleware:
+        app.middleware("http")(_pass_through)
+    return app
+
+
+def _a_client_of(app: FastAPI, root_path: str) -> TestClient:
+    return TestClient(
+        app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=root_path,
+        follow_redirects=False, raise_server_exceptions=False,
+    )
+
+
 def an_oidc_host(
     *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
@@ -445,10 +462,7 @@ def an_oidc_host(
         transaction_kind, accounts=accounts, sessions=sessions, audit=audit, lock=lock,
         strict=strict_records,
     )
-    app = FastAPI()
-    _install_the_host_middleware(app, config, address_budget)
-    if behind_base_http_middleware:
-        app.middleware("http")(_pass_through)
+    app = _a_host_app(config, address_budget, behind_base_http_middleware)
     holder: list[OidcHost] = []
     _add_the_login_routes(
         app, host=lambda: holder[0], transaction=transaction,
@@ -458,10 +472,7 @@ def an_oidc_host(
     )
     _add_the_signed_in_routes(app, sessions)
     holder.append(OidcHost(
-        client=TestClient(
-            app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path=root_path,
-            follow_redirects=False, raise_server_exceptions=False,
-        ),
+        client=_a_client_of(app, root_path),
         issuer=issuer,
         key_set=key_set,
         wall_clock=wall_clock,

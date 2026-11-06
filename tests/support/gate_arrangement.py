@@ -334,6 +334,18 @@ def add_marked_routes(auth: AuthApp, resource: ProtectedResource) -> None:
         )
 
 
+def _the_person_of(
+    auth: AuthApp, request: Request, user: AuthenticatedUser
+) -> dict[str, str | None]:
+    auth.route_runs.append(request.scope["path"])
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "session": session_id_from_request(request, web_auth_config(request)),
+    }
+
+
 def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None) -> None:
     """The routes under `PERSON_PREFIX` that read the person, and the foreign-secret webhook."""
     dependencies = current_user_dependency(
@@ -343,13 +355,7 @@ def add_person_routes(auth: AuthApp, login_redirect: LoginRedirect | None = None
     )
 
     def person(request: Request, user: AuthenticatedUser) -> dict[str, str | None]:
-        auth.route_runs.append(request.scope["path"])
-        return {
-            "id": user.id,
-            "username": user.username,
-            "role": user.role,
-            "session": session_id_from_request(request, web_auth_config(request)),
-        }
+        return _the_person_of(auth, request, user)
 
     @auth.app.api_route(PERSON_ME_PATH, methods=["GET", "POST", "DELETE"])
     def me(
@@ -476,6 +482,29 @@ def _bound_to(
     return replace(resource, transaction=transaction)
 
 
+def _an_auth_app_behind_the_stack(
+    side: _SignInSide,
+    session_gate: bool,
+    public: tuple[PublicRule, ...],
+    stack_policies: dict[str, Any],
+    inner_middleware: tuple[Middleware, ...],
+    auth_app_keywords: dict[str, Any],
+) -> AuthApp:
+    auth = an_auth_app(
+        side.record,
+        gate=session_gate,
+        raise_server_exceptions=False,
+        sessions=side.sessions,
+        public=public,
+        stack_policies=stack_policies,
+        **auth_app_keywords,
+    )
+    if not session_gate:
+        install_web_auth_middleware(auth.app, **{**GATED_STACK_POLICIES, **stack_policies})
+    auth.app.user_middleware.extend(inner_middleware)
+    return auth
+
+
 def a_bearer_app(
     *,
     paths: PathRules = MACHINE_PATHS,
@@ -518,18 +547,9 @@ def a_bearer_app(
     )
     public = _public_rules(auth_app_keywords.pop("public", ()), person, resource)
     stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
-    auth = an_auth_app(
-        side.record,
-        gate=session_gate,
-        raise_server_exceptions=False,
-        sessions=side.sessions,
-        public=public,
-        stack_policies=stack_policies,
-        **auth_app_keywords,
+    auth = _an_auth_app_behind_the_stack(
+        side, session_gate, public, stack_policies, inner_middleware, auth_app_keywords,
     )
-    if not session_gate:
-        install_web_auth_middleware(auth.app, **{**GATED_STACK_POLICIES, **stack_policies})
-    auth.app.user_middleware.extend(inner_middleware)
     _add_routes(auth, person, resource, auth_app_keywords.get("login_redirect"))
     return BearerApp(
         auth, key_sets, clock, cookie=session_cookie_header(auth.signed_cookie()),
