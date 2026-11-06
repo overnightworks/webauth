@@ -3,6 +3,6 @@ agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
 role = "builder"
 base = "69bdf2af24b3256ba818d1d2d1028d1aac6dad78"
 branch = "claude/issue-590-the-operator-publishes-a-release-with-on"
-scope = [".github/workflows/release.yml", "AGENTS.md", "README.md", "scripts/publish_release.sh", "tests/scripts/test_publish_release.py", "tests/test_changelog.py", "tests/test_publish_release.py", "tests/test_webauth_changelog.py"]
+scope = [".github/workflows/release.yml", "README.md", "scripts/publish_release.sh", "tests/scripts/test_publish_release.py", "tests/test_changelog.py", "tests/test_publish_release.py", "tests/test_webauth_changelog.py"]
 opened_commit = "25393d273a56f9b3c7f42d63629007fa36aecd4c"
 whole_reason = "One operator command with its test, the changelog invariant that moves the release workflow's date check before merge, and the two documents that name the command."
