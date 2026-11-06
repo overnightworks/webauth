@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -63,7 +64,7 @@ from tests.support.webauth_arrangement import (
     MEMBER_ROLE,
     FakeUser,
 )
-from webauth.admission import AdmissionConfig, NoAdmins
+from webauth.admission import NoAdmins
 from webauth.dependencies import current_user_dependency
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import admitted_user
@@ -122,6 +123,21 @@ def test_the_first_token_of_a_new_subject_creates_its_account_as_a_sign_in_does(
         ),
     ]
     assert the_account(app).username == username
+
+
+@BOTH_TRANSACTIONS
+def test_a_new_ordinary_member_is_stored_and_audited_with_the_role_user_as_a_plain_str(
+    kind: TransactionKind,
+) -> None:
+    app = a_person_app(transaction_kind=kind)
+
+    app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
+
+    assert app.audit is not None
+    [event] = app.audit.account_events
+    assert (event.kind, event.role) == (AccountEventKind.USER_CREATED, MEMBER_ROLE)
+    assert {type(event.role), type(the_account(app).role)} == {str}
+    assert the_account(app).role == MEMBER_ROLE
 
 
 @BOTH_TRANSACTIONS
@@ -186,11 +202,7 @@ def test_where_the_app_has_no_admins_a_token_admission_demotes_a_stored_admin(
         paths=PathRules(),
         transaction_kind=kind,
         known_accounts=(admin,),
-        admission=AdmissionConfig(
-            bound_issuer=ADMISSION.bound_issuer,
-            login_group="/apps/x",
-            admin_group=NoAdmins.IN_THIS_APP,
-        ),
+        admission=replace(ADMISSION, admin_group=NoAdmins.IN_THIS_APP),
     )
 
     response = app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))

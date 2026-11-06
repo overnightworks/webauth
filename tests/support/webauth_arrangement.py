@@ -535,6 +535,7 @@ class AuthApp:
     config: WebAuthConfig
     route_runs: list[str]
     route_threads: list[int]
+    resource_persons: list[AuthenticatedUser] = field(default_factory=list)
 
     def get(
         self, path: str, *, cookie: str | None = None, accept: str | None = None
@@ -721,8 +722,7 @@ def an_auth_app(
     ``session_transaction`` or else the store's ``in_transaction``; ``stack_policies`` adds the
     other policies the installer takes, or replaces the headers.
     """
-    if config is None:
-        config = a_web_auth_config(**config_overrides)
+    config = config or a_web_auth_config(**config_overrides)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
     app = FastAPI(root_path=root_path)
