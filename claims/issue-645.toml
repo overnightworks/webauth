@@ -1,8 +1,0 @@
-claim_id = "5d11abddb4774f238f928ad9dda30b23"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "dbebc504acfdef507284739c0007e4f8cfe0b4a9"
-branch = "claude/issue-645-architecture-arc42-lite"
-scope = ["AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md"]
-opened_commit = "3fd944511c53e29222868a8bc0b34bbb0c6653d6"
-whole_reason = "One document's structure changes once; the three other files change only the link or sentence that names its sections."
