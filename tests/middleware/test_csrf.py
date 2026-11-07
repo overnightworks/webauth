@@ -209,9 +209,10 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
     status: int,
     body: dict[str, str],
 ) -> None:
-    """CSRF-03, CSRF-05, CSRF-06, CSRF-07, CSRF-08: same-origin passes without a token.
+    """CSRF-03, CSRF-05, CSRF-06, CSRF-07, CSRF-08, CSRF-09: same-origin passes without a token.
 
     Same-site or an absent header falls back to Origin; any other value is refused.
+    A foreign Referer beside valid provenance changes nothing.
     """
     response = _call(method, headers)
 
