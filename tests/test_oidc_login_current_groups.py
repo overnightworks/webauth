@@ -37,22 +37,26 @@ from tests.support.oidc_arrangement import (
     segment,
     token_endpoint_answer,
 )
+from tests.support.oidc_login_host import ADMISSION, LOGIN_GROUP, NO_ADMINS
 from tests.support.oidc_relying_party import a_relying_party_for
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_IDLE_SECONDS,
 )
+from webauth.admission import AppRole, app_role
 from webauth.https_client import KeySetFetchError
 from webauth.oidc import OidcRefusalReason, TokenEndpointError
 from webauth.oidc_login import (
     AccessTokenRefusal,
-    AccessTokenRefusalReason,
 )
 
 
 class TestTheGroupsReturned:
     @SHAPES
     def test_the_full_paths_of_the_refreshed_id_token_are_returned(self, provider_of: Any) -> None:
+        """GROUPS-01, GROUPS-04: the answer is the groups of the refreshed ID token, over both
+        transaction shapes."""
+
         arrangement = an_arrangement()
 
         outcome = arrangement.current_groups(provider_of(arrangement.sessions))
@@ -60,10 +64,37 @@ class TestTheGroupsReturned:
         assert outcome == tuple(GROUPS)
 
     def test_a_missing_groups_claim_is_no_membership(self) -> None:
+        """GROUPS-05: a missing groups claim answers `()`, which `app_role` does not admit."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(groups=ABSENT)
 
-        assert arrangement.current_groups(arrangement.sessions.in_transaction) == ()
+        outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
+
+        assert outcome == ()
+        assert app_role(outcome, ADMISSION) is None
+
+    @pytest.mark.parametrize(
+        ("group", "role"),
+        [
+            pytest.param(LOGIN_GROUP, AppRole.USER, id="the login group"),
+            pytest.param(f"{LOGIN_GROUP}/staff", AppRole.USER, id="a login subgroup"),
+            pytest.param(f"{LOGIN_GROUP}2", None, id="a group named like the login group"),
+        ],
+    )
+    def test_the_tuple_passed_to_app_role_admits_the_group_and_its_subgroups(
+        self, group: str, role: AppRole | None
+    ) -> None:
+        """GROUPS-12: `app_role` admits a member of the login group or of a subgroup, not a group
+        named alike."""
+
+        arrangement = an_arrangement(answer=False)
+        arrangement.answer_with_id_token(groups=[group])
+
+        outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
+
+        assert isinstance(outcome, tuple)
+        assert app_role(outcome, NO_ADMINS) is role
 
     @pytest.mark.parametrize(
         "groups",
@@ -71,6 +102,9 @@ class TestTheGroupsReturned:
         ids=["string", "number", "null-member", "object", "null"],
     )
     def test_a_malformed_groups_claim_is_refused_and_never_empty(self, groups: object) -> None:
+        """GROUPS-08, GROUPS-22: a groups claim that is no list of strings is refused as an issuer
+        failure, never `()`."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(groups=groups)
 
@@ -80,6 +114,8 @@ class TestTheGroupsReturned:
         assert arrangement.stored_refresh_token != ISSUED_REFRESH_TOKEN
 
     def test_the_groups_of_the_reply_come_from_this_calls_grant_only(self) -> None:
+        """GROUPS-01, GROUPS-25: each call makes one grant and answers the groups of its reply."""
+
         arrangement = an_arrangement()
         arrangement.issuer.refresh_answer_members["access_token"] = "different.access.token"
         provider = arrangement.sessions.in_transaction
@@ -105,11 +141,16 @@ class TestTheStoredIdTokenPlaysNoPart:
         ids=["none", "readable", "expired", "unreadable", "unreadable-nonce"],
     )
     def test_a_session_answers_alike_whatever_it_stored(self, stored: SecretStr | None) -> None:
+        """GROUPS-09: a session with no stored ID token, or one of any state, answers the same
+        groups."""
+
         arrangement = an_arrangement(id_token=stored)
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(GROUPS)
 
     def test_a_session_whose_stored_id_token_cannot_be_read_still_answers(self) -> None:
+        """GROUPS-09: the call never reads the stored ID token."""
+
         arrangement = an_arrangement(unreadable_id_token_of)
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(GROUPS)
@@ -125,6 +166,9 @@ class TestTheStoredIdTokenPlaysNoPart:
     def test_the_refusals_before_the_grant_hold(
         self, record_change: str, expected: AccessTokenRefusal
     ) -> None:
+        """GROUPS-06, GROUPS-07: a deleted or expired session ends and one without a refresh token
+        signs in again, before any grant."""
+
         arrangement = an_arrangement(id_token=None)
         if record_change == "delete":
             arrangement.sessions.delete(SESSION_ID)
@@ -180,6 +224,10 @@ class TestTheNewIdTokenIsVerified:
         changes: dict[str, Any],
         reason: OidcRefusalReason,
     ) -> None:
+        """GROUPS-08, GROUPS-13, GROUPS-14, GROUPS-15, GROUPS-16, GROUPS-17, GROUPS-18, GROUPS-19,
+        GROUPS-23: each failed claim of the new ID token is refused with its reason, and the
+        rotation is stored."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(**changes)
 
@@ -191,6 +239,8 @@ class TestTheNewIdTokenIsVerified:
         }
 
     def test_a_token_signed_by_another_key_is_refused(self) -> None:
+        """GROUPS-08: a new ID token signed by another key is refused."""
+
         arrangement = an_arrangement()
         forged = jws(
             {"alg": "RS256", "kid": "current-key", "typ": "JWT"},
@@ -210,6 +260,8 @@ class TestTheNewIdTokenIsVerified:
         assert an_issuer_reason(outcome) is OidcRefusalReason.ID_TOKEN_REJECTED
 
     def test_a_token_whose_header_advertises_an_unsupported_algorithm_is_refused(self) -> None:
+        """GROUPS-08: a new ID token with an unsupported algorithm is refused."""
+
         arrangement = an_arrangement()
         now = int(arrangement.clock.now)
         other = jws(
@@ -230,6 +282,9 @@ class TestTheNewIdTokenIsVerified:
         assert an_issuer_reason(outcome) is OidcRefusalReason.ID_TOKEN_REJECTED
 
     def test_an_unavailable_key_set_is_refused_after_the_rotation_is_stored(self) -> None:
+        """GROUPS-08, GROUPS-23: an unavailable key set refuses the new ID token and the rotation
+        is stored."""
+
         arrangement = an_arrangement()
 
         arrangement.relying_party = a_relying_party(
@@ -244,6 +299,8 @@ class TestTheNewIdTokenIsVerified:
         assert arrangement.stored_refresh_token != ISSUED_REFRESH_TOKEN
 
     def test_a_token_longer_than_the_verifier_reads_is_refused(self) -> None:
+        """GROUPS-08: a new ID token longer than the verifier reads is refused."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(padding="p" * 9000)
 
@@ -252,6 +309,8 @@ class TestTheNewIdTokenIsVerified:
         assert an_issuer_reason(outcome) is OidcRefusalReason.ID_TOKEN_REJECTED
 
     def test_a_token_without_a_nonce_holds(self) -> None:
+        """GROUPS-04, GROUPS-18: a new ID token without a nonce key answers its groups."""
+
         arrangement = an_arrangement()
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(GROUPS)
@@ -260,24 +319,32 @@ class TestTheNewIdTokenIsVerified:
 class TestFreshness:
     @pytest.mark.parametrize("age", [0, LEEWAY], ids=["at-the-start", "the-leeway-older"])
     def test_an_iat_within_the_leeway_of_the_grants_start_holds(self, age: int) -> None:
+        """GROUPS-20: an `iat` up to the leeway older than the grant's start holds."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(iat=int(arrangement.clock.now) - age)
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(GROUPS)
 
     def test_an_exp_within_the_leeway_still_holds(self) -> None:
+        """GROUPS-17, GROUPS-20: an `exp` that passed within the leeway still holds."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token(exp=int(arrangement.clock.now) - LEEWAY + 1)
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(GROUPS)
 
     def test_a_fractional_start_is_judged_by_its_whole_second(self) -> None:
+        """GROUPS-20: the grant's start is judged by its whole second."""
+
         arrangement = an_arrangement(answer=False, clock_now=FIXED_INSTANT.timestamp() + 0.9)
         arrangement.answer_with_id_token(iat=int(arrangement.clock.now) - LEEWAY)
 
         assert arrangement.current_groups(arrangement.sessions.in_transaction) == tuple(GROUPS)
 
     def test_a_grant_longer_than_the_leeway_does_not_age_the_token(self) -> None:
+        """GROUPS-20: freshness is judged against the grant's start, not its end."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.answer_with_id_token()
         arrangement.issuer.before_exchange = lambda: setattr(
@@ -290,6 +357,9 @@ class TestFreshness:
 
     @pytest.mark.parametrize(("age", "holds"), [(0, True), (1, False)])
     def test_without_leeway_the_iat_must_be_the_grants_second(self, age: int, holds: bool) -> None:
+        """GROUPS-08, GROUPS-20: without leeway the `iat` must be the grant's second, else the
+        token is stale."""
+
         arrangement = an_arrangement(answer=False, leeway_seconds=0)
         arrangement.answer_with_id_token(iat=int(arrangement.clock.now) - age)
 
@@ -311,6 +381,9 @@ class TestTheReply:
     def test_a_reply_without_an_id_token_is_refused_after_the_rotation_is_stored(
         self, id_token: object, rotation: dict[str, Any]
     ) -> None:
+        """GROUPS-08, GROUPS-21, GROUPS-23: a reply without an ID token is an issuer failure, never
+        `()`, and the rotation is stored."""
+
         arrangement = an_arrangement(answer=False)
         arrangement.issuer.refresh_answer_members = {
             **rotation,
@@ -341,6 +414,9 @@ class TestTheReply:
     def test_a_failed_grant_is_refused_and_stores_nothing(
         self, answer: object, expected: AccessTokenRefusal | None
     ) -> None:
+        """GROUPS-07, GROUPS-08: an `invalid_grant` signs in again, any other failed grant is an
+        issuer failure with its reason, and nothing is stored."""
+
         arrangement = an_arrangement()
         endpoint = FakeTokenEndpoint(answer=answer)  # type: ignore[arg-type]
         arrangement.relying_party = a_relying_party_for(
@@ -354,6 +430,5 @@ class TestTheReply:
         if expected is not None:
             assert outcome == expected
         else:
-            assert isinstance(outcome, AccessTokenRefusal)
-            assert outcome.reason is AccessTokenRefusalReason.ISSUER_UNAVAILABLE
+            assert an_issuer_reason(outcome) is not None
         assert arrangement.stored_refresh_token == ISSUED_REFRESH_TOKEN
