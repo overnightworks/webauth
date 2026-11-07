@@ -1,0 +1,8 @@
+claim_id = "05efa9ccbbf04c69b55ef599653526d4"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "401082611c9b4fa3c40a588f88b7699f5012940c"
+branch = "claude/issue-671-host-contract-ids-testing-a-host"
+scope = ["docs/host-contract.md", "tests"]
+opened_commit = "19e23b128d134a658e035f6b147dadfafd778e25"
+whole_reason = "One section's IDs, its recipe test and the intro sentence it ends land together; the test modules change docstrings and add focused tests only."
