@@ -344,6 +344,7 @@ def a_host_verifies_a_resource_token(
         resource_url=resource.url,
         scope=resource.scope,
         authorized_parties=resource.authorized_parties,
+        agent_group=resource.agent_group,
     )
     return verify(access_token)
 

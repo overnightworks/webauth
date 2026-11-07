@@ -77,7 +77,7 @@ from webauth.policies import (
     RateLimitBudget,
     RateLimitPolicy,
 )
-from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser
+from webauth.ports import AccountEvent, AccountEventKind, AccountKind, AuthenticatedUser
 
 
 @BOTH_HOSTS
@@ -121,7 +121,8 @@ def test_the_first_token_of_a_new_subject_creates_its_account_as_a_sign_in_does(
     token: str,
     username: str,
 ) -> None:
-    """TOKEN-16, TOKEN-19: a new subject's token creates its account as a sign-in does."""
+    """TOKEN-16, TOKEN-19: a new subject's token creates its account of the kind `PERSON` as a
+    sign-in does."""
     app = a_person_app(transaction_kind=kind)
 
     first = app.ask(PERSON_ME_PATH, authorization=bearing(token))
@@ -142,6 +143,7 @@ def test_the_first_token_of_a_new_subject_creates_its_account_as_a_sign_in_does(
         ),
     ]
     assert the_account(app).username == username
+    assert the_account(app).kind is AccountKind.PERSON
 
 
 @BOTH_TRANSACTIONS
