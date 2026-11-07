@@ -20,7 +20,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, StreamingResponse
-from starlette.types import Message
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tests.support.oidc_arrangement import a_relying_party
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
@@ -43,6 +43,7 @@ from tests.support.webauth_arrangement import (
 )
 from webauth.admission import AdmissionConfig
 from webauth.config import install_web_auth_config
+from webauth.dependencies import LoginRedirect
 from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
@@ -115,6 +116,16 @@ class RouteFailure(RuntimeError):
 
 ROUTE_FAILURE = RouteFailure("mid-stream")
 DOWNSTREAM_MARK: ContextVar[str] = ContextVar("downstream_mark", default="unset")
+INNER_MIDDLEWARE_MARK: ContextVar[str] = ContextVar("inner_middleware_mark", default="unset")
+
+
+class ContextSettingMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        INNER_MIDDLEWARE_MARK.set("set-by-the-inner-middleware")
+        await self.app(scope, receive, send)
 
 
 def a_rate_limit_policy(max_requests: int) -> RateLimitPolicy:
@@ -223,99 +234,169 @@ def get_api_twice(client: TestClient) -> Response:
     return get_api(client)
 
 
+@dataclass
+class HostSightings:
+    reached_inside: list[str]
+    seen_outside: list[Response]
+
+
+def a_client_between_host_middlewares(
+    *,
+    max_requests: int = 100,
+    rate_limits: RateLimitBackend | None = None,
+    session_gate: SessionGate | None = None,
+    cookie_secure: bool = True,
+) -> tuple[TestClient, HostSightings]:
+    app = a_fresh_app(rate_limits=rate_limits, cookie_secure=cookie_secure)
+    sightings = HostSightings(reached_inside=[], seen_outside=[])
+
+    @app.middleware("http")
+    async def inside(request: Request, call_next):  # type: ignore[no-untyped-def]
+        sightings.reached_inside.append(request.url.path)
+        return await call_next(request)
+
+    install_full_stack(app, max_requests=max_requests, session_gate=session_gate)
+
+    @app.middleware("http")
+    async def outside(request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        sightings.seen_outside.append(response)
+        return response
+
+    client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
+    return client, sightings
+
+
+def get_api_as_a_browser(client: TestClient) -> Response:
+    return client.get(API_PATH, headers={"accept": "text/html"}, follow_redirects=False)
+
+
+A_REDIRECTING_SESSION_GATE = replace(
+    A_SESSION_GATE,
+    login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
+)
+
+
 @dataclass(frozen=True)
 class Refusal:
     status: int
     retry_after: str | None = None
     hsts: bool = True
+    admitted_before: int = 0
 
 
-class TestLibraryRefusalsCarryTheSecurityHeaders:
+class TestHostMiddlewarePlacement:
     @pytest.mark.parametrize(
-        ("client_factory", "send", "refusal"),
+        ("arrange", "send", "refusal"),
         [
             pytest.param(
-                a_full_stack_client,
+                a_client_between_host_middlewares,
                 post_oversized,
                 Refusal(413),
                 id="413-by-content-length",
             ),
             pytest.param(
-                lambda: a_full_stack_client(max_requests=1),
+                lambda: a_client_between_host_middlewares(max_requests=1),
                 get_api_twice,
-                Refusal(429, retry_after="60"),
+                Refusal(429, retry_after="60", admitted_before=1),
                 id="429-budget-exhausted",
             ),
             pytest.param(
-                lambda: a_full_stack_client(max_requests=1, cookie_secure=False),
+                lambda: a_client_between_host_middlewares(max_requests=1, cookie_secure=False),
                 get_api_twice,
-                Refusal(429, retry_after="60", hsts=False),
+                Refusal(429, retry_after="60", hsts=False, admitted_before=1),
                 id="429-without-hsts-when-cookies-are-not-secure",
             ),
             pytest.param(
-                lambda: a_full_stack_client(rate_limits=AlwaysFailingRateLimitBackend()),
+                lambda: a_client_between_host_middlewares(
+                    rate_limits=AlwaysFailingRateLimitBackend(),
+                ),
                 get_api,
                 Refusal(503, retry_after="5"),
                 id="503-limiter-unavailable",
             ),
             pytest.param(
-                a_full_stack_client,
+                a_client_between_host_middlewares,
                 post_cross_origin,
                 Refusal(403),
                 id="403-foreign-origin",
             ),
             pytest.param(
-                a_full_stack_client,
+                a_client_between_host_middlewares,
                 post_without_provenance,
                 Refusal(403),
                 id="403-missing-provenance",
             ),
             pytest.param(
-                a_full_stack_client,
+                lambda: a_client_between_host_middlewares(session_gate=A_REDIRECTING_SESSION_GATE),
+                get_api_as_a_browser,
+                Refusal(302),
+                id="session-gate-302",
+            ),
+            pytest.param(
+                lambda: a_client_between_host_middlewares(session_gate=A_SESSION_GATE),
+                get_api,
+                Refusal(401),
+                id="session-gate-401",
+            ),
+            pytest.param(
+                a_client_between_host_middlewares,
                 lambda client: client.get(RAISING_PATH),
-                Refusal(500),
+                Refusal(500, admitted_before=1),
                 id="500-raising-route",
             ),
         ],
     )
-    def test_refusal_carries_the_policy_headers(
+    def test_a_host_middleware_before_the_call_never_sees_a_refusal_one_after_it_sees_it_with_the_headers_set(  # noqa: E501
         self,
-        client_factory: Callable[[], TestClient],
+        arrange: Callable[[], tuple[TestClient, HostSightings]],
         send: Callable[[TestClient], Response],
         refusal: Refusal,
     ) -> None:
-        response = send(client_factory())
+        """STACK-01, STACK-02: only the middleware after the call sees a refusal, with headers."""
+        client, sightings = arrange()
+
+        response = send(client)
+
         assert response.status_code == refusal.status
         assert response.headers.get("retry-after") == refusal.retry_after
         assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=refusal.hsts)
+        assert len(sightings.reached_inside) == refusal.admitted_before
+        seen = sightings.seen_outside[-1]
+        assert seen.status_code == refusal.status
+        assert_carries_policy_headers(seen.headers, HEADERS_POLICY, hsts=refusal.hsts)
 
-
-class TestHostMiddlewarePlacement:
-    def test_host_middleware_added_around_the_call_sees_refusals_only_from_outside(self) -> None:
+    @pytest.mark.parametrize(
+        "outside",
+        [
+            pytest.param(lambda: JSONResponse({}, status_code=204), id="response"),
+            pytest.param(lambda: _raise(RuntimeError("host failed")), id="exception"),
+        ],
+    )
+    def test_what_a_host_middleware_after_the_call_produces_itself_carries_no_library_headers(
+        self,
+        outside: Callable[[], Response],
+    ) -> None:
+        """STACK-03: a response or exception made outside the library stack has no headers."""
         app = a_fresh_app()
-        reached_inside: list[str] = []
-        seen_outside: list[tuple[int, str | None]] = []
-
-        @app.middleware("http")
-        async def inside(request: Request, call_next):  # type: ignore[no-untyped-def]
-            reached_inside.append(request.url.path)
-            return await call_next(request)
-
         install_full_stack(app)
 
         @app.middleware("http")
-        async def outside(request: Request, call_next):  # type: ignore[no-untyped-def]
-            response = await call_next(request)
-            seen_outside.append((response.status_code, response.headers.get("x-frame-options")))
-            return response
+        async def outside_the_library(request: Request, call_next):  # type: ignore[no-untyped-def]
+            return outside()
 
-        response = post_without_provenance(
-            TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False),
-        )
+        response = TestClient(
+            app,
+            base_url=HTTPS_TEST_SERVER,
+            raise_server_exceptions=False,
+        ).get(API_PATH)
 
-        assert response.status_code == 403
-        assert reached_inside == []
-        assert seen_outside == [(403, "DENY")]
+        assert response.status_code in {204, 500}
+        assert response.headers.get("x-frame-options") is None
+
+
+def _raise(error: Exception) -> Response:
+    raise error
 
 
 class TestAnExemptWebhookPrefix:
@@ -354,6 +435,7 @@ class TestAnExemptWebhookPrefix:
 
 class TestRefusedInstallation:
     def test_an_install_without_csrf_origin_is_refused_before_touching_the_app(self) -> None:
+        """CSRF-01, CSRF-02: the install raises and leaves the app untouched."""
         app = a_fresh_app()
         with pytest.raises(TypeError, match="csrf_origin"):
             install_web_auth_middleware(app, security_headers=HEADERS_POLICY)  # type: ignore[call-arg]
@@ -674,8 +756,7 @@ class TestResponsesBehindThePureAsgiMiddlewares:
     async def test_a_context_variable_set_downstream_is_visible_to_the_caller_after_the_call(
         self,
     ) -> None:
-        """Documented change: the middlewares run the app in the caller's task, where
-        BaseHTTPMiddleware gave it a task of its own."""
+        """STACK-04: the middlewares run the app in the caller's task."""
         app = an_authenticated_full_stack_app()
         scope = an_http_scope(
             app, CONTEXT_SETTING_PATH, spec_version=SPEC_WITHOUT_CONCURRENT_READER
@@ -688,6 +769,20 @@ class TestResponsesBehindThePureAsgiMiddlewares:
         assert start["status"] == 200
         assert completed(sent)
         assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
+
+    @pytest.mark.anyio
+    async def test_a_context_variable_set_by_an_inner_middleware_is_visible_to_the_caller_after_the_call(  # noqa: E501
+        self,
+    ) -> None:
+        """STACK-04: the middlewares run an inner middleware in the caller's task."""
+        app = a_fresh_app()
+        app.add_middleware(ContextSettingMiddleware)
+        install_full_stack(app)
+        scope = an_http_scope(app, API_PATH, spec_version=SPEC_WITHOUT_CONCURRENT_READER)
+
+        await drive(app, scope, body_chunks=(b"",))
+
+        assert INNER_MIDDLEWARE_MARK.get() == "set-by-the-inner-middleware"
 
     def test_an_admitted_routes_background_task_runs(self) -> None:
         app = an_authenticated_full_stack_app()
