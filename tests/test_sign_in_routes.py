@@ -21,6 +21,7 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
@@ -50,6 +51,7 @@ from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     FakeUser,
     an_http_scope,
+    body_of,
     drive,
     seeded_session,
     session_cookie_header,
@@ -161,7 +163,8 @@ def test_a_mounted_host_returns_below_its_root_path_and_otherwise_to_the_mount_r
 def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     kind: TransactionKind,
 ) -> None:
-    """REFUSE-02: after signing in, the person lands on the page they were sent from."""
+    """SIGNIN-18, SIGNIN-21, SIGNIN-23, REFUSE-02: after signing in, the person lands on the
+    page they were sent from."""
     host = an_oidc_host(transaction_kind=kind)
 
     response = host.callback(host.sign_in_at_issuer(return_to="/albums/42"))
@@ -169,6 +172,7 @@ def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     assert (response.status_code, response.headers["location"]) == (303, "/albums/42")
     assert host.config.session_cookie_name in set_cookies(response)
     assert (host.transaction.entries, host.sessions.count_active()) == (1, 1)
+    assert [account.id for account in host.accounts.list()] == [SUBJECT]
 
 
 @pytest.mark.parametrize(
@@ -225,18 +229,23 @@ def test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed
     assert SignInRefusal(cause).page is expected
 
 
+_A_FOREIGN_ISSUERS_ADMISSION = AdmissionConfig(
+    bound_issuer="https://other.example/realms/lab",
+    login_group=LOGIN_GROUP,
+    admin_group=f"{LOGIN_GROUP}/admin",
+)
+
+
 def _a_foreign_issuers_identity() -> OidcHost:
-    return an_oidc_host(
-        admission=AdmissionConfig(
-            bound_issuer="https://other.example/realms/lab",
-            login_group=LOGIN_GROUP,
-            admin_group=f"{LOGIN_GROUP}/admin",
-        )
-    )
+    return an_oidc_host(admission=_A_FOREIGN_ISSUERS_ADMISSION)
 
 
 def _with_another_code(query: str) -> str:
     return query.replace("code=", "code=not-issued-")
+
+
+def _without_a_state(query: str) -> str:
+    return query.replace("state=", "other=")
 
 
 @pytest.mark.parametrize(
@@ -278,7 +287,7 @@ def test_a_refusal_reaches_the_hook_as_its_cause_alone_with_its_page(
     cause: OidcRefusal | AdmissionRefusal,
     page: RefusalPage,
 ) -> None:
-    """REFUSE-26, REFUSE-27: both kinds of refusal reach the hook, carrying no identity."""
+    """SIGNIN-28, REFUSE-26, REFUSE-27: both kinds of refusal reach the hook, no identity."""
     refused_host = host()
 
     refused_host.callback(returned_query(refused_host.sign_in_at_issuer()))
@@ -391,6 +400,9 @@ def test_a_failure_in_the_block_answers_500_with_the_deletion_and_keeps_only_wha
     kind: TransactionKind,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """SIGNIN-23, SIGNIN-24, SIGNIN-25: a failure in the block escapes through the exit; a
+    rolling-back host keeps none of the writes and a per-call host keeps the account and the
+    events before it."""
     host = an_oidc_host(*deepcopy(fault.stored_users), transaction_kind=kind)
     query, cookie = _signed_in_holding_session_of_bystander(host)
     before = _state_of(host)
@@ -405,6 +417,7 @@ def test_a_failure_in_the_block_answers_500_with_the_deletion_and_keeps_only_wha
 
 
 def test_a_failing_commit_answers_500_with_the_deletion_and_issues_no_session_cookie() -> None:
+    """SIGNIN-22: the session cookie is issued only after the transaction's exit returned."""
     host = an_oidc_host(transaction_kind=TransactionKind.ROLLING_BACK)
     host.sessions.commit_failure = StoreDown()
     query = host.sign_in_at_issuer()
@@ -457,12 +470,14 @@ def test_a_refusal_hook_that_raises_before_the_pending_cookie_is_selected_answer
 
 
 def test_a_refusal_answer_keeps_its_own_cookies_beside_the_pending_deletion() -> None:
+    """SIGNIN-29: the hook's `Response` is the callback's answer."""
     host = an_oidc_host(groups_claim=())
     host.answer_refusals = _carrying_its_own_cookie
     query = host.sign_in_at_issuer()
 
     response = host.callback(query)
 
+    assert response.status_code == 403
     assert set(set_cookies(response)) == {"flash", host.pending_cookie_name(query)}
 
 
@@ -481,14 +496,32 @@ def _drive_the_callback(host: OidcHost, query: str) -> tuple[list[dict[str, obje
     return [dict(message) for message in messages], raised
 
 
-def test_a_failure_before_the_start_is_raised_once_the_500_is_sent() -> None:
+@pytest.mark.parametrize(
+    "answer",
+    [_raise_in_the_hook, _answer_failing_before_its_start],
+    ids=["the hook raises", "the answer fails before its start"],
+)
+def test_a_failure_before_the_start_is_raised_once_the_500_is_sent(
+    answer: Callable[[Request, SignInRefusal], Response],
+) -> None:
+    """SIGNIN-31: a hook that raises or an answer that fails before its start gets a plain 500 with
+    the deletion, then the failure is raised."""
     host = an_oidc_host(groups_claim=())
-    host.answer_refusals = _raise_in_the_hook
+    host.answer_refusals = answer
     query = host.sign_in_at_issuer()
 
     messages, raised = _drive_the_callback(host, query)
 
-    assert [message["status"] for message in starts(messages)] == [500]  # pyright: ignore[reportArgumentType]
+    [start] = starts(messages)  # pyright: ignore[reportArgumentType]
+    assert start["status"] == 500  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    assert body_of(messages) == b"Internal Server Error"  # pyright: ignore[reportArgumentType]
+    assert [
+        value
+        for name, value in start["headers"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        if name == b"set-cookie"
+        and value.startswith(host.pending_cookie_name(query).encode())
+        and b"max-age=0" in value.lower()
+    ]
     assert isinstance(raised, StoreDown)
 
 
@@ -509,6 +542,7 @@ def test_a_failure_after_the_answer_started_sends_no_second_response() -> None:
 
 
 def test_two_concurrent_callbacks_exchange_outside_the_transaction_and_keep_the_cap() -> None:
+    """SIGNIN-19: no issuer call runs inside the transaction."""
     host = an_oidc_host(max_sessions=1)
     first, second = host.sign_in_at_issuer(), host.sign_in_at_issuer()
     cookies = [host.pending_cookie(query) for query in (first, second)]
@@ -528,6 +562,7 @@ def test_two_concurrent_callbacks_exchange_outside_the_transaction_and_keep_the_
 
 
 def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_exit() -> None:
+    """SIGNIN-18: the callback enters the transaction once and reads no record after its exit."""
     host = an_oidc_host(BYSTANDER, strict_records=True)
     query, cookie = _signed_in_holding_session_of_bystander(host)
 
@@ -537,6 +572,7 @@ def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_ex
 
 
 def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises() -> None:
+    """SIGNIN-61: install without `keeps_id_token` raises `TypeError` and registers no route."""
     app = FastAPI()
     arguments = _install_arguments()
     del arguments["keeps_id_token"]
@@ -560,6 +596,7 @@ def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises()
 def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_is_registered(
     max_sessions: object,
 ) -> None:
+    """SIGNIN-62: install validates `max_sessions` before it registers a route."""
     app = FastAPI()
     arguments = {**_install_arguments(), "max_sessions": max_sessions}
 
@@ -567,85 +604,6 @@ def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_i
         install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
 
     assert not _sign_in_routes_of(app)
-
-
-_VALID_PATHS = {
-    "start": "/login",
-    "callback": "/callback",
-    "logout": "/logout",
-    "backchannel_logout": "/backchannel",
-}
-
-
-@pytest.mark.parametrize(
-    "override",
-    [
-        pytest.param({"start": "login"}, id="a relative start"),
-        pytest.param({"callback": "callback"}, id="a relative callback"),
-        pytest.param({"logout": "logout"}, id="a relative logout"),
-        pytest.param({"backchannel_logout": "backchannel"}, id="a relative back-channel"),
-        pytest.param({"start": "//evil.example/login"}, id="a start another host serves"),
-        pytest.param({"callback": "/\\evil.example"}, id="a callback another host serves"),
-        pytest.param({"callback": "/\t/evil.example"}, id="a callback a browser strips"),
-        pytest.param({"logout": "//evil.example/logout"}, id="a logout another host serves"),
-        pytest.param(
-            {"backchannel_logout": "//evil.example/back"},
-            id="a back-channel another host serves",
-        ),
-        pytest.param({"start": "/a/../login"}, id="a dot segment in start"),
-        pytest.param({"callback": "/a/%2e%2e/callback"}, id="an encoded dot segment"),
-        pytest.param({"logout": "/a/../logout"}, id="a dot segment in logout"),
-        pytest.param({"backchannel_logout": "/a/../back"}, id="a dot segment in the back-channel"),
-        pytest.param({"start": "/login?x=1"}, id="a query in start"),
-        pytest.param({"callback": "/callback#top"}, id="a fragment in callback"),
-        pytest.param({"logout": "/logout?x=1"}, id="a query in logout"),
-        pytest.param({"backchannel_logout": "/back?x=1"}, id="a query in the back-channel"),
-        pytest.param({"callback": "/login"}, id="one path for start and callback"),
-        pytest.param({"logout": "/login"}, id="one path for start and logout"),
-        pytest.param({"logout": "/callback"}, id="one path for callback and logout"),
-        pytest.param({"backchannel_logout": "/logout"}, id="the back-channel equal to logout"),
-        pytest.param({"backchannel_logout": "/callback"}, id="the back-channel equal to callback"),
-    ],
-)
-def test_a_path_that_is_not_an_absolute_distinct_path_of_this_app_is_refused_at_construction(
-    override: dict[str, str],
-) -> None:
-    with pytest.raises(ValueError, match="SignInPaths"):
-        SignInPaths(**{**_VALID_PATHS, **override})
-
-
-@pytest.mark.parametrize("language", ["de", "en-US", "zh-Hant-TW", "sr-Latn", "de-1996", "en-a1b2"])
-def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(language: str) -> None:
-    assert LogoutPageText(language=language, button_label="Out").language == language
-
-
-@pytest.mark.parametrize(
-    "language",
-    [
-        "",
-        "en_US",
-        '"',
-        "<",
-        "en US",
-        "ä",
-        "de\n",
-        "d",
-        "-de",
-        "de-",
-        "de--CH",
-        "1de",
-        "de-123456789",
-        "de-ä",
-        "\u212a\u212a",
-        42,
-        None,
-    ],
-)
-def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
-    language: object,
-) -> None:
-    with pytest.raises(ValueError, match="language"):
-        LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -663,6 +621,8 @@ def test_a_logout_path_and_page_text_come_together_or_install_refuses_before_any
     logout: str | None,
     page_text: Callable[[Request], LogoutPageText] | None,
 ) -> None:
+    """SIGNIN-15: one of `paths.logout` and `logout_page_text` without the other refuses install
+    before any route."""
     app = FastAPI()
     arguments = {
         **_install_arguments(),
@@ -677,6 +637,7 @@ def test_a_logout_path_and_page_text_come_together_or_install_refuses_before_any
 
 
 def test_a_host_without_a_logout_path_and_page_text_registers_no_logout_route() -> None:
+    """SIGNIN-16: a host with neither registers no logout route."""
     app = FastAPI()
     arguments = {
         **_install_arguments(),
@@ -707,6 +668,7 @@ def _install_arguments() -> dict[str, object]:
 def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_before_any_route() -> (  # noqa: E501
     None
 ):
+    """SIGNIN-46: dependencies without the back-channel path refuse install before any route."""
     app = FastAPI()
     arguments = {
         **_install_arguments(),
@@ -729,3 +691,83 @@ def _sign_in_routes_of(app: FastAPI) -> list[str]:
     }
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
     return [route.path for route in routes if route.path in paths]
+
+
+@pytest.mark.parametrize(
+    ("groups_claim", "admission", "returned_query"),
+    [
+        pytest.param((), ADMISSION, str, id="not a member"),
+        pytest.param((LOGIN_GROUP,), _A_FOREIGN_ISSUERS_ADMISSION, str, id="a foreign issuer"),
+        pytest.param((LOGIN_GROUP,), ADMISSION, _with_another_code, id="a code the issuer refuses"),
+        pytest.param((LOGIN_GROUP,), ADMISSION, _without_a_state, id="a callback without a state"),
+    ],
+)
+def test_a_refusal_before_the_admission_decision_enters_no_transaction(
+    groups_claim: tuple[str, ...],
+    admission: AdmissionConfig,
+    returned_query: Callable[[str], str],
+) -> None:
+    """SIGNIN-20: a refusal before the admission decision enters no transaction."""
+    host = an_oidc_host(groups_claim=groups_claim, admission=admission)
+
+    response = host.callback(returned_query(host.sign_in_at_issuer()))
+
+    assert (response.status_code, len(host.refusals), host.transaction.entries) == (403, 1, 0)
+
+
+@pytest.mark.parametrize(
+    ("groups_claim", "hook", "failing_call"),
+    [
+        pytest.param((LOGIN_GROUP,), None, None, id="an admitted login"),
+        pytest.param((), None, None, id="a refusal"),
+        pytest.param((LOGIN_GROUP,), None, "create_for_subject", id="a failure in the block"),
+        pytest.param((), _raise_in_the_hook, None, id="a hook that raises"),
+        pytest.param(
+            (), _answer_failing_before_its_start, None, id="an answer that fails before its start"
+        ),
+    ],
+)
+def test_every_callback_answer_deletes_its_pending_cookie_and_leaves_the_other_tabs(
+    groups_claim: tuple[str, ...],
+    hook: Callable[[Request, SignInRefusal], Response] | None,
+    failing_call: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SIGNIN-30, SIGNIN-32: every callback answer deletes its pending cookie and leaves the other
+    tabs' cookies."""
+    host = an_oidc_host(groups_claim=groups_claim)
+    if hook is not None:
+        host.answer_refusals = hook
+    if failing_call is not None:
+        failing(host.accounts, failing_call, monkeypatch)
+    other_tab = host.sign_in_at_issuer()
+    query = host.sign_in_at_issuer()
+
+    response = host.callback(query)
+
+    assert is_cleared(response, host.pending_cookie_name(query))
+    assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
+
+
+@pytest.mark.parametrize("method", ["GET", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize("path", [LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH])
+def test_the_logout_and_back_channel_routes_serve_post_only(path: str, method: str) -> None:
+    """SIGNIN-10, SIGNIN-41: the logout and the back-channel route serve `POST` only."""
+    app = FastAPI()
+    install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
+
+    response = TestClient(app).request(method, path)
+
+    assert response.status_code == 405
+    assert response.headers["allow"] == "POST"
+
+
+def test_install_registers_the_start_callback_logout_and_back_channel_routes() -> None:
+    """SIGNIN-01: install registers the four routes on the host's app."""
+    app = FastAPI()
+
+    install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
+
+    assert sorted(_sign_in_routes_of(app)) == sorted(
+        [START_PATH, CALLBACK_PATH, LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH]
+    )

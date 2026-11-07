@@ -666,97 +666,130 @@ By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) 
 
 ## The sign-in routes
 
-The operator ruled the passage that opens "`install_sign_in_routes` requires the host's explicit `keeps_id_token` choice"; no other sentence of this section is ruled, and proof lines are not rulings.
+The operator ruled SIGNIN-61, the host duty after SIGNIN-62, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
 
-`install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
-`FastAPI` app over its one `OidcRelyingParty` (read per request), and `SignInPaths`
-derives the policies for exactly those paths: `public_rules` for the session gate (`GET` of
-start and callback, `POST` of logout and of the back-channel), `browser_paths` for the sign-in
-rate budget, `backchannel` for `CsrfPolicy.exempt` and `RateLimitPolicy.exempt`,
-`backchannel_body_size_rule` (32 KiB for `POST`), `cache_control_rule` (`no-store`) and `login_redirect`, so the host lists the paths once. It is browser-absolute, so
-`login_redirect` is right for an app at its origin's root; a host below a `root_path`
-builds its own `LoginRedirect`. The library serves the logout route at `SignInPaths.logout` for `POST` only, with the
-page's text from the host's `logout_page_text`, read per request: a `LogoutPageText` whose
-`button_label` is the title and the button, and whose `language` (a BCP 47 tag, validated in shape
-when the record is built) is the page's `<html lang>`; a single-page app logs
-out by a top-level form POST to that route, and the host never lists the path in
-`CsrfPolicy.exempt`. `paths.logout` and `logout_page_text` come together, or both
-are `None` for a host without logout. `webauth.cookies` carries the pending login in a signed cookie of its own, one
-per login, so the library keeps no server-side store and `WebAuthConfig` knows nothing
+- **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
+  `FastAPI` app.
+- **SIGNIN-02** Every route reads the host's one `OidcRelyingParty` through `relying_party` per request.
+
+`SignInPaths` derives the policies for exactly those paths:
+
+- **SIGNIN-03** `public_rules` for the session gate (`GET` of start and callback, `POST` of logout and of the back-channel);
+- **SIGNIN-04** `browser_paths` for the sign-in rate budget;
+- **SIGNIN-05** `backchannel` for `CsrfPolicy.exempt`;
+- **SIGNIN-06** `backchannel` for `RateLimitPolicy.exempt`;
+- **SIGNIN-07** `backchannel_body_size_rule` (32 KiB for `POST`);
+- **SIGNIN-08** `cache_control_rule` (`no-store`);
+- **SIGNIN-09** `login_redirect`.
+
+So the host lists the paths once. `login_redirect` is browser-absolute, so it is right for an app at its origin's root.
+
+- **Host duty:** a host below a `root_path` builds its own `LoginRedirect`.
+- **SIGNIN-10** The library serves the logout route at `SignInPaths.logout` for `POST` only,
+- **SIGNIN-11** with the page's text from the host's `logout_page_text`, read per request:
+- **SIGNIN-12** a `LogoutPageText` whose `button_label` is the title and the button,
+- **SIGNIN-13** and whose `language` is the page's `<html lang>`;
+- **SIGNIN-14** `language` is a BCP 47 tag, validated in shape when the record is built.
+- **Host duty:** a single-page app logs out by a top-level form POST to that route.
+- **Host duty:** the host never lists the logout path in `CsrfPolicy.exempt`.
+- **SIGNIN-15** `paths.logout` and `logout_page_text` come together,
+- **SIGNIN-16** or both are `None` for a host without logout.
+
+- **SIGNIN-17** `webauth.cookies` carries the pending login in a signed cookie of its own, one per login.
+
+So the library keeps no server-side store and `WebAuthConfig` knows nothing
 of OpenID Connect. The `webauth.sign_in_routes` module and `install_sign_in_routes` docstrings hold the routes' contract, the
 `webauth.oidc_login` and `webauth.cookies` module docstrings hold the login and its
 cookies, and `build_app` in [`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py)
 is the worked host, type-checked and run against a real issuer.
 
-Proofs: `test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start`,
-`test_the_derived_cache_rule_marks_the_sign_in_answers_no_store` and
-`test_the_derived_browser_paths_spend_one_sign_in_budget`, among others, in
-[test_sign_in_routes_derived_policies.py](../tests/test_sign_in_routes_derived_policies.py).
+- **Host duty:** the host supplies a `SignInTransaction` (`webauth.ports`) and a `refused` hook.
+- **SIGNIN-18** The callback enters the transaction once,
+- **SIGNIN-19** only after the issuer's code exchange and the pure admission decision, so no issuer call runs inside it,
+- **SIGNIN-20** and a refusal before admission enters none.
+- **SIGNIN-21** It writes the account and the session through `SignInStores`
+- **SIGNIN-22** and issues the session cookie only after the transaction's exit returned.
 
-The host supplies a `SignInTransaction` (`webauth.ports`) and a `refused` hook. The
-callback enters the transaction once, only after the issuer's code exchange and the pure
-admission decision, so no issuer call runs inside it and a refusal before admission
-enters none. It writes the account and the session through `SignInStores` and issues
-the session cookie only after the transaction's exit returned. The library never
-commits: a successful exit makes the writes durable. An exception in the block escapes
-through the exit, and what is rolled back is the host's choice: a host whose stores apply
-each call keeps the account created, the sessions ended by replacement or pruning and the
-events recorded before the failure, and the next sign-in opens a new session and
-restores nothing; a rolling-back host keeps none of them.
+**SIGNIN-23** The library never commits: a successful exit makes the writes durable.
 
-The hook receives a `SignInRefusal` (the cause and its `page`) for every refusal and
-returns any `Response`. Every callback answer sent after the pending cookie was selected
-carries its deletion, also when the hook raises or the answer fails before it starts: the
-route then sends a plain 500 with the deletion and raises the failure. Other tabs'
-pending cookies stay. A pending login is single-use because its cookie is cleared and the
+What is rolled back is the host's choice:
+
+- **SIGNIN-24** an exception in the block escapes through the exit, and a rolling-back host keeps none of the account created, the sessions ended and the events recorded;
+- **SIGNIN-25** a host whose stores apply each call keeps the account created and the events recorded before the failure;
+- **SIGNIN-26** a host whose stores apply each call keeps the sessions ended by replacement or pruning;
+- **SIGNIN-27** after a failure, the next sign-in opens a new session and restores nothing.
+
+The hook:
+
+- **SIGNIN-28** receives a `SignInRefusal` (the cause and its `page`) for every refusal
+- **SIGNIN-29** and returns any `Response`.
+- **SIGNIN-30** Every callback answer sent after the pending cookie was selected carries its deletion,
+- **SIGNIN-31** also when the hook raises or the answer fails before it starts: the
+  route then sends a plain 500 with the deletion and raises the failure.
+- **SIGNIN-32** Other tabs' pending cookies stay.
+
+A pending login is single-use because its cookie is cleared and the
 issuer accepts a code once; webauth keeps no replay store.
 
-The logout route enters the transaction once, only when the request's cookie names a
-session, and never commits. An exception in the route, the transaction or the host's
-callables answers a plain 500 with no page and no cookie cleared. A rolling-back host
-keeps the session, and a retry ends it with its hint; under per-call persistence or an
-uncertain commit the row and its ID token may already be gone, and a retry still reaches
-the issuer's end-session page, without the hint.
+**SIGNIN-33** The logout route never commits:
 
-`SignInPaths.backchannel_logout` serves the issuer's back-channel logout for `POST` only, and
-must differ from every other path, `logout` included. Only that exact path is exempt from the
-origin check and the rate limit, and logout is never exempt. The host's `backchannel_dependencies`
-run before the body is read, and are given only with that path or install raises `ValueError`
-before any route is registered. A host answers an empty 404 by raising its own exception class
-and mapping it with `app.add_exception_handler(ThatError, lambda request, error:
-Response(status_code=404))`: an `HTTPException(404)` answers JSON, and a `Response` returned
-from a dependency does not stop the route. The answers are, in order: 413 for a declared
-`Content-Length` over the bound, before any dependency; the dependencies' own; 413 for a
-streamed body over the bound; an empty 400 for a request that is not one URL-encoded form with exactly one
-non-empty `logout_token`, or whose token does not verify, before any transaction is entered; an
-empty 200 after the clean exit of one `SignInTransaction` entry; and an empty 400, then the
-failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
-sink or the exit. A subject without an account is accepted and provisions nothing; a known
-subject loses every session in every browser, and one `BACKCHANNEL_LOGOUT` event with
-`actor_id=None` is recorded when at least one session ended. The route clears no cookie and
-calls no issuer endpoint beyond the key fetch of verification. `relying_party` receives the
-request with the Host the issuer posted to, often an internal alias.
+- **SIGNIN-34** it enters the transaction once,
+- **SIGNIN-35** only when the request's cookie names a session.
+- **SIGNIN-36** An exception in the route answers a plain 500 with no page and no cookie cleared.
+- **SIGNIN-37** An exception in the transaction, on entering it or at its exit, answers the same.
+- **SIGNIN-38** An exception in the host's callables answers the same.
+- **SIGNIN-39** A rolling-back host keeps the session, and a retry ends it with its hint.
+- **SIGNIN-40** Under per-call persistence or an uncertain commit the row and its ID token may already be gone, and a retry still reaches the
+  issuer's end-session page, without the hint.
 
-The host's transaction must roll back when the back-channel block raises, also when the audit
-sink fails after the deletion, and commit only for an accepted token. A per-call host keeps the
-sessions ended before the failure, and no event is emitted again.
+The back-channel logout route:
+
+- **SIGNIN-41** `SignInPaths.backchannel_logout` serves the issuer's back-channel logout for `POST` only,
+- **SIGNIN-42** and must differ from every other path, `logout` included.
+- **SIGNIN-43** Only that exact path is exempt from the origin check, and logout is never exempt;
+- **SIGNIN-44** only that exact path is exempt from the rate limit, and logout is never exempt.
+- **SIGNIN-45** The host's `backchannel_dependencies` run before the body is read,
+- **SIGNIN-46** and are given only with that path or install raises `ValueError` before any route is registered.
+- **Host duty:** a host answers an empty 404 by raising its own exception class and mapping it with
+  `app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))`: an `HTTPException(404)` answers JSON, and a `Response` returned from a dependency does not stop the route.
+
+The answers are, in order:
+
+- **SIGNIN-47** 413 for a declared `Content-Length` over the bound, before any dependency;
+- **SIGNIN-48** the dependencies' own;
+- **SIGNIN-49** 413 for a streamed body over the bound;
+- **SIGNIN-50** an empty 400 for a request that is not one URL-encoded form with exactly one
+  non-empty `logout_token`, before any transaction is entered;
+- **SIGNIN-51** an empty 400 for a token that does not verify, before any transaction is entered;
+- **SIGNIN-52** an empty 200 after the clean exit of one `SignInTransaction` entry;
+- **SIGNIN-53** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
+  sink or the exit.
+
+- **SIGNIN-54** A subject without an account is accepted and provisions nothing;
+- **SIGNIN-55** a known subject loses every session in every browser,
+- **SIGNIN-56** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
+- **SIGNIN-57** The route clears no cookie
+- **SIGNIN-58** and calls no issuer endpoint beyond the key fetch of verification.
+- **SIGNIN-59** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
+
+- **Host duty:** the host's transaction rolls back when the back-channel block raises, also when the audit
+  sink fails after the deletion.
+- **Host duty:** the host's transaction commits only for an accepted token.
+- **SIGNIN-60** A per-call host keeps the sessions ended before the failure, and no event is emitted again.
 
 The back-channel route is open to anyone who can reach it, and the token is its only control.
-The host lets the issuer reach it over an internal network alone, never the public route
-(tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
 
-`install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
-default, and validates `max_sessions` before it registers a route. A host that serves no logout
-route passes `False`: its session row keeps no
-ID token, while refresh-token storage is unchanged. With `True`, the row keeps
-the login's ID token for logout. Renewal and refresh-token rotation preserve
-that choice and the original token. [test_oidc_login_open_session_id_token.py](../tests/test_oidc_login_open_session_id_token.py)
-proves the explicit choice, refresh-token retention, hint-free logout and
-renewal/rotation with no ID token;
-`test_a_new_session_holds_the_refresh_token_and_id_token_of_the_admitted_login`
-in [test_oidc_login_open_session.py](../tests/test_oidc_login_open_session.py) and
-`test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout` in
-[test_oidc_login_logout.py](../tests/test_oidc_login_logout.py) prove the retained-token case.
+- **Host duty:** the host lets the issuer reach it over an internal network alone, never the public route
+  (tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
+
+- **SIGNIN-61** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
+  default,
+- **SIGNIN-62** and validates `max_sessions` before it registers a route.
+- **Host duty:** a host that serves no logout route passes `False`.
+- **SIGNIN-63** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
+- **SIGNIN-64** With `True`, the row keeps the login's ID token for logout.
+- **SIGNIN-65** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
+- **SIGNIN-66** and the choice of a row that keeps none.
 
 ## Testing a host
 

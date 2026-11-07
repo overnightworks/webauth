@@ -5,6 +5,7 @@ from __future__ import annotations
 import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 import pytest
 from fastapi import HTTPException, Request
@@ -17,6 +18,7 @@ from tests.support.oidc_arrangement import (
     a_fake_id_token,
 )
 from tests.support.oidc_login_host import (
+    BACKCHANNEL_LOGOUT_PATH,
     CLIENT_ID,
     END_SESSION_ENDPOINT,
     LOGOUT_BUTTON_LABEL,
@@ -24,6 +26,7 @@ from tests.support.oidc_login_host import (
     LOGOUT_PATH,
     NOW,
     SAME_ORIGIN_FORM,
+    START_PATH,
     SUBJECT,
     OidcHost,
     StoreDown,
@@ -110,6 +113,7 @@ def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two
 
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
+    """SIGNIN-65: renewal and rotation keep the login's own ID token as the logout hint."""
     session_clock = FakeClock(float(NOW))
     host = after_signing_in(an_oidc_host(wall_clock=session_clock))
     login_token = host.issued_id_tokens[-1]
@@ -225,7 +229,8 @@ def test_a_same_origin_logout_still_answers_the_page(
     entered: bool,
     keeps_id_token: bool,
 ) -> None:
-    """APP-36: a logout without a row or without an ID token answers the page with no hint."""
+    """SIGNIN-35, APP-36: a logout without a row or without an ID token answers the page with no
+    hint."""
     host = an_oidc_host(keeps_id_token=keeps_id_token)
     if arrange is not _no_session:
         host.callback(host.sign_in_at_issuer())
@@ -321,6 +326,7 @@ def test_a_logout_enters_the_transaction_once_and_reads_no_record_after_its_exit
     *,
     strict_records: bool,
 ) -> None:
+    """SIGNIN-34: the logout enters the transaction once and reads no record after its exit."""
     host = after_signing_in(an_oidc_host(transaction_kind=kind, strict_records=strict_records))
     entries_before = host.transaction.entries
 
@@ -346,6 +352,7 @@ def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
     store_call: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """SIGNIN-36: a store call that raises answers a plain 500, no page, no cookie cleared."""
     host = after_signing_in(an_oidc_host(transaction_kind=kind))
     with monkeypatch.context() as patch:
         failing(host.sessions, store_call, patch)
@@ -360,6 +367,8 @@ def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
 
 
 def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_hint() -> None:
+    """SIGNIN-33, SIGNIN-37, SIGNIN-39: a failing exit answers a plain 500; a rolling-back host
+    keeps the session and a retry ends it with its hint."""
     host = after_signing_in(an_oidc_host(transaction_kind=TransactionKind.ROLLING_BACK))
     host.sessions.commit_failure = StoreDown()
 
@@ -371,7 +380,22 @@ def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_
     assert hint_of(post_logout(host, SAME_ORIGIN_FORM)) == host.issued_id_tokens[-1]
 
 
+def test_a_failing_entry_into_the_logout_transaction_answers_a_plain_500_and_ends_nothing() -> None:
+    """SIGNIN-37: an exception on entering the transaction answers a plain 500 and ends nothing."""
+    host = after_signing_in(an_oidc_host())
+    host.transaction.entry_failure = StoreDown()
+    entries_before = host.transaction.entries
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert _answers_a_plain_500_and_clears_no_cookie(response)
+    assert host.transaction.entries == entries_before
+    assert host.sessions.count_active() == 1
+
+
 def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_the_hint() -> None:
+    """SIGNIN-37, SIGNIN-40: a failing exit answers a plain 500; the row may be gone and a retry
+    answers the page without the hint."""
     host = after_signing_in(an_oidc_host())
     host.transaction.exit_failure = StoreDown()
 
@@ -418,6 +442,7 @@ def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
     page_text: Callable[[Request], LogoutPageText],
     relying_party_of: Callable[[Request], OidcRelyingParty] | None,
 ) -> None:
+    """SIGNIN-38: an exception in a host callable answers a plain 500 and ends nothing."""
     host = after_signing_in(an_oidc_host(logout_page_text=page_text))
     host.relying_party_of = relying_party_of
     entries_before = host.transaction.entries
@@ -430,6 +455,8 @@ def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
 
 
 def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -> None:
+    """SIGNIN-11, SIGNIN-12, SIGNIN-13: the page's title, button and `<html lang>` come from the
+    request's `logout_page_text`."""
     host = after_signing_in(
         an_oidc_host(
             logout_page_text=lambda request: LogoutPageText(
@@ -442,7 +469,11 @@ def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -
     response = post_logout(host, {**SAME_ORIGIN_FORM, "x-label": "Abmelden", "x-language": "de"})
 
     page = LogoutPage(response.text)
-    assert (page.texts["button"], page.attributes_of("html")) == ("Abmelden", [{"lang": "de"}])
+    assert (page.texts["button"], page.texts["title"], page.attributes_of("html")) == (
+        "Abmelden",
+        "Abmelden",
+        [{"lang": "de"}],
+    )
 
     after_the_cookie_is_cleared = post_logout(
         host,
@@ -454,3 +485,89 @@ def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -
         "Sign out",
         [{"lang": "en"}],
     )
+
+
+@pytest.mark.parametrize("language", ["de", "en-US", "zh-Hant-TW", "sr-Latn", "de-1996", "en-a1b2"])
+def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(language: str) -> None:
+    """SIGNIN-14: a language tag of letters and digits joined by hyphens is accepted."""
+    assert LogoutPageText(language=language, button_label="Out").language == language
+
+
+@pytest.mark.parametrize(
+    "language",
+    [
+        "",
+        "en_US",
+        '"',
+        "<",
+        "en US",
+        "ä",
+        "de\n",
+        "d",
+        "-de",
+        "de-",
+        "de--CH",
+        "1de",
+        "de-123456789",
+        "de-ä",
+        "\u212a\u212a",
+        42,
+        None,
+    ],
+)
+def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
+    language: object,
+) -> None:
+    """SIGNIN-14: any other shape raises `ValueError` when the record is built."""
+    with pytest.raises(ValueError, match="language"):
+        LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
+
+
+def _a_start(host: OidcHost) -> Callable[[], HttpxResponse]:
+    return lambda: host.client.get(START_PATH)
+
+
+def _a_callback(host: OidcHost) -> Callable[[], HttpxResponse]:
+    query = host.sign_in_at_issuer()
+    return lambda: host.callback(query)
+
+
+def _a_logout(host: OidcHost) -> Callable[[], HttpxResponse]:
+    after_signing_in(host)
+    return lambda: post_logout(host, SAME_ORIGIN_FORM)
+
+
+def _a_back_channel_logout(host: OidcHost) -> Callable[[], HttpxResponse]:
+    return lambda: host.client.post(
+        BACKCHANNEL_LOGOUT_PATH,
+        content=b"logout_token=x",
+        headers={"content-type": SAME_ORIGIN_FORM["content-type"]},
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_to", "status"),
+    [
+        pytest.param(_a_start, 500, id="start"),
+        pytest.param(_a_callback, 500, id="callback"),
+        pytest.param(_a_logout, 500, id="logout"),
+        pytest.param(_a_back_channel_logout, 400, id="back-channel logout"),
+    ],
+)
+def test_every_route_reads_the_relying_party_again_for_each_request(
+    request_to: Callable[[OidcHost], Callable[[], HttpxResponse]],
+    status: int,
+) -> None:
+    """SIGNIN-02: each route reads `relying_party` for each request."""
+    host = an_oidc_host()
+    send = request_to(host)
+    read: list[Request] = []
+
+    def a_relying_party_that_raises(request: Request) -> NoReturn:
+        read.append(request)
+        raise StoreDown
+
+    host.relying_party_of = a_relying_party_that_raises
+
+    assert send().status_code == status
+    assert read

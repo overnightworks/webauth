@@ -194,7 +194,8 @@ class RecordingSignInTransaction:
 
     It counts its entries and refuses to be entered again from inside its own block.
     ``strict`` hands the route stores whose records fail once the block is left.
-    ``exit_failure`` is raised after a clean block, as an exit that fails to commit."""
+    ``exit_failure`` is raised after a clean block, as an exit that fails to commit;
+    ``entry_failure`` is raised when the transaction is entered."""
 
     def __init__(
         self,
@@ -209,6 +210,7 @@ class RecordingSignInTransaction:
         self.kind = kind
         self.entries = 0
         self.exit_failure: Exception | None = None
+        self.entry_failure: Exception | None = None
         self._accounts = accounts
         self._sessions = sessions
         self._audit = audit
@@ -217,6 +219,8 @@ class RecordingSignInTransaction:
         self._open = 0
 
     def __call__(self) -> AbstractContextManager[SignInStores]:
+        if self.entry_failure is not None:
+            raise self.entry_failure
         return self._entered()
 
     @contextmanager
