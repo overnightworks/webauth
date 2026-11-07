@@ -289,7 +289,7 @@ def test_a_fault_of_the_table_is_refused_with_its_reason_and_class(
     rejection: RejectionReason | None,
 ) -> None:
     """CALLER-08, CALLER-09, CALLER-10, CALLER-11, CALLER-12, CALLER-13, CALLER-14, CALLER-15,
-    CALLER-16, CALLER-17, CALLER-18, CALLER-19, CALLER-25: each fault of a table row, in either
+    CALLER-16, CALLER-17, CALLER-18, CALLER-19, CALLER-26: each fault of a table row, in either
     token where the row names both, is refused with the row's reason and class; a verifier
     refusal other than an unavailable key set keeps its rejection."""
     check = a_check_whose_key_set_went_down(a_registry_of(admission))
@@ -336,7 +336,7 @@ def test_a_token_is_bounded_by_its_exp_against_the_clock_and_by_nothing_else(
 def test_the_audience_of_a_token_must_name_the_service_and_may_name_others(
     side: str, audience: object, rejection: RejectionReason | None
 ) -> None:
-    """CALLER-28, CALLER-29: a token of either kind whose `aud` names the service beside others is
+    """CALLER-29, CALLER-30: a token of either kind whose `aud` names the service beside others is
     admitted, and one that does not name the service is rejected."""
     outcome = a_check().person_caller(*tokens_with(Fault(side, {"aud": audience})))
 
@@ -356,7 +356,7 @@ def test_the_audience_of_a_token_must_name_the_service_and_may_name_others(
 def test_a_null_group_claim_is_malformed_and_only_an_absent_one_means_no_groups(
     side: str, groups_of_the_caller: frozenset[str]
 ) -> None:
-    """CALLER-26, CALLER-27: a JSON `null` group claim in either token is `MALFORMED_GROUPS`, and
+    """CALLER-27, CALLER-28: a JSON `null` group claim in either token is `MALFORMED_GROUPS`, and
     an absent claim is accepted as no groups."""
     admission = replace(an_app_admission(), login_group=EverySubject.OF_THE_BOUND_ISSUER)
     check = a_check(registered_apps=a_registry_of(admission))
@@ -392,7 +392,7 @@ def test_a_null_group_claim_is_malformed_and_only_an_absent_one_means_no_groups(
 def test_a_key_set_that_cannot_be_fetched_is_unavailable_for_a_key_that_is_not_cached(
     make_check: Callable[[], ServiceCallerCheck], faults: list[Fault]
 ) -> None:
-    """CALLER-23: when the key set cannot be fetched and a token's key is not among the cached
+    """CALLER-24: when the key set cannot be fetched and a token's key is not among the cached
     ones, with nothing cached or with other keys cached, the refusal is `KEY_SET_UNAVAILABLE`."""
     outcome = make_check().person_caller(*tokens_with(*faults))
 
@@ -408,7 +408,7 @@ def test_a_key_set_that_cannot_be_fetched_is_unavailable_for_a_key_that_is_not_c
 def test_a_malformed_header_or_unsupported_algorithm_is_rejected_before_any_key_lookup(
     side: str, bad_token: WholeToken
 ) -> None:
-    """CALLER-22: a token of either kind with a malformed header or an unsupported algorithm
+    """CALLER-23: a token of either kind with a malformed header or an unsupported algorithm
     is `TOKEN_REJECTED` and not `KEY_SET_UNAVAILABLE`, though its key is not cached and the key
     set cannot be fetched."""
     outcome = a_check_whose_key_set_went_down().person_caller(*tokens_with(Fault(side, bad_token)))

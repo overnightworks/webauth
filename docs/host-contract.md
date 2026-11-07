@@ -637,31 +637,32 @@ The table lists each reason where it is first checked:
 
 **CALLER-20** Neither token's lifetime is bounded beyond its `exp` against the clock; the issuer owns it.
 
-**CALLER-21** The person token gets no role check; its `azp` is the client binding and is never evidence of an
-exchange.
+**CALLER-21** The person token gets no role check.
+
+**CALLER-22** The person token's `azp` is the client binding and is never evidence of an exchange.
 
 The verifier stage keeps the verifier's own order:
 
-- **CALLER-22** a malformed header or unsupported algorithm is `TOKEN_REJECTED` before any key lookup, so no key set
+- **CALLER-23** a malformed header or unsupported algorithm is `TOKEN_REJECTED` before any key lookup, so no key set
   is fetched;
-- **CALLER-23** `KEY_SET_UNAVAILABLE` (503) is the verifier's refusal when the key set cannot be fetched and the
+- **CALLER-24** `KEY_SET_UNAVAILABLE` (503) is the verifier's refusal when the key set cannot be fetched and the
   token's key is not among the cached ones, also when other keys are cached;
-- **CALLER-24** with a usable cached key, a failed refresh still verifies;
-- **CALLER-25** every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
+- **CALLER-25** with a usable cached key, a failed refresh still verifies;
+- **CALLER-26** every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
 
 By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
 `UNREGISTERED_CLIENT`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and `NOT_A_MEMBER`.
 
-- **CALLER-26** a group claim that is a JSON `null` is `MALFORMED_GROUPS`;
-- **CALLER-27** only an absent group claim means no groups;
-- **CALLER-28** the token's `aud` must name the service;
-- **CALLER-29** the token's `aud` may name others;
-- **CALLER-30** the check has no policy;
+- **CALLER-27** a group claim that is a JSON `null` is `MALFORMED_GROUPS`;
+- **CALLER-28** only an absent group claim means no groups;
+- **CALLER-29** the token's `aud` must name the service;
+- **CALLER-30** the token's `aud` may name others;
+- **CALLER-31** the check has no policy;
 - **Host duty:** which groups reach which route is the service's;
-- **CALLER-31** nothing taken from a token (subject, client id, groups) appears in a repr, an error message or a log
+- **CALLER-32** nothing taken from a token (subject, client id, groups) appears in a repr, an error message or a log
   record of the module;
-- **CALLER-32** `jwks_url` is left out of the repr of `ServiceIdentity`.
+- **CALLER-33** `jwks_url` is left out of the repr of `ServiceIdentity`.
 
 ## The sign-in routes
 

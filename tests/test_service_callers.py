@@ -65,7 +65,7 @@ def test_a_workload_token_may_name_other_audiences_beside_the_callee() -> None:
 
 
 def test_a_cached_key_set_still_verifies_the_workload_token_after_a_failed_refresh() -> None:
-    """CALLER-24: with a usable cached key, a failed refresh still verifies both tokens."""
+    """CALLER-25: with a usable cached key, a failed refresh still verifies both tokens."""
     endpoint = FakeKeySetEndpoint(served_key_set())
     monotonic = FakeClock(5_000.0)
     check = a_check(fetch_key_set=endpoint, monotonic_clock=monotonic)
@@ -184,7 +184,7 @@ def test_an_invalid_identity_field_is_refused_by_name(
 
 
 def test_the_identity_repr_never_shows_the_key_set_url() -> None:
-    """CALLER-32: `jwks_url` is left out of the repr of `ServiceIdentity`."""
+    """CALLER-33: `jwks_url` is left out of the repr of `ServiceIdentity`."""
     secret_url = f"https://login.example.org{SECRET_PATH}"
 
     assert secret_url not in repr(a_service_identity(jwks_url=secret_url))
@@ -274,7 +274,7 @@ def test_a_refusal_rejects_a_token_rejection_that_does_not_match_its_reason(
 def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """CALLER-31: nothing taken from the workload token or the person token (subject, client id,
+    """CALLER-32: nothing taken from the workload token or the person token (subject, client id,
     groups) appears in a repr, an error message or a log record of the module."""
     secret_url = f"https://login.example.org{SECRET_PATH}"
     identity = a_service_identity(jwks_url=secret_url)
@@ -321,7 +321,7 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
 
 
 def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role() -> None:
-    """CALLER-03, CALLER-04, CALLER-30: `person_caller` returns to a plain call a
+    """CALLER-03, CALLER-04, CALLER-31: `person_caller` returns to a plain call a
     `PersonCaller` with the app, client id and the person's identity, groups and role, or a
     `CallerRefusal`; the check applies no policy beyond membership and passes every group of the
     person on."""
@@ -353,16 +353,15 @@ def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role
     ],
 )
 def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> None:
-    """CALLER-21: the person token gets no role check, with the workload role or without, and
-    its `azp` is the client binding, never evidence of an exchange."""
+    """CALLER-21: the person token gets no role check, with the workload role or without."""
     admitted = a_check().person_caller(a_workload_token(), a_person_token(**changes))
 
     assert isinstance(admitted, PersonCaller)
 
 
 def test_a_person_token_azp_binds_the_client_and_no_exchange_claim_stands_in_for_it() -> None:
-    """CALLER-21: the person token gets no role check, with the workload role or without, and
-    its `azp` is the client binding, never evidence of an exchange."""
+    """CALLER-22: the person token's `azp` is the client binding, and no exchange claim
+    stands in for it."""
     check = a_check()
     exchange_claims = {"act": {"sub": "exchanging-client"}, "may_act": {"sub": "exchanging-client"}}
 
