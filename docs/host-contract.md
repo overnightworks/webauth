@@ -268,8 +268,8 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
   [ui-style](https://github.com/overnightworks/ui-style); take the colours from the
   app's own tokens.
 
-A refusal carries no identity, so the page has no name to show. A refused login stores no
-session, so signing out from "no access" follows the missing-ID-token case in
+A refusal carries no identity, so the page has no name to show. A `NOT_A_MEMBER` login
+stores no session, so signing out from "no access" follows the missing-ID-token case in
 [Signing out](#what-every-app-gets).
 
 ## The host's machine routes
