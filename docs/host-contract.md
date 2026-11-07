@@ -736,7 +736,7 @@ issuer accepts a code once; webauth keeps no replay store.
 - **SIGNIN-34** it enters the transaction once,
 - **SIGNIN-35** only when the request's cookie names a session.
 - **SIGNIN-36** An exception in the route answers a plain 500 with no page and no cookie cleared.
-- **SIGNIN-37** An exception in the transaction's exit answers the same.
+- **SIGNIN-37** An exception in the transaction, on entering it or at its exit, answers the same.
 - **SIGNIN-38** An exception in the host's callables answers the same.
 - **SIGNIN-39** A rolling-back host keeps the session, and a retry ends it with its hint.
 - **SIGNIN-40** Under per-call persistence or an uncertain commit the row and its ID token may already be gone, and a retry still reaches the

@@ -380,6 +380,19 @@ def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_
     assert hint_of(post_logout(host, SAME_ORIGIN_FORM)) == host.issued_id_tokens[-1]
 
 
+def test_a_failing_entry_into_the_logout_transaction_answers_a_plain_500_and_ends_nothing() -> None:
+    """SIGNIN-37: an exception on entering the transaction answers a plain 500 and ends nothing."""
+    host = after_signing_in(an_oidc_host())
+    host.transaction.entry_failure = StoreDown()
+    entries_before = host.transaction.entries
+
+    response = post_logout(host, SAME_ORIGIN_FORM)
+
+    assert _answers_a_plain_500_and_clears_no_cookie(response)
+    assert host.transaction.entries == entries_before
+    assert host.sessions.count_active() == 1
+
+
 def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_the_hint() -> None:
     """SIGNIN-37, SIGNIN-40: a failing exit answers a plain 500; the row may be gone and a retry
     answers the page without the hint."""
