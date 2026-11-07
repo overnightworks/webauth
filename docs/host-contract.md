@@ -483,9 +483,12 @@ it as `BearerGate(resource=...)`.
 - **RESOURCE-02** `url` is the resource's identifier, an endpoint URL with a plain host, an optional port and a path of
   one or more segments of RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`), none
   being `.` or `..`, with no trailing slash; its path is the entry point. Any other `url` is a `ValueError`.
-- **RESOURCE-03** `scope` is one scope token, else `ValueError`. It is the scope the challenge asks for and a token must hold.
-- **RESOURCE-04** `authorized_parties` is an `AuthorizedParties`, else `TypeError`. They are the clients whose token the resource takes, apart from the parties of the machine and person paths.
-- **RESOURCE-05** `required_group` is a group path, else `ValueError`. It is the group a person must hold in the token, or one below it, besides the admission's login group.
+- **RESOURCE-03** `scope` is one scope token, else `ValueError`.
+- **RESOURCE-04** `authorized_parties` is an `AuthorizedParties`, else `TypeError`.
+- **RESOURCE-05** `required_group` is a group path, else `ValueError`.
+- `scope` is the scope the challenge asks for and a token must hold. `authorized_parties` are the clients whose token
+  the resource takes, apart from the parties of the machine and person paths. `required_group` is the group a person
+  must hold in the token, or one below it, besides the admission's login group.
 - `transaction` is the host's `SignInTransaction`, the same port the person paths use.
 - Everything else derives from `url`:
   - **RESOURCE-06** the metadata path is `/.well-known/oauth-protected-resource` plus the entry
@@ -550,8 +553,9 @@ At the entry point, on every method and the exact path only:
 - **RESOURCE-40** It is empty by default, so a resource has only its entry point.
 - **RESOURCE-41** `method` is one upper-case HTTP method token, else `ValueError`.
 - **RESOURCE-42** `template` is one or more `/`-separated segments, each a literal of unreserved characters
-  (never a literal `.` or `..` segment) or one `{name}` filling the whole segment.
-- **RESOURCE-43** A `template` with a converter, a partial parameter, an empty segment or a trailing slash is a `ValueError`.
+  or one `{name}` filling the whole segment.
+- **RESOURCE-43** Any other `template` is a `ValueError`: a converter, a partial parameter, an empty segment, a
+  trailing slash, a missing leading `/`, a literal `.` or `..` segment or a literal of other characters.
 - **RESOURCE-44** The match is exact, on the route path: the method equals, the segment count equals, each literal equals, each parameter is one non-empty segment other than `.` and `..`.
 - **RESOURCE-45** A trailing slash, `HEAD` on a marked `GET`, a longer path below a template and a decoded `/` in a parameter do not match.
 - The gate selects machine path, entry point, marked route, person path:
