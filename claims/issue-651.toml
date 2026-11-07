@@ -1,8 +1,0 @@
-claim_id = "ae0e1d5df95141df9df21635118d3ab1"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "0a4ff602dc223e326cf09319002a6b8b00514bdc"
-branch = "claude/issue-651-host-contract-ids-every-app"
-scope = ["docs/host-contract.md", "src/webauth/oidc_login.py", "tests"]
-opened_commit = "394025ace7613377bd40bc3978791adfea234481"
-whole_reason = "One section's IDs and their citations land together; the test modules change docstrings and add focused tests only."
