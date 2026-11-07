@@ -326,7 +326,8 @@ class _Refusal(Enum):
     The first four refuse a machine path, which names its realm; the first three and
     ``RESOURCE_INSUFFICIENT_SCOPE`` refuse the resource's entry point, which names its
     metadata and scope; on a person path ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry
-    neither and ``NOT_A_MEMBER`` and ``USERNAME_TAKEN`` belong to it alone.
+    neither and ``NOT_A_MEMBER`` belongs to it alone; ``USERNAME_TAKEN`` answers it and the
+    resource's creation of an agent's account.
     ``RESOURCE_NOT_ADMITTED`` is the entry point's answer to a token that holds but whose
     person is unknown or outside the required group; a new sign-in cannot change it, so it
     carries no challenge a client would answer with one.

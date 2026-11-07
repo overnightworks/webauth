@@ -160,7 +160,8 @@ def test_an_agent_group_token_the_resource_check_refuses_is_an_invalid_token_and
 ) -> None:
     """RESOURCE-15, RESOURCE-16, RESOURCE-17, RESOURCE-18, RESOURCE-70: the group exempts only
     the party check, so a token of another issuer, a bad signature, two audiences or the app's
-    client ID as audience is a 401 `invalid_token` and nothing is created."""
+    client ID as audience is a 401 `invalid_token` and nothing is created; on a marked route the
+    app's client ID goes on as an unmarked request, a bare 401 without that challenge."""
     app = an_app(resource)
 
     status, headers, _ = ask(app, resource, surface, WRONG_FOR_THE_RESOURCE[name](resource))
@@ -230,16 +231,8 @@ def test_a_path_below_or_beside_the_agent_group_or_a_malformed_list_is_refused_a
 
     status, headers, _ = ask(app, resource, surface, token)
 
-    well_formed = isinstance(groups, list) and 7 not in groups
-    listed = azp == "hal"
-    if well_formed and listed:
-        assert status == 200
-    else:
-        assert (status, headers["www-authenticate"].endswith('error="invalid_token"')) == (
-            401,
-            True,
-        )
-    assert the_transaction(app).entries == int(well_formed and listed)
+    assert (status, headers["www-authenticate"].endswith('error="invalid_token"')) == (401, True)
+    assert the_transaction(app).entries == 0
 
 
 def test_a_token_with_a_subgroup_of_the_agent_group_and_a_listed_azp_is_a_person() -> None:
@@ -391,7 +384,7 @@ def test_an_agent_group_token_without_the_required_or_the_login_group_gets_the_p
     groups = (
         [resource.agent_group, "/other/mcp"]
         if case == "lacking-the-login-group"
-        else [resource.agent_group]
+        else [resource.agent_group, "/apps/x"]
     )
 
     status, headers, body = ask(app, resource, surface, an_agent_group_token(resource, *groups))
@@ -666,6 +659,11 @@ def test_a_failure_in_the_agent_admission_is_the_library_500_and_admits_nothing(
     assert ask(app, resource, surface, token)[0] == 200
     assert len(app.audit.account_events) <= events_before + 1
     assert len(app.audit.account_events) <= 1
+    if kind is TransactionKind.PER_CALL and failure in {"created-audit", "kind-audit"}:
+        survivor = the_agent_account(app)
+        assert survivor is not None
+        assert survivor.kind is AccountKind.AGENT
+        assert len(app.audit.account_events) == events_before == 0
 
 
 @BOTH_TRANSACTIONS
