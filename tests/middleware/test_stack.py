@@ -284,6 +284,7 @@ class TestLibraryRefusalsCarryTheSecurityHeaders:
         send: Callable[[TestClient], Response],
         refusal: Refusal,
     ) -> None:
+        """STACK-02: every library refusal carries its headers before an outer host sees it."""
         response = send(client_factory())
         assert response.status_code == refusal.status
         assert response.headers.get("retry-after") == refusal.retry_after
@@ -292,6 +293,10 @@ class TestLibraryRefusalsCarryTheSecurityHeaders:
 
 class TestHostMiddlewarePlacement:
     def test_host_middleware_added_around_the_call_sees_refusals_only_from_outside(self) -> None:
+        """STACK-01, STACK-02: a middleware before the call never sees a refusal.
+
+        One added after the call sees it with the library headers set.
+        """
         app = a_fresh_app()
         reached_inside: list[str] = []
         seen_outside: list[tuple[int, str | None]] = []
@@ -316,6 +321,20 @@ class TestHostMiddlewarePlacement:
         assert response.status_code == 403
         assert reached_inside == []
         assert seen_outside == [(403, "DENY")]
+
+    def test_a_response_a_host_middleware_makes_itself_carries_no_library_headers(self) -> None:
+        """STACK-03: a response made outside the library stack has no policy headers."""
+        app = a_fresh_app()
+        install_full_stack(app)
+
+        @app.middleware("http")
+        async def outside(request: Request, call_next):  # type: ignore[no-untyped-def]
+            return JSONResponse({}, status_code=204)
+
+        response = TestClient(app, base_url=HTTPS_TEST_SERVER).get(API_PATH)
+
+        assert response.status_code == 204
+        assert response.headers.get("x-frame-options") is None
 
 
 class TestAnExemptWebhookPrefix:
@@ -354,6 +373,7 @@ class TestAnExemptWebhookPrefix:
 
 class TestRefusedInstallation:
     def test_an_install_without_csrf_origin_is_refused_before_touching_the_app(self) -> None:
+        """CSRF-01: the install raises and leaves the app untouched."""
         app = a_fresh_app()
         with pytest.raises(TypeError, match="csrf_origin"):
             install_web_auth_middleware(app, security_headers=HEADERS_POLICY)  # type: ignore[call-arg]
@@ -674,8 +694,7 @@ class TestResponsesBehindThePureAsgiMiddlewares:
     async def test_a_context_variable_set_downstream_is_visible_to_the_caller_after_the_call(
         self,
     ) -> None:
-        """Documented change: the middlewares run the app in the caller's task, where
-        BaseHTTPMiddleware gave it a task of its own."""
+        """STACK-04: the middlewares run the app in the caller's task."""
         app = an_authenticated_full_stack_app()
         scope = an_http_scope(
             app, CONTEXT_SETTING_PATH, spec_version=SPEC_WITHOUT_CONCURRENT_READER

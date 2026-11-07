@@ -66,6 +66,7 @@ _PROXY_NETWORK = "172.16.0.0/12"
 _TRUSTED_PEER = "172.18.0.1"
 _TRUSTED_HOP = "172.18.0.9"
 _CLIENT = "203.0.113.7"
+_UNLISTED_PROXY = "198.51.100.9"
 _CLIENT_AT_THE_HOP_BOUND = ", ".join(
     [_CLIENT, *[_TRUSTED_HOP] * (MAX_FORWARDED_FOR_HOPS - 1)],
 )
@@ -83,6 +84,11 @@ _CLIENT_BEYOND_THE_HOP_BOUND = ", ".join(
             [f"{_CLIENT}, {_TRUSTED_HOP}"],
             _CLIENT,
             id="rightmost untrusted hop",
+        ),
+        pytest.param(
+            [f"{_CLIENT}, {_UNLISTED_PROXY}, {_TRUSTED_HOP}"],
+            _UNLISTED_PROXY,
+            id="an unlisted proxy becomes the client",
         ),
         pytest.param(
             [_CLIENT, _TRUSTED_HOP],
@@ -130,7 +136,9 @@ def test_client_ip_behind_a_trusted_proxy(
     forwarded_for: list[str],
     expected: str,
 ) -> None:
-    """The chain is read from the right, where our own proxies appended.
+    """PROXY-02, PROXY-04, PROXY-05: the chain is read from the right.
+
+    Our own proxies appended there.
 
     The first hop no trusted proxy vouches for is the client; entries further
     left are never read. When the readable part names nobody the request keys
@@ -142,7 +150,7 @@ def test_client_ip_behind_a_trusted_proxy(
 
 
 def test_a_poisoned_prefix_cannot_move_a_client_onto_the_gateway_identity() -> None:
-    """A client's own address is appended after whatever it sent, never before.
+    """PROXY-04: a client's own address is appended after whatever it sent.
 
     So junk it writes sits left of that entry and is never read: it keeps its
     own rate-limit key instead of escaping onto the peer's, which every other
@@ -262,6 +270,7 @@ def test_a_chain_that_names_nobody_is_logged(
 
 
 def test_client_ip_ignores_a_chain_from_an_untrusted_peer() -> None:
+    """PROXY-01: a peer that is not trusted keeps its own address whatever its chain says."""
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     assert _get_client_ip("203.0.113.50", ["10.9.9.9"], trusted) == "203.0.113.50"
 
@@ -353,6 +362,7 @@ def test_the_budget_of_an_address_pools_its_ipv6_network(
     address: str,
     budget: str,
 ) -> None:
+    """PROXY-06: visitors behind one address share its rate-limit budget."""
     assert _budget_address(address) == budget
 
 
@@ -404,9 +414,27 @@ def test_https_counts_only_from_the_connection_or_a_trusted_proxy(
     forwarded_proto: str | None,
     https: bool,
 ) -> None:
+    """PROXY-01, PROXY-02: the scheme comes from the connection or a trusted proxy."""
     headers = {} if forwarded_proto is None else {"x-forwarded-proto": forwarded_proto}
 
     with TestClient(_scheme_app(), base_url=base_url, client=(peer, 55000)) as client:
         response = client.get("/is-https", headers=headers)
 
     assert response.json() == {"https": https}
+
+
+def test_an_rfc_7239_forwarded_header_moves_neither_the_client_address_nor_the_scheme() -> None:
+    """PROXY-03: a trusted proxy's Forwarded header alone changes nothing."""
+    headers = {"forwarded": f"for={_CLIENT};proto=https"}
+    app = _client_ip_app()
+    install_web_auth_config(app, a_web_auth_config())
+
+    with TestClient(app, base_url="http://testserver", client=(_TRUSTED_PEER, 55000)) as client:
+        client_ip = client.get("/client-ip", headers=headers)
+    with TestClient(
+        _scheme_app(), base_url="http://testserver", client=(_TRUSTED_PEER, 55000)
+    ) as client:
+        is_https = client.get("/is-https", headers=headers)
+
+    assert client_ip.json() == {"ip": _TRUSTED_PEER}
+    assert is_https.json() == {"https": False}

@@ -2,24 +2,36 @@
 
 For a host developer: what a host sees from webauth and what it must provide.
 
+A rule webauth promises opens with its ID, such as **CSRF-01**, and a test that
+proves it names the ID at the start of its docstring. A test under `tests/e2e/`
+runs by hand against a real Keycloak, not in CI. A paragraph or bullet that opens
+with **Host duty:** says what the host must do and prove itself. A section without
+IDs still names its proofs in its own lines.
+
 ## Trusted proxies
 
 `WebAuthConfig.trusted_proxies` names the trusted proxy addresses for the host.
-It lists the app's direct peer and every proxy whose address the
-`X-Forwarded-For` chain carries; listing every proxy between the client and the
-app is the simple way to be sure. webauth reads `X-Forwarded-For` and
-`X-Forwarded-Proto` and never RFC 7239 `Forwarded`. It reads the chain from the
-right and takes the first address it does not trust as the client, so a proxy
-whose address the chain carries but which the list lacks becomes the client
-address, and every visitor that reaches the app through it shares that address
-and its rate-limit budget. With a CDN, a tunnel and a reverse proxy in front of
-the app, list whichever of their addresses appear in the chain. The operator's
-[hal](https://github.com/overnightworks/hal) project owns that reachability
-infrastructure.
-`trusted_proxies` decides alone only when the ASGI server does not rewrite the
-client address or scheme from those headers, so the host turns the server's own
-forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
-`proxy_headers=False` or `--no-proxy-headers`).
+
+- **PROXY-01** A request from a peer that `trusted_proxies` does not list keeps the
+  peer's address and the connection's own scheme, whatever forwarded headers it carries.
+- **PROXY-02** webauth reads `X-Forwarded-For` and `X-Forwarded-Proto` from a trusted peer.
+- **PROXY-03** webauth never reads RFC 7239 `Forwarded`.
+- **PROXY-04** It reads the `X-Forwarded-For` chain from the right and takes the first
+  address it does not trust as the client.
+- **PROXY-05** A proxy whose address the chain carries but which the list lacks becomes
+  the client address.
+- **PROXY-06** Every visitor that reaches the app through that proxy shares its address
+  and its rate-limit budget.
+- **Host duty:** list the app's direct peer and every proxy whose address the
+  `X-Forwarded-For` chain carries; listing every proxy between the client and the app is
+  the simple way to be sure. With a CDN, a tunnel and a reverse proxy in front of the
+  app, list whichever of their addresses appear in the chain. The operator's
+  [hal](https://github.com/overnightworks/hal) project owns that reachability
+  infrastructure.
+- **Host duty:** turn the ASGI server's own forwarded-header handling off (uvicorn's
+  `proxy_headers`, on by default: `proxy_headers=False` or `--no-proxy-headers`);
+  `trusted_proxies` decides alone only when the server does not rewrite the client
+  address or scheme from those headers.
 
 ## What every app gets
 
@@ -114,63 +126,58 @@ These are hand-run browser proofs, not CI tests.
 
 ## Where the host's own middleware goes
 
-Added before `install_web_auth_middleware`, a host middleware sits inside the library
-stack, so a request the library refuses early (413 by `Content-Length`, 429, 503, the
-CSRF 403s, the session gate's 302 and 401) never reaches it; put one that must see only
-admitted requests (session lookups, audit) there. Added after the call it sits outside,
-sees every library refusal with its headers already set, and is the place for access
-logs and metrics; a response or exception it produces itself does not carry the library
-headers.
-
-A host `BaseHTTPMiddleware` or `@app.middleware("http")` makes a response that fails
-mid-stream look complete wherever it sits, and added before the call it also turns the
-413 for a streamed body the route reads into the library 500; write a middleware that
-must see admitted requests as pure ASGI.
-
-The library middleware run the app in the caller's task, so a `ContextVar` that the app
-or an inner middleware sets is visible to an outer host middleware after the call
-returns; a host that relied on `BaseHTTPMiddleware`'s task isolation restores its own
-context, for example by resetting the token it set.
+- **STACK-01** Added before `install_web_auth_middleware`, a host middleware sits inside
+  the library stack, so a request the library refuses early (413 by `Content-Length`,
+  429, 503, the CSRF 403s, the session gate's 302 and 401) never reaches it.
+- **Host duty:** put a middleware that must see only admitted requests (session lookups,
+  audit) before the call.
+- **STACK-02** Added after the call, a host middleware sits outside the library stack and
+  sees every library refusal with its headers already set; it is the place for access
+  logs and metrics.
+- **STACK-03** A response or exception that such a host middleware produces itself does
+  not carry the library headers.
+- **STACK-04** The library middleware run the app in the caller's task, so a `ContextVar`
+  that the app or an inner middleware sets is visible to an outer host middleware after
+  the call returns.
+- **Host duty:** write a middleware that must see admitted requests as pure ASGI. A host
+  `BaseHTTPMiddleware` or `@app.middleware("http")` makes a response that fails
+  mid-stream look complete wherever it sits, and added before the call it also turns the
+  413 for a streamed body the route reads into the library 500.
+- **Host duty:** a host that relied on `BaseHTTPMiddleware`'s task isolation restores its
+  own context, for example by resetting the token it set.
 
 ## CSRF origin
 
-The operator ruled the passages that open "Every app supplies", "Only verified bearer admission", "The `Origin` fallback matches" and "webauth supports the current releases"; no other sentence of this section is ruled, and proof lines are not rulings.
+The operator ruled CSRF-01, CSRF-02, CSRF-03, CSRF-04, CSRF-05, CSRF-06, CSRF-07, CSRF-08, CSRF-09, CSRF-10, CSRF-11, CSRF-12, CSRF-13, CSRF-14, CSRF-15 and CSRF-16; no other sentence of this section is ruled.
 
-Every app supplies `csrf_origin=CsrfPolicy(...)` when installing the middleware;
-there is no frontend CSRF-token obligation. A state-changing request (POST, PUT,
-PATCH or DELETE) needs trustworthy provenance regardless of its body or content
-type. `Sec-Fetch-Site: same-origin` passes; `same-site` or an absent Fetch
-Metadata header falls back to `Origin`; every other Fetch Metadata value is
-refused. Without either header the request is refused, and `Referer` is never
-read. The proofs are
-`test_a_request_is_judged_by_sec_fetch_site_then_origin`,
-`test_a_state_changing_request_without_provenance_is_refused_whatever_its_body`
-and `test_the_referer_is_not_read` in [test_csrf.py](../tests/middleware/test_csrf.py), plus
-`TestRefusedInstallation.test_an_install_without_csrf_origin_is_refused_before_touching_the_app`
-in [test_stack.py](../tests/middleware/test_stack.py).
+- **CSRF-01** Every app supplies `csrf_origin=CsrfPolicy(...)` when installing the
+  middleware; an install without it is refused.
+- **CSRF-02** There is no frontend CSRF-token obligation.
+- **CSRF-03** A state-changing request (POST, PUT, PATCH or DELETE) needs trustworthy
+  provenance regardless of its body or content type.
+- **CSRF-04** `Sec-Fetch-Site: same-origin` passes.
+- **CSRF-05** `same-site` or an absent Fetch Metadata header falls back to `Origin`.
+- **CSRF-06** Every other Fetch Metadata value is refused.
+- **CSRF-07** Without either header the request is refused.
+- **CSRF-08** `Referer` is never read.
 
-Only verified bearer admission (on a machine path or a person path) and the sessionless server paths the host names
-in `CsrfPolicy.exempt` bypass this check; an adjacent path is still checked.
-Proofs: `test_a_bearer_request_needs_no_csrf_origin_header_or_cookie`
-in [test_bearer_gate_admission.py](../tests/middleware/test_bearer_gate_admission.py) and
-`test_protect_everything_checks_every_route_but_the_exempt_ones` in
-[test_csrf.py](../tests/middleware/test_csrf.py).
+- **CSRF-09** Only verified bearer admission (on a machine path or a person path) and the
+  sessionless server paths the host names in `CsrfPolicy.exempt` bypass this check.
+- **CSRF-10** An adjacent path is still checked.
 
-The `Origin` fallback matches exact hosts in `WebAuthConfig.allowed_hosts_exact`,
-never host patterns; its docstring owns port matching. With `cookie_secure` on,
-the origin must use HTTPS; with it off, the scheme is not compared. A repeated
-`Origin` header counts as foreign. This also holds for WebSocket handshakes, which
-check `Origin` directly.
-Proofs: `test_an_origin_that_only_resembles_the_exact_host_is_refused`
-in [test_csrf.py](../tests/middleware/test_csrf.py), and
-`test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on` in both that
-module and [test_dependencies_websocket_auth.py](../tests/test_dependencies_websocket_auth.py),
-and `test_a_repeated_origin_header_is_refused_like_a_foreign_origin` in test_csrf.py
-with the "two Origins, both allowed" case of test_dependencies_websocket_auth.py.
+- **CSRF-11** The `Origin` fallback matches exact hosts in
+  `WebAuthConfig.allowed_hosts_exact`, never host patterns; its docstring owns port
+  matching.
+- **CSRF-12** With `cookie_secure` on, the origin must use HTTPS; with it off, the scheme
+  is not compared.
+- **CSRF-13** A repeated `Origin` header counts as foreign.
+- **CSRF-14** These three also hold for WebSocket handshakes, which check `Origin`
+  directly.
 
-webauth supports the current releases of Chrome, Edge, Firefox and Safari
-(macOS and iOS). On every request whose method is not GET or HEAD, each sends
-`Origin`, possibly `null`, and, to an HTTPS app, `Sec-Fetch-Site`.
+- **CSRF-15** webauth supports the current releases of Chrome, Edge, Firefox and Safari
+  (macOS and iOS).
+- **CSRF-16** On every request whose method is not GET or HEAD, each sends `Origin`,
+  possibly `null`, and, to an HTTPS app, `Sec-Fetch-Site`.
 
 ## Signed out and refused
 

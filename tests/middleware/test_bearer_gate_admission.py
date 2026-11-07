@@ -79,6 +79,7 @@ def never_asked() -> Any:
 
 
 def test_a_bearer_request_needs_no_csrf_origin_header_or_cookie() -> None:
+    """CSRF-09: a verified bearer request passes without Origin or a cookie."""
     app = a_bearer_app()
 
     response = app.ask(method="DELETE", authorization=bearing(A_TOKEN), headers=FOREIGN_PAGE)
