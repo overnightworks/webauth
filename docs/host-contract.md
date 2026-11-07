@@ -23,7 +23,7 @@ forwarded-header handling off (uvicorn's `proxy_headers`, on by default:
 
 ## What every app gets
 
-The operator ruled this section's sentences on admission without a username lookup or a local account flag, and the logout page that posts the ID token hint.
+The operator ruled the passages that open "Admission never looks up a username" and "The page sends the client ID"; no other sentence of this section is ruled, and proof lines are not rulings.
 
 Every app that signs people in through Keycloak behaves the same way, unless it
 configures `EverySubject` to require no login group or `NoAdmins` to grant no
@@ -134,7 +134,7 @@ context, for example by resetting the token it set.
 
 ## CSRF origin
 
-The operator ruled this section's sentences on the origin check, its exceptions and its browser support.
+The operator ruled the passages that open "Every app supplies", "Only verified bearer admission", "The `Origin` fallback matches" and "webauth supports the current releases"; no other sentence of this section is ruled, and proof lines are not rulings.
 
 Every app supplies `csrf_origin=CsrfPolicy(...)` when installing the middleware;
 there is no frontend CSRF-token obligation. A state-changing request (POST, PUT,
@@ -174,7 +174,7 @@ webauth supports the current releases of Chrome, Edge, Firefox and Safari
 
 ## Signed out and refused
 
-The operator ruled this section's sentences on the page and API split, public paths, the deep link, the machine refusals and the refusal pages.
+The operator ruled the passages that open "To keep the deep link" and "`"No access"` is for"; no other sentence of this section is ruled, and proof lines are not rulings.
 
 Every app shows signed-out and refused people the same way. This is the rule
 every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it, and a
@@ -273,7 +273,7 @@ are in [test_session_gate_recorded_admission.py](../tests/middleware/test_sessio
 
 ## The host's machine routes
 
-The operator ruled this section's sentences on admitting the bearer token on the machine routes.
+The operator ruled the passages that open "A route reads the admitted caller" and "Token lifetime"; no other sentence of this section is ruled, and proof lines are not rulings.
 
 hal is the operator's CLI for calling an app's machine routes with a bearer
 token. A host declares its machine (admin) paths once, and hal calls them with
@@ -323,7 +323,7 @@ per-address rate limits of browser requests.
 
 ## The person's token on the app's API
 
-The operator ruled this section's sentences on the token as the person on the app's API paths.
+The operator ruled the passages that open "A token created through hal" and "On such a path"; no other sentence of this section is ruled, and proof lines are not rulings.
 
 A token created through hal can call an app's ordinary API with exactly the rights of the
 person behind it, deletion included, and no layer sits on top of the person's rights.
@@ -532,7 +532,7 @@ Proofs: [test_service_callers.py](../tests/test_service_callers.py) in CI.
 
 ## The sign-in routes
 
-The operator ruled this section's sentences on the explicit `keeps_id_token` choice and the ID token kept in the session row.
+The operator ruled the passage that opens "`install_sign_in_routes` requires the host's explicit `keeps_id_token` choice"; no other sentence of this section is ruled, and proof lines are not rulings.
 
 `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
 `FastAPI` app over its one `OidcRelyingParty` (read per request), and `SignInPaths`
