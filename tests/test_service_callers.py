@@ -353,10 +353,26 @@ def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role
     ],
 )
 def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> None:
-    """CALLER-21: the person token gets no role check, with the workload role or without."""
+    """CALLER-21: the person token gets no role check, with the workload role or without, and
+    its `azp` is the client binding, never evidence of an exchange."""
     admitted = a_check().person_caller(a_workload_token(), a_person_token(**changes))
 
     assert isinstance(admitted, PersonCaller)
+
+
+def test_a_person_token_azp_binds_the_client_and_no_exchange_claim_stands_in_for_it() -> None:
+    """CALLER-21: the person token gets no role check, with the workload role or without, and
+    its `azp` is the client binding, never evidence of an exchange."""
+    check = a_check()
+    exchange_claims = {"act": {"sub": "exchanging-client"}, "may_act": {"sub": "exchanging-client"}}
+
+    bound = check.person_caller(a_workload_token(), a_person_token())
+    another_client_with_exchange = check.person_caller(
+        a_workload_token(), a_person_token(azp="another-client", **exchange_claims)
+    )
+
+    assert isinstance(bound, PersonCaller)
+    assert refused(another_client_with_exchange).reason is CallerRefusalReason.CLIENT_MISMATCH
 
 
 @pytest.mark.parametrize(
