@@ -324,7 +324,7 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
 
 
-def test_a_callback_the_app_cannot_complete_because_the_issuer_is_unreachable_stops_at_the_refusal() -> None:
+def test_a_callback_with_an_unreachable_issuer_stops_at_the_refusal() -> None:
     """APP-24: the browser reached the issuer, the app's token exchange cannot."""
     host = an_oidc_host()
     query = host.sign_in_at_issuer()

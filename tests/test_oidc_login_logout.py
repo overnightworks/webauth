@@ -201,12 +201,20 @@ def _row_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
     ("arrange", "sessions_kept", "hint_sent", "entered", "keeps_id_token"),
     [
         pytest.param(_no_session, 0, False, False, True, id="no-session"),
-        pytest.param(_forged_session_cookie, 1, False, False, True, id="forged-cookie-ends-nothing"),
+        pytest.param(
+            _forged_session_cookie, 1, False, False, True, id="forged-cookie-ends-nothing"
+        ),
         pytest.param(_session_cookie_dropped, 1, False, False, True, id="session-cookie-gone"),
         pytest.param(_session_ended_in_the_store, 0, False, True, True, id="session-already-ended"),
-        pytest.param(_session_expired_but_stored, 0, True, True, True, id="session-expired-but-stored"),
-        pytest.param(_row_stored_before_the_upgrade, 0, False, True, True, id="stored-before-upgrade"),
-        pytest.param(_session_as_opened, 0, False, True, False, id="opened-without-keeping-the-id-token"),
+        pytest.param(
+            _session_expired_but_stored, 0, True, True, True, id="session-expired-but-stored"
+        ),
+        pytest.param(
+            _row_stored_before_the_upgrade, 0, False, True, True, id="stored-before-upgrade"
+        ),
+        pytest.param(
+            _session_as_opened, 0, False, True, False, id="opened-without-keeping-the-id-token"
+        ),
     ],
 )
 def test_a_same_origin_logout_still_answers_the_page(
