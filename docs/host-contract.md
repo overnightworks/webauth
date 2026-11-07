@@ -35,23 +35,26 @@ neither an ID nor a label explains. A section without IDs still names its proofs
 
 ## What every app gets
 
-The operator ruled APP-18, APP-19, APP-20, APP-31, APP-32, APP-33 and APP-34; no other sentence of this section is ruled.
+The operator ruled APP-20, APP-21, APP-22, APP-33, APP-34, APP-35 and APP-36; no other sentence of this section is ruled.
 
-Every app that signs people in through Keycloak behaves the same way, unless it
-configures `EverySubject` to require no login group or `NoAdmins` to grant no
-admin role. The details are in the sections below.
+Every app that signs people in through Keycloak behaves the same way, except for the
+two values below. The details are in the sections that follow.
 
-- **APP-01** Only members of the app's `login_group`, such as `/apps/notes`, get in.
-- **APP-02** Members of its `admin_group`, a path below it such as
+- **APP-01** An app that configures `EverySubject` requires no login group: a person of
+  the bound issuer gets in without groups.
+- **APP-02** An app that configures `NoAdmins` grants no admin role, whatever the
+  person's groups.
+- **APP-03** Only members of the app's `login_group`, such as `/apps/notes`, get in.
+- **APP-04** Members of its `admin_group`, a path below it such as
   `/apps/notes/admin`, are admins.
-- **APP-03** An `AdmissionConfig` binds the issuer whose groups count, and only that
+- **APP-05** An `AdmissionConfig` binds the issuer whose groups count, and only that
   issuer's groups decide the role.
-- **APP-04** Membership and role are decided again at every login, so a change in
+- **APP-06** Membership and role are decided again at every login, so a change in
   Keycloak takes effect at the person's next sign-in.
-- **APP-05** An app session that is already open keeps its access until it ends.
-- **APP-06** A changed admin role, which lives on the account, reaches every open
+- **APP-07** An app session that is already open keeps its access until it ends.
+- **APP-08** A changed admin role, which lives on the account, reaches every open
   session at the person's next sign-in.
-- **APP-07** The session's absolute cap bounds the delay before a login-group removal
+- **APP-09** The session's absolute cap bounds the delay before a login-group removal
   takes effect.
 
 The issuer's SSO session makes a fresh login a redirect the person does not notice;
@@ -59,37 +62,37 @@ an immediate removal requires disabling the user at the issuer together with
 [back-channel logout](ARCHITECTURE.md#back-channel-logout). See
 [Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
 
-- **APP-08** The stored role is a plain string: webauth writes `"admin"` for an admin
+- **APP-10** The stored role is a plain string: webauth writes `"admin"` for an admin
   and `"user"` for every other member.
-- **APP-09** The admin checks admit exactly `"admin"`.
-- **APP-10** `NoAdmins` demotes a stored admin to `"user"` at its next sign-in or
+- **APP-11** The admin checks admit exactly `"admin"`.
+- **APP-12** `NoAdmins` demotes a stored admin to `"user"` at its next sign-in or
   person-token admission.
-- **APP-11** Resource admission rewrites no role.
+- **APP-13** Resource admission rewrites no role.
 
 The host's store keeps the stored roles. Only a Breaking release that names the
 migration of stored accounts changes these values.
 
-- **APP-12** A person is a member when one of their groups is the group's path or a
+- **APP-14** A person is a member when one of their groups is the group's path or a
   subgroup of it, compared character for character and by path segment, so
   `/apps/notes/admin` counts for `/apps/notes` and `/apps/notes2` does not.
 - **Host duty:** switch Keycloak's group mapper to `full.path` on, because the groups
   claim must carry full paths.
-- **APP-13** A missing or empty groups claim means no membership.
-- **APP-14** The membership check runs before any account is looked up or created.
-- **APP-15** A person removed from the group is refused at their next login while their
+- **APP-15** A missing or empty groups claim means no membership.
+- **APP-16** The membership check runs before any account is looked up or created.
+- **APP-17** A person removed from the group is refused at their next login while their
   account and data stay.
-- **APP-16** A person put back into the group returns to the same account.
-- **APP-17** `app_role` in `webauth.admission` is the membership rule's public form, for
+- **APP-18** A person put back into the group returns to the same account.
+- **APP-19** `app_role` in `webauth.admission` is the membership rule's public form, for
   a second service that verifies the issuer's token itself.
 
-- **APP-18** Admission never looks up a username.
-- **APP-19** Admission has no local active-user flag; disabling people belongs to the
+- **APP-20** Admission never looks up a username.
+- **APP-21** Admission has no local active-user flag; disabling people belongs to the
   issuer.
-- **APP-20** A host store may still reject a new account's name with `UsernameTakenError`.
+- **APP-22** A host store may still reject a new account's name with `UsernameTakenError`.
 
-- **APP-21** People who are already signed in keep working until their app session
+- **APP-23** People who are already signed in keep working until their app session
   ends, because the app checks a session in its own store and never asks Keycloak.
-- **APP-22** When Keycloak fails during the sign-in, or the browser reaches Keycloak
+- **APP-24** When Keycloak fails during the sign-in, or the browser reaches Keycloak
   but the app does not, the sign-in stops at the app's callback, on the host's refusal
   page.
 
@@ -102,30 +105,30 @@ For the machine callers and the person's token, see
 [The host's machine routes](#the-hosts-machine-routes)
 and [The person's token on the app's API](#the-persons-token-on-the-apps-api).
 
-- **APP-23** Signing out of an app ends its session in that browser at once.
-- **APP-24** Signing out shows a short page that posts to Keycloak.
-- **APP-25** Posting that page to Keycloak ends the person's Keycloak session in that
+- **APP-25** Signing out of an app ends its session in that browser at once.
+- **APP-26** Signing out shows a short page that posts to Keycloak.
+- **APP-27** Posting that page to Keycloak ends the person's Keycloak session in that
   browser without asking anything.
-- **APP-26** Each app that Keycloak tells ends all of the person's sessions, on every
+- **APP-28** Each app that Keycloak tells ends all of the person's sessions, on every
   device.
-- **APP-27** The logout page is `no-store`.
-- **APP-28** The logout page clears the app's cookies.
-- **APP-29** The logout page submits itself; where scripts cannot run, it shows one
+- **APP-29** The logout page is `no-store`.
+- **APP-30** The logout page clears the app's cookies.
+- **APP-31** The logout page submits itself; where scripts cannot run, it shows one
   button.
-- **APP-30** If Keycloak is down, the person still leaves the app signed out.
+- **APP-32** If Keycloak is down, the person still leaves the app signed out.
 
 Keycloak tells each app the person signed in to through that Keycloak session. An app
 they used only on another device is not told and keeps them signed in there. On their
 other devices, the next sign-in asks for no password while that device's own Keycloak
 session lasts.
 
-- **APP-31** The page sends the client ID, `post_logout_redirect_uri` and the stored ID
+- **APP-33** The page sends the client ID, `post_logout_redirect_uri` and the stored ID
   token as `id_token_hint` by POST to Keycloak's end-session endpoint.
-- **APP-32** No URL carries the token.
-- **APP-33** Without the session's row (ended by the host, swept, pruned or ended by
+- **APP-34** No URL carries the token.
+- **APP-35** Without the session's row (ended by the host, swept, pruned or ended by
   back-channel logout), or with a row that holds no ID token (stored before the host
   held them or opened with `keeps_id_token=False`), the page sends no hint.
-- **APP-34** Without a hint, Keycloak asks once to confirm while its own session lives.
+- **APP-36** Without a hint, Keycloak asks once to confirm while its own session lives.
 
 If the realm key that signed a supplied token has been deleted since, Keycloak shows
 an error page instead. See

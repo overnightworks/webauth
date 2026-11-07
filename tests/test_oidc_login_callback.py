@@ -307,7 +307,7 @@ _REFUSED_CALLBACKS = [
 def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its_cookie(
     refused: RefusedCallback,
 ) -> None:
-    """APP-13, APP-22: a missing groups claim or a failed sign-in stops at the refusal."""
+    """APP-15, APP-24: a missing groups claim or a failed sign-in stops at the refusal."""
     host = an_oidc_host(groups_claim=refused.groups_claim)
     other_tab = host.sign_in_at_issuer()
     query = host.sign_in_at_issuer()
@@ -323,7 +323,7 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
 
 
 def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() -> None:
-    """APP-05: a person removed from the group is refused at login, yet an open session works."""
+    """APP-07: a person removed from the group is refused at login, yet an open session works."""
     groups = [LOGIN_GROUP]
     host = an_oidc_host(groups_claim=groups)
     host.callback(host.sign_in_at_issuer())
@@ -338,7 +338,7 @@ def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() ->
 
 
 def test_a_signed_in_person_keeps_working_while_the_issuer_is_unreachable() -> None:
-    """APP-21: an open session is admitted from the app's own store, asking the issuer nothing."""
+    """APP-23: an open session is admitted from the app's own store, asking the issuer nothing."""
     host = after_signing_in(an_oidc_host())
 
     def unreachable() -> None:
@@ -393,7 +393,7 @@ def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
     status_before: int,
     status_after: int,
 ) -> None:
-    """APP-06: a role changed at login reaches the person's other open session."""
+    """APP-08: a role changed at login reaches the person's other open session."""
     groups = list(before)
     host = an_oidc_host(groups_claim=groups)
     host.callback(host.sign_in_at_issuer())

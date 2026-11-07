@@ -161,5 +161,5 @@ def test_app_role_names_the_role_the_groups_carry(
     admission: AdmissionConfig,
     role: AppRole | None,
 ) -> None:
-    """APP-17: app_role names the role the groups carry, as admission decides it."""
+    """APP-19: app_role names the role the groups carry, as admission decides it."""
     assert app_role(groups, admission) is role
