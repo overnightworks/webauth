@@ -39,6 +39,7 @@ from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     SessionRecordsInMemory,
     UsersInMemory,
+    UsersWithCaseInsensitiveUsernames,
     UsersWithoutUniqueUsernames,
     WriteLockInMemory,
     a_web_auth_config,
@@ -148,6 +149,12 @@ class UsersWithSnapshots(UsersInMemory):
 
 class UsersWithSnapshotsAndNoUniqueUsernames(UsersWithSnapshots, UsersWithoutUniqueUsernames):
     """Accounts that can be put back as they were, in a store with no unique username index."""
+
+
+class UsersWithSnapshotsAndCaseInsensitiveUsernames(
+    UsersWithSnapshots, UsersWithCaseInsensitiveUsernames
+):
+    """Accounts that can be put back as they were, in a store whose unique index ignores case."""
 
 
 class _WindowClosedError(AssertionError):

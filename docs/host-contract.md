@@ -195,7 +195,7 @@ The operator ruled CSRF-01, CSRF-03, CSRF-04, CSRF-05, CSRF-06, CSRF-07, CSRF-08
 
 ## Signed out and refused
 
-The operator ruled REFUSE-01, REFUSE-02, REFUSE-03, REFUSE-04, REFUSE-05, REFUSE-06, REFUSE-07, REFUSE-08, REFUSE-09, REFUSE-10, REFUSE-11, REFUSE-12, REFUSE-22, REFUSE-23, REFUSE-24, REFUSE-25, REFUSE-26, REFUSE-27 and REFUSE-28; no other sentence of this section is ruled.
+The operator ruled the opening paragraph and the host duty after it, REFUSE-01, REFUSE-02, REFUSE-03, REFUSE-04 and the host duty after it, REFUSE-05, REFUSE-06, REFUSE-07, REFUSE-08, the lead-in of the machine table, REFUSE-09, REFUSE-10, REFUSE-11, REFUSE-12, REFUSE-22 and the host duty after it, REFUSE-23 and the host duty after it, REFUSE-24, REFUSE-25, REFUSE-26, REFUSE-27, REFUSE-28, the host duty after it that names page choice and presentation, and the paragraph that closes the section; no other sentence of this section is ruled.
 
 Every app shows signed-out and refused people the same way. This is the rule
 every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it.
@@ -213,8 +213,8 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
 - **REFUSE-05** For a server-rendered host, `LoginRedirect` makes the redirect-or-401
   split; see [Reading the session](ARCHITECTURE.md#reading-the-session).
 - **REFUSE-06** To keep the deep link, only request-address construction may prepend
-  `root_path`;
-- **REFUSE-07** the start route never prepends it to an explicit `next`.
+  `root_path`.
+- **REFUSE-07** The start route never prepends it to an explicit `next`.
 - **REFUSE-08** A machine route (see [The host's machine routes](#the-hosts-machine-routes))
   never answers with a redirect.
 
@@ -243,7 +243,7 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
 
 - **REFUSE-19** A cookie person refused by an admin reader on a person path keeps the
   403 without a challenge,
-- **REFUSE-20** and a path outside the person paths keeps its session answer, with no challenge.
+- **REFUSE-20** and a path outside the person paths keeps its answers.
 
   The 401 challenge follows RFC 7235 section 3.1 and RFC 6750 section 3; a malformed
   header answers 401, not the 400 RFC 6750 section 3.1 recommends, as the machine paths do.
@@ -258,7 +258,7 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
 - **REFUSE-25** "Login failed" is for an `OidcRefusal` and for
   `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are setup errors, not
   missing rights.
-- **REFUSE-26** Both types reach the host's refused hook inside a `SignInRefusal`, whose
+- **REFUSE-26** Both types reach the host's `refused` hook inside a `SignInRefusal`, whose
   `page` is this mapping; see [The sign-in routes](#the-sign-in-routes).
 - **REFUSE-27** A refusal carries no identity.
 - **REFUSE-28** A `NOT_A_MEMBER` login stores no session.

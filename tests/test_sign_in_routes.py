@@ -8,6 +8,7 @@ rolls back.
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +39,8 @@ from tests.support.oidc_login_host import (
     OidcHost,
     StoreDown,
     TransactionKind,
+    UsersWithSnapshots,
+    UsersWithSnapshotsAndCaseInsensitiveUsernames,
     an_oidc_host,
     failing,
     is_cleared,
@@ -54,7 +57,7 @@ from tests.support.webauth_arrangement import (
 )
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.cookies import sign_session_id
-from webauth.oidc import OidcRefusal, OidcRefusalReason
+from webauth.oidc import OidcIdentity, OidcRefusal, OidcRefusalReason
 from webauth.ports import AccountEventKind
 from webauth.sign_in_routes import (
     LogoutPageText,
@@ -282,19 +285,43 @@ def test_a_refusal_reaches_the_hook_as_its_cause_alone_with_its_page(
 
     [refusal] = refused_host.refusals
     assert (refusal, refusal.page) == (SignInRefusal(cause), page)
-    assert SUBJECT not in repr(refusal)
-    assert "lena" not in repr(refusal)
+
+
+def test_a_refusal_holds_no_field_of_the_identity() -> None:
+    """REFUSE-27: no public field of a refusal is a field of the person it refused."""
+    identity_fields = {field.name for field in dataclasses.fields(OidcIdentity)} | {"username"}
+    refusal_fields = {
+        field.name
+        for refusal_type in (SignInRefusal, OidcRefusal)
+        for field in dataclasses.fields(refusal_type)
+    }
+
+    assert refusal_fields.isdisjoint(identity_fields)
+    assert all(
+        not [name for name in vars(member) if not name.startswith("_")]
+        for member in AdmissionRefusal
+    )
 
 
 @pytest.mark.parametrize("kind", BOTH_KINDS)
+@pytest.mark.parametrize(
+    ("account_store", "stored_username"),
+    [
+        pytest.param(UsersWithSnapshots, "lena", id="an exact duplicate"),
+        pytest.param(UsersWithSnapshotsAndCaseInsensitiveUsernames, "LENA", id="a differing case"),
+    ],
+)
 def test_a_taken_username_refuses_through_the_hook_and_changes_nothing(
     kind: TransactionKind,
+    account_store: type[UsersWithSnapshots],
+    stored_username: str,
 ) -> None:
     """APP-22: a username the store refuses refuses the sign-in and writes nothing."""
     host = an_oidc_host(
         BYSTANDER,
-        FakeUser(id="user-7", username="lena"),
+        FakeUser(id="user-7", username=stored_username),
         transaction_kind=kind,
+        account_store=account_store,
     )
     query, cookie = _signed_in_holding_session_of_bystander(host)
     before = _state_of(host)
