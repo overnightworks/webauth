@@ -212,6 +212,7 @@ class RecordingSignInTransaction:
         self.entries = 0
         self.exit_failure: Exception | None = None
         self.entry_failure: Exception | None = None
+        self.cleanup_failure: Exception | None = None
         self._accounts = accounts
         self._sessions = sessions
         self._audit = audit
@@ -237,6 +238,10 @@ class RecordingSignInTransaction:
                     yield self._stores(window)
                     if self.exit_failure is not None:
                         raise self.exit_failure
+            except BaseException:
+                if self.cleanup_failure is not None:
+                    raise self.cleanup_failure from None
+                raise
             finally:
                 window.open = False
                 self._open -= 1

@@ -568,31 +568,76 @@ def _admit_resource_holder(
     *,
     required_group: str,
     admission: AdmissionConfig,
-) -> AuthenticatedUser | None:
-    """The known account behind an agent's token, always with the role "user", or ``None``.
+) -> AuthenticatedUser | AdmissionRefusal | None:
+    """The account behind a token presented to a protected resource, always with the role
+    "user", or ``None``.
 
     The token's groups must pass ``app_role`` against ``admission`` and hold
     ``required_group`` or a path below it; otherwise no store is touched. One
-    ``SignInTransaction`` entry then calls only ``accounts.get``: an unknown subject
-    answers ``None``, and nothing is provisioned, re-roled or audited. The answer is built
-    inside the block and takes the role ``"user"``, never from the
-    account, so an admin's agent token carries no admin right. Never commits; a store or
-    exit failure propagates.
+    ``SignInTransaction`` entry then reads ``accounts.get``. A token without the agent group
+    (``verified.agent`` is ``None``) only reads: an unknown subject answers ``None``, and
+    nothing is provisioned, re-roled or audited; the account's stored kind is not read, so
+    the answer is a person even for a stored agent. A token with the agent group
+    registers its account: an unknown subject gets one of the kind ``AGENT`` with the username
+    of ``_username_for`` and ``USER_CREATED``, a stored ``PERSON`` is set to ``AGENT`` with
+    ``KIND_CHANGED``, a stored ``AGENT`` is only read; the answer carries the agent's facts. The
+    role is ``"user"``, never the account's, so an admin's agent token carries no admin right. The
+    answer is built inside the block. Never commits; a store, audit or exit failure propagates;
+    a refused new username answers ``USERNAME_TAKEN`` once the exit returned.
     """
     if _admission.app_role(verified.groups, admission) is None:
         return None
     if not _admission._is_member_of(required_group, verified.groups):
         return None
-    with transaction() as stores:
-        account = stores.accounts.get(verified.subject)
-        if account is None:
-            return None
-        return AuthenticatedUser(
-            id=account.id,
-            username=account.username,
-            role=_admission.AppRole.USER.value,
-            agent=None,
+    try:
+        with transaction() as stores:
+            account = stores.accounts.get(verified.subject)
+            if verified.agent is not None:
+                account = _registered_agent(
+                    verified, account, accounts=stores.accounts, audit=stores.audit
+                )
+            if account is None:
+                return None
+            return AuthenticatedUser(
+                id=account.id,
+                username=account.username,
+                role=_admission.AppRole.USER.value,
+                agent=verified.agent,
+            )
+    except _UsernameTakenSignal:
+        return _admission.AdmissionRefusal.USERNAME_TAKEN
+
+
+def _registered_agent(
+    verified: VerifiedAccessToken,
+    account: UserRecord | None,
+    *,
+    accounts: SubjectUserStore,
+    audit: AuditSink,
+) -> UserRecord:
+    """The account of an agent-group token: created, or set to the agent kind, on its admission."""
+    if account is None:
+        return _provision(
+            verified,
+            _admission.AppRole.USER.value,
+            AccountKind.AGENT,
+            accounts=accounts,
+            audit=audit,
         )
+    previous_kind = account.kind
+    if previous_kind is AccountKind.AGENT:
+        return account
+    updated = accounts.set_kind(account.id, AccountKind.AGENT)
+    audit.account_event(
+        AccountEvent(
+            kind=AccountEventKind.KIND_CHANGED,
+            actor_id=None,
+            subject_id=updated.id,
+            account_kind=AccountKind.AGENT,
+            previous_account_kind=previous_kind,
+        )
+    )
+    return updated
 
 
 def _admit_account(

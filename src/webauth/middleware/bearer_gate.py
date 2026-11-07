@@ -400,6 +400,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                     resource_url=resource.url,
                     scope=resource.scope,
                     authorized_parties=resource.authorized_parties,
+                    agent_group=resource.agent_group,
                 )
             )
         )
@@ -477,6 +478,8 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 admission=self._policy.admission,
             ),
         )
+        if isinstance(person, AdmissionRefusal):
+            return self._refused(_REFUSAL_OF_ADMISSION[person])
         if person is None:
             return self._refused(_Refusal.RESOURCE_NOT_ADMITTED)
         _record_bearer_admission(request, person, resource_method=request.method)
