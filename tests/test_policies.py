@@ -691,12 +691,9 @@ class TestDefaultContentSecurityPolicy:
     @pytest.mark.parametrize(
         "kwargs, owner",
         [
-            pytest.param(styled("'unsafe-inline'"), "style-src", id="str"),
             pytest.param(styled(b"x"), "style-src", id="bytes"),
             pytest.param(styled(b""), "style-src", id="empty-bytes"),
-            pytest.param(styled(""), "style-src", id="empty-str"),
             pytest.param(styled(5), "style-src", id="not-a-sequence"),
-            pytest.param({"script_hashes": "sha256-abc"}, "script-src", id="hashes-str"),
             pytest.param(
                 {"added_sources": {CspDirective.STYLE_SRC: bytearray()}},
                 "style-src",
@@ -724,6 +721,22 @@ class TestDefaultContentSecurityPolicy:
         owner: str,
     ) -> None:
         with pytest.raises(TypeError, match=owner):
+            default_content_security_policy(**kwargs)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "kwargs, owner",
+        [
+            pytest.param(styled("'unsafe-inline'"), "style-src", id="str"),
+            pytest.param(styled(""), "style-src", id="empty-str"),
+            pytest.param({"script_hashes": "sha256-abc"}, "script-src", id="hashes-str"),
+        ],
+    )
+    def test_refuses_one_string_with_a_value_error(
+        self,
+        kwargs: dict[str, object],
+        owner: str,
+    ) -> None:
+        with pytest.raises(ValueError, match=owner):
             default_content_security_policy(**kwargs)  # type: ignore[arg-type]
 
     def test_leaves_the_callers_mapping_and_lists_unchanged(self) -> None:

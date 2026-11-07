@@ -39,10 +39,8 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import RSAAlgorithm
 from pydantic import SecretStr
 
-from webauth.https_client import MAX_KEY_SET_BYTES
 from webauth.jwt_verification import KeySetFetch, MonotonicClock
 from webauth.oidc import (
-    MAX_TOKEN_RESPONSE_BYTES,
     OidcClientConfig,
     OidcRelyingParty,
     TokenEndpointAnswer,
@@ -459,7 +457,7 @@ SERVED_TOKEN_ANSWER = json.dumps(
     {"access_token": "served-access-token", "id_token": "served.id.token", "token_type": "Bearer"}
 ).encode()
 REFUSED_TOKEN_ANSWER = json.dumps({"error": "invalid_grant"}).encode()
-_OVERSIZED_ANSWER_BYTES = 2 * max(MAX_KEY_SET_BYTES, MAX_TOKEN_RESPONSE_BYTES)
+_OVERSIZED_ANSWER_BYTES = 2 * (64 * 1024)
 
 
 @dataclass(frozen=True)
@@ -476,7 +474,7 @@ class ReceivedRequest:
 class LoopbackHttpsServer:
     """Answers by path, whatever the method or query: `/token` a token answer,
     `/token-refused` a 400 `invalid_grant`, `/token-at-limit` and
-    `/token-past-limit` a body of `MAX_TOKEN_RESPONSE_BYTES` and one byte
+    `/token-past-limit` a body of `64 * 1024` and one byte
     more, `/token-reflecting` a token
     answer whose header block carries the request body as a malformed line,
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
@@ -547,9 +545,9 @@ def loopback_https_server(
             elif route == "/token-refused":
                 self._answer(400, REFUSED_TOKEN_ANSWER)
             elif route == "/token-at-limit":
-                self._answer(200, b" " * MAX_TOKEN_RESPONSE_BYTES)
+                self._answer(200, b" " * 64 * 1024)
             elif route == "/token-past-limit":
-                self._answer(200, b" " * (MAX_TOKEN_RESPONSE_BYTES + 1))
+                self._answer(200, b" " * (64 * 1024 + 1))
             elif route == "/token-reflecting":
                 self._answer_reflecting_in_a_malformed_header(body)
             else:

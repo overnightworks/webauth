@@ -54,9 +54,9 @@ from tests.support.webauth_arrangement import (
     drive,
     starts,
 )
+from webauth.admission import AdmissionConfig, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import BearerGate, MachinePaths, PersonPaths, ProtectedResource
-from webauth.oidc_login import AdmissionConfig, NoAdmins
 from webauth.policies import AuthorizedParties, PathRules, PathShape, PublicRule
 from webauth.ports import SignInStores
 

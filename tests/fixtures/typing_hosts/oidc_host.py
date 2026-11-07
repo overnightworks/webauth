@@ -17,8 +17,15 @@ from fastapi import Depends, FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
 
 from webauth import WebAuthError
+from webauth.admission import (
+    AdmissionConfig,
+    AdmissionRefusal,
+    AppRole,
+    EverySubject,
+    NoAdmins,
+    app_role,
+)
 from webauth.config import (
-    MAX_SESSION_LIFETIME_SECONDS,
     SessionLifetime,
     WebAuthConfig,
     install_web_auth_config,
@@ -26,7 +33,6 @@ from webauth.config import (
 from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
     MAX_SESSION_COOKIE_CHARS,
-    PLAIN_SESSION_COOKIE_NAME,
     PendingLogin,
     issue_session_cookies,
 )
@@ -40,21 +46,14 @@ from webauth.dependencies import (
     session_id_from_request,
 )
 from webauth.https_client import (
-    KEY_SET_FETCH_DEADLINE_SECONDS,
-    MAX_KEY_SET_BYTES,
-    TOKEN_EXCHANGE_DEADLINE_SECONDS,
     ExchangeFailure,
     KeySetFetchError,
     fetch_key_set_over_https,
     is_https_url,
 )
 from webauth.jwt_verification import (
-    MAX_KEY_SET_KEYS,
-    JwtVerifier,
     KeySetFetch,
     MonotonicClock,
-    Rejected,
-    VerifiedClaims,
 )
 from webauth.middleware import (
     BearerGate,
@@ -77,9 +76,6 @@ from webauth.middleware import (
     resource_person,
 )
 from webauth.oidc import (
-    LOGOUT_TOKEN_MAX_AGE_SECONDS,
-    MAX_AUTHORIZATION_CODE_CHARS,
-    MAX_TOKEN_RESPONSE_BYTES,
     PENDING_LOGIN_MAX_AGE_SECONDS,
     OidcClientConfig,
     OidcIdentity,
@@ -93,18 +89,11 @@ from webauth.oidc import (
 from webauth.oidc_login import (
     AccessTokenRefusal,
     AccessTokenRefusalReason,
-    AdmissionConfig,
-    AdmissionRefusal,
-    AppRole,
-    EverySubject,
-    NoAdmins,
-    app_role,
     current_groups,
     fresh_access_token,
 )
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
-    DEFAULT_PERMISSIONS_POLICY,
     AuthorizedParties,
     BodySizePolicy,
     BodySizeRule,
@@ -329,17 +318,6 @@ def a_host_verifies_a_logout_token(
     return None if isinstance(verified, OidcRefusal) else verified.subject
 
 
-def a_host_verifies_a_typed_token(verifier: JwtVerifier, token: str) -> VerifiedClaims | Rejected:
-    return verifier.verify(token, expected_type="logout+jwt")
-
-
-def a_host_verifies_a_token_of_several_media_types(
-    verifier: JwtVerifier,
-    token: str,
-) -> VerifiedClaims | Rejected:
-    return verifier.verify(token, expected_media_types=frozenset({"at+jwt", "application/at+jwt"}))
-
-
 def a_host_verifies_an_access_token(
     relying_party: OidcRelyingParty,
     access_token: str,
@@ -542,7 +520,6 @@ def _surface_of_the_errors_and_the_verified_records() -> tuple[object, ...]:
         SessionRecord,
         UserRecord,
         VerifiedAccessToken,
-        VerifiedClaims,
         VerifiedLogout,
         WallClock,
         admit_session,
@@ -565,36 +542,25 @@ def _surface_of_the_gates_and_limits() -> tuple[object, ...]:
         install_resource_metadata,
         BodySizePolicy,
         CsrfOriginMiddleware,
-        DEFAULT_PERMISSIONS_POLICY,
         DEFAULT_SESSION_COOKIE_NAME,
         ExchangeFailure,
         IpRateLimitMiddleware,
-        JwtVerifier,
-        KEY_SET_FETCH_DEADLINE_SECONDS,
         KeySetFetchError,
         LoginRedirect,
-        MAX_AUTHORIZATION_CODE_CHARS,
-        MAX_KEY_SET_BYTES,
-        MAX_KEY_SET_KEYS,
         MAX_SESSION_COOKIE_CHARS,
-        MAX_TOKEN_RESPONSE_BYTES,
         MonotonicClock,
     )
 
 
 def _surface_of_the_login_and_session_flow() -> tuple[object, ...]:
     return (
-        LOGOUT_TOKEN_MAX_AGE_SECONDS,
         OidcClientConfig,
         PENDING_LOGIN_MAX_AGE_SECONDS,
-        PLAIN_SESSION_COOKIE_NAME,
         PendingLogin,
         RateLimitBackend,
-        Rejected,
         RedisRateLimitBackend,
         SecurityHeadersMiddleware,
         SessionLifetime,
-        MAX_SESSION_LIFETIME_SECONDS,
         SessionGate,
         SessionGateMiddleware,
         SessionRecordStore,
@@ -603,7 +569,6 @@ def _surface_of_the_login_and_session_flow() -> tuple[object, ...]:
         admitted_admin,
         admitted_user,
         SingleProcessRateLimitBackend,
-        TOKEN_EXCHANGE_DEADLINE_SECONDS,
     )
 
 

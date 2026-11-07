@@ -41,6 +41,13 @@ user at the issuer together with
 [back-channel logout](ARCHITECTURE.md#back-channel-logout). See
 [Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
 
+The stored role is a plain string. webauth writes `"admin"` for an admin and
+`"user"` for every other member, and the host's store keeps them. The admin
+checks admit exactly `"admin"`. Only a Breaking release that names the migration
+of stored accounts changes these values. `NoAdmins` demotes a stored admin to
+`"user"` at its next sign-in or person-token admission. Resource admission
+rewrites no role.
+
 A person is a member when one of their groups is the group's path or a subgroup of
 it, compared character for character and by path segment, so `/apps/notes/admin`
 counts for `/apps/notes` and `/apps/notes2` does not. The groups claim must carry
@@ -48,7 +55,7 @@ full paths (Keycloak's group mapper with `full.path` on); a missing or empty cla
 means no membership. The check runs before any account is looked up or created, so
 a person removed from the group is refused at their next login while their account
 and data stay, and a person put back returns to the same account. `app_role` is
-that rule's public form, for a second service that verifies the issuer's token
+that rule's public form in `webauth.admission`, for a second service that verifies the issuer's token
 itself.
 
 Admission never looks up a username and has no local active-user flag; disabling
@@ -266,7 +273,7 @@ are in [test_session_gate_recorded_admission.py](../tests/middleware/test_sessio
   `test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise` in
   [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
   A refusal carries no identity (`AdmissionRefusal` in
-  [oidc_login.py](../src/webauth/oidc_login.py), `OidcRefusal` in
+  [admission.py](../src/webauth/admission.py), `OidcRefusal` in
   [oidc](../src/webauth/oidc/_relying_party.py)), so the page shows no name. A
   `NOT_A_MEMBER` login stores no session, so signing out from "no access"
   follows the missing-ID-token case in [Signing out](#what-every-app-gets).
@@ -453,7 +460,7 @@ the gate decides before CSRF and the session gate, and a refusal runs no route:
   resource's scope (absent, not a string, another scope, or the scope only as a substring of
   another): 403 with `error="insufficient_scope"` and the same two parameters;
 - a token that holds, whose person the resource does not admit (the groups lack `required_group` or the admission's login group, or no account has the token's subject): a plain 403 without `WWW-Authenticate`, because a client answers `insufficient_scope` with a new sign-in, which cannot help. No route runs, the store is not touched for a missing group, and nothing is created, changed or audited;
-- a token that holds, whose person is admitted: the request passes with no cookie and no `Origin`, CSRF and the session gate reading the admission as they read a person path's. The lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once. The person is `AuthenticatedUser(id, username, role)` with the configured person role whatever role is stored: a stored admin is admitted as a plain user, and `admin_user` answers 403 without `WWW-Authenticate` (a person path's 403 keeps its `insufficient_scope` challenge). A store or exit failure is the library's 500 and records no admission;
+- a token that holds, whose person is admitted: the request passes with no cookie and no `Origin`, CSRF and the session gate reading the admission as they read a person path's. The lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once. The person is `AuthenticatedUser(id, username, role)` with the role `"user"` whatever role is stored: a stored admin is admitted as a plain user, and `admin_user` answers 403 without `WWW-Authenticate` (a person path's 403 keeps its `insufficient_scope` challenge). A store or exit failure is the library's 500 and records no admission;
 - a credential the gate refuses (a repeated header, a malformed one): that refusal, with the same
   two parameters.
 
@@ -486,47 +493,38 @@ Keycloak in the hand-run harness.
 
 ## A service's callers
 
-A service that is not a browser app (no sessions, no sign-in) admits an app acting as itself, or for a person,
-with `ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
+A service that is not a browser app (no sessions, no sign-in) admits an app acting for a person, with
+`ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
 `ServiceIdentity` (issuer, key-set URL, its own audience, the realm role that marks a workload, the group
 claim, the clock leeway) and its registered apps (`RegisteredApp`, keyed by the workload client id). Nothing
-has a default and nothing is read from the environment. `workload_caller(token)` and
-`person_caller(workload_token, person_token)` are synchronous, so an async service runs them in a thread.
+has a default and nothing is read from the environment. `person_caller(workload_token, person_token)` is
+synchronous, so an async service runs it in a thread.
 
-It returns a `WorkloadCaller` (the app, the client id, the verified `Principal` and the groups) or
-a `CallerRefusal`. The first fault of this order is the refusal; `CallerRefusal.refusal_class` names
-its `CallerRefusalClass`, and the host owns the wire codes, here the recommended ones:
+It returns a `PersonCaller` (the app, the client id, the person's `Principal` and groups, and the person's
+`AppRole`) or a `CallerRefusal`. It never says which token a refusal concerns. Both tokens are verified and
+read before any check that compares them, so every `UNAUTHENTICATED` and `UNAVAILABLE` refusal comes before
+any `FORBIDDEN` one. The checks run in this order: the workload token is checked for a missing token and then
+by the verifier, then the person token the same way; then the workload token's subject and groups, then the
+person token's; then the rows from `NOT_A_WORKLOAD` down, in table order. The table lists each reason where it
+is first checked, and the first fault is the refusal. `CallerRefusal.refusal_class` names its
+`CallerRefusalClass`, and the host owns the wire codes, here the recommended ones:
 
 | Reason | Fault | Class |
 |---|---|---|
-| `MISSING_TOKEN` | no token | `UNAUTHENTICATED` (401) |
-| `KEY_SET_UNAVAILABLE` or `TOKEN_REJECTED` | one verifier stage, see below | `UNAVAILABLE` (503) or `UNAUTHENTICATED` (401) |
-| `INVALID_SUBJECT` | `sub` absent or not valid text | `UNAUTHENTICATED` (401) |
-| `MALFORMED_GROUPS` | the group claim is present and not a list of strings | `UNAUTHENTICATED` (401) |
-| `NOT_A_WORKLOAD` | `realm_access.roles` lacks the workload role | `FORBIDDEN` (403) |
-| `UNBOUND_CLIENT` | `azp` absent or empty, or `client_id` differs from it | `FORBIDDEN` (403) |
-| `UNREGISTERED_CLIENT` | `azp` is no registered app | `FORBIDDEN` (403) |
-
-`person_caller` admits an app acting for a person: it returns a `PersonCaller` (the app, the client
-id, the person's `Principal` and groups, and the person's `AppRole`) or a `CallerRefusal`. It never
-says which token a refusal concerns. Both tokens are verified and read before any check that
-compares them, so every `UNAUTHENTICATED` and `UNAVAILABLE` refusal comes before any `FORBIDDEN` one. The first fault of this order is the
-refusal:
-
-| Step | Reasons | Class |
-|---|---|---|
-| 1 The workload token: missing, then the verifier stage | `MISSING_TOKEN`, `KEY_SET_UNAVAILABLE`, `TOKEN_REJECTED` | `UNAUTHENTICATED` (401) or `UNAVAILABLE` (503) |
-| 2 The person token: missing, then the verifier stage | the same three | `UNAUTHENTICATED` (401) or `UNAVAILABLE` (503) |
-| 3 The workload token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | `UNAUTHENTICATED` (401) |
-| 4 The person token: subject, then groups | `INVALID_SUBJECT`, `MALFORMED_GROUPS` | `UNAUTHENTICATED` (401) |
-| 5 The workload token: role, binding, registry | `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`, `UNREGISTERED_CLIENT` | `FORBIDDEN` (403) |
-| 6 The person's `azp` is the workload's `azp` | `CLIENT_MISMATCH` | `FORBIDDEN` (403) |
-| 7 The person's subject differs from the workload's | `SAME_SUBJECT` | `FORBIDDEN` (403) |
-| 8 The person's groups make a member of the app, by `app_role` and the registered admission | `NOT_A_MEMBER` | `FORBIDDEN` (403) |
+| `MISSING_TOKEN` | the workload token, then the person token, is absent or empty | `UNAUTHENTICATED` (401) |
+| `KEY_SET_UNAVAILABLE` | the verifier cannot fetch the key set, see below | `UNAVAILABLE` (503) |
+| `TOKEN_REJECTED` | the verifier refuses either token, see below | `UNAUTHENTICATED` (401) |
+| `INVALID_SUBJECT` | `sub` absent or not valid text, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
+| `MALFORMED_GROUPS` | the group claim is present and not a list of strings, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
+| `NOT_A_WORKLOAD` | the workload token's `realm_access.roles` lacks the workload role | `FORBIDDEN` (403) |
+| `UNBOUND_CLIENT` | the workload token's `azp` is absent or empty, or its `client_id` differs from it | `FORBIDDEN` (403) |
+| `UNREGISTERED_CLIENT` | the workload token's `azp` is no registered app | `FORBIDDEN` (403) |
+| `CLIENT_MISMATCH` | the person's `azp` is not the workload's `azp` | `FORBIDDEN` (403) |
+| `SAME_SUBJECT` | the person's subject is the workload's | `FORBIDDEN` (403) |
+| `NOT_A_MEMBER` | the person's groups make no member of the app, by `app_role` and the registered admission | `FORBIDDEN` (403) |
 
 Neither token's lifetime is bounded beyond its `exp` against the clock; the issuer owns it. The person token
-gets no role check; its `azp` is the client binding and is never evidence of an exchange. `workload_caller`
-never asks for membership.
+gets no role check; its `azp` is the client binding and is never evidence of an exchange.
 
 The verifier stage keeps the verifier's own order: a malformed header or unsupported algorithm is
 `TOKEN_REJECTED` before any key lookup, so no key set is fetched. `KEY_SET_UNAVAILABLE` (503) is
@@ -536,9 +534,9 @@ verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token
 
 By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
-`UNREGISTERED_CLIENT`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and
-`NOT_A_MEMBER`. A group claim that is a JSON `null` is
-`MALFORMED_GROUPS`; only an absent claim means no groups.
+`UNREGISTERED_CLIENT`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and `NOT_A_MEMBER`.
+
+A group claim that is a JSON `null` is `MALFORMED_GROUPS`; only an absent claim means no groups.
 
 The token's `aud` must name the service; it may name others. The check has no policy: which
 groups reach which route is the service's. Nothing taken from a token (subject, client id,
@@ -640,3 +638,24 @@ renewal/rotation with no ID token;
 in [test_oidc_login_open_session.py](../tests/test_oidc_login_open_session.py) and
 `test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout` in
 [test_oidc_login_logout.py](../tests/test_oidc_login_logout.py) prove the retained-token case.
+
+## Testing a host
+
+A test that needs a signed-in person needs no issuer. It creates the account and
+a session inside the configured lifetime in the host's own store, calls
+`issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
+a `Response` and copies the one cookie it sets into its client. A state-changing
+request also sends `Sec-Fetch-Site: same-origin` ([CSRF origin](#csrf-origin)).
+When the client keeps the cookie's attributes and `cookie_secure` is on, use an
+`https` base URL.
+
+A test of a host that installs the sign-in routes gives
+`OidcRelyingParty` its own `post_token_request` (a `TokenRequestPost`, from
+`webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from
+`webauth.jwt_verification`) instead of the HTTPS ones. The host owns that stub.
+
+The sign-in flow itself is proven against a real issuer: webauth's own proof
+drives Keycloak in a real browser ([run the browser
+proof](runbooks/run-the-browser-proof.md)). A host proves its own sign-in
+against an issuer of its choosing. webauth ships no fake issuer, because one
+that mints tokens does not belong in every production install.

@@ -23,7 +23,6 @@ from webauth._validation import (
 )
 
 __all__ = [
-    "DEFAULT_PERMISSIONS_POLICY",
     "AuthorizedParties",
     "BodySizePolicy",
     "BodySizeRule",
@@ -273,7 +272,7 @@ class CacheControlRule:
         _require_header_field_value("CacheControlRule.value", self.value)
 
 
-DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
+_DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
 
 
 @dataclass(frozen=True)
@@ -292,7 +291,7 @@ class SecurityHeadersPolicy:
 
     content_security_policy: str
     cache_control_rules: tuple[CacheControlRule, ...] = ()
-    permissions_policy: str = DEFAULT_PERMISSIONS_POLICY
+    permissions_policy: str = _DEFAULT_PERMISSIONS_POLICY
 
     def __post_init__(self) -> None:
         _require_header_field_value("content_security_policy", self.content_security_policy)
@@ -321,7 +320,7 @@ class CspDirective(StrEnum):
     FORM_ACTION = "form-action"
 
 
-_TEXT_LIKE: Final = (str, bytes, bytearray, memoryview)
+_BYTES_LIKE: Final = (bytes, bytearray, memoryview)
 _SELF_KEYWORD: Final = "'self'"
 _NONE_SOURCE: Final = "'none'"
 _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
@@ -359,7 +358,8 @@ def _require_header_field_value(name: str, value: str) -> None:
 
 
 def _require_source_list(owner: str, sources: object) -> Sequence[str]:
-    if isinstance(sources, _TEXT_LIKE) or not isinstance(sources, Sequence):
+    require_collection_not_one_string(owner, sources, noun="source")
+    if isinstance(sources, _BYTES_LIKE) or not isinstance(sources, Sequence):
         raise TypeError(
             f"{owner}: sources must be a sequence of str, not {type(sources).__name__}.",
         )
@@ -438,7 +438,8 @@ def default_content_security_policy(
     hosts and schemes bare. A non-empty addition to ``frame-ancestors`` replaces
     its ``'none'``, while an addition to ``form-action`` extends its ``'self'``.
     A source is one token of printable ASCII without space, ``;`` or ``,`` and
-    is kept verbatim; anything else is a ``ValueError`` and a wrong type a
+    is kept verbatim; anything else, and one string in place of a
+    list of sources, is a ``ValueError`` and any other wrong type a
     ``TypeError``, raised before any policy is built. The library does not
     check that a token is a valid CSP source, so ``'selff'`` is emitted as
     written.

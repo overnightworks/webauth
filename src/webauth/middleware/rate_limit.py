@@ -36,10 +36,9 @@ def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
 class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """Spend one request of the client's budget for the budget it falls into.
 
-    The budget belongs to the client's address, or to its whole IPv6 network
-    of the configured prefix -- see ``_budget_address``. A path in the policy's
-    ``exempt`` spends nothing. The limiter key is ``<name>:<address>``, so
-    renaming a budget starts it fresh.
+    The budget belongs to the client's address, or to its IPv6 /64 -- see
+    ``_budget_address``. A path in the policy's ``exempt`` spends nothing. The
+    limiter key is ``<name>:<address>``, so renaming a budget starts it fresh.
 
     A limiter that raises answers 503 with ``Retry-After``, failing closed; so
     does a Redis that refuses the script. What other refusals spend, when the
@@ -57,7 +56,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
         if self._policy.is_exempt(path):
             return None
         config = web_auth_config(request)
-        budget_identity = _budget_address(resolve_client_ip(request), config.ipv6_budget_prefix)
+        budget_identity = _budget_address(resolve_client_ip(request))
         budget = self._policy.budget_for(path)
         try:
             allowed = await to_thread.run_sync(

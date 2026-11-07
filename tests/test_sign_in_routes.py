@@ -52,9 +52,9 @@ from tests.support.webauth_arrangement import (
     session_cookie_header,
     starts,
 )
+from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.cookies import sign_session_id
 from webauth.oidc import OidcRefusal, OidcRefusalReason
-from webauth.oidc_login import AdmissionConfig, AdmissionRefusal
 from webauth.ports import AccountEventKind
 from webauth.sign_in_routes import (
     LogoutPageText,

@@ -86,14 +86,13 @@ from starlette.responses import RedirectResponse, Response
 
 from webauth._paths import _has_dot_segment, reads_as_another_host, same_app_path
 from webauth._validation import require_positive_whole_number
+from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import _take_pending_login, issue_session_cookies
 from webauth.dependencies import LoginRedirect, session_id_from_request
 from webauth.oidc import OidcRefusal, OidcRefusalReason
 from webauth.oidc._relying_party import _callback_state
 from webauth.oidc_login import (
-    AdmissionConfig,
-    AdmissionRefusal,
     _AdmittedLogin,
     _BackchannelLogoutResult,
     _decide_admission,
@@ -460,7 +459,7 @@ class _SignIn:
         identity = self.relying_party(request).complete_login(pending, request.url.query)
         if isinstance(identity, OidcRefusal):
             return self._refuse(request, identity)
-        admitted = _decide_admission(identity, admission=self.admission, config=config)
+        admitted = _decide_admission(identity, admission=self.admission)
         if isinstance(admitted, AdmissionRefusal):
             return self._refuse(request, admitted)
         replaced_session_id = session_id_from_request(request, config)

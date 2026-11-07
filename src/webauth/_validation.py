@@ -62,7 +62,7 @@ def require_collection_not_one_string(
     noun: str,
     example: str | None = None,
 ) -> None:
-    """Refuse one string where a set of ``noun`` belongs.
+    """Refuse one string where a collection of ``noun`` belongs.
 
     Membership in a string is a substring test, so ``"/hooks/stripe"`` would
     admit ``"/"`` and ``"XPOST"`` would admit ``"POST"``.
@@ -70,5 +70,6 @@ def require_collection_not_one_string(
     if isinstance(value, str):
         hint = f", for example {example}" if example else ""
         raise ValueError(
-            f"{field} must be a set of {noun}s, not one string; list each {noun} in a set{hint}",
+            f"{field} must be a collection of {noun}s, not one string; "
+            f"list each {noun} in a collection{hint}",
         )

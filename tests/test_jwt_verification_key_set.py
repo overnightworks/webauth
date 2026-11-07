@@ -1,4 +1,4 @@
-"""How `JwtVerifier` reads a published key set: defective sets, the key bound, key purposes,
+"""How `_JwtVerifier` reads a published key set: defective sets, the key bound, key purposes,
 `key_ops`, duplicate members and the last good snapshot.
 """
 
@@ -27,13 +27,13 @@ from tests.support.oidc_arrangement import (
     public_jwk,
     rs256,
     rsa_key,
+    served_key_set,
     weak_public_jwk,
 )
-from webauth.https_client import MAX_KEY_SET_BYTES, KeySetFetchError
+from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import (
-    MAX_KEY_SET_KEYS,
-    Rejected,
     RejectionReason,
+    _Rejected,
 )
 
 
@@ -52,10 +52,20 @@ def _mixed_keys(count: int) -> list[dict[str, Any]]:
     return keys
 
 
+_KEY_SET_BYTE_LIMIT = 64 * 1024
+
+
+def _key_set_of_bytes(size: int) -> bytes:
+    document = served_key_set()
+    return document + b" " * (size - len(document))
+
+
 def _undeliverable_key_sets() -> list[Any]:
     return [
         pytest.param(KeySetFetchError("timed out"), "fetch-failed", id="fetch-failure"),
-        pytest.param(b" " * MAX_KEY_SET_BYTES + b"{}", "too-large", id="oversized-response"),
+        pytest.param(
+            _key_set_of_bytes(_KEY_SET_BYTE_LIMIT + 1), "too-large", id="oversized-response"
+        ),
     ]
 
 
@@ -66,14 +76,14 @@ def _key_sets_over_the_key_bound(
         pytest.param(
             key_set_document(
                 valid_jwk,
-                *(public_jwk(current, f"spare-{index}") for index in range(MAX_KEY_SET_KEYS)),
+                *(public_jwk(current, f"spare-{index}") for index in range(10)),
             ),
             "key-count-out-of-range",
             id="too-many-keys",
         ),
         pytest.param(
             key_set_document(
-                *_signing_keys(MAX_KEY_SET_KEYS),
+                *_signing_keys(10),
                 public_jwk(current, "eleventh", n=7),
             ),
             "key-count-out-of-range",
@@ -86,7 +96,7 @@ def _unsafe_key_sets(current: rsa.RSAPrivateKey, valid_jwk: dict[str, Any]) -> l
     return [
         pytest.param(
             key_set_document(
-                *_signing_keys(MAX_KEY_SET_KEYS),
+                *_signing_keys(10),
                 public_jwk(current, "encryption-key", use="enc", d="AQAB"),
             ),
             "secret-key-published",
@@ -165,12 +175,12 @@ def _key_sets_with_a_malformed_kid(
 def _key_sets_of_too_many_kidless_keys() -> list[Any]:
     return [
         pytest.param(
-            key_set_document(*kidless_keys(MAX_KEY_SET_KEYS + 1)),
+            key_set_document(*kidless_keys(10 + 1)),
             "key-count-out-of-range",
             id="too-many-kidless-keys",
         ),
         pytest.param(
-            key_set_document(*_mixed_keys(MAX_KEY_SET_KEYS + 1)),
+            key_set_document(*_mixed_keys(10 + 1)),
             "key-count-out-of-range",
             id="too-many-named-and-kidless-keys",
         ),
@@ -227,7 +237,7 @@ def _malformed_key_set_documents(valid_jwk: dict[str, Any]) -> list[Any]:
             id="duplicate-member-keeps-the-last",
         ),
         pytest.param(b'{"keys": [', "not-json", id="malformed-json"),
-        pytest.param(b"[" * MAX_KEY_SET_BYTES, "not-json", id="nested-past-the-recursion-limit"),
+        pytest.param(b"[" * 64 * 1024, "not-json", id="nested-past-the-recursion-limit"),
         pytest.param(gzip.compress(key_set_document(valid_jwk)), "not-json", id="compressed"),
     ]
 
@@ -267,13 +277,19 @@ def test_a_defective_key_set_is_refused_as_a_whole(
     with caplog.at_level(logging.WARNING, logger="webauth.jwt_verification"):
         refused = issuer.verifier.verify(issuer.token())
 
-    assert refused == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert refused == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     [logged] = _logged_refresh_failures(caplog)
     assert logged.endswith(failure)
 
 
+def test_a_key_set_of_exactly_the_byte_limit_is_accepted(issuer: IssuerScenario) -> None:
+    issuer.serve(_key_set_of_bytes(_KEY_SET_BYTE_LIMIT))
+
+    assert issuer.verifier.verify(issuer.token()) == issuer.verified()
+
+
 def test_keys_passed_over_do_not_count_toward_the_key_bound(issuer: IssuerScenario) -> None:
-    published = _signing_keys(MAX_KEY_SET_KEYS)
+    published = _signing_keys(10)
     issuer.serve(key_set_document(*published, *passed_over_keys(20)))
 
     verified = [
@@ -287,8 +303,8 @@ def test_keys_passed_over_do_not_count_toward_the_key_bound(issuer: IssuerScenar
 @pytest.mark.parametrize(
     "published",
     [
-        pytest.param(kidless_keys(MAX_KEY_SET_KEYS), id="all-kidless"),
-        pytest.param(_mixed_keys(MAX_KEY_SET_KEYS), id="named-and-kidless"),
+        pytest.param(kidless_keys(10), id="all-kidless"),
+        pytest.param(_mixed_keys(10), id="named-and-kidless"),
     ],
 )
 def test_the_key_bound_admits_that_many_eligible_keys_named_or_not(
@@ -300,8 +316,8 @@ def test_the_key_bound_admits_that_many_eligible_keys_named_or_not(
 
     unfamiliar = issuer.verifier.verify(issuer.token(header={"kid": "x"}))
 
-    assert kidless == Rejected(RejectionReason.INVALID_KEY_ID)
-    assert unfamiliar == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert kidless == _Rejected(RejectionReason.INVALID_KEY_ID)
+    assert unfamiliar == _Rejected(RejectionReason.UNKNOWN_KEY_ID)
 
 
 @pytest.mark.parametrize(
@@ -314,7 +330,7 @@ def test_the_key_bound_admits_that_many_eligible_keys_named_or_not(
             ),
             id="duplicate-named-kid",
         ),
-        pytest.param(key_set_document(*kidless_keys(MAX_KEY_SET_KEYS + 1)), id="too-many-keys"),
+        pytest.param(key_set_document(*kidless_keys(10 + 1)), id="too-many-keys"),
     ],
 )
 def test_a_refused_key_set_keeps_the_last_good_snapshot(
@@ -327,7 +343,7 @@ def test_a_refused_key_set_keeps_the_last_good_snapshot(
     unfamiliar = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
     known = issuer.verifier.verify(issuer.token())
 
-    assert unfamiliar == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert unfamiliar == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert known == issuer.verified()
 
 
@@ -348,7 +364,7 @@ def test_the_measured_key_set_of_two_unlabelled_signing_keys_among_thirteen_veri
         issuer.verifier.verify(issuer.token(header={"kid": "other-key"}, sign=other_signature))
         == issuer.verified()
     )
-    assert issuer.verifier.verify(issuer.token(sign=other_signature)) == Rejected(
+    assert issuer.verifier.verify(issuer.token(sign=other_signature)) == _Rejected(
         RejectionReason.INVALID_SIGNATURE
     )
 
@@ -360,10 +376,7 @@ def test_one_signing_key_among_the_most_encryption_keys_is_accepted(
     issuer.serve(
         key_set_document(
             public_jwk(current, "current-key"),
-            *(
-                public_jwk(current, f"encryption-{index}", use="enc")
-                for index in range(MAX_KEY_SET_KEYS)
-            ),
+            *(public_jwk(current, f"encryption-{index}", use="enc") for index in range(10)),
         )
     )
 
@@ -392,7 +405,7 @@ def test_keys_published_for_other_purposes_beside_the_signing_key_are_passed_ove
     )
 
     assert issuer.verifier.verify(issuer.token()) == issuer.verified()
-    assert issuer.verifier.verify(issuer.token(header={"kid": "encryption-key"})) == Rejected(
+    assert issuer.verifier.verify(issuer.token(header={"kid": "encryption-key"})) == _Rejected(
         RejectionReason.UNKNOWN_KEY_ID
     )
 
@@ -431,10 +444,10 @@ def test_a_failed_refresh_keeps_the_last_valid_key_set_until_its_ttl(
     issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS
     expired = issuer.verifier.verify(issuer.token())
 
-    assert refreshing == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
-    assert cooling_down == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert refreshing == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert cooling_down == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert still_cached == issuer.verified()
-    assert expired == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert expired == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
     assert len(issuer.endpoint.fetched_urls) == 3
 
 
@@ -445,12 +458,12 @@ def test_an_unknown_kid_is_forged_again_once_a_refresh_succeeds_after_a_failed_o
     issuer.serve(KeySetFetchError("GET answered 503"))
     issuer.after_cooldown()
     during_outage = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
-    issuer.serve(key_set_document(public_jwk(rsa_key("current"), "current-key")))
+    issuer.serve(served_key_set())
     issuer.after_cooldown()
 
     after_recovery = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
     cooling_down = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
 
-    assert during_outage == Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
-    assert after_recovery == Rejected(RejectionReason.UNKNOWN_KEY_ID)
-    assert cooling_down == Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert during_outage == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert after_recovery == _Rejected(RejectionReason.UNKNOWN_KEY_ID)
+    assert cooling_down == _Rejected(RejectionReason.UNKNOWN_KEY_ID)

@@ -68,3 +68,18 @@ protected_modules =
     redis
 allowed_importers =
     webauth.rate_limit
+
+# webauth.admission is the leaf the sign-in steps, the bearer gate and services all
+# apply, so it imports only the standard library: no other webauth module and no
+# third-party runtime dependency (the existing contracts hold jwt, cryptography, urllib3 and redis).
+[importlinter:contract:admission-imports-only-the-standard-library]
+name = webauth.admission imports no other webauth module and no third-party runtime dependency
+type = forbidden
+source_modules =
+    webauth.admission
+forbidden_modules =
+    webauth.*
+    fastapi
+    starlette
+    pydantic
+    anyio

@@ -1,7 +1,7 @@
 # Repository agent guidance
 
 webauth is a library with no deployment of its own; hosts pin its tag by git. `tests/e2e/` is a hand-run proof harness
-(driven through `scripts/run_oidc_proof.sh`, described in `tests/e2e/oidc/README.md`); CI only lints it.
+(driven through `scripts/run_oidc_proof.sh`, run through the runbooks in `docs/runbooks/`); CI only lints it.
 
 ## Boundaries
 
@@ -29,10 +29,10 @@ from a directory without `src`, so a port change or an export a host cannot impo
 
 - A tag is never moved: a broken release gets the next patch tag. The tag ruleset forbids updating and deleting tags.
 - `webauth.__version__` alone is raised, in the pull request that precedes the tag, and stays a plain string literal:
-  setuptools reads it without importing the package, whose dependencies the isolated build lacks. The same pull request turns
-  `## X.Y.Z - Unreleased` in `docs/CHANGELOG.md` into `## X.Y.Z - YYYY-MM-DD`, the date it expects to tag on.
-- A pull request that changes behaviour a host can see adds its line to `docs/CHANGELOG.md` under `## X.Y.Z - Unreleased` (open it
-  when none is open), marked **Breaking** when a public contract changes.
+  setuptools reads it without importing the package, whose dependencies the isolated build lacks.
+- A pull request that changes behaviour a host can see states in its body its **Breaking** line, when a public contract
+  changes, and the hosts' migration or "No migration". The open release item lists what is new since the last tag, so it can be
+  rebuilt from those bodies. At the tag, the head writes the release page by hand.
 - If the release workflow's `verify` job failed only because CI was still running, re-run it once CI is green. Never
   re-create the tag, and never bump the version for it.
 - The setuptools floor lives in `[build-system]` of `pyproject.toml`; after changing it run

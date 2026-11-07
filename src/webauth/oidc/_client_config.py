@@ -52,7 +52,7 @@ class OidcClientConfig:
     differ in whether they keep a `Secure` cookie over http on a loopback host,
     so a stack that must work in each sets `cookie_secure=False` on its
     `WebAuthConfig`. `scopes` includes `openid`. `leeway_seconds`
-    is checked by the `JwtVerifier` the relying party builds from it."""
+    is checked by the `_JwtVerifier` the relying party builds from it."""
 
     issuer: str
     authorization_endpoint: str

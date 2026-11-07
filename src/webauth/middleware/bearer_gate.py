@@ -15,7 +15,14 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
 from webauth._validation import is_scope_token_tuple
-from webauth.config import web_auth_config
+from webauth.admission import (
+    AdmissionConfig,
+    AdmissionRefusal,
+    AppRole,
+    NoAdmins,
+    _require_group_path,
+    app_role,
+)
 from webauth.dependencies import (
     _ADMIN_REQUIRED_DETAIL,
     _AUTHENTICATION_REQUIRED_DETAIL,
@@ -35,16 +42,7 @@ from webauth.oidc import (
 )
 from webauth.oidc._client_config import _PLAIN_AUTHORITY, _is_endpoint_url
 from webauth.oidc._relying_party import _ACCESS_TOKEN, _names_another_audience
-from webauth.oidc_login import (
-    AdmissionConfig,
-    AdmissionRefusal,
-    AppRole,
-    NoAdmins,
-    _admit_resource_holder,
-    _admit_token_holder,
-    _require_group_path,
-    app_role,
-)
+from webauth.oidc_login import _admit_resource_holder, _admit_token_holder
 from webauth.policies import (
     AuthorizedParties,
     PathRules,
@@ -202,7 +200,7 @@ class ProtectedResource:
     no other kind's parties extend, and groups that hold ``required_group`` or a path below it
     besides the admission's login group. The gate then looks the token's subject up in one
     entry of ``transaction``, a read: a person must have signed in once, and is admitted
-    with the configured person role whatever role is stored. ``TypeError`` for
+    with the role ``"user"`` whatever role is stored. ``TypeError`` for
     ``authorized_parties`` that is not an ``AuthorizedParties``. ``ValueError`` for a
     ``required_group`` that is not a group path, and for a ``url`` that is
     not an endpoint URL with a plain host, an optional port and a path of one or more
@@ -475,7 +473,6 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 verified,
                 required_group=resource.required_group,
                 admission=self._policy.admission,
-                config=web_auth_config(request),
             ),
         )
         if person is None:
@@ -502,7 +499,6 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 person_paths.transaction,
                 verified,
                 admission=self._policy.admission,
-                config=web_auth_config(request),
             ),
         )
         if isinstance(person, AdmissionRefusal):

@@ -41,10 +41,8 @@ if TYPE_CHECKING:
     from webauth.config import WebAuthConfig
 
 __all__ = [
-    "COOKIE_PATH",
     "DEFAULT_SESSION_COOKIE_NAME",
     "MAX_SESSION_COOKIE_CHARS",
-    "PLAIN_SESSION_COOKIE_NAME",
     "CookieSameSite",
     "PendingLogin",
     "issue_session_cookies",
@@ -52,8 +50,7 @@ __all__ = [
 ]
 
 _HOST_ONLY_COOKIE_PREFIX: Final = "__Host-"
-_SECURE_COOKIE_PREFIX: Final = "__Secure-"
-PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
+_PLAIN_SESSION_COOKIE_NAME: Final = "session_id"
 _PLAIN_PENDING_LOGIN_COOKIE_NAME: Final = "oidc_pending"
 _MAX_PENDING_LOGIN_COOKIE_CHARS: Final = 896
 # A signed session cookie is an identifier plus a hex digest; anything much
@@ -75,7 +72,6 @@ _MAX_PENDING_LOGINS: Final = 5
 _UNRANKED: Final = -1
 _STATE_DIGEST_HEX_CHARS: Final = 16
 _STATE_DIGEST: Final = re.compile(rf"[0-9a-f]{{{_STATE_DIGEST_HEX_CHARS}}}")
-_COOKIE_NAME_TOKEN: Final = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]+")
 # Unpadded base64url spells n random bytes in exactly ceil(4n / 3)
 # characters, so a field of any other shape was not minted as a pending secret.
 _PENDING_SECRET: Final = rf"[A-Za-z0-9_-]{{{math.ceil(4 * _PENDING_SECRET_BYTES / 3)}}}"
@@ -92,7 +88,7 @@ _PENDING_LOGIN_SIGNATURE: Final = re.compile(r"[0-9a-f]{64}")
 
 CookieSameSite = Literal["strict", "lax"]
 _DEFAULT_COOKIE_SAMESITE: Final[CookieSameSite] = "strict"
-COOKIE_PATH: Final = "/"
+_COOKIE_PATH: Final = "/"
 
 
 class _CookieAttributes(TypedDict):
@@ -102,8 +98,10 @@ class _CookieAttributes(TypedDict):
     samesite: CookieSameSite
 
 
-def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
-    """Return the name a cookie gets when the host names none.
+def _cookie_name(plain_name: str, *, secure: bool) -> str:
+    """Return the cookie's name for ``secure``.
+
+    ``__Host-`` plus the plain name with ``Secure``, the plain name without it.
 
     A ``__Host-`` cookie can be set only by this exact host, so a sibling
     subdomain cannot toss one in with ``Domain=parent``. Browsers accept the
@@ -113,12 +111,12 @@ def _default_cookie_name(plain_name: str, *, secure: bool) -> str:
     return f"{_HOST_ONLY_COOKIE_PREFIX}{plain_name}" if secure else plain_name
 
 
-DEFAULT_SESSION_COOKIE_NAME: Final = _default_cookie_name(PLAIN_SESSION_COOKIE_NAME, secure=True)
+DEFAULT_SESSION_COOKIE_NAME: Final = _cookie_name(_PLAIN_SESSION_COOKIE_NAME, secure=True)
 
 
 def _pending_login_cookie_prefix(*, secure: bool) -> str:
     """The part every pending-login cookie's name starts with."""
-    return f"{_default_cookie_name(_PLAIN_PENDING_LOGIN_COOKIE_NAME, secure=secure)}_"
+    return f"{_cookie_name(_PLAIN_PENDING_LOGIN_COOKIE_NAME, secure=secure)}_"
 
 
 def _pending_login_cookie_name(state: str, *, secure: bool) -> str:
@@ -135,32 +133,6 @@ def _is_pending_login_cookie_name(name: str, *, secure: bool) -> bool:
     if not name.startswith(prefix):
         return False
     return _STATE_DIGEST.fullmatch(name.removeprefix(prefix)) is not None
-
-
-def _is_reserved_cookie_name(name: str) -> bool:
-    """Whether ``name`` is one webauth's own cookies use, in either variant.
-
-    A session cookie under such a name would meet the cookie webauth
-    sets there, and the browser would send both.
-    """
-    return any(
-        name.startswith(_pending_login_cookie_prefix(secure=secure)) for secure in (True, False)
-    )
-
-
-def _is_valid_cookie_name(name: str) -> bool:
-    """Whether ``name`` is an RFC 6265 ``cookie-name``; Starlette refuses most other names."""
-    return _COOKIE_NAME_TOKEN.fullmatch(name) is not None
-
-
-def _is_host_only_cookie_name(name: str) -> bool:
-    """Whether a browser treats ``name`` as a ``__Host-`` cookie (case-insensitively)."""
-    return name.lower().startswith(_HOST_ONLY_COOKIE_PREFIX.lower())
-
-
-def _is_secure_prefixed_cookie_name(name: str) -> bool:
-    """Whether a browser treats ``name`` as a ``__Secure-`` cookie (case-insensitively)."""
-    return name.lower().startswith(_SECURE_COOKIE_PREFIX.lower())
 
 
 def _cookie_pairs(connection: HTTPConnection) -> list[tuple[str, str]]:
@@ -222,7 +194,7 @@ def _verify_session_cookie(cookie_value: str, secret: bytes) -> str | None:
 def _cookie_attributes(config: WebAuthConfig, samesite: CookieSameSite) -> _CookieAttributes:
     """The attributes every cookie is set with, and repeated when it is taken back."""
     return _CookieAttributes(
-        path=COOKIE_PATH,
+        path=_COOKIE_PATH,
         secure=config.cookie_secure,
         httponly=True,
         samesite=samesite,

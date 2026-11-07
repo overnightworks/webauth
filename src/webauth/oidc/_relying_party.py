@@ -11,7 +11,7 @@ one; only then the IdP's own `error`, of which nothing but a short error code
 is carried — never its `error_description`, which is text the IdP's caller
 controls. The code is exchanged with the PKCE verifier over the injected
 `TokenRequestPost`, the client authenticating with HTTP Basic. The ID token
-is verified by a `JwtVerifier` of `webauth.jwt_verification` whose one
+is verified by a `_JwtVerifier` of `webauth.jwt_verification` whose one
 accepted audience is the client ID; its nonce and authorized party are
 checked here, as OpenID Connect Core asks of the relying party. A refresh
 token in the answer must be RFC 6749 Appendix A.17's `1*VSCHAR`, or the login
@@ -58,13 +58,13 @@ from webauth._validation import is_scope_token_tuple, is_utf8
 from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.https_client import ExchangeFailure
 from webauth.jwt_verification import (
-    JwtVerifier,
     KeySetFetch,
     MonotonicClock,
-    Rejected,
     RejectionReason,
-    VerifiedClaims,
     _json_object,
+    _JwtVerifier,
+    _Rejected,
+    _VerifiedClaims,
 )
 from webauth.oidc._client_config import OidcClientConfig
 from webauth.policies import AuthorizedParties, _require_authorized_parties
@@ -73,9 +73,6 @@ if TYPE_CHECKING:
     from webauth.ports import WallClock
 
 __all__ = [
-    "MAX_AUTHORIZATION_CODE_CHARS",
-    "MAX_TOKEN_RESPONSE_BYTES",
-    "LOGOUT_TOKEN_MAX_AGE_SECONDS",
     "PENDING_LOGIN_MAX_AGE_SECONDS",
     "AuthorizationRequest",
     "OidcIdentity",
@@ -91,10 +88,10 @@ __all__ = [
     "VerifiedLogout",
 ]
 
-MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
-MAX_AUTHORIZATION_CODE_CHARS = 2048
+_MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
+_MAX_AUTHORIZATION_CODE_CHARS = 2048
 PENDING_LOGIN_MAX_AGE_SECONDS = 600
-LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
+_LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
 
 _LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105 - token type not a credential
 _ACCESS_TOKEN_MEDIA_TYPES = frozenset({"at+jwt", "application/at+jwt"})
@@ -263,8 +260,8 @@ class OidcRelyingParty:
         self._monotonic_clock = monotonic_clock
         self._jwt_verifier = self._verifier_for(config.client_id)
 
-    def _verifier_for(self, audience: str) -> JwtVerifier:
-        return JwtVerifier(
+    def _verifier_for(self, audience: str) -> _JwtVerifier:
+        return _JwtVerifier(
             issuer=self._config.issuer,
             audiences=[audience],
             jwks_url=self._config.jwks_url,
@@ -318,7 +315,7 @@ class OidcRelyingParty:
         """The identity the callback `callback_query` (its raw query string)
         proves for `pending`, or the refusal naming why it does not.
 
-        A `code` longer than `MAX_AUTHORIZATION_CODE_CHARS` is
+        A `code` longer than `_MAX_AUTHORIZATION_CODE_CHARS` is
         `MALFORMED_CALLBACK`. The ID token must name this client as its `azp` when it is for several
         audiences, and any `azp` it names must be this client. A refresh token
         in the answer that is `null` or outside `1*VSCHAR` is
@@ -354,7 +351,7 @@ class OidcRelyingParty:
                 )
             )
         code = callback.get("code")
-        if not code or len(code) > MAX_AUTHORIZATION_CODE_CHARS:
+        if not code or len(code) > _MAX_AUTHORIZATION_CODE_CHARS:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK))
         return code
 
@@ -490,14 +487,14 @@ class OidcRelyingParty:
         the logout event and no other key, that event's member an object, `sub`
         non-empty (a token naming only a `sid` is refused) and `nonce` absent,
         even as `null`. An RS256 `logout+jwt` of the configured issuer whose one
-        audience is the client ID, issued no more than `LOGOUT_TOKEN_MAX_AGE_SECONDS`
+        audience is the client ID, issued no more than `_LOGOUT_TOKEN_MAX_AGE_SECONDS`
         plus the leeway ago, and expiring after its `iat`. The token, its claims and
         its `sid` are never returned, so no session id is stored. There is no replay
         store: the age bound is what limits a copy, which ends the subject's sessions
         again until it ages out, and a person who signed in again in that time is
         signed out once more."""
         outcome = self._jwt_verifier.verify(logout_token, expected_type=_LOGOUT_TOKEN_TYPE)
-        if isinstance(outcome, Rejected):
+        if isinstance(outcome, _Rejected):
             return OidcRefusal(
                 OidcRefusalReason.LOGOUT_TOKEN_REJECTED, token_rejection=outcome.reason
             )
@@ -556,7 +553,7 @@ class OidcRelyingParty:
 
     def _access_token_profile(
         self,
-        token: VerifiedClaims,
+        token: _VerifiedClaims,
         authorized_parties: AuthorizedParties,
         *,
         audience: str,
@@ -575,25 +572,25 @@ class OidcRelyingParty:
             preferred_username=username if isinstance(username, str) else None,
         )
 
-    def _is_logout_profile(self, token: VerifiedClaims) -> bool:
+    def _is_logout_profile(self, token: _VerifiedClaims) -> bool:
         age_seconds = self._wall_clock() - token.issued_at
         return (
             token.audiences == (self._config.client_id,)
-            and age_seconds <= LOGOUT_TOKEN_MAX_AGE_SECONDS + self._config.leeway_seconds
+            and age_seconds <= _LOGOUT_TOKEN_MAX_AGE_SECONDS + self._config.leeway_seconds
             and token.expires_at > token.issued_at
             and "nonce" not in token.claims
             and _is_backchannel_logout_events(token.claims.get("events"))
         )
 
-    def _verified_id_token(self, id_token: str) -> VerifiedClaims:
+    def _verified_id_token(self, id_token: str) -> _VerifiedClaims:
         outcome = self._jwt_verifier.verify(id_token)
-        if isinstance(outcome, Rejected):
+        if isinstance(outcome, _Rejected):
             raise _RefusalError(
                 OidcRefusal(OidcRefusalReason.ID_TOKEN_REJECTED, token_rejection=outcome.reason)
             )
         return outcome
 
-    def _is_authorized_party(self, id_token: VerifiedClaims) -> bool:
+    def _is_authorized_party(self, id_token: _VerifiedClaims) -> bool:
         """OpenID Connect Core 3.1.3.7: a token for several audiences must
         name this client as its `azp`, and any `azp` it names must be this
         client. The verifier already holds the client among the audiences."""
@@ -684,7 +681,7 @@ def _token_answer_document(body: bytes) -> Mapping[str, object]:
     The production transport refuses an oversize body first (`TOO_LARGE`); the
     size check here guards an injected `TokenRequestPost`, which may return any
     body."""
-    if len(body) > MAX_TOKEN_RESPONSE_BYTES:
+    if len(body) > _MAX_TOKEN_RESPONSE_BYTES:
         return {}
     return _json_object(body) or {}
 
@@ -724,7 +721,7 @@ def _raw_id_token_of(document: Mapping[str, object]) -> str:
 
 
 def _identity_of(
-    id_token: VerifiedClaims, raw_id_token: str, refresh_token: SecretStr | None
+    id_token: _VerifiedClaims, raw_id_token: str, refresh_token: SecretStr | None
 ) -> OidcIdentity:
     groups = _group_paths(id_token.claims)
     if id_token.subject is None or groups is None:
@@ -753,9 +750,9 @@ def _groups_claim(claims: Mapping[str, object], claim_name: str) -> list[str] | 
     return groups
 
 
-def _verify_access_jwt(verifier: JwtVerifier, access_token: str) -> VerifiedClaims | OidcRefusal:
+def _verify_access_jwt(verifier: _JwtVerifier, access_token: str) -> _VerifiedClaims | OidcRefusal:
     outcome = verifier.verify(access_token, expected_media_types=_ACCESS_TOKEN_MEDIA_TYPES)
-    if isinstance(outcome, Rejected):
+    if isinstance(outcome, _Rejected):
         return OidcRefusal(OidcRefusalReason.ACCESS_TOKEN_REJECTED, token_rejection=outcome.reason)
     return outcome
 
