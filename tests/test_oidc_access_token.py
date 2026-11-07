@@ -350,6 +350,7 @@ def resource_verified(token: str, *, scope: str = "mcp:tools") -> VerifiedAccess
         resource_url=RESOURCE_URL,
         scope=scope,
         authorized_parties=HAL,
+        agent_group="/agents",
     )
     return verifier(token)
 
@@ -420,4 +421,5 @@ def test_a_resource_verifier_for_anything_but_authorized_parties_raises(parties:
             resource_url=RESOURCE_URL,
             scope="mcp:tools",
             authorized_parties=parties,
+            agent_group="/agents",
         )

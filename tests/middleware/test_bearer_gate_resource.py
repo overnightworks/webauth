@@ -31,7 +31,7 @@ from tests.support.gate_arrangement import (
     a_resource,
     a_resource_token,
     a_token,
-    an_agent_token,
+    an_interactive_agent_token,
     assert_no_bearer_admission,
     bearing,
     relayed,
@@ -139,10 +139,13 @@ ANSWERS_AT_THE_ENTRY_POINT: dict[
 ] = {
     "no-credential": (lambda resource: (), 401),
     "app-bearer": (lambda resource: bearing(a_token()), 401),
-    "without-the-scope": (lambda resource: bearing(an_agent_token(resource, scope=ABSENT)), 403),
+    "without-the-scope": (
+        lambda resource: bearing(an_interactive_agent_token(resource, scope=ABSENT)),
+        403,
+    ),
     "not-admitted": (lambda resource: bearing(a_resource_token(resource, groups=[])), 403),
     "refused-credential": (lambda resource: (*bearing("a"), *bearing("b")), 401),
-    "admitted": (lambda resource: bearing(an_agent_token(resource)), 200),
+    "admitted": (lambda resource: bearing(an_interactive_agent_token(resource)), 200),
 }
 
 

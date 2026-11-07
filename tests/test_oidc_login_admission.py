@@ -42,6 +42,7 @@ from webauth.oidc import (
 from webauth.oidc_login import _admit_account, _decide_admission
 from webauth.ports import (
     AccountEventKind,
+    AccountKind,
     UserRecord,
 )
 
@@ -110,10 +111,11 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
 
     account = admitted_account(host, replace(LENA, preferred_username=preferred_username))
 
-    assert (account.id, account.username, account.role) == (
+    assert (account.id, account.username, account.role, account.kind) == (
         SUBJECT,
         username,
         MEMBER_ROLE,
+        AccountKind.PERSON,
     )
     assert host.accounts.list() == [account]
     assert [asdict(event) for event in host.audit.account_events] == [
@@ -123,6 +125,8 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
             "subject_id": SUBJECT,
             "role": MEMBER_ROLE,
             "previous_role": None,
+            "account_kind": None,
+            "previous_account_kind": None,
         }
     ]
 
@@ -192,10 +196,15 @@ class UsersFailingOnAnyLookupOrWrite(UsersInMemory):
     def get(self, user_id: str) -> FakeUser | None:
         raise AssertionError(f"account {user_id!r} looked up")
 
-    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> FakeUser:
         raise AssertionError(f"account {subject!r} created")
 
     def set_role(self, user_id: str, role: str) -> FakeUser:
+        raise AssertionError(f"account {user_id!r} changed")
+
+    def set_kind(self, user_id: str, kind: AccountKind) -> FakeUser:
         raise AssertionError(f"account {user_id!r} changed")
 
 
@@ -249,6 +258,8 @@ def test_a_stored_admin_outside_the_admin_group_is_demoted_and_audited_at_login(
             "subject_id": SUBJECT,
             "role": MEMBER_ROLE,
             "previous_role": ADMIN_ROLE,
+            "account_kind": None,
+            "previous_account_kind": None,
         }
     ]
 

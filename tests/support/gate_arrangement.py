@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
@@ -99,6 +99,7 @@ HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
 RESOURCE_URL = "https://app.example/mcp"
 RESOURCE_SCOPE = "mcp:tools"
 RESOURCE_GROUP = "/apps/x/mcp"
+AGENT_GROUP = "/agents"
 EVERY_METHOD = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")
 MARKED_NOTE = MarkedRoute("GET", "/notes/{note}")
 MARKED_NEW_NOTE = MarkedRoute("POST", "/notes")
@@ -125,7 +126,11 @@ RESOURCE_CHALLENGE = (
     f'Bearer resource_metadata="https://app.example/.well-known/oauth-protected-resource/mcp", '
     f'scope="{RESOURCE_SCOPE}"'
 )
-THE_COOKIE_PERSON = asdict(FakeUser(role=ADMIN_ROLE))
+THE_COOKIE_PERSON = {
+    "id": FakeUser().id,
+    "username": FakeUser().username,
+    "role": ADMIN_ROLE,
+}
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
 FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))
@@ -148,6 +153,7 @@ def a_resource(
     url: str = RESOURCE_URL,
     parties: AuthorizedParties = HAL_ONLY,
     required_group: str = RESOURCE_GROUP,
+    agent_group: str = AGENT_GROUP,
     transaction: SignInTransaction = an_unbound_transaction,
     marked_routes: frozenset[MarkedRoute] = frozenset(),
 ) -> ProtectedResource:
@@ -156,6 +162,7 @@ def a_resource(
         url,
         RESOURCE_SCOPE,
         required_group,
+        agent_group,
         parties,
         transaction,
         marked_routes,
@@ -173,7 +180,8 @@ def a_resource_token(resource: ProtectedResource | None = None, **claims: Any) -
     return an_access_token(claims={"aud": held.url, "scope": held.scope, **claims})
 
 
-def an_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
+def an_interactive_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
+    """The token of an interactive agent: hal's `azp`, the resource's group, no agent claims."""
     return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
 
 
@@ -326,6 +334,7 @@ def add_marked_routes(auth: AuthApp, resource: ProtectedResource) -> None:
     def echo(request: Request, user: AuthenticatedUser | None) -> dict[str, str]:
         auth.route_runs.append(request.scope["path"])
         assert user is not None
+        auth.resource_persons.append(user)
         return {"id": user.id, "username": user.username, "role": user.role}
 
     def current(

@@ -27,7 +27,7 @@ from tests.support.gate_arrangement import (
     a_known_person,
     a_resource,
     a_resource_token,
-    an_agent_token,
+    an_interactive_agent_token,
     answering_a_runtime_error_with_418,
     assert_no_bearer_admission,
     bearing,
@@ -85,7 +85,7 @@ def test_a_known_person_in_the_group_is_admitted_with_no_cookie_and_the_person_r
     response = app.ask(
         resource.entry_point,
         method=method,
-        authorization=bearing(an_agent_token(resource, *groups)),
+        authorization=bearing(an_interactive_agent_token(resource, *groups)),
         headers=sent,
     )
 
@@ -106,7 +106,7 @@ def test_a_subgroup_of_the_required_group_counts_and_an_admin_group_adds_nothing
 ) -> None:
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
-    token = bearing(an_agent_token(resource, *groups))
+    token = bearing(an_interactive_agent_token(resource, *groups))
 
     response = app.ask(resource.entry_point, authorization=token)
 
@@ -123,7 +123,9 @@ def test_a_token_of_a_person_whose_stored_account_is_marked_disabled_is_still_ad
         known_accounts=(DisabledUser(id=OPERATOR_SUBJECT, username="lena"),),
     )
 
-    response = app.ask(resource.entry_point, authorization=bearing(an_agent_token(resource)))
+    response = app.ask(
+        resource.entry_point, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == 200
     assert response.json() == {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE}
@@ -143,7 +145,7 @@ def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
     )
     assert app.accounts is not None
     failing(app.accounts, "set_role", monkeypatch)
-    token = bearing(an_agent_token(resource, RESOURCE_GROUP, "/apps/x/admin"))
+    token = bearing(an_interactive_agent_token(resource, RESOURCE_GROUP, "/apps/x/admin"))
 
     posted = app.ask(resource.entry_point, method="POST", authorization=token)
     admin_only = app.ask(resource.entry_point, method="DELETE", authorization=token)
@@ -196,7 +198,7 @@ def test_a_person_outside_the_login_group_gets_the_plain_403_with_the_group_held
 
     response = app.ask(
         resource.entry_point,
-        authorization=bearing(an_agent_token(resource, "/other/mcp")),
+        authorization=bearing(an_interactive_agent_token(resource, "/other/mcp")),
     )
 
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
@@ -215,7 +217,7 @@ def test_an_unknown_subject_gets_the_plain_403_and_no_account_or_event_appears(
     response = app.ask(
         resource.entry_point,
         method="POST",
-        authorization=bearing(an_agent_token(resource)),
+        authorization=bearing(an_interactive_agent_token(resource)),
     )
 
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
@@ -259,7 +261,7 @@ def test_a_store_failure_in_the_admission_is_the_library_500_and_admits_nothing(
         failing(app.accounts, "get", monkeypatch)
     if failure == "exit":
         the_transaction(app).exit_failure = StoreDown()
-    token = bearing(an_agent_token(resource))
+    token = bearing(an_interactive_agent_token(resource))
     relay = relayed(app.auth)
 
     response = app.ask(resource.entry_point, method="POST", authorization=token)
@@ -298,7 +300,9 @@ def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
     monkeypatch.setattr(app.accounts, "get", counting)
     accounts_before = the_accounts(app)
 
-    response = app.ask(resource.entry_point, authorization=bearing(an_agent_token(resource)))
+    response = app.ask(
+        resource.entry_point, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert (response.status_code, the_transaction(app).entries) == (200, 1)
     assert lookups == [OPERATOR_SUBJECT]
@@ -350,7 +354,7 @@ def test_the_resource_person_and_current_user_refuse_a_request_changed_after_adm
     response = app.ask(
         resource.entry_point,
         method="POST",
-        authorization=bearing(an_agent_token(resource)),
+        authorization=bearing(an_interactive_agent_token(resource)),
     )
 
     assert response.status_code == status
@@ -381,7 +385,7 @@ def test_admitted_user_reads_the_resource_person_and_refuses_a_method_changed_af
     response = app.ask(
         resource.entry_point,
         method=sent,
-        authorization=bearing(an_agent_token(resource)),
+        authorization=bearing(an_interactive_agent_token(resource)),
     )
 
     assert response.status_code == status
@@ -406,7 +410,7 @@ def test_csrf_refuses_a_request_made_mutating_after_admission(
     response = app.ask(
         resource.entry_point,
         method="GET",
-        authorization=bearing(an_agent_token(resource)),
+        authorization=bearing(an_interactive_agent_token(resource)),
     )
 
     assert response.status_code == status
@@ -453,3 +457,14 @@ def test_a_required_group_that_is_not_a_group_path_is_refused(group: str) -> Non
     """RESOURCE-05: a `required_group` that is not a group path is a `ValueError`."""
     with pytest.raises(ValueError, match="required_group"):
         a_resource(required_group=group)
+
+
+@pytest.mark.parametrize(
+    "group",
+    ["", "agents", "/", "/agents//x", "/agents ", "/a\u200bb"],
+)
+def test_an_agent_group_that_is_not_a_group_path_is_refused(group: str) -> None:
+    """RESOURCE-05: an `agent_group` that is not a group path is a `ValueError`, as a
+    `required_group` is."""
+    with pytest.raises(ValueError, match="agent_group"):
+        a_resource(agent_group=group)

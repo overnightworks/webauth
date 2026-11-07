@@ -85,7 +85,7 @@ def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) 
     auth_app.get("/me", cookie=auth_app.signed_cookie())
 
     assert auth_app.authenticated == [
-        AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE),
+        AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, agent=None),
     ]
 
 

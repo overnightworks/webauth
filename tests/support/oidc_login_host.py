@@ -39,9 +39,8 @@ from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     SessionRecordsInMemory,
     UsersInMemory,
-    UsersWithCaseInsensitiveUsernames,
-    UsersWithoutUniqueUsernames,
     WriteLockInMemory,
+    _require_held_lock,
     a_web_auth_config,
 )
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
@@ -65,8 +64,10 @@ from webauth.policies import (
     SecurityHeadersPolicy,
 )
 from webauth.ports import (
+    AccountKind,
     AuthenticatedUser,
     SignInStores,
+    UsernameTakenError,
 )
 from webauth.sign_in_routes import (
     LogoutPageText,
@@ -132,17 +133,41 @@ class TransactionKind(enum.Enum):
     ROLLING_BACK = "restores accounts, sessions and audit events when the block or its exit fails"
 
 
+class UsersWithCaseInsensitiveUsernames(UsersInMemory):
+    """A store whose unique index ignores case."""
+
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> FakeUser:
+        if any(user.username.casefold() == username.casefold() for user in self.list()):
+            raise UsernameTakenError("Username is already taken")
+        return super().create_for_subject(subject, username, role, kind)
+
+
+class UsersWithoutUniqueUsernames(UsersInMemory):
+    """A store with no unique index on the username."""
+
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> FakeUser:
+        _require_held_lock(self._lock)
+        user = FakeUser(id=subject, username=username, role=role, kind=kind)
+        self._users[subject] = user
+        return user
+
+
 class UsersWithSnapshots(UsersInMemory):
     """Accounts that can be put back as they were."""
 
     def snapshot(self) -> Callable[[], None]:
         users, usernames = dict(self._users), dict(self._usernames)
-        roles = [(user, user.role) for user in users.values()]
+        stored = [(user, user.role, user.kind) for user in users.values()]
 
         def restore() -> None:
             self._users, self._usernames = dict(users), dict(usernames)
-            for user, role in roles:
+            for user, role, kind in stored:
                 user.role = role
+                user.kind = kind
 
         return restore
 
@@ -211,6 +236,7 @@ class RecordingSignInTransaction:
         self.entries = 0
         self.exit_failure: Exception | None = None
         self.entry_failure: Exception | None = None
+        self.cleanup_failure: Exception | None = None
         self._accounts = accounts
         self._sessions = sessions
         self._audit = audit
@@ -236,6 +262,10 @@ class RecordingSignInTransaction:
                     yield self._stores(window)
                     if self.exit_failure is not None:
                         raise self.exit_failure
+            except BaseException:
+                if self.cleanup_failure is not None:
+                    raise self.cleanup_failure from None
+                raise
             finally:
                 window.open = False
                 self._open -= 1

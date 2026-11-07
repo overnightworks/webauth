@@ -48,7 +48,7 @@ from webauth.proxies import resolve_client_ip
 
 CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
-ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
+ALICE = AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, agent=None)
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1"})
 
 

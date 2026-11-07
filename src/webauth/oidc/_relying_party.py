@@ -68,6 +68,7 @@ from webauth.jwt_verification import (
 )
 from webauth.oidc._client_config import OidcClientConfig
 from webauth.policies import AuthorizedParties, _require_authorized_parties
+from webauth.ports import AgentFacts
 
 if TYPE_CHECKING:
     from webauth.ports import WallClock
@@ -92,6 +93,7 @@ _MAX_TOKEN_RESPONSE_BYTES = 64 * 1024
 _MAX_AUTHORIZATION_CODE_CHARS = 2048
 PENDING_LOGIN_MAX_AGE_SECONDS = 600
 _LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
+_AGENT_NAME_MAX_LENGTH = 64
 
 _LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105 - token type not a credential
 _ACCESS_TOKEN_MEDIA_TYPES = frozenset({"at+jwt", "application/at+jwt"})
@@ -226,12 +228,14 @@ class VerifiedLogout:
 
 @dataclass(frozen=True)
 class VerifiedAccessToken:
-    """An access token that held: the issuer's `subject`, its full group paths and the
-    `preferred_username` it carries, `None` when absent or not a string."""
+    """An access token that held: the issuer's `subject`, its full group paths, the
+    `preferred_username` it carries, `None` when absent or not a string, and the agent's facts
+    when the resource's agent group admitted it, `None` otherwise."""
 
     subject: str
     groups: tuple[str, ...]
     preferred_username: str | None = None
+    agent: AgentFacts | None = None
 
 
 class _RefusalError(Exception):
@@ -529,14 +533,20 @@ class OidcRelyingParty:
         resource_url: str,
         scope: str,
         authorized_parties: AuthorizedParties,
+        agent_group: str,
     ) -> Callable[[str], VerifiedAccessToken | OidcRefusal]:
         """A check of an access token presented to the resource at `resource_url`.
 
         The verifier owns a key-set cache, so build it once. The token's only
-        audience is `resource_url` and its `azp` one `authorized_parties` admits;
-        its `scope` claim, a string of space-separated tokens, must include `scope`
-        exactly, or the refusal is `INSUFFICIENT_SCOPE`. `TypeError` for anything
-        but `AuthorizedParties`."""
+        audience is `resource_url` and its `azp` one `authorized_parties` admits,
+        unless its `groups` list holds `agent_group` as one element (not a path below it):
+        then any `azp` passes, and the token must carry `agent_owner`, a non-empty string,
+        and `agent_name`, a printable string of 1 to 64 characters, which become
+        `VerifiedAccessToken.agent`; anything else is `INVALID_ACCESS_CLAIM`, decided before
+        the scope. Its `scope` claim, a string of space-separated tokens, must include
+        `scope` exactly, or the refusal is `INSUFFICIENT_SCOPE`. The realm alone decides
+        which clients can mint a token for `resource_url`. `TypeError` for anything but
+        `AuthorizedParties`."""
         _require_authorized_parties(authorized_parties)
         jwt_verifier = self._verifier_for(resource_url)
 
@@ -544,7 +554,9 @@ class OidcRelyingParty:
             outcome = _verify_access_jwt(jwt_verifier, access_token)
             if isinstance(outcome, OidcRefusal):
                 return outcome
-            profile = self._access_token_profile(outcome, authorized_parties, audience=resource_url)
+            profile = self._access_token_profile(
+                outcome, authorized_parties, audience=resource_url, agent_group=agent_group
+            )
             if isinstance(profile, VerifiedAccessToken) and not _holds_scope(outcome.claims, scope):
                 return OidcRefusal(OidcRefusalReason.INSUFFICIENT_SCOPE)
             return profile
@@ -557,19 +569,25 @@ class OidcRelyingParty:
         authorized_parties: AuthorizedParties,
         *,
         audience: str,
+        agent_group: str | None = None,
     ) -> VerifiedAccessToken | OidcRefusal:
         if token.subject is None or token.audiences != (audience,):
             return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
-        if not authorized_parties.admits(token.claims.get("azp")):
-            return OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH)
         groups = _group_paths(token.claims)
+        is_agent = groups is not None and agent_group in groups
+        if not is_agent and not authorized_parties.admits(token.claims.get("azp")):
+            return OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH)
         if groups is None:
+            return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
+        agent = _agent_facts(token.claims) if is_agent else None
+        if is_agent and agent is None:
             return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
         username = token.claims.get("preferred_username")
         return VerifiedAccessToken(
             subject=token.subject,
             groups=groups,
             preferred_username=username if isinstance(username, str) else None,
+            agent=agent,
         )
 
     def _is_logout_profile(self, token: _VerifiedClaims) -> bool:
@@ -755,6 +773,15 @@ def _verify_access_jwt(verifier: _JwtVerifier, access_token: str) -> _VerifiedCl
     if isinstance(outcome, _Rejected):
         return OidcRefusal(OidcRefusalReason.ACCESS_TOKEN_REJECTED, token_rejection=outcome.reason)
     return outcome
+
+
+def _agent_facts(claims: Mapping[str, object]) -> AgentFacts | None:
+    owner, name = claims.get("agent_owner"), claims.get("agent_name")
+    if not isinstance(owner, str) or not owner:
+        return None
+    if not isinstance(name, str) or not 1 <= len(name) <= _AGENT_NAME_MAX_LENGTH:
+        return None
+    return AgentFacts(owner, name) if name.isprintable() else None
 
 
 def _holds_scope(claims: Mapping[str, object], scope: str) -> bool:

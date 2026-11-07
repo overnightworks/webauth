@@ -198,11 +198,16 @@ class ProtectedResource:
     section 3.1 derives from it. ``scope`` is the one scope the challenge asks for and a token
     must hold. A token passes there only with an ``azp`` among ``authorized_parties``, which
     no other kind's parties extend, and groups that hold ``required_group`` or a path below it
-    besides the admission's login group. The gate then looks the token's subject up in one
-    entry of ``transaction``, a read: a person must have signed in once, and is admitted
-    with the role ``"user"`` whatever role is stored. ``TypeError`` for
+    besides the admission's login group; a token whose groups hold ``agent_group`` as an exact
+    element passes from any ``azp`` when it carries ``agent_owner`` and ``agent_name``, the realm
+    alone deciding which clients can mint the resource's audience. The gate then looks the
+    token's subject up in one entry of ``transaction``: for a token without the agent group a
+    read, a person must have signed in once, admitted with the role ``"user"`` whatever role is
+    stored; for one with it the account is created on its first admission and set to the kind
+    ``AGENT``, and the agent is admitted with the role ``"user"`` and its ``AgentFacts``.
+    ``TypeError`` for
     ``authorized_parties`` that is not an ``AuthorizedParties``. ``ValueError`` for a
-    ``required_group`` that is not a group path, and for a ``url`` that is
+    ``required_group`` or ``agent_group`` that is not a group path, and for a ``url`` that is
     not an endpoint URL with a plain host, an optional port and a path of one or more
     segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
     trailing slash, and for a ``scope`` that is not one scope token. So the path needs no
@@ -219,6 +224,7 @@ class ProtectedResource:
     url: str
     scope: str
     required_group: str
+    agent_group: str
     authorized_parties: AuthorizedParties
     transaction: SignInTransaction
     marked_routes: frozenset[MarkedRoute] = frozenset()
@@ -230,6 +236,7 @@ class ProtectedResource:
         ):
             raise TypeError("ProtectedResource.marked_routes must be a frozenset of MarkedRoute")
         _require_group_path("ProtectedResource.required_group", self.required_group)
+        _require_group_path("ProtectedResource.agent_group", self.agent_group)
         if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
             raise ValueError(
                 "ProtectedResource.url must be an endpoint URL with a plain host and a path"
@@ -319,7 +326,8 @@ class _Refusal(Enum):
     The first four refuse a machine path, which names its realm; the first three and
     ``RESOURCE_INSUFFICIENT_SCOPE`` refuse the resource's entry point, which names its
     metadata and scope; on a person path ``INVALID_REQUEST`` and ``INVALID_TOKEN`` carry
-    neither and ``NOT_A_MEMBER`` and ``USERNAME_TAKEN`` belong to it alone.
+    neither and ``NOT_A_MEMBER`` belongs to it alone; ``USERNAME_TAKEN`` answers it and the
+    resource's creation of an agent's account.
     ``RESOURCE_NOT_ADMITTED`` is the entry point's answer to a token that holds but whose
     person is unknown or outside the required group; a new sign-in cannot change it, so it
     carries no challenge a client would answer with one.
@@ -398,6 +406,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                     resource_url=resource.url,
                     scope=resource.scope,
                     authorized_parties=resource.authorized_parties,
+                    agent_group=resource.agent_group,
                 )
             )
         )
@@ -475,6 +484,8 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 admission=self._policy.admission,
             ),
         )
+        if isinstance(person, AdmissionRefusal):
+            return self._refused(_REFUSAL_OF_ADMISSION[person])
         if person is None:
             return self._refused(_Refusal.RESOURCE_NOT_ADMITTED)
         _record_bearer_admission(request, person, resource_method=request.method)

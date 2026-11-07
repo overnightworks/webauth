@@ -38,7 +38,7 @@ from tests.support.gate_arrangement import (
     a_resource,
     a_resource_token,
     a_token,
-    an_agent_token,
+    an_interactive_agent_token,
     answering_a_runtime_error_with_418,
     bearing,
     between_the_bearer_gate_and_csrf,
@@ -93,7 +93,7 @@ def test_an_agent_token_on_a_marked_route_is_the_capped_person_with_no_cookie_an
     response = app.ask(
         path,
         method=method,
-        authorization=bearing(an_agent_token(resource)),
+        authorization=bearing(an_interactive_agent_token(resource)),
         headers=sent,
     )
 
@@ -112,7 +112,9 @@ def test_csrf_refuses_a_marked_route_request_made_mutating_after_admission(
         app, Middleware(RewritingTheRequest, changes={"method": "POST"})
     )
 
-    response = app.ask(A_NOTE, method="GET", authorization=bearing(an_agent_token(resource)))
+    response = app.ask(
+        A_NOTE, method="GET", authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == 403
     assert app.auth.route_runs == []
@@ -130,7 +132,9 @@ def test_resource_person_and_admitted_user_read_the_capped_person_on_a_marked_ro
 ) -> None:
     """RESOURCE-63: on a marked route `current_user`, `admitted_user` and `resource_person`
     return the capped person."""
-    response = app.ask(path, method="POST", authorization=bearing(an_agent_token(resource)))
+    response = app.ask(
+        path, method="POST", authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert (response.status_code, response.json()["role"]) == (200, MEMBER_ROLE)
 
@@ -144,7 +148,7 @@ def test_a_stored_admin_stays_the_person_role_and_a_marked_admin_route_is_the_pl
     app = a_bearer_app(resource=resource, known_accounts=(a_known_person(ADMIN_ROLE),))
     assert app.accounts is not None
     failing(app.accounts, "set_role", monkeypatch)
-    token = bearing(an_agent_token(resource, RESOURCE_GROUP, "/apps/x/admin"))
+    token = bearing(an_interactive_agent_token(resource, RESOURCE_GROUP, "/apps/x/admin"))
 
     read = app.ask(A_NOTE, authorization=token)
     admin_only = app.ask(MARKED_ADMIN_NOTES.template, authorization=token)
@@ -185,7 +189,7 @@ def test_a_person_outside_the_login_group_gets_the_plain_403_on_a_marked_route()
 
     response = app.ask(
         A_NOTE,
-        authorization=bearing(an_agent_token(resource, "/other/mcp")),
+        authorization=bearing(an_interactive_agent_token(resource, "/other/mcp")),
         cookie=True,
     )
 
@@ -201,7 +205,9 @@ def test_an_unknown_subject_gets_the_plain_403_and_no_account_appears(
     no account and no event appear."""
     app = a_bearer_app(resource=resource)
 
-    response = app.ask(A_NOTE, authorization=bearing(an_agent_token(resource)), cookie=True)
+    response = app.ask(
+        A_NOTE, authorization=bearing(an_interactive_agent_token(resource)), cookie=True
+    )
 
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
     assert "www-authenticate" not in response.headers
@@ -217,7 +223,7 @@ def test_a_token_without_the_scope_is_an_insufficient_scope_beside_a_valid_cooki
 ) -> None:
     """RESOURCE-57: a token without the scope is a 403 `insufficient_scope` with the challenge
     beside a valid cookie, and nothing is admitted."""
-    token = an_agent_token(resource, scope=scope)
+    token = an_interactive_agent_token(resource, scope=scope)
 
     response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
 
@@ -246,7 +252,7 @@ def test_an_invalid_token_is_a_401_with_the_challenge_and_a_valid_cookie_decides
     """RESOURCE-56: an invalid or expired token, or one naming the resource among two audiences,
     is a 401 `invalid_token` with the challenge beside a valid cookie, and nothing is
     admitted."""
-    token = an_agent_token(resource, **claims)
+    token = an_interactive_agent_token(resource, **claims)
 
     response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
 
@@ -388,7 +394,9 @@ def test_a_request_is_a_marked_route_only_when_method_segments_and_parameters_al
     """RESOURCE-44: the match is exact on the route path: the method equals, the segment count
     equals, each literal equals, and each parameter is one non-empty segment other than `.` and
     `..`."""
-    response = app.ask(path, method=method, authorization=bearing(an_agent_token(resource)))
+    response = app.ask(
+        path, method=method, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     admitted = response.status_code == 200 and response.json()["id"] == OPERATOR_SUBJECT
     assert admitted is matched
@@ -400,7 +408,7 @@ def test_a_token_for_the_resource_is_refused_on_a_person_path_except_on_a_marked
 ) -> None:
     """RESOURCE-09, RESOURCE-48: the token for the resource is refused on a person path except on
     a route the resource marks, and a marked route below a person path is decided as marked."""
-    token = bearing(an_agent_token(resource))
+    token = bearing(an_interactive_agent_token(resource))
 
     unmarked = app.ask(PERSON_ME_PATH, authorization=token)
     marked = app.ask(A_PERSON_NOTE, authorization=token)
@@ -413,10 +421,14 @@ def test_a_token_for_the_resource_is_refused_on_a_person_path_except_on_a_marked
 @pytest.mark.parametrize(
     "authorization",
     [
-        pytest.param(lambda resource: bearing(an_agent_token(resource)), id="admitted"),
-        pytest.param(lambda resource: bearing(an_agent_token(resource, scope=ABSENT)), id="scope"),
+        pytest.param(lambda resource: bearing(an_interactive_agent_token(resource)), id="admitted"),
+        pytest.param(
+            lambda resource: bearing(an_interactive_agent_token(resource, scope=ABSENT)), id="scope"
+        ),
         pytest.param(lambda resource: bearing(a_resource_token(resource, groups=[])), id="group"),
-        pytest.param(lambda resource: bearing(an_agent_token(resource, iss="x")), id="invalid"),
+        pytest.param(
+            lambda resource: bearing(an_interactive_agent_token(resource, iss="x")), id="invalid"
+        ),
         pytest.param(lambda resource: (*bearing("a"), *bearing("b")), id="refused-credential"),
         pytest.param(lambda resource: (), id="no-credential"),
     ],
@@ -465,7 +477,9 @@ def test_the_agent_token_is_refused_on_every_method_and_shape_a_mark_does_not_co
 ) -> None:
     """RESOURCE-45: a trailing slash, `HEAD` on a marked `GET`, a longer path below a template and
     a decoded `/` in a parameter do not match: the token is refused and nothing is admitted."""
-    response = app.ask(path, method=method, authorization=bearing(an_agent_token(resource)))
+    response = app.ask(
+        path, method=method, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == status
     assert "resource_metadata" not in response.headers.get("www-authenticate", "")
@@ -477,7 +491,7 @@ def test_a_marked_template_overlapping_a_machine_path_stays_a_machine_path(
     resource: ProtectedResource,
 ) -> None:
     """RESOURCE-46: a marked template overlapping a machine path stays a machine path."""
-    response = app.ask(A_MACHINE_NOTE, authorization=bearing(an_agent_token(resource)))
+    response = app.ask(A_MACHINE_NOTE, authorization=bearing(an_interactive_agent_token(resource)))
 
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == REALM_INVALID_TOKEN
@@ -525,7 +539,9 @@ def test_every_reader_on_a_marked_route_refuses_a_request_changed_after_admissio
     )
     answering_a_runtime_error_with_418(app)
 
-    response = app.ask(path, method="POST", authorization=bearing(an_agent_token(resource)))
+    response = app.ask(
+        path, method="POST", authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == REFUSED_AS_RUNTIME_ERROR
     assert app.auth.route_runs == []
@@ -615,7 +631,7 @@ def test_a_resource_without_marked_routes_has_only_its_entry_point(
     """RESOURCE-40: a resource with no marked routes has only its entry point."""
     app = a_bearer_app(resource=a_resource(), known_accounts=(a_known_person(),))
 
-    response = app.ask(A_NOTE, authorization=bearing(an_agent_token(resource)))
+    response = app.ask(A_NOTE, authorization=bearing(an_interactive_agent_token(resource)))
 
     assert response.status_code == 401
     assert_admitted_nothing(app)

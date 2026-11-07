@@ -374,7 +374,7 @@ checks the browser.
     a browser sign-in.
   - **TOKEN-17** Every token request enters the host's serialized `SignInTransaction` once.
   - **TOKEN-18** A person outside the app's login group is refused before any store is touched.
-  - **TOKEN-19** An unknown subject gets an account with the token's `preferred_username` (the
+  - **TOKEN-19** An unknown subject gets an account of the kind `PERSON` with the token's `preferred_username` (the
     subject when it carries none) and `USER_CREATED`.
   - **TOKEN-20** A known subject keeps its account.
   - **TOKEN-21** Its role follows the token's groups, written and recorded as `ROLE_CHANGED` when
@@ -476,7 +476,7 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
 
 ## The protected resource
 
-A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, authorized_parties, transaction, marked_routes)` and passes
+A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, agent_group, authorized_parties, transaction, marked_routes)` and passes
 it as `BearerGate(resource=...)`.
 
 - **RESOURCE-01** A gate needs one kind of path, and the resource counts as one.
@@ -485,17 +485,19 @@ it as `BearerGate(resource=...)`.
   being `.` or `..`, with no trailing slash; its path is the entry point. Any other `url` is a `ValueError`.
 - **RESOURCE-03** `scope` is one scope token, else `ValueError`.
 - **RESOURCE-04** `authorized_parties` is an `AuthorizedParties`, else `TypeError`.
-- **RESOURCE-05** `required_group` is a group path, else `ValueError`.
+- **RESOURCE-05** `required_group` and `agent_group` are group paths, else `ValueError`.
 - `scope` is the scope the challenge asks for and a token must hold. `authorized_parties` are the clients whose token
   the resource takes, apart from the parties of the machine and person paths. `required_group` is the group a person
-  must hold in the token, or one below it, besides the admission's login group.
+  must hold in the token, or one below it, besides the admission's login group. `agent_group` is the group an autonomous
+  agent's own client holds in its token, as an exact element: the realm alone decides which clients can mint a token for
+  `url`, and the group lets them through the party check at this resource only.
 - `transaction` is the host's `SignInTransaction`, the same port the person paths use.
 - Everything else derives from `url`:
   - **RESOURCE-06** the metadata path is `/.well-known/oauth-protected-resource` plus the entry
     point (RFC 9728 section 3.1);
   - **RESOURCE-07** the challenge names the metadata URL.
 
-**The resource admits an agent's token, capped and read-only.**
+**The resource admits a token for an agent.** An interactive agent's token is capped and read-only; the token of an agent with its own client, which holds `agent_group`, registers its account.
 
 - **RESOURCE-08** A token for the resource is refused on the machine paths.
 - **RESOURCE-09** A token for the resource is refused on the person paths except on a route the resource marks.
@@ -513,21 +515,46 @@ At the entry point, on every method and the exact path only:
   - **RESOURCE-17** of the relying party's issuer,
   - **RESOURCE-18** whose only audience is the resource's `url` (not the app's client ID,
     not a list of two),
-  - **RESOURCE-19** and whose `azp` is one of the resource's parties.
+  - **RESOURCE-19** and whose `azp` is one of the resource's parties, unless the next rule applies.
+- **RESOURCE-70** A token whose validated `groups` list holds `agent_group` as one element passes the party check
+  (RESOURCE-19) whatever its `azp`, and other groups beside it change nothing. Every other check of
+  RESOURCE-15 to RESOURCE-22 stays.
+- **RESOURCE-71** These do not count as the agent group: a path below it (`/agents/x`), a path that only starts with it
+  (`/agentsX`) and a malformed `groups` claim, which stays a 401 `invalid_token`.
+- **RESOURCE-72** The group widens no other path's parties: the person paths and the machine paths keep their own.
+- **RESOURCE-73** With the agent group, `agent_owner` must be a non-empty string and `agent_name` a printable string
+  (`str.isprintable`) of 1 to 64 characters, else 401 `invalid_token` as RESOURCE-15. The claims are checked inside the
+  token check, so this refusal comes before the scope (RESOURCE-20), before the group refusals (RESOURCE-21,
+  RESOURCE-22) and before any `transaction` entry, also when the `azp` is among the resource's parties.
+- **RESOURCE-74** Without the agent group both claims are ignored and the token is a person's, with `agent` `None`.
 - **RESOURCE-20** A token that passes that but whose `scope` claim, read as space-separated tokens, lacks the
   resource's scope (absent, not a string, another scope, or the scope only as a substring of
   another): 403 with `error="insufficient_scope"` and the same two parameters, and no route runs.
 - A token that holds, whose person the resource does not admit, gets a plain 403 without `WWW-Authenticate`, because a client answers `insufficient_scope` with a new sign-in, which cannot help. No route runs, and nothing is created, changed or audited:
   - **RESOURCE-21** the groups lack `required_group`, and the store is not touched;
   - **RESOURCE-22** the groups lack the admission's login group, and the store is not touched;
-  - **RESOURCE-23** no account has the token's subject.
+  - **RESOURCE-23** no account has the token's subject, for a token without the agent group.
+
+  RESOURCE-21 and RESOURCE-22 hold for a token with the agent group as for any other.
+- A token with the agent group that holds and passes RESOURCE-21 and RESOURCE-22, at the entry point and on a marked route alike, registers its account in the one `transaction` entry:
+  - **RESOURCE-75** no account has its subject: `create_for_subject(subject, username, "user", AccountKind.AGENT)` with
+    the username TOKEN-19 gives (the token's `preferred_username`, else the subject), and `USER_CREATED`;
+  - **RESOURCE-76** its account's kind is `PERSON`: `set_kind(id, AccountKind.AGENT)` and one `KIND_CHANGED` event
+    carrying `account_kind` and `previous_account_kind`; its kind is `AGENT`: the account is only read.
 - A token that holds, whose person is admitted:
   - **RESOURCE-24** the request passes with no cookie and no `Origin`, the session gate reading the admission as it reads a person path's;
   - **RESOURCE-25** CSRF reads the admission as it reads a person path's;
-  - **RESOURCE-26** the lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once;
-  - **RESOURCE-27** the person is `AuthenticatedUser(id, username, role)` with the role `"user"` whatever role is stored: a stored admin is admitted as a plain user;
+  - **RESOURCE-26** for a token without the agent group, the lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once;
+  - **RESOURCE-27** the person is `AuthenticatedUser(id, username, role, agent)` with the role `"user"` whatever role is stored: a stored admin is admitted as a plain user, and `agent` is `None` without the agent group;
+  - **RESOURCE-77** with the agent group the admitted agent is `AuthenticatedUser(id, username, "user", agent=AgentFacts(owner, name))` whatever role is stored and whatever kind the account stores, its `kind` derived from `agent`; CSRF and the session gate step aside as RESOURCE-24 and RESOURCE-25 say, `current_user`, `admitted_user` and `resource_person` return it with its `AgentFacts` (RESOURCE-62, RESOURCE-63, RESOURCE-65), and a changed method or `Authorization` header still ends the admission (RESOURCE-67 to RESOURCE-69);
   - **RESOURCE-28** `admin_user` answers that person 403 without `WWW-Authenticate` (a person path's 403 keeps its `insufficient_scope` challenge);
-  - **RESOURCE-29** a store or exit failure is the library's 500 and records no admission.
+  - **RESOURCE-29** a store or exit failure is the library's 500 and records no admission;
+  - **RESOURCE-78** the same for a failed `create_for_subject`, `set_kind`, `USER_CREATED` or `KIND_CHANGED` audit of an agent: the library promises no rollback, so what the failed entry leaves is the host's, as the `SignInTransaction` docstring says: a host whose stores apply each call can keep the `AGENT` account or kind, and a later request then admits it as known with no second event;
+  - **RESOURCE-79** a username already taken at an agent's creation is a plain 403 without `WWW-Authenticate`, after the transaction's cleanup; a failing cleanup stays the 500, as on the person paths;
+  - **RESOURCE-80** a token without the agent group keeps RESOURCE-23, RESOURCE-26, RESOURCE-27 and RESOURCE-60 unchanged, and a stored `AGENT` account met so is only read: its stored kind stays, `agent` is `None`, and the derived `kind` is `PERSON`.
+- **Host duty:** The store keeps each account's kind, an existing store backfills `person`, and its `SubjectUserStore` implements `set_kind`.
+- **Host duty:** An agent account's username is no display name: show an agent by `AgentFacts.name`.
+- **Host duty:** The library only records the kind; "an agent's service account is no person" is the host's to apply with `AuthenticatedUser.kind`.
 - **RESOURCE-30** A credential the gate refuses (a repeated header, a malformed one): that refusal, with the same
   two parameters, and no route runs.
 - **RESOURCE-31** A cookie decides nothing there: no session transaction runs.
@@ -579,7 +606,7 @@ On a marked route:
 - A token that holds runs the entry point's admission:
   - **RESOURCE-58** the groups lack `required_group`: the plain 403;
   - **RESOURCE-59** the groups lack the admission's login group: the plain 403;
-  - **RESOURCE-60** no account has the subject: the plain 403;
+  - **RESOURCE-60** no account has the subject, for a token without the agent group: the plain 403;
   - **RESOURCE-61** a stored admin on an `admin_user` route: the plain 403;
   - **RESOURCE-62** the capped person is recorded for the request's method, so CSRF and the session gate step aside;
   - **RESOURCE-63** `current_user`, `admitted_user` and `resource_person` return the capped person.

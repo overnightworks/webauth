@@ -53,6 +53,7 @@ from webauth.policies import (
 )
 from webauth.ports import (
     AccountEvent,
+    AccountKind,
     AuthenticatedUser,
     RateLimitBackend,
     SessionRecordStore,
@@ -178,6 +179,7 @@ class FakeUser:
     id: str = "user-1"
     username: str = "alice"
     role: str = MEMBER_ROLE
+    kind: AccountKind = AccountKind.PERSON
 
 
 class UnknownAccountError(LookupError):
@@ -204,13 +206,21 @@ class UsersInMemory:
     def get(self, user_id: str) -> FakeUser | None:
         return self._users.get(user_id)
 
-    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
-        return self._add(FakeUser(id=subject, username=username, role=role))
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> FakeUser:
+        return self._add(FakeUser(id=subject, username=username, role=role, kind=kind))
 
     def set_role(self, user_id: str, role: str) -> FakeUser:
         _require_held_lock(self._lock)
         user = self._users[user_id]
         user.role = role
+        return user
+
+    def set_kind(self, user_id: str, kind: AccountKind) -> FakeUser:
+        _require_held_lock(self._lock)
+        user = self._users[user_id]
+        user.kind = kind
         return user
 
     def _add(self, user: FakeUser) -> FakeUser:
@@ -223,25 +233,6 @@ class UsersInMemory:
 
     def list(self) -> list[FakeUser]:
         return list(self._users.values())
-
-
-class UsersWithCaseInsensitiveUsernames(UsersInMemory):
-    """A store whose unique index ignores case."""
-
-    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
-        if any(user.username.casefold() == username.casefold() for user in self.list()):
-            raise UsernameTakenError("Username is already taken")
-        return super().create_for_subject(subject, username, role)
-
-
-class UsersWithoutUniqueUsernames(UsersInMemory):
-    """A store with no unique index on the username."""
-
-    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
-        _require_held_lock(self._lock)
-        user = FakeUser(id=subject, username=username, role=role)
-        self._users[subject] = user
-        return user
 
 
 @dataclass
