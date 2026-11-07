@@ -330,7 +330,7 @@ def test_the_admin_route_refuses_every_other_role(auth_app: AuthApp) -> None:
     ],
 )
 def test_the_admin_route_admits_exactly_the_role_admin(role: str, expected_status: int) -> None:
-    """APP-11 for the admin dependency, whose role check the session gate shares."""
+    """APP-11: the admin dependency admits the role admin alone and refuses every other string."""
     app = an_auth_app(a_session(user=FakeUser(role=role)))
 
     assert app.get("/admin", cookie=app.signed_cookie()).status_code == expected_status

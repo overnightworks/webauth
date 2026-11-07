@@ -390,6 +390,7 @@ class TestAdmittedAdmin:
         path: str,
         role: str,
     ) -> None:
+        """APP-11: the session gate's admitted admin check refuses every role but "admin"."""
         app = a_gated_app_of(role)
         response = ask(app, path, cookie=signed_in(app))
         assert (response.status_code, response.json()) == (403, ADMIN_REQUIRED)
