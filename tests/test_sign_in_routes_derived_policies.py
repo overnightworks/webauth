@@ -42,6 +42,7 @@ from webauth.policies import (
 from webauth.ports import SignInStores
 from webauth.sign_in_routes import (
     LogoutPageText,
+    SignInPaths,
     install_sign_in_routes,
 )
 
@@ -134,6 +135,7 @@ def _a_transaction_nobody_enters() -> AbstractContextManager[SignInStores]:
 
 
 def test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start() -> None:
+    """SIGNIN-09: `login_redirect` sends a signed-out page to the start path."""
     host = _a_gated_host()
 
     start = host.client.get(START_PATH)
@@ -155,6 +157,7 @@ def test_a_signed_out_logout_passes_the_gate_and_enters_no_transaction() -> None
 
 
 def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
+    """SIGNIN-08: the derived cache rule marks the answers of all four routes `no-store`."""
     host = _a_gated_host()
 
     answers = [
@@ -170,6 +173,7 @@ def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
 
 
 def test_the_derived_browser_paths_spend_one_sign_in_budget() -> None:
+    """SIGNIN-04: start, callback and logout spend one sign-in budget."""
     host = _a_gated_host(rate_budget=3)
 
     statuses = [
@@ -184,6 +188,7 @@ def test_the_derived_browser_paths_spend_one_sign_in_budget() -> None:
 
 
 def test_a_back_channel_post_reaches_the_route_past_the_gate_csrf_and_sign_in_budget() -> None:
+    """SIGNIN-05: the derived `backchannel` rules exempt the back-channel from the origin check."""
     host = _a_gated_host(rate_budget=1)
 
     statuses = [
@@ -225,8 +230,57 @@ def test_the_derived_public_rules_open_exactly_four_methods_of_the_sign_in_paths
     *,
     reaches_the_route: bool,
 ) -> None:
+    """SIGNIN-03: the public rules open `GET` of start and callback and `POST` of logout and
+    back-channel, and no other method."""
     host = _a_gated_host()
 
     response = host.client.request(method, path, headers=SAME_ORIGIN_FORM)
 
     assert (response.status_code == 401) is not reaches_the_route
+
+
+_VALID_PATHS = {
+    "start": "/login",
+    "callback": "/callback",
+    "logout": "/logout",
+    "backchannel_logout": "/backchannel",
+}
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param({"start": "login"}, id="a relative start"),
+        pytest.param({"callback": "callback"}, id="a relative callback"),
+        pytest.param({"logout": "logout"}, id="a relative logout"),
+        pytest.param({"backchannel_logout": "backchannel"}, id="a relative back-channel"),
+        pytest.param({"start": "//evil.example/login"}, id="a start another host serves"),
+        pytest.param({"callback": "/\\evil.example"}, id="a callback another host serves"),
+        pytest.param({"callback": "/\t/evil.example"}, id="a callback a browser strips"),
+        pytest.param({"logout": "//evil.example/logout"}, id="a logout another host serves"),
+        pytest.param(
+            {"backchannel_logout": "//evil.example/back"},
+            id="a back-channel another host serves",
+        ),
+        pytest.param({"start": "/a/../login"}, id="a dot segment in start"),
+        pytest.param({"callback": "/a/%2e%2e/callback"}, id="an encoded dot segment"),
+        pytest.param({"logout": "/a/../logout"}, id="a dot segment in logout"),
+        pytest.param({"backchannel_logout": "/a/../back"}, id="a dot segment in the back-channel"),
+        pytest.param({"start": "/login?x=1"}, id="a query in start"),
+        pytest.param({"callback": "/callback#top"}, id="a fragment in callback"),
+        pytest.param({"logout": "/logout?x=1"}, id="a query in logout"),
+        pytest.param({"backchannel_logout": "/back?x=1"}, id="a query in the back-channel"),
+        pytest.param({"callback": "/login"}, id="one path for start and callback"),
+        pytest.param({"logout": "/login"}, id="one path for start and logout"),
+        pytest.param({"logout": "/callback"}, id="one path for callback and logout"),
+        pytest.param({"backchannel_logout": "/login"}, id="the back-channel equal to start"),
+        pytest.param({"backchannel_logout": "/logout"}, id="the back-channel equal to logout"),
+        pytest.param({"backchannel_logout": "/callback"}, id="the back-channel equal to callback"),
+    ],
+)
+def test_a_path_that_is_not_an_absolute_distinct_path_of_this_app_is_refused_at_construction(
+    override: dict[str, str],
+) -> None:
+    """SIGNIN-40: a back-channel path equal to another path of the sign-in is refused."""
+    with pytest.raises(ValueError, match="SignInPaths"):
+        SignInPaths(**{**_VALID_PATHS, **override})

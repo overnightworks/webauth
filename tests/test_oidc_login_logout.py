@@ -113,6 +113,7 @@ def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two
 
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
+    """SIGNIN-63: renewal and rotation keep the login's own ID token as the logout hint."""
     session_clock = FakeClock(float(NOW))
     host = after_signing_in(an_oidc_host(wall_clock=session_clock))
     login_token = host.issued_id_tokens[-1]
@@ -228,7 +229,8 @@ def test_a_same_origin_logout_still_answers_the_page(
     entered: bool,
     keeps_id_token: bool,
 ) -> None:
-    """APP-36: a logout without a row or without an ID token answers the page with no hint."""
+    """SIGNIN-33, APP-36: a logout without a row or without an ID token answers the page with no
+    hint."""
     host = an_oidc_host(keeps_id_token=keeps_id_token)
     if arrange is not _no_session:
         host.callback(host.sign_in_at_issuer())
@@ -324,6 +326,7 @@ def test_a_logout_enters_the_transaction_once_and_reads_no_record_after_its_exit
     *,
     strict_records: bool,
 ) -> None:
+    """SIGNIN-32: the logout enters the transaction once and reads no record after its exit."""
     host = after_signing_in(an_oidc_host(transaction_kind=kind, strict_records=strict_records))
     entries_before = host.transaction.entries
 
@@ -349,6 +352,7 @@ def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
     store_call: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """SIGNIN-34: a store call that raises answers a plain 500, no page, no cookie cleared."""
     host = after_signing_in(an_oidc_host(transaction_kind=kind))
     with monkeypatch.context() as patch:
         failing(host.sessions, store_call, patch)
@@ -363,6 +367,8 @@ def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
 
 
 def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_hint() -> None:
+    """SIGNIN-35, SIGNIN-37: a failing exit answers a plain 500; a rolling-back host keeps the
+    session and a retry ends it with its hint."""
     host = after_signing_in(an_oidc_host(transaction_kind=TransactionKind.ROLLING_BACK))
     host.sessions.commit_failure = StoreDown()
 
@@ -375,6 +381,8 @@ def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_
 
 
 def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_the_hint() -> None:
+    """SIGNIN-35, SIGNIN-38: a failing exit answers a plain 500; the row may be gone and a retry
+    answers the page without the hint."""
     host = after_signing_in(an_oidc_host())
     host.transaction.exit_failure = StoreDown()
 
@@ -421,6 +429,7 @@ def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
     page_text: Callable[[Request], LogoutPageText],
     relying_party_of: Callable[[Request], OidcRelyingParty] | None,
 ) -> None:
+    """SIGNIN-36: an exception in a host callable answers a plain 500 and ends nothing."""
     host = after_signing_in(an_oidc_host(logout_page_text=page_text))
     host.relying_party_of = relying_party_of
     entries_before = host.transaction.entries
@@ -433,6 +442,8 @@ def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
 
 
 def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -> None:
+    """SIGNIN-11, SIGNIN-12, SIGNIN-13: the page's title, button and `<html lang>` come from the
+    request's `logout_page_text`."""
     host = after_signing_in(
         an_oidc_host(
             logout_page_text=lambda request: LogoutPageText(
@@ -465,6 +476,7 @@ def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -
 
 @pytest.mark.parametrize("language", ["de", "en-US", "zh-Hant-TW", "sr-Latn", "de-1996", "en-a1b2"])
 def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(language: str) -> None:
+    """SIGNIN-14: a language tag of letters and digits joined by hyphens is accepted."""
     assert LogoutPageText(language=language, button_label="Out").language == language
 
 
@@ -493,6 +505,7 @@ def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(lang
 def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
     language: object,
 ) -> None:
+    """SIGNIN-14: any other shape raises `ValueError` when the record is built."""
     with pytest.raises(ValueError, match="language"):
         LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
 
@@ -532,6 +545,7 @@ def test_every_route_reads_the_relying_party_again_for_each_request(
     request_to: Callable[[OidcHost], Callable[[], HttpxResponse]],
     status: int,
 ) -> None:
+    """SIGNIN-02: each route reads `relying_party` for each request."""
     host = an_oidc_host()
     send = request_to(host)
     read: list[Request] = []

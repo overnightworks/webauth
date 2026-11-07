@@ -263,6 +263,8 @@ def test_a_failed_commit_after_the_login_issues_no_cookie_and_keeps_the_replaced
 def test_a_failing_create_leaves_the_replaced_and_pruned_sessions_ended_and_the_next_login_restores_nothing(  # noqa: E501
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """SIGNIN-25, SIGNIN-26: a per-call host keeps the sessions ended by replacement and pruning,
+    and the next sign-in restores nothing."""
     opening = OpeningHost.holding(ACCOUNT, ACCOUNT, ACCOUNT, max_sessions=2)
     pruned, kept, replaced = opening.ids()
 
