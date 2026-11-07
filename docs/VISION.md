@@ -1,27 +1,31 @@
 # webauth vision
 
-## The wish
+## What webauth is for
 
-> "eine auth library die mir alles abnimmt, damit ich sie in all meine repos easy wiederverwenden kann"
+webauth takes sign-in and its security off every app. It signs people in through their OpenID Connect provider, keeps
+them signed in, and signs them out at the app and at the provider. It lets other programs call an app with credentials of
+their own. Around that it guards every app the same way: it turns away requests that another site forged, has the browser
+apply its protections, limits how often one address may try, and records what happened for a later security review. An
+app tells it where to keep what must last and has nothing else of its own to build.
 
-> "gemacht von und für agenten? sauber etc?"
+Every app integrates it the same way, from its documentation alone, without reading its code. A security fix is made
+once, and every app gets it by taking the next release.
 
-A professional library: sign-in through the operator's Keycloak, sessions, CSRF and origin checks, security headers,
-machine bearer routes and logout are taken off every app. It works the same in every app, so an agent integrates it from
-the README and the host contract without reading the library's code. An app implements the ports, wires the README's quick
-start and has nothing else to write; a security fix lands once and reaches every app with the next tag.
+It follows OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0 (RFC 6749) with
+bearer tokens (RFC 6750), JSON Web Token (RFC 7519) and Fetch Metadata.
 
-Made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot derive
-from the code, and the code is clean enough that the next agent changes it without fear.
+It is made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot
+derive from the code, and the code is clean enough that the next agent changes it without fear.
 
 ## Who uses it today
 
-The operator, his apps, the services that admit an app acting as itself, and the agents that build and integrate them.
-Every app integrates the same way: one app's need sets a shape for all of them, so all of them are asked.
+The operator, the people who sign in to his apps, the programs that call those apps on their own behalf, and the agents
+that build and integrate them. One app's need shapes webauth for every app, so every app is asked.
 
 ## Deliberate non-goals
 
-- No storage of its own: the host owns durable state through `webauth.ports`.
-- No deployment of its own: the host pins the tag.
-- No identity provider and no password login: it is a relying party of an OpenID Connect issuer.
-- No compatibility layers: a public change breaks cleanly, marked **Breaking**, and leaves no old names, aliases or shims.
+- No storage of its own: each app keeps what must last.
+- No deployment of its own: each app chooses the release it runs.
+- No identity provider and no password login: it relies on an OpenID Connect provider to say who someone is.
+- No compatibility layers: a change that breaks its callers breaks cleanly, says so, and leaves nothing of the old form
+  behind.
