@@ -1,7 +1,0 @@
-claim_id = "ee7c0a8d1f414562a3aa3f0489d86410"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "ab463002a7b45b70fe200ce1f9cf103efb33bb6c"
-branch = "claude/issue-641-host-contract-no-provenance"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md"]
-opened_commit = "ed764c20a6eec95ef149e6fb18a1e641b194748d"
