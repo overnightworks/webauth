@@ -121,7 +121,7 @@ The return path survives login only as a same-origin app path, else the app root
 
 The logout route reads the row's ID token before deleting the session, in one `SignInTransaction` entry and only when the cookie names a session, even for expired rows; it neither renews nor admits.
 It builds an end-session form without an outbound call. CSP admits one script by hash and only the end-session/post-logout origins;
-security headers preserve that policy and `Cache-Control`. [The host contract](host-contract.md#what-every-app-gets) owns outcomes and ruling/proof provenance.
+security headers preserve that policy and `Cache-Control`. [The host contract](host-contract.md#what-every-app-gets) owns the outcomes and names the test that proves each rule.
 [Retention](host-contract.md#the-sign-in-routes) is explicit. webauth never signs, decodes, verifies or logs the hint;
 Keycloak judges it. [Trust](#trust), items 4 and 9, owns exposure and copied-token consequences.
 
