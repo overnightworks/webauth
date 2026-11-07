@@ -398,7 +398,7 @@ class TestHostMiddlewarePlacement:
         status: int,
         admitted_before_the_refusal: int,
     ) -> None:
-        """STACK-01, STACK-02: only the middleware after the call sees each refusal, with headers."""
+        """STACK-01, STACK-02: only the middleware after the call sees a refusal, with headers."""
         client, sightings = arrange()
 
         response = send(client)
