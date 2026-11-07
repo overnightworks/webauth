@@ -658,6 +658,7 @@ def test_a_scope_is_one_scope_token(scope: object) -> None:
 def test_a_gate_needs_one_kind_of_path_and_the_resource_counts_as_one() -> None:
     """RESOURCE-01: a gate with a resource and no path of another kind is valid; a gate with no
     kind at all is a `ValueError`."""
-    assert a_bearer_gate(paths=PathRules(), resource=a_resource()).resource is not None
+    no_paths = PathRules()
+    assert a_bearer_gate(paths=no_paths, resource=a_resource()).resource is not None
     with pytest.raises(ValueError, match="must name"):
-        a_bearer_gate(paths=PathRules())
+        a_bearer_gate(paths=no_paths)
