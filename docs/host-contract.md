@@ -666,7 +666,7 @@ By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) 
 
 ## The sign-in routes
 
-The operator ruled the host duty after SIGNIN-14, SIGNIN-61, SIGNIN-62 and the host duty after it, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
+The operator ruled the host duty that a single-page app logs out by a top-level form POST, SIGNIN-61, the host duty that a host serving no logout route passes `False`, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
 
 - **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
   `FastAPI` app.

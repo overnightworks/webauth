@@ -50,4 +50,5 @@ def test_a_host_test_drives_the_callback_route_through_its_own_stub_of_the_issue
     admitted = host.client.get("/me")
 
     assert len(host.issuer.requests) == 1
+    assert len(host.key_set.fetched_urls) == 1
     assert admitted.status_code == 200
