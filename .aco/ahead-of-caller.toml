@@ -1,0 +1,19 @@
+[[code]]
+path = "src/webauth/middleware/bearer_gate.py"
+item = "overnightworks/agent-runtime#672"
+reason = "the MCP protected resource (ProtectedResource, MarkedRoute, resource_person, install_resource_metadata) waits for every app's MCP endpoint behind webauth's gate."
+
+[[code]]
+path = "src/webauth/oidc/_relying_party.py"
+item = "overnightworks/agent-runtime#672"
+reason = "OidcRelyingParty.resource_token_verifier verifies the MCP protected resource's tokens."
+
+[[code]]
+path = "src/webauth/oidc_login.py"
+item = "overnightworks/presentator#787"
+reason = "fresh_access_token hands presentator the person's token for its speech-runtime call."
+
+[[code]]
+path = "src/webauth/oidc/_relying_party.py"
+item = "overnightworks/presentator#787"
+reason = "OidcRelyingParty.workload_access_token is presentator's own token for its speech-runtime call."
