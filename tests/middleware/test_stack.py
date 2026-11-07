@@ -43,6 +43,7 @@ from tests.support.webauth_arrangement import (
 )
 from webauth.admission import AdmissionConfig
 from webauth.config import install_web_auth_config
+from webauth.dependencies import LoginRedirect
 from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
@@ -284,57 +285,161 @@ class TestLibraryRefusalsCarryTheSecurityHeaders:
         send: Callable[[TestClient], Response],
         refusal: Refusal,
     ) -> None:
-        """STACK-02: every library refusal carries its headers before an outer host sees it."""
+        """A library refusal reaches the client with the policy headers."""
         response = send(client_factory())
         assert response.status_code == refusal.status
         assert response.headers.get("retry-after") == refusal.retry_after
         assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=refusal.hsts)
 
 
+@dataclass
+class HostSightings:
+    reached_inside: list[str]
+    seen_outside: list[Response]
+
+
+def a_client_between_host_middlewares(
+    *,
+    max_requests: int = 100,
+    rate_limits: RateLimitBackend | None = None,
+    session_gate: SessionGate | None = None,
+) -> tuple[TestClient, HostSightings]:
+    app = a_fresh_app(rate_limits=rate_limits)
+    sightings = HostSightings(reached_inside=[], seen_outside=[])
+
+    @app.middleware("http")
+    async def inside(request: Request, call_next):  # type: ignore[no-untyped-def]
+        sightings.reached_inside.append(request.url.path)
+        return await call_next(request)
+
+    install_full_stack(app, max_requests=max_requests, session_gate=session_gate)
+
+    @app.middleware("http")
+    async def outside(request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        sightings.seen_outside.append(response)
+        return response
+
+    client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
+    return client, sightings
+
+
+def get_api_as_a_browser(client: TestClient) -> Response:
+    return client.get(API_PATH, headers={"accept": "text/html"}, follow_redirects=False)
+
+
+A_REDIRECTING_SESSION_GATE = replace(
+    A_SESSION_GATE,
+    login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
+)
+
+
 class TestHostMiddlewarePlacement:
-    def test_host_middleware_added_around_the_call_sees_refusals_only_from_outside(self) -> None:
-        """STACK-01, STACK-02: a middleware before the call never sees a refusal.
+    @pytest.mark.parametrize(
+        ("arrange", "send", "status", "admitted_before_the_refusal"),
+        [
+            pytest.param(
+                a_client_between_host_middlewares,
+                post_oversized,
+                413,
+                0,
+                id="413-by-content-length",
+            ),
+            pytest.param(
+                lambda: a_client_between_host_middlewares(max_requests=1),
+                get_api_twice,
+                429,
+                1,
+                id="429",
+            ),
+            pytest.param(
+                lambda: a_client_between_host_middlewares(
+                    rate_limits=AlwaysFailingRateLimitBackend(),
+                ),
+                get_api,
+                503,
+                0,
+                id="503",
+            ),
+            pytest.param(
+                a_client_between_host_middlewares,
+                post_cross_origin,
+                403,
+                0,
+                id="403-foreign-origin",
+            ),
+            pytest.param(
+                a_client_between_host_middlewares,
+                post_without_provenance,
+                403,
+                0,
+                id="403-missing-provenance",
+            ),
+            pytest.param(
+                lambda: a_client_between_host_middlewares(session_gate=A_REDIRECTING_SESSION_GATE),
+                get_api_as_a_browser,
+                302,
+                0,
+                id="session-gate-302",
+            ),
+            pytest.param(
+                lambda: a_client_between_host_middlewares(session_gate=A_SESSION_GATE),
+                get_api,
+                401,
+                0,
+                id="session-gate-401",
+            ),
+        ],
+    )
+    def test_a_host_middleware_before_the_call_never_sees_a_refusal_one_after_it_sees_it_with_the_headers_set(  # noqa: E501
+        self,
+        arrange: Callable[[], tuple[TestClient, HostSightings]],
+        send: Callable[[TestClient], Response],
+        status: int,
+        admitted_before_the_refusal: int,
+    ) -> None:
+        """STACK-01, STACK-02: only the middleware after the call sees each refusal, with headers."""
+        client, sightings = arrange()
 
-        One added after the call sees it with the library headers set.
-        """
+        response = send(client)
+
+        assert response.status_code == status
+        assert len(sightings.reached_inside) == admitted_before_the_refusal
+        refusal = sightings.seen_outside[-1]
+        assert refusal.status_code == status
+        assert_carries_policy_headers(refusal.headers, HEADERS_POLICY, hsts=True)
+
+    @pytest.mark.parametrize(
+        "outside",
+        [
+            pytest.param(lambda: JSONResponse({}, status_code=204), id="response"),
+            pytest.param(lambda: _raise(RuntimeError("host failed")), id="exception"),
+        ],
+    )
+    def test_what_a_host_middleware_after_the_call_produces_itself_carries_no_library_headers(
+        self,
+        outside: Callable[[], Response],
+    ) -> None:
+        """STACK-03: a response or exception made outside the library stack has no headers."""
         app = a_fresh_app()
-        reached_inside: list[str] = []
-        seen_outside: list[tuple[int, str | None]] = []
-
-        @app.middleware("http")
-        async def inside(request: Request, call_next):  # type: ignore[no-untyped-def]
-            reached_inside.append(request.url.path)
-            return await call_next(request)
-
         install_full_stack(app)
 
         @app.middleware("http")
-        async def outside(request: Request, call_next):  # type: ignore[no-untyped-def]
-            response = await call_next(request)
-            seen_outside.append((response.status_code, response.headers.get("x-frame-options")))
-            return response
+        async def outside_the_library(request: Request, call_next):  # type: ignore[no-untyped-def]
+            return outside()
 
-        response = post_without_provenance(
-            TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False),
-        )
+        response = TestClient(
+            app,
+            base_url=HTTPS_TEST_SERVER,
+            raise_server_exceptions=False,
+        ).get(API_PATH)
 
-        assert response.status_code == 403
-        assert reached_inside == []
-        assert seen_outside == [(403, "DENY")]
-
-    def test_a_response_a_host_middleware_makes_itself_carries_no_library_headers(self) -> None:
-        """STACK-03: a response made outside the library stack has no policy headers."""
-        app = a_fresh_app()
-        install_full_stack(app)
-
-        @app.middleware("http")
-        async def outside(request: Request, call_next):  # type: ignore[no-untyped-def]
-            return JSONResponse({}, status_code=204)
-
-        response = TestClient(app, base_url=HTTPS_TEST_SERVER).get(API_PATH)
-
-        assert response.status_code == 204
+        assert response.status_code in {204, 500}
         assert response.headers.get("x-frame-options") is None
+
+
+def _raise(error: Exception) -> Response:
+    raise error
 
 
 class TestAnExemptWebhookPrefix:
