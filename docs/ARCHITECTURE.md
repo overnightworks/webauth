@@ -156,7 +156,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 
 - The library never commits: durability belongs to the host, so each host decides what a failure keeps ([host contract](host-contract.md#the-sign-in-routes)).
 - It caches no session: the store decides every request, so a session the host ended is refused on its next request ([`SessionRecordStore`](../src/webauth/ports.py)).
-- One install order: a stack that already holds library middleware is refused, so no host middleware can reorder the gates ([`install_web_auth_middleware`](../src/webauth/middleware/stack.py)).
+- One install order: the gates sit in a fixed order, each placed for what it must see first, so a stack that already holds library middleware is refused untouched ([`install_web_auth_middleware`](../src/webauth/middleware/stack.py)).
 - The store is bound to one issuer: an account's `id` is the issuer's subject, so moving issuers is a migration of the host's accounts ([`oidc_login`](../src/webauth/oidc_login.py)).
 - The pending login lives in its own signed cookie, one per login, so two tabs never overwrite each other and the library keeps no server-side store ([`oidc_login`](../src/webauth/oidc_login.py)).
 - ASGI owns HTTP framing (h11 and httptools may legally differ), so the body-size limit counts streamed bytes and never re-parses framing.
