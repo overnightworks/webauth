@@ -56,8 +56,10 @@ from webauth.cookies import (
     _sign_pending_login,
     _verify_pending_login,
 )
+from webauth.https_client import ExchangeFailure
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
+    TokenEndpointError,
 )
 from webauth.ports import (
     AccountEventKind,
@@ -320,6 +322,25 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.accounts.list() == []
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
+
+
+def test_a_callback_the_app_cannot_complete_because_the_issuer_is_unreachable_stops_at_the_refusal() -> None:
+    """APP-24: the browser reached the issuer, the app's token exchange cannot."""
+    host = an_oidc_host()
+    query = host.sign_in_at_issuer()
+
+    def unreachable() -> None:
+        raise TokenEndpointError("the issuer is down", ExchangeFailure.UNREACHABLE)
+
+    host.issuer.before_exchange = unreachable
+
+    response = host.callback(query)
+
+    assert (response.status_code, response.json()) == (403, {"refusal": "token-endpoint-failed"})
+    assert host.config.session_cookie_name not in set_cookies(response)
+    assert host.sessions.count_active() == 0
+    assert host.accounts.list() == []
+    assert is_cleared(response, host.pending_cookie_name(query))
 
 
 def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() -> None:
