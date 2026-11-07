@@ -35,15 +35,13 @@ neither an ID nor a label explains. A section without IDs still names its proofs
 
 ## What every app gets
 
-The operator ruled APP-20, APP-21, APP-22, APP-33, APP-34, APP-35 and APP-36; no other sentence of this section is ruled.
+The operator ruled APP-20, APP-21, APP-22, APP-34, APP-35, APP-36 and APP-37; no other sentence of this section is ruled.
 
 Every app that signs people in through Keycloak behaves the same way, except for the
 two values below. The details are in the sections that follow.
 
-- **APP-01** An app that configures `EverySubject` requires no login group: a person of
-  the bound issuer gets in without groups.
-- **APP-02** An app that configures `NoAdmins` grants no admin role, whatever the
-  person's groups.
+- **APP-01** An app that configures `EverySubject` requires no login group.
+- **APP-02** An app that configures `NoAdmins` grants no admin role.
 - **APP-03** Only members of the app's `login_group`, such as `/apps/notes`, get in.
 - **APP-04** Members of its `admin_group`, a path below it such as
   `/apps/notes/admin`, are admins.
@@ -96,39 +94,43 @@ migration of stored accounts changes these values.
   Keycloak but the app does not, does the sign-in stop at the app's callback, on the
   host's refusal page.
 
-When Keycloak is down, a new sign-in fails at Keycloak: the app sends the browser to
-Keycloak's sign-in page, which does not load, so the person sees the browser's or the
-proxy's error page, not the app's. webauth offers no local fallback login. See
+When Keycloak is down, a new sign-in fails at Keycloak, not at the app.
+
+- **APP-25** The sign-in route answers with a redirect to the issuer's sign-in page and
+  reaches no issuer endpoint first.
+
+That page does not load, so the person sees the browser's or the proxy's error page, not
+the app's. webauth offers no local fallback login. See
 [The store decides every request](ARCHITECTURE.md#the-store-decides-every-request).
 
 For the machine callers and the person's token, see
 [The host's machine routes](#the-hosts-machine-routes)
 and [The person's token on the app's API](#the-persons-token-on-the-apps-api).
 
-- **APP-25** Signing out of an app ends its session in that browser at once.
-- **APP-26** Signing out shows a short page that posts to Keycloak.
-- **APP-27** Posting that page to Keycloak ends the person's Keycloak session in that
+- **APP-26** Signing out of an app ends its session in that browser at once.
+- **APP-27** Signing out shows a short page that posts to Keycloak.
+- **APP-28** Posting that page to Keycloak ends the person's Keycloak session in that
   browser without asking anything.
-- **APP-28** Each app that Keycloak tells ends all of the person's sessions, on every
+- **APP-29** Each app that Keycloak tells ends all of the person's sessions, on every
   device.
-- **APP-29** The logout page is `no-store`.
-- **APP-30** The logout page clears the app's cookies.
-- **APP-31** The logout page submits itself; where scripts cannot run, it shows one
+- **APP-30** The logout page is `no-store`.
+- **APP-31** The logout page clears the app's cookies.
+- **APP-32** The logout page submits itself; where scripts cannot run, it shows one
   button.
-- **APP-32** If Keycloak is down, the person still leaves the app signed out.
+- **APP-33** If Keycloak is down, the person still leaves the app signed out.
 
 Keycloak tells each app the person signed in to through that Keycloak session. An app
 they used only on another device is not told and keeps them signed in there. On their
 other devices, the next sign-in asks for no password while that device's own Keycloak
 session lasts.
 
-- **APP-33** The page sends the client ID, `post_logout_redirect_uri` and the stored ID
+- **APP-34** The page sends the client ID, `post_logout_redirect_uri` and the stored ID
   token as `id_token_hint` by POST to Keycloak's end-session endpoint.
-- **APP-34** No URL carries the token.
-- **APP-35** Without the session's row (ended by the host, swept, pruned or ended by
+- **APP-35** No URL carries the token.
+- **APP-36** Without the session's row (ended by the host, swept, pruned or ended by
   back-channel logout), or with a row that holds no ID token (stored before the host
   held them or opened with `keeps_id_token=False`), the page sends no hint.
-- **APP-36** Without a hint, Keycloak asks once to confirm while its own session lives.
+- **APP-37** Without a hint, Keycloak asks once to confirm while its own session lives.
 
 If the realm key that signed a supplied token has been deleted since, Keycloak shows
 an error page instead. See

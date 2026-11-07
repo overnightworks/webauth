@@ -32,6 +32,7 @@ from tests.support.oidc_login_host import (
     LOGIN_GROUP,
     NOW,
     SAME_ORIGIN_FORM,
+    START_PATH,
     SUBJECT,
     OidcHost,
     a_client_config,
@@ -103,6 +104,24 @@ def test_a_start_sets_one_lax_http_only_pending_cookie_and_answers_the_issuer_ur
             *secure_attribute,
         },
     }
+
+
+def test_a_start_redirects_to_the_issuers_sign_in_page_and_reaches_no_issuer_endpoint() -> None:
+    """APP-24, APP-25: the start route redirects to the issuer's page, asking the issuer nothing."""
+    host = an_oidc_host()
+
+    def unreachable() -> None:
+        raise OSError("the issuer is down")
+
+    host.issuer.before_exchange = unreachable
+    host.key_set.before_answer = unreachable
+
+    response = host.client.get(START_PATH)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(a_client_config().authorization_endpoint + "?")
+    assert host.issuer.requests == []
+    assert host.key_set.fetched_urls == []
 
 
 def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies() -> None:

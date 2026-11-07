@@ -60,7 +60,7 @@ def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
 
 
 def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint() -> None:
-    """APP-26, APP-33, APP-34: the page posts client, redirect and hint to the end-session URL."""
+    """APP-27, APP-34, APP-35: the page posts client, redirect and hint to the end-session URL."""
     host = after_signing_in(an_oidc_host())
 
     response = post_logout(host, SAME_ORIGIN_FORM)
@@ -139,7 +139,7 @@ def the_session_cookie_is_cleared(host: OidcHost, response: HttpxResponse) -> bo
 
 
 def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings() -> None:
-    """APP-25, APP-30, APP-34: a logout ends the row, clears the cookie, leaks no token."""
+    """APP-26, APP-31, APP-35: a logout ends the row, clears the cookie, leaks no token."""
     host = after_signing_in(an_oidc_host())
     record = host.sessions.stored_record
     record.id_token = SecretStr(a_fake_id_token("held-by-the-row"))
@@ -225,7 +225,7 @@ def test_a_same_origin_logout_still_answers_the_page(
     entered: bool,
     keeps_id_token: bool,
 ) -> None:
-    """APP-35: a logout without a row or without an ID token answers the page with no hint."""
+    """APP-36: a logout without a row or without an ID token answers the page with no hint."""
     host = an_oidc_host(keeps_id_token=keeps_id_token)
     if arrange is not _no_session:
         host.callback(host.sign_in_at_issuer())
@@ -262,7 +262,7 @@ def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]
 
 
 def test_a_logout_reaches_no_issuer_endpoint() -> None:
-    """APP-32: a logout with the issuer down still ends the session and answers the page."""
+    """APP-33: a logout with the issuer down still ends the session and answers the page."""
     host = after_signing_in(an_oidc_host())
     exchanges_before = len(host.issuer.requests)
     fetches_before = len(host.key_set.fetched_urls)
@@ -282,7 +282,7 @@ def test_a_logout_reaches_no_issuer_endpoint() -> None:
 
 
 def test_the_logout_form_carries_the_configured_values_whatever_the_request_names() -> None:
-    """APP-33: the form carries the configured client and redirect, whatever the request names."""
+    """APP-34: the form carries the configured client and redirect, whatever the request names."""
     host = after_signing_in(an_oidc_host())
     query = urllib.parse.urlencode(
         {

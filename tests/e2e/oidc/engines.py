@@ -51,7 +51,7 @@ def logout_through_the_page(
     javascript: bool,
     back_button: bool = False,
 ) -> str:
-    """APP-31, CSRF-16, CSRF-17: a real browser signs in and posts the logout through the page.
+    """APP-32, CSRF-16, CSRF-17: a real browser signs in and posts the logout through the page.
 
     The app's CSRF check admits the browser's own Origin and Sec-Fetch-Site.
     """
