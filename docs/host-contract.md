@@ -261,15 +261,16 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
 - **REFUSE-26** Both types reach the host's refused hook inside a `SignInRefusal`, whose
   `page` is this mapping; see [The sign-in routes](#the-sign-in-routes).
 - **REFUSE-27** A refusal carries no identity.
-  The page therefore has no name to show.
 - **REFUSE-28** A `NOT_A_MEMBER` login stores no session.
-  Signing out from "no access" therefore follows the missing-ID-token case in
-  [Signing out](#what-every-app-gets).
 - **Host duty:** page choice and presentation.
 - **Host duty:** give the three pages (logged out, no access, login failed), their
   wording and their ways out, the sign-in pattern of
   [ui-style](https://github.com/overnightworks/ui-style); take the colours from the
   app's own tokens.
+
+A refusal carries no identity, so the page has no name to show. A refused login stores no
+session, so signing out from "no access" follows the missing-ID-token case in
+[Signing out](#what-every-app-gets).
 
 ## The host's machine routes
 
