@@ -139,7 +139,7 @@ The host contract names the test that proves each rule.
 
 ### Trust
 
-1. **Browser to library** (cookies, [CSRF](host-contract.md#csrf-origin), Origin, [return path](#the-return-path), body size, [the session gate](#the-session-gate), [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that .
+1. **Browser to library** (cookies, [CSRF](host-contract.md#csrf-origin), Origin, [return path](#the-return-path), body size, [the session gate](#the-session-gate), [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that.
 2. **Library to issuer:** the configured issuer is trusted for what it signs and serves over TLS, and gets no defence beyond the JOSE and OpenID Connect specifications and PyJWT.
    - In scope: anyone presenting a token that lacks the issuer's signature or carries the wrong `alg`, `aud`, `iss`, type or time.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect.
@@ -168,6 +168,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 - An admin token opens every machine route; there is no sender constraint (no DPoP or mTLS).
 - A person's token is the person until its `exp` plus leeway, and a sign-out does not end it; the [host contract](host-contract.md#the-persons-token-on-the-apps-api) owns the person-path residues. Every token request there, and every request at a resource's entry point or marked route whose token holds the groups, enters the host's serialized transaction.
 - Only the realm keeps a service account out of the admin group. Key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
+- A compromised app credential defeats the replay protection between services ([trust boundary 8](#trust)). `account` stays in `aud` of tokens as the realm issues them.
 - A workload token the issuer signs with a longer life, for example through a client-level override, is admitted until its `exp` plus leeway; the realm's lifespan and its probe own that bound.
 - The ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of that page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session.
 - A logout that completes before a verified sign-in cannot end that later session; closing that needs sessions bound to the issuer's `sid`. A failed sign-in is not repaired later: a host whose store applies each call keeps the account created, the sessions ended and the events recorded before the failure.
