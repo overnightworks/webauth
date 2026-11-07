@@ -6,8 +6,8 @@ person's caller; every fault of either token yields the first refusal of the doc
 
 from __future__ import annotations
 
+import inspect
 import logging
-from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -25,6 +25,27 @@ from tests.support.oidc_arrangement import (
     an_access_token,
     served_key_set,
 )
+from tests.support.service_caller_arrangement import (
+    CALLEE,
+    CANARIES,
+    CLIENT_CANARY,
+    GROUP_CANARY,
+    PERSON_GROUP_CANARY,
+    PERSON_SUBJECT_CANARY,
+    SECRET_PATH,
+    SUBJECT_CANARY,
+    UNREGISTERED,
+    WORKLOAD_CLIENT,
+    WORKLOAD_ROLE,
+    a_check,
+    a_person_token,
+    a_registry,
+    a_service_identity,
+    a_workload_token,
+    an_app_admission,
+    assert_message_keeps_identity_private,
+    refused,
+)
 from webauth.admission import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import RejectionReason
@@ -34,105 +55,7 @@ from webauth.service_callers import (
     PersonCaller,
     Principal,
     RegisteredApp,
-    ServiceCallerCheck,
-    ServiceIdentity,
 )
-
-CALLEE = "speech-runtime"
-WORKLOAD_ROLE = "workload"
-GROUP_CLAIM = "groups"
-WORKLOAD_CLIENT = "notes-workload"
-# Canaries: recognisable text that appears nowhere in the configuration
-SUBJECT_CANARY = "subject-canary-7f3a"
-CLIENT_CANARY = "client-canary-9b1c"
-GROUP_CANARY = "/group-canary-4d2e"
-PERSON_SUBJECT_CANARY = "person-canary-2c8d"
-PERSON_GROUP_CANARY = "/apps/notes/person-group-canary-6a0b"
-CANARIES = (
-    SUBJECT_CANARY,
-    CLIENT_CANARY,
-    GROUP_CANARY,
-    PERSON_SUBJECT_CANARY,
-    PERSON_GROUP_CANARY,
-)
-SECRET_PATH = "/realms/workshop/certs-secret-path-5e6f"
-UNREGISTERED = "unregistered-client"
-
-
-def an_app_admission() -> AdmissionConfig:
-    return AdmissionConfig(
-        bound_issuer=REALM_ISSUER,
-        login_group="/apps/notes",
-        admin_group=NoAdmins.IN_THIS_APP,
-    )
-
-
-def a_service_identity(**changes: Any) -> ServiceIdentity:
-    arguments: dict[str, Any] = {
-        "issuer": REALM_ISSUER,
-        "audience": CALLEE,
-        "jwks_url": REALM_JWKS_URL,
-        "workload_role": WORKLOAD_ROLE,
-        "group_claim": GROUP_CLAIM,
-        "leeway_seconds": ACCESS_TOKEN_LEEWAY_SECONDS,
-    }
-    return ServiceIdentity(**{**arguments, **changes})
-
-
-def a_registry(client: str = WORKLOAD_CLIENT) -> dict[str, RegisteredApp]:
-    return {client: RegisteredApp(app="notes", admission=an_app_admission())}
-
-
-def a_check(
-    *,
-    identity: ServiceIdentity | None = None,
-    registered_apps: Any = None,
-    fetch_key_set: Callable[[str], bytes] | None = None,
-    monotonic_clock: Callable[[], float] | None = None,
-) -> ServiceCallerCheck:
-    return ServiceCallerCheck(
-        identity or a_service_identity(),
-        registered_apps=a_registry() if registered_apps is None else registered_apps,
-        fetch_key_set=fetch_key_set or FakeKeySetEndpoint(served_key_set()),
-        wall_clock=FakeClock(float(ACCESS_TOKEN_NOW)),
-        monotonic_clock=monotonic_clock or FakeClock(5_000.0),
-    )
-
-
-def a_workload_token(**claim_changes: Any) -> str:
-    """The token of `WORKLOAD_CLIENT` for `CALLEE`, as Keycloak signs a client-credentials grant."""
-    claims = {
-        "aud": CALLEE,
-        "azp": WORKLOAD_CLIENT,
-        "client_id": WORKLOAD_CLIENT,
-        "realm_access": {"roles": [WORKLOAD_ROLE]},
-        "sub": SUBJECT_CANARY,
-        **claim_changes,
-    }
-    return an_access_token(claims=claims)
-
-
-def a_person_token(**claim_changes: Any) -> str:
-    """A person's token for `WORKLOAD_CLIENT`: no workload role, no `client_id`."""
-    claims = {
-        "aud": CALLEE,
-        "azp": WORKLOAD_CLIENT,
-        "sub": PERSON_SUBJECT_CANARY,
-        "groups": ["/apps/notes"],
-        **claim_changes,
-    }
-    return an_access_token(claims=claims)
-
-
-def assert_message_keeps_identity_private(error: pytest.ExceptionInfo[ValueError]) -> None:
-    message = str(error.value)
-    leaked = [secret for secret in (REALM_JWKS_URL, SECRET_PATH, *CANARIES) if secret in message]
-    assert leaked == []
-
-
-def refused(outcome: object) -> CallerRefusal:
-    assert isinstance(outcome, CallerRefusal)
-    return outcome
 
 
 def test_a_workload_token_may_name_other_audiences_beside_the_callee() -> None:
@@ -142,6 +65,7 @@ def test_a_workload_token_may_name_other_audiences_beside_the_callee() -> None:
 
 
 def test_a_cached_key_set_still_verifies_the_workload_token_after_a_failed_refresh() -> None:
+    """CALLER-25: with a usable cached key, a failed refresh still verifies both tokens."""
     endpoint = FakeKeySetEndpoint(served_key_set())
     monotonic = FakeClock(5_000.0)
     check = a_check(fetch_key_set=endpoint, monotonic_clock=monotonic)
@@ -260,6 +184,7 @@ def test_an_invalid_identity_field_is_refused_by_name(
 
 
 def test_the_identity_repr_never_shows_the_key_set_url() -> None:
+    """CALLER-33: `jwks_url` is left out of the repr of `ServiceIdentity`."""
     secret_url = f"https://login.example.org{SECRET_PATH}"
 
     assert secret_url not in repr(a_service_identity(jwks_url=secret_url))
@@ -349,6 +274,8 @@ def test_a_refusal_rejects_a_token_rejection_that_does_not_match_its_reason(
 def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """CALLER-32: nothing taken from the workload token or the person token (subject, client id,
+    groups) appears in a repr, an error message or a log record of the module."""
     secret_url = f"https://login.example.org{SECRET_PATH}"
     identity = a_service_identity(jwks_url=secret_url)
     registry = {CLIENT_CANARY: RegisteredApp("notes", an_app_admission())}
@@ -356,17 +283,25 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
     caller_token = a_workload_token(
         azp=CLIENT_CANARY, client_id=CLIENT_CANARY, groups=[GROUP_CANARY]
     )
-    person = a_person_token(azp=CLIENT_CANARY)
+    person = a_person_token(azp=CLIENT_CANARY, groups=[PERSON_GROUP_CANARY, "/apps/notes"])
     refused_tokens = [
         a_workload_token(azp=CLIENT_CANARY, client_id="other-client", groups=[GROUP_CANARY]),
         a_workload_token(groups=GROUP_CANARY),
         a_workload_token(realm_access={"roles": []}),
         a_workload_token(sub=ABSENT),
     ]
+    refused_people = [
+        a_person_token(azp="another-client"),
+        a_person_token(azp=CLIENT_CANARY, sub=SUBJECT_CANARY),
+        a_person_token(azp=CLIENT_CANARY, groups=[PERSON_GROUP_CANARY]),
+        a_person_token(azp=CLIENT_CANARY, groups=PERSON_GROUP_CANARY),
+    ]
     with caplog.at_level(logging.DEBUG):
         admitted = check.person_caller(caller_token, person)
         refusals = [check.person_caller(token, person) for token in refused_tokens]
+        refusals += [check.person_caller(caller_token, token) for token in refused_people]
     assert isinstance(admitted, PersonCaller)
+    assert PERSON_GROUP_CANARY in admitted.groups
     with pytest.raises(ValueError, match="audience") as configuration_refusal:
         a_service_identity(audience=5)
 
@@ -387,9 +322,18 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
 
 
 def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role() -> None:
-    admitted = a_check().person_caller(
+    """CALLER-03, CALLER-04, CALLER-31: `person_caller` returns to a plain call a
+    `PersonCaller` with the app, client id and the person's identity, groups and role, or a
+    `CallerRefusal`; the check applies no policy beyond membership and passes every group of the
+    person on."""
+    check = a_check()
+    admitted = check.person_caller(
         a_workload_token(), a_person_token(groups=[PERSON_GROUP_CANARY, "/apps/notes"])
     )
+    refusal = check.person_caller(None, a_person_token())
+    assert not inspect.isawaitable(admitted)
+    assert not inspect.isawaitable(refusal)
+    assert isinstance(refusal, CallerRefusal)
 
     assert admitted == PersonCaller(
         app="notes",
@@ -410,9 +354,25 @@ def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role
     ],
 )
 def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> None:
+    """CALLER-21: the person token gets no role check, with the workload role or without."""
     admitted = a_check().person_caller(a_workload_token(), a_person_token(**changes))
 
     assert isinstance(admitted, PersonCaller)
+
+
+def test_a_person_token_azp_binds_the_client_and_no_exchange_claim_stands_in_for_it() -> None:
+    """CALLER-22: the person token's `azp` is the client binding and is never evidence of an
+    exchange: `act` and `may_act` do not stand in for it."""
+    check = a_check()
+    exchange_claims = {"act": {"sub": "exchanging-client"}, "may_act": {"sub": "exchanging-client"}}
+
+    bound = check.person_caller(a_workload_token(), a_person_token())
+    another_client_with_exchange = check.person_caller(
+        a_workload_token(), a_person_token(azp="another-client", **exchange_claims)
+    )
+
+    assert isinstance(bound, PersonCaller)
+    assert refused(another_client_with_exchange).reason is CallerRefusalReason.CLIENT_MISMATCH
 
 
 @pytest.mark.parametrize(

@@ -41,13 +41,14 @@ from tests.support.gate_arrangement import (
     an_agent_token,
     answering_a_runtime_error_with_418,
     bearing,
+    between_the_bearer_gate_and_csrf,
     the_accounts,
     the_transaction,
 )
 from tests.support.oidc_arrangement import ABSENT, ACCESS_TOKEN_NOW, OPERATOR_SUBJECT
 from tests.support.oidc_login_host import failing
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE
-from webauth.middleware import BearerGateMiddleware, MarkedRoute, ProtectedResource
+from webauth.middleware import MarkedRoute, ProtectedResource
 
 
 @pytest.fixture
@@ -107,9 +108,9 @@ def test_csrf_refuses_a_marked_route_request_made_mutating_after_admission(
 ) -> None:
     """RESOURCE-62: the capped person is recorded for the request's method, so a marked-route
     request made mutating after admission is refused by CSRF."""
-    stack = app.auth.app.user_middleware
-    gate = next(at for at, entry in enumerate(stack) if entry.cls is BearerGateMiddleware)
-    stack.insert(gate + 1, Middleware(RewritingTheRequest, changes={"method": "POST"}))
+    between_the_bearer_gate_and_csrf(
+        app, Middleware(RewritingTheRequest, changes={"method": "POST"})
+    )
 
     response = app.ask(A_NOTE, method="GET", authorization=bearing(an_agent_token(resource)))
 

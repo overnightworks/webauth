@@ -31,6 +31,7 @@ from tests.support.gate_arrangement import (
     answering_a_runtime_error_with_418,
     assert_no_bearer_admission,
     bearing,
+    between_the_bearer_gate_and_csrf,
     relayed,
     the_accounts,
     the_transaction,
@@ -42,7 +43,6 @@ from tests.support.oidc_login_host import StoreDown, failing
 from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
-    BearerGateMiddleware,
     ProtectedResource,
     admitted_user,
     resource_person,
@@ -316,12 +316,6 @@ def an_admitted_user_reader(app: BearerApp, resource: ProtectedResource) -> None
     def reading(request: Request) -> dict[str, str | None]:
         user = admitted_user(request)
         return {"id": None if user is None else user.id}
-
-
-def between_the_bearer_gate_and_csrf(app: BearerApp, rewriting: Middleware) -> None:
-    stack = app.auth.app.user_middleware
-    gate = next(at for at, entry in enumerate(stack) if entry.cls is BearerGateMiddleware)
-    stack.insert(gate + 1, rewriting)
 
 
 @pytest.mark.parametrize(

@@ -27,6 +27,7 @@ from webauth.service_callers import CallerRefusal, CallerRefusalClass, CallerRef
 def test_a_refusal_names_the_class_the_host_contract_gives_its_reason(
     reason: str, refusal_class: CallerRefusalClass
 ) -> None:
+    """CALLER-08: `CallerRefusal.refusal_class` names the `CallerRefusalClass` of each reason."""
     reason_member = CallerRefusalReason(reason)
     rejection = RejectionReason.EXPIRED if reason == "token-rejected" else None
 
