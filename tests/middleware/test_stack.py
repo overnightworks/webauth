@@ -20,7 +20,7 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, StreamingResponse
-from starlette.types import Message
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tests.support.oidc_arrangement import a_relying_party
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
@@ -116,6 +116,16 @@ class RouteFailure(RuntimeError):
 
 ROUTE_FAILURE = RouteFailure("mid-stream")
 DOWNSTREAM_MARK: ContextVar[str] = ContextVar("downstream_mark", default="unset")
+INNER_MIDDLEWARE_MARK: ContextVar[str] = ContextVar("inner_middleware_mark", default="unset")
+
+
+class ContextSettingMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        INNER_MIDDLEWARE_MARK.set("set-by-the-inner-middleware")
+        await self.app(scope, receive, send)
 
 
 def a_rate_limit_policy(max_requests: int) -> RateLimitPolicy:
@@ -759,6 +769,20 @@ class TestResponsesBehindThePureAsgiMiddlewares:
         assert start["status"] == 200
         assert completed(sent)
         assert_carries_policy_headers(Headers(raw=start["headers"]), HEADERS_POLICY, hsts=True)
+
+    @pytest.mark.anyio
+    async def test_a_context_variable_set_by_an_inner_middleware_is_visible_to_the_caller_after_the_call(  # noqa: E501
+        self,
+    ) -> None:
+        """STACK-04: the middlewares run an inner middleware in the caller's task."""
+        app = a_fresh_app()
+        app.add_middleware(ContextSettingMiddleware)
+        install_full_stack(app)
+        scope = an_http_scope(app, API_PATH, spec_version=SPEC_WITHOUT_CONCURRENT_READER)
+
+        await drive(app, scope, body_chunks=(b"",))
+
+        assert INNER_MIDDLEWARE_MARK.get() == "set-by-the-inner-middleware"
 
     def test_an_admitted_routes_background_task_runs(self) -> None:
         app = an_authenticated_full_stack_app()
