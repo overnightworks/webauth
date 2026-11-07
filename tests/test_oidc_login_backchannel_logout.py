@@ -399,12 +399,17 @@ def test_an_oversized_logout_body_is_refused_and_ends_nothing(
     ],
 )
 def test_a_path_next_to_the_back_channel_stays_csrf_protected(path: str) -> None:
-    """SIGNIN-43: only the exact back-channel path is exempt from the origin check."""
+    """SIGNIN-43: the exact back-channel path is exempt from the origin check, and no other path is."""
     host = after_signing_in(an_oidc_host())
 
     response = host.client.post(path, headers=FORM, content=b"logout_token=x")
+    sessions_after_the_neighbour = host.sessions.count_active()
+    exact = host.client.post(
+        BACKCHANNEL_LOGOUT_PATH, headers=FORM, content=a_form_of(a_logout_token_of_the_issuer())
+    )
 
-    assert (response.status_code, host.sessions.count_active()) == (403, 1)
+    assert (response.status_code, sessions_after_the_neighbour) == (403, 1)
+    assert exact.status_code == 200
 
 
 def _the_deletion_fails(host: OidcHost, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -612,17 +617,18 @@ def _the_verification_raises(host: OidcHost, monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.parametrize(
-    "fail",
+    ("fail", "raised_type"),
     [
-        pytest.param(_the_relying_party_raises, id="relying-party"),
-        pytest.param(_the_verification_raises, id="verification"),
-        pytest.param(_the_deletion_fails, id="store"),
-        pytest.param(_the_audit_sink_fails, id="audit-sink"),
-        pytest.param(_the_exit_fails, id="exit"),
+        pytest.param(_the_relying_party_raises, StoreDown, id="relying-party"),
+        pytest.param(_the_verification_raises, StoreDown, id="verification"),
+        pytest.param(_the_deletion_fails, StoreDown, id="store"),
+        pytest.param(_the_audit_sink_fails, StoreDown, id="audit-sink"),
+        pytest.param(_the_exit_fails, ConnectionError, id="exit"),
     ],
 )
 def test_a_back_channel_failure_is_raised_once_the_400_is_sent(
     fail: Callable[[OidcHost, pytest.MonkeyPatch], None],
+    raised_type: type[Exception],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SIGNIN-53: an exception in the relying party, verification, store, audit sink or exit gets an
@@ -642,7 +648,7 @@ def test_a_back_channel_failure_is_raised_once_the_400_is_sent(
 
     assert [message["status"] for message in starts(messages)] == [400]  # pyright: ignore[reportArgumentType]
     assert body_of(messages) == b""
-    assert isinstance(raised, StoreDown | ConnectionError)
+    assert type(raised) is raised_type
 
 
 @pytest.mark.parametrize("strict_records", [False, True], ids=["plain", "strict"])
@@ -687,14 +693,16 @@ def test_the_back_channel_answers_200_only_after_the_exit_returned(
     ],
 )
 def test_a_path_next_to_the_back_channel_spends_the_address_budget(path: str) -> None:
-    """SIGNIN-44: only the exact back-channel path is exempt from the rate limit."""
+    """SIGNIN-44: the exact back-channel path is exempt from the rate limit, and no other path is."""
     host = a_host_with_sessions(subject_sessions=1, address_budget=1)
     host.client.get("/me")
     assert host.client.get("/me").status_code == 429
 
     response = host.client.post(path, headers=SAME_ORIGIN_FORM, content=b"logout_token=x")
+    exact = post_logout_token(host, a_logout_token_of_the_issuer())
 
     assert response.status_code == 429
+    assert exact.status_code == 200
 
 
 @pytest.mark.parametrize(

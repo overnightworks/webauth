@@ -6,7 +6,7 @@ A rule webauth promises opens with its ID, such as **CSRF-01**, and a test that
 proves it names the ID at the start of its docstring. A test under `tests/e2e/`
 runs by hand against a real Keycloak, not in CI. A paragraph or bullet that opens
 with **Host duty:** says what the host must do and prove itself. A sentence with
-neither an ID nor a label explains. A section without IDs still names its proofs in its own lines.
+neither an ID nor a label explains.
 
 ## Trusted proxies
 
@@ -666,7 +666,7 @@ By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) 
 
 ## The sign-in routes
 
-The operator ruled SIGNIN-61, the host duty after SIGNIN-62, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
+The operator ruled the host duty after SIGNIN-14, SIGNIN-61, SIGNIN-62 and the host duty after it, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
 
 - **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
   `FastAPI` app.
@@ -717,7 +717,7 @@ What is rolled back is the host's choice:
 - **SIGNIN-24** an exception in the block escapes through the exit, and a rolling-back host keeps none of the account created, the sessions ended and the events recorded;
 - **SIGNIN-25** a host whose stores apply each call keeps the account created and the events recorded before the failure;
 - **SIGNIN-26** a host whose stores apply each call keeps the sessions ended by replacement or pruning;
-- **SIGNIN-27** after a failure, the next sign-in opens a new session and restores nothing.
+- **SIGNIN-27** a host whose stores apply each call opens a new session at its next sign-in after a failure and restores nothing.
 
 The hook:
 
@@ -793,21 +793,26 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 
 ## Testing a host
 
-A test that needs a signed-in person needs no issuer. It creates the account and
-a session inside the configured lifetime in the host's own store, calls
-`issue_session_cookies(response, session_id, config)` from `webauth.cookies` on
-a `Response` and copies the one cookie it sets into its client. A state-changing
-request also sends `Sec-Fetch-Site: same-origin` ([CSRF origin](#csrf-origin)).
-When the client keeps the cookie's attributes and `cookie_secure` is on, use an
-`https` base URL.
+A test that needs a signed-in person needs no issuer:
 
-A test of a host that installs the sign-in routes gives
-`OidcRelyingParty` its own `post_token_request` (a `TokenRequestPost`, from
-`webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from
-`webauth.jwt_verification`) instead of the HTTPS ones. The host owns that stub.
+- **Host duty:** it creates the account and a session inside the configured lifetime in the host's own store.
+- **HOSTTEST-01** `issue_session_cookies(response, session_id, config)` from `webauth.cookies`, called on a `Response`, sets one cookie.
+- **Host duty:** it copies that cookie into its client.
+- **HOSTTEST-02** A request with that cookie and that session in the store is admitted as that person on a session path.
+- **HOSTTEST-03** A state-changing request is admitted the same way when it also sends `Sec-Fetch-Site: same-origin` ([CSRF origin](#csrf-origin)).
+- **Host duty:** when the client keeps the cookie's attributes and `cookie_secure` is on, it uses an `https` base URL.
+
+A test of a host that installs the sign-in routes:
+
+- **HOSTTEST-04** `OidcRelyingParty` takes its own `post_token_request` (a `TokenRequestPost`, from
+  `webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from `webauth.jwt_verification`) instead of the HTTPS ones,
+  and the callback route then makes no HTTPS call.
+- **Host duty:** the host owns that stub.
 
 The sign-in flow itself is proven against a real issuer: webauth's own proof
 drives Keycloak in a real browser ([run the browser
-proof](runbooks/run-the-browser-proof.md)). A host proves its own sign-in
-against an issuer of its choosing. webauth ships no fake issuer, because one
-that mints tokens does not belong in every production install.
+proof](runbooks/run-the-browser-proof.md)).
+
+- **Host duty:** a host proves its own sign-in against an issuer of its choosing.
+
+webauth ships no fake issuer, because one that mints tokens does not belong in every production install.

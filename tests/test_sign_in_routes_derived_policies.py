@@ -281,6 +281,6 @@ _VALID_PATHS = {
 def test_a_path_that_is_not_an_absolute_distinct_path_of_this_app_is_refused_at_construction(
     override: dict[str, str],
 ) -> None:
-    """SIGNIN-42: a back-channel path equal to another path of the sign-in is refused."""
+    """SIGNIN-42: a back-channel path equal to the start, callback or logout path is refused."""
     with pytest.raises(ValueError, match="SignInPaths"):
         SignInPaths(**{**_VALID_PATHS, **override})
