@@ -27,6 +27,7 @@ from tests.support.gate_arrangement import (
     PERSON_ME_PATH,
     PERSON_PATHS,
     REALM_INVALID_TOKEN,
+    REFUSED_AS_RUNTIME_ERROR,
     RESOURCE_CHALLENGE,
     RESOURCE_GROUP,
     THE_COOKIE_PERSON,
@@ -38,6 +39,7 @@ from tests.support.gate_arrangement import (
     a_resource_token,
     a_token,
     an_agent_token,
+    answering_a_runtime_error_with_418,
     bearing,
     the_accounts,
     the_transaction,
@@ -497,18 +499,18 @@ def test_every_reader_on_a_marked_route_refuses_a_request_changed_after_admissio
     path: str,
     changes: dict[str, object],
 ) -> None:
-    """RESOURCE-62, RESOURCE-68, RESOURCE-69: on a marked route every reader raises
-    `RuntimeError` in a sub-app and after the `Authorization` header or the method changed, as
-    the capped person is recorded for the request's method."""
+    """RESOURCE-68, RESOURCE-69: on a marked route every reader raises
+    `RuntimeError` in a sub-app and after the `Authorization` header or the method changed."""
     app = a_bearer_app(
         resource=resource,
         known_accounts=(a_known_person(),),
         inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
     )
+    answering_a_runtime_error_with_418(app)
 
     response = app.ask(path, method="POST", authorization=bearing(an_agent_token(resource)))
 
-    assert response.status_code == 500
+    assert response.status_code == REFUSED_AS_RUNTIME_ERROR
     assert app.auth.route_runs == []
 
 

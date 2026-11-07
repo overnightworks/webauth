@@ -13,13 +13,13 @@ from typing import NoReturn
 import pytest
 from fastapi import FastAPI, Request
 from starlette.middleware import Middleware
-from starlette.responses import JSONResponse
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
     EXPORT_PATH,
     PERSON_ME_PATH,
     PERSON_PATHS,
+    REFUSED_AS_RUNTIME_ERROR,
     RESOURCE_GROUP,
     BearerApp,
     RewritingTheRequest,
@@ -28,6 +28,7 @@ from tests.support.gate_arrangement import (
     a_resource,
     a_resource_token,
     an_agent_token,
+    answering_a_runtime_error_with_418,
     assert_no_bearer_admission,
     bearing,
     relayed,
@@ -302,18 +303,6 @@ def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
     assert (response.status_code, the_transaction(app).entries) == (200, 1)
     assert lookups == [OPERATOR_SUBJECT]
     assert the_accounts(app) == accounts_before
-
-
-REFUSED_AS_RUNTIME_ERROR = 418
-
-
-def answering_a_runtime_error_with_418(app: BearerApp) -> None:
-    """A reader that refuses with `RuntimeError` answers 418; any other failure stays the 500."""
-
-    def answer(_request: Request, _error: Exception) -> JSONResponse:
-        return JSONResponse({"detail": "refused"}, status_code=REFUSED_AS_RUNTIME_ERROR)
-
-    app.auth.app.add_exception_handler(RuntimeError, answer)
 
 
 def a_resource_person_reader(app: BearerApp, path: str) -> None:
