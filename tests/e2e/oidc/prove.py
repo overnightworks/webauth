@@ -619,7 +619,7 @@ def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
 
 
 def deep_link_survives_the_login(proof: Proof, width: Width) -> str:
-    """REFUSE-01, REFUSE-02, REFUSE-03: the page asked for without a session is returned to."""
+    """REFUSE-01, REFUSE-02: the page asked for without a session is returned to."""
     scenario = f"24-{width.label}"
     deep_link = "/albums/42?page=2"
     proof.reset_host()
