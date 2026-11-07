@@ -243,7 +243,7 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
 
 - **REFUSE-19** A cookie person refused by an admin reader on a person path keeps the
   403 without a challenge,
-- **REFUSE-20** and a path outside the person paths keeps its answers.
+- **REFUSE-20** and a path outside the person paths keeps its session answer, with no challenge.
 
   The 401 challenge follows RFC 7235 section 3.1 and RFC 6750 section 3; a malformed
   header answers 401, not the 400 RFC 6750 section 3.1 recommends, as the machine paths do.
@@ -260,9 +260,11 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
   missing rights.
 - **REFUSE-26** Both types reach the host's refused hook inside a `SignInRefusal`, whose
   `page` is this mapping; see [The sign-in routes](#the-sign-in-routes).
-- **REFUSE-27** A refusal carries no identity, so the page shows no name.
-- **REFUSE-28** A `NOT_A_MEMBER` login stores no session, so signing out from "no access"
-  follows the missing-ID-token case in [Signing out](#what-every-app-gets).
+- **REFUSE-27** A refusal carries no identity.
+  The page therefore has no name to show.
+- **REFUSE-28** A `NOT_A_MEMBER` login stores no session.
+  Signing out from "no access" therefore follows the missing-ID-token case in
+  [Signing out](#what-every-app-gets).
 - **Host duty:** page choice and presentation.
 - **Host duty:** give the three pages (logged out, no access, login failed), their
   wording and their ways out, the sign-in pattern of
