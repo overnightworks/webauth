@@ -1,8 +1,0 @@
-claim_id = "b1ce98da6ca547779dd1b0af1bd1a43e"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "dbebc504acfdef507284739c0007e4f8cfe0b4a9"
-branch = "claude/issue-647-host-contract-ids-proxies-stack-csrf"
-scope = ["docs/host-contract.md", "tests/e2e/oidc/engines.py", "tests/middleware/test_bearer_gate_admission.py", "tests/middleware/test_csrf.py", "tests/middleware/test_stack.py", "tests/test_dependencies_websocket_auth.py", "tests/test_proxies.py"]
-opened_commit = "81f1589125ffd0be854ee26684b9c861a05c7987"
-whole_reason = "The ID form and its first three sections land together, because the intro that explains the IDs is true only once some exist; the test modules change only docstrings and at most one focused test."
