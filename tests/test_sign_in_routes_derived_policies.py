@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.responses import Response
@@ -203,3 +204,29 @@ def test_the_back_channel_path_is_not_a_browser_path() -> None:
         host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
 
     assert host.client.get(START_PATH).status_code == 303
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "reaches_the_route"),
+    [
+        pytest.param("GET", START_PATH, True, id="get start"),
+        pytest.param("POST", START_PATH, False, id="post start"),
+        pytest.param("GET", CALLBACK_PATH, True, id="get callback"),
+        pytest.param("POST", CALLBACK_PATH, False, id="post callback"),
+        pytest.param("POST", LOGOUT_PATH, True, id="post logout"),
+        pytest.param("GET", LOGOUT_PATH, False, id="get logout"),
+        pytest.param("POST", BACKCHANNEL_LOGOUT_PATH, True, id="post back-channel"),
+        pytest.param("GET", BACKCHANNEL_LOGOUT_PATH, False, id="get back-channel"),
+    ],
+)
+def test_the_derived_public_rules_open_exactly_four_methods_of_the_sign_in_paths(
+    method: str,
+    path: str,
+    *,
+    reaches_the_route: bool,
+) -> None:
+    host = _a_gated_host()
+
+    response = host.client.request(method, path, headers=SAME_ORIGIN_FORM)
+
+    assert (response.status_code == 401) is not reaches_the_route

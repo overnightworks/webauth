@@ -41,6 +41,7 @@ from tests.support.oidc_login_host import (
     an_oidc_host,
     failing,
     post_logout,
+    set_cookies,
     stored_id_tokens,
     stored_refresh_tokens,
 )
@@ -48,6 +49,7 @@ from tests.support.webauth_arrangement import (
     SESSION_IDLE_SECONDS,
     FakeUser,
     an_http_scope,
+    body_of,
     drive,
     seeded_session,
     session_cookie_header,
@@ -56,6 +58,7 @@ from tests.support.webauth_arrangement import (
 from webauth.cookies import (
     sign_session_id,
 )
+from webauth.oidc import OidcRelyingParty
 from webauth.ports import (
     AccountEventKind,
 )
@@ -529,7 +532,7 @@ def refuse_everyone() -> None:
     raise NotTheIssuerError
 
 
-def test_a_refusing_dependency_answers_the_hosts_empty_404_before_the_body_is_read() -> None:
+def _a_host_whose_dependency_refuses() -> OidcHost:
     host = an_oidc_host(
         FakeUser(id=SUBJECT, username="lena"),
         backchannel_dependencies=[Depends(refuse_everyone)],
@@ -540,11 +543,34 @@ def test_a_refusing_dependency_answers_the_hosts_empty_404_before_the_body_is_re
         lambda _request, _error: Response(status_code=404),
     )
     open_sessions(host, SUBJECT, 1)
+    return host
+
+
+def test_a_refusing_dependency_answers_the_hosts_empty_404_before_the_body_is_read() -> None:
+    host = _a_host_whose_dependency_refuses()
 
     response = post_backchannel_logout(host, an_oversized_streamed_body())
 
     assert (response.status_code, response.content) == (404, b"")
     assert (host.transaction.entries, sessions_of(host, SUBJECT)) == (0, 1)
+
+
+@pytest.mark.parametrize(
+    ("body", "status"),
+    [
+        pytest.param(b"x" * (BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1), 413, id="declared"),
+        pytest.param(an_oversized_streamed_body(), 404, id="streamed"),
+    ],
+)
+def test_a_refusing_dependency_answers_after_the_declared_bound_and_before_the_streamed_one(
+    body: bytes | Iterator[bytes],
+    status: int,
+) -> None:
+    host = _a_host_whose_dependency_refuses()
+
+    response = post_backchannel_logout(host, body)
+
+    assert response.status_code == status
 
 
 def _a_relying_party_that_raises(_request: Request) -> NoReturn:
@@ -562,10 +588,30 @@ def test_a_relying_party_that_raises_answers_400_and_enters_no_transaction() -> 
     assert (host.transaction.entries, sessions_of(host, SUBJECT)) == (0, 1)
 
 
-def test_a_back_channel_failure_is_raised_once_the_400_is_sent() -> None:
-    host = a_host_with_sessions(subject_sessions=1)
-
+def _the_relying_party_raises(host: OidcHost, _monkeypatch: pytest.MonkeyPatch) -> None:
     host.relying_party_of = _a_relying_party_that_raises
+
+
+def _the_verification_raises(host: OidcHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    failing(host.relying_party, "verify_logout_token", monkeypatch)
+
+
+@pytest.mark.parametrize(
+    "fail",
+    [
+        pytest.param(_the_relying_party_raises, id="relying-party"),
+        pytest.param(_the_verification_raises, id="verification"),
+        pytest.param(_the_deletion_fails, id="store"),
+        pytest.param(_the_audit_sink_fails, id="audit-sink"),
+        pytest.param(_the_exit_fails, id="exit"),
+    ],
+)
+def test_a_back_channel_failure_is_raised_once_the_400_is_sent(
+    fail: Callable[[OidcHost, pytest.MonkeyPatch], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+    fail(host, monkeypatch)
     app: FastAPI = host.client.app  # pyright: ignore[reportAssignmentType]
     scope = an_http_scope(
         app,
@@ -578,7 +624,8 @@ def test_a_back_channel_failure_is_raised_once_the_400_is_sent() -> None:
     messages, raised = anyio.run(lambda: drive(app, scope, body_chunks=[form]))
 
     assert [message["status"] for message in starts(messages)] == [400]  # pyright: ignore[reportArgumentType]
-    assert isinstance(raised, StoreDown)
+    assert body_of(messages) == b""
+    assert isinstance(raised, StoreDown | ConnectionError)
 
 
 @pytest.mark.parametrize("strict_records", [False, True], ids=["plain", "strict"])
@@ -598,3 +645,91 @@ def test_an_accepted_back_channel_logout_enters_the_transaction_once_and_reads_n
     response = post_logout_token(host, a_logout_token_of_the_issuer())
 
     assert (response.status_code, host.transaction.entries) == (200, 1)
+
+
+@pytest.mark.parametrize("exit_failure", [None, ConnectionError("the commit failed")])
+def test_the_back_channel_answers_200_only_after_the_exit_returned(
+    exit_failure: Exception | None,
+) -> None:
+    host = a_host_with_sessions(subject_sessions=1)
+    host.transaction.exit_failure = exit_failure
+
+    response = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert (response.status_code, response.content) == (200 if exit_failure is None else 400, b"")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}/", id="trailing-slash"),
+        pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}-other", id="longer-name"),
+        pytest.param(LOGOUT_PATH, id="the-browser-logout"),
+    ],
+)
+def test_a_path_next_to_the_back_channel_spends_the_address_budget(path: str) -> None:
+    host = a_host_with_sessions(subject_sessions=1, address_budget=1)
+    host.client.get("/me")
+    assert host.client.get("/me").status_code == 429
+
+    response = host.client.post(path, headers=SAME_ORIGIN_FORM, content=b"logout_token=x")
+
+    assert response.status_code == 429
+
+
+@pytest.mark.parametrize(
+    ("body", "status"),
+    [
+        pytest.param(None, 200, id="accepted"),
+        pytest.param(b"logout_token=x", 400, id="refused"),
+        pytest.param(b"x" * (BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1), 413, id="oversized"),
+    ],
+)
+def test_no_answer_of_the_back_channel_sets_or_clears_a_cookie(
+    body: bytes | None,
+    status: int,
+) -> None:
+    host = after_signing_in(an_oidc_host())
+    content = a_form_of(a_logout_token_of_the_issuer()) if body is None else body
+
+    response = post_backchannel_logout(host, content)
+
+    assert (response.status_code, set_cookies(response)) == (status, {})
+
+
+def test_the_relying_party_receives_the_back_channel_request_with_the_host_it_was_posted_to() -> (
+    None
+):
+    host = a_host_with_sessions(subject_sessions=1)
+    hosts_seen: set[str] = set()
+
+    def a_relying_party_noting_the_host(request: Request) -> OidcRelyingParty:
+        hosts_seen.add(request.headers["host"])
+        return host.relying_party
+
+    host.relying_party_of = a_relying_party_noting_the_host
+    internal_alias = "idp-callback.internal"
+
+    response = post_backchannel_logout(
+        host,
+        a_form_of(a_logout_token_of_the_issuer()),
+        {**FORM, "host": internal_alias},
+    )
+
+    assert (response.status_code, hosts_seen) == (200, {internal_alias})
+
+
+def test_after_an_audit_failure_a_per_call_host_keeps_the_ended_sessions_and_a_retry_audits_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = an_oidc_host(FakeUser(id=SUBJECT, username="lena"))
+    open_sessions(host, SUBJECT, 2)
+    with monkeypatch.context() as patch:
+        failing(host.audit, "account_event", patch)
+        failed = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    retried = post_logout_token(host, a_logout_token_of_the_issuer())
+
+    assert (failed.status_code, retried.status_code) == (400, 200)
+    assert sessions_of(host, SUBJECT) == 0
+    assert host.audit.account_events == []

@@ -5,6 +5,7 @@ from __future__ import annotations
 import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 import pytest
 from fastapi import HTTPException, Request
@@ -17,6 +18,7 @@ from tests.support.oidc_arrangement import (
     a_fake_id_token,
 )
 from tests.support.oidc_login_host import (
+    BACKCHANNEL_LOGOUT_PATH,
     CLIENT_ID,
     END_SESSION_ENDPOINT,
     LOGOUT_BUTTON_LABEL,
@@ -24,6 +26,7 @@ from tests.support.oidc_login_host import (
     LOGOUT_PATH,
     NOW,
     SAME_ORIGIN_FORM,
+    START_PATH,
     SUBJECT,
     OidcHost,
     StoreDown,
@@ -442,7 +445,11 @@ def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -
     response = post_logout(host, {**SAME_ORIGIN_FORM, "x-label": "Abmelden", "x-language": "de"})
 
     page = LogoutPage(response.text)
-    assert (page.texts["button"], page.attributes_of("html")) == ("Abmelden", [{"lang": "de"}])
+    assert (page.texts["button"], page.texts["title"], page.attributes_of("html")) == (
+        "Abmelden",
+        "Abmelden",
+        [{"lang": "de"}],
+    )
 
     after_the_cookie_is_cleared = post_logout(
         host,
@@ -454,3 +461,86 @@ def test_the_logout_page_reads_its_words_and_their_language_from_the_request() -
         "Sign out",
         [{"lang": "en"}],
     )
+
+
+@pytest.mark.parametrize("language", ["de", "en-US", "zh-Hant-TW", "sr-Latn", "de-1996", "en-a1b2"])
+def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(language: str) -> None:
+    assert LogoutPageText(language=language, button_label="Out").language == language
+
+
+@pytest.mark.parametrize(
+    "language",
+    [
+        "",
+        "en_US",
+        '"',
+        "<",
+        "en US",
+        "ä",
+        "de\n",
+        "d",
+        "-de",
+        "de-",
+        "de--CH",
+        "1de",
+        "de-123456789",
+        "de-ä",
+        "\u212a\u212a",
+        42,
+        None,
+    ],
+)
+def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
+    language: object,
+) -> None:
+    with pytest.raises(ValueError, match="language"):
+        LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
+
+
+def _a_start(host: OidcHost) -> Callable[[], HttpxResponse]:
+    return lambda: host.client.get(START_PATH)
+
+
+def _a_callback(host: OidcHost) -> Callable[[], HttpxResponse]:
+    query = host.sign_in_at_issuer()
+    return lambda: host.callback(query)
+
+
+def _a_logout(host: OidcHost) -> Callable[[], HttpxResponse]:
+    after_signing_in(host)
+    return lambda: post_logout(host, SAME_ORIGIN_FORM)
+
+
+def _a_back_channel_logout(host: OidcHost) -> Callable[[], HttpxResponse]:
+    return lambda: host.client.post(
+        BACKCHANNEL_LOGOUT_PATH,
+        content=b"logout_token=x",
+        headers={"content-type": SAME_ORIGIN_FORM["content-type"]},
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_to", "status"),
+    [
+        pytest.param(_a_start, 500, id="start"),
+        pytest.param(_a_callback, 500, id="callback"),
+        pytest.param(_a_logout, 500, id="logout"),
+        pytest.param(_a_back_channel_logout, 400, id="back-channel logout"),
+    ],
+)
+def test_every_route_reads_the_relying_party_again_for_each_request(
+    request_to: Callable[[OidcHost], Callable[[], HttpxResponse]],
+    status: int,
+) -> None:
+    host = an_oidc_host()
+    send = request_to(host)
+    read: list[Request] = []
+
+    def a_relying_party_that_raises(request: Request) -> NoReturn:
+        read.append(request)
+        raise StoreDown
+
+    host.relying_party_of = a_relying_party_that_raises
+
+    assert send().status_code == status
+    assert read

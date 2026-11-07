@@ -18,6 +18,7 @@ from tests.support.oidc_login_host import (
     TransactionKind,
     after_signing_in,
     an_oidc_host,
+    failing,
     set_cookies,
 )
 from tests.support.webauth_arrangement import (
@@ -257,3 +258,21 @@ def test_a_failed_commit_after_the_login_issues_no_cookie_and_keeps_the_replaced
     assert host.config.session_cookie_name not in set_cookies(response)
     assert [record.id for record in host.sessions.list_active()] == before
     assert host.client.cookies[host.config.session_cookie_name] == cookie_before
+
+
+def test_a_failing_create_leaves_the_replaced_and_pruned_sessions_ended_and_the_next_login_restores_nothing(  # noqa: E501
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opening = OpeningHost.holding(ACCOUNT, ACCOUNT, ACCOUNT, max_sessions=2)
+    pruned, kept, replaced = opening.ids()
+
+    with monkeypatch.context() as patch:
+        failing(opening.host.sessions, "create", patch)
+        failed = opening.sign_in(opening.signed(replaced))
+    ids_after_the_failure = opening.ids()
+    reopened = opening.open_session()
+
+    assert failed.status_code == 500
+    assert ids_after_the_failure == [kept]
+    assert sorted(opening.ids()) == sorted([kept, reopened.id])
+    assert {pruned, replaced}.isdisjoint(opening.ids())

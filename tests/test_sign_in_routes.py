@@ -21,6 +21,8 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
@@ -50,6 +52,7 @@ from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     FakeUser,
     an_http_scope,
+    body_of,
     drive,
     seeded_session,
     session_cookie_header,
@@ -169,6 +172,7 @@ def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     assert (response.status_code, response.headers["location"]) == (303, "/albums/42")
     assert host.config.session_cookie_name in set_cookies(response)
     assert (host.transaction.entries, host.sessions.count_active()) == (1, 1)
+    assert [account.id for account in host.accounts.list()] == [SUBJECT]
 
 
 @pytest.mark.parametrize(
@@ -225,18 +229,23 @@ def test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed
     assert SignInRefusal(cause).page is expected
 
 
+_A_FOREIGN_ISSUERS_ADMISSION = AdmissionConfig(
+    bound_issuer="https://other.example/realms/lab",
+    login_group=LOGIN_GROUP,
+    admin_group=f"{LOGIN_GROUP}/admin",
+)
+
+
 def _a_foreign_issuers_identity() -> OidcHost:
-    return an_oidc_host(
-        admission=AdmissionConfig(
-            bound_issuer="https://other.example/realms/lab",
-            login_group=LOGIN_GROUP,
-            admin_group=f"{LOGIN_GROUP}/admin",
-        )
-    )
+    return an_oidc_host(admission=_A_FOREIGN_ISSUERS_ADMISSION)
 
 
 def _with_another_code(query: str) -> str:
     return query.replace("code=", "code=not-issued-")
+
+
+def _without_a_state(query: str) -> str:
+    return query.replace("state=", "other=")
 
 
 @pytest.mark.parametrize(
@@ -463,6 +472,7 @@ def test_a_refusal_answer_keeps_its_own_cookies_beside_the_pending_deletion() ->
 
     response = host.callback(query)
 
+    assert response.status_code == 403
     assert set(set_cookies(response)) == {"flash", host.pending_cookie_name(query)}
 
 
@@ -481,14 +491,30 @@ def _drive_the_callback(host: OidcHost, query: str) -> tuple[list[dict[str, obje
     return [dict(message) for message in messages], raised
 
 
-def test_a_failure_before_the_start_is_raised_once_the_500_is_sent() -> None:
+@pytest.mark.parametrize(
+    "answer",
+    [_raise_in_the_hook, _answer_failing_before_its_start],
+    ids=["the hook raises", "the answer fails before its start"],
+)
+def test_a_failure_before_the_start_is_raised_once_the_500_is_sent(
+    answer: Callable[[Request, SignInRefusal], Response],
+) -> None:
     host = an_oidc_host(groups_claim=())
-    host.answer_refusals = _raise_in_the_hook
+    host.answer_refusals = answer
     query = host.sign_in_at_issuer()
 
     messages, raised = _drive_the_callback(host, query)
 
-    assert [message["status"] for message in starts(messages)] == [500]  # pyright: ignore[reportArgumentType]
+    [start] = starts(messages)
+    assert start["status"] == 500  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    assert body_of(messages) == b"Internal Server Error"
+    assert [
+        value
+        for name, value in start["headers"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        if name == b"set-cookie"
+        and value.startswith(host.pending_cookie_name(query).encode())
+        and b"max-age=0" in value.lower()
+    ]
     assert isinstance(raised, StoreDown)
 
 
@@ -603,6 +629,7 @@ _VALID_PATHS = {
         pytest.param({"callback": "/login"}, id="one path for start and callback"),
         pytest.param({"logout": "/login"}, id="one path for start and logout"),
         pytest.param({"logout": "/callback"}, id="one path for callback and logout"),
+        pytest.param({"backchannel_logout": "/login"}, id="the back-channel equal to start"),
         pytest.param({"backchannel_logout": "/logout"}, id="the back-channel equal to logout"),
         pytest.param({"backchannel_logout": "/callback"}, id="the back-channel equal to callback"),
     ],
@@ -612,40 +639,6 @@ def test_a_path_that_is_not_an_absolute_distinct_path_of_this_app_is_refused_at_
 ) -> None:
     with pytest.raises(ValueError, match="SignInPaths"):
         SignInPaths(**{**_VALID_PATHS, **override})
-
-
-@pytest.mark.parametrize("language", ["de", "en-US", "zh-Hant-TW", "sr-Latn", "de-1996", "en-a1b2"])
-def test_a_language_tag_of_letters_and_digits_joined_by_hyphens_is_accepted(language: str) -> None:
-    assert LogoutPageText(language=language, button_label="Out").language == language
-
-
-@pytest.mark.parametrize(
-    "language",
-    [
-        "",
-        "en_US",
-        '"',
-        "<",
-        "en US",
-        "ä",
-        "de\n",
-        "d",
-        "-de",
-        "de-",
-        "de--CH",
-        "1de",
-        "de-123456789",
-        "de-ä",
-        "\u212a\u212a",
-        42,
-        None,
-    ],
-)
-def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
-    language: object,
-) -> None:
-    with pytest.raises(ValueError, match="language"):
-        LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -729,3 +722,74 @@ def _sign_in_routes_of(app: FastAPI) -> list[str]:
     }
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
     return [route.path for route in routes if route.path in paths]
+
+
+@pytest.mark.parametrize(
+    ("groups_claim", "admission", "returned_query"),
+    [
+        pytest.param((), ADMISSION, str, id="not a member"),
+        pytest.param((LOGIN_GROUP,), _A_FOREIGN_ISSUERS_ADMISSION, str, id="a foreign issuer"),
+        pytest.param((LOGIN_GROUP,), ADMISSION, _with_another_code, id="a code the issuer refuses"),
+        pytest.param((LOGIN_GROUP,), ADMISSION, _without_a_state, id="a callback without a state"),
+    ],
+)
+def test_a_refusal_before_the_admission_decision_enters_no_transaction(
+    groups_claim: tuple[str, ...],
+    admission: AdmissionConfig,
+    returned_query: Callable[[str], str],
+) -> None:
+    host = an_oidc_host(groups_claim=groups_claim, admission=admission)
+
+    response = host.callback(returned_query(host.sign_in_at_issuer()))
+
+    assert (response.status_code, len(host.refusals), host.transaction.entries) == (403, 1, 0)
+
+
+@pytest.mark.parametrize(
+    ("groups_claim", "hook", "failing_call"),
+    [
+        pytest.param((LOGIN_GROUP,), None, None, id="an admitted login"),
+        pytest.param((), None, None, id="a refusal"),
+        pytest.param((LOGIN_GROUP,), None, "create_for_subject", id="a failure in the block"),
+        pytest.param((), _raise_in_the_hook, None, id="a hook that raises"),
+        pytest.param(
+            (), _answer_failing_before_its_start, None, id="an answer that fails before its start"
+        ),
+    ],
+)
+def test_every_callback_answer_deletes_its_pending_cookie_and_leaves_the_other_tabs(
+    groups_claim: tuple[str, ...],
+    hook: Callable[[Request, SignInRefusal], Response] | None,
+    failing_call: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = an_oidc_host(groups_claim=groups_claim)
+    if hook is not None:
+        host.answer_refusals = hook
+    if failing_call is not None:
+        failing(host.accounts, failing_call, monkeypatch)
+    other_tab = host.sign_in_at_issuer()
+    query = host.sign_in_at_issuer()
+
+    response = host.callback(query)
+
+    assert is_cleared(response, host.pending_cookie_name(query))
+    assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
+
+
+@pytest.mark.parametrize("path", [LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH])
+def test_the_logout_and_back_channel_routes_answer_no_get(path: str) -> None:
+    app = FastAPI()
+    install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
+
+    assert TestClient(app).get(path).status_code == 405
+
+
+def test_install_registers_the_start_callback_logout_and_back_channel_routes() -> None:
+    app = FastAPI()
+
+    install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
+
+    assert sorted(_sign_in_routes_of(app)) == sorted(
+        [START_PATH, CALLBACK_PATH, LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH]
+    )
