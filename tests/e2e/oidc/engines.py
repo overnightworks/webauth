@@ -51,7 +51,7 @@ def logout_through_the_page(
     javascript: bool,
     back_button: bool = False,
 ) -> str:
-    """CSRF-15, CSRF-16: a real browser signs in and posts the logout through the page.
+    """CSRF-16, CSRF-17: a real browser signs in and posts the logout through the page.
 
     The app's CSRF check admits the browser's own Origin and Sec-Fetch-Site.
     """
@@ -108,7 +108,7 @@ def other_engine(
     width: Width,
     number: int,
 ) -> str:
-    """CSRF-15, CSRF-16: Firefox or WebKit posts the logout past the app's CSRF check."""
+    """CSRF-16, CSRF-17: Firefox or WebKit posts the logout past the app's CSRF check."""
     with launch_behind_host_mapping(engine, mapped_hosts) as browser:
         scripted = logout_through_the_page(
             run,
@@ -137,7 +137,7 @@ def drive_engine_phase(
     host: Host,
     widths: tuple[Width, ...],
 ) -> None:
-    """CSRF-15, CSRF-16: Chromium, Firefox and WebKit post the logout past the CSRF check."""
+    """CSRF-16, CSRF-17: Chromium, Firefox and WebKit post the logout past the CSRF check."""
     run.proof.host = host
     chromium = launch_pinned_chromium(
         playwright, runtime, mapped_hosts, tls.leaf_spki_sha256_base64

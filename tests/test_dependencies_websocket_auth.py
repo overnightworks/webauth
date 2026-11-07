@@ -148,7 +148,7 @@ def test_an_origin_from_the_configured_hosts_is_admitted(
     origin: str,
     loopback_cookie_secure: bool | None,
 ) -> None:
-    """CSRF-11, CSRF-14: a handshake from an exact configured host is admitted."""
+    """CSRF-12, CSRF-15: a handshake from an exact configured host is admitted."""
     app = (
         an_auth_app(a_session())
         if loopback_cookie_secure is None
@@ -258,7 +258,7 @@ def test_a_handshake_without_exactly_one_allowed_origin_is_refused(
     headers: Sequence[tuple[str, str]],
     refusal: ConnectionRefusal,
 ) -> None:
-    """CSRF-13, CSRF-14: a handshake with no Origin, a foreign one or a repeated one is refused."""
+    """CSRF-14, CSRF-15: a handshake with no Origin, a foreign one or a repeated one is refused."""
     assert (
         the_refusal_of(auth_app, cookie=auth_app.signed_cookie(), origin=origin, headers=headers)
         is refusal
@@ -266,7 +266,7 @@ def test_a_handshake_without_exactly_one_allowed_origin_is_refused(
 
 
 def test_a_sibling_host_the_application_does_not_list_is_refused_even_as_same_site() -> None:
-    """CSRF-11, CSRF-14: an unlisted sibling host is refused even as same-site."""
+    """CSRF-12, CSRF-15: an unlisted sibling host is refused even as same-site."""
     app = an_auth_app(a_session())
 
     refusal = the_refusal_of(
@@ -319,7 +319,7 @@ def test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on(
     is_plain_http: bool,
     cookie_secure: bool,
 ) -> None:
-    """CSRF-12, CSRF-14: the handshake compares the origin scheme only while cookie_secure is on."""
+    """CSRF-13, CSRF-15: the handshake compares the origin scheme only while cookie_secure is on."""
     refused = cookie_secure and is_plain_http
     sessions = SessionsThatMustNotBeAsked(a_session()) if refused else None
     app = an_auth_app(a_session(), sessions=sessions, cookie_secure=cookie_secure)

@@ -148,35 +148,36 @@ These are hand-run browser proofs, not CI tests.
 
 ## CSRF origin
 
-The operator ruled CSRF-01, CSRF-02, CSRF-03, CSRF-04, CSRF-05, CSRF-06, CSRF-07, CSRF-08, CSRF-09, CSRF-10, CSRF-11, CSRF-12, CSRF-13, CSRF-14, CSRF-15 and CSRF-16; no other sentence of this section is ruled.
+The operator ruled CSRF-01, CSRF-03, CSRF-04, CSRF-05, CSRF-06, CSRF-07, CSRF-08, CSRF-09, CSRF-10, CSRF-11, CSRF-12, CSRF-13, CSRF-14, CSRF-15, CSRF-16 and CSRF-17; no other sentence of this section is ruled.
 
 - **CSRF-01** Every app supplies `csrf_origin=CsrfPolicy(...)` when installing the
-  middleware; an install without it is refused.
-- **CSRF-02** There is no frontend CSRF-token obligation.
-- **CSRF-03** A state-changing request (POST, PUT, PATCH or DELETE) needs trustworthy
+  middleware.
+- **CSRF-02** An install without it is refused.
+- **CSRF-03** There is no frontend CSRF-token obligation.
+- **CSRF-04** A state-changing request (POST, PUT, PATCH or DELETE) needs trustworthy
   provenance regardless of its body or content type.
-- **CSRF-04** `Sec-Fetch-Site: same-origin` passes.
-- **CSRF-05** `same-site` or an absent Fetch Metadata header falls back to `Origin`.
-- **CSRF-06** Every other Fetch Metadata value is refused.
-- **CSRF-07** Without either header the request is refused.
-- **CSRF-08** `Referer` is never read.
+- **CSRF-05** `Sec-Fetch-Site: same-origin` passes.
+- **CSRF-06** `same-site` or an absent Fetch Metadata header falls back to `Origin`.
+- **CSRF-07** Every other Fetch Metadata value is refused.
+- **CSRF-08** Without either header the request is refused.
+- **CSRF-09** `Referer` is never read.
 
-- **CSRF-09** Only verified bearer admission (on a machine path or a person path) and the
+- **CSRF-10** Only verified bearer admission (on a machine path or a person path) and the
   sessionless server paths the host names in `CsrfPolicy.exempt` bypass this check.
-- **CSRF-10** An adjacent path is still checked.
+- **CSRF-11** An adjacent path is still checked.
 
-- **CSRF-11** The `Origin` fallback matches exact hosts in
+- **CSRF-12** The `Origin` fallback matches exact hosts in
   `WebAuthConfig.allowed_hosts_exact`, never host patterns; its docstring owns port
   matching.
-- **CSRF-12** With `cookie_secure` on, the origin must use HTTPS; with it off, the scheme
+- **CSRF-13** With `cookie_secure` on, the origin must use HTTPS; with it off, the scheme
   is not compared.
-- **CSRF-13** A repeated `Origin` header counts as foreign.
-- **CSRF-14** These three also hold for WebSocket handshakes, which check `Origin`
+- **CSRF-14** A repeated `Origin` header counts as foreign.
+- **CSRF-15** These three also hold for WebSocket handshakes, which check `Origin`
   directly.
 
-- **CSRF-15** webauth supports the current releases of Chrome, Edge, Firefox and Safari
+- **CSRF-16** webauth supports the current releases of Chrome, Edge, Firefox and Safari
   (macOS and iOS).
-- **CSRF-16** On every request whose method is not GET or HEAD, each sends `Origin`,
+- **CSRF-17** On every request whose method is not GET or HEAD, each sends `Origin`,
   possibly `null`, and, to an HTTPS app, `Sec-Fetch-Site`.
 
 ## Signed out and refused

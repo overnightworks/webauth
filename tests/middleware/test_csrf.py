@@ -195,7 +195,7 @@ def test_a_request_is_judged_by_sec_fetch_site_then_origin(
     status: int,
     body: dict[str, str],
 ) -> None:
-    """CSRF-02, CSRF-04, CSRF-05, CSRF-06, CSRF-07: same-origin passes without a token.
+    """CSRF-03, CSRF-05, CSRF-06, CSRF-07, CSRF-08: same-origin passes without a token.
 
     Same-site or an absent header falls back to Origin; any other value is refused.
     """
@@ -238,7 +238,7 @@ def test_a_state_changing_request_without_provenance_is_refused_whatever_its_bod
     method: str,
     body: RequestBody,
 ) -> None:
-    """CSRF-03, CSRF-07: a state-changing request without provenance is refused, body or not."""
+    """CSRF-04, CSRF-08: a state-changing request without provenance is refused, body or not."""
     client = an_origin_guarded_client()
 
     response = client.request(method, API_PATH, **body)
@@ -260,7 +260,7 @@ def test_the_referer_is_not_read(
     headers: dict[str, str],
     body: BodyContent,
 ) -> None:
-    """CSRF-08: an allowed Referer is no provenance."""
+    """CSRF-09: an allowed Referer is no provenance."""
     client = an_origin_guarded_client()
 
     response = client.request(method, API_PATH, headers=headers, **body)
@@ -312,7 +312,7 @@ def test_an_origin_that_names_no_host_is_refused_like_a_foreign_one(
     ],
 )
 def test_a_repeated_origin_header_is_refused_like_a_foreign_origin(origins: list[str]) -> None:
-    """CSRF-13: two Origin headers count as foreign even when both are allowed."""
+    """CSRF-14: two Origin headers count as foreign even when both are allowed."""
     response = an_origin_guarded_client().post(
         API_PATH,
         json={"n": 1},
@@ -331,7 +331,7 @@ def test_a_repeated_origin_header_is_refused_like_a_foreign_origin(origins: list
     ],
 )
 def test_an_origin_that_only_resembles_the_exact_host_is_refused(origin: str) -> None:
-    """CSRF-11: only an exact host matches, never a prefix or userinfo lookalike."""
+    """CSRF-12: only an exact host matches, never a prefix or userinfo lookalike."""
     response = _call("POST", {"origin": origin})
 
     assert response.status_code == 403
@@ -397,7 +397,7 @@ def test_the_origin_scheme_is_compared_only_while_cookie_secure_is_on(
     refused_while_secure: bool,
     cookie_secure: bool,
 ) -> None:
-    """CSRF-12: the origin scheme is compared only while cookie_secure is on."""
+    """CSRF-13: the origin scheme is compared only while cookie_secure is on."""
     client = an_origin_guarded_client(a_web_auth_config(cookie_secure=cookie_secure))
     headers = {"origin": origin, **({} if fetch_site is None else {"sec-fetch-site": fetch_site})}
 
@@ -464,7 +464,7 @@ def test_protect_everything_checks_every_route_but_the_exempt_ones(
     headers: dict[str, str],
     checked_answer: tuple[int, dict[str, str]],
 ) -> None:
-    """CSRF-09, CSRF-10: an exempt path bypasses the check, an adjacent one does not."""
+    """CSRF-10, CSRF-11: an exempt path bypasses the check, an adjacent one does not."""
     client, route_runs = a_protect_everything_client()
 
     response = client.post(path, json={"n": 1}, headers=headers)

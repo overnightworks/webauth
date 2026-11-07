@@ -373,7 +373,7 @@ class TestAnExemptWebhookPrefix:
 
 class TestRefusedInstallation:
     def test_an_install_without_csrf_origin_is_refused_before_touching_the_app(self) -> None:
-        """CSRF-01: the install raises and leaves the app untouched."""
+        """CSRF-02: the install raises and leaves the app untouched."""
         app = a_fresh_app()
         with pytest.raises(TypeError, match="csrf_origin"):
             install_web_auth_middleware(app, security_headers=HEADERS_POLICY)  # type: ignore[call-arg]
