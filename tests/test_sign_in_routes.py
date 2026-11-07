@@ -748,13 +748,17 @@ def test_every_callback_answer_deletes_its_pending_cookie_and_leaves_the_other_t
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
 
 
+@pytest.mark.parametrize("method", ["GET", "PUT", "PATCH", "DELETE"])
 @pytest.mark.parametrize("path", [LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH])
-def test_the_logout_and_back_channel_routes_answer_no_get(path: str) -> None:
+def test_the_logout_and_back_channel_routes_serve_post_only(path: str, method: str) -> None:
     """SIGNIN-10, SIGNIN-39: the logout and the back-channel route serve `POST` only."""
     app = FastAPI()
     install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
 
-    assert TestClient(app).get(path).status_code == 405
+    response = TestClient(app).request(method, path)
+
+    assert response.status_code == 405
+    assert response.headers["allow"] == "POST"
 
 
 def test_install_registers_the_start_callback_logout_and_back_channel_routes() -> None:
