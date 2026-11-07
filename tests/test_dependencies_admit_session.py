@@ -8,13 +8,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_ID,
     SESSION_IDLE_SECONDS,
-    DisabledUser,
     FakeSessionRecord,
     SessionRecordsInMemory,
     SessionsAnsweringTouch,

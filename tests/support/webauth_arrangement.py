@@ -180,13 +180,6 @@ class FakeUser:
     role: str = MEMBER_ROLE
 
 
-@dataclass
-class DisabledUser(FakeUser):
-    """A stored account whose record marks it disabled: webauth reads no such flag."""
-
-    is_active: bool = False
-
-
 class UnknownAccountError(LookupError):
     """A session was requested for an account the arrangement does not hold."""
 

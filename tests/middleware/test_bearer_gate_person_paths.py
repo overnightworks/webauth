@@ -51,6 +51,7 @@ from tests.support.person_paths_arrangement import (
     OPTIONAL_PATH,
     OUTSIDER_TOKEN,
     UNGATED_ME_PATH,
+    DisabledUser,
     a_lena,
     a_person_app,
     a_transaction_failing_to_be_created,
@@ -62,7 +63,6 @@ from tests.support.person_paths_arrangement import (
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     MEMBER_ROLE,
-    DisabledUser,
     FakeUser,
 )
 from webauth.admission import NoAdmins

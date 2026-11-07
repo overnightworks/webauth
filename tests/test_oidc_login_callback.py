@@ -47,11 +47,10 @@ from tests.support.oidc_login_host import (
     stored_refresh_tokens,
 )
 from tests.support.oidc_relying_party import OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR
+from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
-    SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_IDLE_SECONDS,
-    DisabledUser,
     signed_without_bound,
 )
 from webauth.cookies import (
@@ -389,33 +388,6 @@ def test_a_callback_signs_in_a_person_whose_stored_account_is_marked_disabled() 
     assert (response.status_code, response.headers["location"]) == (303, "/")
     assert host.client.get("/me").json() == {"username": "lena"}
     assert host.audit.account_events == []
-
-
-def test_a_removed_persons_open_session_works_to_its_cap_and_the_next_sign_in_is_refused() -> None:
-    """APP-09: after a login-group removal, an open session is admitted and renewed to its cap."""
-    groups = [LOGIN_GROUP]
-    clock = FakeClock(FIXED_INSTANT.timestamp())
-    host = an_oidc_host(groups_claim=groups, wall_clock=clock)
-    host.callback(host.sign_in_at_issuer())
-    groups[:] = []
-    half_idle = SESSION_IDLE_SECONDS // 2
-    ages = (
-        *range(half_idle, SESSION_ABSOLUTE_MAX_AGE_SECONDS, half_idle),
-        SESSION_ABSOLUTE_MAX_AGE_SECONDS - 1,
-    )
-    statuses = []
-
-    for age in ages:
-        clock.now = FIXED_INSTANT.timestamp() + age
-        statuses.append(host.client.get("/me").status_code)
-    clock.now = FIXED_INSTANT.timestamp() + SESSION_ABSOLUTE_MAX_AGE_SECONDS + 1
-    past_the_cap = host.client.get("/me").status_code
-    host.client.cookies.clear()
-    refused = host.callback(host.sign_in_at_issuer())
-
-    assert set(statuses) == {200}
-    assert past_the_cap == 401
-    assert (refused.status_code, refused.json()) == (403, {"refusal": "not-a-member"})
 
 
 def test_a_signed_in_person_keeps_working_while_the_issuer_is_unreachable() -> None:

@@ -38,7 +38,8 @@ from tests.support.oidc_arrangement import (
     OPERATOR_SUBJECT,
 )
 from tests.support.oidc_login_host import StoreDown, failing
-from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, DisabledUser, FakeUser
+from tests.support.person_paths_arrangement import DisabledUser
+from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
     BearerGateMiddleware,
     ProtectedResource,

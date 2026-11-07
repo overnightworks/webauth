@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -47,6 +48,13 @@ BOTH_TRANSACTIONS = pytest.mark.parametrize(
         pytest.param(TransactionKind.ROLLING_BACK, id="RB"),
     ],
 )
+
+
+@dataclass
+class DisabledUser(FakeUser):
+    """A stored account whose record marks it disabled: webauth reads no such flag."""
+
+    is_active: bool = False
 
 
 def a_lena() -> FakeUser:
