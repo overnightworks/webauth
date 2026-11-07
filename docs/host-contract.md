@@ -544,8 +544,8 @@ At the entry point, on every method and the exact path only:
 - **Host duty:** Install it ahead of any catch-all route.
 - **Host duty:** List `resource.public_rule` in `SessionGate.public`.
 - **RESOURCE-38** So listed, a client without a session reads the metadata document.
-- **Host duty:** A host below a `root_path` cannot name a resource yet. The entry point is matched on the
-  route path, as every policy is, and the `url` is the public identifier, so the route path differs from it.
+- **Host duty:** A host below a `root_path` names no resource: the entry point is matched on the route path,
+  as every policy is, and the `url` is the public identifier, so the route path differs from it.
 
 **Marked routes.** `marked_routes` are the host's operations besides the entry point that take the same token.
 

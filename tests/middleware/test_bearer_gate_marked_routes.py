@@ -47,7 +47,7 @@ from tests.support.gate_arrangement import (
 from tests.support.oidc_arrangement import ABSENT, ACCESS_TOKEN_NOW, OPERATOR_SUBJECT
 from tests.support.oidc_login_host import failing
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE
-from webauth.middleware import MarkedRoute, ProtectedResource
+from webauth.middleware import BearerGateMiddleware, MarkedRoute, ProtectedResource
 
 
 @pytest.fixture
@@ -99,6 +99,22 @@ def test_an_agent_token_on_a_marked_route_is_the_capped_person_with_no_cookie_an
     assert response.status_code == 200
     assert response.json() == {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE}
     assert app.audit.account_events == []
+
+
+def test_csrf_refuses_a_marked_route_request_made_mutating_after_admission(
+    app: BearerApp,
+    resource: ProtectedResource,
+) -> None:
+    """RESOURCE-62: the capped person is recorded for the request's method, so a marked-route
+    request made mutating after admission is refused by CSRF."""
+    stack = app.auth.app.user_middleware
+    gate = next(at for at, entry in enumerate(stack) if entry.cls is BearerGateMiddleware)
+    stack.insert(gate + 1, Middleware(RewritingTheRequest, changes={"method": "POST"}))
+
+    response = app.ask(A_NOTE, method="GET", authorization=bearing(an_agent_token(resource)))
+
+    assert response.status_code == 403
+    assert app.auth.route_runs == []
 
 
 @pytest.mark.parametrize(
