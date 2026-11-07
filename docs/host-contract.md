@@ -692,8 +692,8 @@ So the host lists the paths once. `login_redirect` is browser-absolute, so it is
 - **SIGNIN-14** `language` is a BCP 47 tag, validated in shape when the record is built.
 - **Host duty:** a single-page app logs out by a top-level form POST to that route.
 - **Host duty:** the host never lists the logout path in `CsrfPolicy.exempt`.
-- **SIGNIN-15** `paths.logout` and `logout_page_text` come together, or install refuses before any route is registered;
-- **SIGNIN-16** both are `None` for a host without logout, which registers no logout route.
+- **SIGNIN-15** `paths.logout` and `logout_page_text` come together,
+- **SIGNIN-16** or both are `None` for a host without logout.
 
 - **SIGNIN-17** `webauth.cookies` carries the pending login in a signed cookie of its own, one per login.
 
@@ -733,7 +733,7 @@ The logout route never commits:
 
 - **SIGNIN-32** it enters the transaction once,
 - **SIGNIN-33** only when the request's cookie names a session.
-- **SIGNIN-34** An exception in a store call of the route answers a plain 500 with no page and no cookie cleared.
+- **SIGNIN-34** An exception in the route answers a plain 500 with no page and no cookie cleared.
 - **SIGNIN-35** An exception in the transaction's exit answers the same.
 - **SIGNIN-36** An exception in the host's callables answers the same.
 - **SIGNIN-37** A rolling-back host keeps the session, and a retry ends it with its hint.
