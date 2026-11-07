@@ -198,11 +198,16 @@ class ProtectedResource:
     section 3.1 derives from it. ``scope`` is the one scope the challenge asks for and a token
     must hold. A token passes there only with an ``azp`` among ``authorized_parties``, which
     no other kind's parties extend, and groups that hold ``required_group`` or a path below it
-    besides the admission's login group. The gate then looks the token's subject up in one
-    entry of ``transaction``, a read: a person must have signed in once, and is admitted
-    with the role ``"user"`` whatever role is stored. ``TypeError`` for
+    besides the admission's login group; a token whose groups hold ``agent_group`` as an exact
+    element passes from any ``azp`` when it carries ``agent_owner`` and ``agent_name``, the realm
+    alone deciding which clients can mint the resource's audience. The gate then looks the
+    token's subject up in one entry of ``transaction``: for a token without the agent group a
+    read, a person must have signed in once, admitted with the role ``"user"`` whatever role is
+    stored; for one with it the account is created on its first admission and set to the kind
+    ``AGENT``, and the agent is admitted with the role ``"user"`` and its ``AgentFacts``.
+    ``TypeError`` for
     ``authorized_parties`` that is not an ``AuthorizedParties``. ``ValueError`` for a
-    ``required_group`` that is not a group path, and for a ``url`` that is
+    ``required_group`` or ``agent_group`` that is not a group path, and for a ``url`` that is
     not an endpoint URL with a plain host, an optional port and a path of one or more
     segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
     trailing slash, and for a ``scope`` that is not one scope token. So the path needs no
