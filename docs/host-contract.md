@@ -274,53 +274,60 @@ stores no session, so signing out from "no access" follows the missing-ID-token 
 
 ## The host's machine routes
 
-The operator ruled the passages that open "A route reads the admitted caller" and "Token lifetime"; no other sentence of this section is ruled, and proof lines are not rulings.
+The operator ruled MACHINE-01 to MACHINE-06, MACHINE-24 and MACHINE-25; no other sentence of this section is ruled.
 
 hal is the operator's CLI for calling an app's machine routes with a bearer
-token. A host declares its machine (admin) paths once, and hal calls them with
-the access token Keycloak issued it in `Authorization: Bearer`. `BearerGate` is passed to
+token. It calls them with the access token Keycloak issued it in `Authorization: Bearer`.
+
+**Host duty:** A host declares its machine (admin) paths once. `BearerGate` is passed to
 `install_web_auth_middleware(bearer_gate=...)`; it holds the app's own
 `OidcRelyingParty`, the app's `AdmissionConfig` and `MachinePaths(paths, authorized_parties)`:
 the paths (`PathRules`) and `AuthorizedParties`, the `azp` values (hal's client ids) the host
-admits on them, read from configuration. A route reads the admitted caller with
-`Depends(bearer_caller)`; `BearerCaller.subject` is the token's `sub`, with no
-account and no role. Admission is
-opt-in, opens no session and sets no cookie, and bearer requests share the
-per-address rate limits of browser requests.
+admits on them, read from configuration.
 
-- **What passes.** Only an RS256 `at+jwt` of the app's issuer whose only
-  `aud` is the app's client, whose `azp` is allowed and whose `groups` hold the
-  admin group or a group below it. Nothing is created or provisioned, and webauth
-  emits no event: the host audits the admitted call itself (subject, route,
-  outcome). `test_the_audience_must_be_the_app_alone` and
-  `test_an_authorized_party_the_host_did_not_allow_is_refused` in
-  [test_oidc_access_token.py](../tests/test_oidc_access_token.py) prove the audience and
-  `azp` restrictions; [bearer.py](../tests/e2e/oidc/bearer.py) holds the hand-run
-  real-issuer admission proofs.
-- **What it replaces.** On a gated path the cookie, the CSRF check and the
-  session gate decide nothing, every answer is `no-store`, and webauth sets no
-  cookie. `admitted_user` returns `None` and `session_id_from_request` answers
-  `None`, whatever cookie the request carries. The same rate
-  limit applies where a rate policy covers the path; a flood of invalid tokens
-  is bounded only by it. A session dependency (`current_user`, `admin_user`,
-  `admitted_admin`) on a machine path raises, so the library answers 500. `test_the_cookie_counts_for_nothing_beside_a_token` in
-  [test_bearer_gate_admission.py](../tests/middleware/test_bearer_gate_admission.py) proves admission
-  uses the token's subject without opening a session transaction.
-- **Token lifetime.** A block at Keycloak reaches the gate only when the token
-  expires, plus the leeway; signing out of a browser leaves the token valid.
-  `test_an_expired_token_is_admitted_until_expiry_plus_leeway` in
-  [test_oidc_access_token.py](../tests/test_oidc_access_token.py) proves the expiry boundary.
-  `disabled_person_keeps_the_token`, `sign_out_leaves_the_token` and
-  `short_token_fails_after_exp_and_leeway` in [bearer.py](../tests/e2e/oidc/bearer.py)
-  drive the real-issuer cases in the hand-run harness, not CI.
-- **The paths** are written as every other policy's are; the `PathRules`
-  docstring says how.
-  They must cover every machine route, a prefix being the safe form. Every method
-  is gated, `OPTIONS` included; a CORS preflight is the host's own layer outside
-  the stack. A path that machine paths and person paths both select is a machine path.
-- **Mounts and sockets.** Install the gate on the app that serves the machine
-  routes. A sub-app mounted below a gated path keeps its own CSRF and session
-  gate, and its `bearer_caller` raises. WebSocket scopes are not gated.
+- **MACHINE-01** A route reads the admitted caller with `Depends(bearer_caller)`;
+  `BearerCaller.subject` is the token's `sub`.
+- **MACHINE-02** The caller carries no account and no role.
+- **MACHINE-03** Admission is opt-in.
+- **MACHINE-04** Admission opens no session.
+- **MACHINE-05** Admission sets no cookie.
+- **MACHINE-06** Bearer requests share the per-address rate limits of browser requests.
+
+- **What passes.**
+  - **MACHINE-07** A token passes only as an RS256 `at+jwt`.
+  - **MACHINE-08** A token passes only from the app's issuer.
+  - **MACHINE-09** A token passes only if its only `aud` is the app's client.
+  - **MACHINE-10** A token passes only if its `azp` is allowed.
+  - **MACHINE-11** A token passes only if its `groups` hold the admin group or a group below it.
+  - **MACHINE-12** Nothing is created or provisioned.
+  - **MACHINE-13** webauth emits no event.
+  - **Host duty:** The host audits the admitted call itself (subject, route, outcome).
+- **What it replaces.** On a gated path:
+  - **MACHINE-14** The cookie decides nothing.
+  - **MACHINE-15** The CSRF check decides nothing.
+  - **MACHINE-16** The session gate decides nothing.
+  - **MACHINE-17** Every answer is `no-store`.
+  - **MACHINE-18** webauth sets no cookie.
+  - **MACHINE-19** `admitted_user` returns `None`, whatever cookie the request carries.
+  - **MACHINE-20** `session_id_from_request` answers `None`, whatever cookie the request carries.
+  - **MACHINE-21** The same rate limit applies where a rate policy covers the path.
+  - **MACHINE-22** A flood of invalid tokens is bounded only by that rate limit.
+  - **MACHINE-23** A session dependency (`current_user`, `admin_user`, `admitted_admin`) on a
+    machine path raises, so the library answers 500.
+- **Token lifetime.**
+  - **MACHINE-24** A block at Keycloak reaches the gate only when the token expires, plus the leeway.
+  - **MACHINE-25** Signing out of a browser leaves the token valid.
+- **The paths** are written as every other policy's are; the `PathRules` docstring says how.
+  - **Host duty:** The paths must cover every machine route, a prefix being the safe form.
+  - **MACHINE-26** Every method is gated, `OPTIONS` included.
+  - **Host duty:** A CORS preflight is the host's own layer outside the stack.
+  - **MACHINE-27** A path that machine paths and person paths both select is a machine path.
+- **Mounts and sockets.**
+  - **Host duty:** Install the gate on the app that serves the machine routes.
+  - **MACHINE-28** A sub-app mounted below a gated path keeps its own CSRF check.
+  - **MACHINE-29** A sub-app mounted below a gated path keeps its own session gate.
+  - **MACHINE-30** The `bearer_caller` of a route in such a sub-app raises.
+  - **MACHINE-31** WebSocket scopes are not gated.
 
 ## The person's token on the app's API
 

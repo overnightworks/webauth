@@ -160,6 +160,7 @@ def header_of(token: str) -> dict[str, Any]:
 
 
 def admin_token_opens_export(run: BearerRun) -> str:
+    """MACHINE-01: an admin token opens the export route, whose caller is the token's subject."""
     reset_host(run.host)
     answer = run.send(Call("GET", EXPORT, run.tokens["admin"]))
     assert_answer(answer, 200)
@@ -168,6 +169,7 @@ def admin_token_opens_export(run: BearerRun) -> str:
 
 
 def admission_leaves_no_trace(run: BearerRun) -> str:
+    """MACHINE-04, MACHINE-12: an admitted request opens no session and creates no account."""
     held = run.state()
     assert (held["accounts"], held["sessions"], held["session_transactions"]) == (0, 0, 0), held
     return "after the admitted export: accounts 0, sessions 0, session transactions 0"
@@ -291,6 +293,7 @@ def disabled_person_keeps_the_token(run: BearerRun) -> str:
 
 
 def sign_out_leaves_the_token(run: BearerRun) -> str:
+    """MACHINE-25: signing out of a browser leaves the token valid on a machine path."""
     page = run.host_page(run.people["admin"])
     run.proof.press(page, "#logout")
     page.wait_for_url(f"{run.settings.app_origins[0]}/")
@@ -329,6 +332,7 @@ def flipped_signature_is_refused(run: BearerRun) -> str:
 
 
 def answers_are_not_stored_and_set_no_cookie(run: BearerRun) -> str:
+    """MACHINE-17, MACHINE-18: every machine-route answer is `no-store` and sets no cookie."""
     for answer in run.answers:
         assert answer.headers.get("cache-control") == "no-store", (
             f"{answer.request.method} {answer.request.url.path} {answer.status_code}: "

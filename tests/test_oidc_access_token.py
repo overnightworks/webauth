@@ -101,6 +101,32 @@ def test_a_token_of_another_type_is_refused_before_any_key_set_is_fetched(typ: A
     assert (outcome, key_sets.fetched_urls) == (rejected(RejectionReason.INVALID_TOKEN_TYPE), [])
 
 
+@pytest.mark.parametrize(
+    ("header", "refusal"),
+    [
+        pytest.param({}, None, id="rs256-at-jwt"),
+        pytest.param({"typ": "JWT"}, rejected(RejectionReason.INVALID_TOKEN_TYPE), id="jwt-type"),
+        pytest.param(
+            {"alg": "none"}, rejected(RejectionReason.UNSUPPORTED_ALGORITHM), id="alg-none"
+        ),
+        pytest.param(
+            {"alg": "HS256"}, rejected(RejectionReason.UNSUPPORTED_ALGORITHM), id="alg-hs256"
+        ),
+        pytest.param(
+            {"alg": "RS512"}, rejected(RejectionReason.UNSUPPORTED_ALGORITHM), id="alg-rs512"
+        ),
+    ],
+)
+def test_only_an_rs256_at_jwt_passes(header: dict[str, Any], refusal: OidcRefusal | None) -> None:
+    """MACHINE-07: a token passes only as an RS256 `at+jwt`."""
+    outcome = verified(an_access_token(header=header))
+
+    if refusal is None:
+        assert isinstance(outcome, VerifiedAccessToken)
+    else:
+        assert outcome == refusal
+
+
 def a_jwt_verifier() -> _JwtVerifier:
     return _JwtVerifier(
         issuer=REALM_ISSUER,
@@ -148,6 +174,7 @@ def test_the_audience_must_be_the_app_alone(
     claims: dict[str, Any],
     refusal: OidcRefusal,
 ) -> None:
+    """MACHINE-09: a token passes only if its only `aud` is the app's client."""
     assert verified(an_access_token(claims=claims)) == refusal
 
 
@@ -174,6 +201,7 @@ def test_a_singleton_audience_array_of_the_app_is_accepted() -> None:
     ],
 )
 def test_an_authorized_party_the_host_did_not_allow_is_refused(authorized_party: Any) -> None:
+    """MACHINE-10: a token passes only if its `azp` is a party the host allowed."""
     outcome = verified(an_access_token(claims={"azp": authorized_party}))
 
     assert outcome == NOT_AN_AUTHORIZED_PARTY
@@ -248,6 +276,7 @@ def test_a_token_without_groups_is_accepted_with_none() -> None:
 
 
 def test_a_token_of_another_issuer_signed_with_the_right_key_is_refused() -> None:
+    """MACHINE-08: a token passes only from the app's issuer."""
     outcome = verified(an_access_token(issuer="https://login.example.org/realms/elsewhere"))
 
     assert outcome == rejected(RejectionReason.INVALID_ISSUER)
