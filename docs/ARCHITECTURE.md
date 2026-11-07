@@ -1,6 +1,6 @@
 # webauth architecture
 
-## Context and Scope
+## 1. Context and Scope
 
 webauth runs inside a FastAPI host, with no deployment, schema or ORM. Host developers start at the [README](../README.md).
 
@@ -9,43 +9,41 @@ flowchart LR
     subgraph process["Host process"]
         lib["webauth<br/>middleware, cookies, relying party"] --> host["Host application<br/>routes, user model, transactions"]
     end
-    subgraph stores["Host infrastructure (trusted)"]
-        sessions[("Session store")]
-        limits[("Rate-limit backend")]
-        audit["Audit sink, clock"]
+    stores[("Host infrastructure (trusted)<br/>sessions, rate limits, audit sink, clock")]
+    subgraph serviceprocess["Service process"]
+        check["webauth<br/>ServiceCallerCheck"] --> service["Service application"]
     end
     browser["Browser<br/>(any visitor, in scope)"] -- "cookies, CSRF, Origin" --> lib
     hal["hal<br/>(operator's CLI)"] -- "Authorization: Bearer" --> lib
+    app["App acting for a person"] -- "workload token + person token" --> check
     lib -- "https only, no redirects" --> issuer["OpenID Connect issuer<br/>(trusted for what it signs)"]
+    check -- "key set, https only" --> issuer
     browser -- "sign-in redirects" --> issuer
-    lib -- "ports" --> sessions & limits & audit
+    lib -- "ports" --> stores
 ```
-Request boundaries for the changing engineer, from [`middleware`](../src/webauth/middleware/), [`ports`](../src/webauth/ports.py),
-[`oidc`](../src/webauth/oidc/) and [`https_client`](../src/webauth/https_client.py).
+Request boundaries for the changing engineer, from [`middleware`](../src/webauth/middleware/), [`ports`](../src/webauth/ports.py), [`oidc`](../src/webauth/oidc/), [`service_callers`](../src/webauth/service_callers.py) and [`https_client`](../src/webauth/https_client.py).
 
-## Building Blocks
+## 2. Building Block View
 
 Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout and fresh tokens.
 
 - `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes, selects `SignInPaths` policies and answers failures.
 - `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `oidc_login` and the bearer gate apply it and services call `app_role`.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
-- `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission (a machine caller, or on a person path the account behind the token).
+- `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission.
 - `middleware` enforces body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
 - `proxies` derives client identity from trusted peers; `rate_limit` measures sliding windows in Redis or in process.
 - `ports` defines host Protocols, `AuthenticatedUser` and `BearerCaller`; `jwt_verification` verifies RS256 against cached issuer keys.
 - `oidc` owns authorization URLs, PKCE, callback/code/ID-token checks, access-token verification, refresh and client-credentials grants.
-- `service_callers` is how a service proves the caller of its API: `ServiceCallerCheck.person_caller` verifies an app's own token, binds a person's token to it and checks the person's membership, returning the `PersonCaller` or else the first `CallerRefusal`, under the service's `ServiceIdentity` and its registered apps; it holds no policy and logs nothing.
+- `service_callers` is how a service proves the caller of its API ([host contract](host-contract.md#a-services-callers)); it holds no policy and logs nothing.
 - `https_client` owns outbound HTTPS; `oidc_transport.post_token_request_over_https` implements the injected `TokenRequestPost`.
 
 The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
-The sign-in callback, the logout route and the back-channel logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores.
-Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
-The host owns its routes except the sign-in start, callback, logout and back-channel logout, which `install_sign_in_routes` registers; library responses are refusals (401/403/413/429/503/500), 302 login redirects, the sign-in 303s, the logout page and the back-channel's 200 and 400.
-ASGI owns HTTP framing (h11/httptools may legally differ); the body-size limit counts streamed bytes, never re-parsing framing.
+The sign-in callback, the logout route and the back-channel logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores. Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
+The host owns its routes except the four `install_sign_in_routes` registers; [the library's responses](host-contract.md#signed-out-and-refused) are in the host contract.
 
-## Runtime View
+## 3. Runtime View
 
 ```mermaid
 sequenceDiagram
@@ -54,17 +52,16 @@ sequenceDiagram
     participant R as OidcRelyingParty
     participant H as Host<br/>refusal hook
     participant S as Host stores<br/>accounts<br/>sessions
+    participant Issuer as OpenID Connect<br/>issuer
     Browser->>L: Start (next)
     L->>R: begin_login
     L-->>Browser: 303 to the issuer + signed pending cookie
     Browser->>Issuer: Authorization request (PKCE, state, nonce)
     Issuer-->>Browser: Redirect to callback with code + state
     Browser->>L: Callback + pending cookie
-    Note over L: Select the pending cookie and write its deletion
     L->>R: complete_login
     R->>Issuer: Code + PKCE verifier via injected transport
     Note over R: Verify ID token<br/>cached keys<br/>(fetch if needed)
-    Note over L: Decide admission (pure)
     alt refused
         L->>H: SignInRefusal
         H-->>Browser: The host's answer + pending clearing
@@ -74,140 +71,110 @@ sequenceDiagram
         L-->>Browser: 303 to the return path + session cookie + pending clearing
     end
 ```
-Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc/),
-[`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
-The harness opens one sign-in transaction under its write lock around the account and session writes; cookies follow ([Trust](#trust)).
-[Host refusals](host-contract.md#signed-out-and-refused) are outside this successful flow.
+Successful-login ownership for the changing engineer, from [`oidc_login`](../src/webauth/oidc_login.py), [`oidc`](../src/webauth/oidc/), [`jwt_verification`](../src/webauth/jwt_verification.py), [`cookies`](../src/webauth/cookies.py) and the [host callback](../tests/e2e/oidc/host_app.py).
 
 ### The store decides every request
 
-Every authenticated request reads `SessionRecordStore`, never a cache; the library judges validity, the store writes supplied expiry.
-
-### Middleware order
-
-`install_web_auth_middleware` enforces outermost-first: security headers, body size, rate limit, bearer gate, CSRF origin, session gate.
-Install once, adding no library middleware yourself; its docstring explains placement of host middleware and rejected stacks.
+Every authenticated request reads `SessionRecordStore`, never a cache ([`ports`](../src/webauth/ports.py) owns the duties); the library judges validity.
 
 ### The bearer gate
 
-[Host requirements/outcomes](host-contract.md#the-hosts-machine-routes), the [person paths](host-contract.md#the-persons-token-on-the-apps-api) and [refusals](host-contract.md#signed-out-and-refused) have one owner.
-The gate runs `OidcRelyingParty.verify_access_token` off-loop, then `app_role`; only admission records app/path/header SHA-256 in request memory, never the token.
-Each kind of path (`MachinePaths`, `PersonPaths`) names its own `AuthorizedParties`; each kind admits only the clients it lists, so a client listed on one is not thereby admitted on the other. On a machine path the record holds a `BearerCaller`. On a person path (`PersonPaths`) the gate admits the account behind the token with the sign-in's own `app_role` and account step in one `SignInTransaction` entry, off-loop, and records an `AuthenticatedUser`; a request with no bearer credential falls through to the cookie. A path both rules select is a machine path.
-A `ProtectedResource` (`BearerGate(resource=...)`) is a third kind of path with its own `AuthorizedParties`: its entry point, the exact path of its `url`, answers before CSRF and the session gate. The gate builds `OidcRelyingParty.resource_token_verifier` once, a second `_JwtVerifier` of its own key-set cache whose one audience is the `url` (the first keeps the client ID), and checks each request's bearer with it off-loop. A resource also names `MarkedRoute(method, template)` operations of the host, which share one decision for the answer with the entry point. Paths are selected in the order machine, resource, marked route, person. The 401 and 403 cases, the role cap and the account step are in the host contract's [protected resource](host-contract.md#the-protected-resource).
-CSRF, session gate, `bearer_caller`, `current_user` and `admitted_user` read strictly: another app/path/header, or for a resource admission another method, is no admission. `session_id_from_request` and the loose reader refuse more: a bearer-admitted request names no session.
-The gate sits inside rate limiting; installation puts the `no-store` rule of the machine paths and the resource's entry point first in security-header policy.
+The gate verifies the bearer with `OidcRelyingParty` off-loop and admits by the kind of path (machine, person, protected resource), each with its own `AuthorizedParties`.
+[The host contract](host-contract.md#the-hosts-machine-routes) owns the outcomes; `no-store` and the selection order are in [the person paths](host-contract.md#the-persons-token-on-the-apps-api) and [the protected resource](host-contract.md#the-protected-resource).
 
 ### Reading the session
 
-`current_user_dependency` binds the store to `current_user`, `admin_user`; `admit_session` judges a host-read id.
-`session_id_from_request` reads the signed cookie; [the host contract](host-contract.md#signed-out-and-refused) owns `LoginRedirect`/401 outcomes.
+`current_user_dependency` binds the store to `current_user`, `admin_user`; `admit_session` judges a host-read id. `session_id_from_request` reads the signed cookie; [the host contract](host-contract.md#signed-out-and-refused) owns `LoginRedirect`/401 outcomes.
 
 ### The session gate
 
-`SessionGate` enforces [the host contract](host-contract.md#signed-out-and-refused) without route dependencies;
-`admitted_user` reads admission, `admitted_admin` checks admin too.
+`SessionGate` enforces [the host contract](host-contract.md#signed-out-and-refused) without route dependencies; `admitted_user` reads admission, `admitted_admin` checks admin too.
 
 ### WebSocket handshakes
 
-`authenticate_websocket` checks Origin before session: cross-site handshakes carry cookies too. The host rechecks while streaming;
-ending a session alone does not end a socket.
+`authenticate_websocket` checks Origin before session: cross-site handshakes carry cookies too. The host rechecks while streaming; ending a session alone does not end a socket.
 
 ### The return path
 
-The return path survives login only as a same-origin app path, else the app root without refusal; the start route owns validation,
-[the host contract](host-contract.md#signed-out-and-refused) owns the landing outcome.
+The return path survives login only as a same-origin app path, else the app root without refusal; the start route owns validation, [the host contract](host-contract.md#signed-out-and-refused) owns the landing outcome.
 
 ### Logging out and the ID token hint
 
-The logout route reads the row's ID token before deleting the session, in one `SignInTransaction` entry and only when the cookie names a session, even for expired rows; it neither renews nor admits.
-It builds an end-session form without an outbound call. CSP admits one script by hash and only the end-session/post-logout origins;
-security headers preserve that policy and `Cache-Control`. [The host contract](host-contract.md#what-every-app-gets) owns the outcomes and names the test that proves each rule.
-[Retention](host-contract.md#the-sign-in-routes) is explicit. webauth never signs, decodes, verifies or logs the hint;
-Keycloak judges it. [Trust](#trust), items 4 and 9, owns exposure and copied-token consequences.
+The logout route reads the row's ID token before deleting the session and builds an end-session form without an outbound call;
+[the host contract](host-contract.md#what-every-app-gets) owns the outcomes and [retention](host-contract.md#the-sign-in-routes) is explicit.
+webauth never signs, decodes, verifies or logs the hint; Keycloak judges it. [Trust](#trust) and [Risks](#8-risks-and-technical-debt) own exposure and copied-token consequences.
 
 ### Back-channel logout
 
-`install_sign_in_routes` registers the issuer's route for `POST` only, over a private step. It reads the body outside every catch (a streamed oversized body is 413), verifies the form's one `logout_token` through `OidcRelyingParty.verify_logout_token`, and only then enters one `SignInTransaction`, where it deletes the subject's sessions and records one event when at least one session ended. A refused form or token is an empty 400 that enters no transaction; 200 follows only a clean exit; any exception in the relying-party callable, the verification, a store, the audit sink or the exit is an empty 400 and is re-raised. The host's `backchannel_dependencies` run before the body is read and answer its own 404 by exception handler.
-The host's transaction rolls back when the block raises, also when the audit sink fails after the deletion. Signature is the only control; restrict reachability to the issuer.
-
-### The relying party
-
-`OidcRelyingParty` runs authorization-code/PKCE for one client/issuer, using host-built `OidcClientConfig` and host secret channels.
-Injected `oidc_transport.post_token_request_over_https` and `https_client.fetch_key_set_over_https` bound time/size, use HTTPS,
-follow no redirects and log nothing. The host names authorization, token, key-set and end-session URLs; there is no discovery.
-
-### The person's access token
-
-`fresh_access_token` takes a session and returns a `SecretStr` in memory, or `AccessTokenRefusal` carrying `AccessTokenRefusalReason`.
-`current_groups` shares its grant, its second transaction and its rotation, and returns the group paths of the refreshed, verified ID token or an `AccessTokenRefusal` ([host contract](host-contract.md#a-persons-current-groups)).
-`OidcRelyingParty.workload_access_token(scopes=...)` returns the client's token for the scopes the host passes, the callee's audience scope; [Trust](#trust), item 9, owns lifetime after logout.
+`install_sign_in_routes` registers the issuer's route for `POST` only; it verifies the form's `logout_token` before it enters one `SignInTransaction` that deletes the subject's sessions. [The host contract](host-contract.md#the-sign-in-routes) owns the answers.
 
 ### Admitting an identity
 
-The callback's admission decision and its account write share `AdmissionConfig`; the host store binds to one issuer, whose subject is the account `id`.
-`app_role` owns the [group decision](host-contract.md#what-every-app-gets), also used by services verifying issuer tokens themselves.
+The callback's admission decision and its account write share `AdmissionConfig`; the host store binds to one issuer, whose subject is the account `id`. `app_role` owns the [group decision](host-contract.md#what-every-app-gets), also used by services verifying issuer tokens themselves.
+`OidcRelyingParty` runs authorization-code/PKCE for one client and issuer from host-built `OidcClientConfig`; the host names every URL, and there is no discovery.
 
-## Crosscutting Concepts
+## 4. Deployment View
 
-### Configuration
+webauth has no deployment of its own: each host runs it in its own process at a git-pinned tag ([Install](../README.md#install)).
+Rate-limit windows shared across processes need the `redis` extra ([Rate limiting](#rate-limiting-and-the-optional-redis-extra)).
+The proof harness runs by hand on the operator's machine, in Docker, on free loopback ports ([runbooks](runbooks/run-the-browser-proof.md)).
+The operator's account and environment are trusted. A same-user race between listing and removal in `scripts/run_oidc_proof.sh` is out of scope.
 
-The host installs one keyword-built `WebAuthConfig` via `install_web_auth_config`; no module reads environment variables or globals.
-`cookie_secure` alone controls cookie `Secure`/HSTS regardless of request scheme; disable only for plain-HTTP development. Its docstring owns checks.
-`SecurityHeadersPolicy` covers all responses, refusals/500 included; `default_content_security_policy()` builds its policy.
+## 5. Crosscutting Concepts
 
 ### Session lifetime
 
-`SessionLifetime` bounds idle time and total time since creation. Groups are not rechecked during a session;
-[the host contract](host-contract.md#what-every-app-gets) owns membership/role changes. For `login_group`, both recommended windows are 12 hours.
-
-### CSRF origin
-
-`CsrfOriginMiddleware` applies [host rules](host-contract.md#csrf-origin): Fetch Metadata, then the origin matcher WebSocket checks use directly.
-Verified bearer admission bypasses it; `CsrfPolicy` selects exemptions, `WebAuthConfig` owns exact-host/port matching.
+`SessionLifetime` bounds idle time and total time since creation. Groups are not rechecked during a session; [the host contract](host-contract.md#what-every-app-gets) owns membership/role changes. For `login_group`, both recommended windows are 12 hours.
 
 ### Rate limiting, and the optional Redis extra
 
-`WebAuthConfig.rate_limits` supplies `RateLimitBackend`; `RateLimitPolicy` sets budgets. Backend errors fail closed.
-`RedisRateLimitBackend` shares windows across processes and needs `[redis]`; `SingleProcessRateLimitBackend` needs no Redis, for one worker only.
+`WebAuthConfig.rate_limits` supplies `RateLimitBackend`; `RateLimitPolicy` sets budgets. Backend errors fail closed. `RedisRateLimitBackend` shares windows across processes and needs `[redis]`; `SingleProcessRateLimitBackend` needs no Redis, for one worker only.
 
-### Audit events
+### Proof strategy
 
-`AuditSink.account_event` reports user creation, role changes and back-channel logout, with no session id/username; the host maps it or does nothing.
+CI's `checks` job runs `scripts/run_static_checks.sh` (ruff, format, deptry, pyright, the typing hosts against the built wheel), `pytest tests` with branch coverage and the hash-pinned build;
+`lowest-direct` runs the tests at the lowest declared versions with the `redis` extra; `quality / verdict` takes the coverage artifact, SonarCloud and the import contracts.
+The browser proof (Chromium, Firefox and WebKit against a real Keycloak) and the OIDF conformance suite run by hand through `scripts/run_oidc_proof.sh` and the [runbooks](runbooks/run-the-browser-proof.md); CI only lints `tests/e2e/`.
+The host contract names the test that proves each rule.
 
 ### Trust
 
-Who the library defends against and trusts; links point to owning sections.
-
-1. **Browser to library** (cookies, [CSRF](#csrf-origin), Origin, [return path](#the-return-path), body size, [the session gate](#the-session-gate), [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that ([Configuration](#configuration)).
+1. **Browser to library** (cookies, [CSRF](host-contract.md#csrf-origin), Origin, [return path](#the-return-path), body size, [the session gate](#the-session-gate), [rate limit](#rate-limiting-and-the-optional-redis-extra), [WebSocket handshake](#websocket-handshakes)): any browser or cross-site attacker is in scope. A network attacker below TLS is out of scope; the host's TLS, HSTS and `cookie_secure` own that.
 2. **Library to issuer:** the configured issuer is trusted for what it signs and serves over TLS, and gets no defence beyond the JOSE and OpenID Connect specifications and PyJWT.
    - In scope: anyone presenting a token that lacks the issuer's signature or carries the wrong `alg`, `aud`, `iss`, type or time.
-   - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect ([The relying party](#the-relying-party)).
-   - Availability: every connection and read is bounded.
+   - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect.
 3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only the logout route's page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
 4. **Host store to library (ports):** the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): id entropy, exact comparison, atomicity, serialization of sign-in entries, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty. The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. An ID token stored there carries the person's identity claims, not an authentication credential; a copy nevertheless allows its holder to invoke the [hinted logout](host-contract.md#what-every-app-gets).
 5. **Host infrastructure** (`WallClock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
-7. **Bearer caller to library:** anyone who can reach a gated path is untrusted. [The bearer gate](#the-bearer-gate) owns the verification and admission mechanism; the [host contract](host-contract.md#the-hosts-machine-routes) owns token lifetime, cookie handling and socket exclusions. Named residues:
-   - an admin token opens every machine route; there is no sender constraint (no DPoP or mTLS);
-   - on a person path a token is the person, with their rights and no layer on top, until its `exp` plus leeway: a browser sign-out, a back-channel logout or disabling the person at the issuer does not end it, group changes arrive with the next token, and a copied token is the person;
-   - every token request on a person path, and every request at the resource's entry point or on one of its marked routes whose token holds the groups, enters the host's serialized `SignInTransaction` and shares the address budget with the browser;
-   - only the realm keeps a service account out of the admin group;
-   - key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
-8. **A service's caller:** anyone who can reach a service's API is untrusted. [`service_callers`](../src/webauth/service_callers.py) owns the workload proof (realm role, `azp` equal to `client_id`, a registered client) and the person binding (the person's `azp` is the workload's, another subject, a member of the app) and refuses 401 and 503 causes before any 403 ([host contract](host-contract.md#a-services-callers)). Replay of an app's token between services is closed only while each app requests the callee's audience alone in each workload grant and no service holds an app's credentials. Named residues:
-   - a compromised app credential defeats that protection;
-   - the issuer owns the workload token's lifetime: a token it signs with a longer life, for example through a client-level override, is admitted until its `exp` plus leeway. The realm's lifespan and its probe own that bound;
-   - `account` stays in `aud` of tokens as the realm issues them;
-   - the check proves who the app is, not what the service lets it do: groups, roles, routing and wire codes belong to the service.
-9. **Named residues:**
-   - the ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of that page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session;
-   - a logout that completes before a verified sign-in cannot end that later session; closing that needs sessions bound to the issuer's `sid`, which webauth does not do. A failed sign-in is not repaired later: a host whose store applies each call keeps the account created, the sessions ended and the events recorded before the failure;
-   - a node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up; the session is not ended ([Session lifetime](#session-lifetime));
-   - a clock reading past year 9999 fails closed;
-   - name resolution is bounded by the system resolver, not by the library; connecting is bounded per resolved address, outside the total deadline ([The relying party](#the-relying-party));
-   - an access token that [`fresh_access_token`](#the-persons-access-token) handed out stays valid at the service it is sent to, and at the issuer's own endpoints, until its own `exp`, even after a logout or an expiry that lands once the call has decided; webauth revokes nothing;
-   - a copy of a logout token replays within its age bound (`_LOGOUT_TOKEN_MAX_AGE_SECONDS` plus the leeway), so it ends the sessions of a login made after the first delivery; webauth keeps no `jti` store, as `OidcRelyingParty.verify_logout_token`'s docstring says;
-   - with a store that commits every statement, a session deleted between `fresh_access_token`'s second `load` and the end of its block is seen only through `replace_refresh_token` answering `False`, and an issuer that echoes or omits the refresh token never reaches that call, so the call then hands out a token for the session deleted in that window; `current_groups` shares that window and hands out groups for such a session.
+7. **Bearer caller to library:** anyone who can reach a gated path is untrusted. [The bearer gate](#the-bearer-gate) owns the mechanism and the [host contract](host-contract.md#the-hosts-machine-routes) owns token lifetime, cookie handling and socket exclusions; the residues are in [Risks](#8-risks-and-technical-debt).
+8. **A service's caller:** anyone who can reach a service's API is untrusted. [`service_callers`](../src/webauth/service_callers.py) owns the workload proof and the person binding and refuses 401 and 503 causes before any 403 ([host contract](host-contract.md#a-services-callers)). Replay of an app's token between services is closed only while each app requests the callee's audience alone in each workload grant and no service holds an app's credentials.
 
 To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 
-The operator's account and environment are trusted. A same-user race between listing and removal in `scripts/run_oidc_proof.sh` is out of scope.
+## 6. Constraints and reasons
+
+- The library never commits: durability belongs to the host, so each host decides what a failure keeps ([host contract](host-contract.md#the-sign-in-routes)).
+- It caches no session: the store decides every request, so a session the host ended is refused on its next request ([`SessionRecordStore`](../src/webauth/ports.py)).
+- One install order: the gates sit in a fixed order, each placed for what it must see first, so a stack that already holds library middleware is refused untouched ([`install_web_auth_middleware`](../src/webauth/middleware/stack.py)).
+- The store is bound to one issuer: an account's `id` is the issuer's subject, so moving issuers is a migration of the host's accounts ([`oidc_login`](../src/webauth/oidc_login.py)).
+- The pending login lives in its own signed cookie, one per login, so two tabs never overwrite each other and the library keeps no server-side store ([`oidc_login`](../src/webauth/oidc_login.py)).
+- ASGI owns HTTP framing (h11 and httptools may legally differ), so the body-size limit counts streamed bytes and never re-parses framing.
+- Outbound calls are https only, bounded and without redirects, because the issuer is trusted only over TLS ([Trust](#trust)).
+- A host without the `redis` extra imports everything, so the extra stays optional ([`AGENTS.md`](../AGENTS.md)).
+
+## 8. Risks and Technical Debt
+
+- An admin token opens every machine route; there is no sender constraint (no DPoP or mTLS).
+- A person's token is the person until its `exp` plus leeway, and a sign-out does not end it; the [host contract](host-contract.md#the-persons-token-on-the-apps-api) owns the person-path residues. Every token request there, and every request at a resource's entry point or marked route whose token holds the groups, enters the host's serialized transaction.
+- Only the realm keeps a service account out of the admin group. Key-set unavailability fails verification; its response is in [Signed out and refused](host-contract.md#signed-out-and-refused).
+- A compromised app credential defeats the replay protection between services ([trust boundary 8](#trust)). `account` stays in `aud` of tokens as the realm issues them. A workload token the issuer signs with a longer life, for example through a client-level override, is admitted until its `exp` plus leeway; the realm's lifespan and its probe own that bound.
+- The ID token reaches the browser only in the one `no-store` logout answer; what a browser's session restore keeps of that page is the browser's, and a same-origin script reads the hint only by posting the logout itself, which ends the session.
+- A logout that completes before a verified sign-in cannot end that later session; closing that needs sessions bound to the issuer's `sid`. A failed sign-in is not repaired later: a host whose store applies each call keeps the account created, the sessions ended and the events recorded before the failure.
+- A node whose clock runs more than 60 s behind the node that last renewed a session, or a clock that steps back more than 60 s, refuses that session until its clock catches up ([Session lifetime](#session-lifetime)). A clock reading past year 9999 fails closed.
+- Name resolution is bounded by the system resolver; connecting is bounded per resolved address, outside the total deadline.
+- An access token that `fresh_access_token` handed out stays valid at the service it is sent to, and at the issuer's own endpoints, until its own `exp`, even after a logout; webauth revokes nothing. The same holds for `workload_access_token`.
+- A copy of a logout token replays within its age bound plus the leeway, so it ends the sessions of a login made after the first delivery; webauth keeps no `jti` store, as `OidcRelyingParty.verify_logout_token`'s docstring says.
+- With a store that commits every statement, a session deleted in `fresh_access_token`'s window escapes the rotation check; the [host contract](host-contract.md#a-persons-current-groups) states it.
+- A real browser, Keycloak and the OIDF suite are proven only by hand-run proofs that CI does not run ([run the browser proof](runbooks/run-the-browser-proof.md), [refresh the e2e pins](runbooks/refresh-the-e2e-pins.md)).
+- Branch coverage measures the unit layer only.

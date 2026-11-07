@@ -423,7 +423,7 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   calls this on every turn must expect that.
 - **Residue.** The second transaction cannot rule out a session deleted after its load: with a
   store that commits each statement, a deletion before the transaction's exit also escapes when
-  the rotation is omitted or echoed, as [Trust](ARCHITECTURE.md#trust), item 9, says.
+  the rotation is omitted or echoed, as [Risks and Technical Debt](ARCHITECTURE.md#8-risks-and-technical-debt) says.
 
 Proofs: [test_oidc_login_current_groups.py](../tests/test_oidc_login_current_groups.py) in CI,
 and `CHECK refreshed-id-token-facts` in
