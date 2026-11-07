@@ -720,7 +720,7 @@ def session_cookie_after_redirect(
 
 
 def logout(proof: Proof, width: Width) -> str:
-    """REFUSE-23, APP-26, APP-28, APP-31, APP-34: logout ends the session and clears cookies, no prompt."""
+    """REFUSE-23, APP-26, APP-28, APP-31, APP-34: logout ends the session and clears cookies."""
     scenario = f"2-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
