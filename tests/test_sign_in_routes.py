@@ -60,7 +60,7 @@ from tests.support.webauth_arrangement import (
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.cookies import sign_session_id
 from webauth.oidc import OidcIdentity, OidcRefusal, OidcRefusalReason
-from webauth.ports import AccountEventKind
+from webauth.ports import AccountEventKind, AccountKind
 from webauth.sign_in_routes import (
     LogoutPageText,
     RefusalPage,
@@ -172,7 +172,9 @@ def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     assert (response.status_code, response.headers["location"]) == (303, "/albums/42")
     assert host.config.session_cookie_name in set_cookies(response)
     assert (host.transaction.entries, host.sessions.count_active()) == (1, 1)
-    assert [account.id for account in host.accounts.list()] == [SUBJECT]
+    assert [(account.id, account.kind) for account in host.accounts.list()] == [
+        (SUBJECT, AccountKind.PERSON)
+    ]
 
 
 @pytest.mark.parametrize(
