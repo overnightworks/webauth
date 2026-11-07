@@ -317,12 +317,23 @@ def test_the_admin_route_refuses_every_other_role(auth_app: AuthApp) -> None:
     assert response.json()["detail"] == ADMIN_REQUIRED_DETAIL
 
 
-@pytest.mark.parametrize("role", ["Admin", "ADMIN", "administrator", "admin ", "owner", ""])
-def test_the_admin_route_refuses_a_role_that_is_not_exactly_admin(role: str) -> None:
-    """APP-09: the admin route admits exactly the role admin and no look-alike."""
+@pytest.mark.parametrize(
+    ("role", "expected_status"),
+    [
+        (ADMIN_ROLE, 200),
+        ("Admin", 403),
+        ("ADMIN", 403),
+        ("administrator", 403),
+        ("admin ", 403),
+        ("owner", 403),
+        ("", 403),
+    ],
+)
+def test_the_admin_route_admits_exactly_the_role_admin(role: str, expected_status: int) -> None:
+    """APP-09 for the admin dependency, whose role check the session gate shares."""
     app = an_auth_app(a_session(user=FakeUser(role=role)))
 
-    assert app.get("/admin", cookie=app.signed_cookie()).status_code == 403
+    assert app.get("/admin", cookie=app.signed_cookie()).status_code == expected_status
 
 
 def test_the_admin_route_refuses_the_same_cookie_the_protected_route_refuses(

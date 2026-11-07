@@ -17,7 +17,7 @@ host's accounts, never a configuration change. This module builds on
 
 Admission runs inside the host's ``SignInTransaction`` and never commits: the host's
 exit commits or rolls back, and a refusal writes nothing. Who gets in, and when a
-change of group takes effect, is in ``docs/host-contract.md``, "Who gets in".
+change of group takes effect, is in ``docs/host-contract.md``, "What every app gets".
 
 After the callback admits an account, one ``SignInTransaction`` ends the session the
 request's cookie names, prunes the account to a cap, and creates its new session,
