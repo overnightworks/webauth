@@ -92,9 +92,9 @@ migration of stored accounts changes these values.
 
 - **APP-23** People who are already signed in keep working until their app session
   ends, because the app checks a session in its own store and never asks Keycloak.
-- **APP-24** When Keycloak fails during the sign-in, or the browser reaches Keycloak
-  but the app does not, the sign-in stops at the app's callback, on the host's refusal
-  page.
+- **APP-24** Only when Keycloak fails during the sign-in, or the browser reaches
+  Keycloak but the app does not, does the sign-in stop at the app's callback, on the
+  host's refusal page.
 
 When Keycloak is down, a new sign-in fails at Keycloak: the app sends the browser to
 Keycloak's sign-in page, which does not load, so the person sees the browser's or the
