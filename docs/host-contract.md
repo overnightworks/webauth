@@ -601,54 +601,67 @@ On a marked route:
 A service that is not a browser app (no sessions, no sign-in) admits an app acting for a person, with
 `ServiceCallerCheck` of `webauth.service_callers`. The service builds one per process from a
 `ServiceIdentity` (issuer, key-set URL, its own audience, the realm role that marks a workload, the group
-claim, the clock leeway) and its registered apps (`RegisteredApp`, keyed by the workload client id). Nothing
-has a default and nothing is read from the environment. `person_caller(workload_token, person_token)` is
-synchronous, so an async service runs it in a thread.
+claim, the clock leeway) and its registered apps (`RegisteredApp`, keyed by the workload client id).
 
-It returns a `PersonCaller` (the app, the client id, the person's `Principal` and groups, and the person's
-`AppRole`) or a `CallerRefusal`. It never says which token a refusal concerns. Both tokens are verified and
-read before any check that compares them, so every `UNAUTHENTICATED` and `UNAVAILABLE` refusal comes before
-any `FORBIDDEN` one. The checks run in this order: the workload token is checked for a missing token and then
-by the verifier, then the person token the same way; then the workload token's subject and groups, then the
-person token's; then the rows from `NOT_A_WORKLOAD` down, in table order. The table lists each reason where it
-is first checked, and the first fault is the refusal. `CallerRefusal.refusal_class` names its
-`CallerRefusalClass`, and the host owns the wire codes, here the recommended ones:
+- **CALLER-01** nothing has a default;
+- **CALLER-02** nothing is read from the environment;
+- **CALLER-03** `person_caller(workload_token, person_token)` is synchronous;
+- **Host duty:** an async service runs `person_caller` in a thread.
 
-| Reason | Fault | Class |
-|---|---|---|
-| `MISSING_TOKEN` | the workload token, then the person token, is absent or empty | `UNAUTHENTICATED` (401) |
-| `KEY_SET_UNAVAILABLE` | the verifier cannot fetch the key set, see below | `UNAVAILABLE` (503) |
-| `TOKEN_REJECTED` | the verifier refuses either token, see below | `UNAUTHENTICATED` (401) |
-| `INVALID_SUBJECT` | `sub` absent or not valid text, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
-| `MALFORMED_GROUPS` | the group claim is present and not a list of strings, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
-| `NOT_A_WORKLOAD` | the workload token's `realm_access.roles` lacks the workload role | `FORBIDDEN` (403) |
-| `UNBOUND_CLIENT` | the workload token's `azp` is absent or empty, or its `client_id` differs from it | `FORBIDDEN` (403) |
-| `UNREGISTERED_CLIENT` | the workload token's `azp` is no registered app | `FORBIDDEN` (403) |
-| `CLIENT_MISMATCH` | the person's `azp` is not the workload's `azp` | `FORBIDDEN` (403) |
-| `SAME_SUBJECT` | the person's subject is the workload's | `FORBIDDEN` (403) |
-| `NOT_A_MEMBER` | the person's groups make no member of the app, by `app_role` and the registered admission | `FORBIDDEN` (403) |
+- **CALLER-04** it returns a `PersonCaller` (the app, the client id, the person's `Principal` and groups, and the
+  person's `AppRole`) or a `CallerRefusal`;
+- **CALLER-05** it never says which token a refusal concerns;
+- **CALLER-06** both tokens are verified and read before any check that compares them, so every `UNAUTHENTICATED` and
+  `UNAVAILABLE` refusal comes before any `FORBIDDEN` one;
+- **CALLER-07** the checks run in this order: the workload token is checked for a missing token and then by the
+  verifier, then the person token the same way; then the workload token's subject and groups, then the person
+  token's; then the rows from `NOT_A_WORKLOAD` down, in table order. The first fault is the refusal;
+- **CALLER-08** `CallerRefusal.refusal_class` names its `CallerRefusalClass`;
+- **Host duty:** the host owns the wire codes, here the recommended ones.
 
-Neither token's lifetime is bounded beyond its `exp` against the clock; the issuer owns it. The person token
-gets no role check; its `azp` is the client binding and is never evidence of an exchange.
+The table lists each reason where it is first checked:
 
-The verifier stage keeps the verifier's own order: a malformed header or unsupported algorithm is
-`TOKEN_REJECTED` before any key lookup, so no key set is fetched. `KEY_SET_UNAVAILABLE` (503) is
-the verifier's refusal when the key set cannot be fetched and the token's key is not among the
-cached ones, also when other keys are cached; with a usable cached key, a failed refresh still
-verifies. Every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
+| ID | Reason | Fault | Class |
+|---|---|---|---|
+| **CALLER-09** | `MISSING_TOKEN` | the workload token, then the person token, is absent or empty | `UNAUTHENTICATED` (401) |
+| **CALLER-10** | `KEY_SET_UNAVAILABLE` | the verifier cannot fetch the key set, see below | `UNAVAILABLE` (503) |
+| **CALLER-11** | `TOKEN_REJECTED` | the verifier refuses either token, see below | `UNAUTHENTICATED` (401) |
+| **CALLER-12** | `INVALID_SUBJECT` | `sub` absent or not valid text, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
+| **CALLER-13** | `MALFORMED_GROUPS` | the group claim is present and not a list of strings, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
+| **CALLER-14** | `NOT_A_WORKLOAD` | the workload token's `realm_access.roles` lacks the workload role | `FORBIDDEN` (403) |
+| **CALLER-15** | `UNBOUND_CLIENT` | the workload token's `azp` is absent or empty, or its `client_id` differs from it | `FORBIDDEN` (403) |
+| **CALLER-16** | `UNREGISTERED_CLIENT` | the workload token's `azp` is no registered app | `FORBIDDEN` (403) |
+| **CALLER-17** | `CLIENT_MISMATCH` | the person's `azp` is not the workload's `azp` | `FORBIDDEN` (403) |
+| **CALLER-18** | `SAME_SUBJECT` | the person's subject is the workload's | `FORBIDDEN` (403) |
+| **CALLER-19** | `NOT_A_MEMBER` | the person's groups make no member of the app, by `app_role` and the registered admission | `FORBIDDEN` (403) |
+
+**CALLER-20** Neither token's lifetime is bounded beyond its `exp` against the clock; the issuer owns it.
+
+**CALLER-21** The person token gets no role check; its `azp` is the client binding and is never evidence of an
+exchange.
+
+The verifier stage keeps the verifier's own order:
+
+- **CALLER-22** a malformed header or unsupported algorithm is `TOKEN_REJECTED` before any key lookup, so no key set
+  is fetched;
+- **CALLER-23** `KEY_SET_UNAVAILABLE` (503) is the verifier's refusal when the key set cannot be fetched and the
+  token's key is not among the cached ones, also when other keys are cached;
+- **CALLER-24** with a usable cached key, a failed refresh still verifies;
+- **CALLER-25** every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
 
 By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
 `UNREGISTERED_CLIENT`, `CLIENT_MISMATCH`, `SAME_SUBJECT` and `NOT_A_MEMBER`.
 
-A group claim that is a JSON `null` is `MALFORMED_GROUPS`; only an absent claim means no groups.
-
-The token's `aud` must name the service; it may name others. The check has no policy: which
-groups reach which route is the service's. Nothing taken from a token (subject, client id,
-groups) appears in a repr, an error message or a log record of the module, and `jwks_url` is left
-out of the repr of `ServiceIdentity`.
-
-Proofs: [test_service_callers.py](../tests/test_service_callers.py) in CI.
+- **CALLER-26** a group claim that is a JSON `null` is `MALFORMED_GROUPS`;
+- **CALLER-27** only an absent group claim means no groups;
+- **CALLER-28** the token's `aud` must name the service;
+- **CALLER-29** the token's `aud` may name others;
+- **CALLER-30** the check has no policy;
+- **Host duty:** which groups reach which route is the service's;
+- **CALLER-31** nothing taken from a token (subject, client id, groups) appears in a repr, an error message or a log
+  record of the module;
+- **CALLER-32** `jwks_url` is left out of the repr of `ServiceIdentity`.
 
 ## The sign-in routes
 
