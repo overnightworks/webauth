@@ -371,12 +371,11 @@ def test_visitors_behind_an_unlisted_proxy_share_its_rate_limit_budget() -> None
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     other_visitor = "203.0.113.8"
 
-    budgets = {
-        _budget_address(
-            _get_client_ip(_TRUSTED_PEER, [f"{visitor}, {_UNLISTED_PROXY}, {_TRUSTED_HOP}"], trusted)
-        )
-        for visitor in (_CLIENT, other_visitor)
-    }
+    chains = [
+        f"{visitor}, {_UNLISTED_PROXY}, {_TRUSTED_HOP}" for visitor in (_CLIENT, other_visitor)
+    ]
+
+    budgets = {_budget_address(_get_client_ip(_TRUSTED_PEER, [chain], trusted)) for chain in chains}
 
     assert budgets == {_UNLISTED_PROXY}
 
