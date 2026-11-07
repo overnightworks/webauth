@@ -174,7 +174,7 @@ webauth supports the current releases of Chrome, Edge, Firefox and Safari
 
 ## Signed out and refused
 
-The operator ruled the opening sentence, the passages that open "To keep the deep link" and "`"No access"` is for", the sentences on a page or an API call without a session, the public paths, the page after signing out, and the machine route's refusal answers with the paragraph that proves them; no other sentence of this section is ruled, and proof lines are not rulings.
+The operator ruled the passages that open "Every app shows", "A page without a session sends", "An API call without a session gets", "To keep the deep link", "A machine route", "Public paths are the exception", "The page after signing out is" and "`"No access"` is for"; no other sentence of this section is ruled, and proof lines are not rulings.
 
 Every app shows signed-out and refused people the same way. This is the rule
 every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it, and a
