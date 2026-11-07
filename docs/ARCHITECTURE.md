@@ -156,12 +156,21 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 
 - The library never commits: durability belongs to the host, so each host decides what a failure keeps ([host contract](host-contract.md#the-sign-in-routes)).
 - It caches no session: the store decides every request, so a session the host ended is refused on its next request ([`SessionRecordStore`](../src/webauth/ports.py)).
-- One install order: the gates sit in a fixed order, each placed for what it must see first, so a stack that already holds library middleware is refused untouched ([`install_web_auth_middleware`](../src/webauth/middleware/stack.py)).
+- One install order: the gates sit in a fixed order, each placed for what it must see first; a stack that already holds library middleware is refused untouched ([`install_web_auth_middleware`](../src/webauth/middleware/stack.py)).
 - The store is bound to one issuer: an account's `id` is the issuer's subject, so moving issuers is a migration of the host's accounts ([`oidc_login`](../src/webauth/oidc_login.py)).
 - The pending login lives in its own signed cookie, one per login, so two tabs never overwrite each other and the library keeps no server-side store ([`oidc_login`](../src/webauth/oidc_login.py)).
 - ASGI owns HTTP framing (h11 and httptools may legally differ), so the body-size limit counts streamed bytes and never re-parses framing.
 - Outbound calls are https only, bounded and without redirects, because the issuer is trusted only over TLS ([Trust](#trust)).
 - A host without the `redis` extra imports everything, so the extra stays optional ([`AGENTS.md`](../AGENTS.md)).
+
+## 7. Not chosen
+
+- A `jti` replay store for logout tokens: replay detection is optional in Back-Channel Logout, and a repeat only ends the same person's sessions again while the issuer signs them back in without a prompt. It reopens when a repeated logout is no longer harmless, as when the issuer stops signing a person back in without a prompt.
+- Sessions bound to the issuer's `sid`: a back-channel logout ends every session of the person, and other devices sign back in through their own live issuer sessions, so one device's precision buys nothing. It reopens when other devices can no longer sign back in invisibly, or when the logout-before-login residue in [Risks](#8-risks-and-technical-debt) must close.
+- Sender-constrained tokens (DPoP, mTLS): the operator's machine is trusted and the person is locked in the issuer before an erasure, so binding guards a theft the trust model leaves out. It reopens if hal binds its tokens: the library then checks DPoP proofs (RFC 9449) at the resource server, or that binding protects nothing.
+- A local flag that locks an account: disabling a person happens at the issuer, and a flag no one writes after the cutover decides nothing. It reopens when the issuer can no longer disable a person.
+- A fake issuer shipped for hosts' tests: one that mints tokens does not belong in every production install ([Testing a host](host-contract.md#testing-a-host)). It reopens when one can ship apart from the production install.
+- A CSRF token layer, or reading `Referer`: the token protects only script calls, and every supported browser sends `Origin` and, to an HTTPS app, `Sec-Fetch-Site` on a state-changing request ([CSRF origin](host-contract.md#csrf-origin)). It reopens when a supported browser sends neither on such a request.
 
 ## 8. Risks and Technical Debt
 
