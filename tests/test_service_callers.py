@@ -283,7 +283,7 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
     caller_token = a_workload_token(
         azp=CLIENT_CANARY, client_id=CLIENT_CANARY, groups=[GROUP_CANARY]
     )
-    person = a_person_token(azp=CLIENT_CANARY)
+    person = a_person_token(azp=CLIENT_CANARY, groups=[PERSON_GROUP_CANARY, "/apps/notes"])
     refused_tokens = [
         a_workload_token(azp=CLIENT_CANARY, client_id="other-client", groups=[GROUP_CANARY]),
         a_workload_token(groups=GROUP_CANARY),
@@ -301,6 +301,7 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
         refusals = [check.person_caller(token, person) for token in refused_tokens]
         refusals += [check.person_caller(caller_token, token) for token in refused_people]
     assert isinstance(admitted, PersonCaller)
+    assert PERSON_GROUP_CANARY in admitted.groups
     with pytest.raises(ValueError, match="audience") as configuration_refusal:
         a_service_identity(audience=5)
 
@@ -360,8 +361,8 @@ def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> N
 
 
 def test_a_person_token_azp_binds_the_client_and_no_exchange_claim_stands_in_for_it() -> None:
-    """CALLER-22: the person token's `azp` is the client binding, and no exchange claim
-    stands in for it."""
+    """CALLER-22: the person token's `azp` is the client binding and is never evidence of an
+    exchange: `act` and `may_act` do not stand in for it."""
     check = a_check()
     exchange_claims = {"act": {"sub": "exchanging-client"}, "may_act": {"sub": "exchanging-client"}}
 

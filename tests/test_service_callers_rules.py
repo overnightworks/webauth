@@ -96,8 +96,7 @@ def a_registry_of(admission: AdmissionConfig) -> dict[str, RegisteredApp]:
 )
 def test_nothing_a_check_is_built_from_has_a_default(without: str) -> None:
     """CALLER-01: a check cannot be built without its identity, a field of it, its registered
-    apps or its key-set fetch and clocks, and a registered app not without its app or
-    admission."""
+    apps or its key-set fetch and clocks."""
     identity_fields: dict[str, Any] = {
         "issuer": a_service_identity().issuer,
         "audience": CALLEE,
@@ -411,7 +410,11 @@ def test_a_malformed_header_or_unsupported_algorithm_is_rejected_before_any_key_
     """CALLER-23: a token of either kind with a malformed header or an unsupported algorithm
     is `TOKEN_REJECTED` and not `KEY_SET_UNAVAILABLE`, though its key is not cached and the key
     set cannot be fetched."""
-    outcome = a_check_whose_key_set_went_down().person_caller(*tokens_with(Fault(side, bad_token)))
+    endpoint = FakeKeySetEndpoint(served_key_set())
+    check = a_check_whose_key_set_went_down(endpoint=endpoint)
+
+    outcome = check.person_caller(*tokens_with(Fault(side, bad_token)))
 
     assert isinstance(outcome, CallerRefusal)
     assert outcome.reason is CallerRefusalReason.TOKEN_REJECTED
+    assert endpoint.fetched_urls == []

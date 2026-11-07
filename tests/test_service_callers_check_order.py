@@ -60,7 +60,21 @@ def two_faults_at_once() -> list[pytest.ParameterSet]:
     return cases
 
 
-@pytest.mark.parametrize(("first", "later", "reason"), two_faults_at_once())
+def an_unbound_client_with_an_unregistered_azp() -> pytest.ParameterSet:
+    """Both faults sit on the workload token without sharing a claim: the `client_id` differs from
+    the `azp`, and the `azp` is not registered."""
+    return pytest.param(
+        on_workload({"client_id": "another-client"}),
+        on_workload({"azp": UNREGISTERED}),
+        CallerRefusalReason.UNBOUND_CLIENT,
+        id="unbound-client-before-unregistered-client-on-one-token",
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "later", "reason"),
+    [*two_faults_at_once(), an_unbound_client_with_an_unregistered_azp()],
+)
 def test_the_fault_checked_first_is_the_refusal_when_two_faults_come_at_once(
     first: Fault, later: Fault, reason: CallerRefusalReason
 ) -> None:

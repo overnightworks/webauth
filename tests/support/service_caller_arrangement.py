@@ -195,9 +195,12 @@ def tokens_with(*faults: Fault) -> tuple[str | None, str | None]:
     return tokens[0], tokens[1]
 
 
-def a_check_whose_key_set_went_down(registered_apps: Any = None) -> ServiceCallerCheck:
-    """A check that cached the default key, then lost its key set after the refresh cooldown."""
-    endpoint = FakeKeySetEndpoint(served_key_set())
+def a_check_whose_key_set_went_down(
+    registered_apps: Any = None, endpoint: FakeKeySetEndpoint | None = None
+) -> ServiceCallerCheck:
+    """A check that cached the default key, then lost its key set after the refresh cooldown;
+    `endpoint` is the fake it fetches from, and has no fetch recorded when the check is returned."""
+    endpoint = endpoint or FakeKeySetEndpoint(served_key_set())
     monotonic = FakeClock(5_000.0)
     check = a_check(
         registered_apps=registered_apps, fetch_key_set=endpoint, monotonic_clock=monotonic
@@ -208,5 +211,6 @@ def a_check_whose_key_set_went_down(registered_apps: Any = None) -> ServiceCalle
         and warmed.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE
     )
     endpoint.response = KeySetFetchError("down")
+    endpoint.fetched_urls.clear()
     monotonic.now += 60
     return check
