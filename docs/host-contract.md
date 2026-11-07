@@ -214,7 +214,7 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
   split; see [Reading the session](ARCHITECTURE.md#reading-the-session).
 - **REFUSE-06** To keep the deep link, only request-address construction may prepend
   `root_path`.
-- **REFUSE-07** The start route never prepends it to an explicit `next`.
+- **REFUSE-07** The start route never prepends `root_path` to an explicit `next`.
 - **REFUSE-08** A machine route (see [The host's machine routes](#the-hosts-machine-routes))
   never answers with a redirect.
 
