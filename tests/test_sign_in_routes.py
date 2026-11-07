@@ -146,6 +146,7 @@ def test_a_mounted_host_returns_below_its_root_path_and_otherwise_to_the_mount_r
     asked_for: str | None,
     landing: str,
 ) -> None:
+    """REFUSE-03, REFUSE-06, REFUSE-07: a mounted host returns to the explicit `next` as given."""
     host = an_oidc_host(root_path="/app")
 
     response = host.callback(host.sign_in_at_issuer(return_to=asked_for))
@@ -157,6 +158,7 @@ def test_a_mounted_host_returns_below_its_root_path_and_otherwise_to_the_mount_r
 def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     kind: TransactionKind,
 ) -> None:
+    """REFUSE-02: after signing in, the person lands on the page they were sent from."""
     host = an_oidc_host(transaction_kind=kind)
 
     response = host.callback(host.sign_in_at_issuer(return_to="/albums/42"))
@@ -210,6 +212,7 @@ def test_an_identity_refused_before_admission_writes_nothing_and_enters_no_trans
 def test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise(
     cause: OidcRefusal | AdmissionRefusal,
 ) -> None:
+    """REFUSE-24, REFUSE-25: no access for a person outside the app, login failed otherwise."""
     expected = (
         RefusalPage.NO_ACCESS
         if cause is AdmissionRefusal.NOT_A_MEMBER
@@ -219,10 +222,75 @@ def test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed
     assert SignInRefusal(cause).page is expected
 
 
+def _a_foreign_issuers_identity() -> OidcHost:
+    return an_oidc_host(
+        admission=AdmissionConfig(
+            bound_issuer="https://other.example/realms/lab",
+            login_group=LOGIN_GROUP,
+            admin_group=f"{LOGIN_GROUP}/admin",
+        )
+    )
+
+
+def _with_another_code(query: str) -> str:
+    return query.replace("code=", "code=not-issued-")
+
+
+@pytest.mark.parametrize(
+    ("host", "returned_query", "cause", "page"),
+    [
+        pytest.param(
+            lambda: an_oidc_host(groups_claim=()),
+            str,
+            AdmissionRefusal.NOT_A_MEMBER,
+            RefusalPage.NO_ACCESS,
+            id="not a member",
+        ),
+        pytest.param(
+            _a_foreign_issuers_identity,
+            str,
+            AdmissionRefusal.FOREIGN_ISSUER,
+            RefusalPage.LOGIN_FAILED,
+            id="a foreign issuer",
+        ),
+        pytest.param(
+            lambda: an_oidc_host(FakeUser(id="user-7", username="lena")),
+            str,
+            AdmissionRefusal.USERNAME_TAKEN,
+            RefusalPage.LOGIN_FAILED,
+            id="a taken username",
+        ),
+        pytest.param(
+            an_oidc_host,
+            _with_another_code,
+            OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_grant"),
+            RefusalPage.LOGIN_FAILED,
+            id="an issuer that refuses the code",
+        ),
+    ],
+)
+def test_a_refusal_reaches_the_hook_as_its_cause_alone_with_its_page(
+    host: Callable[[], OidcHost],
+    returned_query: Callable[[str], str],
+    cause: OidcRefusal | AdmissionRefusal,
+    page: RefusalPage,
+) -> None:
+    """REFUSE-26, REFUSE-27: both kinds of refusal reach the hook, carrying no identity."""
+    refused_host = host()
+
+    refused_host.callback(returned_query(refused_host.sign_in_at_issuer()))
+
+    [refusal] = refused_host.refusals
+    assert (refusal, refusal.page) == (SignInRefusal(cause), page)
+    assert SUBJECT not in repr(refusal)
+    assert "lena" not in repr(refusal)
+
+
 @pytest.mark.parametrize("kind", BOTH_KINDS)
 def test_a_taken_username_refuses_through_the_hook_and_changes_nothing(
     kind: TransactionKind,
 ) -> None:
+    """APP-22: a username the store refuses refuses the sign-in and writes nothing."""
     host = an_oidc_host(
         BYSTANDER,
         FakeUser(id="user-7", username="lena"),

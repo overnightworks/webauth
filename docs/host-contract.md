@@ -195,102 +195,81 @@ The operator ruled CSRF-01, CSRF-03, CSRF-04, CSRF-05, CSRF-06, CSRF-07, CSRF-08
 
 ## Signed out and refused
 
-The operator ruled the passages that open "Every app shows", "A page without a session sends", "An API call without a session gets", "To keep the deep link", "A machine route", "Public paths are the exception", "The page after signing out is" and "`"No access"` is for"; no other sentence of this section is ruled, and proof lines are not rulings.
+The operator ruled REFUSE-01, REFUSE-02, REFUSE-04, REFUSE-06, REFUSE-07, REFUSE-08, REFUSE-09, REFUSE-10, REFUSE-11, REFUSE-12, REFUSE-22, REFUSE-23, REFUSE-24 and REFUSE-25; no other sentence of this section is ruled.
 
 Every app shows signed-out and refused people the same way. This is the rule
-every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it, and a
-host without the gate follows it itself. Its page, API and public-path proofs are
-`test_a_page_without_a_session_is_redirected_to_the_start_route_with_next`,
-`test_an_api_call_without_a_session_gets_401_authentication_required` and
-`test_a_public_path_passes_untouched_and_asks_no_store` in
-[test_session_gate.py](../tests/middleware/test_session_gate.py).
-The recorded-admission proofs, among them `test_a_replay_on_the_gated_app_is_decided_by_the_gate_itself`,
-are in [test_session_gate_recorded_admission.py](../tests/middleware/test_session_gate_recorded_admission.py).
+every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it.
 
-- **A page without a session** sends the browser straight to the app's start
-  route, with `next` naming the page, so the person lands there after signing
-  in. The start route reads `next` as the path to return to, and the callback
+- **Host duty:** a host without the gate follows this rule itself.
+- **REFUSE-01** A page without a session sends the browser straight to the app's start
+  route, with `next` naming the page.
+- **REFUSE-02** The person then lands there after signing in.
+- **REFUSE-03** The start route reads `next` as the path to return to, and the callback
   sends the browser to it when it is a same-origin path of the app, otherwise to the
-  app root. An API call without a session gets
-  401, and the app's UI then navigates to its start route. See
-  [The sign-in routes](#the-sign-in-routes)
-  and, for the rule the return path must pass,
-  [The return path](ARCHITECTURE.md#the-return-path). For a
-  server-rendered host, `LoginRedirect` makes the redirect-or-401 split; see
-  [Reading the session](ARCHITECTURE.md#reading-the-session).
-  To keep the deep link,
-  only request-address construction may prepend `root_path`; the start route
-  never prepends it to an explicit `next`. Proofs:
-  `test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_app_root`
-  in [test_oidc_login_callback.py](../tests/test_oidc_login_callback.py) and
-  `test_only_a_path_of_this_app_is_a_return_path` in
-  [test_paths.py](../tests/test_paths.py). `deep_link_survives_the_login` in
-  [prove.py](../tests/e2e/oidc/prove.py) drives the browser round trip in the hand-run
-  harness, not CI.
-- **A machine route** (see [The host's machine routes](#the-hosts-machine-routes))
-  answers 401 with a `WWW-Authenticate: Bearer realm="admin"` challenge, never a
-  redirect, and 403 for a valid token without the admin group:
+  app root. See [The sign-in routes](#the-sign-in-routes) and, for the rule the return
+  path must pass, [The return path](ARCHITECTURE.md#the-return-path).
+- **REFUSE-04** An API call without a session gets 401.
+- **Host duty:** the app's UI navigates to its start route when an API call gets 401.
+- **REFUSE-05** For a server-rendered host, `LoginRedirect` makes the redirect-or-401
+  split; see [Reading the session](ARCHITECTURE.md#reading-the-session).
+- **REFUSE-06** To keep the deep link, only request-address construction may prepend
+  `root_path`;
+- **REFUSE-07** the start route never prepends it to an explicit `next`.
+- **REFUSE-08** A machine route (see [The host's machine routes](#the-hosts-machine-routes))
+  never answers with a redirect.
 
-  | Case | Status | `WWW-Authenticate` | `detail` |
-  |---|---|---|---|
-  | no credentials | 401 | `Bearer realm="admin"` | `Authentication required` |
-  | malformed request (repeated or combined `Authorization`, or `access_token` in the query beside an `Authorization: Bearer`; in the query alone it is no credential) | 401 | `Bearer realm="admin", error="invalid_request"` | `Invalid request` |
-  | invalid token (any verification failure, an unavailable key set included) | 401 | `Bearer realm="admin", error="invalid_token"` | `Invalid token` |
-  | valid token, not an admin | 403 | `Bearer realm="admin", error="insufficient_scope"` | `Admin access required` |
+  A machine route answers 401 with a `WWW-Authenticate: Bearer realm="admin"` challenge,
+  and 403 for a valid token without the admin group:
+
+  | ID | Case | Status | `WWW-Authenticate` | `detail` |
+  |---|---|---|---|---|
+  | **REFUSE-09** | no credentials | 401 | `Bearer realm="admin"` | `Authentication required` |
+  | **REFUSE-10** | malformed request (repeated or combined `Authorization`, or `access_token` in the query beside an `Authorization: Bearer`; in the query alone it is no credential) | 401 | `Bearer realm="admin", error="invalid_request"` | `Invalid request` |
+  | **REFUSE-11** | invalid token (any verification failure, an unavailable key set included) | 401 | `Bearer realm="admin", error="invalid_token"` | `Invalid token` |
+  | **REFUSE-12** | valid token, not an admin | 403 | `Bearer realm="admin", error="insufficient_scope"` | `Admin access required` |
 
   A **person path** (see [The person's token on the app's API](#the-persons-token-on-the-apps-api))
   answers a bearer credential as follows; the challenge names `realm="api"` only where
   no credential was sent:
 
-  | Case | Status | `WWW-Authenticate` | `detail` |
-  |---|---|---|---|
-  | no bearer credential, refused by the library for want of a session (`current_user`, `admin_user`, the session gate, `admitted_admin`) | 401, or the 302 a navigation gets under `login_redirect` | `Bearer realm="api"` on the 401 | the session refusal's own |
-  | malformed (as above) | 401 | `Bearer error="invalid_request"` | `Invalid request` |
-  | invalid token (any verification failure, a foreign audience and an unavailable key set included) | 401 | `Bearer error="invalid_token"` | `Invalid token` |
-  | valid token, not a member of the app | 403 | `Bearer error="insufficient_scope"` | `No access` |
-  | valid member token, the store refuses the new username | 403 | none | `Login failed` |
-  | token person refused by `admin_user` or `admitted_admin` | 403 | `Bearer error="insufficient_scope"` | `Admin access required` |
+  | ID | Case | Status | `WWW-Authenticate` | `detail` |
+  |---|---|---|---|---|
+  | **REFUSE-13** | no bearer credential, refused by the library for want of a session (`current_user`, `admin_user`, the session gate, `admitted_admin`) | 401, or the 302 a navigation gets under `login_redirect` | `Bearer realm="api"` on the 401 | the session refusal's own |
+  | **REFUSE-14** | malformed (as above) | 401 | `Bearer error="invalid_request"` | `Invalid request` |
+  | **REFUSE-15** | invalid token (any verification failure, a foreign audience and an unavailable key set included) | 401 | `Bearer error="invalid_token"` | `Invalid token` |
+  | **REFUSE-16** | valid token, not a member of the app | 403 | `Bearer error="insufficient_scope"` | `No access` |
+  | **REFUSE-17** | valid member token, the store refuses the new username | 403 | none | `Login failed` |
+  | **REFUSE-18** | token person refused by `admin_user` or `admitted_admin` | 403 | `Bearer error="insufficient_scope"` | `Admin access required` |
 
-  A cookie person refused by an admin reader on a person path keeps the 403 without a
-  challenge, and a path outside the person paths keeps its answers. The 401 challenge
-  follows RFC 7235 section 3.1 and RFC 6750 section 3; a malformed header answers 401, not
-  the 400 RFC 6750 section 3.1 recommends, as the machine paths do. A host's own 401 on a
-  person path carries no challenge unless the host adds it.
-  `test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_without_realm` in
-  [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
-  and `test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer` in
-  [test_bearer_gate_person_paths_challenges_and_neighbours.py](../tests/middleware/test_bearer_gate_person_paths_challenges_and_neighbours.py)
-  prove the table.
+- **REFUSE-19** A cookie person refused by an admin reader on a person path keeps the
+  403 without a challenge,
+- **REFUSE-20** and a path outside the person paths keeps its session answer, with no challenge.
 
-  `test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge` in
-  [test_bearer_gate.py](../tests/middleware/test_bearer_gate.py) proves the machine refusal responses,
-  including 401 when the key set is unavailable.
+  The 401 challenge follows RFC 7235 section 3.1 and RFC 6750 section 3; a malformed
+  header answers 401, not the 400 RFC 6750 section 3.1 recommends, as the machine paths do.
 
-- **Public paths** are the exception. Each app names its own, and they need
-  no session and do not redirect.
-- **The page after signing out** is the app's `post_logout_redirect_uri`. It
-  never redirects by itself.
-- **Which refusal shows which page.** "No access" is for
-  `AdmissionRefusal.NOT_A_MEMBER`; "Login failed" is for an `OidcRefusal`
-  and for `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are
-  setup errors, not missing rights.
-  Both types reach the host's `refused` hook inside a `SignInRefusal`, whose `page` is
-  this mapping; see
-  [The sign-in routes](#the-sign-in-routes).
-  `test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed_otherwise` in
-  [test_sign_in_routes.py](../tests/test_sign_in_routes.py) proves it for every cause.
-  A refusal carries no identity (`AdmissionRefusal` in
-  [admission.py](../src/webauth/admission.py), `OidcRefusal` in
-  [oidc](../src/webauth/oidc/_relying_party.py)), so the page shows no name. A
-  `NOT_A_MEMBER` login stores no session, so signing out from "no access"
-  follows the missing-ID-token case in [Signing out](#what-every-app-gets).
-  `outsider_is_refused` in [prove.py](../tests/e2e/oidc/prove.py) drives the harness's
-  refusal with no account or session; it is a hand-run browser proof, not a
-  test of every host's page. Page choice and presentation remain host duties.
-- **Look.** The three pages (logged out, no access, login failed), their
-  wording and their ways out are the sign-in pattern of
-  [ui-style](https://github.com/overnightworks/ui-style); each app takes
-  the colours from its own tokens.
+- **REFUSE-21** A host's own 401 on a person path carries no challenge unless the host
+  adds it.
+- **REFUSE-22** Public paths are the exception: they need no session and do not redirect.
+- **Host duty:** each app names its own public paths.
+- **REFUSE-23** The page after signing out is the app's `post_logout_redirect_uri`.
+- **Host duty:** the page after signing out never redirects by itself.
+- **REFUSE-24** "No access" is for `AdmissionRefusal.NOT_A_MEMBER`;
+- **REFUSE-25** "Login failed" is for an `OidcRefusal` and for
+  `AdmissionRefusal.FOREIGN_ISSUER` and `USERNAME_TAKEN`, which are setup errors, not
+  missing rights.
+- **REFUSE-26** Both types reach the host's refused hook inside a `SignInRefusal`, whose
+  `page` is this mapping; see [The sign-in routes](#the-sign-in-routes).
+- **REFUSE-27** A refusal carries no identity.
+  The page therefore has no name to show.
+- **REFUSE-28** A `NOT_A_MEMBER` login stores no session.
+  Signing out from "no access" therefore follows the missing-ID-token case in
+  [Signing out](#what-every-app-gets).
+- **Host duty:** page choice and presentation.
+- **Host duty:** give the three pages (logged out, no access, login failed), their
+  wording and their ways out, the sign-in pattern of
+  [ui-style](https://github.com/overnightworks/ui-style); take the colours from the
+  app's own tokens.
 
 ## The host's machine routes
 

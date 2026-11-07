@@ -82,16 +82,24 @@ def assert_answers_alike(gated: Response, plain: Response) -> None:
 
 class TestPublicPaths:
     @pytest.mark.parametrize("signed_in_session", [False, True], ids=["signed-out", "signed-in"])
+    @pytest.mark.parametrize("accept", [None, HTML], ids=["api call", "navigation"])
     def test_a_public_path_passes_untouched_and_asks_no_store(
         self,
         signed_in_session: bool,
+        accept: str | None,
     ) -> None:
+        """REFUSE-22: a public path needs no session and does not redirect."""
         app = a_gated_app(
             None,
             public=ONLY_LOGIN_AND_HEALTH,
             sessions=SessionsThatMustNotBeAsked(),
         )
-        response = ask(app, "/health", cookie=signed_in(app) if signed_in_session else None)
+        response = ask(
+            app,
+            "/health",
+            cookie=signed_in(app) if signed_in_session else None,
+            accept=accept,
+        )
         assert (response.status_code, response.json()) == (200, {"username": None})
 
     def test_a_method_rule_opens_only_the_methods_it_names(self) -> None:
@@ -120,6 +128,7 @@ class TestPublicPaths:
 
 class TestRefusalsAreTheDependencysBytes:
     def test_a_page_without_a_session_is_redirected_to_the_start_route_with_next(self) -> None:
+        """REFUSE-01: a page without a session is sent to the start route, `next` naming it."""
         gated, plain = a_gated_app(), a_plain_app(a_session())
         response = ask(gated, "/me", accept=HTML)
         assert (response.status_code, response.headers["location"], response.json()) == (
@@ -131,6 +140,7 @@ class TestRefusalsAreTheDependencysBytes:
         assert_carries_policy_headers(response.headers, GATED_APP_HEADERS_POLICY, hsts=True)
 
     def test_an_api_call_without_a_session_gets_401_authentication_required(self) -> None:
+        """REFUSE-04: an API call without a session gets 401."""
         gated, plain = a_gated_app(), a_plain_app(a_session())
         response = ask(gated, "/me")
         assert (response.status_code, response.json()) == (
@@ -215,6 +225,18 @@ class TestRouterPaths:
         assert ask(app, redirect.headers["location"]).status_code == 200
         assert ask(app, "/app").status_code == 401
         assert ask(app, "/appx/login").status_code == 401
+
+    @pytest.mark.parametrize("guard", [a_gated_app, a_plain_app], ids=["gate", "dependency"])
+    def test_a_redirect_names_the_page_by_its_address_with_the_root_path_once(
+        self,
+        guard: Callable[..., AuthApp],
+    ) -> None:
+        """REFUSE-06: the redirect names the page by an address that carries `root_path` once."""
+        app = guard(None, root_path="/app")
+
+        response = ask(app, "/app/me", accept=HTML)
+
+        assert response.headers["location"] == "/login?next=%2Fapp%2Fme"
 
     def test_a_mounted_app_is_judged_by_its_full_path_under_the_top_apps_gate(self) -> None:
         app = a_gated_app(

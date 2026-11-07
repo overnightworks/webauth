@@ -577,6 +577,7 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
 
 
 def outsider_is_refused(proof: Proof, width: Width) -> str:
+    """REFUSE-28: a person outside the app signs in at Keycloak and is refused with no session."""
     scenario = f"7-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
@@ -618,6 +619,7 @@ def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
 
 
 def deep_link_survives_the_login(proof: Proof, width: Width) -> str:
+    """REFUSE-01, REFUSE-02, REFUSE-03: the page asked for without a session is returned to."""
     scenario = f"24-{width.label}"
     deep_link = "/albums/42?page=2"
     proof.reset_host()
@@ -722,9 +724,7 @@ def logout(proof: Proof, width: Width) -> str:
     scenario = f"2-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
-        proof.sign_in(page, scenario)
-        page.goto(f"{APP_ORIGIN}/")
-        assert proof.headline(page) == f"Signed in as {USER_NAME}"
+        signed_in(proof, page, scenario)
         cookies = app_cookies(page)
         held_names = {cookie_name_and_value(c)[0] for c in cookies}
         session = next(

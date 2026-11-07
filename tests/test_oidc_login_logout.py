@@ -282,7 +282,7 @@ def test_a_logout_reaches_no_issuer_endpoint() -> None:
 
 
 def test_the_logout_form_carries_the_configured_values_whatever_the_request_names() -> None:
-    """APP-34: the form carries the configured client and redirect, whatever the request names."""
+    """APP-34, REFUSE-23: the form carries the configured client and redirect, whatever is named."""
     host = after_signing_in(an_oidc_host())
     query = urllib.parse.urlencode(
         {

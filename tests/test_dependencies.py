@@ -348,6 +348,7 @@ def test_the_admin_route_refuses_the_same_cookie_the_protected_route_refuses(
 def test_a_missing_cookie_401_stays_byte_identical_without_a_login_redirect(
     auth_app: AuthApp,
 ) -> None:
+    """REFUSE-04: an API call without a session gets 401 where no login redirect is set."""
     response = auth_app.get("/me")
 
     assert response.status_code == 401
@@ -379,7 +380,7 @@ def test_an_expired_session_401_stays_byte_identical_without_a_login_redirect() 
 
 
 def test_a_browser_with_no_cookie_at_all_is_sent_to_the_login_page() -> None:
-    """The redirect's own status, ``Location``, and body — pinned once here.
+    """REFUSE-01: the redirect's own status, ``Location``, and body — pinned once here.
 
     A dependency cannot answer with anything but an ``HTTPException``, so the
     302 still carries FastAPI's JSON body; every other redirect test below

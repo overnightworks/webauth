@@ -225,15 +225,6 @@ class UsersInMemory:
         return list(self._users.values())
 
 
-class UsersWithCaseInsensitiveUsernames(UsersInMemory):
-    """A store whose unique index ignores case."""
-
-    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
-        if any(user.username.casefold() == username.casefold() for user in self.list()):
-            raise UsernameTakenError("Username is already taken")
-        return super().create_for_subject(subject, username, role)
-
-
 class UsersWithoutUniqueUsernames(UsersInMemory):
     """A store with no unique index on the username."""
 
