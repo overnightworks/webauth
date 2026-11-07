@@ -361,6 +361,7 @@ def no_token_is_shown_and_refusals_are_logged(run: BearerRun) -> str:
 
 
 def member_token_creates_the_account(run: BearerRun) -> str:
+    """TOKEN-19, TOKEN-22: a new subject's token creates its account and no session."""
     reset_host(run.host)
     answer = run.send(Call("GET", ME, run.tokens["user"]))
     assert_person_answer(answer, 200)
@@ -373,6 +374,7 @@ def member_token_creates_the_account(run: BearerRun) -> str:
 
 
 def token_and_browser_name_the_same_person(run: BearerRun) -> str:
+    """TOKEN-20: a known subject keeps its account, whichever way it signs in."""
     origin = run.settings.app_origins[0]
     cookies = session_cookies(run.sign_in_after_reset(run.people["user"]), origin)
     browser = run.send(Call("GET", "/me", cookies=cookies))
@@ -386,12 +388,14 @@ def token_and_browser_name_the_same_person(run: BearerRun) -> str:
 
 
 def token_post_needs_no_origin_and_no_cookie(run: BearerRun) -> str:
+    """TOKEN-28: a verified token request needs no Origin and no cookie."""
     answer = run.send(Call("POST", ME, run.tokens["user"]))
     assert_person_answer(answer, 200)
     return "POST /api/me with the token, no Origin and no cookie: 200"
 
 
 def outsider_token_is_refused_without_an_account(run: BearerRun) -> str:
+    """TOKEN-18: a person outside the app is refused and no account is created."""
     before = run.state()["accounts"]
     answer = run.send(Call("GET", ME, run.tokens["outsider"]))
     assert_person_answer(answer, 403, PERSON_CHALLENGE_INSUFFICIENT_SCOPE, "No access")
@@ -406,6 +410,7 @@ def other_client_token_is_refused_on_the_person_path(run: BearerRun) -> str:
 
 
 def sign_out_leaves_the_token_on_the_person_path(run: BearerRun) -> str:
+    """TOKEN-34: signing out of a browser leaves the token valid on a person path."""
     page = run.host_page(run.people["user"])
     run.proof.press(page, "#logout")
     page.wait_for_url(f"{run.settings.app_origins[0]}/")

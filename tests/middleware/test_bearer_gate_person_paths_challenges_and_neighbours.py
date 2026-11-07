@@ -69,7 +69,6 @@ from webauth.policies import (
 )
 from webauth.ports import AuthenticatedUser
 
-
 PERSON_READERS = [
     pytest.param(PERSON_ME_PATH, id="current_user"),
     pytest.param(PERSON_ADMIN_ME_PATH, id="admin_user"),

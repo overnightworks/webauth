@@ -331,58 +331,88 @@ admits on them, read from configuration.
 
 ## The person's token on the app's API
 
-The operator ruled the passages that open "A token created through hal" and "On such a path"; no other sentence of this section is ruled, and proof lines are not rulings.
+The operator ruled TOKEN-01, TOKEN-02, TOKEN-06, TOKEN-07, TOKEN-08, TOKEN-09 and TOKEN-10; no other sentence of this section is ruled.
 
-A token created through hal can call an app's ordinary API with exactly the rights of the
-person behind it, deletion included, and no layer sits on top of the person's rights.
-A host names its API paths in `PersonPaths(paths, authorized_parties, transaction)` and passes it
-as `BearerGate(person_paths=...)`; `machine_paths` may then be left out (a gate needs one kind
-of path, and a `NoAdmins` app may name person paths alone). On such a
-path `Authorization: Bearer` is the account behind the token: `current_user`, `admin_user`,
-`admitted_user` and `admitted_admin` return it as they return the browser's person, and no
-host route changes. A token carries the
-rights of the identity behind it and the app checks it as it checks the browser; ordinary
-routes admit tokens issued to the hal registration, the same way in every app. Whoever
-holds the operator's token may do what the operator may, with no extra security layer.
+**TOKEN-01** A token created through hal can call an app's ordinary API with exactly the rights of
+the person behind it, deletion included.
 
-- **Which paths.** Only the paths the host names. A path neither rule selects is untouched,
-  so a route that takes a foreign secret in `Authorization: Bearer` (a webhook) keeps
-  working, and an API route outside `PersonPaths` is not reachable by token. A request with
-  no bearer credential (no header, another scheme such as `Basic` or `DPoP`, or
-  `access_token` only in the query) is decided by the cookie as on any other path; a bearer
-  credential is judged by the token and never falls back to the cookie.
-- **The account.** The verified `sub` is admitted by the same `app_role` and the same
-  account step as a browser sign-in, in one `SignInTransaction` entry. A person outside the
-  app's login group is refused before any store is touched. An unknown subject gets an
-  account with the token's `preferred_username` (the subject when it carries none) and
-  `USER_CREATED`. A known subject keeps its account, and its role follows the token's
-  groups, written and recorded as `ROLE_CHANGED` when it differs, exactly as at sign-in. No
-  session is created. Nothing is committed here: durability is the exit of the host's
-  transaction, a store, audit or exit failure is the library 500, and no issuer call happens
-  inside the block.
-- **Clients.** Each kind of path names its own `AuthorizedParties`, so a client admitted on the
-  person paths is refused on the machine routes unless `MachinePaths` lists it too, and the
-  other way round. No empty set admits anybody.
-- **No origin, no cookie.** A verified token request bypasses the CSRF origin check, so a
-  CLI needs no `Origin`. A cookie-only request is checked as before.
-- **The cookie beside a token.** The token decides and the cookie names no session for that
-  request: `session_id_from_request` answers `None` and the session is not renewed. A host
-  route that binds work to the session answers its own refusal when it gets `None`. Host
-  dependencies such as `current_user`'s `session_store` still resolve before the reader runs.
+**TOKEN-02** No layer sits on top of the person's rights.
+
+**Host duty:** Name the API paths in `PersonPaths(paths, authorized_parties, transaction)` and pass
+it as `BearerGate(person_paths=...)`.
+
+**TOKEN-03** `machine_paths` may then be left out.
+
+**TOKEN-04** A gate needs one kind of path.
+
+**TOKEN-05** A `NoAdmins` app may name person paths alone.
+
+**TOKEN-06** On such a path `Authorization: Bearer` is the account behind the token: `current_user`,
+`admin_user`, `admitted_user` and `admitted_admin` return it as they return the browser's person,
+and no host route changes.
+
+**TOKEN-07** A token carries the rights of the identity behind it and the app checks it as it
+checks the browser.
+
+**TOKEN-08** Ordinary routes admit tokens issued to the hal registration, the same way in every app.
+
+**TOKEN-09** Whoever holds the operator's token may do what the operator may.
+
+**TOKEN-10** That holds with no extra security layer.
+
+- **Which paths.**
+  - **TOKEN-11** Only the paths the host names take a token: an API route outside `PersonPaths` is
+    not reachable by token.
+  - **TOKEN-12** A path neither rule selects is untouched.
+  - **TOKEN-13** A route that takes a foreign secret in `Authorization: Bearer` (a webhook) keeps
+    working.
+  - **TOKEN-14** A request with no bearer credential (no header, another scheme such as `Basic` or
+    `DPoP`, or `access_token` only in the query) is decided by the cookie as on any other path.
+  - **TOKEN-15** A bearer credential is judged by the token and never falls back to the cookie.
+- **The account.**
+  - **TOKEN-16** The verified `sub` is admitted by the same `app_role` and the same account step as
+    a browser sign-in.
+  - **TOKEN-17** Every token request enters the host's serialized `SignInTransaction` once.
+  - **TOKEN-18** A person outside the app's login group is refused before any store is touched.
+  - **TOKEN-19** An unknown subject gets an account with the token's `preferred_username` (the
+    subject when it carries none) and `USER_CREATED`.
+  - **TOKEN-20** A known subject keeps its account.
+  - **TOKEN-21** Its role follows the token's groups, written and recorded as `ROLE_CHANGED` when
+    it differs, exactly as at sign-in.
+  - **TOKEN-22** No session is created.
+  - **TOKEN-23** Nothing is committed here: durability is the exit of the host's transaction.
+  - **TOKEN-24** A store, audit or exit failure is the library 500.
+  - **TOKEN-25** No issuer call happens inside the block.
+- **Clients.**
+  - **TOKEN-26** Each kind of path names its own `AuthorizedParties`, so a client admitted on the
+    person paths is refused on the machine routes unless `MachinePaths` lists it too, and the
+    other way round.
+  - **TOKEN-27** No empty set admits anybody.
+- **No origin, no cookie.**
+  - **TOKEN-28** A verified token request bypasses the CSRF origin check, so a CLI needs no
+    `Origin`.
+  - **TOKEN-29** A cookie-only request is checked as before.
+- **The cookie beside a token.**
+  - **TOKEN-30** The token decides and the cookie names no session for that request:
+    `session_id_from_request` answers `None`.
+  - **TOKEN-31** The session is not renewed.
+  - **Host duty:** A host route that binds work to the session answers its own refusal when it
+    gets `None`.
+  - **TOKEN-32** Host dependencies such as `current_user`'s `session_store` still resolve before
+    the reader runs.
 - **Refusals.** See the person-path table under
   [Signed out and refused](#signed-out-and-refused).
-- **Residues.** Signing out in a browser, a back-channel logout, or disabling the person at
-  Keycloak does not end a token: it works until its `exp` plus leeway. Group changes reach a
-  token request with the next token, at most one token lifetime later, and an older token can
-  write the old role back within its lifetime. There is no sender constraint: webauth checks
-  no DPoP proof, so a bound token is plain bearer here, and a copied token is the person until
-  it expires. The per-address rate limit is shared with the browser's. Every token request
-  enters the host's serialized transaction once. A WebSocket handshake is not gated.
-
-Proofs: [test_bearer_gate_person_paths.py](../tests/middleware/test_bearer_gate_person_paths.py)
-and [test_bearer_gate_person_paths_challenges_and_neighbours.py](../tests/middleware/test_bearer_gate_person_paths_challenges_and_neighbours.py)
-in CI, and scenarios 55 to 60 of [bearer.py](../tests/e2e/oidc/bearer.py) against real
-Keycloak in the hand-run harness.
+- **Residues.**
+  - **TOKEN-33** Disabling the person at Keycloak does not end a token: it works until its `exp`
+    plus leeway.
+  - **TOKEN-34** Signing out in a browser does not end a token before its `exp` plus leeway.
+  - **TOKEN-35** A back-channel logout does not end a token before its `exp` plus leeway.
+  - Group changes reach a token request with the next token, at most one token lifetime later.
+  - **TOKEN-36** An older token can write the old role back within its lifetime.
+  - **TOKEN-37** There is no sender constraint: webauth checks no DPoP proof, so a bound token is
+    plain bearer here, and a copied token is the person until it expires.
+  - **TOKEN-38** The per-address rate limit is shared with the browser's.
+  - **TOKEN-39** A WebSocket handshake is not gated.
 
 ## A person's current groups
 
