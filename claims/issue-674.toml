@@ -1,8 +1,0 @@
-claim_id = "58e70ef0cb3441b6b2675358e9ef0785"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "f81015f1fa0a6881307f83ff7fe49e0d8a18e902"
-branch = "claude/issue-674-agent-principal"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/dependencies.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "tests"]
-opened_commit = "4f91f3a30b4fa9783bca7a02cc88209b142a924d"
-whole_reason = "The party rule, the agent claims, the stored kind and the first registration are one admission decision: the rule without the claims admits any client of the group, and the port without the admission ships an uncalled set_kind."
