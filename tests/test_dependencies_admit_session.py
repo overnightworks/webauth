@@ -14,6 +14,7 @@ from tests.support.webauth_arrangement import (
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_ID,
     SESSION_IDLE_SECONDS,
+    DisabledUser,
     FakeSessionRecord,
     SessionRecordsInMemory,
     SessionsAnsweringTouch,
@@ -68,6 +69,16 @@ def test_a_session_inside_its_lifetime_returns_its_account_and_is_renewed() -> N
         role=record.user.role,
     )
     assert record.expires_at == FIXED_INSTANT + IDLE
+
+
+def test_a_session_of_an_account_marked_disabled_is_still_admitted() -> None:
+    """APP-21: session admission reads no local active-user flag."""
+    user = DisabledUser(id="user-1", username="lena")
+    record = a_session(now=FIXED_INSTANT, user=user)
+
+    outcome = admit(record.id, SessionRecordsInMemory(record))
+
+    assert outcome == AuthenticatedUser(id=user.id, username=user.username, role=user.role)
 
 
 @pytest.mark.parametrize(

@@ -32,6 +32,7 @@ from tests.support.oidc_login_host import (
     LOGIN_GROUP,
     NOW,
     SAME_ORIGIN_FORM,
+    SUBJECT,
     OidcHost,
     a_client_config,
     after_signing_in,
@@ -48,6 +49,7 @@ from tests.support.oidc_relying_party import OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_IDLE_SECONDS,
+    DisabledUser,
     signed_without_bound,
 )
 from webauth.cookies import (
@@ -356,6 +358,17 @@ def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() ->
     host.client.cookies.set(host.config.session_cookie_name, session_cookie)
 
     assert host.client.get("/me").status_code == 200
+
+
+def test_a_callback_signs_in_a_person_whose_stored_account_is_marked_disabled() -> None:
+    """APP-21: sign-in reads no local active-user flag."""
+    host = an_oidc_host(DisabledUser(id=SUBJECT, username="lena"))
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert (response.status_code, response.headers["location"]) == (303, "/")
+    assert host.client.get("/me").json() == {"username": "lena"}
+    assert host.audit.account_events == []
 
 
 def test_a_signed_in_person_keeps_working_while_the_issuer_is_unreachable() -> None:

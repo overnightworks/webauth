@@ -8,7 +8,6 @@ of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import NoReturn
 
 import pytest
@@ -39,7 +38,7 @@ from tests.support.oidc_arrangement import (
     OPERATOR_SUBJECT,
 )
 from tests.support.oidc_login_host import StoreDown, failing
-from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
+from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, DisabledUser, FakeUser
 from webauth.middleware import (
     BearerGateMiddleware,
     ProtectedResource,
@@ -101,13 +100,6 @@ def test_a_subgroup_of_the_required_group_counts_and_an_admin_group_adds_nothing
     response = app.ask(resource.entry_point, authorization=token)
 
     assert (response.status_code, response.json()["role"]) == (200, MEMBER_ROLE)
-
-
-@dataclass
-class DisabledUser(FakeUser):
-    """A stored account whose record marks it disabled."""
-
-    is_active: bool = False
 
 
 def test_a_token_of_a_person_whose_stored_account_is_marked_disabled_is_still_admitted(

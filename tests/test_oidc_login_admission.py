@@ -494,25 +494,6 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
     assert host.audit.account_events == []
 
 
-@dataclass
-class DisabledUser(FakeUser):
-    """A stored account whose record marks it disabled."""
-
-    is_active: bool = False
-
-
-def test_a_person_whose_stored_account_is_marked_disabled_is_still_admitted() -> None:
-    """APP-21: admission reads no local active-user flag."""
-    host = a_host(DisabledUser(id=SUBJECT, username="lena", role=MEMBER_ROLE))
-    stored = deepcopy(host.accounts.list())
-
-    account = host.admit(LENA)
-
-    assert account is host.accounts.get(SUBJECT)
-    assert host.accounts.list() == stored
-    assert host.audit.account_events == []
-
-
 def test_a_store_without_unique_usernames_admits_two_subjects_sharing_one() -> None:
     """APP-20: admission never looks up a username, so two subjects share one."""
     host = a_host(store=UsersWithoutUniqueUsernames)

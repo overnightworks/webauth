@@ -62,6 +62,7 @@ from tests.support.person_paths_arrangement import (
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     MEMBER_ROLE,
+    DisabledUser,
     FakeUser,
 )
 from webauth.admission import NoAdmins
@@ -88,6 +89,21 @@ def test_a_token_on_a_person_path_is_the_account_behind_its_subject(session_gate
         {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE, "session": None},
     )
     assert app.auth.authenticated == [AuthenticatedUser(OPERATOR_SUBJECT, "lena", MEMBER_ROLE)]
+
+
+@BOTH_TRANSACTIONS
+def test_a_person_token_of_a_stored_account_marked_disabled_is_still_admitted(
+    kind: TransactionKind,
+) -> None:
+    """APP-21: person-token admission reads no local active-user flag."""
+    app = a_person_app(
+        transaction_kind=kind,
+        known_accounts=(DisabledUser(id=OPERATOR_SUBJECT, username="lena"),),
+    )
+
+    response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
+
+    assert (response.status_code, response.json()["username"]) == (200, "lena")
 
 
 @BOTH_TRANSACTIONS
