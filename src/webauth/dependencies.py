@@ -428,6 +428,7 @@ def admit_session(
         id=record.user.id,
         username=record.user.username,
         role=record.user.role,
+        agent=None,
     )
 
 

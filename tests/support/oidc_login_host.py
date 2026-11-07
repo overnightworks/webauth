@@ -137,12 +137,13 @@ class UsersWithSnapshots(UsersInMemory):
 
     def snapshot(self) -> Callable[[], None]:
         users, usernames = dict(self._users), dict(self._usernames)
-        roles = [(user, user.role) for user in users.values()]
+        stored = [(user, user.role, user.kind) for user in users.values()]
 
         def restore() -> None:
             self._users, self._usernames = dict(users), dict(usernames)
-            for user, role in roles:
+            for user, role, kind in stored:
                 user.role = role
+                user.kind = kind
 
         return restore
 

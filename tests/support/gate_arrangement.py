@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
@@ -125,7 +125,11 @@ RESOURCE_CHALLENGE = (
     f'Bearer resource_metadata="https://app.example/.well-known/oauth-protected-resource/mcp", '
     f'scope="{RESOURCE_SCOPE}"'
 )
-THE_COOKIE_PERSON = asdict(FakeUser(role=ADMIN_ROLE))
+THE_COOKIE_PERSON = {
+    "id": FakeUser().id,
+    "username": FakeUser().username,
+    "role": ADMIN_ROLE,
+}
 MACHINE_PATHS = PathRules(prefixes=(MACHINE_PREFIX,))
 PERSON_PATHS = PathRules(prefixes=(PERSON_PREFIX,))
 FOREIGN_SECRET_PATHS = PathRules(exact=frozenset({FOREIGN_SECRET_PATH}))

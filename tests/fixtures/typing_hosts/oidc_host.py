@@ -111,6 +111,7 @@ from webauth.policies import (
 from webauth.ports import (
     AccountEvent,
     AccountEventKind,
+    AccountKind,
     AuthenticatedUser,
     BearerCaller,
     RateLimitBackend,
@@ -139,6 +140,7 @@ class HostAccount:
     id: str
     username: str
     role: str
+    kind: AccountKind
 
 
 @dataclass(frozen=True)
@@ -153,13 +155,18 @@ class HostSession:
 
 class HostAccounts:
     def get(self, user_id: str) -> HostAccount | None:
-        return HostAccount(user_id, "someone", "user")
+        return HostAccount(user_id, "someone", "user", AccountKind.PERSON)
 
-    def create_for_subject(self, subject: str, username: str, role: str) -> HostAccount:
-        return HostAccount(subject, username, role)
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> HostAccount:
+        return HostAccount(subject, username, role, kind)
 
     def set_role(self, user_id: str, role: str) -> HostAccount:
-        return HostAccount(user_id, "someone", role)
+        return HostAccount(user_id, "someone", role, AccountKind.PERSON)
+
+    def set_kind(self, user_id: str, kind: AccountKind) -> HostAccount:
+        return HostAccount(user_id, "someone", "user", kind)
 
 
 class HostSessions:
@@ -172,7 +179,7 @@ class HostSessions:
         refresh_token: SecretStr | None,
         id_token: SecretStr | None,
     ) -> HostSession:
-        user = HostAccount(user_id, "someone", "user")
+        user = HostAccount(user_id, "someone", "user", AccountKind.PERSON)
         return HostSession("id", user, now, expires_at, refresh_token, id_token)
 
     def load(self, session_id: str) -> HostSession | None:

@@ -81,7 +81,13 @@ from webauth.oidc import (
     OidcRefusal,
     OidcRefusalReason,
 )
-from webauth.ports import AccountEvent, AccountEventKind, AuthenticatedUser, UsernameTakenError
+from webauth.ports import (
+    AccountEvent,
+    AccountEventKind,
+    AccountKind,
+    AuthenticatedUser,
+    UsernameTakenError,
+)
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -549,7 +555,9 @@ def _admit_token_holder(
     try:
         with transaction() as stores:
             account = _admit_account(verified, role, accounts=stores.accounts, audit=stores.audit)
-            return AuthenticatedUser(id=account.id, username=account.username, role=account.role)
+            return AuthenticatedUser(
+                id=account.id, username=account.username, role=account.role, agent=None
+            )
     except _UsernameTakenSignal:
         return _admission.AdmissionRefusal.USERNAME_TAKEN
 
@@ -580,7 +588,10 @@ def _admit_resource_holder(
         if account is None:
             return None
         return AuthenticatedUser(
-            id=account.id, username=account.username, role=_admission.AppRole.USER.value
+            id=account.id,
+            username=account.username,
+            role=_admission.AppRole.USER.value,
+            agent=None,
         )
 
 
@@ -613,7 +624,7 @@ def _admit_account(
     """
     account = accounts.get(claimant.subject)
     if account is None:
-        return _provision(claimant, role, accounts=accounts, audit=audit)
+        return _provision(claimant, role, AccountKind.PERSON, accounts=accounts, audit=audit)
     return _with_role(account, role, accounts=accounts, audit=audit)
 
 
@@ -643,13 +654,14 @@ def _with_role(
 def _provision(
     claimant: _Claimant,
     role: str,
+    kind: AccountKind,
     *,
     accounts: SubjectUserStore,
     audit: AuditSink,
 ) -> UserRecord:
     username = _username_for(claimant)
     try:
-        account = accounts.create_for_subject(claimant.subject, username, role)
+        account = accounts.create_for_subject(claimant.subject, username, role, kind)
     except UsernameTakenError as refused:
         raise _UsernameTakenSignal from refused
     audit.account_event(

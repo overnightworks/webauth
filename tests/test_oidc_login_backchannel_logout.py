@@ -230,6 +230,8 @@ def test_a_logout_that_ended_sessions_audits_one_event_for_the_account_and_no_ac
             "subject_id": SUBJECT,
             "role": None,
             "previous_role": None,
+            "account_kind": None,
+            "previous_account_kind": None,
         }
     ]
 

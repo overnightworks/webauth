@@ -102,7 +102,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
             arrangement.gate_entries
             if planted == "replayed"
             else {
-                key: AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE)
+                key: AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, agent=None)
                 for key in arrangement.gate_entries
             }
         )

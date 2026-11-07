@@ -67,6 +67,7 @@ def test_a_session_inside_its_lifetime_returns_its_account_and_is_renewed() -> N
         id=record.user.id,
         username=record.user.username,
         role=record.user.role,
+        agent=None,
     )
     assert record.expires_at == FIXED_INSTANT + IDLE
 
@@ -78,7 +79,7 @@ def test_a_session_of_an_account_marked_disabled_is_still_admitted() -> None:
 
     outcome = admit(record.id, SessionRecordsInMemory(record))
 
-    assert outcome == AuthenticatedUser(id=user.id, username=user.username, role=user.role)
+    assert outcome == AuthenticatedUser(id=user.id, username=user.username, role=user.role, agent=None)
 
 
 @pytest.mark.parametrize(

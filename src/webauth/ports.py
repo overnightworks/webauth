@@ -23,7 +23,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from webauth import WebAuthError
@@ -34,6 +34,8 @@ if TYPE_CHECKING:
 __all__ = [
     "AccountEvent",
     "AccountEventKind",
+    "AccountKind",
+    "AgentFacts",
     "AuditSink",
     "AuthenticatedUser",
     "BearerCaller",
@@ -55,13 +57,39 @@ whole seconds. A reading within the session cap plus 60 seconds of the end of
 year 9999 makes the decision raise, so no session is admitted."""
 
 
+class AccountKind(StrEnum):
+    """What an account is: the names a host stores as its kind."""
+
+    PERSON = "person"
+    AGENT = "agent"
+
+
+@dataclass(frozen=True)
+class AgentFacts:
+    """What an agent's token says about itself at a protected resource: the subject of its
+    owner and its own name."""
+
+    owner: str
+    name: str
+
+
 @dataclass(frozen=True)
 class AuthenticatedUser:
-    """The account behind the current request."""
+    """The account behind the current request.
+
+    ``agent`` is set only for a request a protected resource admitted on an agent's token;
+    every construction decides it. ``kind`` follows it: ``AGENT`` with facts, ``PERSON``
+    without, whatever kind the account stores.
+    """
 
     id: str
     username: str
     role: str
+    agent: AgentFacts | None
+
+    @property
+    def kind(self) -> AccountKind:
+        return AccountKind.PERSON if self.agent is None else AccountKind.AGENT
 
 
 @dataclass(frozen=True)
@@ -85,6 +113,9 @@ class UserRecord(Protocol):
 
     @property
     def role(self) -> str: ...
+
+    @property
+    def kind(self) -> AccountKind: ...
 
 
 class SessionRecord(Protocol):
@@ -142,8 +173,10 @@ class SubjectUserStore(Protocol):
         """
         ...
 
-    def create_for_subject(self, subject: str, username: str, role: str) -> UserRecord:
-        """Add an account whose ``id`` is ``subject``.
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> UserRecord:
+        """Add an account whose ``id`` is ``subject``, storing its ``kind``.
 
         Raises ``UsernameTakenError`` when the store enforces a unique username and
         ``username`` is taken; uniqueness is not required.
@@ -156,6 +189,14 @@ class SubjectUserStore(Protocol):
         Runs in the caller's transaction and never commits. Raises when no
         account has ``user_id``: admission only calls it for an account it just
         read, so a missing row is the host's defect and the host rolls back.
+        """
+        ...
+
+    def set_kind(self, user_id: str, kind: AccountKind) -> UserRecord:
+        """Change the kind of the account whose ``id`` is ``user_id`` and return it.
+
+        Runs in the caller's transaction and never commits. Raises when no
+        account has ``user_id``, as ``set_role`` does.
         """
         ...
 
@@ -303,7 +344,8 @@ class SignInStores:
 class SignInTransaction(Protocol):
     """The host's serialized context around one sign-in, entered by the callback, logout and
     back-channel logout routes, once per token request on the bearer gate's person paths, and
-    once per admitted-group request at a ProtectedResource's entry point.
+    once per admitted-group request at a ProtectedResource's entry point, where a token holding the
+    resource's agent group also registers its account on the first request and has its kind set.
 
     Creating it, entering the context manager, every store call inside the block
     and leaving it all run on one worker thread, never on the event loop. Entries
@@ -356,12 +398,14 @@ class AccountEventKind(Enum):
     """What happened to an account; the fields beyond ``AccountEvent``'s common ones.
 
     ``USER_CREATED`` carries ``role``; ``ROLE_CHANGED`` carries ``previous_role``
-    and ``role``; ``BACKCHANNEL_LOGOUT`` carries none, and its ``subject_id`` is
-    the account whose sessions the issuer ended.
+    and ``role``; ``KIND_CHANGED`` carries ``account_kind`` and
+    ``previous_account_kind``; ``BACKCHANNEL_LOGOUT`` carries none, and its
+    ``subject_id`` is the account whose sessions the issuer ended.
     """
 
     USER_CREATED = "user_created"
     ROLE_CHANGED = "role_changed"
+    KIND_CHANGED = "kind_changed"
     BACKCHANNEL_LOGOUT = "backchannel_logout"
 
 
@@ -374,13 +418,15 @@ class AccountEvent:
     subject_id: str
     role: str | None = None
     previous_role: str | None = None
+    account_kind: AccountKind | None = None
+    previous_account_kind: AccountKind | None = None
 
 
 class AuditSink(Protocol):
     def account_event(self, event: AccountEvent) -> None:
         """Map an account operation to the host's audit, optionally doing nothing.
 
-        On an admission event (``USER_CREATED`` or ``ROLE_CHANGED``),
+        On an admission event (``USER_CREATED``, ``ROLE_CHANGED`` or ``KIND_CHANGED``),
         ``actor_id=None`` means the issuer's groups decided, not a person. A
         ``BACKCHANNEL_LOGOUT`` also has ``actor_id=None``, with no group decision.
         """
