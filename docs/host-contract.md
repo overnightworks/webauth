@@ -195,7 +195,7 @@ The operator ruled CSRF-01, CSRF-03, CSRF-04, CSRF-05, CSRF-06, CSRF-07, CSRF-08
 
 ## Signed out and refused
 
-The operator ruled REFUSE-01, REFUSE-02, REFUSE-04, REFUSE-06, REFUSE-07, REFUSE-08, REFUSE-09, REFUSE-10, REFUSE-11, REFUSE-12, REFUSE-22, REFUSE-23, REFUSE-24 and REFUSE-25; no other sentence of this section is ruled.
+The operator ruled REFUSE-01, REFUSE-02, REFUSE-03, REFUSE-04, REFUSE-05, REFUSE-06, REFUSE-07, REFUSE-08, REFUSE-09, REFUSE-10, REFUSE-11, REFUSE-12, REFUSE-22, REFUSE-23, REFUSE-24, REFUSE-25, REFUSE-26, REFUSE-27 and REFUSE-28; no other sentence of this section is ruled.
 
 Every app shows signed-out and refused people the same way. This is the rule
 every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces it.
