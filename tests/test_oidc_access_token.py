@@ -217,6 +217,7 @@ def test_an_authorized_party_the_host_did_not_allow_is_refused(authorized_party:
     ],
 )
 def test_authorized_parties_refuse_what_is_not_a_set_of_client_ids(client_ids: Any) -> None:
+    """TOKEN-27: `AuthorizedParties` refuses an empty set, so no empty set admits anybody."""
     with pytest.raises(ValueError):
         AuthorizedParties(client_ids)
 

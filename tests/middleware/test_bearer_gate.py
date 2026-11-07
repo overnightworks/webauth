@@ -537,6 +537,7 @@ class TestAGateIsBuiltFromSoundParts:
         changes: dict[str, Any],
         error: type[Exception],
     ) -> None:
+        """TOKEN-04: a gate with neither kind of path is refused; so is an unsound admission."""
         arguments = {
             "relying_party": a_relying_party(),
             "admission": ADMISSION,
@@ -558,6 +559,7 @@ class TestAGateIsBuiltFromSoundParts:
         with pytest.raises(ValueError, match="at least one path"):
             PersonPaths(no_path, HAL_ONLY, a_transaction_never_entered)
 
+    @pytest.mark.parametrize("bare_set", [frozenset({"hal"}), frozenset()], ids=["set", "empty"])
     @pytest.mark.parametrize(
         "construct",
         [
@@ -569,14 +571,16 @@ class TestAGateIsBuiltFromSoundParts:
     def test_a_kind_of_path_refuses_parties_that_are_not_authorized_parties(
         self,
         construct: Callable[[PathRules, Any], object],
+        bare_set: frozenset[str],
     ) -> None:
+        """TOKEN-27: a kind of path takes `AuthorizedParties` only, so no empty set admits."""
         paths = PathRules(prefixes=("/api/",))
-        bare_set = frozenset({"hal"})
 
         with pytest.raises(TypeError, match="AuthorizedParties"):
             construct(paths, bare_set)
 
     def test_a_no_admins_app_may_name_person_paths_alone(self) -> None:
+        """TOKEN-05: a `NoAdmins` app builds a gate of person paths alone."""
         gate = a_bearer_gate(
             paths=PathRules(),
             person_paths=PersonPaths(
