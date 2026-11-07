@@ -32,6 +32,7 @@ from tests.support.person_paths_arrangement import (
     ADMIN_TOKEN,
     BOTH_HOSTS,
     MEMBER_TOKEN,
+    UNGATED_ADMIN_PATH,
     UNGATED_ME_PATH,
     a_person_app,
     ran,
@@ -51,7 +52,7 @@ from webauth.policies import (
 def test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer(
     session_gate: bool,
 ) -> None:
-    """REFUSE-20: a path outside the person paths keeps its session answer, with no challenge."""
+    """A person path refused for want of a session carries the person realm."""
     app = a_person_app(session_gate=session_gate)
 
     readers = [PERSON_ME_PATH, PERSON_ADMIN_ME_PATH]
@@ -61,8 +62,34 @@ def test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer(
         (401, PERSON_REALM),
         (401, PERSON_REALM),
     ]
-    outside = app.ask(UNGATED_ME_PATH)
-    assert (outside.status_code, the_challenge(outside)) == (401, None)
+
+
+OUTSIDE_READERS = [
+    pytest.param(True, UNGATED_ME_PATH, id="SG-current_user"),
+    pytest.param(False, UNGATED_ME_PATH, id="NG-current_user"),
+    pytest.param(True, UNGATED_ADMIN_PATH, id="SG-admin_user"),
+    pytest.param(False, UNGATED_ADMIN_PATH, id="NG-admin_user"),
+]
+
+
+@pytest.mark.parametrize(("session_gate", "path"), OUTSIDE_READERS)
+def test_a_path_outside_the_person_paths_is_refused_with_its_session_answer_and_no_challenge(
+    session_gate: bool,
+    path: str,
+) -> None:
+    """REFUSE-20: a path outside the person paths keeps its session answer, with no challenge."""
+    app = a_person_app(session_gate=session_gate, login_redirect=LOGIN_REDIRECT)
+    api_call = {"accept": "application/json"}
+    invalid_cookie = {"cookie": f"{app.auth.config.session_cookie_name}=unsigned", **api_call}
+
+    refusals = [app.ask(path, headers=api_call), app.ask(path, headers=invalid_cookie)]
+    navigation = app.ask(path, headers={"accept": "text/html"}, follow_redirects=False)
+
+    assert [(r.status_code, r.json()["detail"], the_challenge(r)) for r in refusals] == [
+        (401, "Authentication required", None),
+        (401, "Invalid session", None),
+    ]
+    assert (navigation.status_code, the_challenge(navigation)) == (302, None)
 
 
 def test_the_admitted_admin_401_of_a_person_path_without_a_gate_admission_challenges() -> None:

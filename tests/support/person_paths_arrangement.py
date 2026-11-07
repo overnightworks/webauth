@@ -36,6 +36,7 @@ OUTSIDER_TOKEN = a_token(groups=["/apps/elsewhere"])
 LENA_TOKEN = a_token(preferred_username="lena")
 OPTIONAL_PATH = "/optional"
 UNGATED_ME_PATH = "/me"
+UNGATED_ADMIN_PATH = "/admin"
 
 BOTH_HOSTS = pytest.mark.parametrize(
     "session_gate",
