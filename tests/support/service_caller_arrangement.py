@@ -1,5 +1,5 @@
-"""The builders the service caller proofs share: tokens of a workload and of a person, a check over one
-registered app, and faults to put on either token."""
+"""The builders the service caller proofs share: the tokens of a workload and of a person, a check
+over one registered app, and faults to put on either token."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from webauth.admission import AdmissionConfig, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.service_callers import (
     CallerRefusal,
-    PersonCaller,
+    CallerRefusalReason,
     RegisteredApp,
     ServiceCallerCheck,
     ServiceIdentity,
@@ -146,7 +146,7 @@ class Fault:
     changes: Mapping[str, object] | WholeToken
 
     def conflicts_with(self, other: Fault) -> bool:
-        """Two faults on one token cannot both show when either replaces the token or both set a claim."""
+        """Two faults on one token cannot both show when one replaces it or both set a claim."""
         if self.side != other.side:
             return False
         if isinstance(self.changes, WholeToken) or isinstance(other.changes, WholeToken):
@@ -172,7 +172,9 @@ def a_replacement_token(kind: WholeToken) -> str | None:
         ),
         WholeToken.FORGED: an_access_token(key_name="foreign", claims={"aud": CALLEE}),
         WholeToken.MALFORMED: "not-a-token",
-        WholeToken.UNSUPPORTED_ALGORITHM: an_access_token(header={"alg": "HS256"}),
+        WholeToken.UNSUPPORTED_ALGORITHM: an_access_token(
+            key_id="rotated-key", header={"alg": "HS256"}
+        ),
     }[kind]
 
 
@@ -193,12 +195,18 @@ def tokens_with(*faults: Fault) -> tuple[str | None, str | None]:
     return tokens[0], tokens[1]
 
 
-def a_check_whose_key_set_went_down() -> ServiceCallerCheck:
+def a_check_whose_key_set_went_down(registered_apps: Any = None) -> ServiceCallerCheck:
     """A check that cached the default key, then lost its key set after the refresh cooldown."""
     endpoint = FakeKeySetEndpoint(served_key_set())
     monotonic = FakeClock(5_000.0)
-    check = a_check(fetch_key_set=endpoint, monotonic_clock=monotonic)
-    assert isinstance(check.person_caller(a_workload_token(), a_person_token()), PersonCaller)
+    check = a_check(
+        registered_apps=registered_apps, fetch_key_set=endpoint, monotonic_clock=monotonic
+    )
+    warmed = check.person_caller(a_workload_token(), a_person_token())
+    assert not (
+        isinstance(warmed, CallerRefusal)
+        and warmed.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE
+    )
     endpoint.response = KeySetFetchError("down")
     monotonic.now += 60
     return check

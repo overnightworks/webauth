@@ -6,6 +6,7 @@ person's caller; every fault of either token yields the first refusal of the doc
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import replace
 from typing import Any
@@ -64,6 +65,7 @@ def test_a_workload_token_may_name_other_audiences_beside_the_callee() -> None:
 
 
 def test_a_cached_key_set_still_verifies_the_workload_token_after_a_failed_refresh() -> None:
+    """CALLER-24: with a usable cached key, a failed refresh still verifies both tokens."""
     endpoint = FakeKeySetEndpoint(served_key_set())
     monotonic = FakeClock(5_000.0)
     check = a_check(fetch_key_set=endpoint, monotonic_clock=monotonic)
@@ -182,6 +184,7 @@ def test_an_invalid_identity_field_is_refused_by_name(
 
 
 def test_the_identity_repr_never_shows_the_key_set_url() -> None:
+    """CALLER-32: `jwks_url` is left out of the repr of `ServiceIdentity`."""
     secret_url = f"https://login.example.org{SECRET_PATH}"
 
     assert secret_url not in repr(a_service_identity(jwks_url=secret_url))
@@ -271,6 +274,8 @@ def test_a_refusal_rejects_a_token_rejection_that_does_not_match_its_reason(
 def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """CALLER-31: nothing taken from the workload token or the person token (subject, client id,
+    groups) appears in a repr, an error message or a log record of the module."""
     secret_url = f"https://login.example.org{SECRET_PATH}"
     identity = a_service_identity(jwks_url=secret_url)
     registry = {CLIENT_CANARY: RegisteredApp("notes", an_app_admission())}
@@ -285,9 +290,16 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
         a_workload_token(realm_access={"roles": []}),
         a_workload_token(sub=ABSENT),
     ]
+    refused_people = [
+        a_person_token(azp="another-client"),
+        a_person_token(azp=CLIENT_CANARY, sub=SUBJECT_CANARY),
+        a_person_token(azp=CLIENT_CANARY, groups=[PERSON_GROUP_CANARY]),
+        a_person_token(azp=CLIENT_CANARY, groups=PERSON_GROUP_CANARY),
+    ]
     with caplog.at_level(logging.DEBUG):
         admitted = check.person_caller(caller_token, person)
         refusals = [check.person_caller(token, person) for token in refused_tokens]
+        refusals += [check.person_caller(caller_token, token) for token in refused_people]
     assert isinstance(admitted, PersonCaller)
     with pytest.raises(ValueError, match="audience") as configuration_refusal:
         a_service_identity(audience=5)
@@ -309,9 +321,18 @@ def test_nothing_taken_from_a_token_appears_in_a_repr_message_or_log(
 
 
 def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role() -> None:
-    admitted = a_check().person_caller(
+    """CALLER-03, CALLER-04, CALLER-30: `person_caller` returns to a plain call a
+    `PersonCaller` with the app, client id and the person's identity, groups and role, or a
+    `CallerRefusal`; the check applies no policy beyond membership and passes every group of the
+    person on."""
+    check = a_check()
+    admitted = check.person_caller(
         a_workload_token(), a_person_token(groups=[PERSON_GROUP_CANARY, "/apps/notes"])
     )
+    refusal = check.person_caller(None, a_person_token())
+    assert not inspect.isawaitable(admitted)
+    assert not inspect.isawaitable(refusal)
+    assert isinstance(refusal, CallerRefusal)
 
     assert admitted == PersonCaller(
         app="notes",
@@ -332,6 +353,7 @@ def test_a_workload_with_a_person_is_admitted_with_the_persons_identity_and_role
     ],
 )
 def test_a_person_token_needs_no_workload_shape(changes: dict[str, object]) -> None:
+    """CALLER-21: the person token gets no role check, with the workload role or without."""
     admitted = a_check().person_caller(a_workload_token(), a_person_token(**changes))
 
     assert isinstance(admitted, PersonCaller)
