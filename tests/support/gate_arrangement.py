@@ -11,6 +11,7 @@ from fastapi import Depends, Request, WebSocket
 from httpx import Response
 from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
+from starlette.responses import JSONResponse
 
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
@@ -759,3 +760,15 @@ def the_transaction(app: BearerApp) -> RecordingSignInTransaction:
 def the_accounts(app: BearerApp) -> list[FakeUser]:
     assert app.accounts is not None
     return app.accounts.list()
+
+
+REFUSED_AS_RUNTIME_ERROR = 418
+
+
+def answering_a_runtime_error_with_418(app: BearerApp) -> None:
+    """A reader that refuses with `RuntimeError` answers 418; any other failure stays the 500."""
+
+    def answer(_request: Request, _error: Exception) -> JSONResponse:
+        return JSONResponse({"detail": "refused"}, status_code=REFUSED_AS_RUNTIME_ERROR)
+
+    app.auth.app.add_exception_handler(RuntimeError, answer)

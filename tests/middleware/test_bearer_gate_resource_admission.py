@@ -13,13 +13,13 @@ from typing import NoReturn
 import pytest
 from fastapi import FastAPI, Request
 from starlette.middleware import Middleware
-from starlette.responses import JSONResponse
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
     EXPORT_PATH,
     PERSON_ME_PATH,
     PERSON_PATHS,
+    REFUSED_AS_RUNTIME_ERROR,
     RESOURCE_GROUP,
     BearerApp,
     RewritingTheRequest,
@@ -28,6 +28,7 @@ from tests.support.gate_arrangement import (
     a_resource,
     a_resource_token,
     an_agent_token,
+    answering_a_runtime_error_with_418,
     assert_no_bearer_admission,
     bearing,
     relayed,
@@ -59,7 +60,12 @@ def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
     return next((user for user in the_accounts(app) if user.id == OPERATOR_SUBJECT), None)
 
 
-@pytest.mark.parametrize("method", ["GET", "POST", "PUT"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH"])
+@pytest.mark.parametrize(
+    "groups",
+    [["/apps/x/mcp"], ["/apps/x/mcp/sub"]],
+    ids=["required-group", "subgroup"],
+)
 @pytest.mark.parametrize(
     "sent",
     [{}, {"origin": "https://evil.example"}],
@@ -68,14 +74,18 @@ def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
 def test_a_known_person_in_the_group_is_admitted_with_no_cookie_and_the_person_role(
     resource: ProtectedResource,
     method: str,
+    groups: list[str],
     sent: dict[str, str],
 ) -> None:
+    """RESOURCE-24, RESOURCE-65: a person holding the required group or one below it, besides
+    the login group, passes with no cookie and no Origin, and `resource_person` and
+    `current_user` return the person with the role "user"."""
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
     response = app.ask(
         resource.entry_point,
         method=method,
-        authorization=bearing(an_agent_token(resource)),
+        authorization=bearing(an_agent_token(resource, *groups)),
         headers=sent,
     )
 
@@ -123,7 +133,9 @@ def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
     resource: ProtectedResource,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """APP-13: resource admission rewrites no role and writes no audit event."""
+    """APP-13, RESOURCE-27, RESOURCE-28: resource admission rewrites no role and writes no audit
+    event, admits a stored admin as `AuthenticatedUser(id, username, role)` with the role
+    "user", and `admin_user` answers that person a 403 without `WWW-Authenticate`."""
     app = a_bearer_app(
         paths=PathRules(),
         resource=resource,
@@ -136,10 +148,12 @@ def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
     posted = app.ask(resource.entry_point, method="POST", authorization=token)
     admin_only = app.ask(resource.entry_point, method="DELETE", authorization=token)
 
-    assert (posted.status_code, posted.json()["role"]) == (200, MEMBER_ROLE)
+    assert posted.status_code == 200
+    assert posted.json() == {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE}
     [admitted] = app.auth.resource_persons
     assert type(admitted.role) is str
     assert admin_only.status_code == 403
+    assert "www-authenticate" not in admin_only.headers
     stored = the_account_of_the_token(app)
     assert stored is not None
     assert stored.role == ADMIN_ROLE
@@ -155,7 +169,11 @@ def test_a_person_without_the_required_group_gets_the_plain_403_and_the_store_is
     resource: ProtectedResource,
     groups: list[str],
 ) -> None:
+    """RESOURCE-21: a person whose groups lack the required group, or one below it, gets the
+    plain 403 without `WWW-Authenticate`, no route runs, and the store, the accounts and the
+    audit stay as they were."""
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+    accounts_before = the_accounts(app)
 
     response = app.ask(
         resource.entry_point,
@@ -166,10 +184,13 @@ def test_a_person_without_the_required_group_gets_the_plain_403_and_the_store_is
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
     assert "www-authenticate" not in response.headers
     assert (the_transaction(app).entries, app.audit.account_events) == (0, [])
+    assert the_accounts(app) == accounts_before
     assert app.auth.route_runs == []
 
 
 def test_a_person_outside_the_login_group_gets_the_plain_403_with_the_group_held() -> None:
+    """RESOURCE-22: a person outside the admission's login group gets the plain 403 without
+    `WWW-Authenticate`, no route runs, and the store and the audit stay as they were."""
     resource = a_resource(required_group="/other/mcp")
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
@@ -179,12 +200,16 @@ def test_a_person_outside_the_login_group_gets_the_plain_403_with_the_group_held
     )
 
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
+    assert "www-authenticate" not in response.headers
     assert (the_transaction(app).entries, app.audit.account_events) == (0, [])
+    assert app.auth.route_runs == []
 
 
 def test_an_unknown_subject_gets_the_plain_403_and_no_account_or_event_appears(
     resource: ProtectedResource,
 ) -> None:
+    """RESOURCE-23: a subject no account has gets the plain 403 without `WWW-Authenticate`, no
+    route runs, and no account and no event appear."""
     app = a_bearer_app(paths=PathRules(), resource=resource)
 
     response = app.ask(
@@ -217,6 +242,8 @@ def test_a_store_failure_in_the_admission_is_the_library_500_and_admits_nothing(
     failure: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """RESOURCE-29: a store or transaction exit failure in the admission is the library's 500,
+    no route runs, and no admission is recorded."""
     broken_transactions = {
         "creation": a_transaction_that_cannot_be_created,
         "entry": ATransactionThatCannotBeEntered,
@@ -249,7 +276,10 @@ def test_a_store_failure_in_the_admission_is_the_library_500_and_admits_nothing(
 
 def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
     resource: ProtectedResource,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """RESOURCE-26: the admission is one `accounts.get` in one entry of the transaction, and
+    changes no account."""
     app = a_bearer_app(
         paths=PathRules(),
         resource=resource,
@@ -257,21 +287,22 @@ def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
         strict_records=True,
     )
 
+    assert app.accounts is not None
+    lookups: list[str] = []
+    stored_get = app.accounts.get
+
+    def counting(user_id: str) -> FakeUser | None:
+        lookups.append(user_id)
+        return stored_get(user_id)
+
+    monkeypatch.setattr(app.accounts, "get", counting)
+    accounts_before = the_accounts(app)
+
     response = app.ask(resource.entry_point, authorization=bearing(an_agent_token(resource)))
 
     assert (response.status_code, the_transaction(app).entries) == (200, 1)
-
-
-REFUSED_AS_RUNTIME_ERROR = 418
-
-
-def answering_a_runtime_error_with_418(app: BearerApp) -> None:
-    """A reader that refuses with `RuntimeError` answers 418; any other failure stays the 500."""
-
-    def answer(_request: Request, _error: Exception) -> JSONResponse:
-        return JSONResponse({"detail": "refused"}, status_code=REFUSED_AS_RUNTIME_ERROR)
-
-    app.auth.app.add_exception_handler(RuntimeError, answer)
+    assert lookups == [OPERATOR_SUBJECT]
+    assert the_accounts(app) == accounts_before
 
 
 def a_resource_person_reader(app: BearerApp, path: str) -> None:
@@ -312,6 +343,8 @@ def test_the_resource_person_and_current_user_refuse_a_request_changed_after_adm
     changes: dict[str, object],
     status: int,
 ) -> None:
+    """RESOURCE-67, RESOURCE-69: at the entry point `resource_person` and `current_user` raise
+    `RuntimeError` in a sub-app and after the `Authorization` header or the method changed."""
     app = a_bearer_app(
         paths=PathRules(),
         resource=resource,
@@ -371,6 +404,8 @@ def test_csrf_refuses_a_request_made_mutating_after_admission(
     changes: dict[str, object],
     status: int,
 ) -> None:
+    """RESOURCE-25: CSRF reads the admission as it reads a person path's, so a request made
+    mutating after admission is refused."""
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
     between_the_bearer_gate_and_csrf(app, Middleware(RewritingTheRequest, changes=changes))
 
@@ -401,6 +436,8 @@ def test_the_resource_person_raises_on_a_session_person_and_machine_request(
     path: str,
     asked: dict[str, object],
 ) -> None:
+    """RESOURCE-66: `resource_person` raises `RuntimeError` on a session, person or machine
+    request."""
     app = a_bearer_app(
         person_paths=PERSON_PATHS,
         resource=resource,
@@ -419,5 +456,6 @@ def test_the_resource_person_raises_on_a_session_person_and_machine_request(
     ["", "apps/x/mcp", "/", "/apps//mcp", "/apps/x/mcp ", "/a\u200bb"],
 )
 def test_a_required_group_that_is_not_a_group_path_is_refused(group: str) -> None:
+    """RESOURCE-05: a `required_group` that is not a group path is a `ValueError`."""
     with pytest.raises(ValueError, match="required_group"):
         a_resource(required_group=group)

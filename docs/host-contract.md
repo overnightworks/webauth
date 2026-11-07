@@ -461,7 +461,7 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   - **GROUPS-21** A reply without an ID token is `ISSUER_UNAVAILABLE`, never `()`.
   - **GROUPS-22** A `groups` claim that is not a list of strings is `ISSUER_UNAVAILABLE`, never `()`.
 - **The rotation survives.**
-  - **GROUPS-23** A replacement refresh token is stored whatever the ID token said.
+  - **GROUPS-23** While the session stands, a replacement refresh token is stored whatever the ID token said.
   - **GROUPS-24** A session that is gone is `SESSION_ENDED` and never recreated.
 - **Overlap.**
   - **GROUPS-25** Each call is one grant.
@@ -477,55 +477,124 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
 ## The protected resource
 
 A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, authorized_parties, transaction, marked_routes)` and passes
-it as `BearerGate(resource=...)`; a gate needs one kind of path, and the resource counts as one.
-`url` is the resource's identifier, an endpoint URL with a plain host, an optional port and a path of
-one or more segments of RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`), none
-being `.` or `..`, with no trailing slash; its path is the entry point; `scope` is the one scope token the challenge asks for and a token must hold; `authorized_parties` (an `AuthorizedParties`, else `TypeError`) are the clients whose token the resource takes, apart from the parties of the machine and person paths; `required_group` (a group path, else `ValueError`) is the group a person must hold in the token, or one below it, besides the admission's login group; `transaction` is the host's `SignInTransaction`, the same port the person paths use. Everything else
-derives from `url`: the metadata path is `/.well-known/oauth-protected-resource` plus the entry
-point (RFC 9728 section 3.1), and the challenge names the metadata URL.
+it as `BearerGate(resource=...)`.
 
-**The resource admits an agent's token, capped and read-only.** A token for the resource is refused on the machine paths, and on the person paths except on a route the resource marks; an app token is refused at the entry point; a party listed on one kind is not thereby listed on another. At the entry point, on every method and the exact path only,
-the gate decides before CSRF and the session gate, and a refusal runs no route:
+- **RESOURCE-01** A gate needs one kind of path, and the resource counts as one.
+- **RESOURCE-02** `url` is the resource's identifier, an endpoint URL with a plain host, an optional port and a path of
+  one or more segments of RFC 3986 unreserved characters (letters, digits, `-`, `.`, `_`, `~`), none
+  being `.` or `..`, with no trailing slash; its path is the entry point. Any other `url` is a `ValueError`.
+- **RESOURCE-03** `scope` is one scope token, else `ValueError`.
+- **RESOURCE-04** `authorized_parties` is an `AuthorizedParties`, else `TypeError`.
+- **RESOURCE-05** `required_group` is a group path, else `ValueError`.
+- `scope` is the scope the challenge asks for and a token must hold. `authorized_parties` are the clients whose token
+  the resource takes, apart from the parties of the machine and person paths. `required_group` is the group a person
+  must hold in the token, or one below it, besides the admission's login group.
+- `transaction` is the host's `SignInTransaction`, the same port the person paths use.
+- Everything else derives from `url`:
+  - **RESOURCE-06** the metadata path is `/.well-known/oauth-protected-resource` plus the entry
+    point (RFC 9728 section 3.1);
+  - **RESOURCE-07** the challenge names the metadata URL.
 
-- no credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`;
-- a token the resource's check refuses: 401 with `error="invalid_token"` and the same two
-  parameters. The check is `OidcRelyingParty.resource_token_verifier`: an RS256 `at+jwt` of the
-  relying party's issuer whose only audience is the resource's `url` (not the app's client ID,
-  not a list of two) and whose `azp` is one of the resource's parties;
-- a token that passes that but whose `scope` claim, read as space-separated tokens, lacks the
+**The resource admits an agent's token, capped and read-only.**
+
+- **RESOURCE-08** A token for the resource is refused on the machine paths.
+- **RESOURCE-09** A token for the resource is refused on the person paths except on a route the resource marks.
+- **RESOURCE-10** An app token is refused at the entry point.
+- **RESOURCE-11** A party the resource lists is not thereby listed on the machine and person paths.
+- **RESOURCE-12** A party the machine or person paths list is not thereby listed on the resource.
+
+At the entry point, on every method and the exact path only:
+
+- **RESOURCE-13** The gate decides before CSRF and the session gate.
+- **RESOURCE-14** No credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`. No route runs.
+- **RESOURCE-15** A token the resource's check refuses: 401 with `error="invalid_token"` and the same two
+  parameters, and no route runs. The check is `OidcRelyingParty.resource_token_verifier`:
+  - **RESOURCE-16** an RS256 `at+jwt`,
+  - **RESOURCE-17** of the relying party's issuer,
+  - **RESOURCE-18** whose only audience is the resource's `url` (not the app's client ID,
+    not a list of two),
+  - **RESOURCE-19** and whose `azp` is one of the resource's parties.
+- **RESOURCE-20** A token that passes that but whose `scope` claim, read as space-separated tokens, lacks the
   resource's scope (absent, not a string, another scope, or the scope only as a substring of
-  another): 403 with `error="insufficient_scope"` and the same two parameters;
-- a token that holds, whose person the resource does not admit (the groups lack `required_group` or the admission's login group, or no account has the token's subject): a plain 403 without `WWW-Authenticate`, because a client answers `insufficient_scope` with a new sign-in, which cannot help. No route runs, the store is not touched for a missing group, and nothing is created, changed or audited;
-- a token that holds, whose person is admitted: the request passes with no cookie and no `Origin`, CSRF and the session gate reading the admission as they read a person path's. The lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once. The person is `AuthenticatedUser(id, username, role)` with the role `"user"` whatever role is stored: a stored admin is admitted as a plain user, and `admin_user` answers 403 without `WWW-Authenticate` (a person path's 403 keeps its `insufficient_scope` challenge). A store or exit failure is the library's 500 and records no admission;
-- a credential the gate refuses (a repeated header, a malformed one): that refusal, with the same
-  two parameters.
+  another): 403 with `error="insufficient_scope"` and the same two parameters, and no route runs.
+- A token that holds, whose person the resource does not admit, gets a plain 403 without `WWW-Authenticate`, because a client answers `insufficient_scope` with a new sign-in, which cannot help. No route runs, and nothing is created, changed or audited:
+  - **RESOURCE-21** the groups lack `required_group`, and the store is not touched;
+  - **RESOURCE-22** the groups lack the admission's login group, and the store is not touched;
+  - **RESOURCE-23** no account has the token's subject.
+- A token that holds, whose person is admitted:
+  - **RESOURCE-24** the request passes with no cookie and no `Origin`, the session gate reading the admission as it reads a person path's;
+  - **RESOURCE-25** CSRF reads the admission as it reads a person path's;
+  - **RESOURCE-26** the lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once;
+  - **RESOURCE-27** the person is `AuthenticatedUser(id, username, role)` with the role `"user"` whatever role is stored: a stored admin is admitted as a plain user;
+  - **RESOURCE-28** `admin_user` answers that person 403 without `WWW-Authenticate` (a person path's 403 keeps its `insufficient_scope` challenge);
+  - **RESOURCE-29** a store or exit failure is the library's 500 and records no admission.
+- **RESOURCE-30** A credential the gate refuses (a repeated header, a malformed one): that refusal, with the same
+  two parameters, and no route runs.
+- **RESOURCE-31** A cookie decides nothing there: no session transaction runs.
+- **RESOURCE-32** The entry point's answers carry `no-store`.
+- **RESOURCE-33** A trailing slash or a longer path is not the entry point.
+- **RESOURCE-34** A machine path that overlaps the entry point stays a machine path.
+- **RESOURCE-35** An entry point below a person path is decided as the entry point.
 
-A cookie decides nothing there: no session transaction runs. The entry
-point's answers carry `no-store`. A trailing slash or a longer path is not the entry point, and a
-machine path that overlaps it stays a machine path (paths are selected machine, resource, person).
+`install_resource_metadata(app, resource, issuer=...)`:
 
-`install_resource_metadata(app, resource, issuer=...)` registers `GET` of the metadata path,
-answering JSON with `resource`, `authorization_servers` (`[issuer]`) and `scopes_supported`
-(`[scope]`). Install it ahead of any catch-all route, and list `resource.public_rule` in
-`SessionGate.public` so a client without a session reads it. The entry point is matched on the
-route path, as every policy is, so a host below a `root_path` cannot name a resource yet: the `url` is the public identifier and the route path differs from it.
+- **RESOURCE-36** registers `GET` of the metadata path,
+- **RESOURCE-37** answering JSON with `resource`, `authorization_servers` (`[issuer]`) and `scopes_supported`
+  (`[scope]`).
+- **Host duty:** Install it ahead of any catch-all route.
+- **Host duty:** List `resource.public_rule` in `SessionGate.public`.
+- **RESOURCE-38** So listed, a client without a session reads the metadata document.
+- **Host duty:** A host below a `root_path` names no resource: the entry point is matched on the route path,
+  as every policy is, and the `url` is the public identifier, so the route path differs from it.
 
-**Marked routes.** `marked_routes` is a `frozenset` of `MarkedRoute(method, template)` (else `TypeError`), the host's operations besides the entry point that take the same token; empty by default, so a resource has only its entry point. `method` is one upper-case HTTP method token. `template` is one or more `/`-separated segments, each a literal of unreserved characters (never a literal `.` or `..` segment) or one `{name}` filling the whole segment: no converter, no partial parameter, no empty segment, no trailing slash, else `ValueError`. The match is exact, on the route path: the method equals, the segment count equals, each literal equals, each parameter is one non-empty segment other than `.` and `..`. A trailing slash, `HEAD` on a marked `GET`, a longer path below a template and a decoded `/` in a parameter do not match. The gate selects machine path, entry point, marked route, person path; a marked template overlapping a machine path stays a machine path. On a marked route:
+**Marked routes.** `marked_routes` are the host's operations besides the entry point that take the same token.
 
-- no bearer credential, another scheme included: session and CSRF as without the marking;
-- a token whose audience is not the resource (the resource's check refuses it as `INVALID_AUDIENCE`): the request goes on exactly as unmarked, so a person path runs its complete check and any other path ignores the bearer. It is never a resource admission;
-- any other refusal answers there as at the entry point with the challenge, a valid cookie beside it deciding nothing: a refused credential, an invalid or expired token, a token naming the resource among two audiences, and `insufficient_scope`;
-- a token that holds runs the entry point's admission: the plain 403, or the capped person recorded for the request's method, so CSRF and the session gate step aside and `current_user`, `admitted_user` and `resource_person` return the capped person.
+- **RESOURCE-39** `marked_routes` is a `frozenset` of `MarkedRoute(method, template)`, else `TypeError`.
+- **RESOURCE-40** It is empty by default, so a resource has only its entry point.
+- **RESOURCE-41** `method` is one upper-case HTTP method token, else `ValueError`.
+- **RESOURCE-42** `template` is one or more `/`-separated segments, each a literal of unreserved characters
+  or one `{name}` filling the whole segment.
+- **RESOURCE-43** Any other `template` is a `ValueError`: a converter, a partial parameter, an empty segment, a
+  trailing slash, a missing leading `/`, a literal `.` or `..` segment or a literal of other characters.
+- **RESOURCE-44** The match is exact, on the route path: the method equals, the segment count equals, each literal equals, each parameter is one non-empty segment other than `.` and `..`.
+- **RESOURCE-45** A trailing slash, `HEAD` on a marked `GET`, a longer path below a template and a decoded `/` in a parameter do not match.
+- The gate selects machine path, entry point, marked route, person path:
+  - **RESOURCE-46** a marked template overlapping a machine path stays a machine path;
+  - **RESOURCE-47** a marked route at the entry point is decided as the entry point;
+  - **RESOURCE-48** a marked route below a person path is decided as the marked route.
 
-The host's duties: the gate runs before routing, so the host proves that every request a marked route permits resolves to a marked operation (no earlier unmarked route shadows the template); the host marks no operation in a deletion area and no admin operation, because the role cap keeps neither out (an ordinary user may delete, and an admin operation only answers 403); the token reaches a marked route directly, not only through the entry point. Responses on a marked route are the host's own and carry no `no-store`, as on a person path.
+On a marked route:
 
-`webauth.middleware.resource_person(connection)` returns the person for this very request and raises `RuntimeError` on a session, person or machine request, in a sub-app, and after the `Authorization` header or the method changed. `current_user` returns the same capped person on the entry point and a marked route and refuses after a method change.
+- **RESOURCE-49** With no bearer credential the session decides as without the marking.
+- **RESOURCE-50** With no bearer credential CSRF decides as without the marking.
+- **RESOURCE-51** Another scheme is no bearer credential.
+- A token whose audience is not the resource (the resource's check refuses it as `INVALID_AUDIENCE`) goes on exactly as unmarked:
+  - **RESOURCE-52** a person path runs its complete check;
+  - **RESOURCE-53** any other path ignores the bearer;
+  - **RESOURCE-54** it is never a resource admission.
+- Any other refusal answers there as at the entry point with the challenge, a valid cookie beside it deciding nothing:
+  - **RESOURCE-55** a refused credential;
+  - **RESOURCE-56** an invalid or expired token, and a token naming the resource among two audiences;
+  - **RESOURCE-57** `insufficient_scope`.
+- A token that holds runs the entry point's admission:
+  - **RESOURCE-58** the groups lack `required_group`: the plain 403;
+  - **RESOURCE-59** the groups lack the admission's login group: the plain 403;
+  - **RESOURCE-60** no account has the subject: the plain 403;
+  - **RESOURCE-61** a stored admin on an `admin_user` route: the plain 403;
+  - **RESOURCE-62** the capped person is recorded for the request's method, so CSRF and the session gate step aside;
+  - **RESOURCE-63** `current_user`, `admitted_user` and `resource_person` return the capped person.
+- **Host duty:** The gate runs before routing, so prove that every request a marked route permits resolves to a marked operation (no earlier unmarked route shadows the template).
+- **Host duty:** Mark no operation in a deletion area and no admin operation, because the role cap keeps neither out (an ordinary user may delete, and an admin operation only answers 403).
+- **Host duty:** Let the token reach a marked route directly, not only through the entry point.
+- **RESOURCE-64** Responses on a marked route are the host's own and carry no `no-store`, as on a person path.
 
-Proofs: [test_bearer_gate_resource_admission.py](../tests/middleware/test_bearer_gate_resource_admission.py)
-[test_bearer_gate_resource.py](../tests/middleware/test_bearer_gate_resource.py)
-and [test_bearer_gate_marked_routes.py](../tests/middleware/test_bearer_gate_marked_routes.py)
-in CI, and [bearer_resource.py](../tests/e2e/oidc/bearer_resource.py) against real
-Keycloak in the hand-run harness.
+`webauth.middleware.resource_person(connection)`:
+
+- **RESOURCE-65** at the entry point `resource_person` and `current_user` return the capped person for this very request;
+- **RESOURCE-66** `resource_person` raises `RuntimeError` on a session, person or machine request;
+- **RESOURCE-67** at the entry point `resource_person` raises `RuntimeError` in a sub-app, and after the `Authorization` header or the method changed;
+- **RESOURCE-68** the same on a marked route;
+- **RESOURCE-69** `current_user` refuses after a method change, at the entry point and on a marked route.
 
 ## A service's callers
 

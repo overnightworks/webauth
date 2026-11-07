@@ -416,7 +416,7 @@ class TestTheReply:
         self, answer: object, expected: AccessTokenRefusal | None
     ) -> None:
         """GROUPS-07, GROUPS-08: an `invalid_grant` signs in again, any other failed grant is an
-        issuer failure with its reason, and nothing is stored."""
+        issuer failure with its reason, nothing is stored, and the session still stands."""
 
         arrangement = an_arrangement()
         endpoint = FakeTokenEndpoint(answer=answer)  # type: ignore[arg-type]
@@ -432,4 +432,5 @@ class TestTheReply:
             assert outcome == expected
         else:
             assert an_issuer_reason(outcome) is not None
+        assert arrangement.sessions.load(SESSION_ID) is not None
         assert arrangement.stored_refresh_token == ISSUED_REFRESH_TOKEN
