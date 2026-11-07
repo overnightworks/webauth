@@ -5,6 +5,7 @@ The arrangement is that of `tests/support/person_paths_arrangement.py`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -27,6 +28,7 @@ from tests.support.gate_arrangement import (
     PERSON_PREFIX,
     PERSON_REALM,
     REALM_INSUFFICIENT_SCOPE,
+    BearerApp,
     a_bearer_app,
     a_key_set_answering,
     a_token,
@@ -38,8 +40,14 @@ from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
     REALM_JWKS_URL,
+    a_logout_token,
 )
 from tests.support.oidc_login_host import (
+    BOUND_ISSUER,
+    CLIENT_ID,
+    NOW,
+    SAME_ORIGIN_FORM,
+    SIGN_IN_PATHS,
     RecordingSignInTransaction,
     failing,
 )
@@ -52,6 +60,7 @@ from tests.support.person_paths_arrangement import (
     UNGATED_ME_PATH,
     a_lena,
     a_person_app,
+    a_person_app_serving_back_channel_logout,
     ran,
     the_account,
     the_challenge,
@@ -532,17 +541,49 @@ def test_a_token_works_until_its_expiry_plus_leeway_whatever_the_issuer_decided_
     assert set(app.key_sets.fetched_urls) == {REALM_JWKS_URL}
 
 
-def test_a_token_stays_valid_after_the_persons_sessions_end() -> None:
-    """TOKEN-34, TOKEN-35: ending the person's sessions, as a sign-out or a back-channel logout
-    does, ends no token."""
-    app = a_person_app()
-    cookie_person = app.auth.sessions.stored_record.user
+def signing_out_of_the_browser(app: BearerApp) -> Response:
+    return app.ask(
+        SIGN_IN_PATHS.logout,
+        method="POST",
+        cookie=True,
+        headers=SAME_ORIGIN_FORM,
+    )
 
-    ended = app.auth.sessions.delete_for_user(cookie_person.id)
+
+def the_issuer_logging_the_person_out_by_back_channel(app: BearerApp) -> Response:
+    logout_token = a_logout_token(
+        issuer=BOUND_ISSUER,
+        audience=CLIENT_ID,
+        subject=app.auth.sessions.stored_record.user.id,
+        now=NOW,
+        key_id="issuer-key",
+        key_name="issuer",
+    )
+    return app.auth.client.post(
+        SIGN_IN_PATHS.backchannel_logout, data={"logout_token": logout_token}
+    )
+
+
+@pytest.mark.parametrize(
+    "ends_the_session",
+    [
+        pytest.param(signing_out_of_the_browser, id="TOKEN-34-sign-out"),
+        pytest.param(the_issuer_logging_the_person_out_by_back_channel, id="TOKEN-35-back-channel"),
+    ],
+)
+def test_a_token_stays_valid_after_the_persons_session_ends_by_logout(
+    ends_the_session: Callable[[BearerApp], Response],
+) -> None:
+    """TOKEN-34, TOKEN-35: signing out in a browser, and a back-channel logout from the issuer,
+    each end the person's session and no token."""
+    app = a_person_app_serving_back_channel_logout()
+
+    logout = ends_the_session(app)
     by_cookie = app.ask(PERSON_ME_PATH, cookie=True)
     by_token = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
 
-    assert (ended, by_cookie.status_code, by_token.status_code) == (1, 401, 200)
+    assert logout.status_code == 200
+    assert (by_cookie.status_code, by_token.status_code) == (401, 200)
 
 
 def test_an_older_token_writes_the_role_it_carries_back_within_its_lifetime() -> None:
