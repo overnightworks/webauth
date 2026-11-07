@@ -234,18 +234,22 @@ def test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge(
 
 
 @pytest.mark.parametrize(
-    "authorization",
+    ("authorization", "key_set_response"),
     [
-        pytest.param((), id="no credentials"),
-        pytest.param(("Bearer abc!def",), id="an invalid token"),
-        pytest.param(bearing(ONLY_THE_APP_GROUP), id="a token without the admin group"),
+        pytest.param((), None, id="no credentials"),
+        pytest.param((f"Bearer {A_TOKEN}", f"Bearer {A_TOKEN}"), None, id="a malformed request"),
+        pytest.param(("Bearer abc!def",), None, id="an invalid token"),
+        pytest.param(bearing(A_TOKEN), KEY_SET_DOWN, id="an unavailable key set"),
+        pytest.param(bearing(ONLY_THE_APP_GROUP), None, id="a token without the admin group"),
     ],
 )
 def test_a_machine_route_refuses_a_navigation_without_a_redirect(
-    authorization: tuple[str, ...],
+    authorization: tuple[str, ...], key_set_response: Exception | None
 ) -> None:
     """REFUSE-08: a machine route never redirects, even where a login redirect is configured."""
-    app = a_bearer_app(login_redirect=LOGIN_REDIRECT)
+    app = a_bearer_app(
+        login_redirect=LOGIN_REDIRECT, key_sets=a_key_set_answering(key_set_response)
+    )
 
     response = app.ask(
         authorization=authorization,
