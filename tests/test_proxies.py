@@ -362,8 +362,23 @@ def test_the_budget_of_an_address_pools_its_ipv6_network(
     address: str,
     budget: str,
 ) -> None:
-    """PROXY-06: visitors behind one address share its rate-limit budget."""
+    """An address keys its budget by its own text, and an IPv6 address by its /64."""
     assert _budget_address(address) == budget
+
+
+def test_visitors_behind_an_unlisted_proxy_share_its_rate_limit_budget() -> None:
+    """PROXY-06: two visitors that reach the app through one unlisted proxy share its budget."""
+    trusted = TrustedProxies.parse(_PROXY_NETWORK)
+    other_visitor = "203.0.113.8"
+
+    budgets = {
+        _budget_address(
+            _get_client_ip(_TRUSTED_PEER, [f"{visitor}, {_UNLISTED_PROXY}, {_TRUSTED_HOP}"], trusted)
+        )
+        for visitor in (_CLIENT, other_visitor)
+    }
+
+    assert budgets == {_UNLISTED_PROXY}
 
 
 # -- Forwarded protocol ------------------------------------------------------
