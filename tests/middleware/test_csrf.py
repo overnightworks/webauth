@@ -341,6 +341,27 @@ def test_an_origin_that_only_resembles_the_exact_host_is_refused(origin: str) ->
 @pytest.mark.parametrize(
     ("allowed_entry", "origin"),
     [
+        pytest.param("*.example.test", "https://notes.example.test", id="a wildcard subdomain"),
+        pytest.param("*", "https://notes.example.test", id="a bare wildcard"),
+        pytest.param("notes.*", "https://notes.example.test", id="a wildcard suffix"),
+        pytest.param(".*", "https://notes.example.test", id="a regular expression"),
+    ],
+)
+def test_an_entry_that_is_a_host_pattern_matches_no_origin(allowed_entry: str, origin: str) -> None:
+    """CSRF-12: an entry is an exact host; a pattern in it matches nothing."""
+    client = an_origin_guarded_client(
+        a_web_auth_config(allowed_hosts_exact=frozenset({allowed_entry})),
+    )
+
+    response = client.post(API_PATH, json={"n": 1}, headers={"origin": origin})
+
+    assert response.status_code == 403
+    assert response.json() == CROSS_ORIGIN_DETAIL
+
+
+@pytest.mark.parametrize(
+    ("allowed_entry", "origin"),
+    [
         pytest.param("[::1]", "https://[::1]", id="a bracketed IPv6 host"),
         pytest.param("[::1]:8000", "https://[::1]:8000", id="a bracketed IPv6 host with a port"),
     ],
