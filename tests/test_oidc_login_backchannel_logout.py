@@ -399,7 +399,7 @@ def test_an_oversized_logout_body_is_refused_and_ends_nothing(
     ],
 )
 def test_a_path_next_to_the_back_channel_stays_csrf_protected(path: str) -> None:
-    """SIGNIN-43: the exact back-channel path is exempt from the origin check, and no other path is."""
+    """SIGNIN-43: the exact back-channel path is exempt from the origin check; no other path is."""
     host = after_signing_in(an_oidc_host())
 
     response = host.client.post(path, headers=FORM, content=b"logout_token=x")
@@ -693,7 +693,7 @@ def test_the_back_channel_answers_200_only_after_the_exit_returned(
     ],
 )
 def test_a_path_next_to_the_back_channel_spends_the_address_budget(path: str) -> None:
-    """SIGNIN-44: the exact back-channel path is exempt from the rate limit, and no other path is."""
+    """SIGNIN-44: the exact back-channel path is exempt from the rate limit; no other path is."""
     host = a_host_with_sessions(subject_sessions=1, address_budget=1)
     host.client.get("/me")
     assert host.client.get("/me").status_code == 429
