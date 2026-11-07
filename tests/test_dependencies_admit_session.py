@@ -147,6 +147,7 @@ def test_a_session_is_admitted_inside_its_lifetime_and_renewed_no_further_than_i
     renewed_to: timedelta | None,
     stored_as: Callable[[datetime], datetime],
 ) -> None:
+    """APP-07: a session is renewed no further than its absolute cap."""
     record = a_session(now=FIXED_INSTANT, age=age, remaining=remaining)
     record.created_at = stored_as(record.created_at)
     record.expires_at = stored_as(record.expires_at)

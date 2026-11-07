@@ -270,7 +270,7 @@ def _with_an_undecodable_parameter(_host: OidcHost, query: str) -> str:
 _REFUSED_CALLBACKS = [
     pytest.param(
         RefusedCallback("token-request-refused", returned_query=_with_another_code),
-        id="a code the issuer never issued",
+        id="an issuer that refuses the code during the sign-in",
     ),
     pytest.param(
         RefusedCallback("pending-login-expired", returned_query=_after_the_pending_lifetime),
@@ -293,6 +293,10 @@ _REFUSED_CALLBACKS = [
         id="a person whose groups claim is empty",
     ),
     pytest.param(
+        RefusedCallback("not-a-member", groups_claim=ABSENT),
+        id="a person whose groups claim is missing",
+    ),
+    pytest.param(
         RefusedCallback("invalid-identity-claim", groups_claim="/apps/lab"),
         id="a groups claim that is not a list",
     ),
@@ -303,6 +307,7 @@ _REFUSED_CALLBACKS = [
 def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its_cookie(
     refused: RefusedCallback,
 ) -> None:
+    """APP-13, APP-22: a missing groups claim or a failed sign-in stops at the refusal."""
     host = an_oidc_host(groups_claim=refused.groups_claim)
     other_tab = host.sign_in_at_issuer()
     query = host.sign_in_at_issuer()
@@ -315,6 +320,40 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.accounts.list() == []
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
+
+
+def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() -> None:
+    """APP-05: a person removed from the group is refused at login, yet an open session works."""
+    groups = [LOGIN_GROUP]
+    host = an_oidc_host(groups_claim=groups)
+    host.callback(host.sign_in_at_issuer())
+    session_cookie = host.client.cookies[host.config.session_cookie_name]
+
+    groups[:] = []
+    host.client.cookies.clear()
+    assert host.callback(host.sign_in_at_issuer()).status_code == 403
+    host.client.cookies.set(host.config.session_cookie_name, session_cookie)
+
+    assert host.client.get("/me").status_code == 200
+
+
+def test_a_signed_in_person_keeps_working_while_the_issuer_is_unreachable() -> None:
+    """APP-21: an open session is admitted from the app's own store, asking the issuer nothing."""
+    host = after_signing_in(an_oidc_host())
+
+    def unreachable() -> None:
+        raise OSError("the issuer is down")
+
+    host.issuer.before_exchange = unreachable
+    host.key_set.before_answer = unreachable
+    exchanges_before = len(host.issuer.requests)
+    fetches_before = len(host.key_set.fetched_urls)
+
+    response = host.client.get("/me")
+
+    assert response.status_code == 200
+    assert len(host.issuer.requests) == exchanges_before
+    assert len(host.key_set.fetched_urls) == fetches_before
 
 
 def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
@@ -354,6 +393,7 @@ def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
     status_before: int,
     status_after: int,
 ) -> None:
+    """APP-06: a role changed at login reaches the person's other open session."""
     groups = list(before)
     host = an_oidc_host(groups_claim=groups)
     host.callback(host.sign_in_at_issuer())

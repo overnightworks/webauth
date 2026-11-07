@@ -106,6 +106,7 @@ def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
     resource: ProtectedResource,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """APP-11: resource admission rewrites no role and writes no audit event."""
     app = a_bearer_app(
         paths=PathRules(),
         resource=resource,

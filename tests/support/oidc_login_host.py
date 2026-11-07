@@ -26,6 +26,7 @@ from tests.support.oidc_arrangement import (
     a_realm_client_config,
     a_relying_party,
     an_id_token_claims,
+    changed,
     jws,
     rs256,
     rsa_key,
@@ -334,6 +335,7 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding
         preferred_username="lena",
         groups=groups_claim,
     )
+    claims = changed(claims, {})
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
     if padding:
         header["padding"] = padding

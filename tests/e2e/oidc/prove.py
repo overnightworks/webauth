@@ -718,6 +718,7 @@ def session_cookie_after_redirect(
 
 
 def logout(proof: Proof, width: Width) -> str:
+    """APP-23, APP-25, APP-31: the logout page ends the session and Keycloak asks nothing."""
     scenario = f"2-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
@@ -752,13 +753,13 @@ def logout(proof: Proof, width: Width) -> str:
         f"the button led straight back to the app with no confirmation page (the end-session "
         f"answer was a redirect to '/' and {KEYCLOAK_LOGOUT_CONFIRMATION} never attached), the "
         f"host already at 0 sessions and no app cookie, and the POST carried an id_token_hint; "
-        f"the app showed Signed out and /me answered 401; "
-        f"the back button shows {back_shows!r} but the old session cookie replayed over HTTPS "
-        f"to /me is refused ({replay}); a second Sign in {again}"
+        f"the app showed Signed out and /me answered 401; the back button shows {back_shows!r} "
+        f"but the old cookie replayed to /me is refused ({replay}); a second Sign in {again}"
     )
 
 
 def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
+    """APP-33, APP-34: with the app session gone the logout sends no hint and Keycloak asks."""
     scenario = f"9-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
@@ -774,8 +775,7 @@ def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
         proof.shot(page, scenario, "result")
         again = second_sign_in(proof, page, scenario)
     return (
-        "with the app session already gone, the logout sent no hint, Keycloak asked once and, "
-        f"after confirming, led back to the app, signed out; a second Sign in {again}"
+        f"app session gone: no hint sent, Keycloak asked once, signed out; a second Sign in {again}"
     )
 
 

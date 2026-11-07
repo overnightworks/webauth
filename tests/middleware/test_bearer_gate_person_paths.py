@@ -184,6 +184,7 @@ def test_the_role_follows_the_tokens_groups_and_is_stored_as_at_sign_in(
 def test_the_roles_a_token_admission_stores_and_audits_are_plain_strings(
     kind: TransactionKind,
 ) -> None:
+    """APP-08: a person-token admission stores admin and user as plain strings."""
     app = a_person_app(transaction_kind=kind, known_accounts=(a_lena(),))
 
     app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
@@ -197,6 +198,7 @@ def test_the_roles_a_token_admission_stores_and_audits_are_plain_strings(
 def test_where_the_app_has_no_admins_a_token_admission_demotes_a_stored_admin(
     kind: TransactionKind,
 ) -> None:
+    """APP-10: a person-token admission demotes a stored admin where the app has no admins."""
     admin = FakeUser(id=OPERATOR_SUBJECT, username="lena", role=ADMIN_ROLE)
     app = a_person_app(
         paths=PathRules(),
@@ -241,6 +243,7 @@ def test_a_token_of_a_person_outside_the_app_is_refused_before_any_store_is_touc
 def test_a_username_the_store_refuses_answers_403_login_failed_without_a_challenge(
     kind: TransactionKind,
 ) -> None:
+    """APP-20: a person-token admission refuses a username the store refuses."""
     app = a_person_app(transaction_kind=kind)
     taken = a_token(preferred_username="alice")
 

@@ -155,6 +155,7 @@ def test_a_person_is_admitted_when_a_group_is_the_login_group_or_below_it(
     *,
     admitted: bool,
 ) -> None:
+    """APP-01, APP-12: only a person with the login group or a subgroup of it gets in."""
     host = a_host()
 
     outcome = host.admit(replace(LENA, groups=groups))
@@ -171,6 +172,7 @@ def test_the_every_subject_value_admits_a_person_without_groups() -> None:
 
 
 def test_a_person_taken_out_of_the_group_is_refused_and_back_in_returns_to_the_account() -> None:
+    """APP-04, APP-15, APP-16: a removed person is refused, keeps the account and returns to it."""
     host = a_host()
     first = host.admit(LENA)
     stored = deepcopy(host.accounts.list())
@@ -183,6 +185,19 @@ def test_a_person_taken_out_of_the_group_is_refused_and_back_in_returns_to_the_a
 
 
 FOREIGN_ISSUER = "https://other.example/realms/lab"
+
+
+class UsersFailingOnAnyLookupOrWrite(UsersInMemory):
+    """A store that fails when admission looks up, creates or changes an account."""
+
+    def get(self, user_id: str) -> FakeUser | None:
+        raise AssertionError(f"account {user_id!r} looked up")
+
+    def create_for_subject(self, subject: str, username: str, role: str) -> FakeUser:
+        raise AssertionError(f"account {subject!r} created")
+
+    def set_role(self, user_id: str, role: str) -> FakeUser:
+        raise AssertionError(f"account {user_id!r} changed")
 
 
 @pytest.mark.parametrize(
@@ -213,7 +228,8 @@ def test_an_identity_refused_before_its_account_writes_nothing(
     admission: AdmissionConfig,
     refusal: AdmissionRefusal,
 ) -> None:
-    host = a_host()
+    """APP-03, APP-14: a refused identity reaches no account, whatever its issuer."""
+    host = a_host(store=UsersFailingOnAnyLookupOrWrite)
 
     assert host.admit(identity, admission) is refusal
     assert host.accounts.list() == []
@@ -306,6 +322,7 @@ class RoleCase:
     ],
 )
 def test_an_account_gets_the_role_its_groups_derive_at_every_login(case: RoleCase) -> None:
+    """APP-02, APP-04, APP-10: the role follows the groups at every login; no admins demotes."""
     host = a_host(
         *(
             [FakeUser(id=SUBJECT, username="lena", role=case.stored_role)]
@@ -329,6 +346,7 @@ def test_an_account_gets_the_role_its_groups_derive_at_every_login(case: RoleCas
 
 
 def test_the_roles_a_sign_in_stores_and_audits_are_plain_strings() -> None:
+    """APP-08: a sign-in stores admin and user as plain strings."""
     host = a_host()
 
     created = admitted_account(host, LENA)
@@ -428,6 +446,7 @@ def test_a_role_that_does_not_change_is_written_by_no_second_login() -> None:
 
 
 def test_a_known_subject_reuses_its_account_unchanged_when_its_username_changed() -> None:
+    """APP-18: a known subject's account is found by subject, whatever its username."""
     host = a_host()
     first = host.admit(LENA)
     stored = deepcopy(host.accounts.list())
@@ -455,6 +474,7 @@ def test_a_refused_identity_changes_neither_the_store_nor_the_audit_log(
     stored: list[FakeUser],
     refusal: AdmissionRefusal,
 ) -> None:
+    """APP-03: another issuer's identity never changes an account's role."""
     host = a_host(*deepcopy(stored))
 
     assert host.admit(identity) is refusal
@@ -463,6 +483,7 @@ def test_a_refused_identity_changes_neither_the_store_nor_the_audit_log(
 
 
 def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written() -> None:
+    """APP-20: a store that refuses a new account's username makes admission report it taken."""
     stored = [FakeUser(id="user-7", username="Lena")]
     host = a_host(*deepcopy(stored), store=UsersWithCaseInsensitiveUsernames)
 
@@ -473,6 +494,7 @@ def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written(
 
 
 def test_a_store_without_unique_usernames_admits_two_subjects_sharing_one() -> None:
+    """APP-18: admission never looks up a username, so two subjects share one."""
     host = a_host(store=UsersWithoutUniqueUsernames)
     other_lena = replace(LENA, subject="0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23")
 
