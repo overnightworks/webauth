@@ -1,0 +1,8 @@
+claim_id = "b53a4b7db05a412b9c65234c2c96e0d5"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "ddad4b171f9de67f23ea916c3632af0222a54aba"
+branch = "claude/issue-663-host-contract-ids-service-callers"
+scope = ["docs/host-contract.md", "tests"]
+opened_commit = "3846c718d0dbb95a95e86fa4145b3dfa388634bd"
+whole_reason = "One section's IDs and their citations land together; the test modules change docstrings and add focused tests only."
