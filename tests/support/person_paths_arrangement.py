@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from fastapi import Response as AppResponse
 from httpx import Response
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
+    ADMISSION,
     PERSON_ADMIN_ME_PATH,
     PERSON_ADMITTED_ADMIN_PATH,
     PERSON_PATHS,
@@ -19,16 +21,27 @@ from tests.support.gate_arrangement import (
     a_bearer_app,
     a_token,
 )
-from tests.support.oidc_arrangement import OPERATOR_SUBJECT
+from tests.support.oidc_arrangement import (
+    OPERATOR_SUBJECT,
+    FakeClock,
+    a_key_set_endpoint,
+    a_relying_party,
+)
 from tests.support.oidc_login_host import (
+    LOGOUT_PAGE_TEXT,
+    NOW,
+    SIGN_IN_PATHS,
     StoreDown,
     TransactionKind,
+    a_client_config,
 )
 from tests.support.webauth_arrangement import (
     MEMBER_ROLE,
     FakeUser,
 )
+from webauth.policies import CsrfPolicy
 from webauth.ports import SignInStores
+from webauth.sign_in_routes import install_sign_in_routes
 
 ADMIN_TOKEN = A_TOKEN
 MEMBER_TOKEN = a_token(groups=["/apps/x"])
@@ -77,6 +90,32 @@ def a_transaction_failing_to_be_entered() -> AbstractContextManager[SignInStores
 
 def a_person_app(**keywords: Any) -> BearerApp:
     return a_bearer_app(person_paths=PERSON_PATHS, **keywords)
+
+
+def a_person_app_serving_back_channel_logout() -> BearerApp:
+    """A person-path app that also serves the library's logout and back-channel logout routes."""
+    app = a_person_app(
+        public=SIGN_IN_PATHS.public_rules,
+        policies={"csrf_origin": CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel)},
+    )
+    assert app.transaction is not None
+    relying_party = a_relying_party(
+        config=a_client_config(),
+        fetch_key_set=a_key_set_endpoint("issuer"),
+        wall_clock=FakeClock(float(NOW)),
+    )
+    install_sign_in_routes(
+        app.auth.app,
+        paths=SIGN_IN_PATHS,
+        relying_party=lambda _request: relying_party,
+        admission=ADMISSION,
+        transaction=app.transaction,
+        refused=lambda _request, _refusal: AppResponse(status_code=403),
+        keeps_id_token=True,
+        max_sessions=None,
+        logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
+    )
+    return app
 
 
 def the_account(app: BearerApp) -> Any:

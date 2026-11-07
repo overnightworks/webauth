@@ -14,12 +14,14 @@ from typing import Any
 
 import pytest
 from fastapi import Depends, FastAPI, Request
+from httpx import Response
 
 from tests.support.gate_arrangement import (
     ADMISSION,
     EXPORT_PATH,
     MACHINE_AS_PERSON_PATH,
     MACHINE_SESSION_PATH,
+    PERSON_ADMIN_ME_PATH,
     PERSON_ADMITTED_ME_PATH,
     PERSON_CALLER_PATH,
     PERSON_INSUFFICIENT_SCOPE,
@@ -119,6 +121,7 @@ def test_the_first_token_of_a_new_subject_creates_its_account_as_a_sign_in_does(
     token: str,
     username: str,
 ) -> None:
+    """TOKEN-16, TOKEN-19: a new subject's token creates its account as a sign-in does."""
     app = a_person_app(transaction_kind=kind)
 
     first = app.ask(PERSON_ME_PATH, authorization=bearing(token))
@@ -160,6 +163,7 @@ def test_a_new_ordinary_member_is_stored_and_audited_with_the_role_user_as_a_pla
 def test_the_role_follows_the_tokens_groups_and_is_stored_as_at_sign_in(
     kind: TransactionKind,
 ) -> None:
+    """TOKEN-16, TOKEN-20, TOKEN-21: a known subject keeps its account and follows the token."""
     app = a_person_app(transaction_kind=kind, known_accounts=(a_lena(),))
 
     def asked_with(token: str) -> str:
@@ -193,7 +197,7 @@ def test_the_role_follows_the_tokens_groups_and_is_stored_as_at_sign_in(
             previous_role=ADMIN_ROLE,
         ),
     ]
-    assert the_account(app).role == MEMBER_ROLE
+    assert (the_account(app).username, the_account(app).role) == ("lena", MEMBER_ROLE)
 
 
 @BOTH_TRANSACTIONS
@@ -214,7 +218,10 @@ def test_the_roles_a_token_admission_stores_and_audits_are_plain_strings(
 def test_where_the_app_has_no_admins_a_token_admission_demotes_a_stored_admin(
     kind: TransactionKind,
 ) -> None:
-    """APP-12: a person-token admission demotes a stored admin where the app has no admins."""
+    """APP-12, TOKEN-05: a token admission demotes a stored admin where the app has no admins.
+
+    The gate names person paths alone and serves them.
+    """
     admin = FakeUser(id=OPERATOR_SUBJECT, username="lena", role=ADMIN_ROLE)
     app = a_person_app(
         paths=PathRules(),
@@ -242,7 +249,7 @@ def test_where_the_app_has_no_admins_a_token_admission_demotes_a_stored_admin(
 def test_a_token_of_a_person_outside_the_app_is_refused_before_any_store_is_touched(
     session_gate: bool,
 ) -> None:
-    """REFUSE-16: a valid token of a person outside the app is refused with 403 No access."""
+    """REFUSE-16, TOKEN-18: a valid token of a person outside the app is refused with 403."""
     app = a_person_app(session_gate=session_gate)
 
     response = app.ask(PERSON_ME_PATH, authorization=bearing(OUTSIDER_TOKEN))
@@ -290,6 +297,7 @@ def test_without_a_bearer_credential_a_person_path_is_decided_by_the_session(
     credentials: dict[str, Any],
     request_keywords: dict[str, Any],
 ) -> None:
+    """TOKEN-14: a person path without a bearer credential is decided by the cookie."""
     app = a_person_app(session_gate=session_gate)
 
     refused = app.ask(PERSON_ME_PATH, **credentials, **request_keywords)
@@ -432,6 +440,7 @@ def test_with_the_same_parties_on_both_kinds_they_admit_exactly_the_same_clients
     [
         pytest.param({"hal"}, {"another-client"}, 200, 401, id="listed-only-on-machine-paths"),
         pytest.param({"another-client"}, {"hal"}, 401, 200, id="listed-only-on-person-paths"),
+        pytest.param({"hal"}, {"hal"}, 200, 200, id="listed-on-both"),
     ],
 )
 def test_a_party_listed_on_one_kind_of_path_is_refused_on_the_other(
@@ -440,6 +449,7 @@ def test_a_party_listed_on_one_kind_of_path_is_refused_on_the_other(
     machine_status: int,
     person_status: int,
 ) -> None:
+    """TOKEN-26: each kind of path admits only the clients it names itself."""
     app = a_person_app(
         machine_parties=AuthorizedParties(frozenset(machine_parties)),
         person_parties=AuthorizedParties(frozenset(person_parties)),
@@ -458,6 +468,7 @@ def test_a_token_post_on_a_person_path_needs_no_origin_and_no_cookie(
     session_gate: bool,
     method: str,
 ) -> None:
+    """TOKEN-28: a verified token request needs no Origin and no cookie."""
     app = a_person_app(session_gate=session_gate)
 
     response = app.ask(PERSON_ME_PATH, method=method, authorization=bearing(MEMBER_TOKEN))
@@ -466,22 +477,33 @@ def test_a_token_post_on_a_person_path_needs_no_origin_and_no_cookie(
 
 
 @BOTH_HOSTS
+@pytest.mark.parametrize(
+    ("path", "token", "role"),
+    [
+        pytest.param(PERSON_ME_PATH, MEMBER_TOKEN, MEMBER_ROLE, id="current_user"),
+        pytest.param(PERSON_ADMIN_ME_PATH, ADMIN_TOKEN, ADMIN_ROLE, id="admin_user"),
+    ],
+)
 def test_beside_a_token_the_cookie_decides_nothing_and_names_no_session(
     session_gate: bool,
+    path: str,
+    token: str,
+    role: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """TOKEN-30, TOKEN-31: a token request beside a cookie names no session and renews none."""
     app = a_person_app(session_gate=session_gate)
     failing(app.auth.sessions, "load", monkeypatch)
     failing(app.auth.sessions, "touch", monkeypatch)
 
-    response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN), cookie=True)
+    response = app.ask(path, authorization=bearing(token), cookie=True)
 
     assert (response.status_code, response.json()) == (
         200,
         {
             "id": OPERATOR_SUBJECT,
             "username": OPERATOR_SUBJECT,
-            "role": MEMBER_ROLE,
+            "role": role,
             "session": None,
         },
     )
@@ -604,6 +626,7 @@ class TestAFailingTransactionIsTheLibrary500:
         kept_by_a_per_call_host: str | None,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """TOKEN-23, TOKEN-24: the library commits nothing; a failing store or exit is a 500."""
         promoted = broken == "audit-after-role-changed"
         app = a_person_app(transaction_kind=kind, known_accounts=(a_lena(),) if promoted else ())
         assert isinstance(app.transaction, RecordingSignInTransaction)
@@ -632,6 +655,7 @@ class TestAFailingTransactionIsTheLibrary500:
 def test_a_token_request_enters_one_sign_in_transaction_and_reads_no_record_after_its_exit(
     kind: TransactionKind,
 ) -> None:
+    """TOKEN-17: a token request enters the host's sign-in transaction once."""
     app = a_person_app(transaction_kind=kind, strict_records=True, known_accounts=(a_lena(),))
 
     response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
@@ -659,14 +683,31 @@ def test_no_person_admission_holds_the_token_or_its_digest_in_an_answer_or_a_log
     assert all(secret not in text for secret in secrets for text in shown)
 
 
-def test_a_token_request_on_a_person_path_spends_the_address_budget() -> None:
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        pytest.param("token", "token", id="token-then-token"),
+        pytest.param("token", "cookie", id="token-then-browser"),
+        pytest.param("cookie", "token", id="browser-then-token"),
+    ],
+)
+def test_a_token_request_on_a_person_path_spends_the_address_budget(
+    first: str,
+    second: str,
+) -> None:
+    """TOKEN-38: token and browser requests spend one per-address budget."""
     budget = RateLimitPolicy(default=RateLimitBudget("api", 1, 60))
     app = a_person_app(policies={"rate_limit": budget})
 
-    app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
-    second = app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
+    def asked_by(credential: str) -> Response:
+        if credential == "token":
+            return app.ask(PERSON_ME_PATH, authorization=bearing(ADMIN_TOKEN))
+        return app.ask(UNGATED_ME_PATH, cookie=True)
 
-    assert (second.status_code, "retry-after" in second.headers) == (429, True)
+    asked_by(first)
+    refused = asked_by(second)
+
+    assert (refused.status_code, "retry-after" in refused.headers) == (429, True)
 
 
 class TestAStrictReaderRefusesAPersonAdmissionMadeForAnotherPathOrHeader:
