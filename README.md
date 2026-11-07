@@ -95,7 +95,7 @@ The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trust
 ## Documentation
 
 - A host developer: the [host contract](docs/host-contract.md), which holds the trusted-proxy rule, what every app gets, the machine routes, the person paths a token can call, the sign-in and logout routes and how to test a host.
-- An engineer changing the library: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) holds the architecture: the building blocks and what the host owns, how a request and a sign-in run, and the concepts behind each module.
+- An engineer changing the library: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) holds the architecture: the context, the building blocks and what the host owns, how a request and a sign-in run, the deployment, the concepts behind each module, the constraints with their reasons and the risks.
 - Security: [Trust](docs/ARCHITECTURE.md#trust) says who the library defends against and what it trusts; [SECURITY.md](.github/SECURITY.md) says how to report.
 - The proof harness, by task: [run the browser proof](docs/runbooks/run-the-browser-proof.md), [run the conformance suite](docs/runbooks/run-the-conformance-suite.md), [stop a run](docs/runbooks/stop-a-run.md), [clean up after a killed run](docs/runbooks/clean-up-after-a-killed-run.md) and [refresh the e2e pins](docs/runbooks/refresh-the-e2e-pins.md).
 
