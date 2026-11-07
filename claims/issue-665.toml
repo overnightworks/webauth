@@ -1,0 +1,7 @@
+claim_id = "c8eb4c9fa0a141fd9bd5b3e9fb9b4f38"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "ddad4b171f9de67f23ea916c3632af0222a54aba"
+branch = "claude/issue-665-csp-frame-src"
+scope = ["src/webauth/policies.py", "tests/test_policies.py"]
+opened_commit = "82734fbf2a64a51f801701c1a4e1fa1a904144dc"
