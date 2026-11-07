@@ -45,6 +45,7 @@ from tests.support.oidc_arrangement import (
 from tests.support.oidc_login_host import (
     BOUND_ISSUER,
     CLIENT_ID,
+    LOGOUT_PATH,
     NOW,
     SAME_ORIGIN_FORM,
     SIGN_IN_PATHS,
@@ -403,14 +404,14 @@ def test_every_reader_returns_the_account_behind_the_token_and_the_route_is_unch
     session_gate: bool,
     path: str,
 ) -> None:
-    """TOKEN-06: each reader returns the token's account, and the same route serves the browser."""
+    """TOKEN-06: each reader returns the token's account in the shape it returns the browser's person."""
     app = a_person_app(session_gate=session_gate, known_accounts=(a_lena(),))
 
     by_token = app.ask(path, authorization=bearing(ADMIN_TOKEN))
     by_cookie = app.ask(path, cookie=True)
 
     assert (by_token.status_code, by_token.json()["username"]) == (200, "lena")
-    assert by_cookie.status_code == 200
+    assert (by_cookie.status_code, by_cookie.json().keys()) == (200, by_token.json().keys())
 
 
 @pytest.mark.parametrize("login_group", ["/apps/x", "/apps/y"])
@@ -543,7 +544,7 @@ def test_a_token_works_until_its_expiry_plus_leeway_whatever_the_issuer_decided_
 
 def signing_out_of_the_browser(app: BearerApp) -> Response:
     return app.ask(
-        SIGN_IN_PATHS.logout,
+        LOGOUT_PATH,
         method="POST",
         cookie=True,
         headers=SAME_ORIGIN_FORM,
