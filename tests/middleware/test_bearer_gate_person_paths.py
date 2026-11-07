@@ -242,6 +242,7 @@ def test_where_the_app_has_no_admins_a_token_admission_demotes_a_stored_admin(
 def test_a_token_of_a_person_outside_the_app_is_refused_before_any_store_is_touched(
     session_gate: bool,
 ) -> None:
+    """REFUSE-16: a valid token of a person outside the app is refused with 403 No access."""
     app = a_person_app(session_gate=session_gate)
 
     response = app.ask(PERSON_ME_PATH, authorization=bearing(OUTSIDER_TOKEN))
@@ -259,7 +260,7 @@ def test_a_token_of_a_person_outside_the_app_is_refused_before_any_store_is_touc
 def test_a_username_the_store_refuses_answers_403_login_failed_without_a_challenge(
     kind: TransactionKind,
 ) -> None:
-    """APP-22: a person-token admission refuses a username the store refuses."""
+    """APP-22, REFUSE-17: a person-token admission refuses a username the store refuses."""
     app = a_person_app(transaction_kind=kind)
     taken = a_token(preferred_username="alice")
 
@@ -369,6 +370,14 @@ MALFORMED_OR_INVALID = [
         "Invalid token",
         id="key-set-down",
     ),
+    pytest.param(
+        (f"Bearer {a_token(aud='another-application')}",),
+        {},
+        None,
+        PERSON_INVALID_TOKEN,
+        "Invalid token",
+        id="foreign-audience",
+    ),
 ]
 
 
@@ -383,6 +392,7 @@ def test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_wit
     challenge: str,
     detail: str,
 ) -> None:
+    """REFUSE-14, REFUSE-15: a malformed or invalid token on a person path answers as its row."""
     app = a_person_app(key_sets=a_key_set_answering(key_set_failure))
 
     response = app.ask(PERSON_ME_PATH, authorization=authorization, **request_keywords)
@@ -490,6 +500,7 @@ def test_the_admin_readers_admit_an_admin_token_and_refuse_a_user_token_with_ins
     session_gate: bool,
     path: str,
 ) -> None:
+    """REFUSE-18: an admin reader refuses a user token with 403 and insufficient_scope."""
     app = a_person_app(session_gate=session_gate)
 
     admitted = app.ask(path, authorization=bearing(ADMIN_TOKEN))

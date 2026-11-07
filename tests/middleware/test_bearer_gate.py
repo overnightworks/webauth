@@ -50,6 +50,7 @@ from tests.support.oidc_arrangement import (
 )
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
+    LOGIN_REDIRECT,
     an_http_scope,
     drive,
     starts,
@@ -218,6 +219,7 @@ def test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge(
     answer: Answer,
     sent: dict[str, Any],
 ) -> None:
+    """REFUSE-09, REFUSE-10, REFUSE-11, REFUSE-12: a machine route refuses as its table row says."""
     app = a_bearer_app(key_sets=a_key_set_answering(key_set_response))
 
     response = app.ask(EXPORT_PATH + query, authorization=lines, cookie=True, **sent)
@@ -229,6 +231,30 @@ def test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge(
     )
     assert_answers_no_store(response)
     assert app.auth.route_runs == []
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        pytest.param((), id="no credentials"),
+        pytest.param(("Bearer abc!def",), id="an invalid token"),
+        pytest.param(bearing(ONLY_THE_APP_GROUP), id="a token without the admin group"),
+    ],
+)
+def test_a_machine_route_refuses_a_navigation_without_a_redirect(
+    authorization: tuple[str, ...],
+) -> None:
+    """REFUSE-08: a machine route never redirects, even where a login redirect is configured."""
+    app = a_bearer_app(login_redirect=LOGIN_REDIRECT)
+
+    response = app.ask(
+        authorization=authorization,
+        headers={"accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in {401, 403}
+    assert "location" not in response.headers
 
 
 def test_a_not_a_b64token_credential_reaches_no_key_set() -> None:

@@ -31,10 +31,12 @@ from tests.support.oidc_login_host import (
     LEGACY_ADMIN,
     LOGIN_GROUP,
     NOW,
+    OTHER_SUBJECT,
     SAME_ORIGIN_FORM,
     START_PATH,
     SUBJECT,
     OidcHost,
+    UsersWithSnapshotsAndNoUniqueUsernames,
     a_client_config,
     after_signing_in,
     an_id_token,
@@ -51,6 +53,7 @@ from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_IDLE_SECONDS,
+    FakeUser,
     signed_without_bound,
 )
 from webauth.cookies import (
@@ -330,7 +333,7 @@ _REFUSED_CALLBACKS = [
 def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its_cookie(
     refused: RefusedCallback,
 ) -> None:
-    """APP-15, APP-24: a missing groups claim or a failed sign-in stops at the refusal."""
+    """APP-15, APP-24, REFUSE-28: a refused sign-in, a non-member included, stores no session."""
     host = an_oidc_host(groups_claim=refused.groups_claim)
     other_tab = host.sign_in_at_issuer()
     query = host.sign_in_at_issuer()
@@ -377,6 +380,20 @@ def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() ->
     host.client.cookies.set(host.config.session_cookie_name, session_cookie)
 
     assert host.client.get("/me").status_code == 200
+
+
+def test_a_callback_admits_two_subjects_sharing_a_username_without_a_unique_index() -> None:
+    """APP-20: sign-in never looks up a username, so two subjects share one."""
+    host = an_oidc_host(
+        FakeUser(id=OTHER_SUBJECT, username="lena"),
+        account_store=UsersWithSnapshotsAndNoUniqueUsernames,
+    )
+
+    assert host.callback(host.sign_in_at_issuer()).status_code == 303
+    assert sorted((user.id, user.username) for user in host.accounts.list()) == [
+        (OTHER_SUBJECT, "lena"),
+        (SUBJECT, "lena"),
+    ]
 
 
 def test_a_callback_signs_in_a_person_whose_stored_account_is_marked_disabled() -> None:
@@ -473,6 +490,7 @@ def test_a_login_returns_only_a_path_of_this_app_and_otherwise_the_app_root(
     asked_for: str,
     returned: str,
 ) -> None:
+    """REFUSE-03: the callback returns to `next` when it is a path of this app, else the root."""
     host = an_oidc_host()
 
     response = host.callback(host.sign_in_at_issuer(return_to=asked_for))

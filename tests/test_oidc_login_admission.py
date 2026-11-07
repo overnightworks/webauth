@@ -29,8 +29,6 @@ from tests.support.webauth_arrangement import (
     FakeUser,
     RecordingAuditSink,
     UsersInMemory,
-    UsersWithCaseInsensitiveUsernames,
-    UsersWithoutUniqueUsernames,
     WriteLockInMemory,
     _require_held_lock,
 )
@@ -41,7 +39,7 @@ from webauth.admission import (
 from webauth.oidc import (
     OidcIdentity,
 )
-from webauth.oidc_login import _admit_account, _decide_admission, _UsernameTakenSignal
+from webauth.oidc_login import _admit_account, _decide_admission
 from webauth.ports import (
     AccountEventKind,
     UserRecord,
@@ -481,26 +479,3 @@ def test_a_refused_identity_changes_neither_the_store_nor_the_audit_log(
     assert host.admit(identity) is refusal
     assert host.accounts.list() == stored
     assert host.audit.account_events == []
-
-
-def test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written() -> None:
-    """APP-22: a store that refuses a new account's username makes admission report it taken."""
-    stored = [FakeUser(id="user-7", username="Lena")]
-    host = a_host(*deepcopy(stored), store=UsersWithCaseInsensitiveUsernames)
-
-    with pytest.raises(_UsernameTakenSignal):
-        host.admit(LENA)
-    assert host.accounts.list() == stored
-    assert host.audit.account_events == []
-
-
-def test_a_store_without_unique_usernames_admits_two_subjects_sharing_one() -> None:
-    """APP-20: admission never looks up a username, so two subjects share one."""
-    host = a_host(store=UsersWithoutUniqueUsernames)
-    other_lena = replace(LENA, subject="0b6f1d7e-3c8a-4e0b-8d52-6a1f9e4c7b23")
-
-    first = admitted_account(host, LENA)
-    second = admitted_account(host, other_lena)
-
-    assert (first.id, second.id) == (LENA.subject, other_lena.subject)
-    assert (first.username, second.username) == ("lena", "lena")
