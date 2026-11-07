@@ -404,7 +404,7 @@ def test_every_reader_returns_the_account_behind_the_token_and_the_route_is_unch
     session_gate: bool,
     path: str,
 ) -> None:
-    """TOKEN-06: each reader returns the token's account in the shape it returns the browser's person."""
+    """TOKEN-06: each reader returns the token's account, shaped as the browser's person."""
     app = a_person_app(session_gate=session_gate, known_accounts=(a_lena(),))
 
     by_token = app.ask(path, authorization=bearing(ADMIN_TOKEN))
