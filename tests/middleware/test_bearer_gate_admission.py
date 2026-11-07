@@ -99,7 +99,7 @@ def never_asked() -> Any:
 def test_a_bearer_request_needs_no_csrf_origin_header_or_cookie(
     arrange: Callable[[], BearerApp],
     path: str,
-    token: tuple[str, ...],
+    token: str,
 ) -> None:
     """CSRF-10: a verified bearer request passes without Origin or a cookie."""
     app = arrange()

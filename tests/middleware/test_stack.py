@@ -224,74 +224,6 @@ def get_api_twice(client: TestClient) -> Response:
     return get_api(client)
 
 
-@dataclass(frozen=True)
-class Refusal:
-    status: int
-    retry_after: str | None = None
-    hsts: bool = True
-
-
-class TestLibraryRefusalsCarryTheSecurityHeaders:
-    @pytest.mark.parametrize(
-        ("client_factory", "send", "refusal"),
-        [
-            pytest.param(
-                a_full_stack_client,
-                post_oversized,
-                Refusal(413),
-                id="413-by-content-length",
-            ),
-            pytest.param(
-                lambda: a_full_stack_client(max_requests=1),
-                get_api_twice,
-                Refusal(429, retry_after="60"),
-                id="429-budget-exhausted",
-            ),
-            pytest.param(
-                lambda: a_full_stack_client(max_requests=1, cookie_secure=False),
-                get_api_twice,
-                Refusal(429, retry_after="60", hsts=False),
-                id="429-without-hsts-when-cookies-are-not-secure",
-            ),
-            pytest.param(
-                lambda: a_full_stack_client(rate_limits=AlwaysFailingRateLimitBackend()),
-                get_api,
-                Refusal(503, retry_after="5"),
-                id="503-limiter-unavailable",
-            ),
-            pytest.param(
-                a_full_stack_client,
-                post_cross_origin,
-                Refusal(403),
-                id="403-foreign-origin",
-            ),
-            pytest.param(
-                a_full_stack_client,
-                post_without_provenance,
-                Refusal(403),
-                id="403-missing-provenance",
-            ),
-            pytest.param(
-                a_full_stack_client,
-                lambda client: client.get(RAISING_PATH),
-                Refusal(500),
-                id="500-raising-route",
-            ),
-        ],
-    )
-    def test_refusal_carries_the_policy_headers(
-        self,
-        client_factory: Callable[[], TestClient],
-        send: Callable[[TestClient], Response],
-        refusal: Refusal,
-    ) -> None:
-        """A library refusal reaches the client with the policy headers."""
-        response = send(client_factory())
-        assert response.status_code == refusal.status
-        assert response.headers.get("retry-after") == refusal.retry_after
-        assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=refusal.hsts)
-
-
 @dataclass
 class HostSightings:
     reached_inside: list[str]
@@ -303,8 +235,9 @@ def a_client_between_host_middlewares(
     max_requests: int = 100,
     rate_limits: RateLimitBackend | None = None,
     session_gate: SessionGate | None = None,
+    cookie_secure: bool = True,
 ) -> tuple[TestClient, HostSightings]:
-    app = a_fresh_app(rate_limits=rate_limits)
+    app = a_fresh_app(rate_limits=rate_limits, cookie_secure=cookie_secure)
     sightings = HostSightings(reached_inside=[], seen_outside=[])
 
     @app.middleware("http")
@@ -334,60 +267,73 @@ A_REDIRECTING_SESSION_GATE = replace(
 )
 
 
+@dataclass(frozen=True)
+class Refusal:
+    status: int
+    retry_after: str | None = None
+    hsts: bool = True
+    admitted_before: int = 0
+
+
 class TestHostMiddlewarePlacement:
     @pytest.mark.parametrize(
-        ("arrange", "send", "status", "admitted_before_the_refusal"),
+        ("arrange", "send", "refusal"),
         [
             pytest.param(
                 a_client_between_host_middlewares,
                 post_oversized,
-                413,
-                0,
+                Refusal(413),
                 id="413-by-content-length",
             ),
             pytest.param(
                 lambda: a_client_between_host_middlewares(max_requests=1),
                 get_api_twice,
-                429,
-                1,
-                id="429",
+                Refusal(429, retry_after="60", admitted_before=1),
+                id="429-budget-exhausted",
+            ),
+            pytest.param(
+                lambda: a_client_between_host_middlewares(max_requests=1, cookie_secure=False),
+                get_api_twice,
+                Refusal(429, retry_after="60", hsts=False, admitted_before=1),
+                id="429-without-hsts-when-cookies-are-not-secure",
             ),
             pytest.param(
                 lambda: a_client_between_host_middlewares(
                     rate_limits=AlwaysFailingRateLimitBackend(),
                 ),
                 get_api,
-                503,
-                0,
-                id="503",
+                Refusal(503, retry_after="5"),
+                id="503-limiter-unavailable",
             ),
             pytest.param(
                 a_client_between_host_middlewares,
                 post_cross_origin,
-                403,
-                0,
+                Refusal(403),
                 id="403-foreign-origin",
             ),
             pytest.param(
                 a_client_between_host_middlewares,
                 post_without_provenance,
-                403,
-                0,
+                Refusal(403),
                 id="403-missing-provenance",
             ),
             pytest.param(
                 lambda: a_client_between_host_middlewares(session_gate=A_REDIRECTING_SESSION_GATE),
                 get_api_as_a_browser,
-                302,
-                0,
+                Refusal(302),
                 id="session-gate-302",
             ),
             pytest.param(
                 lambda: a_client_between_host_middlewares(session_gate=A_SESSION_GATE),
                 get_api,
-                401,
-                0,
+                Refusal(401),
                 id="session-gate-401",
+            ),
+            pytest.param(
+                a_client_between_host_middlewares,
+                lambda client: client.get(RAISING_PATH),
+                Refusal(500, admitted_before=1),
+                id="500-raising-route",
             ),
         ],
     )
@@ -395,19 +341,20 @@ class TestHostMiddlewarePlacement:
         self,
         arrange: Callable[[], tuple[TestClient, HostSightings]],
         send: Callable[[TestClient], Response],
-        status: int,
-        admitted_before_the_refusal: int,
+        refusal: Refusal,
     ) -> None:
         """STACK-01, STACK-02: only the middleware after the call sees a refusal, with headers."""
         client, sightings = arrange()
 
         response = send(client)
 
-        assert response.status_code == status
-        assert len(sightings.reached_inside) == admitted_before_the_refusal
-        refusal = sightings.seen_outside[-1]
-        assert refusal.status_code == status
-        assert_carries_policy_headers(refusal.headers, HEADERS_POLICY, hsts=True)
+        assert response.status_code == refusal.status
+        assert response.headers.get("retry-after") == refusal.retry_after
+        assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=refusal.hsts)
+        assert len(sightings.reached_inside) == refusal.admitted_before
+        seen = sightings.seen_outside[-1]
+        assert seen.status_code == refusal.status
+        assert_carries_policy_headers(seen.headers, HEADERS_POLICY, hsts=refusal.hsts)
 
     @pytest.mark.parametrize(
         "outside",
