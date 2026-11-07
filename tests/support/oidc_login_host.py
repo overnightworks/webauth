@@ -39,9 +39,8 @@ from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     SessionRecordsInMemory,
     UsersInMemory,
-    UsersWithCaseInsensitiveUsernames,
-    UsersWithoutUniqueUsernames,
     WriteLockInMemory,
+    _require_held_lock,
     a_web_auth_config,
 )
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
@@ -65,8 +64,10 @@ from webauth.policies import (
     SecurityHeadersPolicy,
 )
 from webauth.ports import (
+    AccountKind,
     AuthenticatedUser,
     SignInStores,
+    UsernameTakenError,
 )
 from webauth.sign_in_routes import (
     LogoutPageText,
@@ -130,6 +131,29 @@ class TransactionKind(enum.Enum):
 
     PER_CALL = "serializes only: every store call stands whatever happens later"
     ROLLING_BACK = "restores accounts, sessions and audit events when the block or its exit fails"
+
+
+class UsersWithCaseInsensitiveUsernames(UsersInMemory):
+    """A store whose unique index ignores case."""
+
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> FakeUser:
+        if any(user.username.casefold() == username.casefold() for user in self.list()):
+            raise UsernameTakenError("Username is already taken")
+        return super().create_for_subject(subject, username, role, kind)
+
+
+class UsersWithoutUniqueUsernames(UsersInMemory):
+    """A store with no unique index on the username."""
+
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> FakeUser:
+        _require_held_lock(self._lock)
+        user = FakeUser(id=subject, username=username, role=role, kind=kind)
+        self._users[subject] = user
+        return user
 
 
 class UsersWithSnapshots(UsersInMemory):

@@ -79,7 +79,9 @@ def test_a_session_of_an_account_marked_disabled_is_still_admitted() -> None:
 
     outcome = admit(record.id, SessionRecordsInMemory(record))
 
-    assert outcome == AuthenticatedUser(id=user.id, username=user.username, role=user.role, agent=None)
+    assert outcome == AuthenticatedUser(
+        id=user.id, username=user.username, role=user.role, agent=None
+    )
 
 
 @pytest.mark.parametrize(

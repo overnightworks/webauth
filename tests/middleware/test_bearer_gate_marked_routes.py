@@ -112,7 +112,9 @@ def test_csrf_refuses_a_marked_route_request_made_mutating_after_admission(
         app, Middleware(RewritingTheRequest, changes={"method": "POST"})
     )
 
-    response = app.ask(A_NOTE, method="GET", authorization=bearing(an_interactive_agent_token(resource)))
+    response = app.ask(
+        A_NOTE, method="GET", authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == 403
     assert app.auth.route_runs == []
@@ -130,7 +132,9 @@ def test_resource_person_and_admitted_user_read_the_capped_person_on_a_marked_ro
 ) -> None:
     """RESOURCE-63: on a marked route `current_user`, `admitted_user` and `resource_person`
     return the capped person."""
-    response = app.ask(path, method="POST", authorization=bearing(an_interactive_agent_token(resource)))
+    response = app.ask(
+        path, method="POST", authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert (response.status_code, response.json()["role"]) == (200, MEMBER_ROLE)
 
@@ -201,7 +205,9 @@ def test_an_unknown_subject_gets_the_plain_403_and_no_account_appears(
     no account and no event appear."""
     app = a_bearer_app(resource=resource)
 
-    response = app.ask(A_NOTE, authorization=bearing(an_interactive_agent_token(resource)), cookie=True)
+    response = app.ask(
+        A_NOTE, authorization=bearing(an_interactive_agent_token(resource)), cookie=True
+    )
 
     assert (response.status_code, response.json()) == (403, {"detail": "Access denied"})
     assert "www-authenticate" not in response.headers
@@ -388,7 +394,9 @@ def test_a_request_is_a_marked_route_only_when_method_segments_and_parameters_al
     """RESOURCE-44: the match is exact on the route path: the method equals, the segment count
     equals, each literal equals, and each parameter is one non-empty segment other than `.` and
     `..`."""
-    response = app.ask(path, method=method, authorization=bearing(an_interactive_agent_token(resource)))
+    response = app.ask(
+        path, method=method, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     admitted = response.status_code == 200 and response.json()["id"] == OPERATOR_SUBJECT
     assert admitted is matched
@@ -414,9 +422,13 @@ def test_a_token_for_the_resource_is_refused_on_a_person_path_except_on_a_marked
     "authorization",
     [
         pytest.param(lambda resource: bearing(an_interactive_agent_token(resource)), id="admitted"),
-        pytest.param(lambda resource: bearing(an_interactive_agent_token(resource, scope=ABSENT)), id="scope"),
+        pytest.param(
+            lambda resource: bearing(an_interactive_agent_token(resource, scope=ABSENT)), id="scope"
+        ),
         pytest.param(lambda resource: bearing(a_resource_token(resource, groups=[])), id="group"),
-        pytest.param(lambda resource: bearing(an_interactive_agent_token(resource, iss="x")), id="invalid"),
+        pytest.param(
+            lambda resource: bearing(an_interactive_agent_token(resource, iss="x")), id="invalid"
+        ),
         pytest.param(lambda resource: (*bearing("a"), *bearing("b")), id="refused-credential"),
         pytest.param(lambda resource: (), id="no-credential"),
     ],
@@ -465,7 +477,9 @@ def test_the_agent_token_is_refused_on_every_method_and_shape_a_mark_does_not_co
 ) -> None:
     """RESOURCE-45: a trailing slash, `HEAD` on a marked `GET`, a longer path below a template and
     a decoded `/` in a parameter do not match: the token is refused and nothing is admitted."""
-    response = app.ask(path, method=method, authorization=bearing(an_interactive_agent_token(resource)))
+    response = app.ask(
+        path, method=method, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == status
     assert "resource_metadata" not in response.headers.get("www-authenticate", "")
@@ -525,7 +539,9 @@ def test_every_reader_on_a_marked_route_refuses_a_request_changed_after_admissio
     )
     answering_a_runtime_error_with_418(app)
 
-    response = app.ask(path, method="POST", authorization=bearing(an_interactive_agent_token(resource)))
+    response = app.ask(
+        path, method="POST", authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == REFUSED_AS_RUNTIME_ERROR
     assert app.auth.route_runs == []

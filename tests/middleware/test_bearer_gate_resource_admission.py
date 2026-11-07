@@ -123,7 +123,9 @@ def test_a_token_of_a_person_whose_stored_account_is_marked_disabled_is_still_ad
         known_accounts=(DisabledUser(id=OPERATOR_SUBJECT, username="lena"),),
     )
 
-    response = app.ask(resource.entry_point, authorization=bearing(an_interactive_agent_token(resource)))
+    response = app.ask(
+        resource.entry_point, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert response.status_code == 200
     assert response.json() == {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE}
@@ -298,7 +300,9 @@ def test_the_resource_person_enters_the_sign_in_transaction_once_per_request(
     monkeypatch.setattr(app.accounts, "get", counting)
     accounts_before = the_accounts(app)
 
-    response = app.ask(resource.entry_point, authorization=bearing(an_interactive_agent_token(resource)))
+    response = app.ask(
+        resource.entry_point, authorization=bearing(an_interactive_agent_token(resource))
+    )
 
     assert (response.status_code, the_transaction(app).entries) == (200, 1)
     assert lookups == [OPERATOR_SUBJECT]

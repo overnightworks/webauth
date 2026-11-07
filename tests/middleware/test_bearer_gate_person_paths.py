@@ -90,7 +90,9 @@ def test_a_token_on_a_person_path_is_the_account_behind_its_subject(session_gate
         200,
         {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE, "session": None},
     )
-    assert app.auth.authenticated == [AuthenticatedUser(OPERATOR_SUBJECT, "lena", MEMBER_ROLE, None)]
+    assert app.auth.authenticated == [
+        AuthenticatedUser(OPERATOR_SUBJECT, "lena", MEMBER_ROLE, None)
+    ]
 
 
 @BOTH_TRANSACTIONS

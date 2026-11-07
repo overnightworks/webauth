@@ -15,11 +15,15 @@ import pytest
 from fastapi import FastAPI
 from starlette.middleware import Middleware
 
-from tests.support.gate_arrangement import (
-    A_NOTE,
+from tests.support.agent_arrangement import (
     AGENT_CLIENT,
     AGENT_NAME,
     AGENT_OWNER,
+    an_agent_group_claims,
+    an_agent_group_token,
+)
+from tests.support.gate_arrangement import (
+    A_NOTE,
     EXPORT_PATH,
     MARKED_ADMITTED_USER,
     MARKED_NEW_NOTE,
@@ -36,7 +40,6 @@ from tests.support.gate_arrangement import (
     a_resource,
     a_resource_token,
     a_token,
-    an_agent_group_token,
     an_interactive_agent_token,
     answering_a_runtime_error_with_418,
     assert_no_bearer_admission,
@@ -70,7 +73,10 @@ def resource() -> ProtectedResource:
 
 def an_app(resource: ProtectedResource, *accounts: FakeUser, **keywords: object) -> BearerApp:
     return a_bearer_app(
-        paths=PathRules(), resource=resource, known_accounts=accounts, **keywords  # type: ignore[arg-type]
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=accounts,
+        **keywords,  # type: ignore[arg-type]
     )
 
 
@@ -131,22 +137,16 @@ def test_a_token_holding_the_agent_group_passes_the_party_check_whatever_its_azp
 # Tokens signed by the test issuer, with the agent group, that the resource's check refuses.
 WRONG_FOR_THE_RESOURCE = {
     "foreign-issuer": lambda resource: an_agent_group_token(resource, iss="https://evil.example/r"),
-    "bad-signature": lambda resource: an_agent_group_token(resource, key_name="forged"),
+    "bad-signature": lambda resource: an_access_token(
+        key_name="forged", claims=an_agent_group_claims(resource)
+    ),
     "two-audiences": lambda resource: an_agent_group_token(
         resource, aud=[resource.url, "another-app"]
     ),
     "the-apps-client": lambda resource: an_agent_group_token(resource, aud="app-client"),
     "expired": lambda resource: an_agent_group_token(resource, exp=ACCESS_TOKEN_NOW - 1_000),
     "not-an-access-token": lambda resource: an_access_token(
-        claims={
-            "aud": resource.url,
-            "scope": resource.scope,
-            "azp": AGENT_CLIENT,
-            "groups": [resource.agent_group],
-            "agent_owner": AGENT_OWNER,
-            "agent_name": AGENT_NAME,
-        },
-        header={"typ": "JWT"},
+        claims=an_agent_group_claims(resource), header={"typ": "JWT"}
     ),
 }
 
@@ -388,9 +388,11 @@ def test_an_agent_group_token_without_the_required_or_the_login_group_gets_the_p
     )
     app = an_app(resource, a_known_person())
     accounts_before = deepcopy(the_accounts(app))
-    groups = [resource.agent_group, "/other/mcp"] if case == "lacking-the-login-group" else [
-        resource.agent_group
-    ]
+    groups = (
+        [resource.agent_group, "/other/mcp"]
+        if case == "lacking-the-login-group"
+        else [resource.agent_group]
+    )
 
     status, headers, body = ask(app, resource, surface, an_agent_group_token(resource, *groups))
 
@@ -449,9 +451,7 @@ def test_two_concurrent_first_admissions_through_a_serialized_transaction_create
     token = an_agent_group_token(resource)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        statuses = list(
-            pool.map(lambda _: ask(app, resource, "entry-point", token)[0], range(2))
-        )
+        statuses = list(pool.map(lambda _: ask(app, resource, "entry-point", token)[0], range(2)))
 
     assert statuses == [200, 200]
     assert [user.id for user in the_accounts(app)].count(OPERATOR_SUBJECT) == 1
@@ -592,7 +592,10 @@ def test_an_admitted_agent_needs_no_cookie_or_origin_and_every_reader_returns_it
             id="marked-header",
         ),
         pytest.param(
-            lambda r: MARKED_RESOURCE_PERSON.template, "POST", {"app": FastAPI()}, id="marked-sub-app"
+            lambda r: MARKED_RESOURCE_PERSON.template,
+            "POST",
+            {"app": FastAPI()},
+            id="marked-sub-app",
         ),
     ],
 )
@@ -719,9 +722,7 @@ def test_a_token_without_the_agent_group_and_an_unknown_subject_gets_the_plain_4
     subject has no account is the plain 403, and no account appears."""
     app = an_app(resource)
 
-    status, headers, body = ask(
-        app, resource, "marked-route", an_interactive_agent_token(resource)
-    )
+    status, headers, body = ask(app, resource, "marked-route", an_interactive_agent_token(resource))
 
     assert (status, body) == (403, {"detail": "Access denied"})
     assert "www-authenticate" not in headers

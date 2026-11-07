@@ -174,46 +174,15 @@ def a_known_person(role: str = MEMBER_ROLE) -> FakeUser:
     return FakeUser(id=OPERATOR_SUBJECT, username="lena", role=role)
 
 
-def a_resource_token(
-    resource: ProtectedResource | None = None, *, key_name: str = "current", **claims: Any
-) -> str:
+def a_resource_token(resource: ProtectedResource | None = None, **claims: Any) -> str:
     """A token hal holds for `resource` (default `a_resource()`): its audience and its scope."""
     held = resource or a_resource()
-    return an_access_token(
-        key_name=key_name, claims={"aud": held.url, "scope": held.scope, **claims}
-    )
+    return an_access_token(claims={"aud": held.url, "scope": held.scope, **claims})
 
 
-def an_interactive_agent_token(
-    resource: ProtectedResource, *groups: str, **claims: object
-) -> str:
+def an_interactive_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
     """The token of an interactive agent: hal's `azp`, the resource's group, no agent claims."""
     return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
-
-
-AGENT_OWNER = "owner-account-1"
-AGENT_NAME = "Mozart"
-AGENT_CLIENT = "agent-mozart"
-
-
-def an_agent_group_token(
-    resource: ProtectedResource, *groups: str, key_name: str = "current", **claims: object
-) -> str:
-    """The token of an autonomous agent's own client: its `azp` is no party of the resource,
-    its groups hold the agent group and the resource's group, and it carries `agent_owner` and
-    `agent_name`; `claims` change or, with `ABSENT`, remove members."""
-    held = list(groups) or [resource.agent_group, resource.required_group]
-    return a_resource_token(
-        resource,
-        key_name=key_name,
-        **{
-            "azp": AGENT_CLIENT,
-            "groups": held,
-            "agent_owner": AGENT_OWNER,
-            "agent_name": AGENT_NAME,
-            **claims,
-        },
-    )
 
 
 def bearing(token: str) -> tuple[str, ...]:
