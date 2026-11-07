@@ -98,6 +98,20 @@ def _call(method: str, headers: dict[str, str]) -> Response:
         ),
         pytest.param(
             "POST",
+            {"sec-fetch-site": "same-origin", "referer": f"{FOREIGN_ORIGIN}/page"},
+            200,
+            OK,
+            id="same-origin-with-foreign-referer-passes",
+        ),
+        pytest.param(
+            "POST",
+            {"origin": ALLOWED_ORIGIN, "referer": f"{FOREIGN_ORIGIN}/page"},
+            200,
+            OK,
+            id="allowed-origin-with-foreign-referer-passes",
+        ),
+        pytest.param(
+            "POST",
             {"sec-fetch-site": "same-origin", "origin": FOREIGN_ORIGIN},
             200,
             OK,
