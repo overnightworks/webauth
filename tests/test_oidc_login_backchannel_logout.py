@@ -668,13 +668,14 @@ def test_an_accepted_back_channel_logout_enters_the_transaction_once_and_reads_n
 def test_the_back_channel_answers_200_only_after_the_exit_returned(
     exit_failure: Exception | None,
 ) -> None:
-    """SIGNIN-50: the empty 200 follows the clean exit; a failing exit answers 400."""
+    """SIGNIN-50: the empty 200 follows the clean exit of one entry; a failing exit answers 400."""
     host = a_host_with_sessions(subject_sessions=1)
     host.transaction.exit_failure = exit_failure
 
     response = post_logout_token(host, a_logout_token_of_the_issuer())
 
     assert (response.status_code, response.content) == (200 if exit_failure is None else 400, b"")
+    assert host.transaction.entries == 1
 
 
 @pytest.mark.parametrize(
