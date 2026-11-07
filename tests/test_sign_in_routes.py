@@ -164,7 +164,7 @@ def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     kind: TransactionKind,
 ) -> None:
     """SIGNIN-18, SIGNIN-21, SIGNIN-23, REFUSE-02: after signing in, the person lands on the
-    page they were sent from."""
+    page they were sent from, and a browser sign-in creates an account of kind PERSON."""
     host = an_oidc_host(transaction_kind=kind)
 
     response = host.callback(host.sign_in_at_issuer(return_to="/albums/42"))
