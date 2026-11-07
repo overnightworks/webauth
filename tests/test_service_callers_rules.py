@@ -96,7 +96,8 @@ def a_registry_of(admission: AdmissionConfig) -> dict[str, RegisteredApp]:
 )
 def test_nothing_a_check_is_built_from_has_a_default(without: str) -> None:
     """CALLER-01: a check cannot be built without its identity, a field of it, its registered
-    apps or its key-set fetch and clocks."""
+    apps or its key-set fetch and clocks, and a registered app not without its app or
+    admission."""
     identity_fields: dict[str, Any] = {
         "issuer": a_service_identity().issuer,
         "audience": CALLEE,
@@ -111,14 +112,31 @@ def test_nothing_a_check_is_built_from_has_a_default(without: str) -> None:
         "wall_clock": lambda: 0.0,
         "monotonic_clock": lambda: 0.0,
     }
+    identity_is_built_incomplete = without in identity_fields
     identity_fields.pop(without, None)
     others.pop(without, None)
+    build: Callable[..., object] = (
+        ServiceIdentity if identity_is_built_incomplete else ServiceCallerCheck
+    )
+    arguments: dict[str, Any] = identity_fields if identity_is_built_incomplete else others
+    positional = (
+        ()
+        if without == "identity" or identity_is_built_incomplete
+        else (ServiceIdentity(**identity_fields),)
+    )
 
     with pytest.raises(TypeError, match=without):
-        if without == "identity":
-            ServiceCallerCheck(**others)
-        else:
-            ServiceCallerCheck(ServiceIdentity(**identity_fields), **others)
+        build(*positional, **arguments)
+
+
+@pytest.mark.parametrize("without", ["app", "admission"])
+def test_nothing_a_registered_app_is_built_from_has_a_default(without: str) -> None:
+    """CALLER-01: a registered app cannot be built without its app name or its admission."""
+    fields: dict[str, Any] = {"app": "notes", "admission": an_app_admission()}
+    fields.pop(without)
+
+    with pytest.raises(TypeError, match=without):
+        RegisteredApp(**fields)
 
 
 def test_a_check_reads_nothing_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
