@@ -163,8 +163,8 @@ def test_a_mounted_host_returns_below_its_root_path_and_otherwise_to_the_mount_r
 def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     kind: TransactionKind,
 ) -> None:
-    """SIGNIN-18, SIGNIN-21, REFUSE-02: after signing in, the person lands on the page they were
-    sent from."""
+    """SIGNIN-18, SIGNIN-21, SIGNIN-23, REFUSE-02: after signing in, the person lands on the
+    page they were sent from."""
     host = an_oidc_host(transaction_kind=kind)
 
     response = host.callback(host.sign_in_at_issuer(return_to="/albums/42"))
@@ -287,7 +287,7 @@ def test_a_refusal_reaches_the_hook_as_its_cause_alone_with_its_page(
     cause: OidcRefusal | AdmissionRefusal,
     page: RefusalPage,
 ) -> None:
-    """SIGNIN-27, REFUSE-26, REFUSE-27: both kinds of refusal reach the hook, no identity."""
+    """SIGNIN-28, REFUSE-26, REFUSE-27: both kinds of refusal reach the hook, no identity."""
     refused_host = host()
 
     refused_host.callback(returned_query(refused_host.sign_in_at_issuer()))
@@ -400,8 +400,9 @@ def test_a_failure_in_the_block_answers_500_with_the_deletion_and_keeps_only_wha
     kind: TransactionKind,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SIGNIN-23, SIGNIN-24: a failure in the block escapes through the exit; a rolling-back host
-    keeps none of the writes and a per-call host keeps the account and the events before it."""
+    """SIGNIN-23, SIGNIN-24, SIGNIN-25: a failure in the block escapes through the exit; a
+    rolling-back host keeps none of the writes and a per-call host keeps the account and the
+    events before it."""
     host = an_oidc_host(*deepcopy(fault.stored_users), transaction_kind=kind)
     query, cookie = _signed_in_holding_session_of_bystander(host)
     before = _state_of(host)
@@ -469,7 +470,7 @@ def test_a_refusal_hook_that_raises_before_the_pending_cookie_is_selected_answer
 
 
 def test_a_refusal_answer_keeps_its_own_cookies_beside_the_pending_deletion() -> None:
-    """SIGNIN-28: the hook's `Response` is the callback's answer."""
+    """SIGNIN-29: the hook's `Response` is the callback's answer."""
     host = an_oidc_host(groups_claim=())
     host.answer_refusals = _carrying_its_own_cookie
     query = host.sign_in_at_issuer()
@@ -503,7 +504,7 @@ def _drive_the_callback(host: OidcHost, query: str) -> tuple[list[dict[str, obje
 def test_a_failure_before_the_start_is_raised_once_the_500_is_sent(
     answer: Callable[[Request, SignInRefusal], Response],
 ) -> None:
-    """SIGNIN-30: a hook that raises or an answer that fails before its start gets a plain 500 with
+    """SIGNIN-31: a hook that raises or an answer that fails before its start gets a plain 500 with
     the deletion, then the failure is raised."""
     host = an_oidc_host(groups_claim=())
     host.answer_refusals = answer
@@ -571,7 +572,7 @@ def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_ex
 
 
 def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises() -> None:
-    """SIGNIN-59: install without `keeps_id_token` raises `TypeError` and registers no route."""
+    """SIGNIN-61: install without `keeps_id_token` raises `TypeError` and registers no route."""
     app = FastAPI()
     arguments = _install_arguments()
     del arguments["keeps_id_token"]
@@ -595,7 +596,7 @@ def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises()
 def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_is_registered(
     max_sessions: object,
 ) -> None:
-    """SIGNIN-60: install validates `max_sessions` before it registers a route."""
+    """SIGNIN-62: install validates `max_sessions` before it registers a route."""
     app = FastAPI()
     arguments = {**_install_arguments(), "max_sessions": max_sessions}
 
@@ -667,7 +668,7 @@ def _install_arguments() -> dict[str, object]:
 def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_before_any_route() -> (  # noqa: E501
     None
 ):
-    """SIGNIN-44: dependencies without the back-channel path refuse install before any route."""
+    """SIGNIN-46: dependencies without the back-channel path refuse install before any route."""
     app = FastAPI()
     arguments = {
         **_install_arguments(),
@@ -732,7 +733,7 @@ def test_every_callback_answer_deletes_its_pending_cookie_and_leaves_the_other_t
     failing_call: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SIGNIN-29, SIGNIN-31: every callback answer deletes its pending cookie and leaves the other
+    """SIGNIN-30, SIGNIN-32: every callback answer deletes its pending cookie and leaves the other
     tabs' cookies."""
     host = an_oidc_host(groups_claim=groups_claim)
     if hook is not None:
@@ -751,7 +752,7 @@ def test_every_callback_answer_deletes_its_pending_cookie_and_leaves_the_other_t
 @pytest.mark.parametrize("method", ["GET", "PUT", "PATCH", "DELETE"])
 @pytest.mark.parametrize("path", [LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH])
 def test_the_logout_and_back_channel_routes_serve_post_only(path: str, method: str) -> None:
-    """SIGNIN-10, SIGNIN-39: the logout and the back-channel route serve `POST` only."""
+    """SIGNIN-10, SIGNIN-41: the logout and the back-channel route serve `POST` only."""
     app = FastAPI()
     install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
 

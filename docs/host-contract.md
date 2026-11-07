@@ -666,7 +666,7 @@ By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) 
 
 ## The sign-in routes
 
-The operator ruled SIGNIN-59, the host duty after SIGNIN-60, SIGNIN-61 and SIGNIN-62; no other sentence of this section is ruled.
+The operator ruled SIGNIN-61, the host duty after SIGNIN-62, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
 
 - **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
   `FastAPI` app.
@@ -710,84 +710,86 @@ is the worked host, type-checked and run against a real issuer.
 - **SIGNIN-21** It writes the account and the session through `SignInStores`
 - **SIGNIN-22** and issues the session cookie only after the transaction's exit returned.
 
-The library never commits: a successful exit makes the writes durable. What is rolled back is the host's choice:
+**SIGNIN-23** The library never commits: a successful exit makes the writes durable.
 
-- **SIGNIN-23** an exception in the block escapes through the exit, and a rolling-back host keeps none of the account created, the sessions ended and the events recorded;
-- **SIGNIN-24** a host whose stores apply each call keeps the account created and the events recorded before the failure;
-- **SIGNIN-25** a host whose stores apply each call keeps the sessions ended by replacement or pruning;
-- **SIGNIN-26** after a failure, the next sign-in opens a new session and restores nothing.
+What is rolled back is the host's choice:
+
+- **SIGNIN-24** an exception in the block escapes through the exit, and a rolling-back host keeps none of the account created, the sessions ended and the events recorded;
+- **SIGNIN-25** a host whose stores apply each call keeps the account created and the events recorded before the failure;
+- **SIGNIN-26** a host whose stores apply each call keeps the sessions ended by replacement or pruning;
+- **SIGNIN-27** after a failure, the next sign-in opens a new session and restores nothing.
 
 The hook:
 
-- **SIGNIN-27** receives a `SignInRefusal` (the cause and its `page`) for every refusal
-- **SIGNIN-28** and returns any `Response`.
-- **SIGNIN-29** Every callback answer sent after the pending cookie was selected carries its deletion,
-- **SIGNIN-30** also when the hook raises or the answer fails before it starts: the
+- **SIGNIN-28** receives a `SignInRefusal` (the cause and its `page`) for every refusal
+- **SIGNIN-29** and returns any `Response`.
+- **SIGNIN-30** Every callback answer sent after the pending cookie was selected carries its deletion,
+- **SIGNIN-31** also when the hook raises or the answer fails before it starts: the
   route then sends a plain 500 with the deletion and raises the failure.
-- **SIGNIN-31** Other tabs' pending cookies stay.
+- **SIGNIN-32** Other tabs' pending cookies stay.
 
 A pending login is single-use because its cookie is cleared and the
 issuer accepts a code once; webauth keeps no replay store.
 
-The logout route never commits:
+**SIGNIN-33** The logout route never commits:
 
-- **SIGNIN-32** it enters the transaction once,
-- **SIGNIN-33** only when the request's cookie names a session.
-- **SIGNIN-34** An exception in the route answers a plain 500 with no page and no cookie cleared.
-- **SIGNIN-35** An exception in the transaction's exit answers the same.
-- **SIGNIN-36** An exception in the host's callables answers the same.
-- **SIGNIN-37** A rolling-back host keeps the session, and a retry ends it with its hint.
-- **SIGNIN-38** Under per-call persistence or an uncertain commit the row and its ID token may already be gone, and a retry still reaches the
+- **SIGNIN-34** it enters the transaction once,
+- **SIGNIN-35** only when the request's cookie names a session.
+- **SIGNIN-36** An exception in the route answers a plain 500 with no page and no cookie cleared.
+- **SIGNIN-37** An exception in the transaction's exit answers the same.
+- **SIGNIN-38** An exception in the host's callables answers the same.
+- **SIGNIN-39** A rolling-back host keeps the session, and a retry ends it with its hint.
+- **SIGNIN-40** Under per-call persistence or an uncertain commit the row and its ID token may already be gone, and a retry still reaches the
   issuer's end-session page, without the hint.
 
 The back-channel logout route:
 
-- **SIGNIN-39** `SignInPaths.backchannel_logout` serves the issuer's back-channel logout for `POST` only,
-- **SIGNIN-40** and must differ from every other path, `logout` included.
-- **SIGNIN-41** Only that exact path is exempt from the origin check, and logout is never exempt;
-- **SIGNIN-42** only that exact path is exempt from the rate limit, and logout is never exempt.
-- **SIGNIN-43** The host's `backchannel_dependencies` run before the body is read,
-- **SIGNIN-44** and are given only with that path or install raises `ValueError` before any route is registered.
+- **SIGNIN-41** `SignInPaths.backchannel_logout` serves the issuer's back-channel logout for `POST` only,
+- **SIGNIN-42** and must differ from every other path, `logout` included.
+- **SIGNIN-43** Only that exact path is exempt from the origin check, and logout is never exempt;
+- **SIGNIN-44** only that exact path is exempt from the rate limit, and logout is never exempt.
+- **SIGNIN-45** The host's `backchannel_dependencies` run before the body is read,
+- **SIGNIN-46** and are given only with that path or install raises `ValueError` before any route is registered.
 - **Host duty:** a host answers an empty 404 by raising its own exception class and mapping it with
   `app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))`: an `HTTPException(404)` answers JSON, and a `Response` returned from a dependency does not stop the route.
 
 The answers are, in order:
 
-- **SIGNIN-45** 413 for a declared `Content-Length` over the bound, before any dependency;
-- **SIGNIN-46** the dependencies' own;
-- **SIGNIN-47** 413 for a streamed body over the bound;
-- **SIGNIN-48** an empty 400 for a request that is not one URL-encoded form with exactly one
+- **SIGNIN-47** 413 for a declared `Content-Length` over the bound, before any dependency;
+- **SIGNIN-48** the dependencies' own;
+- **SIGNIN-49** 413 for a streamed body over the bound;
+- **SIGNIN-50** an empty 400 for a request that is not one URL-encoded form with exactly one
   non-empty `logout_token`, before any transaction is entered;
-- **SIGNIN-49** an empty 400 for a token that does not verify, before any transaction is entered;
-- **SIGNIN-50** an empty 200 after the clean exit of one `SignInTransaction` entry;
-- **SIGNIN-51** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
+- **SIGNIN-51** an empty 400 for a token that does not verify, before any transaction is entered;
+- **SIGNIN-52** an empty 200 after the clean exit of one `SignInTransaction` entry;
+- **SIGNIN-53** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
   sink or the exit.
 
-- **SIGNIN-52** A subject without an account is accepted and provisions nothing;
-- **SIGNIN-53** a known subject loses every session in every browser,
-- **SIGNIN-54** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
-- **SIGNIN-55** The route clears no cookie
-- **SIGNIN-56** and calls no issuer endpoint beyond the key fetch of verification.
-- **SIGNIN-57** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
+- **SIGNIN-54** A subject without an account is accepted and provisions nothing;
+- **SIGNIN-55** a known subject loses every session in every browser,
+- **SIGNIN-56** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
+- **SIGNIN-57** The route clears no cookie
+- **SIGNIN-58** and calls no issuer endpoint beyond the key fetch of verification.
+- **SIGNIN-59** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
 
 - **Host duty:** the host's transaction rolls back when the back-channel block raises, also when the audit
   sink fails after the deletion.
 - **Host duty:** the host's transaction commits only for an accepted token.
-- **SIGNIN-58** A per-call host keeps the sessions ended before the failure, and no event is emitted again.
+- **SIGNIN-60** A per-call host keeps the sessions ended before the failure, and no event is emitted again.
 
 The back-channel route is open to anyone who can reach it, and the token is its only control.
 
 - **Host duty:** the host lets the issuer reach it over an internal network alone, never the public route
   (tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
 
-- **SIGNIN-59** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
+- **SIGNIN-61** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
   default,
-- **SIGNIN-60** and validates `max_sessions` before it registers a route.
+- **SIGNIN-62** and validates `max_sessions` before it registers a route.
 - **Host duty:** a host that serves no logout route passes `False`.
-- **SIGNIN-61** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
-- **SIGNIN-62** With `True`, the row keeps the login's ID token for logout.
-- **SIGNIN-63** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
-- **SIGNIN-64** and the choice of a row that keeps none.
+- **SIGNIN-63** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
+- **SIGNIN-64** With `True`, the row keeps the login's ID token for logout.
+- **SIGNIN-65** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
+- **SIGNIN-66** and the choice of a row that keeps none.
 
 ## Testing a host
 

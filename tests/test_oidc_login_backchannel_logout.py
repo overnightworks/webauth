@@ -140,7 +140,7 @@ def sessions_of(host: OidcHost, user_id: str) -> int:
 
 
 def test_a_valid_logout_token_ends_every_session_of_its_subject_and_keeps_anothers() -> None:
-    """SIGNIN-53, APP-29: a valid logout token ends every session of its subject."""
+    """SIGNIN-55, APP-29: a valid logout token ends every session of its subject."""
     host = a_host_with_sessions(subject_sessions=3, other_sessions=2)
 
     response = post_logout_token(host, a_logout_token_of_the_issuer())
@@ -195,7 +195,7 @@ def test_after_a_session_ends_its_cookie_is_refused_and_every_other_sessions_coo
 
 
 def test_a_logout_for_an_unknown_subject_is_accepted_without_provisioning_an_account() -> None:
-    """SIGNIN-52: a subject without an account is accepted and provisions nothing."""
+    """SIGNIN-54: a subject without an account is accepted and provisions nothing."""
     host = an_oidc_host(FakeUser(id=OTHER_SUBJECT, username="omar"))
     open_sessions(host, OTHER_SUBJECT, 1)
 
@@ -208,7 +208,7 @@ def test_a_logout_for_an_unknown_subject_is_accepted_without_provisioning_an_acc
 
 
 def test_a_logout_for_a_subject_without_sessions_is_accepted_and_audits_nothing() -> None:
-    """SIGNIN-54: no event is recorded when no session ended."""
+    """SIGNIN-56: no event is recorded when no session ended."""
     host = a_host_with_sessions(subject_sessions=0, other_sessions=1)
 
     response = post_logout_token(host, a_logout_token_of_the_issuer())
@@ -218,7 +218,7 @@ def test_a_logout_for_a_subject_without_sessions_is_accepted_and_audits_nothing(
 
 
 def test_a_logout_that_ended_sessions_audits_one_event_for_the_account_and_no_actor() -> None:
-    """SIGNIN-54: one `BACKCHANNEL_LOGOUT` event with no actor is recorded when sessions ended."""
+    """SIGNIN-56: one `BACKCHANNEL_LOGOUT` event with no actor is recorded when sessions ended."""
     host = a_host_with_sessions(subject_sessions=3)
 
     post_logout_token(host, a_logout_token_of_the_issuer())
@@ -235,7 +235,7 @@ def test_a_logout_that_ended_sessions_audits_one_event_for_the_account_and_no_ac
 
 
 def test_an_accepted_logout_enters_the_transaction_once_and_calls_no_issuer_endpoint() -> None:
-    """SIGNIN-56: an accepted logout calls no issuer endpoint."""
+    """SIGNIN-58: an accepted logout calls no issuer endpoint."""
     host = a_host_with_sessions(subject_sessions=1)
     exchanges_before = len(host.issuer.requests)
 
@@ -255,7 +255,7 @@ def test_an_accepted_logout_enters_the_transaction_once_and_calls_no_issuer_endp
 def test_a_logout_token_that_does_not_hold_is_refused_before_the_transaction_and_ends_nothing(
     logout_token: str,
 ) -> None:
-    """SIGNIN-49: a token that does not verify gets an empty 400 before any transaction."""
+    """SIGNIN-51: a token that does not verify gets an empty 400 before any transaction."""
     host = a_host_with_sessions(subject_sessions=2)
 
     response = post_logout_token(host, logout_token)
@@ -302,7 +302,7 @@ def test_what_is_not_one_well_formed_logout_token_form_gets_an_empty_400_before_
     body: bytes,
     content_type: str | None,
 ) -> None:
-    """SIGNIN-48: a request that is not one form with one non-empty `logout_token` gets an empty 400
+    """SIGNIN-50: a request that is not one form with one non-empty `logout_token` gets an empty 400
     before any transaction."""
     host = a_host_with_sessions(subject_sessions=1)
     headers = {} if content_type is None else {"content-type": content_type}
@@ -381,7 +381,7 @@ def an_oversized_streamed_body() -> Iterator[bytes]:
 def test_an_oversized_logout_body_is_refused_and_ends_nothing(
     body: bytes | Iterator[bytes],
 ) -> None:
-    """SIGNIN-07, SIGNIN-47: a body over the derived bound gets 413, a streamed one before the form
+    """SIGNIN-07, SIGNIN-49: a body over the derived bound gets 413, a streamed one before the form
     is read."""
     host = a_host_with_sessions(subject_sessions=1)
 
@@ -399,7 +399,7 @@ def test_an_oversized_logout_body_is_refused_and_ends_nothing(
     ],
 )
 def test_a_path_next_to_the_back_channel_stays_csrf_protected(path: str) -> None:
-    """SIGNIN-41: only the exact back-channel path is exempt from the origin check."""
+    """SIGNIN-43: only the exact back-channel path is exempt from the origin check."""
     host = after_signing_in(an_oidc_host())
 
     response = host.client.post(path, headers=FORM, content=b"logout_token=x")
@@ -559,7 +559,7 @@ def _a_host_whose_dependency_refuses() -> OidcHost:
 
 
 def test_a_refusing_dependency_answers_the_hosts_empty_404_before_the_body_is_read() -> None:
-    """SIGNIN-43: the dependencies run before the body is read."""
+    """SIGNIN-45: the dependencies run before the body is read."""
     host = _a_host_whose_dependency_refuses()
 
     response = post_backchannel_logout(host, an_oversized_streamed_body())
@@ -579,7 +579,7 @@ def test_a_refusing_dependency_answers_after_the_declared_bound_and_before_the_s
     body: bytes | Iterator[bytes],
     status: int,
 ) -> None:
-    """SIGNIN-45, SIGNIN-46: a declared oversized body is refused before any dependency and a
+    """SIGNIN-47, SIGNIN-48: a declared oversized body is refused before any dependency and a
     dependency answers before a streamed oversized body."""
     host = _a_host_whose_dependency_refuses()
 
@@ -625,7 +625,7 @@ def test_a_back_channel_failure_is_raised_once_the_400_is_sent(
     fail: Callable[[OidcHost, pytest.MonkeyPatch], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SIGNIN-51: an exception in the relying party, verification, store, audit sink or exit gets an
+    """SIGNIN-53: an exception in the relying party, verification, store, audit sink or exit gets an
     empty 400, then is raised."""
     host = a_host_with_sessions(subject_sessions=1)
     fail(host, monkeypatch)
@@ -668,7 +668,7 @@ def test_an_accepted_back_channel_logout_enters_the_transaction_once_and_reads_n
 def test_the_back_channel_answers_200_only_after_the_exit_returned(
     exit_failure: Exception | None,
 ) -> None:
-    """SIGNIN-50: the empty 200 follows the clean exit of one entry; a failing exit answers 400."""
+    """SIGNIN-52: the empty 200 follows the clean exit of one entry; a failing exit answers 400."""
     host = a_host_with_sessions(subject_sessions=1)
     host.transaction.exit_failure = exit_failure
 
@@ -687,7 +687,7 @@ def test_the_back_channel_answers_200_only_after_the_exit_returned(
     ],
 )
 def test_a_path_next_to_the_back_channel_spends_the_address_budget(path: str) -> None:
-    """SIGNIN-42: only the exact back-channel path is exempt from the rate limit."""
+    """SIGNIN-44: only the exact back-channel path is exempt from the rate limit."""
     host = a_host_with_sessions(subject_sessions=1, address_budget=1)
     host.client.get("/me")
     assert host.client.get("/me").status_code == 429
@@ -709,7 +709,7 @@ def test_no_answer_of_the_back_channel_sets_or_clears_a_cookie(
     body: bytes | None,
     status: int,
 ) -> None:
-    """SIGNIN-55: no answer of the back-channel sets or clears a cookie."""
+    """SIGNIN-57: no answer of the back-channel sets or clears a cookie."""
     host = after_signing_in(an_oidc_host())
     content = a_form_of(a_logout_token_of_the_issuer()) if body is None else body
 
@@ -721,7 +721,7 @@ def test_no_answer_of_the_back_channel_sets_or_clears_a_cookie(
 def test_the_relying_party_receives_the_back_channel_request_with_the_host_it_was_posted_to() -> (
     None
 ):
-    """SIGNIN-57: the relying party receives the request with the Host it was posted to."""
+    """SIGNIN-59: the relying party receives the request with the Host it was posted to."""
     host = a_host_with_sessions(subject_sessions=1)
     hosts_seen: set[str] = set()
 
@@ -744,7 +744,7 @@ def test_the_relying_party_receives_the_back_channel_request_with_the_host_it_wa
 def test_after_an_audit_failure_a_per_call_host_keeps_the_ended_sessions_and_a_retry_audits_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SIGNIN-58: a per-call host keeps the sessions ended before the failure and no event is
+    """SIGNIN-60: a per-call host keeps the sessions ended before the failure and no event is
     emitted again."""
     host = an_oidc_host(FakeUser(id=SUBJECT, username="lena"))
     open_sessions(host, SUBJECT, 2)

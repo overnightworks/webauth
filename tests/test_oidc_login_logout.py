@@ -113,7 +113,7 @@ def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two
 
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
-    """SIGNIN-63: renewal and rotation keep the login's own ID token as the logout hint."""
+    """SIGNIN-65: renewal and rotation keep the login's own ID token as the logout hint."""
     session_clock = FakeClock(float(NOW))
     host = after_signing_in(an_oidc_host(wall_clock=session_clock))
     login_token = host.issued_id_tokens[-1]
@@ -229,7 +229,7 @@ def test_a_same_origin_logout_still_answers_the_page(
     entered: bool,
     keeps_id_token: bool,
 ) -> None:
-    """SIGNIN-33, APP-36: a logout without a row or without an ID token answers the page with no
+    """SIGNIN-35, APP-36: a logout without a row or without an ID token answers the page with no
     hint."""
     host = an_oidc_host(keeps_id_token=keeps_id_token)
     if arrange is not _no_session:
@@ -326,7 +326,7 @@ def test_a_logout_enters_the_transaction_once_and_reads_no_record_after_its_exit
     *,
     strict_records: bool,
 ) -> None:
-    """SIGNIN-32: the logout enters the transaction once and reads no record after its exit."""
+    """SIGNIN-34: the logout enters the transaction once and reads no record after its exit."""
     host = after_signing_in(an_oidc_host(transaction_kind=kind, strict_records=strict_records))
     entries_before = host.transaction.entries
 
@@ -352,7 +352,7 @@ def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
     store_call: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SIGNIN-34: a store call that raises answers a plain 500, no page, no cookie cleared."""
+    """SIGNIN-36: a store call that raises answers a plain 500, no page, no cookie cleared."""
     host = after_signing_in(an_oidc_host(transaction_kind=kind))
     with monkeypatch.context() as patch:
         failing(host.sessions, store_call, patch)
@@ -367,8 +367,8 @@ def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
 
 
 def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_hint() -> None:
-    """SIGNIN-35, SIGNIN-37: a failing exit answers a plain 500; a rolling-back host keeps the
-    session and a retry ends it with its hint."""
+    """SIGNIN-33, SIGNIN-37, SIGNIN-39: a failing exit answers a plain 500; a rolling-back host
+    keeps the session and a retry ends it with its hint."""
     host = after_signing_in(an_oidc_host(transaction_kind=TransactionKind.ROLLING_BACK))
     host.sessions.commit_failure = StoreDown()
 
@@ -381,7 +381,7 @@ def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_
 
 
 def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_the_hint() -> None:
-    """SIGNIN-35, SIGNIN-38: a failing exit answers a plain 500; the row may be gone and a retry
+    """SIGNIN-37, SIGNIN-40: a failing exit answers a plain 500; the row may be gone and a retry
     answers the page without the hint."""
     host = after_signing_in(an_oidc_host())
     host.transaction.exit_failure = StoreDown()
@@ -429,7 +429,7 @@ def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
     page_text: Callable[[Request], LogoutPageText],
     relying_party_of: Callable[[Request], OidcRelyingParty] | None,
 ) -> None:
-    """SIGNIN-36: an exception in a host callable answers a plain 500 and ends nothing."""
+    """SIGNIN-38: an exception in a host callable answers a plain 500 and ends nothing."""
     host = after_signing_in(an_oidc_host(logout_page_text=page_text))
     host.relying_party_of = relying_party_of
     entries_before = host.transaction.entries
