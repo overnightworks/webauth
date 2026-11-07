@@ -71,6 +71,7 @@ class TestTheGroupsReturned:
 
         outcome = arrangement.current_groups(arrangement.sessions.in_transaction)
 
+        assert isinstance(outcome, tuple)
         assert outcome == ()
         assert app_role(outcome, ADMISSION) is None
 
