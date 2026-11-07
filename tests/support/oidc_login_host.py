@@ -39,6 +39,8 @@ from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     SessionRecordsInMemory,
     UsersInMemory,
+    UsersWithCaseInsensitiveUsernames,
+    UsersWithoutUniqueUsernames,
     WriteLockInMemory,
     a_web_auth_config,
 )
@@ -143,6 +145,16 @@ class UsersWithSnapshots(UsersInMemory):
                 user.role = role
 
         return restore
+
+
+class UsersWithSnapshotsAndNoUniqueUsernames(UsersWithSnapshots, UsersWithoutUniqueUsernames):
+    """Accounts that can be put back as they were, in a store with no unique username index."""
+
+
+class UsersWithSnapshotsAndCaseInsensitiveUsernames(
+    UsersWithSnapshots, UsersWithCaseInsensitiveUsernames
+):
+    """Accounts that can be put back as they were, in a store whose unique index ignores case."""
 
 
 class _WindowClosedError(AssertionError):
@@ -450,9 +462,10 @@ def _the_stores_of_a_host(
     stored_session: FakeSessionRecord | None,
     transaction_kind: TransactionKind,
     strict_records: bool,
+    account_store: type[UsersWithSnapshots],
 ) -> _HostStores:
     lock = WriteLockInMemory()
-    accounts = UsersWithSnapshots(*users, lock=lock)
+    accounts = account_store(*users, lock=lock)
     sessions = SessionRecordsInMemory(stored_session, users=accounts, lock=lock)
     audit = RecordingAuditSink()
     transaction = RecordingSignInTransaction(
@@ -499,12 +512,15 @@ def an_oidc_host(
     stored_session: FakeSessionRecord | None = None,
     keeps_id_token: bool = True,
     admission: AdmissionConfig = ADMISSION,
+    account_store: type[UsersWithSnapshots] = UsersWithSnapshots,
     logout_page_text: Callable[[Request], LogoutPageText] = lambda _request: LOGOUT_PAGE_TEXT,
     backchannel_dependencies: Sequence[params.Depends] = (),
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
-    stores = _the_stores_of_a_host(users, stored_session, transaction_kind, strict_records)
+    stores = _the_stores_of_a_host(
+        users, stored_session, transaction_kind, strict_records, account_store
+    )
     wall_clock = FakeClock(float(NOW))
     issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(wall_clock, groups_claim)
     app = _a_host_app(config, address_budget, behind_base_http_middleware)

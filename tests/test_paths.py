@@ -78,6 +78,7 @@ def test_only_a_path_of_this_app_is_a_return_path(
     asked_for: str,
     returned: str | None,
 ) -> None:
+    """REFUSE-03, REFUSE-07: only a path of this app is a return path, and none gets `root_path`."""
     scope = {**an_http_scope(FastAPI()), "root_path": root_path}
 
     assert same_app_path(Request(scope), asked_for) == returned
