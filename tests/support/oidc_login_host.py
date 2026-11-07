@@ -17,6 +17,7 @@ from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
 from tests.support.oidc_arrangement import (
+    ABSENT,
     ISSUED_REFRESH_TOKEN,
     FakeClock,
     FakeIssuer,
@@ -26,7 +27,6 @@ from tests.support.oidc_arrangement import (
     a_realm_client_config,
     a_relying_party,
     an_id_token_claims,
-    changed,
     jws,
     rs256,
     rsa_key,
@@ -335,7 +335,7 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding
         preferred_username="lena",
         groups=groups_claim,
     )
-    claims = changed(claims, {})
+    claims = {name: value for name, value in claims.items() if value is not ABSENT}
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
     if padding:
         header["padding"] = padding
