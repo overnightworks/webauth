@@ -69,6 +69,7 @@ from webauth.oidc import (
 )
 from webauth.ports import (
     AccountEventKind,
+    AccountKind,
 )
 
 MAX_PENDING_LOGIN_COOKIE_CHARS = 896
@@ -141,6 +142,7 @@ def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies()
     assert set_cookies(response)[host.config.session_cookie_name] == configured | {"httponly"}
     assert set(host.client.cookies) == {host.config.session_cookie_name}
     assert host.client.get("/me").json() == {"username": "lena"}
+    assert [account.kind for account in host.accounts.list()] == [AccountKind.PERSON]
 
 
 def test_an_admitted_callback_stores_the_refresh_token_and_nothing_of_the_access_token() -> None:
