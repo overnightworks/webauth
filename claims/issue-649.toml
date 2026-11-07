@@ -1,7 +1,0 @@
-claim_id = "399df311d84a40fabb618ec24a1e47d8"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "f96e50c0f206f08b7e4b06a85a99ce396af6bed0"
-branch = "claude/issue-649-architecture-not-chosen"
-scope = ["README.md", "docs/ARCHITECTURE.md"]
-opened_commit = "cdbce49b8bb8e53943e13608b73029801a3e4850"
