@@ -416,50 +416,63 @@ checks the browser.
 
 ## A person's current groups
 
-`current_groups(relying_party, session_id, *, session_transaction, config)` answers the
+**GROUPS-01** `current_groups(relying_party, session_id, *, session_transaction, config)` answers the
 group paths the issuer holds for the person a session signs in, from the ID token of a
-refresh grant made in that call: a check at the moment of use, such as whether a person may
-start a turn that spends the app's budget, is judged against groups that are fresh and
-verified, not those of the login. It stores nothing but the rotated refresh token, and no token
-leaves webauth. The caller is the app, which maps each outcome once:
+refresh grant made in that call.
 
-| Outcome | Meaning | Turn? |
-|---|---|---|
-| a tuple of paths | the current groups; `()` is no membership, so a realm without the groups scope admits nobody | only if the check below holds |
-| `SESSION_ENDED` | the session is gone, expired or deleted during the grant | no |
-| `SIGN_IN_AGAIN` | no refresh token, or the issuer refused it as `invalid_grant` (its session ended, or overlapping calls where the issuer refuses reuse) | no |
-| `ISSUER_UNAVAILABLE` | the issuer failed or its new ID token was refused; `issuer_refusal` says why | no |
+A check at the moment of use, such as whether a person may start a turn that spends the app's
+budget, is judged against groups that are fresh and verified, not those of the login.
 
-The call reads no stored ID token, so a session with or without one answers alike, and a host
-with `keeps_id_token=False` works. A store failure or a failed transaction exit raises, and no
-groups are handed out then.
+**GROUPS-02** `current_groups` stores nothing but the rotated refresh token.
 
-A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(bound_issuer=...,
+**GROUPS-03** No token leaves webauth.
+
+**Host duty:** The caller is the app, which maps each outcome once:
+
+| ID | Outcome | Meaning | Turn? |
+|---|---|---|---|
+| **GROUPS-04** | a tuple of paths | the current groups | only if the check below holds |
+| **GROUPS-05** | `()` | no membership, so a realm without the groups scope admits nobody | only if the check below holds |
+| **GROUPS-06** | `SESSION_ENDED` | the session is gone, expired or deleted during the grant | no |
+| **GROUPS-07** | `SIGN_IN_AGAIN` | no refresh token, or the issuer refused it as `invalid_grant` (its session ended, or overlapping calls where the issuer refuses reuse) | no |
+| **GROUPS-08** | `ISSUER_UNAVAILABLE` | the issuer failed or its new ID token was refused; `issuer_refusal` says why | no |
+
+- **GROUPS-09** The call reads no stored ID token, so a session with or without one answers alike,
+  and a host with `keeps_id_token=False` works.
+- **GROUPS-10** A store failure raises, and no groups are handed out then.
+- **GROUPS-11** A failed transaction exit raises, and no groups are handed out then.
+
+**GROUPS-12** A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(bound_issuer=...,
 login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
 
-- **The source.** Only the new ID token counts: `iss` is the configured issuer, `sub` the
-  session account's id, `aud` the client, `azp` as at login, `exp` has not passed, and it holds no `nonce` key.
-  OpenID Connect Core 1.0 section 12.2 says the refreshed ID token SHOULD NOT have one and
-  section 2 requires a present one to be verified; webauth keeps nothing to verify it against, so
-  a present nonce, whatever its value, is refused as `nonce-mismatch`. The precondition is that
-  the issuer's refreshed ID token holds no nonce; an issuer that echoes the original's is refused.
-  Freshness is judged against the grant's start, with the configured leeway. A reply without an
-  ID token, or a `groups` claim that is not a list of strings, is `ISSUER_UNAVAILABLE`, never `()`.
-- **The rotation survives.** A replacement refresh token is stored whatever the ID token said,
-  unless the session is gone, which is `SESSION_ENDED` and never recreated.
-- **Overlap.** Each call is one grant. Where the issuer lets a refresh token be used again, two
-  overlapping calls, with each other or with `fresh_access_token`, each succeed and the last
-  replacement written wins; an echoed token never overwrites a replacement. Where it refuses
-  reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session. An app that
-  calls this on every turn must expect that.
+- **The source.** Only the new ID token counts:
+  - **GROUPS-13** `iss` is the configured issuer.
+  - **GROUPS-14** `sub` is the session account's id.
+  - **GROUPS-15** `aud` is the client.
+  - **GROUPS-16** `azp` is as at login.
+  - **GROUPS-17** `exp` has not passed.
+  - **GROUPS-18** It holds no `nonce` key: a present nonce, whatever its value, is refused as
+    `nonce-mismatch`.
+  - OpenID Connect Core 1.0 section 12.2 says the refreshed ID token SHOULD NOT have a nonce and
+    section 2 requires a present one to be verified; webauth keeps nothing to verify it against.
+    The precondition is that the issuer's refreshed ID token holds no nonce.
+  - **GROUPS-19** An issuer that echoes the original's nonce is refused.
+  - **GROUPS-20** Freshness is judged against the grant's start, with the configured leeway.
+  - **GROUPS-21** A reply without an ID token is `ISSUER_UNAVAILABLE`, never `()`.
+  - **GROUPS-22** A `groups` claim that is not a list of strings is `ISSUER_UNAVAILABLE`, never `()`.
+- **The rotation survives.**
+  - **GROUPS-23** A replacement refresh token is stored whatever the ID token said.
+  - **GROUPS-24** A session that is gone is `SESSION_ENDED` and never recreated.
+- **Overlap.**
+  - **GROUPS-25** Each call is one grant.
+  - **GROUPS-26** Where the issuer lets a refresh token be used again, two overlapping calls, with
+    each other or with `fresh_access_token`, each succeed and the last replacement written wins.
+  - **GROUPS-27** An echoed token never overwrites a replacement.
+  - Where the issuer refuses reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session.
+  - **Host duty:** An app that calls this on every turn must expect that.
 - **Residue.** The second transaction cannot rule out a session deleted after its load: with a
   store that commits each statement, a deletion before the transaction's exit also escapes when
   the rotation is omitted or echoed, as [Risks and Technical Debt](ARCHITECTURE.md#8-risks-and-technical-debt) says.
-
-Proofs: [test_oidc_login_current_groups.py](../tests/test_oidc_login_current_groups.py) in CI,
-and `CHECK refreshed-id-token-facts` in
-[bearer_groups.py](../tests/e2e/oidc/bearer_groups.py) against real Keycloak in the hand-run
-harness.
 
 ## The protected resource
 
