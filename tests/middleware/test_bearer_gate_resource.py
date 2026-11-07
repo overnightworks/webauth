@@ -26,10 +26,12 @@ from tests.support.gate_arrangement import (
     RESOURCE_GROUP,
     BearerApp,
     a_bearer_app,
+    a_bearer_gate,
     a_known_person,
     a_resource,
     a_resource_token,
     a_token,
+    an_agent_token,
     assert_no_bearer_admission,
     bearing,
     relayed,
@@ -42,6 +44,7 @@ from tests.support.oidc_arrangement import (
     REALM_ISSUER,
     an_access_token,
 )
+from tests.support.webauth_arrangement import FakeUser
 from webauth.middleware import (
     ProtectedResource,
     install_resource_metadata,
@@ -102,10 +105,14 @@ def refusing_a_session_transaction() -> NoReturn:
     raise AssertionError("a session transaction was opened")
 
 
-def a_resource_app_refusing_a_session_transaction(resource: ProtectedResource) -> BearerApp:
+def a_resource_app_refusing_a_session_transaction(
+    resource: ProtectedResource,
+    known_accounts: tuple[FakeUser, ...] = (),
+) -> BearerApp:
     return a_bearer_app(
         paths=PathRules(),
         resource=resource,
+        known_accounts=known_accounts,
         session_transaction=refusing_a_session_transaction,
     )
 
@@ -117,6 +124,8 @@ def test_no_credential_at_the_entry_point_answers_the_challenge_on_every_method(
     challenge: str,
     method: str,
 ) -> None:
+    """RESOURCE-13, RESOURCE-14: on every method the gate answers a request with no credential
+    before CSRF and the session gate, with the 401 and the challenge, and runs no route."""
     response = app.ask(resource.entry_point, method=method)
 
     assert response.status_code == 401
@@ -125,21 +134,59 @@ def test_no_credential_at_the_entry_point_answers_the_challenge_on_every_method(
     assert app.auth.route_runs == []
 
 
+ANSWERS_AT_THE_ENTRY_POINT: dict[
+    str, tuple[Callable[[ProtectedResource], tuple[str, ...]], int]
+] = {
+    "no-credential": (lambda resource: (), 401),
+    "app-bearer": (lambda resource: bearing(a_token()), 401),
+    "without-the-scope": (lambda resource: bearing(an_agent_token(resource, scope=ABSENT)), 403),
+    "not-admitted": (lambda resource: bearing(a_resource_token(resource, groups=[])), 403),
+    "refused-credential": (lambda resource: (*bearing("a"), *bearing("b")), 401),
+    "admitted": (lambda resource: bearing(an_agent_token(resource)), 200),
+}
+
+
+@pytest.mark.parametrize("answer", list(ANSWERS_AT_THE_ENTRY_POINT))
 @pytest.mark.parametrize("method", ["GET", "POST"])
 @pytest.mark.parametrize("sent", [{}, {"origin": "https://evil.example"}], ids=["plain", "foreign"])
 def test_a_cookie_decides_nothing_at_the_entry_point_and_opens_no_session_transaction(
     resource: ProtectedResource,
-    challenge: str,
+    answer: str,
     method: str,
     sent: dict[str, str],
 ) -> None:
-    app = a_resource_app_refusing_a_session_transaction(resource)
+    """RESOURCE-31: with a valid cookie beside it every answer is the one it is without, and no
+    session transaction runs."""
+    app = a_resource_app_refusing_a_session_transaction(resource, (a_known_person(),))
+    authorization, status = ANSWERS_AT_THE_ENTRY_POINT[answer]
     expires_at = app.auth.sessions.stored_record.expires_at
 
-    response = app.ask(resource.entry_point, method=method, cookie=True, headers=sent)
+    response = app.ask(
+        resource.entry_point,
+        method=method,
+        authorization=authorization(resource),
+        cookie=True,
+        headers=sent,
+    )
 
-    assert (response.status_code, response.headers["www-authenticate"]) == (401, challenge)
-    assert_untouched(app, expires_at)
+    assert response.status_code == status
+    assert app.auth.route_runs == ([resource.entry_point] if status == 200 else [])
+    assert app.auth.authenticated == []
+    assert app.auth.sessions.stored_record.expires_at == expires_at
+
+
+@pytest.mark.parametrize("answer", list(ANSWERS_AT_THE_ENTRY_POINT))
+def test_every_answer_at_the_entry_point_carries_no_store(
+    resource: ProtectedResource,
+    answer: str,
+) -> None:
+    """RESOURCE-32: each of the six answers carries `no-store`."""
+    app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
+    authorization, _status = ANSWERS_AT_THE_ENTRY_POINT[answer]
+
+    response = app.ask(resource.entry_point, authorization=authorization(resource))
+
+    assert response.headers["cache-control"] == "no-store"
 
 
 @pytest.mark.parametrize(
@@ -154,6 +201,8 @@ def test_an_app_bearer_or_garbage_at_the_entry_point_is_an_invalid_token_and_adm
     method: str,
     token: str,
 ) -> None:
+    """RESOURCE-10: an app's token is a 401 `invalid_token` on every method and admits
+    nothing."""
     app = a_resource_app_refusing_a_session_transaction(resource)
     expires_at = app.auth.sessions.stored_record.expires_at
     relay = relayed(app.auth)
@@ -192,6 +241,10 @@ WRONG_FOR_THE_RESOURCE: dict[str, Callable[[ProtectedResource], str]] = {
         claims={"aud": resource.url, "scope": resource.scope},
         header={"typ": "JWT"},
     ),
+    "not-rs256": lambda resource: an_access_token(
+        claims={"aud": resource.url, "scope": resource.scope},
+        header={"alg": "HS256"},
+    ),
     "unlisted-party": lambda resource: a_resource_token(resource, azp="stranger"),
     "unlisted-party-without-scope": lambda resource: a_resource_token(
         resource,
@@ -212,6 +265,9 @@ def test_a_token_the_resource_check_refuses_is_an_invalid_token_with_the_challen
     challenge: str,
     name: str,
 ) -> None:
+    """RESOURCE-15, RESOURCE-16, RESOURCE-17, RESOURCE-18, RESOURCE-19: a token that is not an
+    RS256 `at+jwt` of the issuer, whose only audience is the `url` and whose `azp` is a party,
+    is a 401 `invalid_token` with the challenge, and no route runs."""
     app = a_resource_app_refusing_a_session_transaction(resource)
 
     status, authenticate = entry_point_answer(app, resource, WRONG_FOR_THE_RESOURCE[name](resource))
@@ -237,6 +293,8 @@ def test_a_resource_token_without_the_scope_is_an_insufficient_scope_with_the_ch
     challenge: str,
     claims: dict[str, object],
 ) -> None:
+    """RESOURCE-20: a token whose `scope` claim, read as space-separated tokens, lacks the scope
+    is a 403 `insufficient_scope` with the challenge, and no route runs."""
     app = a_resource_app_refusing_a_session_transaction(resource)
 
     response = app.ask(
@@ -292,6 +350,8 @@ def test_the_key_set_is_fetched_once_for_two_requests_at_the_entry_point(
 
 
 def test_a_token_for_the_resource_is_refused_on_a_person_path_and_a_machine_path() -> None:
+    """RESOURCE-08: the token for the resource is a 401 on the machine path and creates no
+    account and no event."""
     resource = a_resource()
     app = a_bearer_app(
         person_paths=PERSON_PATHS,
@@ -313,6 +373,7 @@ def test_a_token_for_the_resource_is_refused_on_a_person_path_and_a_machine_path
 
 
 def test_a_party_listed_only_on_the_resource_is_refused_on_the_other_kinds() -> None:
+    """RESOURCE-11: a party the resource lists is refused on the machine and person paths."""
     resource = a_resource(parties=AuthorizedParties(frozenset({"agent"})))
     app = a_bearer_app(
         person_paths=PERSON_PATHS,
@@ -330,6 +391,8 @@ def test_a_party_listed_only_on_the_resource_is_refused_on_the_other_kinds() -> 
 def test_a_party_listed_only_on_a_person_or_machine_kind_is_refused_at_the_entry_point(
     challenge: str,
 ) -> None:
+    """RESOURCE-12: a party only the machine or person paths list is refused at the entry
+    point."""
     resource = a_resource(parties=AuthorizedParties(frozenset({"agent"})))
     app = a_bearer_app(person_paths=PERSON_PATHS, resource=resource)
 
@@ -340,21 +403,35 @@ def test_a_party_listed_only_on_a_person_or_machine_kind_is_refused_at_the_entry
 
 @pytest.mark.parametrize("parties", ["hal", frozenset({"hal"}), None])
 def test_a_resource_with_anything_but_authorized_parties_raises(parties: object) -> None:
+    """RESOURCE-04: `authorized_parties` that is not an `AuthorizedParties` is a `TypeError`."""
     resource = a_resource()
     with pytest.raises(TypeError, match="authorized_parties"):
         replace(resource, authorized_parties=parties)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    ("authorization", "error"),
+    [
+        pytest.param((*bearing("a"), *bearing("b")), "invalid_request", id="repeated"),
+        pytest.param(("Bearer not a token",), "invalid_request", id="two-credentials"),
+        pytest.param(("Bearer ?",), "invalid_token", id="not-a-b64token"),
+    ],
+)
 def test_a_credential_the_gate_refuses_is_answered_by_that_refusal_with_the_challenge(
     app: BearerApp,
     resource: ProtectedResource,
     challenge: str,
+    authorization: tuple[str, ...],
+    error: str,
 ) -> None:
-    response = app.ask(resource.entry_point, authorization=(*bearing("a"), *bearing("b")))
+    """RESOURCE-30: a repeated or malformed credential is that refusal with the challenge, and
+    no route runs."""
+    response = app.ask(resource.entry_point, authorization=authorization)
 
     assert response.status_code == 401
-    assert response.headers["www-authenticate"] == f'{challenge}, error="invalid_request"'
+    assert response.headers["www-authenticate"] == f'{challenge}, error="{error}"'
     assert response.headers["cache-control"] == "no-store"
+    assert app.auth.route_runs == []
 
 
 @pytest.mark.parametrize("path", ["/mcp/", "/mcp/more"])
@@ -362,6 +439,7 @@ def test_a_trailing_slash_and_a_longer_path_are_not_the_entry_point(
     app: BearerApp,
     path: str,
 ) -> None:
+    """RESOURCE-33: a trailing slash and a longer path are not the entry point."""
     response = app.ask(path, authorization=bearing(A_TOKEN))
 
     assert "resource_metadata" not in response.headers.get("www-authenticate", "")
@@ -373,6 +451,7 @@ def test_a_trailing_slash_and_a_longer_path_are_not_the_entry_point(
     ids=["beside", "overlapping"],
 )
 def test_a_machine_path_beside_a_resource_keeps_its_realm_and_admits_an_admin(url: str) -> None:
+    """RESOURCE-34: a machine path that overlaps the entry point stays a machine path."""
     app = a_bearer_app(resource=a_resource(url))
 
     refused = app.ask(EXPORT_PATH)
@@ -398,6 +477,7 @@ def test_a_person_path_beside_a_resource_keeps_its_cookie_and_its_app_bearer(
 def test_an_entry_point_below_a_person_path_is_the_resource_and_not_the_person(
     member_token: str,
 ) -> None:
+    """RESOURCE-35: an entry point below a person path is decided as the entry point."""
     below_person_prefix = a_resource("https://app.example/api/mcp")
     app = a_bearer_app(paths=PathRules(), person_paths=PERSON_PATHS, resource=below_person_prefix)
     challenge = (
@@ -430,6 +510,8 @@ def test_the_metadata_document_answers_without_a_session_and_names_the_resource(
     app: BearerApp,
     resource: ProtectedResource,
 ) -> None:
+    """RESOURCE-37, RESOURCE-38: the metadata document names the resource, its issuer and its
+    scope, and a client without a session reads it."""
     response = app.ask(urlsplit(resource.metadata_url).path)
 
     assert response.status_code == 200
@@ -445,12 +527,14 @@ def test_the_challenge_points_at_the_url_the_metadata_document_answers_at(
     app: BearerApp,
     resource: ProtectedResource,
 ) -> None:
+    """RESOURCE-06, RESOURCE-07: the challenge names the metadata URL, which is the well-known
+    path of RFC 9728 section 3.1 plus the entry point, and the document answers there."""
     advertised = app.ask(resource.entry_point).headers["www-authenticate"]
     advertised_url = advertised.split('resource_metadata="')[1].split('"')[0]
 
     response = app.ask(urlsplit(advertised_url).path)
 
-    assert advertised_url == resource.metadata_url
+    assert advertised_url == "https://app.example/.well-known/oauth-protected-resource/mcp"
     assert response.status_code == 200
 
 
@@ -459,11 +543,14 @@ def test_the_metadata_route_answers_a_get_of_the_exact_path_only(
     resource: ProtectedResource,
     same_origin: dict[str, str],
 ) -> None:
+    """RESOURCE-36: the metadata route answers a `GET` of the metadata path and nothing else."""
     metadata_path = urlsplit(resource.metadata_url).path
 
+    served = app.ask(metadata_path, cookie=True)
     posted = app.ask(metadata_path, method="POST", cookie=True, headers=same_origin)
     longer = app.ask(f"{metadata_path}/more", cookie=True)
 
+    assert served.status_code == 200
     assert posted.status_code == 405
     assert longer.status_code == 404
 
@@ -495,42 +582,82 @@ def test_the_metadata_route_runs_the_hosts_app_level_dependencies(
 
 
 @pytest.mark.parametrize(
-    "url",
+    ("url", "entry_point"),
     [
-        "http://app.example/mcp",
-        "https://app.example",
-        "https://app.example/",
-        "https://app.example/mcp?x=1",
-        "https://app.example/mcp#top",
-        'https://app.example/m"cp',
-        "https://app.example/m\\cp",
-        "https://app.example/%6Dcp",
-        "https://app.example/%7Bid:int%7D",
-        "https://app.example/{id}",
-        "https://app.example/\u20ac",
-        'https://app.exa"mple/mcp',
-        "https://app.example\\x/mcp",
-        "https://ex%61mple/mcp",
-        "https://app.example/a/../mcp",
-        "https://app.example/./mcp",
-        "https://app.example/mcp/",
-        "/mcp",
-        "",
+        pytest.param("https://app.example/mcp", "/mcp", id="plain"),
+        pytest.param("https://app.example:8443/mcp", "/mcp", id="port"),
+        pytest.param("https://app.example/api/mcp", "/api/mcp", id="segments"),
+        pytest.param("https://app.example/a-b/c.d_e~f/9", "/a-b/c.d_e~f/9", id="unreserved"),
+        *(
+            pytest.param(url, None, id=f"refused-{at}")
+            for at, url in enumerate(
+                [
+                    "http://app.example/mcp",
+                    "https://app.example",
+                    "https://app.example/",
+                    "https://app.example/mcp?x=1",
+                    "https://app.example/mcp#top",
+                    'https://app.example/m"cp',
+                    "https://app.example/m\\cp",
+                    "https://app.example/%6Dcp",
+                    "https://app.example/%7Bid:int%7D",
+                    "https://app.example/{id}",
+                    "https://app.example/\u20ac",
+                    'https://app.exa"mple/mcp',
+                    "https://app.example\\x/mcp",
+                    "https://ex%61mple/mcp",
+                    "https://app.example/a/../mcp",
+                    "https://app.example/./mcp",
+                    "https://app.example/mcp/",
+                    "/mcp",
+                    "",
+                ]
+            )
+        ),
     ],
 )
-def test_a_url_outside_the_resource_url_rule_is_refused(url: str) -> None:
-    with pytest.raises(ValueError, match="url"):
-        a_resource(url)
+def test_a_url_is_the_resource_only_inside_the_resource_url_rule_and_its_path_is_the_entry_point(
+    url: str,
+    entry_point: str | None,
+) -> None:
+    """RESOURCE-02: an endpoint URL with a plain host, an optional port and unreserved segments
+    is the resource and its path is the entry point; any other `url` is a `ValueError`."""
+    if entry_point is None:
+        with pytest.raises(ValueError, match="url"):
+            a_resource(url)
+    else:
+        assert a_resource(url).entry_point == entry_point
 
 
-@pytest.mark.parametrize("scope", ["", "two scopes", 'quo"te', "back\\slash", "tab\t", "ü"])
-def test_a_scope_that_is_not_one_scope_token_is_refused(scope: str) -> None:
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "mcp:tools",
+        "read",
+        "tools/read",
+        "",
+        "two scopes",
+        'quo"te',
+        "back\\slash",
+        "tab\t",
+        "ü",
+        ("mcp:tools",),
+    ],
+)
+def test_a_scope_is_one_scope_token(scope: object) -> None:
+    """RESOURCE-03: a `scope` that is one scope token is taken, anything else is a
+    `ValueError`."""
     resource = a_resource()
-    with pytest.raises(ValueError, match="scope"):
-        replace(resource, scope=scope)
+    if scope in {"mcp:tools", "read", "tools/read"}:
+        assert replace(resource, scope=scope).scope == scope  # type: ignore[arg-type]
+    else:
+        with pytest.raises(ValueError, match="scope"):
+            replace(resource, scope=scope)  # type: ignore[arg-type]
 
 
-def test_a_non_string_scope_is_refused() -> None:
-    resource = a_resource()
-    with pytest.raises(ValueError, match="scope"):
-        replace(resource, scope=("mcp:tools",))  # type: ignore[arg-type]
+def test_a_gate_needs_one_kind_of_path_and_the_resource_counts_as_one() -> None:
+    """RESOURCE-01: a gate with a resource and no path of another kind is valid; a gate with no
+    kind at all is a `ValueError`."""
+    assert a_bearer_gate(paths=PathRules(), resource=a_resource()).resource is not None
+    with pytest.raises(ValueError, match="must name"):
+        a_bearer_gate(paths=PathRules())
