@@ -541,6 +541,7 @@ class TestEachModeKeepsItsReader:
 
 class TestAPathBothRulesSelectIsAMachinePath:
     def test_an_admin_token_is_a_caller_and_no_account_is_created(self) -> None:
+        """MACHINE-27: an admin token on a path both kinds select is a bearer caller."""
         app = a_person_app()
 
         response = app.ask(EXPORT_PATH, authorization=bearing(ADMIN_TOKEN))
@@ -550,6 +551,7 @@ class TestAPathBothRulesSelectIsAMachinePath:
         assert (app.transaction.entries, the_account(app)) == (0, None)
 
     def test_a_user_token_is_refused_as_on_any_machine_path(self) -> None:
+        """MACHINE-27: a user token on a path both kinds select is refused as on a machine path."""
         app = a_person_app()
 
         response = app.ask(EXPORT_PATH, authorization=bearing(MEMBER_TOKEN))

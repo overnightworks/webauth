@@ -23,6 +23,7 @@ from httpx import Response
 from tests.support.gate_arrangement import (
     A_TOKEN,
     ADMISSION,
+    EVERY_METHOD,
     EXPORT_PATH,
     HAL_ONLY,
     MACHINE_PATHS,
@@ -356,6 +357,7 @@ ADMITTED = [
 
 @pytest.mark.parametrize("line", ADMITTED)
 def test_an_admin_token_is_admitted_and_its_subject_is_the_caller(line: str) -> None:
+    """MACHINE-01: a route reads the admitted caller, whose subject is the token's `sub`."""
     app = a_bearer_app()
 
     response = app.ask(authorization=(line,))
@@ -394,6 +396,30 @@ def test_no_admission_holds_the_token_the_header_or_its_digest_in_a_record_or_an
         response = app.ask(authorization=(line,))
 
     assert_nothing_leaks(secrets_of((line,)), caplog, response)
+
+
+@pytest.mark.parametrize(
+    ("groups", "status"),
+    [
+        pytest.param(["/apps/x/admin"], 200, id="the-admin-group"),
+        pytest.param(["/apps/x", "/apps/x/admin/ops"], 200, id="a-group-below-admin"),
+        pytest.param(["/apps/x/admin/ops/deep"], 200, id="a-group-deep-below-admin"),
+        pytest.param(["/apps/x"], 403, id="the-app-group-alone"),
+        pytest.param(["/apps/x/administrators"], 403, id="a-sibling-of-admin"),
+        pytest.param(["/apps/y/admin"], 403, id="the-admin-group-of-another-app"),
+        pytest.param([], 403, id="no-group"),
+        pytest.param(ABSENT, 403, id="no-groups-claim"),
+    ],
+)
+def test_a_token_passes_with_the_admin_group_or_a_group_below_it_and_with_no_other(
+    groups: Any, status: int
+) -> None:
+    """MACHINE-11: a token passes only if its groups hold the admin group or one below it."""
+    app = a_bearer_app()
+
+    response = app.ask(authorization=bearing(a_token(groups=groups)))
+
+    assert response.status_code == status
 
 
 def test_a_member_without_the_admin_group_is_refused_with_insufficient_scope_only() -> None:
@@ -575,6 +601,7 @@ class TestAGateIsBuiltFromSoundParts:
 
 class TestWithoutAGateTheAdminPathsStayWithTheSession:
     def test_a_token_alone_on_a_get_meets_the_session_gate(self) -> None:
+        """MACHINE-03: without the gate a token admits nothing; a GET meets the session gate."""
         app = a_bearer_app(gated=False)
 
         response = app.ask(authorization=bearing(A_TOKEN))
@@ -585,6 +612,7 @@ class TestWithoutAGateTheAdminPathsStayWithTheSession:
         )
 
     def test_a_token_alone_on_a_delete_meets_the_csrf_origin_check(self) -> None:
+        """MACHINE-03: without the gate a token admits nothing; a DELETE meets the CSRF check."""
         app = a_bearer_app(gated=False)
 
         response = app.ask(method="DELETE", authorization=bearing(A_TOKEN))
@@ -702,8 +730,9 @@ PREFLIGHT = {"origin": "https://evil.test", "access-control-request-method": "DE
 
 
 class TestEveryMethodIsGated:
-    @pytest.mark.parametrize("method", ["HEAD", "OPTIONS"])
+    @pytest.mark.parametrize("method", [*EVERY_METHOD, "OPTIONS"])
     def test_head_and_options_without_a_token_are_refused(self, method: str) -> None:
+        """MACHINE-26: every method is gated, `OPTIONS` included."""
         app = a_bearer_app()
 
         response = app.ask(method=method, headers=PREFLIGHT)
@@ -711,14 +740,24 @@ class TestEveryMethodIsGated:
         assert (response.status_code, response.headers["www-authenticate"]) == (401, REALM)
         assert_answers_no_store(response)
 
-    @pytest.mark.parametrize("method", ["HEAD", "OPTIONS"])
+    @pytest.mark.parametrize(
+        ("method", "status"),
+        [
+            pytest.param("GET", 200, id="GET"),
+            pytest.param("DELETE", 200, id="DELETE"),
+            *(
+                pytest.param(method, 405, id=method)
+                for method in ("POST", "PUT", "PATCH", "HEAD", "OPTIONS")
+            ),
+        ],
+    )
     def test_head_and_options_with_a_token_reach_the_router_that_knows_neither(
-        self,
-        method: str,
+        self, method: str, status: int
     ) -> None:
+        """MACHINE-26: a token opens every method to the router, `OPTIONS` included."""
         app = a_bearer_app()
 
         response = app.ask(method=method, authorization=bearing(A_TOKEN), headers=PREFLIGHT)
 
-        assert response.status_code == 405
+        assert response.status_code == status
         assert_answers_no_store(response)
