@@ -483,6 +483,8 @@ def test_a_marked_route_at_the_entry_point_is_decided_as_the_entry_point() -> No
         pytest.param(MARKED_RESOURCE_PERSON.template, {"method": "GET"}, id="resource-person"),
         pytest.param(MARKED_ADMITTED_USER.template, {"method": "GET"}, id="admitted-user"),
         pytest.param(MARKED_NEW_NOTE.template, {"app": object()}, id="current-user-app"),
+        pytest.param(MARKED_RESOURCE_PERSON.template, {"app": object()}, id="resource-person-app"),
+        pytest.param(MARKED_ADMITTED_USER.template, {"app": object()}, id="admitted-user-app"),
         pytest.param(
             MARKED_RESOURCE_PERSON.template,
             {"headers": [(b"authorization", b"Bearer other")]},
