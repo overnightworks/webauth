@@ -7,7 +7,6 @@ person's caller; every fault of either token yields the first refusal of the doc
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
@@ -25,6 +24,27 @@ from tests.support.oidc_arrangement import (
     an_access_token,
     served_key_set,
 )
+from tests.support.service_caller_arrangement import (
+    CALLEE,
+    CANARIES,
+    CLIENT_CANARY,
+    GROUP_CANARY,
+    PERSON_GROUP_CANARY,
+    PERSON_SUBJECT_CANARY,
+    SECRET_PATH,
+    SUBJECT_CANARY,
+    UNREGISTERED,
+    WORKLOAD_CLIENT,
+    WORKLOAD_ROLE,
+    a_check,
+    a_person_token,
+    a_registry,
+    a_service_identity,
+    a_workload_token,
+    an_app_admission,
+    assert_message_keeps_identity_private,
+    refused,
+)
 from webauth.admission import AdmissionConfig, AppRole, EverySubject, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import RejectionReason
@@ -34,105 +54,7 @@ from webauth.service_callers import (
     PersonCaller,
     Principal,
     RegisteredApp,
-    ServiceCallerCheck,
-    ServiceIdentity,
 )
-
-CALLEE = "speech-runtime"
-WORKLOAD_ROLE = "workload"
-GROUP_CLAIM = "groups"
-WORKLOAD_CLIENT = "notes-workload"
-# Canaries: recognisable text that appears nowhere in the configuration
-SUBJECT_CANARY = "subject-canary-7f3a"
-CLIENT_CANARY = "client-canary-9b1c"
-GROUP_CANARY = "/group-canary-4d2e"
-PERSON_SUBJECT_CANARY = "person-canary-2c8d"
-PERSON_GROUP_CANARY = "/apps/notes/person-group-canary-6a0b"
-CANARIES = (
-    SUBJECT_CANARY,
-    CLIENT_CANARY,
-    GROUP_CANARY,
-    PERSON_SUBJECT_CANARY,
-    PERSON_GROUP_CANARY,
-)
-SECRET_PATH = "/realms/workshop/certs-secret-path-5e6f"
-UNREGISTERED = "unregistered-client"
-
-
-def an_app_admission() -> AdmissionConfig:
-    return AdmissionConfig(
-        bound_issuer=REALM_ISSUER,
-        login_group="/apps/notes",
-        admin_group=NoAdmins.IN_THIS_APP,
-    )
-
-
-def a_service_identity(**changes: Any) -> ServiceIdentity:
-    arguments: dict[str, Any] = {
-        "issuer": REALM_ISSUER,
-        "audience": CALLEE,
-        "jwks_url": REALM_JWKS_URL,
-        "workload_role": WORKLOAD_ROLE,
-        "group_claim": GROUP_CLAIM,
-        "leeway_seconds": ACCESS_TOKEN_LEEWAY_SECONDS,
-    }
-    return ServiceIdentity(**{**arguments, **changes})
-
-
-def a_registry(client: str = WORKLOAD_CLIENT) -> dict[str, RegisteredApp]:
-    return {client: RegisteredApp(app="notes", admission=an_app_admission())}
-
-
-def a_check(
-    *,
-    identity: ServiceIdentity | None = None,
-    registered_apps: Any = None,
-    fetch_key_set: Callable[[str], bytes] | None = None,
-    monotonic_clock: Callable[[], float] | None = None,
-) -> ServiceCallerCheck:
-    return ServiceCallerCheck(
-        identity or a_service_identity(),
-        registered_apps=a_registry() if registered_apps is None else registered_apps,
-        fetch_key_set=fetch_key_set or FakeKeySetEndpoint(served_key_set()),
-        wall_clock=FakeClock(float(ACCESS_TOKEN_NOW)),
-        monotonic_clock=monotonic_clock or FakeClock(5_000.0),
-    )
-
-
-def a_workload_token(**claim_changes: Any) -> str:
-    """The token of `WORKLOAD_CLIENT` for `CALLEE`, as Keycloak signs a client-credentials grant."""
-    claims = {
-        "aud": CALLEE,
-        "azp": WORKLOAD_CLIENT,
-        "client_id": WORKLOAD_CLIENT,
-        "realm_access": {"roles": [WORKLOAD_ROLE]},
-        "sub": SUBJECT_CANARY,
-        **claim_changes,
-    }
-    return an_access_token(claims=claims)
-
-
-def a_person_token(**claim_changes: Any) -> str:
-    """A person's token for `WORKLOAD_CLIENT`: no workload role, no `client_id`."""
-    claims = {
-        "aud": CALLEE,
-        "azp": WORKLOAD_CLIENT,
-        "sub": PERSON_SUBJECT_CANARY,
-        "groups": ["/apps/notes"],
-        **claim_changes,
-    }
-    return an_access_token(claims=claims)
-
-
-def assert_message_keeps_identity_private(error: pytest.ExceptionInfo[ValueError]) -> None:
-    message = str(error.value)
-    leaked = [secret for secret in (REALM_JWKS_URL, SECRET_PATH, *CANARIES) if secret in message]
-    assert leaked == []
-
-
-def refused(outcome: object) -> CallerRefusal:
-    assert isinstance(outcome, CallerRefusal)
-    return outcome
 
 
 def test_a_workload_token_may_name_other_audiences_beside_the_callee() -> None:
