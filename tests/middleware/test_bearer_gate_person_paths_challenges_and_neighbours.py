@@ -77,7 +77,7 @@ def test_a_path_outside_the_person_paths_is_refused_with_its_session_answer_and_
     session_gate: bool,
     path: str,
 ) -> None:
-    """REFUSE-20: a path outside the person paths keeps its session answer, with no challenge."""
+    """REFUSE-20: a path outside the person paths keeps its answers."""
     app = a_person_app(session_gate=session_gate, login_redirect=LOGIN_REDIRECT)
     api_call = {"accept": "application/json"}
     invalid_cookie = {"cookie": f"{app.auth.config.session_cookie_name}=unsigned", **api_call}
