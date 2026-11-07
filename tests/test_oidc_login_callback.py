@@ -32,6 +32,8 @@ from tests.support.oidc_login_host import (
     LOGIN_GROUP,
     NOW,
     SAME_ORIGIN_FORM,
+    START_PATH,
+    SUBJECT,
     OidcHost,
     a_client_config,
     after_signing_in,
@@ -45,6 +47,7 @@ from tests.support.oidc_login_host import (
     stored_refresh_tokens,
 )
 from tests.support.oidc_relying_party import OUTSIDE_THE_REFRESH_TOKEN_GRAMMAR
+from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_IDLE_SECONDS,
@@ -56,8 +59,10 @@ from webauth.cookies import (
     _sign_pending_login,
     _verify_pending_login,
 )
+from webauth.https_client import ExchangeFailure
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
+    TokenEndpointError,
 )
 from webauth.ports import (
     AccountEventKind,
@@ -98,6 +103,24 @@ def test_a_start_sets_one_lax_http_only_pending_cookie_and_answers_the_issuer_ur
             *secure_attribute,
         },
     }
+
+
+def test_a_start_redirects_to_the_issuers_sign_in_page_and_reaches_no_issuer_endpoint() -> None:
+    """APP-24, APP-25: the start route redirects to the issuer's page, asking the issuer nothing."""
+    host = an_oidc_host()
+
+    def unreachable() -> None:
+        raise OSError("the issuer is down")
+
+    host.issuer.before_exchange = unreachable
+    host.key_set.before_answer = unreachable
+
+    response = host.client.get(START_PATH)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(a_client_config().authorization_endpoint + "?")
+    assert host.issuer.requests == []
+    assert host.key_set.fetched_urls == []
 
 
 def test_an_admitted_callback_signs_the_browser_in_with_the_configured_cookies() -> None:
@@ -270,7 +293,7 @@ def _with_an_undecodable_parameter(_host: OidcHost, query: str) -> str:
 _REFUSED_CALLBACKS = [
     pytest.param(
         RefusedCallback("token-request-refused", returned_query=_with_another_code),
-        id="a code the issuer never issued",
+        id="an issuer that refuses the code during the sign-in",
     ),
     pytest.param(
         RefusedCallback("pending-login-expired", returned_query=_after_the_pending_lifetime),
@@ -293,6 +316,10 @@ _REFUSED_CALLBACKS = [
         id="a person whose groups claim is empty",
     ),
     pytest.param(
+        RefusedCallback("not-a-member", groups_claim=ABSENT),
+        id="a person whose groups claim is missing",
+    ),
+    pytest.param(
         RefusedCallback("invalid-identity-claim", groups_claim="/apps/lab"),
         id="a groups claim that is not a list",
     ),
@@ -303,6 +330,7 @@ _REFUSED_CALLBACKS = [
 def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its_cookie(
     refused: RefusedCallback,
 ) -> None:
+    """APP-15, APP-24: a missing groups claim or a failed sign-in stops at the refusal."""
     host = an_oidc_host(groups_claim=refused.groups_claim)
     other_tab = host.sign_in_at_issuer()
     query = host.sign_in_at_issuer()
@@ -315,6 +343,70 @@ def test_a_refused_callback_issues_no_session_leaves_no_account_and_consumes_its
     assert host.accounts.list() == []
     assert is_cleared(response, host.pending_cookie_name(query))
     assert host.pending_cookie_names() == {host.pending_cookie_name(other_tab)}
+
+
+def test_a_callback_with_an_unreachable_issuer_stops_at_the_refusal() -> None:
+    """APP-24: the browser reached the issuer, the app's token exchange cannot."""
+    host = an_oidc_host()
+    query = host.sign_in_at_issuer()
+
+    def unreachable() -> None:
+        raise TokenEndpointError("the issuer is down", ExchangeFailure.UNREACHABLE)
+
+    host.issuer.before_exchange = unreachable
+
+    response = host.callback(query)
+
+    assert (response.status_code, response.json()) == (403, {"refusal": "token-endpoint-failed"})
+    assert host.config.session_cookie_name not in set_cookies(response)
+    assert host.sessions.count_active() == 0
+    assert host.accounts.list() == []
+    assert is_cleared(response, host.pending_cookie_name(query))
+
+
+def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() -> None:
+    """APP-07: a person removed from the group is refused at login, yet an open session works."""
+    groups = [LOGIN_GROUP]
+    host = an_oidc_host(groups_claim=groups)
+    host.callback(host.sign_in_at_issuer())
+    session_cookie = host.client.cookies[host.config.session_cookie_name]
+
+    groups[:] = []
+    host.client.cookies.clear()
+    assert host.callback(host.sign_in_at_issuer()).status_code == 403
+    host.client.cookies.set(host.config.session_cookie_name, session_cookie)
+
+    assert host.client.get("/me").status_code == 200
+
+
+def test_a_callback_signs_in_a_person_whose_stored_account_is_marked_disabled() -> None:
+    """APP-21: sign-in reads no local active-user flag."""
+    host = an_oidc_host(DisabledUser(id=SUBJECT, username="lena"))
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert (response.status_code, response.headers["location"]) == (303, "/")
+    assert host.client.get("/me").json() == {"username": "lena"}
+    assert host.audit.account_events == []
+
+
+def test_a_signed_in_person_keeps_working_while_the_issuer_is_unreachable() -> None:
+    """APP-23: an open session is admitted from the app's own store, asking the issuer nothing."""
+    host = after_signing_in(an_oidc_host())
+
+    def unreachable() -> None:
+        raise OSError("the issuer is down")
+
+    host.issuer.before_exchange = unreachable
+    host.key_set.before_answer = unreachable
+    exchanges_before = len(host.issuer.requests)
+    fetches_before = len(host.key_set.fetched_urls)
+
+    response = host.client.get("/me")
+
+    assert response.status_code == 200
+    assert len(host.issuer.requests) == exchanges_before
+    assert len(host.key_set.fetched_urls) == fetches_before
 
 
 def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
@@ -354,6 +446,7 @@ def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
     status_before: int,
     status_after: int,
 ) -> None:
+    """APP-08: a role changed at login reaches the person's other open session."""
     groups = list(before)
     host = an_oidc_host(groups_claim=groups)
     host.callback(host.sign_in_at_issuer())

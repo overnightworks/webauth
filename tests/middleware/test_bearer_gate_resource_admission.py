@@ -38,6 +38,7 @@ from tests.support.oidc_arrangement import (
     OPERATOR_SUBJECT,
 )
 from tests.support.oidc_login_host import StoreDown, failing
+from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
     BearerGateMiddleware,
@@ -102,10 +103,27 @@ def test_a_subgroup_of_the_required_group_counts_and_an_admin_group_adds_nothing
     assert (response.status_code, response.json()["role"]) == (200, MEMBER_ROLE)
 
 
+def test_a_token_of_a_person_whose_stored_account_is_marked_disabled_is_still_admitted(
+    resource: ProtectedResource,
+) -> None:
+    """APP-21: resource admission reads no local active-user flag."""
+    app = a_bearer_app(
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=(DisabledUser(id=OPERATOR_SUBJECT, username="lena"),),
+    )
+
+    response = app.ask(resource.entry_point, authorization=bearing(an_agent_token(resource)))
+
+    assert response.status_code == 200
+    assert response.json() == {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE}
+
+
 def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
     resource: ProtectedResource,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """APP-13: resource admission rewrites no role and writes no audit event."""
     app = a_bearer_app(
         paths=PathRules(),
         resource=resource,

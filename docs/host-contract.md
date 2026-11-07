@@ -5,8 +5,8 @@ For a host developer: what a host sees from webauth and what it must provide.
 A rule webauth promises opens with its ID, such as **CSRF-01**, and a test that
 proves it names the ID at the start of its docstring. A test under `tests/e2e/`
 runs by hand against a real Keycloak, not in CI. A paragraph or bullet that opens
-with **Host duty:** says what the host must do and prove itself. A section without
-IDs still names its proofs in its own lines.
+with **Host duty:** says what the host must do and prove itself. A sentence with
+neither an ID nor a label explains. A section without IDs still names its proofs in its own lines.
 
 ## Trusted proxies
 
@@ -35,94 +35,107 @@ IDs still names its proofs in its own lines.
 
 ## What every app gets
 
-The operator ruled the passages that open "Admission never looks up a username" and "The page sends the client ID"; no other sentence of this section is ruled, and proof lines are not rulings.
+The operator ruled APP-20, APP-21, APP-22, APP-34, APP-35, APP-36 and APP-37; no other sentence of this section is ruled.
 
-Every app that signs people in through Keycloak behaves the same way, unless it
-configures `EverySubject` to require no login group or `NoAdmins` to grant no
-admin role. The details are in the sections below.
+Every app that signs people in through Keycloak behaves the same way, except for the
+two values below. The details are in the sections that follow.
 
-**Who gets in.** Only members of the app's `login_group`, such as
-`/apps/notes`, get in. Members of its `admin_group`, a path below it such as
-`/apps/notes/admin`, are admins. An `AdmissionConfig` binds the issuer whose
-groups count, and only that issuer's groups decide the role. Membership and role
-are decided again at every login, so a change in Keycloak takes effect at the person's next
-sign-in; an app session that is already open keeps its access until it ends; a
-changed admin role, which lives on the account, reaches every open session at
-the person's next sign-in. The session's absolute cap bounds the delay before a
-login-group removal takes effect. The issuer's SSO session makes a fresh login a
-redirect the person does not notice; an immediate removal requires disabling the
-user at the issuer together with
+- **APP-01** An app that configures `EverySubject` requires no login group.
+- **APP-02** An app that configures `NoAdmins` grants no admin role.
+- **APP-03** Only members of the app's `login_group`, such as `/apps/notes`, get in.
+- **APP-04** Members of its `admin_group`, a path below it such as
+  `/apps/notes/admin`, are admins.
+- **APP-05** An `AdmissionConfig` binds the issuer whose groups count, and only that
+  issuer's groups decide the role.
+- **APP-06** Membership and role are decided again at every login, so a change in
+  Keycloak takes effect at the person's next sign-in.
+- **APP-07** An app session that is already open keeps its access until it ends.
+- **APP-08** A changed admin role, which lives on the account, reaches every open
+  session at the person's next sign-in.
+- **APP-09** The session's absolute cap bounds the delay before a login-group removal
+  takes effect.
+
+The issuer's SSO session makes a fresh login a redirect the person does not notice;
+an immediate removal requires disabling the user at the issuer together with
 [back-channel logout](ARCHITECTURE.md#back-channel-logout). See
 [Admitting an identity](ARCHITECTURE.md#admitting-an-identity).
 
-The stored role is a plain string. webauth writes `"admin"` for an admin and
-`"user"` for every other member, and the host's store keeps them. The admin
-checks admit exactly `"admin"`. Only a Breaking release that names the migration
-of stored accounts changes these values. `NoAdmins` demotes a stored admin to
-`"user"` at its next sign-in or person-token admission. Resource admission
-rewrites no role.
+- **APP-10** The stored role is a plain string: webauth writes `"admin"` for an admin
+  and `"user"` for every other member.
+- **APP-11** The admin checks admit exactly `"admin"`.
+- **APP-12** `NoAdmins` demotes a stored admin to `"user"` at its next sign-in or
+  person-token admission.
+- **APP-13** Resource admission rewrites no role.
 
-A person is a member when one of their groups is the group's path or a subgroup of
-it, compared character for character and by path segment, so `/apps/notes/admin`
-counts for `/apps/notes` and `/apps/notes2` does not. The groups claim must carry
-full paths (Keycloak's group mapper with `full.path` on); a missing or empty claim
-means no membership. The check runs before any account is looked up or created, so
-a person removed from the group is refused at their next login while their account
-and data stay, and a person put back returns to the same account. `app_role` is
-that rule's public form in `webauth.admission`, for a second service that verifies the issuer's token
-itself.
+The host's store keeps the stored roles. Only a Breaking release that names the
+migration of stored accounts changes these values.
 
-Admission never looks up a username and has no local active-user flag; disabling
-people belongs to the issuer. A host store may still reject a new account's name
-with `UsernameTakenError`. Store-controlled username uniqueness is proven by
-`test_a_store_without_unique_usernames_admits_two_subjects_sharing_one` and
-`test_a_username_the_store_refuses_on_create_is_taken_and_nothing_is_written`
-in [test_oidc_login_admission.py](../tests/test_oidc_login_admission.py). The absence of a local
-active-user policy is visible in `UserRecord` and `SubjectUserStore` in
-[ports.py](../src/webauth/ports.py), the admission steps in
-[oidc_login.py](../src/webauth/oidc_login.py) and `admit_session` in
-[dependencies.py](../src/webauth/dependencies.py).
+- **APP-14** A person is a member when one of their groups is the group's path or a
+  subgroup of it, compared character for character and by path segment, so
+  `/apps/notes/admin` counts for `/apps/notes` and `/apps/notes2` does not.
+- **Host duty:** switch Keycloak's group mapper to `full.path` on, because the groups
+  claim must carry full paths.
+- **APP-15** A missing or empty groups claim means no membership.
+- **APP-16** The membership check runs before any account is looked up or created.
+- **APP-17** A person removed from the group is refused at their next login while their
+  account and data stay.
+- **APP-18** A person put back into the group returns to the same account.
+- **APP-19** `app_role` in `webauth.admission` is the membership rule's public form, for
+  a second service that verifies the issuer's token itself.
 
-**When Keycloak is down.** People who are already signed in keep working until
-their app session ends, because the app checks a session in its own store and
-never asks Keycloak. A new sign-in fails at Keycloak: the app sends the browser
-to Keycloak's sign-in page, which does not load, so the person sees the
-browser's or the proxy's error page, not the app's. Only when Keycloak fails
-during the sign-in, or the browser reaches Keycloak but the app does not, does
-the sign-in stop at the app's callback, on the host's refusal page. webauth
-offers no local fallback login. See
+- **APP-20** Admission never looks up a username.
+- **APP-21** Admission has no local active-user flag; disabling people belongs to the
+  issuer.
+- **APP-22** A host store may still reject a new account's name with `UsernameTakenError`.
+
+- **APP-23** People who are already signed in keep working until their app session
+  ends, because the app checks a session in its own store and never asks Keycloak.
+- **APP-24** Only when Keycloak fails during the sign-in, or the browser reaches
+  Keycloak but the app does not, does the sign-in stop at the app's callback, on the
+  host's refusal page.
+
+When Keycloak is down, a new sign-in fails at Keycloak, not at the app.
+
+- **APP-25** The sign-in route answers with a redirect to the issuer's sign-in page and
+  reaches no issuer endpoint first.
+
+That page does not load, so the person sees the browser's or the proxy's error page, not
+the app's. webauth offers no local fallback login. See
 [The store decides every request](ARCHITECTURE.md#the-store-decides-every-request).
 
-**Machine callers and the person's token.** See [The host's machine routes](#the-hosts-machine-routes)
+For the machine callers and the person's token, see
+[The host's machine routes](#the-hosts-machine-routes)
 and [The person's token on the app's API](#the-persons-token-on-the-apps-api).
 
-**Signing out.** Signing out of an app ends its session in that browser at once
-and shows a short page that posts to Keycloak, which ends the person's Keycloak session in
-that browser without asking anything. Keycloak then tells each app the
-person signed in to through that Keycloak session, and each of those apps ends
-all of the person's sessions, on every device. An app they used only on another
-device is not told and keeps them signed in there. On their other devices, the
-next sign-in asks for no password while that device's own Keycloak session
-lasts. The logout page is `no-store`, clears the app's cookies and submits itself;
-where scripts cannot run, it shows one button. If Keycloak is down, the person
-still leaves the app signed out.
+- **APP-26** Signing out of an app ends its session in that browser at once.
+- **APP-27** Signing out shows a short page that posts to Keycloak.
+- **APP-28** Posting that page to Keycloak ends the person's Keycloak session in that
+  browser without asking anything.
+- **APP-29** Each app that Keycloak tells ends all of the person's sessions, on every
+  device.
+- **APP-30** The logout page is `no-store`.
+- **APP-31** The logout page clears the app's cookies.
+- **APP-32** The logout page submits itself; where scripts cannot run, it shows one
+  button.
+- **APP-33** If Keycloak is down, the person still leaves the app signed out.
 
-The page sends the client ID, `post_logout_redirect_uri` and the stored ID token
-as `id_token_hint` by POST to Keycloak's end-session endpoint; no URL carries
-the token. Without the session's row
-(ended by the host, swept, pruned or ended by back-channel logout), or with a row
-that holds no ID token (stored before the host held them or opened with
-`keeps_id_token=False`), it sends no hint, and Keycloak asks once to confirm
-while its own session lives. If the realm key that signed a supplied token has
-been deleted since, Keycloak shows an error page instead. See
+Keycloak tells each app the person signed in to through that Keycloak session. An app
+they used only on another device is not told and keeps them signed in there. On their
+other devices, the next sign-in asks for no password while that device's own Keycloak
+session lasts.
+
+- **APP-34** The page sends the client ID, `post_logout_redirect_uri` and the stored ID
+  token as `id_token_hint` by POST to Keycloak's end-session endpoint.
+- **APP-35** No URL carries the token.
+- **APP-36** Without the session's row (ended by the host, swept, pruned or ended by
+  back-channel logout), or with a row that holds no ID token (stored before the host
+  held them or opened with `keeps_id_token=False`), the page sends no hint.
+- **APP-37** Without a hint, Keycloak asks once to confirm while its own session lives.
+
+If the realm key that signed a supplied token has been deleted since, Keycloak shows
+an error page instead. See
 [Logging out and the ID token hint](ARCHITECTURE.md#logging-out-and-the-id-token-hint)
-for the mechanism and its trust boundaries. `test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint`
-and `test_a_same_origin_logout_still_answers_the_page` in
-[test_oidc_login_logout.py](../tests/test_oidc_login_logout.py) prove the response shape,
-including a missing hint. Browser behavior is driven by `logout` and
-`logout_after_the_app_session_ended` in [prove.py](../tests/e2e/oidc/prove.py) and
-`logout_through_the_page` in [engines.py](../tests/e2e/oidc/engines.py).
-These are hand-run browser proofs, not CI tests.
+for the mechanism and its trust boundaries.
 
 ## Where the host's own middleware goes
 

@@ -523,6 +523,7 @@ def the_logout_policy_of(page: HttpxResponse) -> str:
 def test_the_logout_page_keeps_its_policy_and_no_store_and_gets_the_other_headers(
     cookie_secure: bool,
 ) -> None:
+    """APP-30: the logout page is no-store."""
     page = the_logout_page(cookie_secure=cookie_secure)
 
     assert page.headers["cache-control"] == "no-store"

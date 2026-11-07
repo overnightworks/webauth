@@ -60,6 +60,7 @@ def content_security_policy_of(response: HttpxResponse) -> dict[str, list[str]]:
 
 
 def test_the_logout_page_posts_the_client_and_the_hint_to_the_end_session_endpoint() -> None:
+    """APP-27, APP-34, APP-35: the page posts client, redirect and hint to the end-session URL."""
     host = after_signing_in(an_oidc_host())
 
     response = post_logout(host, SAME_ORIGIN_FORM)
@@ -138,6 +139,7 @@ def the_session_cookie_is_cleared(host: OidcHost, response: HttpxResponse) -> bo
 
 
 def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings() -> None:
+    """APP-26, APP-31, APP-35: a logout ends the row, clears the cookie, leaks no token."""
     host = after_signing_in(an_oidc_host())
     record = host.sessions.stored_record
     record.id_token = SecretStr(a_fake_id_token("held-by-the-row"))
@@ -159,6 +161,10 @@ def test_the_answer_carries_the_rows_token_ends_the_row_and_sets_only_clearings(
 
 
 def _no_session(_host: OidcHost) -> dict[str, str]:
+    return {}
+
+
+def _session_as_opened(_host: OidcHost) -> dict[str, str]:
     return {}
 
 
@@ -192,14 +198,23 @@ def _row_stored_before_the_upgrade(host: OidcHost) -> dict[str, str]:
 
 
 @pytest.mark.parametrize(
-    ("arrange", "sessions_kept", "hint_sent", "entered"),
+    ("arrange", "sessions_kept", "hint_sent", "entered", "keeps_id_token"),
     [
-        pytest.param(_no_session, 0, False, False, id="no-session"),
-        pytest.param(_forged_session_cookie, 1, False, False, id="forged-cookie-ends-nothing"),
-        pytest.param(_session_cookie_dropped, 1, False, False, id="session-cookie-gone"),
-        pytest.param(_session_ended_in_the_store, 0, False, True, id="session-already-ended"),
-        pytest.param(_session_expired_but_stored, 0, True, True, id="session-expired-but-stored"),
-        pytest.param(_row_stored_before_the_upgrade, 0, False, True, id="stored-before-upgrade"),
+        pytest.param(_no_session, 0, False, False, True, id="no-session"),
+        pytest.param(
+            _forged_session_cookie, 1, False, False, True, id="forged-cookie-ends-nothing"
+        ),
+        pytest.param(_session_cookie_dropped, 1, False, False, True, id="session-cookie-gone"),
+        pytest.param(_session_ended_in_the_store, 0, False, True, True, id="session-already-ended"),
+        pytest.param(
+            _session_expired_but_stored, 0, True, True, True, id="session-expired-but-stored"
+        ),
+        pytest.param(
+            _row_stored_before_the_upgrade, 0, False, True, True, id="stored-before-upgrade"
+        ),
+        pytest.param(
+            _session_as_opened, 0, False, True, False, id="opened-without-keeping-the-id-token"
+        ),
     ],
 )
 def test_a_same_origin_logout_still_answers_the_page(
@@ -208,8 +223,10 @@ def test_a_same_origin_logout_still_answers_the_page(
     *,
     hint_sent: bool,
     entered: bool,
+    keeps_id_token: bool,
 ) -> None:
-    host = an_oidc_host()
+    """APP-36: a logout without a row or without an ID token answers the page with no hint."""
+    host = an_oidc_host(keeps_id_token=keeps_id_token)
     if arrange is not _no_session:
         host.callback(host.sign_in_at_issuer())
     extra_headers = arrange(host)
@@ -245,6 +262,7 @@ def test_a_cross_site_logout_is_refused_and_ends_nothing(headers: dict[str, str]
 
 
 def test_a_logout_reaches_no_issuer_endpoint() -> None:
+    """APP-33: a logout with the issuer down still ends the session and answers the page."""
     host = after_signing_in(an_oidc_host())
     exchanges_before = len(host.issuer.requests)
     fetches_before = len(host.key_set.fetched_urls)
@@ -264,6 +282,7 @@ def test_a_logout_reaches_no_issuer_endpoint() -> None:
 
 
 def test_the_logout_form_carries_the_configured_values_whatever_the_request_names() -> None:
+    """APP-34: the form carries the configured client and redirect, whatever the request names."""
     host = after_signing_in(an_oidc_host())
     query = urllib.parse.urlencode(
         {

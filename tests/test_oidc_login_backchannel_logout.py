@@ -137,6 +137,7 @@ def sessions_of(host: OidcHost, user_id: str) -> int:
 
 
 def test_a_valid_logout_token_ends_every_session_of_its_subject_and_keeps_anothers() -> None:
+    """APP-29: a valid logout token ends every session of its subject."""
     host = a_host_with_sessions(subject_sessions=3, other_sessions=2)
 
     response = post_logout_token(host, a_logout_token_of_the_issuer())

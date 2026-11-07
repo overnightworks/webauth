@@ -718,6 +718,7 @@ def session_cookie_after_redirect(
 
 
 def logout(proof: Proof, width: Width) -> str:
+    """APP-26, APP-28, APP-31, APP-34: logout ends the session and clears cookies, no prompt."""
     scenario = f"2-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
@@ -759,12 +760,11 @@ def logout(proof: Proof, width: Width) -> str:
 
 
 def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
+    """APP-36, APP-37: with the app session gone the logout sends no hint and Keycloak asks."""
     scenario = f"9-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
-        proof.sign_in(page, scenario)
-        page.goto(f"{APP_ORIGIN}/")
-        assert proof.headline(page) == f"Signed in as {USER_NAME}"
+        signed_in(proof, page, scenario)
         proof.reset_host()
         assert proof.host_state()["sessions"] == 0, "the host still holds a session"
         end_session_request = log_out_through_keycloak(

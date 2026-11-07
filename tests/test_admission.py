@@ -12,6 +12,7 @@ from tests.support.oidc_login_host import (
     EVERYONE_WITH_ADMIN_GROUP,
     LOGIN_GROUP,
     NO_ADMINS,
+    an_oidc_host,
 )
 from webauth.admission import AdmissionConfig, AppRole, EverySubject, NoAdmins, app_role
 
@@ -161,4 +162,14 @@ def test_app_role_names_the_role_the_groups_carry(
     admission: AdmissionConfig,
     role: AppRole | None,
 ) -> None:
-    assert app_role(groups, admission) is role
+    """APP-19: app_role is the role sign-in admission stores, and refuses where sign-in refuses."""
+    derived = app_role(groups, admission)
+    host = an_oidc_host(groups_claim=list(groups), admission=admission)
+
+    response = host.callback(host.sign_in_at_issuer())
+
+    assert derived is role
+    assert [account.role for account in host.accounts.list()] == (
+        [] if derived is None else [derived.value]
+    )
+    assert (response.status_code == 303) is (derived is not None)

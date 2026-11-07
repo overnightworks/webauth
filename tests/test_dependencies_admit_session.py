@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
@@ -68,6 +69,16 @@ def test_a_session_inside_its_lifetime_returns_its_account_and_is_renewed() -> N
         role=record.user.role,
     )
     assert record.expires_at == FIXED_INSTANT + IDLE
+
+
+def test_a_session_of_an_account_marked_disabled_is_still_admitted() -> None:
+    """APP-21: session admission reads no local active-user flag."""
+    user = DisabledUser(id="user-1", username="lena")
+    record = a_session(now=FIXED_INSTANT, user=user)
+
+    outcome = admit(record.id, SessionRecordsInMemory(record))
+
+    assert outcome == AuthenticatedUser(id=user.id, username=user.username, role=user.role)
 
 
 @pytest.mark.parametrize(
@@ -147,6 +158,7 @@ def test_a_session_is_admitted_inside_its_lifetime_and_renewed_no_further_than_i
     renewed_to: timedelta | None,
     stored_as: Callable[[datetime], datetime],
 ) -> None:
+    """APP-09: a session is renewed no further than its absolute cap."""
     record = a_session(now=FIXED_INSTANT, age=age, remaining=remaining)
     record.created_at = stored_as(record.created_at)
     record.expires_at = stored_as(record.expires_at)
