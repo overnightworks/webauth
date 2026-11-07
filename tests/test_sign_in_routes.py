@@ -561,6 +561,23 @@ def test_two_concurrent_callbacks_exchange_outside_the_transaction_and_keep_the_
     assert host.sessions.count_active() == 1
 
 
+def test_each_login_the_start_route_begins_holds_a_signed_pending_cookie_of_its_own() -> None:
+    """SIGNIN-17: every start sets one pending cookie under a name of its own, and a callback
+    carrying that cookie tampered with is refused."""
+    host = an_oidc_host()
+    first, second = host.sign_in_at_issuer(), host.sign_in_at_issuer()
+    pending = host.pending_cookie(first)
+    tampered = pending[:-1] + ("0" if pending[-1] != "0" else "1")
+
+    names = host.pending_cookie_names()
+
+    refused = host.callback(first, cookie=tampered)
+
+    assert names == {host.pending_cookie_name(first), host.pending_cookie_name(second)}
+    assert len(host.refusals) == 1
+    assert host.config.session_cookie_name not in set_cookies(refused)
+
+
 def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_exit() -> None:
     """SIGNIN-18: the callback enters the transaction once and reads no record after its exit."""
     host = an_oidc_host(BYSTANDER, strict_records=True)

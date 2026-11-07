@@ -367,8 +367,8 @@ def test_a_failure_in_the_logout_answers_500_with_no_page_and_clears_no_cookie(
 
 
 def test_a_failing_commit_in_the_logout_leaves_the_session_for_a_retry_with_its_hint() -> None:
-    """SIGNIN-33, SIGNIN-37, SIGNIN-39: a failing exit answers a plain 500; a rolling-back host
-    keeps the session and a retry ends it with its hint."""
+    """SIGNIN-33, SIGNIN-37, SIGNIN-39: a failing exit answers a plain 500 and a rolling-back host
+    keeps the session, so the route committed nothing; a retry ends it with its hint."""
     host = after_signing_in(an_oidc_host(transaction_kind=TransactionKind.ROLLING_BACK))
     host.sessions.commit_failure = StoreDown()
 
@@ -395,7 +395,7 @@ def test_a_failing_entry_into_the_logout_transaction_answers_a_plain_500_and_end
 
 def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_the_hint() -> None:
     """SIGNIN-37, SIGNIN-40: a failing exit answers a plain 500; the row may be gone and a retry
-    answers the page without the hint."""
+    answers the page that posts to the issuer's end-session endpoint without the hint."""
     host = after_signing_in(an_oidc_host())
     host.transaction.exit_failure = StoreDown()
 
@@ -406,6 +406,9 @@ def test_an_uncertain_exit_that_ended_the_row_leaves_a_retry_the_page_without_th
     host.transaction.exit_failure = None
     retry = post_logout(host, SAME_ORIGIN_FORM)
     assert retry.status_code == 200
+    assert LogoutPage(retry.text).attributes_of("form") == [
+        {"method": "post", "action": END_SESSION_ENDPOINT}
+    ]
     assert hint_of(retry) is None
 
 

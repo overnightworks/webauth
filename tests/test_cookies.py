@@ -165,7 +165,7 @@ def test_a_pending_login_cookie_is_named_after_a_digest_of_its_state(
 
 
 def test_each_login_holds_a_signed_pending_cookie_of_its_own() -> None:
-    """SIGNIN-17: each login has its own cookie name and a tampered cookie does not verify."""
+    """Each login has its own cookie name and a tampered cookie does not verify."""
     other = dataclasses.replace(_PENDING, state="another-state")
     signed = _sign_pending_login(_PENDING, _TEST_SECRET)
     tampered = signed[:-1] + ("0" if signed[-1] != "0" else "1")
