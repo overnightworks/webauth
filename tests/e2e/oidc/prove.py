@@ -764,9 +764,7 @@ def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
     scenario = f"9-{width.label}"
     proof.reset_host()
     with proof.browsing(width) as page:
-        proof.sign_in(page, scenario)
-        page.goto(f"{APP_ORIGIN}/")
-        assert proof.headline(page) == f"Signed in as {USER_NAME}"
+        signed_in(proof, page, scenario)
         proof.reset_host()
         assert proof.host_state()["sessions"] == 0, "the host still holds a session"
         end_session_request = log_out_through_keycloak(
