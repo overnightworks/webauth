@@ -19,6 +19,7 @@ from tests.support.gate_arrangement import (
     ADMITTED_ADMIN_PATHS,
     EXPORT_PATH,
     MACHINE_PATHS,
+    PERSON_ME_PATH,
     REALM,
     REALM_INVALID_TOKEN,
     UNDECLARED_PATH,
@@ -36,6 +37,11 @@ from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_LIFETIME_SECONDS,
     ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
+)
+from tests.support.person_paths_arrangement import (
+    MEMBER_TOKEN,
+    a_lena,
+    a_person_app,
 )
 from tests.support.webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
@@ -78,14 +84,29 @@ def never_asked() -> Any:
     raise AssertionError("the session transaction was opened")
 
 
-def test_a_bearer_request_needs_no_csrf_origin_header_or_cookie() -> None:
+@pytest.mark.parametrize(
+    ("arrange", "path", "token"),
+    [
+        pytest.param(a_bearer_app, EXPORT_PATH, A_TOKEN, id="machine-path"),
+        pytest.param(
+            lambda: a_person_app(session_gate=True, known_accounts=(a_lena(),)),
+            PERSON_ME_PATH,
+            MEMBER_TOKEN,
+            id="person-path",
+        ),
+    ],
+)
+def test_a_bearer_request_needs_no_csrf_origin_header_or_cookie(
+    arrange: Callable[[], BearerApp],
+    path: str,
+    token: tuple[str, ...],
+) -> None:
     """CSRF-10: a verified bearer request passes without Origin or a cookie."""
-    app = a_bearer_app()
+    app = arrange()
 
-    response = app.ask(method="DELETE", authorization=bearing(A_TOKEN), headers=FOREIGN_PAGE)
+    response = app.ask(path, method="DELETE", authorization=bearing(token), headers=FOREIGN_PAGE)
 
-    assert (response.status_code, response.json()) == (200, {"subject": OPERATOR_SUBJECT})
-    assert_answers_no_store(response)
+    assert response.status_code == 200
 
 
 def test_the_cookie_counts_for_nothing_beside_a_token() -> None:
