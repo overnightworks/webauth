@@ -51,6 +51,7 @@ from webauth.dependencies import (
 )
 from webauth.middleware import (
     BearerGate,
+    BearerGateMiddleware,
     MachinePaths,
     MarkedRoute,
     PersonPaths,
@@ -772,3 +773,9 @@ def answering_a_runtime_error_with_418(app: BearerApp) -> None:
         return JSONResponse({"detail": "refused"}, status_code=REFUSED_AS_RUNTIME_ERROR)
 
     app.auth.app.add_exception_handler(RuntimeError, answer)
+
+
+def between_the_bearer_gate_and_csrf(app: BearerApp, rewriting: Middleware) -> None:
+    stack = app.auth.app.user_middleware
+    gate = next(at for at, entry in enumerate(stack) if entry.cls is BearerGateMiddleware)
+    stack.insert(gate + 1, rewriting)
