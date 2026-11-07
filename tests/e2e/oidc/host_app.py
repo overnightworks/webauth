@@ -126,6 +126,7 @@ PERSON_ROUTES_PREFIX = "/api/"
 RESOURCE_PATH = "/mcp"
 RESOURCE_SCOPE = "mcp:tools"
 RESOURCE_GROUP_NAME = "mcp"
+AGENT_GROUP = "/agents"
 MARKED_ROUTES = (
     MarkedRoute("GET", "/notes/{note}"),
     MarkedRoute("POST", "/notes"),
@@ -453,6 +454,7 @@ def _resource_of(settings: HostSettings, transaction: SignInTransaction) -> Prot
         f"{origin}{RESOURCE_PATH}",
         RESOURCE_SCOPE,
         f"{settings.login_group}/{RESOURCE_GROUP_NAME}",
+        AGENT_GROUP,
         AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
         transaction,
         frozenset(MARKED_ROUTES),

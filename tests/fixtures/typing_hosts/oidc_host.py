@@ -390,6 +390,7 @@ def a_host_declares_its_resource(
             "https://app.example/mcp",
             "mcp:tools",
             "/apps/host/mcp",
+            "/agents",
             AuthorizedParties(frozenset({"agent"})),
             transaction,
             marked_routes=frozenset({MarkedRoute("GET", "/notes/{note}")}),

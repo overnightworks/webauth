@@ -219,6 +219,7 @@ class ProtectedResource:
     url: str
     scope: str
     required_group: str
+    agent_group: str
     authorized_parties: AuthorizedParties
     transaction: SignInTransaction
     marked_routes: frozenset[MarkedRoute] = frozenset()
@@ -230,6 +231,7 @@ class ProtectedResource:
         ):
             raise TypeError("ProtectedResource.marked_routes must be a frozenset of MarkedRoute")
         _require_group_path("ProtectedResource.required_group", self.required_group)
+        _require_group_path("ProtectedResource.agent_group", self.agent_group)
         if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
             raise ValueError(
                 "ProtectedResource.url must be an endpoint URL with a plain host and a path"

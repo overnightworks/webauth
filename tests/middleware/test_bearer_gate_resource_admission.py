@@ -453,3 +453,14 @@ def test_a_required_group_that_is_not_a_group_path_is_refused(group: str) -> Non
     """RESOURCE-05: a `required_group` that is not a group path is a `ValueError`."""
     with pytest.raises(ValueError, match="required_group"):
         a_resource(required_group=group)
+
+
+@pytest.mark.parametrize(
+    "group",
+    ["", "agents", "/", "/agents//x", "/agents ", "/a\u200bb"],
+)
+def test_an_agent_group_that_is_not_a_group_path_is_refused(group: str) -> None:
+    """RESOURCE-05: an `agent_group` that is not a group path is a `ValueError`, as a
+    `required_group` is."""
+    with pytest.raises(ValueError, match="agent_group"):
+        a_resource(agent_group=group)

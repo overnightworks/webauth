@@ -99,6 +99,7 @@ HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
 RESOURCE_URL = "https://app.example/mcp"
 RESOURCE_SCOPE = "mcp:tools"
 RESOURCE_GROUP = "/apps/x/mcp"
+AGENT_GROUP = "/agents"
 EVERY_METHOD = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")
 MARKED_NOTE = MarkedRoute("GET", "/notes/{note}")
 MARKED_NEW_NOTE = MarkedRoute("POST", "/notes")
@@ -152,6 +153,7 @@ def a_resource(
     url: str = RESOURCE_URL,
     parties: AuthorizedParties = HAL_ONLY,
     required_group: str = RESOURCE_GROUP,
+    agent_group: str = AGENT_GROUP,
     transaction: SignInTransaction = an_unbound_transaction,
     marked_routes: frozenset[MarkedRoute] = frozenset(),
 ) -> ProtectedResource:
@@ -160,6 +162,7 @@ def a_resource(
         url,
         RESOURCE_SCOPE,
         required_group,
+        agent_group,
         parties,
         transaction,
         marked_routes,

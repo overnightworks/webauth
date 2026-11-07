@@ -485,7 +485,7 @@ it as `BearerGate(resource=...)`.
   being `.` or `..`, with no trailing slash; its path is the entry point. Any other `url` is a `ValueError`.
 - **RESOURCE-03** `scope` is one scope token, else `ValueError`.
 - **RESOURCE-04** `authorized_parties` is an `AuthorizedParties`, else `TypeError`.
-- **RESOURCE-05** `required_group` is a group path, else `ValueError`.
+- **RESOURCE-05** `required_group` and `agent_group` are group paths, else `ValueError`.
 - `scope` is the scope the challenge asks for and a token must hold. `authorized_parties` are the clients whose token
   the resource takes, apart from the parties of the machine and person paths. `required_group` is the group a person
   must hold in the token, or one below it, besides the admission's login group.
