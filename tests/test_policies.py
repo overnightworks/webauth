@@ -437,6 +437,7 @@ THE_DEFAULT_POLICY = (
     "font-src 'self'; "
     "manifest-src 'self'; "
     "worker-src 'self'; "
+    "frame-src 'none'; "
     "frame-ancestors 'none'; "
     "form-action 'self'"
 )
@@ -636,6 +637,45 @@ class TestDefaultContentSecurityPolicy:
     @pytest.mark.parametrize(
         ("added", "expected"),
         [
+            pytest.param(
+                ["https://skat.example.test"],
+                "https://skat.example.test",
+                id="one-origin",
+            ),
+            pytest.param(
+                ["'self'", "https://a.example.test", "'self'"],
+                "'self' https://a.example.test",
+                id="order-kept-duplicates-once",
+            ),
+        ],
+    )
+    def test_a_framed_origin_replaces_none_in_frame_src(
+        self,
+        added: list[str],
+        expected: str,
+    ) -> None:
+        policy = default_content_security_policy(
+            added_sources={CspDirective.FRAME_SRC: added},
+        )
+
+        assert policy == THE_DEFAULT_POLICY.replace("frame-src 'none'", f"frame-src {expected}")
+
+    def test_frame_src_and_frame_ancestors_each_replace_only_their_own_none(self) -> None:
+        policy = default_content_security_policy(
+            added_sources={
+                CspDirective.FRAME_ANCESTORS: ["https://parent.example.test"],
+                CspDirective.FRAME_SRC: ["https://child.example.test"],
+            },
+        )
+
+        assert policy == THE_DEFAULT_POLICY.replace(
+            "frame-src 'none'",
+            "frame-src https://child.example.test",
+        ).replace("frame-ancestors 'none'", "frame-ancestors https://parent.example.test")
+
+    @pytest.mark.parametrize(
+        ("added", "expected"),
+        [
             (["https://id.example.test"], "'self' https://id.example.test"),
             (["https:"], "'self' https:"),
             (["'self'"], "'self'"),
@@ -728,6 +768,11 @@ class TestDefaultContentSecurityPolicy:
         [
             pytest.param(styled("'unsafe-inline'"), "style-src", id="str"),
             pytest.param(styled(""), "style-src", id="empty-str"),
+            pytest.param(
+                {"added_sources": {CspDirective.FRAME_SRC: "https://a.example.test"}},
+                "frame-src",
+                id="frame-src-str",
+            ),
             pytest.param({"script_hashes": "sha256-abc"}, "script-src", id="hashes-str"),
         ],
     )

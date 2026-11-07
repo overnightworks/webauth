@@ -316,6 +316,7 @@ class CspDirective(StrEnum):
     FONT_SRC = "font-src"
     MANIFEST_SRC = "manifest-src"
     WORKER_SRC = "worker-src"
+    FRAME_SRC = "frame-src"
     FRAME_ANCESTORS = "frame-ancestors"
     FORM_ACTION = "form-action"
 
@@ -332,6 +333,7 @@ _DEFAULT_SOURCES: Final[Mapping[CspDirective, tuple[str, ...]]] = {
     CspDirective.FONT_SRC: (_SELF_KEYWORD,),
     CspDirective.MANIFEST_SRC: (_SELF_KEYWORD,),
     CspDirective.WORKER_SRC: (_SELF_KEYWORD,),
+    CspDirective.FRAME_SRC: (_NONE_SOURCE,),
     CspDirective.FRAME_ANCESTORS: (_NONE_SOURCE,),
     CspDirective.FORM_ACTION: (_SELF_KEYWORD,),
 }
@@ -427,7 +429,7 @@ def default_content_security_policy(
     Forms post only to this origin and a ``<base>`` may point only at it.
     Scripts, styles, connections, fonts, manifests and workers load from
     ``'self'``, images also from ``data:`` and ``blob:``, media also from
-    ``blob:``, and ``frame-ancestors`` is ``'none'``. Every kind of resource
+    ``blob:``, and ``frame-src`` and ``frame-ancestors`` are ``'none'``. Every kind of resource
     the policy does not name falls back to ``default-src 'none'`` and loads
     from nowhere, not even this origin.
 
@@ -435,8 +437,8 @@ def default_content_security_policy(
     document are admitted by bare hash (``sha256-<base64>``), which this function
     quotes. A host adds its own sources per directive in ``added_sources`` as
     complete source expressions: keywords, nonces and hashes in their quotes,
-    hosts and schemes bare. A non-empty addition to ``frame-ancestors`` replaces
-    its ``'none'``, while an addition to ``form-action`` extends its ``'self'``.
+    hosts and schemes bare. A non-empty addition to ``frame-src`` or ``frame-ancestors``
+    replaces its ``'none'``, while an addition to ``form-action`` extends its ``'self'``.
     A source is one token of printable ASCII without space, ``;`` or ``,`` and
     is kept verbatim; anything else, and one string in place of a
     list of sources, is a ``ValueError`` and any other wrong type a
