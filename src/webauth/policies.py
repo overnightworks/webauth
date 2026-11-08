@@ -439,6 +439,8 @@ def default_content_security_policy(
     complete source expressions: keywords, nonces and hashes in their quotes,
     hosts and schemes bare. A non-empty addition to ``frame-src`` or ``frame-ancestors``
     replaces its ``'none'``, while an addition to ``form-action`` extends its ``'self'``.
+    Under a ``frame-ancestors`` addition the middleware sends no ``X-Frame-Options``,
+    which ``frame-ancestors`` obsoletes; with ``'none'`` it sends ``DENY``.
     A source is one token of printable ASCII without space, ``;`` or ``,`` and
     is kept verbatim; anything else, and one string in place of a
     list of sources, is a ``ValueError`` and any other wrong type a
