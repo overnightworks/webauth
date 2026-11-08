@@ -604,7 +604,7 @@ def test_x_frame_options_follows_the_frame_ancestors_the_answer_leaves_with(
 
     @app.get("/page")
     def page() -> Response:
-        return Response("page")
+        return Response("page", headers={"X-Frame-Options": "SAMEORIGIN"})
 
     response = TestClient(app).get("/page")
 
