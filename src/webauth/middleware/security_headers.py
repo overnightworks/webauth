@@ -45,7 +45,7 @@ def _allows_no_framer(content_security_policy: str) -> bool:
     for directive in content_security_policy.split(";"):
         name, *sources = _ASCII_WHITESPACE_RUN.split(directive.strip(_ASCII_WHITESPACE))
         if name.lower() == "frame-ancestors":
-            return [source.lower() for source in sources] in ([], ["'none'"])
+            return [source.lower() for source in sources] == ["'none'"]
     return True
 
 
