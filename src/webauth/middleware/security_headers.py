@@ -35,7 +35,9 @@ _ASCII_WHITESPACE_RUN: Final = re.compile(f"[{_ASCII_WHITESPACE}]+")
 
 
 def _allows_no_framer(content_security_policy: str) -> bool:
-    """Whether the policy has no ``frame-ancestors`` or one whose only source is ``'none'``.
+    """Whether the policy allows no framer through ``frame-ancestors``.
+
+    That is no directive, one with no source, or one whose only source is ``'none'``.
 
     The policy is read as CSP Level 3 parses a serialized policy: the first
     ``frame-ancestors`` directive counts, its name and ``'none'`` compared
@@ -45,7 +47,7 @@ def _allows_no_framer(content_security_policy: str) -> bool:
     for directive in content_security_policy.split(";"):
         name, *sources = _ASCII_WHITESPACE_RUN.split(directive.strip(_ASCII_WHITESPACE))
         if name.lower() == "frame-ancestors":
-            return [source.lower() for source in sources] == ["'none'"]
+            return [source.lower() for source in sources] in ([], ["'none'"])
     return True
 
 
@@ -72,11 +74,11 @@ class SecurityHeadersMiddleware:
     ``no-store``, and the marker reaches the browser, which ignores it.
 
     ``X-Frame-Options: DENY`` leaves with an answer whose
-    ``Content-Security-Policy`` has no ``frame-ancestors`` directive or one
-    whose only source is ``'none'``. An answer whose ``frame-ancestors`` lists
-    any other source carries no ``X-Frame-Options``, so a host that allows a
-    framer sends one framing rule. The sign-out page's own policy is judged
-    the same way.
+    ``Content-Security-Policy`` has no ``frame-ancestors`` directive, one with
+    no source, or one whose only source is ``'none'``. An answer whose
+    ``frame-ancestors`` lists any other source carries no ``X-Frame-Options``,
+    so a host that allows a framer sends one framing rule. The sign-out page's
+    own policy is judged the same way.
     """
 
     def __init__(self, app: ASGIApp, policy: SecurityHeadersPolicy) -> None:

@@ -583,7 +583,7 @@ FRAMER_POLICY = default_content_security_policy(
         pytest.param("FRAME-ANCESTORS https://a.example", None, id="framer-directive-in-capitals"),
         pytest.param("frame-ancestors 'self'", None, id="self"),
         pytest.param("frame-ancestors 'none' https://a.example", None, id="none-with-a-framer"),
-        pytest.param("frame-ancestors", None, id="empty-source-list"),
+        pytest.param("frame-ancestors", "DENY", id="empty-source-list"),
         pytest.param(
             "frame-ancestors 'none'; frame-ancestors https://a.example",
             "DENY",
