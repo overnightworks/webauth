@@ -1,0 +1,8 @@
+claim_id = "d4eb944fd2e34dc39b077e7c6cf95ef9"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "ce19c7104a22bc32b54f978428c49ea8d90035a0"
+branch = "claude/issue-678-release-without-files"
+scope = [".github/workflows/release.yml", "AGENTS.md", "README.md", "scripts/verify_release.sh"]
+opened_commit = "c4a93d2ef4e5800f70a2130d92006ca3f486b864"
+whole_reason = "One release channel ends in its workflow, its verification script and the two documents that name them; a landed half would describe a channel the other half still serves."
