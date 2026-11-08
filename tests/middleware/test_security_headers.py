@@ -470,6 +470,7 @@ def add_a_pure_asgi_host_middleware(app: FastAPI) -> None:
 
 def the_logout_page(
     *,
+    host_policy: SecurityHeadersPolicy = HOST_POLICY,
     cookie_secure: bool = True,
     host_middleware: Callable[[FastAPI], None] | None = None,
     installed: bool = True,
@@ -486,7 +487,7 @@ def the_logout_page(
         host_middleware(app)
     install_web_auth_config(app, config)
     if installed:
-        install_web_auth_middleware(app, security_headers=HOST_POLICY, csrf_origin=CsrfPolicy())
+        install_web_auth_middleware(app, security_headers=host_policy, csrf_origin=CsrfPolicy())
 
     install_sign_in_routes(
         app,
@@ -559,3 +560,65 @@ def test_without_the_middleware_the_page_carries_its_policy_no_store_and_the_mar
     assert page.headers["cache-control"] == "no-store"
     assert page.headers["webauth-own-policy"] == "1"
     assert "strict-transport-security" not in page.headers
+
+
+FRAMER_POLICY = default_content_security_policy(
+    added_sources={CspDirective.FRAME_ANCESTORS: ("https://call.example.org",)}
+)
+
+
+@pytest.mark.parametrize(
+    ("content_security_policy", "expected_frame_options"),
+    [
+        pytest.param(default_content_security_policy([]), "DENY", id="default-policy"),
+        pytest.param(FRAMER_POLICY, None, id="added-framer"),
+        pytest.param("default-src 'self'", "DENY", id="no-frame-ancestors"),
+        pytest.param("default-src 'self'; frame-ancestors 'none'", "DENY", id="none"),
+        pytest.param("frame-ancestors 'NONE'", "DENY", id="none-in-capitals"),
+        pytest.param(
+            "default-src 'self' ;  Frame-Ancestors  'none'",
+            "DENY",
+            id="directive-name-in-other-case",
+        ),
+        pytest.param("FRAME-ANCESTORS https://a.example", None, id="framer-directive-in-capitals"),
+        pytest.param("frame-ancestors 'self'", None, id="self"),
+        pytest.param("frame-ancestors 'none' https://a.example", None, id="none-with-a-framer"),
+        pytest.param("frame-ancestors", "DENY", id="empty-source-list"),
+        pytest.param(
+            "frame-ancestors 'none'; frame-ancestors https://a.example",
+            "DENY",
+            id="first-directive-counts-none",
+        ),
+        pytest.param(
+            "frame-ancestors https://a.example; frame-ancestors 'none'",
+            None,
+            id="first-directive-counts-framer",
+        ),
+    ],
+)
+def test_x_frame_options_follows_the_frame_ancestors_the_answer_leaves_with(
+    content_security_policy: str, expected_frame_options: str | None
+) -> None:
+    policy = SecurityHeadersPolicy(content_security_policy)
+    app = an_app(policy=policy)
+
+    @app.get("/page")
+    def page() -> Response:
+        return Response("page", headers={"X-Frame-Options": "SAMEORIGIN"})
+
+    response = TestClient(app).get("/page")
+
+    assert_carries_policy_headers(
+        response.headers, policy, hsts=True, frame_options=expected_frame_options
+    )
+
+
+def test_the_logout_page_keeps_deny_under_a_host_policy_that_allows_a_framer() -> None:
+    page = the_logout_page(host_policy=SecurityHeadersPolicy(FRAMER_POLICY))
+
+    assert_carries_policy_headers(
+        page.headers,
+        SecurityHeadersPolicy(the_logout_policy_of(page)),
+        hsts=True,
+        frame_options="DENY",
+    )
