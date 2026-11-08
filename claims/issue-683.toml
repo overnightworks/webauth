@@ -1,0 +1,8 @@
+claim_id = "2b9e8d2b62f4495c95f645aabe1fa19b"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "11c6e195ddfe15bbd929b4afc0a9943e4fa9b68f"
+branch = "claude/issue-683-frame-options-follow-csp"
+scope = ["src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "tests/middleware/test_security_headers.py", "tests/support/security_headers_arrangement.py"]
+opened_commit = "169f184754c2d2199e1729d23d51186e54ea3c2d"
+whole_reason = "One framing rule and its proof: the middleware that sets the header, the policy docstring that promises it, and the tests with their shared assertion."
