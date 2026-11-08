@@ -113,8 +113,6 @@ The host's lock records the commit of the tag. A build needs git and builds weba
 
 A host's Dependabot entry for uv ignores `overnightworks-*`, because Dependabot looks the name up on PyPI. Real uv Dependabot runs in hosts end green with this pin, both with webauth alone and with other overnightworks libraries pinned by git beside it.
 
-Do not pin the wheel URL: one in a resolved tree fails a uv Dependabot run. The wheel stays on each tag's [release page](https://github.com/overnightworks/webauth/releases), and `scripts/verify_release.sh` checks it.
-
 Tags are never moved; a broken release gets the next patch tag.
 
 ## Versioning
@@ -139,9 +137,7 @@ pass and how a release is made. The commands live under `scripts/`:
 
 - `scripts/run_static_checks.sh` runs every static check CI's `checks` job runs;
 - `scripts/regenerate_build_constraints.sh` regenerates the hash-pinned build
-  constraints from the setuptools floor in `pyproject.toml`;
-- `scripts/verify_release.sh` downloads a release and checks the checksums and
-  build-provenance attestations of its wheel and sdist.
+  constraints from the setuptools floor in `pyproject.toml`.
 
 ## Licence
 
