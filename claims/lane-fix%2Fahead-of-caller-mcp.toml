@@ -1,0 +1,7 @@
+claim_id = "b78eba87a9824d53aa253f9fe7235ddb"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "ce19c7104a22bc32b54f978428c49ea8d90035a0"
+branch = "fix/ahead-of-caller-mcp"
+scope = [".aco/ahead-of-caller.toml"]
+opened_commit = "f9294dca149f62b1236c222964a686feab64a520"
