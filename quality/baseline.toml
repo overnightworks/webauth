@@ -1,4 +1,4 @@
-# Measured by `quality baseline write`. Entries only ever go down.
+# Measured by `quality check --fix`. Entries only ever go down.
 
 [ccn."tests/support/oidc_arrangement.py"]
 "loopback_https_server.LoopbackHandler._receive" = 16
