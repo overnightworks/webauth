@@ -844,16 +844,17 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **MEMSTORE-10** `create_for_subject` never raises `UsernameTakenError` and has no flag: the username is for display and the issuer decides who a subject is, so a raise would lock a re-created person out until a restart.
 - **MEMSTORE-11** `load` returns an expired row, as the port says; the gate decides expiry.
 - **MEMSTORE-12** `delete_expired(now)` removes the expired sessions and returns how many; `create` prunes the sessions expired at its `now`.
-- **MEMSTORE-13** An entry of the transaction holds one re-entrant guard from enter to exit, so a second entry waits until the first exits.
+- **MEMSTORE-13** An entry of the transaction holds one re-entrant guard from enter to exit, so a second entry, and every store call from another thread, waits until the first exits; an entry whose enter fails gives the guard back.
 - **MEMSTORE-14** Store calls from several threads leave the stores consistent.
 - **MEMSTORE-15** A raise inside an entry restores both stores from a snapshot taken at entry and drops the entry's audit events; a clean entry hands them to the sink as its last step.
 - **MEMSTORE-16** A sink that fails at the exit rolls the entry back and its exception reaches the route.
 - **MEMSTORE-17** Entering an entry again raises; the transaction hands out a new entry per call.
 - **MEMSTORE-18** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
-- **MEMSTORE-19** The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
-- **MEMSTORE-20** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
-- **MEMSTORE-21** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
+- **MEMSTORE-19** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
+- **MEMSTORE-20** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
 - **Host duty:** an entry copies both tables, so its cost grows with the stored accounts and sessions; keep the store small by calling `delete_expired` on a timer.
+
+The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
 
 ## Testing a host
 

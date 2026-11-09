@@ -126,7 +126,7 @@ class TestTheBundle:
         assert loaded.user == stores.accounts.get(SUBJECT_ONE)
 
     def test_the_records_implement_the_ports_records(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-20: the stored records are the ports' user and session records."""
+        """MEMSTORE-19: the stored records are the ports' user and session records."""
         with_account(stores)
         account: UserRecord | None = stores.accounts.get(SUBJECT_ONE)
         session: SessionRecord | None = stores.sessions.load(open_session(stores))
@@ -412,12 +412,8 @@ def enter_and_leave(stores: SingleProcessStores) -> None:
         pass
 
 
-class AnInterruption(BaseException):  # noqa: N818 - stands for KeyboardInterrupt, which is no Exception
-    pass
-
-
 class TestSignInTransaction:
-    @pytest.mark.parametrize("raised", [RuntimeError, AnInterruption])
+    @pytest.mark.parametrize("raised", [RuntimeError, KeyboardInterrupt])
     def test_a_block_that_raises_restores_both_stores_and_drops_its_audit(
         self, stores: SingleProcessStores, audit: RecordingAuditSink, raised: type[BaseException]
     ) -> None:
@@ -651,7 +647,7 @@ class TestSignInRoutesOverTheStores:
     def test_the_callback_opens_a_session_the_gate_admits(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-21: the callback opens a session the gate admits."""
+        """MEMSTORE-20: the callback opens a session the gate admits."""
         browser = Browser(stores)
 
         assert browser.sign_in() == 303
@@ -663,7 +659,7 @@ class TestSignInRoutesOverTheStores:
     def test_logout_ends_the_session_the_gate_then_refuses(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-21: logout ends the session."""
+        """MEMSTORE-20: logout ends the session."""
         browser = Browser(stores)
         browser.sign_in()
 
@@ -675,7 +671,7 @@ class TestSignInRoutesOverTheStores:
     def test_back_channel_logout_ends_every_session_and_the_next_sign_in_creates_the_account_again(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-21: back-channel logout ends every session and the account."""
+        """MEMSTORE-20: back-channel logout ends every session and the account."""
         browser = Browser(stores)
         browser.sign_in()
 
