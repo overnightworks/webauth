@@ -29,6 +29,7 @@ from webauth.dependencies import (
     _PERSON_PATH_INSUFFICIENT_SCOPE,
     _bearer_admission,
     _mark_person_path,
+    _raise_for_bearer_admission,
     _record_bearer_admission,
 )
 from webauth.middleware._refusal import RefusalMiddleware
@@ -70,6 +71,7 @@ __all__ = [
     "ProtectedResource",
     "bearer_caller",
     "install_resource_metadata",
+    "is_resource_admission",
     "resource_person",
 ]
 
@@ -597,6 +599,18 @@ def bearer_caller(connection: HTTPConnection) -> BearerCaller:
     return admission.principal
 
 
+def _resource_person_admitted(connection: HTTPConnection) -> AuthenticatedUser | None:
+    """The capped person this request's resource admission holds, or ``None``."""
+    admission = _bearer_admission(connection)
+    if (
+        admission is None
+        or not admission.is_resource_admission
+        or not isinstance(admission.principal, AuthenticatedUser)
+    ):
+        return None
+    return admission.principal
+
+
 def resource_person(connection: HTTPConnection) -> AuthenticatedUser:
     """The capped person the resource admitted for this request, at its entry point or on one
     of its marked routes.
@@ -606,18 +620,31 @@ def resource_person(connection: HTTPConnection) -> AuthenticatedUser:
     middleware changed the ``Authorization`` header or the method after admission. A
     forgotten gate never reads as a person.
     """
-    admission = _bearer_admission(connection)
-    if (
-        admission is None
-        or not admission.is_resource_admission
-        or not isinstance(admission.principal, AuthenticatedUser)
-    ):
+    person = _resource_person_admitted(connection)
+    if person is None:
         raise RuntimeError(
             "The bearer gate admitted no resource person for this request: install it with "
             "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
             "route, and read the person on the resource's entry point or marked route itself.",
         )
-    return admission.principal
+    return person
+
+
+def is_resource_admission(connection: HTTPConnection) -> bool:
+    """Whether the resource admitted this request as its capped person: true exactly when
+    ``resource_person`` returns, at the entry point or on a marked route, with agent facts or
+    without.
+
+    False on a session, a person path's token, a machine request, a request without a
+    credential, a WebSocket and in an app without a bearer gate. Raises ``RuntimeError``, as
+    ``current_user`` does, where a bearer admission is recorded but no longer holds for this
+    request: in a sub-app, and after the ``Authorization`` header or the method changed. It
+    never raises to answer no.
+    """
+    if _bearer_admission(connection) is None:
+        _raise_for_bearer_admission(connection)
+        return False
+    return _resource_person_admitted(connection) is not None
 
 
 def install_resource_metadata(app: FastAPI, resource: ProtectedResource, *, issuer: str) -> None:

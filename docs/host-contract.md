@@ -623,6 +623,12 @@ On a marked route:
 - **RESOURCE-68** the same on a marked route;
 - **RESOURCE-69** `current_user` refuses after a method change, at the entry point and on a marked route.
 
+`webauth.middleware.is_resource_admission(connection)`:
+
+- **RESOURCE-81** it is true for this very request at the resource's entry point and on a marked route, with agent facts or without;
+- **RESOURCE-82** it is false on a session, on a person-path token (on a marked route below a person path too, and for a token of another audience on a marked route), on a machine request, on a request without a credential, on a WebSocket, and in an app without a bearer gate;
+- **RESOURCE-83** it raises `RuntimeError` where a bearer admission is recorded but no longer holds for this request: in a sub-app, and after the `Authorization` header or the method changed. Otherwise it never raises.
+
 ## A service's callers
 
 A service that is not a browser app (no sessions, no sign-in) admits an app acting for a person, with
