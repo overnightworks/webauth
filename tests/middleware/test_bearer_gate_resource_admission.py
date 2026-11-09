@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import NoReturn, TypedDict
+from typing import NoReturn, Required, TypedDict
 
 import pytest
 from fastapi import FastAPI, Request, WebSocket
 from starlette.middleware import Middleware
+from starlette.requests import HTTPConnection
 
 from tests.support.agent_arrangement import AGENT_NAME, AGENT_OWNER, an_agent_group_token
 from tests.support.gate_arrangement import (
@@ -70,7 +71,7 @@ MACHINE_ADMISSION_PROBE_PATH = "/api/admin/probe/resource-admission"
 WEBSOCKET_ADMISSION_PROBE_PATH = "/probe/ws-resource-admission"
 
 
-def the_admission_answer(request: Request) -> dict[str, object]:
+def the_admission_answer(request: HTTPConnection) -> dict[str, object]:
     """What `is_resource_admission` answers beside `resource_person` and the agent facts."""
     is_resource = is_resource_admission(request)
     try:
@@ -108,7 +109,7 @@ def with_admission_probes(app: BearerApp, resource: ProtectedResource) -> Bearer
     @app.auth.app.websocket(WEBSOCKET_ADMISSION_PROBE_PATH)
     async def websocket_probe(websocket: WebSocket) -> None:
         await websocket.accept()
-        await websocket.send_json({"is_resource_admission": is_resource_admission(websocket)})
+        await websocket.send_json(the_admission_answer(websocket))
         await websocket.close()
 
     probes = routes[existing:]
@@ -486,21 +487,20 @@ def test_csrf_refuses_a_request_made_mutating_after_admission(
 
 
 @pytest.mark.parametrize(
-    ("path", "asked"),
+    "asked",
     [
-        pytest.param("/plain", {"cookie": True}, id="session"),
-        pytest.param(f"{PERSON_ME_PATH}-reader", {"authorization": bearing(A_TOKEN)}, id="person"),
+        pytest.param({"path": "/plain", "cookie": True}, id="session"),
         pytest.param(
-            f"{EXPORT_PATH}-reader",
-            {"authorization": bearing(A_TOKEN)},
-            id="machine",
+            {"path": f"{PERSON_ME_PATH}-reader", "authorization": bearing(A_TOKEN)}, id="person"
+        ),
+        pytest.param(
+            {"path": f"{EXPORT_PATH}-reader", "authorization": bearing(A_TOKEN)}, id="machine"
         ),
     ],
 )
 def test_the_resource_person_raises_on_a_session_person_and_machine_request(
     resource: ProtectedResource,
-    path: str,
-    asked: dict[str, object],
+    asked: Asked,
 ) -> None:
     """RESOURCE-66: `resource_person` raises `RuntimeError` on a session, person or machine
     request."""
@@ -509,10 +509,10 @@ def test_the_resource_person_raises_on_a_session_person_and_machine_request(
         resource=resource,
         known_accounts=(a_known_person(),),
     )
-    a_resource_person_reader(app, path)
+    a_resource_person_reader(app, asked["path"])
     answering_a_runtime_error_with_418(app)
 
-    response = app.ask(path, **asked)  # type: ignore[arg-type]
+    response = app.ask(**asked)
 
     assert response.status_code == REFUSED_AS_RUNTIME_ERROR
 
@@ -544,14 +544,20 @@ THE_PUBLIC_PROBE = PublicRule(PathRules(exact=frozenset({ADMISSION_PROBE_PATH}))
 class Asked(TypedDict, total=False):
     """The keyword set `BearerApp.ask` takes for the requests of the admission probes."""
 
-    path: str
+    path: Required[str]
     method: str
     authorization: tuple[str, ...]
     cookie: bool
+    headers: dict[str, str]
 
 
 def asked_by_a_session(path: str) -> Asked:
-    return {"path": path, "cookie": True}
+    return {
+        "path": path,
+        "method": "POST",
+        "headers": {"sec-fetch-site": "same-origin"},
+        "cookie": True,
+    }
 
 
 def asked_with(path: str, token: str, method: str = "POST") -> Asked:
@@ -662,7 +668,11 @@ def test_a_websocket_is_no_resource_admission(marked_resource: ProtectedResource
     ):
         answer = socket.receive_json()
 
-    assert answer == {"is_resource_admission": False}
+    assert answer == {
+        "is_resource_admission": False,
+        "resource_person_returns": False,
+        "agent": None,
+    }
 
 
 def test_an_app_without_a_bearer_gate_has_no_resource_admission(
@@ -675,7 +685,12 @@ def test_an_app_without_a_bearer_gate_has_no_resource_admission(
 
     response = app.ask(ADMISSION_PROBE_PATH, cookie=True)
 
-    assert (response.status_code, response.json()["is_resource_admission"]) == (200, False)
+    assert response.status_code == 200
+    assert response.json() == {
+        "is_resource_admission": False,
+        "resource_person_returns": False,
+        "agent": None,
+    }
 
 
 @pytest.mark.parametrize("surface", ["entry-point", "marked-route"])
