@@ -301,7 +301,10 @@ class SessionRecordStore(Protocol):
         error: a logout names whatever the browser's cookie says."""
         ...
 
-    def delete_for_user(self, user_id: str) -> int: ...
+    def delete_for_user(self, user_id: str) -> int:
+        """End every session of the account and return how many ended; a store may
+        also remove the account."""
+        ...
 
     def prune_overflow(self, user_id: str, keep_newest: int) -> None:
         """End all but the user's ``keep_newest`` newest sessions by ``created_at``.

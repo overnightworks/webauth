@@ -827,11 +827,40 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **SIGNIN-65** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
 - **SIGNIN-66** and the choice of a row that keeps none.
 
+## The single-process stores
+
+`webauth.single_process_stores` implements the account, session and sign-in transaction ports in the memory of one process, for a host that runs one worker.
+
+- **MEMSTORE-01** One worker only: a restart forgets every account and session, and a second worker sees none of the first's.
+- **Host duty:** a host with several workers, or one that keeps sessions across a restart, implements the ports over its database.
+- **MEMSTORE-02** `SingleProcessStores(audit=...)` bundles `accounts` (a `SubjectUserStore`), `sessions` (a `SessionRecordStore`) and `transaction` (a `SignInTransaction`) over one set of tables; the host passes its own `AuditSink`, and webauth ships no logging sink.
+- **MEMSTORE-03** A session id is distinct, URL-safe, 43 to 135 characters, and drawn from a CSPRNG.
+- **MEMSTORE-04** `get` compares the subject character for character: no case, trailing-space or Unicode-normalization folding.
+- **MEMSTORE-05** `set_role`, `set_kind` and a session `create` for a missing account raise.
+- **MEMSTORE-06** `touch` and `replace_refresh_token` on a missing session answer `False` and create no row.
+- **MEMSTORE-07** `touch` writes the `expires_at` it is given and keeps both tokens; `replace_refresh_token` keeps the ID token.
+- **MEMSTORE-08** `delete` of an unknown id is a no-op.
+- **MEMSTORE-09** `prune_overflow` keeps the newest sessions by `created_at`; `0` keeps none.
+- **MEMSTORE-10** `delete_for_user` ends every session of the account, returns how many ended, and removes the account too: an account that outlives its sign-out serves nothing in memory, and the next sign-in creates it again, so its `USER_CREATED` event is true.
+- **MEMSTORE-11** `create_for_subject` never raises `UsernameTakenError` and has no flag: the username is for display and the issuer decides who a subject is, so a raise would lock a re-created person out until a restart.
+- **MEMSTORE-12** `load` returns an expired row, as the port says; the gate decides expiry.
+- **MEMSTORE-13** `delete_expired(now)` removes the expired sessions and returns how many; `create` prunes the sessions expired at its `now`. A host's sweep timer calls `delete_expired`.
+- **MEMSTORE-14** An entry of the transaction holds one re-entrant guard from enter to exit, so a second entry, and every store call from another thread, waits until the first exits.
+- **MEMSTORE-15** Store calls from several threads leave the stores consistent.
+- **MEMSTORE-16** A raise inside an entry restores both stores from a snapshot taken at entry and drops the entry's audit events; a clean entry hands them to the sink as its last step.
+- **MEMSTORE-17** A sink that fails at the exit rolls the entry back and its exception reaches the route.
+- **MEMSTORE-18** Entering an entry again raises; the transaction hands out a new entry per call.
+- **MEMSTORE-19** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
+- **MEMSTORE-20** No other `webauth` module imports the adapter, so the library never defaults to it; it has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
+- **MEMSTORE-21** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
+- **MEMSTORE-22** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
+- **Host duty:** an entry copies both tables, so its cost grows with the number of stored accounts and sessions.
+
 ## Testing a host
 
 A test that needs a signed-in person needs no issuer:
 
-- **Host duty:** it creates the account and a session inside the configured lifetime in the host's own store.
+- **Host duty:** it creates the account and a session inside the configured lifetime in the host's own store, or in `SingleProcessStores` ([the single-process stores](#the-single-process-stores)).
 - **HOSTTEST-01** `issue_session_cookies(response, session_id, config)` from `webauth.cookies`, called on a `Response`, sets one cookie.
 - **Host duty:** it copies that cookie into its client.
 - **HOSTTEST-02** A request with that cookie and that session in the store is admitted as that person on a session path.
