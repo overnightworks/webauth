@@ -153,13 +153,13 @@ class SingleProcessAccountStore:
 
     def set_role(self, user_id: str, role: str) -> StoredAccount:
         with self._tables.guard:
-            account = replace(self._tables.accounts[user_id], role=role)
+            account: StoredAccount = replace(self._tables.accounts[user_id], role=role)
             self._tables.accounts[user_id] = account
         return account
 
     def set_kind(self, user_id: str, kind: AccountKind) -> StoredAccount:
         with self._tables.guard:
-            account = replace(self._tables.accounts[user_id], kind=kind)
+            account: StoredAccount = replace(self._tables.accounts[user_id], kind=kind)
             self._tables.accounts[user_id] = account
         return account
 
@@ -172,6 +172,7 @@ class SingleProcessSessionStore:
     """
 
     def __init__(self, accounts: SingleProcessAccountStore) -> None:
+        self._accounts = accounts
         self._tables = accounts._tables
 
     def create(
@@ -293,17 +294,13 @@ class SingleProcessSignInTransaction:
     entry's own writes. The audit events reach the sink as the block's last
     step, so a sink that fails rolls the entry back too. Each entry copies both
     tables, so its cost grows with the number of stored accounts and sessions.
-    It shares the tables of the account store it is given.
+    It takes the account store from the session store it is given, so both
+    stores always share one set of tables.
     """
 
-    def __init__(
-        self,
-        accounts: SingleProcessAccountStore,
-        sessions: SingleProcessSessionStore,
-        audit: AuditSink,
-    ) -> None:
-        self._tables = accounts._tables
-        self._accounts = accounts
+    def __init__(self, sessions: SingleProcessSessionStore, *, audit: AuditSink) -> None:
+        self._tables = sessions._tables
+        self._accounts = sessions._accounts
         self._sessions = sessions
         self._audit = audit
 
@@ -368,5 +365,5 @@ class SingleProcessStores:
         self.accounts: SingleProcessAccountStore = SingleProcessAccountStore()
         self.sessions: SingleProcessSessionStore = SingleProcessSessionStore(self.accounts)
         self.transaction: SingleProcessSignInTransaction = SingleProcessSignInTransaction(
-            self.accounts, self.sessions, audit
+            self.sessions, audit=audit
         )

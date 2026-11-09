@@ -34,8 +34,10 @@ from tests.support.oidc_login_host import (
     SIGN_IN_PATHS,
     START_PATH,
     SUBJECT,
+    StoreDown,
     a_client_config,
     an_id_token,
+    failing,
 )
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
@@ -46,9 +48,21 @@ from webauth.config import install_web_auth_config
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
 from webauth.policies import BodySizePolicy, CsrfPolicy, SecurityHeadersPolicy
-from webauth.ports import AccountEvent, AccountEventKind, AccountKind, AuthenticatedUser
+from webauth.ports import (
+    AccountEvent,
+    AccountEventKind,
+    AccountKind,
+    AuthenticatedUser,
+    SessionRecord,
+    UserRecord,
+)
 from webauth.sign_in_routes import LogoutPageText, install_sign_in_routes
-from webauth.single_process_stores import SingleProcessStores
+from webauth.single_process_stores import (
+    SingleProcessAccountStore,
+    SingleProcessSessionStore,
+    SingleProcessSignInTransaction,
+    SingleProcessStores,
+)
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 LATER = START + timedelta(hours=1)
@@ -95,6 +109,30 @@ def open_session(
 
 def held_ids(stores: SingleProcessStores, ids: list[str]) -> list[str]:
     return [session_id for session_id in ids if stores.sessions.load(session_id) is not None]
+
+
+class TestTheBundle:
+    def test_the_bundle_shares_one_set_of_tables(self, stores: SingleProcessStores) -> None:
+        """MEMSTORE-02: accounts, sessions and the transaction work over one set of tables."""
+        with stores.transaction() as inside:
+            inside.accounts.create_for_subject(SUBJECT_ONE, "name", "member", AccountKind.PERSON)
+            session_id = inside.sessions.create(
+                SUBJECT_ONE, now=START, expires_at=LATER, refresh_token=None, id_token=None
+            ).id
+
+        loaded = stores.sessions.load(session_id)
+        assert loaded is not None
+        assert loaded.user == stores.accounts.get(SUBJECT_ONE)
+
+    def test_the_records_implement_the_ports_records(self, stores: SingleProcessStores) -> None:
+        """MEMSTORE-21: the stored records are the ports' user and session records."""
+        with_account(stores)
+        account: UserRecord | None = stores.accounts.get(SUBJECT_ONE)
+        session: SessionRecord | None = stores.sessions.load(open_session(stores))
+
+        assert account is not None
+        assert session is not None
+        assert session.user.id == account.id
 
 
 class TestAccounts:
@@ -373,12 +411,18 @@ class TestSignInTransaction:
         with_account(stores)
         kept = open_session(stores)
 
-        with pytest.raises(RuntimeError, match="boom"), stores.transaction() as inside:
-            inside.accounts.create_for_subject(SUBJECT_TWO, "name", "member", AccountKind.PERSON)
-            inside.accounts.set_role(SUBJECT_ONE, "admin")
-            inside.sessions.delete(kept)
-            inside.audit.account_event(an_event())
-            raise RuntimeError("boom")
+        def a_block_that_raises() -> None:
+            with stores.transaction() as inside:
+                inside.accounts.create_for_subject(
+                    SUBJECT_TWO, "name", "member", AccountKind.PERSON
+                )
+                inside.accounts.set_role(SUBJECT_ONE, "admin")
+                inside.sessions.delete(kept)
+                inside.audit.account_event(an_event())
+                raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            a_block_that_raises()
 
         account = stores.accounts.get(SUBJECT_ONE)
         assert account is not None
@@ -399,20 +443,51 @@ class TestSignInTransaction:
         assert stores.accounts.get(SUBJECT_ONE) is not None
         assert audit.account_events == [an_event()]
 
-    def test_a_failing_sink_at_the_exit_rolls_the_entry_back(self) -> None:
+    def test_a_failing_sink_at_the_exit_rolls_the_entry_back(
+        self,
+        stores: SingleProcessStores,
+        audit: RecordingAuditSink,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """MEMSTORE-17: a failing audit sink at the exit rolls the entry back."""
+        failing(audit, "account_event", monkeypatch)
 
-        class FailingSink:
-            def account_event(self, event: AccountEvent) -> None:
-                raise ConnectionError("sink down")
+        def an_entry_whose_sink_fails() -> None:
+            with stores.transaction() as inside:
+                inside.accounts.create_for_subject(
+                    SUBJECT_ONE, "name", "member", AccountKind.PERSON
+                )
+                inside.audit.account_event(an_event())
 
-        stores = SingleProcessStores(audit=FailingSink())
-
-        with pytest.raises(ConnectionError), stores.transaction() as inside:
-            inside.accounts.create_for_subject(SUBJECT_ONE, "name", "member", AccountKind.PERSON)
-            inside.audit.account_event(an_event())
+        with pytest.raises(StoreDown):
+            an_entry_whose_sink_fails()
 
         assert stores.accounts.get(SUBJECT_ONE) is None
+
+    def test_a_transaction_over_a_session_store_restores_that_stores_sessions(
+        self, audit: RecordingAuditSink
+    ) -> None:
+        """MEMSTORE-16: the transaction restores the tables of the session store it is built on."""
+        accounts = SingleProcessAccountStore()
+        sessions = SingleProcessSessionStore(accounts)
+        transaction = SingleProcessSignInTransaction(sessions, audit=audit)
+        accounts.create_for_subject(SUBJECT_ONE, "name", "member", AccountKind.PERSON)
+
+        def a_block_that_raises() -> None:
+            with transaction() as inside:
+                inside.sessions.create(
+                    SUBJECT_ONE,
+                    now=START,
+                    expires_at=LATER,
+                    refresh_token=None,
+                    id_token=None,
+                )
+                raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            a_block_that_raises()
+
+        assert sessions.records_of(SUBJECT_ONE).sessions == ()
 
     def test_an_entry_cannot_be_entered_twice(self, stores: SingleProcessStores) -> None:
         """MEMSTORE-18: re-entering an entry raises."""
@@ -428,7 +503,6 @@ class TestSignInTransaction:
     ) -> None:
         """MEMSTORE-14: a second entry waits until the first exits."""
         order: list[str] = []
-        first_inside = threading.Event()
         second_asking = threading.Event()
 
         def second() -> None:
@@ -438,7 +512,6 @@ class TestSignInTransaction:
 
         thread = threading.Thread(target=second)
         with stores.transaction():
-            first_inside.set()
             thread.start()
             second_asking.wait()
             order.append("first leaving")
