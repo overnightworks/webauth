@@ -27,6 +27,7 @@ from tests.support.security_headers_arrangement import assert_carries_policy_hea
 from tests.support.webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
+    GATED_SIGN_IN_PATHS,
     HTTPS_TEST_SERVER,
     SAME_ORIGIN_REQUEST,
     SPEC_WITH_CONCURRENT_READER,
@@ -193,6 +194,7 @@ def install_full_stack(
 ) -> None:
     install_web_auth_middleware(
         app,
+        sign_in_paths=GATED_SIGN_IN_PATHS,
         security_headers=HEADERS_POLICY,
         body_size=BodySizePolicy(default_max_bytes=BODY_LIMIT_BYTES),
         rate_limit=a_rate_limit_policy(max_requests),
@@ -405,6 +407,7 @@ class TestAnExemptWebhookPrefix:
         app = a_fresh_app()
         install_web_auth_middleware(
             app,
+            sign_in_paths=GATED_SIGN_IN_PATHS,
             security_headers=HEADERS_POLICY,
             csrf_origin=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PREFIX,))),
         )
@@ -438,7 +441,11 @@ class TestRefusedInstallation:
         """CSRF-01, CSRF-02: the install raises and leaves the app untouched."""
         app = a_fresh_app()
         with pytest.raises(TypeError, match="csrf_origin"):
-            install_web_auth_middleware(app, security_headers=HEADERS_POLICY)  # type: ignore[call-arg]
+            install_web_auth_middleware(  # type: ignore[call-arg]
+                app,
+                sign_in_paths=GATED_SIGN_IN_PATHS,
+                security_headers=HEADERS_POLICY,
+            )
         assert app.user_middleware == []
 
     @pytest.mark.parametrize(

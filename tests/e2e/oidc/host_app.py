@@ -116,7 +116,7 @@ LOGOUT_PAGE_TEXT = LogoutPageText(language="en", button_label="Log out")
 ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
 WORKLOAD_TOKEN_PATH = "/workload-token"  # noqa: S105  # a route, not a credential
 CURRENT_GROUPS_PATH = "/current-groups"
-BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = SIGN_IN_PATHS.backchannel_body_size_rule.max_bytes
+BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 REPOSITORY = Path(__file__).resolve().parents[3]
@@ -383,15 +383,10 @@ def _install_stack(
 ) -> None:
     install_web_auth_middleware(
         app,
-        security_headers=SecurityHeadersPolicy(
-            default_content_security_policy(),
-            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
-        ),
-        body_size=BodySizePolicy(
-            default_max_bytes=DEFAULT_MAX_BODY_BYTES,
-            rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
-        ),
-        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
+        sign_in_paths=SIGN_IN_PATHS,
+        security_headers=SecurityHeadersPolicy(default_content_security_policy()),
+        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+        csrf_origin=CsrfPolicy(),
         **_bearer_policies(settings, world, transaction),
     )
 
@@ -423,7 +418,6 @@ def _bearer_policies(
             # The gate would answer a dead cookie with 401 before the route runs; the call
             # answers `session-ended` itself.
             public=(
-                *SIGN_IN_PATHS.public_rules,
                 resource.public_rule,
                 PublicRule(
                     PathRules(exact=frozenset({CURRENT_GROUPS_PATH})),

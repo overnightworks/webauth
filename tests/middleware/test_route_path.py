@@ -13,6 +13,7 @@ from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
 from tests.support.webauth_arrangement import (
+    GATED_SIGN_IN_PATHS,
     HTTPS_TEST_SERVER,
     SAME_ORIGIN_REQUEST,
     AuthApp,
@@ -205,6 +206,7 @@ class TestAPathNextToTheRootPathIsNotStripped:
         install_web_auth_config(app, a_web_auth_config())
         install_web_auth_middleware(
             app,
+            sign_in_paths=GATED_SIGN_IN_PATHS,
             **{
                 "security_headers": a_no_store_policy(PathRules()),
                 "csrf_origin": CsrfPolicy(),
@@ -297,6 +299,7 @@ class TestACacheControlRuleOfTheParentSelectsThroughAMount:
         install_web_auth_config(parent, a_web_auth_config())
         install_web_auth_middleware(
             parent,
+            sign_in_paths=GATED_SIGN_IN_PATHS,
             security_headers=a_no_store_policy(PathRules(prefixes=("/api/x/",))),
             csrf_origin=CsrfPolicy(),
         )

@@ -53,6 +53,7 @@ from tests.support.person_paths_arrangement import (
 )
 from tests.support.webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
+    GATED_SIGN_IN_PATHS,
     HTTPS_TEST_SERVER,
     LOGIN_REDIRECT,
     SessionsThatMustNotBeAsked,
@@ -252,6 +253,7 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
     if csrf or session_gate:
         install_web_auth_middleware(
             inner,
+            sign_in_paths=GATED_SIGN_IN_PATHS,
             security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
             csrf_origin=CsrfPolicy(),
             session_gate=SessionGate(
@@ -464,6 +466,7 @@ class TestTheGateSitsInsideTheRateLimitAndBodyLimitAndBehindTheHeaders:
         install_web_auth_config(app, a_web_auth_config())
         install_web_auth_middleware(
             app,
+            sign_in_paths=GATED_SIGN_IN_PATHS,
             security_headers=SecurityHeadersPolicy(
                 content_security_policy="default-src 'self'",
                 cache_control_rules=(CacheControlRule(MACHINE_PATHS, "public, max-age=60"),),

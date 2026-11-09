@@ -159,6 +159,13 @@ for the mechanism and its trust boundaries.
 - **Host duty:** a host that relied on `BaseHTTPMiddleware`'s task isolation restores its
   own context, for example by resetting the token it set.
 
+What the installer applies when the host passes none:
+
+- **STACK-05** Without a `rate_limit` the installer applies 600 requests per 60 seconds per address; a host that passes a policy keeps its own default and rules.
+- **Host duty:** a host behind a shared proxy address, where many people share one budget (PROXY-06), passes its own policy.
+- **STACK-06** Without a `body_size` the installer applies a body limit of 4 KiB; a larger body gets 413.
+- **STACK-07** Without a `permissions_policy` the header turns off `camera`, `microphone`, `geolocation` and `display-capture`.
+
 ## CSRF origin
 
 The operator ruled CSRF-01, CSRF-03, CSRF-04, CSRF-05, CSRF-06, CSRF-07, CSRF-08, CSRF-09, CSRF-10, CSRF-11, CSRF-12, CSRF-13, CSRF-14, CSRF-15, CSRF-16 and CSRF-17; no other sentence of this section is ruled.
@@ -310,7 +317,7 @@ admits on them, read from configuration.
   - **MACHINE-18** webauth sets no cookie.
   - **MACHINE-19** `admitted_user` returns `None`, whatever cookie the request carries.
   - **MACHINE-20** `session_id_from_request` answers `None`, whatever cookie the request carries.
-  - **MACHINE-21** The same rate limit applies where a rate policy covers the path.
+  - **MACHINE-21** The same rate limit applies: the installer always installs one.
   - **MACHINE-22** A flood of invalid tokens is bounded only by that rate limit.
   - **MACHINE-23** A session dependency (`current_user`, `admin_user`, `admitted_admin`) on a
     machine path raises, so the library answers 500.
@@ -708,19 +715,24 @@ The operator ruled the host duty that a single-page app logs out by a top-level 
   `FastAPI` app.
 - **SIGNIN-02** Every route reads the host's one `OidcRelyingParty` through `relying_party` per request.
 
-`SignInPaths` derives the policies for exactly those paths:
+`install_web_auth_middleware` takes the host's `SignInPaths` and applies the policies for exactly those paths:
 
-- **SIGNIN-03** `public_rules` for the session gate (`GET` of start and callback, `POST` of logout and of the back-channel);
-- **SIGNIN-04** `browser_paths` for the sign-in rate budget;
-- **SIGNIN-05** `backchannel` for `CsrfPolicy.exempt`;
-- **SIGNIN-06** `backchannel` for `RateLimitPolicy.exempt`;
-- **SIGNIN-07** `backchannel_body_size_rule` (32 KiB for `POST`);
-- **SIGNIN-08** `cache_control_rule` (`no-store`);
-- **SIGNIN-09** `login_redirect`.
+- **SIGNIN-03** the session gate's public rules, when a session gate is installed (`GET` of start and callback, `POST` of logout and of the back-channel);
+- **SIGNIN-04** the sign-in rate budget on start, callback and logout;
+- **SIGNIN-05** the back-channel path is exempt from the origin check;
+- **SIGNIN-06** the back-channel path is exempt from the rate limit;
+- **SIGNIN-07** a body rule of 32 KiB for `POST` of the back-channel path;
+- **SIGNIN-08** `no-store` on every sign-in path;
+- **SIGNIN-09** `SignInPaths.login_redirect` is the one derived value the host passes itself, to its session gate.
 
 So the host lists the paths once. `login_redirect` is browser-absolute, so it is right for an app at its origin's root.
 
 - **Host duty:** a host below a `root_path` builds its own `LoginRedirect`.
+- **SIGNIN-67** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
+- **SIGNIN-68** The derived rules come ahead of the host's own in every policy, so the first match is the derived one.
+- **SIGNIN-69** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
+- **SIGNIN-70** The budget name `"sign-in"` is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
+- **SIGNIN-71** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.
 - **SIGNIN-10** The library serves the logout route at `SignInPaths.logout` for `POST` only,
 - **SIGNIN-11** with the page's text from the host's `logout_page_text`, read per request:
 - **SIGNIN-12** a `LogoutPageText` whose `button_label` is the title and the button,

@@ -107,7 +107,7 @@ SIGN_IN_PATHS = SignInPaths(
     logout=LOGOUT_PATH,
     backchannel_logout=BACKCHANNEL_LOGOUT_PATH,
 )
-BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = SIGN_IN_PATHS.backchannel_body_size_rule.max_bytes
+BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
 
 
@@ -396,21 +396,13 @@ def _install_the_host_middleware(
     install_web_auth_config(app, config)
     install_web_auth_middleware(
         app,
-        security_headers=SecurityHeadersPolicy(
-            content_security_policy="default-src 'self'",
-            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
-        ),
-        body_size=BodySizePolicy(
-            default_max_bytes=DEFAULT_MAX_BODY_BYTES,
-            rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
-        ),
+        sign_in_paths=SIGN_IN_PATHS,
+        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
         rate_limit=None
         if address_budget is None
-        else RateLimitPolicy(
-            default=RateLimitBudget("host", address_budget, 60),
-            exempt=SIGN_IN_PATHS.backchannel,
-        ),
-        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
+        else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60)),
+        csrf_origin=CsrfPolicy(),
     )
 
 

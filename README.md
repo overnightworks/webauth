@@ -25,7 +25,6 @@ from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_conf
 from webauth.dependencies import current_user_dependency
 from webauth.middleware import install_web_auth_middleware
 from webauth.policies import (
-    BodySizePolicy,
     CsrfPolicy,
     SecurityHeadersPolicy,
     default_content_security_policy,
@@ -50,14 +49,11 @@ paths = SignInPaths(
 )
 install_web_auth_middleware(
     app,
+    sign_in_paths=paths,
     security_headers=SecurityHeadersPolicy(
         content_security_policy=default_content_security_policy(),
-        cache_control_rules=(paths.cache_control_rule,),
     ),
-    body_size=BodySizePolicy(
-        default_max_bytes=64 * 1024, rules=(paths.backchannel_body_size_rule,),
-    ),
-    csrf_origin=CsrfPolicy(exempt=paths.backchannel),
+    csrf_origin=CsrfPolicy(),
 )
 install_sign_in_routes(
     app,
@@ -89,7 +85,7 @@ A host with one worker and no database keeps its accounts and sessions in memory
 
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
 `admin_user`) and its docstring says what `session_store`
-and `on_authenticated` are. `paths` also derives the policies of the four routes (`public_rules`, `browser_paths`, `backchannel`, `backchannel_body_size_rule`, `cache_control_rule`, `login_redirect`), so the host lists them once. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
+and `on_authenticated` are. `install_web_auth_middleware` derives the policies of the four routes from `paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. `paths.login_redirect` is the one derived value the host passes, to its session gate. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
 The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trusted-proxies).

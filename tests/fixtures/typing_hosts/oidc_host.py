@@ -97,8 +97,6 @@ from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     AuthorizedParties,
     BodySizePolicy,
-    BodySizeRule,
-    CacheControlRule,
     CspDirective,
     CsrfPolicy,
     PathRules,
@@ -256,24 +254,8 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
     )
 
 
-def a_host_derives_the_policies_of_its_sign_in_paths(
-    paths: SignInPaths,
-) -> tuple[
-    tuple[PublicRule, ...],
-    PathRules,
-    PathRules,
-    BodySizeRule,
-    CacheControlRule,
-    LoginRedirect,
-]:
-    return (
-        paths.public_rules,
-        paths.browser_paths,
-        paths.backchannel,
-        paths.backchannel_body_size_rule,
-        paths.cache_control_rule,
-        paths.login_redirect,
-    )
+def a_host_takes_the_login_redirect_of_its_sign_in_paths(paths: SignInPaths) -> LoginRedirect:
+    return paths.login_redirect
 
 
 def a_host_gets_a_fresh_access_token(
@@ -476,9 +458,14 @@ def a_host_admits_a_session_without_a_request(
     return admit_session(session_id, sessions=HostSessions(), config=config)
 
 
-def a_host_installs_the_middleware(app: FastAPI, bearer_gate: BearerGate) -> None:
+def a_host_installs_the_middleware(
+    app: FastAPI,
+    bearer_gate: BearerGate,
+    sign_in_paths: SignInPaths,
+) -> None:
     install_web_auth_middleware(
         app,
+        sign_in_paths=sign_in_paths,
         bearer_gate=bearer_gate,
         security_headers=SecurityHeadersPolicy(
             content_security_policy=default_content_security_policy(

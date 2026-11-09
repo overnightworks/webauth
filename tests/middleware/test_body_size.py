@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
+    GATED_SIGN_IN_PATHS,
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
     StartSend,
@@ -108,6 +109,7 @@ def a_body_limited_app(
     if full_stack:
         install_web_auth_middleware(
             app,
+            sign_in_paths=GATED_SIGN_IN_PATHS,
             security_headers=HEADERS_POLICY,
             body_size=body_size,
             rate_limit=RateLimitPolicy(default=RateLimitBudget("api", 100, 60)),
@@ -116,6 +118,7 @@ def a_body_limited_app(
     else:
         install_web_auth_middleware(
             app,
+            sign_in_paths=GATED_SIGN_IN_PATHS,
             security_headers=HEADERS_POLICY,
             body_size=body_size,
             csrf_origin=CsrfPolicy(),

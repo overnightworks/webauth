@@ -13,12 +13,23 @@ from webauth.middleware.csrf import CsrfOriginMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
 from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware
-from webauth.policies import CacheControlRule, PathRules, SecurityHeadersPolicy
+from webauth.policies import (
+    BodySizePolicy,
+    BodySizeRule,
+    CacheControlRule,
+    CsrfPolicy,
+    PathRules,
+    PublicRule,
+    RateLimitBudget,
+    RateLimitPolicy,
+    RateLimitRule,
+    SecurityHeadersPolicy,
+)
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
 
-    from webauth.policies import BodySizePolicy, CsrfPolicy, RateLimitPolicy
+    from webauth.sign_in_routes import SignInPaths
 
 __all__ = [
     "install_web_auth_middleware",
@@ -33,6 +44,65 @@ _LIBRARY_MIDDLEWARE = (
     SessionGateMiddleware,
 )
 
+_BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
+_DEFAULT_RATE_LIMIT = RateLimitPolicy(default=RateLimitBudget("default", 600, 60))
+_DEFAULT_BODY_SIZE = BodySizePolicy(default_max_bytes=4 * 1024)
+
+
+def _with_sign_in_rules(
+    sign_in_paths: SignInPaths,
+    *,
+    security_headers: SecurityHeadersPolicy,
+    body_size: BodySizePolicy,
+    rate_limit: RateLimitPolicy,
+    csrf_origin: CsrfPolicy,
+    session_gate: SessionGate | None,
+) -> tuple[SecurityHeadersPolicy, BodySizePolicy, RateLimitPolicy, CsrfPolicy, SessionGate | None]:
+    """The host's policies with the rules the sign-in paths derive put ahead of the host's own."""
+    paths = sign_in_paths
+    sign_in_page = PathRules(exact=frozenset({paths.start, paths.callback}))
+    browser = PathRules(
+        exact=frozenset(path for path in (paths.start, paths.callback, paths.logout) if path)
+    )
+    posted = frozenset(path for path in (paths.logout, paths.backchannel_logout) if path)
+    backchannel = PathRules(
+        exact=frozenset()
+        if paths.backchannel_logout is None
+        else frozenset({paths.backchannel_logout})
+    )
+    every_route = PathRules(exact=browser.exact | backchannel.exact)
+    if session_gate is not None:
+        public = (PublicRule(sign_in_page, methods=frozenset({"GET"})),)
+        if posted:
+            public += (PublicRule(PathRules(exact=posted), methods=frozenset({"POST"})),)
+        session_gate = replace(session_gate, public=(*public, *session_gate.public))
+    return (
+        replace(
+            security_headers,
+            cache_control_rules=(
+                CacheControlRule(every_route, "no-store"),
+                *security_headers.cache_control_rules,
+            ),
+        ),
+        replace(
+            body_size,
+            rules=(
+                BodySizeRule(backchannel, _BACKCHANNEL_MAX_BODY_BYTES, methods=frozenset({"POST"})),
+                *body_size.rules,
+            ),
+        ),
+        replace(
+            rate_limit,
+            rules=(RateLimitRule(browser, rate_limit.sign_in), *rate_limit.rules),
+            exempt=replace(rate_limit.exempt, exact=rate_limit.exempt.exact | backchannel.exact),
+        ),
+        replace(
+            csrf_origin,
+            exempt=replace(csrf_origin.exempt, exact=csrf_origin.exempt.exact | backchannel.exact),
+        ),
+        session_gate,
+    )
+
 
 def _no_store_paths(bearer_gate: BearerGate) -> list[PathRules]:
     paths = []
@@ -46,8 +116,8 @@ def _no_store_paths(bearer_gate: BearerGate) -> list[PathRules]:
 def _library_middleware(
     *,
     security_headers: SecurityHeadersPolicy,
-    body_size: BodySizePolicy | None,
-    rate_limit: RateLimitPolicy | None,
+    body_size: BodySizePolicy,
+    rate_limit: RateLimitPolicy,
     bearer_gate: BearerGate | None,
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
@@ -62,10 +132,8 @@ def _library_middleware(
             cache_control_rules=(*no_store, *security_headers.cache_control_rules),
         )
     entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
-    if body_size is not None:
-        entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
-    if rate_limit is not None:
-        entries.append(Middleware(IpRateLimitMiddleware, policy=rate_limit))
+    entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
+    entries.append(Middleware(IpRateLimitMiddleware, policy=rate_limit))
     if bearer_gate is not None:
         entries.append(Middleware(BearerGateMiddleware, policy=bearer_gate))
     entries.append(Middleware(CsrfOriginMiddleware, policy=csrf_origin))
@@ -88,6 +156,7 @@ def _refuse_an_unsound_stack(app: Starlette) -> None:
 def install_web_auth_middleware(
     app: Starlette,
     *,
+    sign_in_paths: SignInPaths,
     security_headers: SecurityHeadersPolicy,
     csrf_origin: CsrfPolicy,
     body_size: BodySizePolicy | None = None,
@@ -97,6 +166,14 @@ def install_web_auth_middleware(
 ) -> None:
     """Install the library's middleware outermost first: security headers, body
     size, rate limit, bearer gate, CSRF origin, session gate.
+
+    ``sign_in_paths`` is the one description of the sign-in routes. From it the installer
+    puts these rules ahead of the host's own, so the first match is the derived one:
+    ``no-store`` on every sign-in path; the back-channel path's exemption from CSRF and
+    from the rate limit and its 32 KiB ``POST`` body rule; with a session gate, the
+    public rules of the routes; and the policy's ``sign_in`` budget on start, callback and
+    logout. A host adds none of them. Without a ``rate_limit`` the default is 600
+    requests per 60 seconds per address, without a ``body_size`` it is 4 KiB.
 
     Security headers sit outside everything so the library's own refusals (the
     413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500)
@@ -123,6 +200,14 @@ def install_web_auth_middleware(
     middleware goes".
     """
     _refuse_an_unsound_stack(app)
+    security_headers, body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
+        sign_in_paths,
+        security_headers=security_headers,
+        body_size=body_size or _DEFAULT_BODY_SIZE,
+        rate_limit=rate_limit or _DEFAULT_RATE_LIMIT,
+        csrf_origin=csrf_origin,
+        session_gate=session_gate,
+    )
     entries = _library_middleware(
         security_headers=security_headers,
         body_size=body_size,

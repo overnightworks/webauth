@@ -159,14 +159,21 @@ class RateLimitPolicy:
 
     A request spends from one budget. Separate budgets exist so one traffic
     pattern cannot starve another arriving from the same address.
+
+    ``sign_in`` is the budget the installer spends on the sign-in paths ahead of
+    ``rules``: 40 requests per 10 minutes, two for each complete sign-in. Its name,
+    ``"sign-in"`` by default, is reserved: no other budget of the policy may carry it.
     """
 
     default: RateLimitBudget
     rules: tuple[RateLimitRule, ...] = ()
     exempt: PathRules = PathRules()
+    sign_in: RateLimitBudget = RateLimitBudget("sign-in", 40, 600)
 
     def __post_init__(self) -> None:
-        names = [self.default.name, *(rule.budget.name for rule in self.rules)]
+        other_budgets = [self.default, *(rule.budget for rule in self.rules)]
+        names = [self.sign_in.name]
+        names += [budget.name for budget in other_budgets if budget != self.sign_in]
         repeated = sorted({name for name in names if names.count(name) > 1})
         if repeated:
             raise ValueError(
@@ -272,7 +279,7 @@ class CacheControlRule:
         _require_header_field_value("CacheControlRule.value", self.value)
 
 
-_DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
+_DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=(), display-capture=()"
 
 
 @dataclass(frozen=True)
