@@ -83,3 +83,13 @@ forbidden_modules =
     starlette
     pydantic
     anyio
+
+# The single-process stores are a host's choice for one worker. No webauth
+# module imports them, so the library never falls back to them.
+[importlinter:contract:no-webauth-module-imports-the-single-process-stores]
+name = webauth.single_process_stores is imported by no other webauth module
+type = protected
+protected_modules =
+    webauth.single_process_stores
+allowed_importers =
+    webauth.single_process_stores

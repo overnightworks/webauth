@@ -85,6 +85,8 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
     return user
 ```
 
+A host with one worker and no database keeps its accounts and sessions in memory with `SingleProcessStores(audit=the_hosts_audit_sink)` from `webauth.single_process_stores`: pass its `transaction` to `install_sign_in_routes` and `session_store=lambda: stores.sessions` to `current_user_dependency`. A restart forgets every account and session ([the single-process stores](docs/host-contract.md#the-single-process-stores)).
+
 `current_user_dependency` returns an `AuthDependencies` (`current_user`,
 `admin_user`) and its docstring says what `session_store`
 and `on_authenticated` are. `paths` also derives the policies of the four routes (`public_rules`, `browser_paths`, `backchannel`, `backchannel_body_size_rule`, `cache_control_rule`, `login_redirect`), so the host lists them once. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
