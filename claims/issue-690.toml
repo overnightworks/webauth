@@ -1,8 +1,0 @@
-claim_id = "e5fb2673fddd4efd92c4cd1d38db4c7c"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "661c73ede0bf06cb5e935b6fd937717d20676a34"
-branch = "claude/issue-690-key-set-wait"
-scope = ["docs/host-contract.md", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "tests/test_jwt_verification_https_fetch.py", "tests/test_jwt_verification_refresh.py"]
-opened_commit = "415f4e9ceb2957f32ae8e6b68d6f181d33a19557"
-whole_reason = "One bounded wait in the verifier with its contract sentence and the two test modules that pin the refresh."
