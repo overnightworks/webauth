@@ -1,8 +1,0 @@
-claim_id = "e4ec8d059b3f4761900420e6e36db38c"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "16f628c09ac558239f6fa367198f0cbb59ac7d55"
-branch = "claude/issue-697-single-process-stores"
-scope = [".importlinter", "README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/ports.py", "src/webauth/single_process_stores.py", "tests/test_single_process_stores.py"]
-opened_commit = "d0dea1afc2caedabb0c22469d42ed4dcaf6c9d40"
-whole_reason = "One adapter whose three stores share one guard and one snapshot, with its contract sentences and its proof; a cut leaves neither host able to drop its fork."
