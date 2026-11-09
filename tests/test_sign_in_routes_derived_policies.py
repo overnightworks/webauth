@@ -133,12 +133,13 @@ def _backchannel_post(host: GatedHost, size: int = 0) -> int:
 def test_the_installer_is_refused_without_sign_in_paths() -> None:
     """SIGNIN-67: the installer requires `sign_in_paths`."""
     app = FastAPI()
+    csrf_origin = CsrfPolicy()
 
     with pytest.raises(TypeError, match="sign_in_paths"):
         install_web_auth_middleware(  # type: ignore[call-arg]
             app,
             security_headers=HEADERS_POLICY,
-            csrf_origin=CsrfPolicy(),
+            csrf_origin=csrf_origin,
         )
 
 
@@ -269,6 +270,9 @@ def test_a_host_sign_in_budget_applies_on_the_sign_in_paths() -> None:
     assert 429 not in _statuses_of_gets(host, "/albums/1", 4)
 
 
+_DEFAULT_SIGN_IN_BUDGET = RateLimitPolicy(default=RateLimitBudget("host", 5, 60)).sign_in
+
+
 @pytest.mark.parametrize(
     ("default", "rules"),
     [
@@ -283,17 +287,13 @@ def test_a_host_sign_in_budget_applies_on_the_sign_in_paths() -> None:
             id="as a rule",
         ),
         pytest.param(
-            RateLimitBudget(SIGN_IN_BUDGET_NAME, 40, 600),
+            _DEFAULT_SIGN_IN_BUDGET,
             (),
             id="the default sign-in budget as the default",
         ),
         pytest.param(
             RateLimitBudget("host", 5, 60),
-            (
-                RateLimitRule(
-                    PathRules(prefixes=("/api/",)), RateLimitBudget(SIGN_IN_BUDGET_NAME, 40, 600)
-                ),
-            ),
+            (RateLimitRule(PathRules(prefixes=("/api/",)), _DEFAULT_SIGN_IN_BUDGET),),
             id="the default sign-in budget as a rule",
         ),
     ],

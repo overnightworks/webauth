@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
@@ -185,7 +185,13 @@ class RateLimitPolicy:
 
     def with_sign_in_paths(self, paths: PathRules) -> RateLimitPolicy:
         """This policy with the ``sign_in`` budget spent on ``paths`` ahead of ``rules``."""
-        return replace(self, _sign_in_paths=paths)
+        return RateLimitPolicy(
+            default=self.default,
+            rules=self.rules,
+            exempt=self.exempt,
+            sign_in=self.sign_in,
+            _sign_in_paths=paths,
+        )
 
     def budget_for(self, path: str) -> RateLimitBudget:
         """The one budget ``path`` spends from; the sign-in paths, then the first matching rule.
