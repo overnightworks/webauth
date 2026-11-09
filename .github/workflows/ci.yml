@@ -9,13 +9,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   checks:
     name: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -34,7 +35,7 @@ jobs:
         run: scripts/run_static_checks.sh
 
       - name: Tests
-        run: uv run --locked pytest tests -q --cov=webauth --cov-report=xml --cov-report=term-missing:skip-covered
+        run: uv run --locked pytest tests -q -n auto --cov=webauth --cov-report=xml --cov-report=term-missing:skip-covered
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -51,6 +52,7 @@ jobs:
   lowest-direct:
     name: lowest-direct
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -70,7 +72,7 @@ jobs:
         run: uv pip install --resolution lowest-direct -e ".[redis]" --group dev
 
       - name: Tests
-        run: .venv/bin/pytest tests -q
+        run: .venv/bin/pytest tests -q -n auto
 
   quality:
     name: quality
