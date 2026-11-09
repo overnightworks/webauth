@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import traceback
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -303,16 +304,16 @@ def test_a_wait_ends_with_a_refusal_once_the_bound_passed(
     issuer: IssuerScenario, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """CALLER-34: a refresh that outlasts KEY_SET_REFRESH_WAIT_SECONDS refuses the waiter."""
-    monkeypatch.setattr(jwt_verification, "KEY_SET_REFRESH_WAIT_SECONDS", 0.5)
+    bound = 0.5
+    monkeypatch.setattr(jwt_verification, "KEY_SET_REFRESH_WAIT_SECONDS", bound)
     with _held_fetch(issuer) as (fetch_started, release_fetch):
         with ThreadPoolExecutor(max_workers=2) as pool:
             refreshing = pool.submit(issuer.verifier.verify, issuer.token())
             assert fetch_started.wait(timeout=10)
+            started = time.monotonic()
             waiting = pool.submit(issuer.verifier.verify, issuer.token())
-            done, _ = wait([waiting], timeout=0.1)
-            assert not done
             assert waiting.result(timeout=10) == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
-            assert not release_fetch.is_set()
+            assert time.monotonic() - started >= bound
             release_fetch.set()
             refreshing.result(timeout=10)
 

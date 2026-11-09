@@ -42,12 +42,11 @@ token: a refresh is skipped for `KEY_SET_REFRESH_COOLDOWN_SECONDS` after the
 last attempt and while another request is refreshing, except that a request
 with no current key set waits for that refresh, at most
 `KEY_SET_REFRESH_WAIT_SECONDS`, unless the last refresh attempt failed. The
-refusal then depends
-on the last refresh attempt: `UNKNOWN_KEY_ID` when it succeeded and the key set
-it fetched lacks the `kid`, `KEY_SET_UNAVAILABLE` when it failed, because the
-`kid` may belong to a rotated key. A token that passes the header checks while
-no current key set remains after the refresh attempt is refused as
-`KEY_SET_UNAVAILABLE`.
+refusal then depends on the last refresh attempt: `UNKNOWN_KEY_ID` when it
+succeeded and the key set it fetched lacks the `kid`, `KEY_SET_UNAVAILABLE`
+when it failed, because the `kid` may belong to a rotated key. A token that
+passes the header checks while no current key set remains after the refresh
+attempt is refused as `KEY_SET_UNAVAILABLE`.
 """
 
 from __future__ import annotations
@@ -357,7 +356,8 @@ class _JwtVerifier:
         # snapshot it already holds instead of waiting, so a flood of unknown
         # `kid`s costs one fetch and no blocked request threads. A wait exists
         # only while there is no snapshot to fail closed on, and it stops once
-        # a refresh is known to fail, so an issuer outage holds no threads.
+        # a refresh is known to fail, so an issuer outage holds no threads
+        # beyond its first attempt.
         acquired = (
             self._refresh_lock.acquire(timeout=KEY_SET_REFRESH_WAIT_SECONDS)
             if wait
