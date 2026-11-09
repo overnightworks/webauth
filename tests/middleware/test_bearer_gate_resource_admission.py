@@ -9,27 +9,22 @@ of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict
 from typing import NoReturn
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from starlette.middleware import Middleware
 
 from tests.support.agent_arrangement import AGENT_NAME, AGENT_OWNER, an_agent_group_token
 from tests.support.gate_arrangement import (
     A_TOKEN,
-    ADMISSION_PROBE_PATH,
+    EVERY_METHOD,
     EXPORT_PATH,
-    MACHINE_ADMISSION_PROBE_PATH,
-    MARKED_ADMISSION_PROBE,
-    MARKED_PERSON_ADMISSION_PROBE,
-    MARKED_ROUTES,
-    PERSON_ADMISSION_PROBE_PATH,
     PERSON_ME_PATH,
     PERSON_PATHS,
     REFUSED_AS_RUNTIME_ERROR,
     RESOURCE_GROUP,
-    WEBSOCKET_ADMISSION_PROBE_PATH,
     BearerApp,
     RewritingTheRequest,
     a_bearer_app,
@@ -52,8 +47,10 @@ from tests.support.oidc_login_host import StoreDown, failing
 from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
 from webauth.middleware import (
+    MarkedRoute,
     ProtectedResource,
     admitted_user,
+    is_resource_admission,
     resource_person,
 )
 from webauth.policies import PathRules, PublicRule
@@ -65,9 +62,68 @@ def resource() -> ProtectedResource:
     return a_resource()
 
 
+MARKED_ADMISSION_PROBE = MarkedRoute("POST", "/probe/marked-resource-admission")
+MARKED_PERSON_ADMISSION_PROBE = MarkedRoute("POST", "/api/probe/marked-resource-admission")
+ADMISSION_PROBE_PATH = "/probe/resource-admission"
+PERSON_ADMISSION_PROBE_PATH = "/api/probe/resource-admission"
+MACHINE_ADMISSION_PROBE_PATH = "/api/admin/probe/resource-admission"
+WEBSOCKET_ADMISSION_PROBE_PATH = "/probe/ws-resource-admission"
+
+
+def the_admission_answer(request: Request) -> dict[str, object]:
+    """What `is_resource_admission` answers beside `resource_person` and the agent facts."""
+    is_resource = is_resource_admission(request)
+    user = admitted_user(request) if is_resource else None
+    try:
+        resource_person(request)
+        person_returned = True
+    except RuntimeError:
+        person_returned = False
+    return {
+        "is_resource_admission": is_resource,
+        "resource_person_returns": person_returned,
+        "agent": None if user is None or user.agent is None else asdict(user.agent),
+    }
+
+
+def with_admission_probes(app: BearerApp, resource: ProtectedResource) -> BearerApp:
+    """Routes that echo `is_resource_admission` on a marked route, an unmarked person path, a
+    machine path, a path no gate marks and a WebSocket; the entry point answers it on `LINK`.
+    They come before the arrangement's own routes, which read `current_user` on a marked route."""
+    routes = app.auth.app.router.routes
+    existing = len(routes)
+    probe_paths = (
+        ADMISSION_PROBE_PATH,
+        PERSON_ADMISSION_PROBE_PATH,
+        MACHINE_ADMISSION_PROBE_PATH,
+        MARKED_ADMISSION_PROBE.template,
+        MARKED_PERSON_ADMISSION_PROBE.template,
+    )
+    for path in probe_paths:
+        app.auth.app.add_api_route(
+            path, the_admission_answer, methods=list(EVERY_METHOD), include_in_schema=False
+        )
+    app.auth.app.add_api_route(
+        resource.entry_point, the_admission_answer, methods=["LINK", "UNLINK"]
+    )
+
+    @app.auth.app.websocket(WEBSOCKET_ADMISSION_PROBE_PATH)
+    async def websocket_probe(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_json({"is_resource_admission": is_resource_admission(websocket)})
+        await websocket.close()
+
+    probes = routes[existing:]
+    del routes[existing:]
+    routes[:0] = probes
+    return app
+
+
 @pytest.fixture
 def marked_resource() -> ProtectedResource:
-    return a_resource(marked_routes=MARKED_ROUTES)
+    return a_resource(
+        marked_routes=frozenset({MARKED_ADMISSION_PROBE, MARKED_PERSON_ADMISSION_PROBE})
+    )
 
 
 def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
@@ -567,11 +623,14 @@ def test_a_route_reads_whether_the_request_is_a_resource_admission(
 ) -> None:
     """RESOURCE-81, RESOURCE-82: the predicate is true for a resource admission, with agent
     facts or without, and false for every other request; it agrees with `resource_person`."""
-    app = a_bearer_app(
-        person_paths=PERSON_PATHS,
-        resource=marked_resource,
-        known_accounts=(a_known_person(),),
-        public=(THE_PUBLIC_PROBE,),
+    app = with_admission_probes(
+        a_bearer_app(
+            person_paths=PERSON_PATHS,
+            resource=marked_resource,
+            known_accounts=(a_known_person(),),
+            public=(THE_PUBLIC_PROBE,),
+        ),
+        marked_resource,
     )
 
     response = app.ask(**asked(marked_resource))  # type: ignore[arg-type]
@@ -586,7 +645,9 @@ def test_a_route_reads_whether_the_request_is_a_resource_admission(
 
 def test_a_websocket_is_no_resource_admission(marked_resource: ProtectedResource) -> None:
     """RESOURCE-82: the predicate is false on a WebSocket."""
-    app = a_bearer_app(person_paths=PERSON_PATHS, resource=marked_resource)
+    app = with_admission_probes(
+        a_bearer_app(person_paths=PERSON_PATHS, resource=marked_resource), marked_resource
+    )
 
     with (
         app.auth.client,
@@ -597,9 +658,13 @@ def test_a_websocket_is_no_resource_admission(marked_resource: ProtectedResource
     assert answer == {"is_resource_admission": False}
 
 
-def test_an_app_without_a_bearer_gate_has_no_resource_admission() -> None:
+def test_an_app_without_a_bearer_gate_has_no_resource_admission(
+    marked_resource: ProtectedResource,
+) -> None:
     """RESOURCE-82: the predicate is false in an app without a bearer gate."""
-    app = a_bearer_app(gated=False)
+    app = with_admission_probes(
+        a_bearer_app(gated=False, resource=marked_resource), marked_resource
+    )
 
     response = app.ask(ADMISSION_PROBE_PATH, cookie=True)
 
@@ -636,11 +701,14 @@ def test_the_predicate_raises_for_an_admission_that_no_longer_holds(
     if "method" in changes:
         changes = {"method": "UNLINK" if surface == "entry-point" else "GET"}
 
-    app = a_bearer_app(
-        paths=PathRules(),
-        resource=marked_resource,
-        known_accounts=(a_known_person(),),
-        inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
+    app = with_admission_probes(
+        a_bearer_app(
+            paths=PathRules(),
+            resource=marked_resource,
+            known_accounts=(a_known_person(),),
+            inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
+        ),
+        marked_resource,
     )
     answering_a_runtime_error_with_418(app)
     response = app.ask(
