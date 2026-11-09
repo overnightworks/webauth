@@ -115,14 +115,23 @@ def _no_store_paths(bearer_gate: BearerGate) -> list[PathRules]:
 
 def _library_middleware(
     *,
+    sign_in_paths: SignInPaths,
     security_headers: SecurityHeadersPolicy,
-    body_size: BodySizePolicy,
-    rate_limit: RateLimitPolicy,
+    body_size: BodySizePolicy | None,
+    rate_limit: RateLimitPolicy | None,
     bearer_gate: BearerGate | None,
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
 ) -> list[Middleware]:
     """The middleware to install, outermost first, for the policies the host named."""
+    security_headers, body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
+        sign_in_paths,
+        security_headers=security_headers,
+        body_size=body_size or _DEFAULT_BODY_SIZE,
+        rate_limit=rate_limit or _DEFAULT_RATE_LIMIT,
+        csrf_origin=csrf_origin,
+        session_gate=session_gate,
+    )
     if bearer_gate is not None:
         no_store = tuple(
             CacheControlRule(paths, "no-store") for paths in _no_store_paths(bearer_gate)
@@ -200,15 +209,8 @@ def install_web_auth_middleware(
     middleware goes".
     """
     _refuse_an_unsound_stack(app)
-    security_headers, body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
-        sign_in_paths,
-        security_headers=security_headers,
-        body_size=body_size or _DEFAULT_BODY_SIZE,
-        rate_limit=rate_limit or _DEFAULT_RATE_LIMIT,
-        csrf_origin=csrf_origin,
-        session_gate=session_gate,
-    )
     entries = _library_middleware(
+        sign_in_paths=sign_in_paths,
         security_headers=security_headers,
         body_size=body_size,
         rate_limit=rate_limit,

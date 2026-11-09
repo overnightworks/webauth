@@ -22,6 +22,7 @@ from tests.support.gate_arrangement import (
     WEBSOCKET_ADMITTED_ADMIN_PATH,
     with_admitted_admin_routes,
 )
+from tests.support.gated_stack_arrangement import GATED_APP_HEADERS_POLICY
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.session_gate_arrangement import (
     ONLY_LOGIN_AND_HEALTH,
@@ -35,7 +36,6 @@ from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     ALL_DEPENDENCIES_PATH,
     ALLOWED_ORIGIN,
-    GATED_APP_HEADERS_POLICY,
     MEMBER_ROLE,
     WEBSOCKET_ADMITTED_PATH,
     WEBSOCKET_PATH,

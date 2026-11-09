@@ -11,9 +11,9 @@ from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
+from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
-    GATED_SIGN_IN_PATHS,
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
     StartSend,

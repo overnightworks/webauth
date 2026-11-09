@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -66,7 +65,9 @@ def _a_gated_host(
     *,
     sign_in_paths: SignInPaths = SIGN_IN_PATHS,
     gated: bool = True,
-    **policies: Any,
+    security_headers: SecurityHeadersPolicy = HEADERS_POLICY,
+    body_size: BodySizePolicy | None = None,
+    rate_limit: RateLimitPolicy | None = None,
 ) -> GatedHost:
     """A host the installer wires from its sign-in paths and the policies it passes."""
     config = a_web_auth_config()
@@ -78,8 +79,10 @@ def _a_gated_host(
     install_web_auth_middleware(
         app,
         sign_in_paths=sign_in_paths,
-        security_headers=policies.pop("security_headers", HEADERS_POLICY),
-        csrf_origin=policies.pop("csrf_origin", CsrfPolicy()),
+        security_headers=security_headers,
+        body_size=body_size,
+        rate_limit=rate_limit,
+        csrf_origin=CsrfPolicy(),
         session_gate=SessionGate(
             session_transaction=sessions.in_transaction,
             login_redirect=sign_in_paths.login_redirect,
@@ -87,7 +90,6 @@ def _a_gated_host(
         )
         if gated
         else None,
-        **policies,
     )
     install_sign_in_routes(
         app,
@@ -341,7 +343,7 @@ def test_the_back_channel_takes_a_32_kib_post_whatever_the_host_body_policy_says
     refused_at: int,
 ) -> None:
     """SIGNIN-07: the back-channel rule of 32 KiB comes ahead of the host's rules."""
-    host = _a_gated_host(**({} if body_size is None else {"body_size": body_size}))
+    host = _a_gated_host(body_size=body_size)
 
     assert _backchannel_post(host, back_channel_bytes) == 400
     assert _backchannel_post(host, refused_at) == 413

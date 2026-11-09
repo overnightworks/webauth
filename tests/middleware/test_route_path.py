@@ -12,8 +12,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
+from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.webauth_arrangement import (
-    GATED_SIGN_IN_PATHS,
     HTTPS_TEST_SERVER,
     SAME_ORIGIN_REQUEST,
     AuthApp,

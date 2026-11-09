@@ -22,12 +22,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.oidc_arrangement import a_relying_party
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
     ALLOWED_ORIGIN,
     API_PATH,
-    GATED_SIGN_IN_PATHS,
     HTTPS_TEST_SERVER,
     SAME_ORIGIN_REQUEST,
     SPEC_WITH_CONCURRENT_READER,
@@ -442,9 +442,7 @@ class TestRefusedInstallation:
         app = a_fresh_app()
         with pytest.raises(TypeError, match="csrf_origin"):
             install_web_auth_middleware(  # type: ignore[call-arg]
-                app,
-                sign_in_paths=GATED_SIGN_IN_PATHS,
-                security_headers=HEADERS_POLICY,
+                app, sign_in_paths=GATED_SIGN_IN_PATHS, security_headers=HEADERS_POLICY
             )
         assert app.user_middleware == []
 

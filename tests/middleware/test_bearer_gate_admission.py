@@ -39,6 +39,7 @@ from tests.support.gate_arrangement import (
     the_transaction,
     with_admitted_admin_routes,
 )
+from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
@@ -53,7 +54,6 @@ from tests.support.person_paths_arrangement import (
 )
 from tests.support.webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
-    GATED_SIGN_IN_PATHS,
     HTTPS_TEST_SERVER,
     LOGIN_REDIRECT,
     SessionsThatMustNotBeAsked,
