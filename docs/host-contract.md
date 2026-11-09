@@ -850,7 +850,7 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **MEMSTORE-17** A sink that fails at the exit rolls the entry back and its exception reaches the route.
 - **MEMSTORE-18** Entering an entry again raises; the transaction hands out a new entry per call.
 - **MEMSTORE-19** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
-The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
+- **MEMSTORE-20** The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
 - **MEMSTORE-21** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
 - **MEMSTORE-22** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
 - **Host duty:** an entry copies both tables, so its cost grows with the stored accounts and sessions; keep the store small by calling `delete_expired` on a timer.

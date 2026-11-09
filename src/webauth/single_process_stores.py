@@ -153,13 +153,25 @@ class SingleProcessAccountStore:
 
     def set_role(self, user_id: str, role: str) -> StoredAccount:
         with self._tables.guard:
-            account: StoredAccount = replace(self._tables.accounts[user_id], role=role)
+            current = self._tables.accounts[user_id]
+            account = StoredAccount(
+                id=current.id,
+                username=current.username,
+                role=role,
+                kind=current.kind,
+            )
             self._tables.accounts[user_id] = account
         return account
 
     def set_kind(self, user_id: str, kind: AccountKind) -> StoredAccount:
         with self._tables.guard:
-            account: StoredAccount = replace(self._tables.accounts[user_id], kind=kind)
+            current = self._tables.accounts[user_id]
+            account = StoredAccount(
+                id=current.id,
+                username=current.username,
+                role=current.role,
+                kind=kind,
+            )
             self._tables.accounts[user_id] = account
         return account
 
