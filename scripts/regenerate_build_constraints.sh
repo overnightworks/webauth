@@ -12,5 +12,5 @@ print(next(requirement for requirement in requirements if requirement.startswith
 ')"
 
 echo "$floor" | uv pip compile - --generate-hashes --python-version 3.14 --no-annotate \
-  --custom-compile-command 'See AGENTS.md "Releasing"' \
+  --custom-compile-command scripts/regenerate_build_constraints.sh \
   --output-file .github/requirements-build.txt
