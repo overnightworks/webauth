@@ -1,0 +1,7 @@
+claim_id = "94b2637ef96e415c9d8d4f56a7088d39"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "16f628c09ac558239f6fa367198f0cbb59ac7d55"
+branch = "claude/issue-700-ci-time-limits-parallel-tests"
+scope = [".github/workflows/ci.yml", "pyproject.toml", "uv.lock"]
+opened_commit = "03ec4905cc7e346abeeb4d86d3cda30cae871d57"
