@@ -22,7 +22,6 @@ from webauth.policies import (
     PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
-    RateLimitRule,
     SecurityHeadersPolicy,
 )
 
@@ -92,8 +91,7 @@ def _with_sign_in_rules(
             ),
         ),
         replace(
-            rate_limit,
-            rules=(RateLimitRule(browser, rate_limit.sign_in), *rate_limit.rules),
+            rate_limit.with_sign_in_paths(browser),
             exempt=replace(rate_limit.exempt, exact=rate_limit.exempt.exact | backchannel.exact),
         ),
         replace(

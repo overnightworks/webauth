@@ -132,9 +132,11 @@ def _backchannel_post(host: GatedHost, size: int = 0) -> int:
 
 def test_the_installer_is_refused_without_sign_in_paths() -> None:
     """SIGNIN-67: the installer requires `sign_in_paths`."""
+    app = FastAPI()
+
     with pytest.raises(TypeError, match="sign_in_paths"):
         install_web_auth_middleware(  # type: ignore[call-arg]
-            FastAPI(),
+            app,
             security_headers=HEADERS_POLICY,
             csrf_origin=CsrfPolicy(),
         )
@@ -208,7 +210,7 @@ def test_a_host_rule_keeps_deciding_the_paths_the_sign_in_paths_do_not_name() ->
     assert host.client.get("/albums/1").headers["cache-control"] == "public, max-age=60"
 
 
-def test_the_sixty_first_sign_in_request_of_the_budget_is_refused_without_a_host_policy() -> None:
+def test_the_forty_first_sign_in_request_in_ten_minutes_is_refused_without_a_host_policy() -> None:
     """SIGNIN-04: start, callback and logout spend one sign-in budget of 40 per 10 minutes."""
     host = _a_gated_host()
 
@@ -280,6 +282,20 @@ def test_a_host_sign_in_budget_applies_on_the_sign_in_paths() -> None:
             ),
             id="as a rule",
         ),
+        pytest.param(
+            RateLimitBudget(SIGN_IN_BUDGET_NAME, 40, 600),
+            (),
+            id="the default sign-in budget as the default",
+        ),
+        pytest.param(
+            RateLimitBudget("host", 5, 60),
+            (
+                RateLimitRule(
+                    PathRules(prefixes=("/api/",)), RateLimitBudget(SIGN_IN_BUDGET_NAME, 40, 600)
+                ),
+            ),
+            id="the default sign-in budget as a rule",
+        ),
     ],
 )
 def test_a_host_budget_under_the_reserved_sign_in_name_fails_at_construction(
@@ -323,30 +339,26 @@ def test_logout_is_never_exempt_from_csrf_or_the_rate_limit() -> None:
 
 
 @pytest.mark.parametrize(
-    ("body_size", "back_channel_bytes", "refused_at"),
+    "body_size",
     [
-        pytest.param(None, THIRTY_TWO_KIB, THIRTY_TWO_KIB + 1, id="no host body policy"),
+        pytest.param(None, id="no host body policy"),
         pytest.param(
             BodySizePolicy(
                 default_max_bytes=1024,
                 rules=(BodySizeRule(PathRules(prefixes=("/",)), 100, methods=frozenset({"POST"})),),
             ),
-            THIRTY_TWO_KIB,
-            THIRTY_TWO_KIB + 1,
             id="a host rule over every path",
         ),
     ],
 )
 def test_the_back_channel_takes_a_32_kib_post_whatever_the_host_body_policy_says(
     body_size: BodySizePolicy | None,
-    back_channel_bytes: int,
-    refused_at: int,
 ) -> None:
     """SIGNIN-07: the back-channel rule of 32 KiB comes ahead of the host's rules."""
     host = _a_gated_host(body_size=body_size)
 
-    assert _backchannel_post(host, back_channel_bytes) == 400
-    assert _backchannel_post(host, refused_at) == 413
+    assert _backchannel_post(host, THIRTY_TWO_KIB) == 400
+    assert _backchannel_post(host, THIRTY_TWO_KIB + 1) == 413
 
 
 def test_a_body_over_4_kib_is_refused_without_a_host_body_policy() -> None:
@@ -397,7 +409,7 @@ def test_a_signed_out_browser_reaches_exactly_four_methods_of_the_sign_in_paths(
     assert (response.status_code == 401) is not reaches_the_route
 
 
-def test_without_a_session_gate_the_installer_adds_none() -> None:
+def test_without_a_session_gate_a_signed_out_request_reaches_any_route() -> None:
     host = _a_gated_host(gated=False)
 
     assert host.client.get("/albums/1").status_code == 200

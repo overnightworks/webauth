@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Final
 
@@ -162,18 +162,17 @@ class RateLimitPolicy:
 
     ``sign_in`` is the budget the installer spends on the sign-in paths ahead of
     ``rules``: 40 requests per 10 minutes, two for each complete sign-in. Its name,
-    ``"sign-in"`` by default, is reserved: no other budget of the policy may carry it.
+    ``"sign-in"`` by default, is reserved: neither ``default`` nor a rule may carry it.
     """
 
     default: RateLimitBudget
     rules: tuple[RateLimitRule, ...] = ()
     exempt: PathRules = PathRules()
     sign_in: RateLimitBudget = RateLimitBudget("sign-in", 40, 600)
+    _sign_in_paths: PathRules | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        other_budgets = [self.default, *(rule.budget for rule in self.rules)]
-        names = [self.sign_in.name]
-        names += [budget.name for budget in other_budgets if budget != self.sign_in]
+        names = [self.sign_in.name, self.default.name, *(rule.budget.name for rule in self.rules)]
         repeated = sorted({name for name in names if names.count(name) > 1})
         if repeated:
             raise ValueError(
@@ -184,12 +183,18 @@ class RateLimitPolicy:
     def is_exempt(self, path: str) -> bool:
         return self.exempt.matches(path)
 
+    def with_sign_in_paths(self, paths: PathRules) -> RateLimitPolicy:
+        """This policy with the ``sign_in`` budget spent on ``paths`` ahead of ``rules``."""
+        return replace(self, _sign_in_paths=paths)
+
     def budget_for(self, path: str) -> RateLimitBudget:
-        """The one budget ``path`` spends from; the first matching rule decides.
+        """The one budget ``path`` spends from; the sign-in paths, then the first matching rule.
 
         A path no rule claims spends from the default budget -- fail closed, so
         an unrecognised route cannot slip through unlimited.
         """
+        if self._sign_in_paths is not None and self._sign_in_paths.matches(path):
+            return self.sign_in
         for rule in self.rules:
             if rule.paths.matches(path):
                 return rule.budget

@@ -731,7 +731,7 @@ So the host lists the paths once. `login_redirect` is browser-absolute, so it is
 - **SIGNIN-67** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
 - **SIGNIN-68** The derived rules come ahead of the host's own in every policy, so the first match is the derived one.
 - **SIGNIN-69** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
-- **SIGNIN-70** The budget name `"sign-in"` is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
+- **SIGNIN-70** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
 - **SIGNIN-71** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.
 - **SIGNIN-10** The library serves the logout route at `SignInPaths.logout` for `POST` only,
 - **SIGNIN-11** with the page's text from the host's `logout_page_text`, read per request:
