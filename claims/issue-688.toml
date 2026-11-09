@@ -1,0 +1,7 @@
+claim_id = "3d11dbca7e3847faba80477129d69f12"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "3ea4cf0abc1a47fded94ad6707d5140155e856db"
+branch = "claude/issue-688-agents-md-shape"
+scope = [".github/requirements-build.txt", "AGENTS.md", "scripts/regenerate_build_constraints.sh"]
+opened_commit = "e32a80c3f31be9a43839db3144a73a112ea57a33"
