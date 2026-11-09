@@ -843,7 +843,7 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **MEMSTORE-09** `delete_for_user` ends every session of the account, returns how many ended, and removes the account too: an account that outlives its sign-out serves nothing in memory, and the next sign-in creates it again, so its `USER_CREATED` event is true.
 - **MEMSTORE-10** `create_for_subject` never raises `UsernameTakenError` and has no flag: the username is for display and the issuer decides who a subject is, so a raise would lock a re-created person out until a restart.
 - **MEMSTORE-11** `load` returns an expired row, as the port says; the gate decides expiry.
-- **MEMSTORE-12** `delete_expired(now)` removes the expired sessions and returns how many; `create` prunes the sessions expired at its `now`. A host's sweep timer calls `delete_expired`.
+- **MEMSTORE-12** `delete_expired(now)` removes the expired sessions and returns how many; `create` prunes the sessions expired at its `now`.
 - **MEMSTORE-13** An entry of the transaction holds one re-entrant guard from enter to exit, so a second entry waits until the first exits.
 - **MEMSTORE-14** Store calls from several threads leave the stores consistent.
 - **MEMSTORE-15** A raise inside an entry restores both stores from a snapshot taken at entry and drops the entry's audit events; a clean entry hands them to the sink as its last step.

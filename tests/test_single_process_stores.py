@@ -62,6 +62,7 @@ from webauth.single_process_stores import (
     SingleProcessSessionStore,
     SingleProcessSignInTransaction,
     SingleProcessStores,
+    _Tables,
 )
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -335,11 +336,14 @@ class TestSessions:
         with_account(stores)
         expired = [open_session(stores, expires_at=START + timedelta(seconds=n)) for n in (1, 2)]
         alive = open_session(stores, expires_at=LATER)
+        now = START + timedelta(minutes=1)
+        due_now = open_session(stores, expires_at=now)
 
-        assert stores.sessions.delete_expired(START + timedelta(minutes=1)) == 2
+        assert stores.sessions.delete_expired(now) == 2
 
         assert held_ids(stores, expired) == []
         assert stores.sessions.load(alive) is not None
+        assert stores.sessions.load(due_now) is not None
 
     def test_create_drops_the_rows_expired_at_its_time(self, stores: SingleProcessStores) -> None:
         """MEMSTORE-12: create prunes the rows expired at its time."""
@@ -403,9 +407,19 @@ class TestRecordsOf:
         assert (records.account, records.sessions) == (None, ())
 
 
+def enter_and_leave(stores: SingleProcessStores) -> None:
+    with stores.transaction():
+        pass
+
+
+class AnInterruption(BaseException):  # noqa: N818 - stands for KeyboardInterrupt, which is no Exception
+    pass
+
+
 class TestSignInTransaction:
+    @pytest.mark.parametrize("raised", [RuntimeError, AnInterruption])
     def test_a_block_that_raises_restores_both_stores_and_drops_its_audit(
-        self, stores: SingleProcessStores, audit: RecordingAuditSink
+        self, stores: SingleProcessStores, audit: RecordingAuditSink, raised: type[BaseException]
     ) -> None:
         """MEMSTORE-15: a raise inside an entry restores both stores and drops its audit."""
         with_account(stores)
@@ -419,9 +433,9 @@ class TestSignInTransaction:
                 inside.accounts.set_role(SUBJECT_ONE, "admin")
                 inside.sessions.delete(kept)
                 inside.audit.account_event(an_event())
-                raise RuntimeError("boom")
+                raise raised("boom")
 
-        with pytest.raises(RuntimeError, match="boom"):
+        with pytest.raises(raised, match="boom"):
             a_block_that_raises()
 
         account = stores.accounts.get(SUBJECT_ONE)
@@ -498,26 +512,57 @@ class TestSignInTransaction:
         with pytest.raises(RuntimeError, match="entered once"), entry:
             pass
 
-    def test_a_second_entry_waits_until_the_first_has_exited(
-        self, stores: SingleProcessStores
+    @pytest.mark.parametrize(
+        "second_call",
+        [
+            enter_and_leave,
+            lambda stores: stores.accounts.get(SUBJECT_ONE),
+            lambda stores: stores.sessions.load("unknown"),
+            lambda stores: open_session(stores),
+        ],
+        ids=["entry", "accounts.get", "sessions.load", "sessions.create"],
+    )
+    def test_a_second_caller_waits_until_the_first_entry_has_exited(
+        self, stores: SingleProcessStores, second_call: Callable[[SingleProcessStores], object]
     ) -> None:
-        """MEMSTORE-13: a second entry waits until the first exits."""
-        order: list[str] = []
-        second_asking = threading.Event()
+        """MEMSTORE-13: a second entry or a plain store call waits until the first entry exits."""
+        with_account(stores)
+        finished = threading.Event()
 
         def second() -> None:
-            second_asking.set()
-            with stores.transaction():
-                order.append("second entered")
+            second_call(stores)
+            finished.set()
 
-        thread = threading.Thread(target=second)
+        thread = threading.Thread(target=second, daemon=True)
         with stores.transaction():
             thread.start()
-            second_asking.wait()
-            order.append("first leaving")
-        thread.join()
+            finished_while_open = finished.wait(timeout=0.3)
 
-        assert order == ["first leaving", "second entered"]
+        thread.join(timeout=10)
+
+        assert not finished_while_open
+        assert finished.is_set()
+
+    def test_a_failed_enter_gives_the_guard_back(
+        self, stores: SingleProcessStores, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MEMSTORE-13: an entry whose snapshot fails does not keep the guard."""
+        failing(_Tables, "snapshot", monkeypatch)
+        with pytest.raises(StoreDown), stores.transaction():
+            pass
+        monkeypatch.undo()
+        finished = threading.Event()
+
+        def another_thread() -> None:
+            stores.accounts.get(SUBJECT_ONE)
+            finished.set()
+
+        thread = threading.Thread(target=another_thread, daemon=True)
+        thread.start()
+        thread.join(timeout=10)
+
+        assert not thread.is_alive()
+        assert finished.is_set()
 
 
 class Browser:

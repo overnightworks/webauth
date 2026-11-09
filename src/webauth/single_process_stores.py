@@ -345,7 +345,11 @@ class _SignInEntry:
             raise RuntimeError(message)
         self._entered = True
         self._held.enter_context(self._tables.guard)
-        self._snapshot = self._tables.snapshot()
+        try:
+            self._snapshot = self._tables.snapshot()
+        except BaseException:
+            self._held.close()
+            raise
         return SignInStores(accounts=self._accounts, sessions=self._sessions, audit=self._deferred)
 
     def __exit__(
