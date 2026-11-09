@@ -39,7 +39,10 @@ unless a token naming an unfamiliar `kid` triggers an earlier refresh
 
 A token naming an unfamiliar `kid` triggers a refresh, but not on every such
 token: a refresh is skipped for `KEY_SET_REFRESH_COOLDOWN_SECONDS` after the
-last attempt and while another request is refreshing. The refusal then depends
+last attempt and while another request is refreshing, except that a request
+with no current key set waits for that refresh, at most
+`KEY_SET_REFRESH_WAIT_SECONDS`, unless the last refresh attempt failed. The
+refusal then depends
 on the last refresh attempt: `UNKNOWN_KEY_ID` when it succeeded and the key set
 it fetched lacks the `kid`, `KEY_SET_UNAVAILABLE` when it failed, because the
 `kid` may belong to a rotated key. A token that passes the header checks while
@@ -80,6 +83,7 @@ _MAX_HEADER_SEGMENT_CHARACTERS = 512
 _MAX_KEY_ID_CHARACTERS = 128
 _KEY_SET_TTL_SECONDS = 60 * 60
 KEY_SET_REFRESH_COOLDOWN_SECONDS = 30
+KEY_SET_REFRESH_WAIT_SECONDS = 10
 _MAX_KEY_SET_KEYS = 10
 _MIN_RSA_KEY_BITS = 2048
 
@@ -95,6 +99,7 @@ KeySetFetch = Callable[[str], bytes]
 
 __all__ = [
     "KEY_SET_REFRESH_COOLDOWN_SECONDS",
+    "KEY_SET_REFRESH_WAIT_SECONDS",
     "KeySetFetch",
     "MonotonicClock",
     "RejectionReason",
@@ -320,8 +325,11 @@ class _JwtVerifier:
 
     def _signing_key(self, key_id: str | None) -> RSAPublicKey:
         key_set = self._key_set
-        if not self._is_current(key_set) or (key_id is not None and key_id not in key_set.named):
-            self._refresh_key_set()
+        if not self._is_current(key_set):
+            self._refresh_key_set(wait=not self._last_refresh_failed)
+            key_set = self._key_set
+        elif key_id is not None and key_id not in key_set.named:
+            self._refresh_key_set(wait=False)
             key_set = self._key_set
         if not self._is_current(key_set):
             raise _VerificationRefusal(RejectionReason.KEY_SET_UNAVAILABLE)
@@ -344,11 +352,18 @@ class _JwtVerifier:
             and self._monotonic_clock() - key_set.fetched_at < _KEY_SET_TTL_SECONDS
         )
 
-    def _refresh_key_set(self) -> None:
-        # A request arriving while another refreshes does not wait for it: it
-        # fails closed on the snapshot it already holds, so a flood of unknown
-        # `kid`s costs one fetch and no blocked request threads.
-        if not self._refresh_lock.acquire(blocking=False):
+    def _refresh_key_set(self, *, wait: bool) -> None:
+        # A request arriving while another refreshes fails closed on the
+        # snapshot it already holds instead of waiting, so a flood of unknown
+        # `kid`s costs one fetch and no blocked request threads. A wait exists
+        # only while there is no snapshot to fail closed on, and it stops once
+        # a refresh is known to fail, so an issuer outage holds no threads.
+        acquired = (
+            self._refresh_lock.acquire(timeout=KEY_SET_REFRESH_WAIT_SECONDS)
+            if wait
+            else self._refresh_lock.acquire(blocking=False)
+        )
+        if not acquired:
             return
         try:
             now = self._monotonic_clock()
