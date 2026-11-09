@@ -1,8 +1,0 @@
-claim_id = "2779537b29f44487a9614cb046aa3d59"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "1f79753aad0c0d3b4bdb581c3ca7cf83cb6f32f8"
-branch = "claude/issue-693-resource-admission-read"
-scope = ["docs/host-contract.md", "src/webauth/middleware/__init__.py", "src/webauth/middleware/bearer_gate.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_bearer_gate_marked_routes.py", "tests/middleware/test_bearer_gate_resource_admission.py", "tests/support/gate_arrangement.py"]
-opened_commit = "37e6a61f0d0018ab2878e57f0e854bc3470bd3ab"
-whole_reason = "One public read with its contract sentences and its proof; the tests, their arrangement and the typing host are its callers, so it does not split."
