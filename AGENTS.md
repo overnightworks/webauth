@@ -24,7 +24,7 @@
 
 ## Owners
 
-- The operator rules each release and pushes its tag. The head writes the release page by hand, from the release item that lists every change since the last tag.
+- The head writes each release page by hand, from the open release item, which lists every change since the last tag.
 
 ## Documents
 
