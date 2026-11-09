@@ -1,7 +1,0 @@
-claim_id = "0ba035eb9a7f44eabee41a19690377a4"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "c1acdf6c2be24f347abb263e903be41dc9b8f77a"
-branch = "claude/issue-700-ci-concurrency-run-id"
-scope = [".github/workflows/ci.yml", "pyproject.toml", "uv.lock"]
-opened_commit = "ddcff0d3bdaef4bc822da024276301644f2fa888"
