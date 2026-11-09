@@ -832,27 +832,27 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 `webauth.single_process_stores` implements the account, session and sign-in transaction ports in the memory of one process, for a host that runs one worker.
 
 - **Host duty:** one worker only, because a restart forgets every account and session and a second worker sees none of the first's. A host with several workers, or one that keeps sessions across a restart, implements the ports over its database.
-- **MEMSTORE-02** `SingleProcessStores(audit=...)` bundles `accounts` (a `SubjectUserStore`), `sessions` (a `SessionRecordStore`) and `transaction` (a `SignInTransaction`) over one set of tables; the host passes its own `AuditSink`, and webauth ships no logging sink.
-- **MEMSTORE-03** A session id is distinct, URL-safe, 43 to 135 characters, and drawn from a CSPRNG.
-- **MEMSTORE-04** `get` compares the subject character for character: no case, trailing-space or Unicode-normalization folding.
-- **MEMSTORE-05** `set_role`, `set_kind` and a session `create` for a missing account raise.
-- **MEMSTORE-06** `touch` and `replace_refresh_token` on a missing session answer `False` and create no row.
-- **MEMSTORE-07** `touch` writes the `expires_at` it is given and keeps both tokens; `replace_refresh_token` keeps the ID token.
-- **MEMSTORE-08** `delete` of an unknown id is a no-op.
-- **MEMSTORE-09** `prune_overflow` keeps the newest sessions by `created_at`; `0` keeps none.
-- **MEMSTORE-10** `delete_for_user` ends every session of the account, returns how many ended, and removes the account too: an account that outlives its sign-out serves nothing in memory, and the next sign-in creates it again, so its `USER_CREATED` event is true.
-- **MEMSTORE-11** `create_for_subject` never raises `UsernameTakenError` and has no flag: the username is for display and the issuer decides who a subject is, so a raise would lock a re-created person out until a restart.
-- **MEMSTORE-12** `load` returns an expired row, as the port says; the gate decides expiry.
-- **MEMSTORE-13** `delete_expired(now)` removes the expired sessions and returns how many; `create` prunes the sessions expired at its `now`. A host's sweep timer calls `delete_expired`.
-- **MEMSTORE-14** An entry of the transaction holds one re-entrant guard from enter to exit, so a second entry waits until the first exits.
-- **MEMSTORE-15** Store calls from several threads leave the stores consistent.
-- **MEMSTORE-16** A raise inside an entry restores both stores from a snapshot taken at entry and drops the entry's audit events; a clean entry hands them to the sink as its last step.
-- **MEMSTORE-17** A sink that fails at the exit rolls the entry back and its exception reaches the route.
-- **MEMSTORE-18** Entering an entry again raises; the transaction hands out a new entry per call.
-- **MEMSTORE-19** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
-- **MEMSTORE-20** The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
-- **MEMSTORE-21** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
-- **MEMSTORE-22** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
+- **MEMSTORE-01** `SingleProcessStores(audit=...)` bundles `accounts` (a `SubjectUserStore`), `sessions` (a `SessionRecordStore`) and `transaction` (a `SignInTransaction`) over one set of tables; the host passes its own `AuditSink`, and webauth ships no logging sink.
+- **MEMSTORE-02** A session id is distinct, URL-safe, 43 to 135 characters, and drawn from a CSPRNG.
+- **MEMSTORE-03** `get` compares the subject character for character: no case, trailing-space or Unicode-normalization folding.
+- **MEMSTORE-04** `set_role`, `set_kind` and a session `create` for a missing account raise.
+- **MEMSTORE-05** `touch` and `replace_refresh_token` on a missing session answer `False` and create no row.
+- **MEMSTORE-06** `touch` writes the `expires_at` it is given and keeps both tokens; `replace_refresh_token` keeps the ID token.
+- **MEMSTORE-07** `delete` of an unknown id is a no-op.
+- **MEMSTORE-08** `prune_overflow` keeps the newest sessions by `created_at`; `0` keeps none.
+- **MEMSTORE-09** `delete_for_user` ends every session of the account, returns how many ended, and removes the account too: an account that outlives its sign-out serves nothing in memory, and the next sign-in creates it again, so its `USER_CREATED` event is true.
+- **MEMSTORE-10** `create_for_subject` never raises `UsernameTakenError` and has no flag: the username is for display and the issuer decides who a subject is, so a raise would lock a re-created person out until a restart.
+- **MEMSTORE-11** `load` returns an expired row, as the port says; the gate decides expiry.
+- **MEMSTORE-12** `delete_expired(now)` removes the expired sessions and returns how many; `create` prunes the sessions expired at its `now`. A host's sweep timer calls `delete_expired`.
+- **MEMSTORE-13** An entry of the transaction holds one re-entrant guard from enter to exit, so a second entry waits until the first exits.
+- **MEMSTORE-14** Store calls from several threads leave the stores consistent.
+- **MEMSTORE-15** A raise inside an entry restores both stores from a snapshot taken at entry and drops the entry's audit events; a clean entry hands them to the sink as its last step.
+- **MEMSTORE-16** A sink that fails at the exit rolls the entry back and its exception reaches the route.
+- **MEMSTORE-17** Entering an entry again raises; the transaction hands out a new entry per call.
+- **MEMSTORE-18** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
+- **MEMSTORE-19** The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
+- **MEMSTORE-20** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
+- **MEMSTORE-21** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
 - **Host duty:** an entry copies both tables, so its cost grows with the stored accounts and sessions; keep the store small by calling `delete_expired` on a timer.
 
 ## Testing a host

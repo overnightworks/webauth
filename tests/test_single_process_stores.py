@@ -113,7 +113,7 @@ def held_ids(stores: SingleProcessStores, ids: list[str]) -> list[str]:
 
 class TestTheBundle:
     def test_the_bundle_shares_one_set_of_tables(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-02: accounts, sessions and the transaction work over one set of tables."""
+        """MEMSTORE-01: accounts, sessions and the transaction work over one set of tables."""
         with stores.transaction() as inside:
             inside.accounts.create_for_subject(SUBJECT_ONE, "name", "member", AccountKind.PERSON)
             session_id = inside.sessions.create(
@@ -125,7 +125,7 @@ class TestTheBundle:
         assert loaded.user == stores.accounts.get(SUBJECT_ONE)
 
     def test_the_records_implement_the_ports_records(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-21: the stored records are the ports' user and session records."""
+        """MEMSTORE-20: the stored records are the ports' user and session records."""
         with_account(stores)
         account: UserRecord | None = stores.accounts.get(SUBJECT_ONE)
         session: SessionRecord | None = stores.sessions.load(open_session(stores))
@@ -142,7 +142,7 @@ class TestAccounts:
         ids=["case", "trailing-space", "decomposed-unicode"],
     )
     def test_get_matches_the_subject_exactly(self, stores: SingleProcessStores, asked: str) -> None:
-        """MEMSTORE-04: get compares the subject character for character."""
+        """MEMSTORE-03: get compares the subject character for character."""
         stores.accounts.create_for_subject("subject-\u00e9", "name", "member", AccountKind.PERSON)
 
         assert stores.accounts.get(asked) is None
@@ -160,7 +160,7 @@ class TestAccounts:
     def test_a_write_on_a_missing_account_raises(
         self, stores: SingleProcessStores, call: Callable[[SingleProcessStores], object]
     ) -> None:
-        """MEMSTORE-05: a write on a missing account raises."""
+        """MEMSTORE-04: a write on a missing account raises."""
         with pytest.raises(KeyError):
             call(stores)
 
@@ -169,7 +169,7 @@ class TestAccounts:
     def test_set_role_and_set_kind_change_only_their_field(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-05: set_role and set_kind return the changed account."""
+        """MEMSTORE-04: set_role and set_kind return the changed account."""
         with_account(stores)
 
         stores.accounts.set_role(SUBJECT_ONE, "admin")
@@ -186,7 +186,7 @@ class TestAccounts:
     def test_a_second_subject_with_a_taken_username_keeps_both_accounts(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-11: a taken username never raises."""
+        """MEMSTORE-10: a taken username never raises."""
         first = stores.accounts.create_for_subject(
             SUBJECT_ONE, "same", "member", AccountKind.PERSON
         )
@@ -204,7 +204,7 @@ class TestSessions:
     def test_session_ids_are_distinct_url_safe_and_long_enough(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-03: a session id is distinct, URL-safe and 43 to 135 characters."""
+        """MEMSTORE-02: a session id is distinct, URL-safe and 43 to 135 characters."""
         with_account(stores)
 
         ids = [open_session(stores) for _ in range(200)]
@@ -227,14 +227,14 @@ class TestSessions:
         stores: SingleProcessStores,
         write: Callable[[SingleProcessStores, str], object],
     ) -> None:
-        """MEMSTORE-06: touch and replace_refresh_token on a missing row answer False."""
+        """MEMSTORE-05: touch and replace_refresh_token on a missing row answer False."""
         assert write(stores, "absent") is False
         assert stores.sessions.load("absent") is None
 
     def test_touch_writes_the_given_expiry_and_keeps_both_tokens(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-07: touch writes the given expiry and keeps both tokens."""
+        """MEMSTORE-06: touch writes the given expiry and keeps both tokens."""
         with_account(stores)
         session_id = open_session(stores)
         renewed = LATER + timedelta(days=1)
@@ -250,7 +250,7 @@ class TestSessions:
     def test_replacing_the_refresh_token_keeps_the_id_token(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-07: replace_refresh_token keeps the ID token."""
+        """MEMSTORE-06: replace_refresh_token keeps the ID token."""
         with_account(stores)
         session_id = open_session(stores)
 
@@ -265,7 +265,7 @@ class TestSessions:
         assert session.id_token == SecretStr("identity")
 
     def test_deleting_an_unknown_id_changes_nothing(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-08: delete of an unknown id is a no-op."""
+        """MEMSTORE-07: delete of an unknown id is a no-op."""
         with_account(stores)
         session_id = open_session(stores)
 
@@ -277,7 +277,7 @@ class TestSessions:
     def test_prune_overflow_keeps_the_newest_by_creation(
         self, stores: SingleProcessStores, keep_newest: int
     ) -> None:
-        """MEMSTORE-09: prune_overflow keeps the newest N by creation."""
+        """MEMSTORE-08: prune_overflow keeps the newest N by creation."""
         with_account(stores)
         with_account(stores, SUBJECT_TWO)
         created = [
@@ -297,7 +297,7 @@ class TestSessions:
     def test_delete_for_user_ends_every_session_counts_them_and_removes_the_account(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-10: delete_for_user ends every session, counts them and removes the account."""
+        """MEMSTORE-09: delete_for_user ends every session, counts them and removes the account."""
         with_account(stores)
         with_account(stores, SUBJECT_TWO)
         mine = [open_session(stores) for _ in range(3)]
@@ -312,14 +312,14 @@ class TestSessions:
     def test_delete_for_user_without_sessions_still_removes_the_account(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-10: delete_for_user removes the account when no session is left."""
+        """MEMSTORE-09: delete_for_user removes the account when no session is left."""
         with_account(stores)
 
         assert stores.sessions.delete_for_user(SUBJECT_ONE) == 0
         assert stores.accounts.get(SUBJECT_ONE) is None
 
     def test_load_returns_an_expired_row(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-12: load returns an expired row."""
+        """MEMSTORE-11: load returns an expired row."""
         with_account(stores)
         session_id = open_session(stores, expires_at=START)
 
@@ -331,7 +331,7 @@ class TestSessions:
     def test_delete_expired_removes_the_expired_rows_and_counts_them(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-13: delete_expired removes the expired rows and counts them."""
+        """MEMSTORE-12: delete_expired removes the expired rows and counts them."""
         with_account(stores)
         expired = [open_session(stores, expires_at=START + timedelta(seconds=n)) for n in (1, 2)]
         alive = open_session(stores, expires_at=LATER)
@@ -342,7 +342,7 @@ class TestSessions:
         assert stores.sessions.load(alive) is not None
 
     def test_create_drops_the_rows_expired_at_its_time(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-13: create prunes the rows expired at its time."""
+        """MEMSTORE-12: create prunes the rows expired at its time."""
         with_account(stores)
         expired = open_session(stores, expires_at=START + timedelta(seconds=1))
 
@@ -353,7 +353,7 @@ class TestSessions:
     def test_calls_from_several_threads_leave_a_consistent_store(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-15: calls from several threads leave a consistent store."""
+        """MEMSTORE-14: calls from several threads leave a consistent store."""
         with_account(stores)
         ids_by_thread: list[list[str]] = [[] for _ in range(8)]
 
@@ -379,7 +379,7 @@ class TestRecordsOf:
     def test_records_carry_the_times_and_no_session_id_or_token(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-19: records_of carries no session id and no token."""
+        """MEMSTORE-18: records_of carries no session id and no token."""
         with_account(stores)
         session_id = open_session(
             stores, refresh_token="secret-refresh", id_token="secret-identity"
@@ -397,7 +397,7 @@ class TestRecordsOf:
             assert secret not in shown
 
     def test_records_of_an_unknown_subject_are_empty(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-19: records_of an unknown subject holds nothing."""
+        """MEMSTORE-18: records_of an unknown subject holds nothing."""
         records = stores.sessions.records_of("absent")
 
         assert (records.account, records.sessions) == (None, ())
@@ -407,7 +407,7 @@ class TestSignInTransaction:
     def test_a_block_that_raises_restores_both_stores_and_drops_its_audit(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-16: a raise inside an entry restores both stores and drops its audit."""
+        """MEMSTORE-15: a raise inside an entry restores both stores and drops its audit."""
         with_account(stores)
         kept = open_session(stores)
 
@@ -434,7 +434,7 @@ class TestSignInTransaction:
     def test_a_clean_block_keeps_its_writes_and_reports_its_events_at_the_exit(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-16: a clean entry keeps its writes and reports its events at the exit."""
+        """MEMSTORE-15: a clean entry keeps its writes and reports its events at the exit."""
         with stores.transaction() as inside:
             inside.accounts.create_for_subject(SUBJECT_ONE, "name", "member", AccountKind.PERSON)
             inside.audit.account_event(an_event())
@@ -449,7 +449,7 @@ class TestSignInTransaction:
         audit: RecordingAuditSink,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """MEMSTORE-17: a failing audit sink at the exit rolls the entry back."""
+        """MEMSTORE-16: a failing audit sink at the exit rolls the entry back."""
         failing(audit, "account_event", monkeypatch)
 
         def an_entry_whose_sink_fails() -> None:
@@ -467,7 +467,7 @@ class TestSignInTransaction:
     def test_a_transaction_over_a_session_store_restores_that_stores_sessions(
         self, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-16: the transaction restores the tables of the session store it is built on."""
+        """MEMSTORE-15: the transaction restores the tables of the session store it is built on."""
         accounts = SingleProcessAccountStore()
         sessions = SingleProcessSessionStore(accounts)
         transaction = SingleProcessSignInTransaction(sessions, audit=audit)
@@ -490,7 +490,7 @@ class TestSignInTransaction:
         assert sessions.records_of(SUBJECT_ONE).sessions == ()
 
     def test_an_entry_cannot_be_entered_twice(self, stores: SingleProcessStores) -> None:
-        """MEMSTORE-18: re-entering an entry raises."""
+        """MEMSTORE-17: re-entering an entry raises."""
         entry = stores.transaction()
         with entry:
             pass
@@ -501,7 +501,7 @@ class TestSignInTransaction:
     def test_a_second_entry_waits_until_the_first_has_exited(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-14: a second entry waits until the first exits."""
+        """MEMSTORE-13: a second entry waits until the first exits."""
         order: list[str] = []
         second_asking = threading.Event()
 
@@ -606,7 +606,7 @@ class TestSignInRoutesOverTheStores:
     def test_the_callback_opens_a_session_the_gate_admits(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-22: the callback opens a session the gate admits."""
+        """MEMSTORE-21: the callback opens a session the gate admits."""
         browser = Browser(stores)
 
         assert browser.sign_in() == 303
@@ -618,7 +618,7 @@ class TestSignInRoutesOverTheStores:
     def test_logout_ends_the_session_the_gate_then_refuses(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-22: logout ends the session."""
+        """MEMSTORE-21: logout ends the session."""
         browser = Browser(stores)
         browser.sign_in()
 
@@ -630,7 +630,7 @@ class TestSignInRoutesOverTheStores:
     def test_back_channel_logout_ends_every_session_and_the_next_sign_in_creates_the_account_again(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-22: back-channel logout ends every session and the account."""
+        """MEMSTORE-21: back-channel logout ends every session and the account."""
         browser = Browser(stores)
         browser.sign_in()
 
