@@ -45,6 +45,7 @@ def test_a_verifier_on_the_https_fetch_verifies_a_token_of_the_served_key_set(
 def test_a_request_during_a_stalled_key_set_fetch_waits_and_is_refused_when_it_fails(
     https_key_set_server: LoopbackHttpsServer, issuer: IssuerScenario
 ) -> None:
+    """CALLER-34: a request during a stalled HTTPS fetch waits and is refused if the fetch fails."""
     verifier = issuer.verifier_with(
         jwks_url=f"{https_key_set_server.base_url}/silent", fetch_key_set=fetch_key_set_over_https
     )
