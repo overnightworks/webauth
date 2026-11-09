@@ -11,6 +11,7 @@ from webauth.middleware.bearer_gate import (
     ProtectedResource,
     bearer_caller,
     install_resource_metadata,
+    is_resource_admission,
     resource_person,
 )
 from webauth.middleware.body_size import BodySizeLimitMiddleware, RequestBodyTooLarge
@@ -44,5 +45,6 @@ __all__ = [
     "bearer_caller",
     "install_resource_metadata",
     "install_web_auth_middleware",
+    "is_resource_admission",
     "resource_person",
 ]

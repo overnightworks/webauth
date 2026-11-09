@@ -8,19 +8,28 @@ of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import NoReturn
 
 import pytest
 from fastapi import FastAPI, Request
 from starlette.middleware import Middleware
 
+from tests.support.agent_arrangement import AGENT_NAME, AGENT_OWNER, an_agent_group_token
 from tests.support.gate_arrangement import (
     A_TOKEN,
+    ADMISSION_PROBE_PATH,
     EXPORT_PATH,
+    MACHINE_ADMISSION_PROBE_PATH,
+    MARKED_ADMISSION_PROBE,
+    MARKED_PERSON_ADMISSION_PROBE,
+    MARKED_ROUTES,
+    PERSON_ADMISSION_PROBE_PATH,
     PERSON_ME_PATH,
     PERSON_PATHS,
     REFUSED_AS_RUNTIME_ERROR,
     RESOURCE_GROUP,
+    WEBSOCKET_ADMISSION_PROBE_PATH,
     BearerApp,
     RewritingTheRequest,
     a_bearer_app,
@@ -47,13 +56,18 @@ from webauth.middleware import (
     admitted_user,
     resource_person,
 )
-from webauth.policies import PathRules
+from webauth.policies import PathRules, PublicRule
 from webauth.ports import SignInStores
 
 
 @pytest.fixture
 def resource() -> ProtectedResource:
     return a_resource()
+
+
+@pytest.fixture
+def marked_resource() -> ProtectedResource:
+    return a_resource(marked_routes=MARKED_ROUTES)
 
 
 def the_account_of_the_token(app: BearerApp) -> FakeUser | None:
@@ -468,3 +482,169 @@ def test_an_agent_group_that_is_not_a_group_path_is_refused(group: str) -> None:
     `required_group` is."""
     with pytest.raises(ValueError, match="agent_group"):
         a_resource(agent_group=group)
+
+
+THE_PUBLIC_PROBE = PublicRule(PathRules(exact=frozenset({ADMISSION_PROBE_PATH})))
+
+
+def asked_by_a_session(path: str) -> dict[str, object]:
+    return {"path": path, "cookie": True}
+
+
+def asked_with(path: str, token: str, method: str = "POST") -> dict[str, object]:
+    return {"path": path, "method": method, "authorization": bearing(token)}
+
+
+@pytest.mark.parametrize(
+    ("asked", "is_resource", "agent"),
+    [
+        pytest.param(
+            lambda r: asked_by_a_session(MARKED_ADMISSION_PROBE.template),
+            False,
+            None,
+            id="session-on-a-marked-route",
+        ),
+        pytest.param(
+            lambda r: asked_with(PERSON_ADMISSION_PROBE_PATH, A_TOKEN),
+            False,
+            None,
+            id="person-token-on-a-person-path",
+        ),
+        pytest.param(
+            lambda r: asked_with(MARKED_PERSON_ADMISSION_PROBE.template, A_TOKEN),
+            False,
+            None,
+            id="person-token-of-another-audience-on-a-marked-route-below-a-person-path",
+        ),
+        pytest.param(
+            lambda r: asked_with(r.entry_point, an_interactive_agent_token(r), "LINK"),
+            True,
+            None,
+            id="own-agent-at-the-entry-point",
+        ),
+        pytest.param(
+            lambda r: asked_with(MARKED_ADMISSION_PROBE.template, an_interactive_agent_token(r)),
+            True,
+            None,
+            id="own-agent-on-a-marked-route",
+        ),
+        pytest.param(
+            lambda r: asked_with(
+                MARKED_ADMISSION_PROBE.template,
+                an_agent_group_token(r, r.agent_group, r.required_group),
+            ),
+            True,
+            {"owner": AGENT_OWNER, "name": AGENT_NAME},
+            id="agent-group-on-a-marked-route",
+        ),
+        pytest.param(
+            lambda r: asked_with(
+                MARKED_PERSON_ADMISSION_PROBE.template, an_interactive_agent_token(r)
+            ),
+            True,
+            None,
+            id="resource-token-on-a-marked-route-below-a-person-path",
+        ),
+        pytest.param(
+            lambda r: asked_with(MACHINE_ADMISSION_PROBE_PATH, A_TOKEN),
+            False,
+            None,
+            id="machine-request",
+        ),
+        pytest.param(
+            lambda r: {"path": ADMISSION_PROBE_PATH},
+            False,
+            None,
+            id="no-credential-on-a-public-path",
+        ),
+    ],
+)
+def test_a_route_reads_whether_the_request_is_a_resource_admission(
+    marked_resource: ProtectedResource,
+    asked: Callable[[ProtectedResource], dict[str, object]],
+    is_resource: bool,
+    agent: dict[str, str] | None,
+) -> None:
+    """RESOURCE-81, RESOURCE-82: the predicate is true for a resource admission, with agent
+    facts or without, and false for every other request; it agrees with `resource_person`."""
+    app = a_bearer_app(
+        person_paths=PERSON_PATHS,
+        resource=marked_resource,
+        known_accounts=(a_known_person(),),
+        public=(THE_PUBLIC_PROBE,),
+    )
+
+    response = app.ask(**asked(marked_resource))  # type: ignore[arg-type]
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "is_resource_admission": is_resource,
+        "resource_person_returns": is_resource,
+        "agent": agent,
+    }
+
+
+def test_a_websocket_is_no_resource_admission(marked_resource: ProtectedResource) -> None:
+    """RESOURCE-82: the predicate is false on a WebSocket."""
+    app = a_bearer_app(person_paths=PERSON_PATHS, resource=marked_resource)
+
+    with (
+        app.auth.client,
+        app.auth.connect(WEBSOCKET_ADMISSION_PROBE_PATH, cookie=app.auth.signed_cookie()) as socket,
+    ):
+        answer = socket.receive_json()
+
+    assert answer == {"is_resource_admission": False}
+
+
+def test_an_app_without_a_bearer_gate_has_no_resource_admission() -> None:
+    """RESOURCE-82: the predicate is false in an app without a bearer gate."""
+    app = a_bearer_app(gated=False)
+
+    response = app.ask(ADMISSION_PROBE_PATH, cookie=True)
+
+    assert (response.status_code, response.json()["is_resource_admission"]) == (200, False)
+
+
+@pytest.mark.parametrize("surface", ["entry-point", "marked-route"])
+@pytest.mark.parametrize(
+    ("changes", "status"),
+    [
+        pytest.param({"app": FastAPI()}, REFUSED_AS_RUNTIME_ERROR, id="sub-app"),
+        pytest.param({"method": "another"}, REFUSED_AS_RUNTIME_ERROR, id="method-changed"),
+        pytest.param(
+            {"headers": [(b"authorization", b"Bearer other")]},
+            REFUSED_AS_RUNTIME_ERROR,
+            id="authorization-changed",
+        ),
+        pytest.param({}, 200, id="unchanged"),
+    ],
+)
+def test_the_predicate_raises_for_an_admission_that_no_longer_holds(
+    marked_resource: ProtectedResource,
+    surface: str,
+    changes: dict[str, object],
+    status: int,
+) -> None:
+    """RESOURCE-83: the predicate raises `RuntimeError` in a sub-app and after the
+    `Authorization` header or the method changed, and answers otherwise."""
+    path, method = (
+        (marked_resource.entry_point, "LINK")
+        if surface == "entry-point"
+        else (MARKED_ADMISSION_PROBE.template, "POST")
+    )
+    if "method" in changes:
+        changes = {"method": "UNLINK" if surface == "entry-point" else "GET"}
+
+    app = a_bearer_app(
+        paths=PathRules(),
+        resource=marked_resource,
+        known_accounts=(a_known_person(),),
+        inner_middleware=(Middleware(RewritingTheRequest, changes=changes),),
+    )
+    answering_a_runtime_error_with_418(app)
+    response = app.ask(
+        path, method=method, authorization=bearing(an_interactive_agent_token(marked_resource))
+    )
+
+    assert response.status_code == status

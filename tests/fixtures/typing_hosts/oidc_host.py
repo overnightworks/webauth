@@ -73,6 +73,7 @@ from webauth.middleware import (
     bearer_caller,
     install_resource_metadata,
     install_web_auth_middleware,
+    is_resource_admission,
     resource_person,
 )
 from webauth.oidc import (
@@ -403,6 +404,16 @@ def a_host_reads_the_resource_person(app: FastAPI) -> None:
     @app.post("/mcp")
     def mcp(request: Request) -> str:
         return resource_person(request).username
+
+
+def a_host_reads_whether_the_resource_admitted_the_request(
+    app: FastAPI, dependencies: AuthDependencies
+) -> None:
+    @app.post("/share")
+    def share(
+        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user)
+    ) -> bool:
+        return is_resource_admission(request) and user.agent is None
 
 
 def a_host_reads_the_token_person(app: FastAPI, dependencies: AuthDependencies) -> None:

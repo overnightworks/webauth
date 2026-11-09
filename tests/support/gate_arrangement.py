@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
@@ -61,6 +61,7 @@ from webauth.middleware import (
     bearer_caller,
     install_resource_metadata,
     install_web_auth_middleware,
+    is_resource_admission,
     resource_person,
 )
 from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PublicRule
@@ -108,8 +109,16 @@ MARKED_PERSON_NOTE = MarkedRoute("GET", "/api/notes/{note}")
 MARKED_UNDER_MACHINE = MarkedRoute("GET", "/api/admin/notes/{note}")
 MARKED_RESOURCE_PERSON = MarkedRoute("POST", "/readers/resource-person")
 MARKED_ADMITTED_USER = MarkedRoute("POST", "/readers/admitted-user")
+MARKED_ADMISSION_PROBE = MarkedRoute("POST", "/probe/marked-resource-admission")
+MARKED_PERSON_ADMISSION_PROBE = MarkedRoute("POST", "/api/probe/marked-resource-admission")
+ADMISSION_PROBE_PATH = "/probe/resource-admission"
+PERSON_ADMISSION_PROBE_PATH = "/api/probe/resource-admission"
+MACHINE_ADMISSION_PROBE_PATH = "/api/admin/probe/resource-admission"
+WEBSOCKET_ADMISSION_PROBE_PATH = "/probe/ws-resource-admission"
 MARKED_ROUTES = frozenset(
     {
+        MARKED_ADMISSION_PROBE,
+        MARKED_PERSON_ADMISSION_PROBE,
         MARKED_NOTE,
         MARKED_NEW_NOTE,
         MARKED_ADMIN_NOTES,
@@ -318,7 +327,54 @@ def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
     ) -> dict[str, str]:
         return echo(request, user)
 
+    @auth.app.api_route(resource.entry_point, methods=["LINK", "UNLINK"])
+    def entry_point_admission(request: Request) -> dict[str, object]:
+        return the_admission_answer(request)
+
     add_marked_routes(auth, resource)
+
+
+def the_admission_answer(request: Request) -> dict[str, object]:
+    """What `is_resource_admission` answers, and the person's agent facts when it says yes."""
+    is_resource = is_resource_admission(request)
+    user = admitted_user(request) if is_resource else None
+    return {
+        "is_resource_admission": is_resource,
+        "resource_person_returns": a_resource_person_is_returned(request),
+        "agent": None if user is None or user.agent is None else asdict(user.agent),
+    }
+
+
+def a_resource_person_is_returned(connection: HTTPConnection) -> bool:
+    try:
+        resource_person(connection)
+    except RuntimeError:
+        return False
+    return True
+
+
+def add_admission_probe_routes(auth: AuthApp) -> None:
+    """Routes that echo `is_resource_admission`, on a marked route, an unmarked person path, a
+    machine path, a path no gate marks and a WebSocket. The resource's entry point answers it on
+    `LINK`."""
+
+    def probe(request: Request) -> dict[str, object]:
+        return the_admission_answer(request)
+
+    for path in (
+        ADMISSION_PROBE_PATH,
+        PERSON_ADMISSION_PROBE_PATH,
+        MACHINE_ADMISSION_PROBE_PATH,
+        MARKED_ADMISSION_PROBE.template,
+        MARKED_PERSON_ADMISSION_PROBE.template,
+    ):
+        auth.app.add_api_route(path, probe, methods=list(EVERY_METHOD), include_in_schema=False)
+
+    @auth.app.websocket(WEBSOCKET_ADMISSION_PROBE_PATH)
+    async def websocket_probe(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_json({"is_resource_admission": is_resource_admission(websocket)})
+        await websocket.close()
 
 
 def add_marked_routes(auth: AuthApp, resource: ProtectedResource) -> None:
@@ -514,6 +570,7 @@ def _add_routes(
     login_redirect: LoginRedirect | None,
 ) -> None:
     add_machine_routes(auth)
+    add_admission_probe_routes(auth)
     if person is not None:
         add_person_routes(auth, login_redirect)
     if resource is not None:
