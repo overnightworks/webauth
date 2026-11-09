@@ -129,10 +129,8 @@ def fetch_key_set_over_https(
     timeout is cut off. Connecting, which urllib3 bounds
     by the connect timeout once per resolved address, and the host name lookup,
     which the resolver offers no way to bound, run outside the deadline. Every
-    failure fails closed, and every other request is refused at once rather
-    than waiting for this refresh. A
-    `timeout_seconds` or `deadline_seconds` of zero or less raises
-    `ValueError`."""
+    failure fails closed. A `timeout_seconds` or `deadline_seconds` of zero
+    or less raises `ValueError`."""
     if not is_https_url(url):
         raise KeySetFetchError(
             "refusing to fetch the key set: not an https URL naming a host,"

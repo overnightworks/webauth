@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -23,6 +26,7 @@ from tests.support.oidc_arrangement import (
     served_key_set,
     weak_public_jwk,
 )
+from webauth import jwt_verification
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import (
     RejectionReason,
@@ -203,3 +207,131 @@ def test_a_refused_key_set_url_is_not_repeated_in_the_configuration_error(
         issuer.verifier_with(jwks_url=f"https://operator:{_URL_SECRET}@login.example.org/certs")
 
     assert _URL_SECRET not in "".join(traceback.format_exception(refusal.value))
+
+
+_WHILE_WAITING_SECONDS = 0.3
+
+
+@contextmanager
+def _held_fetch(issuer: IssuerScenario) -> Iterator[tuple[threading.Event, threading.Event]]:
+    fetch_started, release_fetch = threading.Event(), threading.Event()
+
+    def hold_the_fetch() -> None:
+        fetch_started.set()
+        assert release_fetch.wait(timeout=10)
+
+    issuer.endpoint.before_answer = hold_the_fetch
+    try:
+        yield fetch_started, release_fetch
+    finally:
+        release_fetch.set()
+
+
+@pytest.mark.parametrize("waiters", [1, 8], ids=["one-waiter", "eight-waiters"])
+def test_cold_callers_wait_for_the_running_refresh_and_share_its_fetch(
+    issuer: IssuerScenario, waiters: int
+) -> None:
+    """CALLER-34: callers finding no current key set wait for the one refresh."""
+    with _held_fetch(issuer) as (fetch_started, release_fetch):
+        with ThreadPoolExecutor(max_workers=waiters + 1) as pool:
+            refreshing = pool.submit(issuer.verifier.verify, issuer.token())
+            assert fetch_started.wait(timeout=10)
+            waiting = [pool.submit(issuer.verifier.verify, issuer.token()) for _ in range(waiters)]
+            done, _ = wait(waiting, timeout=_WHILE_WAITING_SECONDS)
+            assert not done
+            release_fetch.set()
+            outcomes = [refreshing.result(timeout=10), *(w.result(timeout=10) for w in waiting)]
+
+    assert outcomes == [issuer.verified()] * (waiters + 1)
+    assert len(issuer.endpoint.fetched_urls) == 1
+
+
+def test_callers_wait_for_the_refresh_of_an_expired_key_set(issuer: IssuerScenario) -> None:
+    """CALLER-34: the wait also opens when the key set is past its TTL."""
+    issuer.verifier.verify(issuer.token())
+    issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS
+    with _held_fetch(issuer) as (fetch_started, release_fetch):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            refreshing = pool.submit(issuer.verifier.verify, issuer.token())
+            assert fetch_started.wait(timeout=10)
+            waiting = pool.submit(issuer.verifier.verify, issuer.token())
+            done, _ = wait([waiting], timeout=_WHILE_WAITING_SECONDS)
+            assert not done
+            release_fetch.set()
+            outcomes = [refreshing.result(timeout=10), waiting.result(timeout=10)]
+
+    assert outcomes == [issuer.verified()] * 2
+    assert len(issuer.endpoint.fetched_urls) == 2
+
+
+def test_callers_waiting_for_a_failing_refresh_are_refused_after_one_fetch(
+    issuer: IssuerScenario,
+) -> None:
+    """CALLER-34: a refresh that fails leaves the waiter refused KEY_SET_UNAVAILABLE."""
+    issuer.serve(KeySetFetchError("answered 503"))
+    with _held_fetch(issuer) as (fetch_started, release_fetch):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            refreshing = pool.submit(issuer.verifier.verify, issuer.token())
+            assert fetch_started.wait(timeout=10)
+            waiting = pool.submit(issuer.verifier.verify, issuer.token())
+            done, _ = wait([waiting], timeout=_WHILE_WAITING_SECONDS)
+            assert not done
+            release_fetch.set()
+            outcomes = [refreshing.result(timeout=10), waiting.result(timeout=10)]
+
+    assert outcomes == [_Rejected(RejectionReason.KEY_SET_UNAVAILABLE)] * 2
+    assert len(issuer.endpoint.fetched_urls) == 1
+
+
+def test_a_caller_does_not_wait_once_the_last_refresh_failed(issuer: IssuerScenario) -> None:
+    """CALLER-34: after a failed refresh a caller is refused at once instead of waiting."""
+    issuer.serve(KeySetFetchError("answered 503"))
+    issuer.verifier.verify(issuer.token())
+    issuer.after_cooldown()
+    issuer.serve(served_key_set("current"))
+    with _held_fetch(issuer) as (fetch_started, release_fetch):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            refreshing = pool.submit(issuer.verifier.verify, issuer.token())
+            assert fetch_started.wait(timeout=10)
+            refused_at_once = pool.submit(issuer.verifier.verify, issuer.token()).result(timeout=10)
+            release_fetch.set()
+            refreshing.result(timeout=10)
+
+    assert refused_at_once == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+
+
+def test_a_wait_ends_with_a_refusal_once_the_bound_passed(
+    issuer: IssuerScenario, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CALLER-34: a refresh that outlasts KEY_SET_REFRESH_WAIT_SECONDS refuses the waiter."""
+    bound = 0.5
+    monkeypatch.setattr(jwt_verification, "KEY_SET_REFRESH_WAIT_SECONDS", bound)
+    with _held_fetch(issuer) as (fetch_started, release_fetch):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            refreshing = pool.submit(issuer.verifier.verify, issuer.token())
+            assert fetch_started.wait(timeout=10)
+            started = time.monotonic()
+            waiting = pool.submit(issuer.verifier.verify, issuer.token())
+            assert waiting.result(timeout=10) == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+            assert time.monotonic() - started >= bound
+            release_fetch.set()
+            refreshing.result(timeout=10)
+
+
+def test_a_forged_token_is_refused_by_its_signature_after_the_wait(
+    issuer: IssuerScenario,
+) -> None:
+    """CALLER-34: waiting for the key set admits no token it does not verify."""
+    forged = issuer.token(sign=rs256(rsa_key("other")))
+    with _held_fetch(issuer) as (fetch_started, release_fetch):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            refreshing = pool.submit(issuer.verifier.verify, issuer.token())
+            assert fetch_started.wait(timeout=10)
+            waiting = pool.submit(issuer.verifier.verify, forged)
+            done, _ = wait([waiting], timeout=_WHILE_WAITING_SECONDS)
+            assert not done
+            release_fetch.set()
+            refreshing.result(timeout=10)
+            outcome = waiting.result(timeout=10)
+
+    assert outcome == _Rejected(RejectionReason.INVALID_SIGNATURE)

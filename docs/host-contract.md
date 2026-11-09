@@ -675,6 +675,9 @@ The verifier stage keeps the verifier's own order:
 - **CALLER-24** `KEY_SET_UNAVAILABLE` (503) is the verifier's refusal when the key set cannot be fetched and the
   token's key is not among the cached ones, also when other keys are cached;
 - **CALLER-25** with a usable cached key, a failed refresh still verifies;
+- **CALLER-34** any token verification, not only a service caller's, that finds no current key set while another
+  request refreshes waits for that refresh, at most `KEY_SET_REFRESH_WAIT_SECONDS`, unless the last refresh attempt
+  failed; it then uses the key set the refresh left or is refused `KEY_SET_UNAVAILABLE`;
 - **CALLER-26** every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
 
 By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
