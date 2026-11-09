@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import NoReturn
+from typing import NoReturn, TypedDict
 
 import pytest
 from fastapi import FastAPI, Request, WebSocket
@@ -73,16 +73,14 @@ WEBSOCKET_ADMISSION_PROBE_PATH = "/probe/ws-resource-admission"
 def the_admission_answer(request: Request) -> dict[str, object]:
     """What `is_resource_admission` answers beside `resource_person` and the agent facts."""
     is_resource = is_resource_admission(request)
-    user = admitted_user(request) if is_resource else None
     try:
-        resource_person(request)
-        person_returned = True
+        person = resource_person(request)
     except RuntimeError:
-        person_returned = False
+        person = None
     return {
         "is_resource_admission": is_resource,
-        "resource_person_returns": person_returned,
-        "agent": None if user is None or user.agent is None else asdict(user.agent),
+        "resource_person_returns": person is not None,
+        "agent": None if person is None or person.agent is None else asdict(person.agent),
     }
 
 
@@ -543,11 +541,20 @@ def test_an_agent_group_that_is_not_a_group_path_is_refused(group: str) -> None:
 THE_PUBLIC_PROBE = PublicRule(PathRules(exact=frozenset({ADMISSION_PROBE_PATH})))
 
 
-def asked_by_a_session(path: str) -> dict[str, object]:
+class Asked(TypedDict, total=False):
+    """The keyword set `BearerApp.ask` takes for the requests of the admission probes."""
+
+    path: str
+    method: str
+    authorization: tuple[str, ...]
+    cookie: bool
+
+
+def asked_by_a_session(path: str) -> Asked:
     return {"path": path, "cookie": True}
 
 
-def asked_with(path: str, token: str, method: str = "POST") -> dict[str, object]:
+def asked_with(path: str, token: str, method: str = "POST") -> Asked:
     return {"path": path, "method": method, "authorization": bearing(token)}
 
 
@@ -617,7 +624,7 @@ def asked_with(path: str, token: str, method: str = "POST") -> dict[str, object]
 )
 def test_a_route_reads_whether_the_request_is_a_resource_admission(
     marked_resource: ProtectedResource,
-    asked: Callable[[ProtectedResource], dict[str, object]],
+    asked: Callable[[ProtectedResource], Asked],
     is_resource: bool,
     agent: dict[str, str] | None,
 ) -> None:
@@ -633,7 +640,7 @@ def test_a_route_reads_whether_the_request_is_a_resource_admission(
         marked_resource,
     )
 
-    response = app.ask(**asked(marked_resource))  # type: ignore[arg-type]
+    response = app.ask(**asked(marked_resource))
 
     assert response.status_code == 200
     assert response.json() == {
@@ -673,33 +680,34 @@ def test_an_app_without_a_bearer_gate_has_no_resource_admission(
 
 @pytest.mark.parametrize("surface", ["entry-point", "marked-route"])
 @pytest.mark.parametrize(
-    ("changes", "status"),
+    ("changes_after", "status"),
     [
-        pytest.param({"app": FastAPI()}, REFUSED_AS_RUNTIME_ERROR, id="sub-app"),
-        pytest.param({"method": "another"}, REFUSED_AS_RUNTIME_ERROR, id="method-changed"),
+        pytest.param(lambda other: {"app": FastAPI()}, REFUSED_AS_RUNTIME_ERROR, id="sub-app"),
         pytest.param(
-            {"headers": [(b"authorization", b"Bearer other")]},
+            lambda other: {"method": other}, REFUSED_AS_RUNTIME_ERROR, id="method-changed"
+        ),
+        pytest.param(
+            lambda other: {"headers": [(b"authorization", b"Bearer other")]},
             REFUSED_AS_RUNTIME_ERROR,
             id="authorization-changed",
         ),
-        pytest.param({}, 200, id="unchanged"),
+        pytest.param(lambda other: {}, 200, id="unchanged"),
     ],
 )
 def test_the_predicate_raises_for_an_admission_that_no_longer_holds(
     marked_resource: ProtectedResource,
     surface: str,
-    changes: dict[str, object],
+    changes_after: Callable[[str], dict[str, object]],
     status: int,
 ) -> None:
     """RESOURCE-83: the predicate raises `RuntimeError` in a sub-app and after the
     `Authorization` header or the method changed, and answers otherwise."""
-    path, method = (
-        (marked_resource.entry_point, "LINK")
+    path, method, other_method = (
+        (marked_resource.entry_point, "LINK", "UNLINK")
         if surface == "entry-point"
-        else (MARKED_ADMISSION_PROBE.template, "POST")
+        else (MARKED_ADMISSION_PROBE.template, "POST", "GET")
     )
-    if "method" in changes:
-        changes = {"method": "UNLINK" if surface == "entry-point" else "GET"}
+    changes = changes_after(other_method)
 
     app = with_admission_probes(
         a_bearer_app(
