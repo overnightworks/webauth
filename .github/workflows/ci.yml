@@ -48,7 +48,6 @@ jobs:
       - name: Build the distribution
         run: uv build --build-constraint .github/requirements-build.txt --require-hashes
 
-  # The name is a contract with release.yml: its REQUIRED_JOBS refuses a tag without this job green.
   lowest-direct:
     name: lowest-direct
     runs-on: ubuntu-latest
