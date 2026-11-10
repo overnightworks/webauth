@@ -342,6 +342,29 @@ class _IssuedCode:
     code_challenge: str
 
 
+class GrantHeldUntilReleased:
+    """A ``FakeIssuer.before_exchange`` that stops the grant on a worker thread until the test
+    releases it, so a test acts while the grant is in flight and sleeps nowhere."""
+
+    def __init__(self, deadline_seconds: float) -> None:
+        self._deadline_seconds = deadline_seconds
+        self._reached = threading.Event()
+        self._released = threading.Event()
+
+    def __call__(self) -> None:
+        self._reached.set()
+        if not self._released.wait(self._deadline_seconds):
+            raise TimeoutError("the held grant was never released")
+
+    def wait_until_reached(self) -> None:
+        """Blocks the calling thread until a grant is held; call it off the event loop."""
+        if not self._reached.wait(self._deadline_seconds):
+            raise TimeoutError("no grant reached the issuer")
+
+    def release(self) -> None:
+        self._released.set()
+
+
 @dataclass
 class FakeIssuer:
     """An issuer's authorization and token endpoints that remember what they issued.

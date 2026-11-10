@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from starlette.requests import HTTPConnection
 
 from webauth._paths import _has_dot_segment
+from webauth._worker import on_worker
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.dependencies import (
     _AUTHENTICATION_REQUIRED_DETAIL,
@@ -30,7 +31,6 @@ from webauth.dependencies import (
 )
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
-from webauth.middleware._worker import on_worker
 from webauth.policies import PathRules, PublicRule
 from webauth.ports import AuthenticatedUser
 

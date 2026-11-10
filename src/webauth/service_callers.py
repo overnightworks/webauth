@@ -221,7 +221,7 @@ class ServiceCallerCheck:
         if person_identity.principal.subject == workload_identity.principal.subject:
             return CallerRefusal(CallerRefusalReason.SAME_SUBJECT, None)
         admission = workload.registered.admission
-        role = app_role(sorted(person_identity.groups), admission)
+        role = app_role(person_identity.groups, admission)
         if role is None:
             return CallerRefusal(CallerRefusalReason.NOT_A_MEMBER, None)
         return PersonCaller(

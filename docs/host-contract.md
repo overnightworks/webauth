@@ -449,7 +449,7 @@ budget, is judged against groups that are fresh and verified, not those of the l
 - **GROUPS-10** A store failure raises, and no groups are handed out then.
 - **GROUPS-11** A failed transaction exit raises, and no groups are handed out then.
 
-**GROUPS-12** A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(bound_issuer=...,
+**GROUPS-12** A subgroup-aware check passes the tuple, or the `frozenset` the async reader answers, to `app_role` as it is, with `AdmissionConfig(bound_issuer=...,
 login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
 
 - **The source.** Only the new ID token counts:
@@ -480,6 +480,18 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
 - **Residue.** The second transaction cannot rule out a session deleted after its load: with a
   store that commits each statement, a deletion before the transaction's exit also escapes when
   the rotation is omitted or echoed, as [Risks and Technical Debt](ARCHITECTURE.md#8-risks-and-technical-debt) says.
+- **The async reader.** `SessionGroups(relying_party, session_transaction, config)` from
+  `webauth.session_groups` takes the host's `SessionTransaction`, as `current_groups` does:
+  - **GROUPS-28** `await of_session(session_id)` and `await of_connection(connection)` answer the
+    groups of a session, or of the session the connection's cookie names, as a `frozenset` or the
+    refusal `current_groups` answers, by one `current_groups` call on a worker thread. The `frozenset`
+    passes to `app_role` as it is (GROUPS-12).
+  - **GROUPS-29** A connection without a session answers `SIGN_IN_AGAIN` and makes no grant.
+  - **GROUPS-30** A cancelled caller gets no answer, but its grant still stores its rotated refresh token.
+    The cancellation reaches the caller only after the grant ends, so a timeout around the call fires
+    then, not at its deadline; the host's `SessionTransaction` is entered and left on the worker thread.
+  - It takes no lock, so overlapping calls are GROUPS-26. **Host duty:** The app maps each refusal to
+    its own answer and names the group it checks.
 
 ## The protected resource
 

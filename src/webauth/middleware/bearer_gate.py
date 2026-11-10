@@ -15,6 +15,7 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
 from webauth._validation import is_scope_token_tuple
+from webauth._worker import on_worker
 from webauth.admission import (
     AdmissionConfig,
     AdmissionRefusal,
@@ -34,7 +35,6 @@ from webauth.dependencies import (
 )
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
-from webauth.middleware._worker import on_worker
 from webauth.oidc import (
     OidcRefusal,
     OidcRefusalReason,

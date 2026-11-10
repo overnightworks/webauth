@@ -15,6 +15,7 @@ from typing import assert_never
 
 from fastapi import Depends, FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
+from starlette.requests import HTTPConnection
 
 from webauth import WebAuthError
 from webauth.admission import (
@@ -125,6 +126,7 @@ from webauth.ports import (
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
+from webauth.session_groups import SessionGroups
 from webauth.sign_in_routes import (
     LogoutPageText,
     RefusalPage,
@@ -298,6 +300,21 @@ def a_host_gets_current_groups(
     if isinstance(outcome, AccessTokenRefusal):
         return a_host_maps_an_access_token_refusal(outcome)
     return outcome
+
+
+async def a_host_reads_the_app_role_of_a_sessions_current_groups(
+    session_groups: SessionGroups,
+    session_id: str,
+    connection: HTTPConnection,
+    admission: AdmissionConfig,
+) -> tuple[AppRole | None, AppRole | None] | AccessTokenRefusal:
+    of_session = await session_groups.of_session(session_id)
+    of_connection = await session_groups.of_connection(connection)
+    if isinstance(of_session, AccessTokenRefusal):
+        return of_session
+    if isinstance(of_connection, AccessTokenRefusal):
+        return of_connection
+    return app_role(of_session, admission), app_role(of_connection, admission)
 
 
 def a_host_verifies_a_logout_token(
