@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
@@ -159,14 +159,20 @@ class RateLimitPolicy:
 
     A request spends from one budget. Separate budgets exist so one traffic
     pattern cannot starve another arriving from the same address.
+
+    ``sign_in`` is the budget the installer spends on the sign-in paths ahead of
+    ``rules``: 40 requests per 10 minutes, two for each complete sign-in. Its name,
+    ``"sign-in"`` by default, is reserved: neither ``default`` nor a rule may carry it.
     """
 
-    default: RateLimitBudget
+    default: RateLimitBudget = RateLimitBudget("default", 600, 60)
     rules: tuple[RateLimitRule, ...] = ()
     exempt: PathRules = PathRules()
+    sign_in: RateLimitBudget = RateLimitBudget("sign-in", 40, 600)
+    _sign_in_paths: PathRules | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        names = [self.default.name, *(rule.budget.name for rule in self.rules)]
+        names = [self.sign_in.name, self.default.name, *(rule.budget.name for rule in self.rules)]
         repeated = sorted({name for name in names if names.count(name) > 1})
         if repeated:
             raise ValueError(
@@ -178,11 +184,13 @@ class RateLimitPolicy:
         return self.exempt.matches(path)
 
     def budget_for(self, path: str) -> RateLimitBudget:
-        """The one budget ``path`` spends from; the first matching rule decides.
+        """The one budget ``path`` spends from; the sign-in paths, then the first matching rule.
 
         A path no rule claims spends from the default budget -- fail closed, so
         an unrecognised route cannot slip through unlimited.
         """
+        if self._sign_in_paths is not None and self._sign_in_paths.matches(path):
+            return self.sign_in
         for rule in self.rules:
             if rule.paths.matches(path):
                 return rule.budget
@@ -244,7 +252,7 @@ class PublicRule:
 class BodySizePolicy:
     """How large a request body may be, by default and on the routes that differ."""
 
-    default_max_bytes: int
+    default_max_bytes: int = 4 * 1024
     rules: tuple[BodySizeRule, ...] = ()
     start_send_seconds: float = 10.0
     """How long a response start may take to reach the server before the request fails."""
@@ -272,7 +280,7 @@ class CacheControlRule:
         _require_header_field_value("CacheControlRule.value", self.value)
 
 
-_DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=()"
+_DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=(), display-capture=()"
 
 
 @dataclass(frozen=True)

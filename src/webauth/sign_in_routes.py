@@ -43,8 +43,8 @@ The back-channel route is the issuer's back-channel logout, registered for ``POS
 issuer posts one URL-encoded form with one non-empty ``logout_token`` when a person's session
 at the issuer ends. The route answers in this order:
 
-1. A declared ``Content-Length`` over ``SignInPaths.backchannel_body_size_rule`` gets 413 from
-   the body-size middleware before any dependency runs.
+1. A declared ``Content-Length`` over the back-channel limit gets 413 from the body-size
+   middleware the installer configures before any dependency runs.
 2. ``backchannel_dependencies`` run before the body is read. A host answers an empty 404 by
    raising its own exception class and mapping it with
    ``app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))``:
@@ -102,7 +102,6 @@ from webauth.oidc_login import (
     _UsernameTakenSignal,
     _write_sign_in,
 )
-from webauth.policies import BodySizeRule, CacheControlRule, PathRules, PublicRule
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -124,7 +123,6 @@ __all__ = [
 
 _RETURN_PATH_QUERY_NAME = "next"
 _SET_COOKIE = b"set-cookie"
-_BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
 
 
 _LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*")
@@ -176,8 +174,8 @@ class SignInPaths:
     dot segment, ``?`` or ``#``, and differ from the others; ``ValueError`` at
     construction, before any route is registered, names the first that is not.
     ``logout`` is ``None`` for a host that serves no logout route, and
-    ``backchannel_logout`` for one that serves no back-channel logout route. The derived
-    values are the policies for exactly these paths.
+    ``backchannel_logout`` for one that serves no back-channel logout route.
+    ``install_web_auth_middleware`` derives the policies for exactly these paths.
     """
 
     start: str
@@ -192,58 +190,6 @@ class SignInPaths:
         if len(set(paths)) != len(paths):
             names = ", ".join(f"SignInPaths.{name}" for name, _ in self._named_paths)
             raise ValueError(f"{names} must differ")
-
-    @property
-    def public_rules(self) -> tuple[PublicRule, ...]:
-        """The rules that let a browser without a session reach the routes, for
-        ``SessionGate.public``: ``GET`` of the start and callback paths and ``POST`` of the
-        logout and back-channel logout paths, when there are any. The logout token, not a
-        session, authenticates the back-channel."""
-        rules = (PublicRule(self._sign_in, methods=frozenset({"GET"})),)
-        posted = {path for path in (self.logout, self.backchannel_logout) if path is not None}
-        if not posted:
-            return rules
-        return (*rules, PublicRule(PathRules(exact=frozenset(posted)), methods=frozenset({"POST"})))
-
-    @property
-    def browser_paths(self) -> PathRules:
-        """The paths a browser reaches the sign-in with, for the sign-in rate budget: the
-        back-channel, which the issuer posts to, is not one."""
-        return PathRules(
-            exact=frozenset(
-                path for name, path in self._named_paths if name != "backchannel_logout"
-            )
-        )
-
-    @property
-    def backchannel(self) -> PathRules:
-        """The exact back-channel logout path, for ``CsrfPolicy.exempt`` and
-        ``RateLimitPolicy.exempt``: the issuer sends neither an Origin nor a cookie and posts
-        from shared server addresses. It exempts nothing when there is no such path, and
-        logout is never exempt."""
-        return PathRules(
-            exact=frozenset(
-                () if self.backchannel_logout is None else (self.backchannel_logout,),
-            )
-        )
-
-    @property
-    def backchannel_body_size_rule(self) -> BodySizeRule:
-        """A bound of 32 KiB for ``POST`` of the back-channel path, which admits a Logout
-        Token where a host's default may not."""
-        return BodySizeRule(
-            self.backchannel,
-            _BACKCHANNEL_MAX_BODY_BYTES,
-            methods=frozenset({"POST"}),
-        )
-
-    @property
-    def cache_control_rule(self) -> CacheControlRule:
-        """``no-store`` for every path: the answers carry cookies, or are the issuer's."""
-        return CacheControlRule(
-            PathRules(exact=frozenset(path for _, path in self._named_paths)),
-            "no-store",
-        )
 
     @property
     def login_redirect(self) -> LoginRedirect:
@@ -261,10 +207,6 @@ class SignInPaths:
             ("callback", self.callback),
             *((name, path) for name, path in optional if path is not None),
         )
-
-    @property
-    def _sign_in(self) -> PathRules:
-        return PathRules(exact=frozenset({self.start, self.callback}))
 
 
 def _require_sign_in_path(name: str, path: str) -> None:

@@ -13,6 +13,7 @@ from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
+from tests.support.gated_stack_arrangement import GATED_STACK_POLICIES
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
@@ -30,7 +31,6 @@ from tests.support.oidc_login_host import (
 )
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
-    GATED_STACK_POLICIES,
     MEMBER_ROLE,
     AuthApp,
     FakeSessionRecord,

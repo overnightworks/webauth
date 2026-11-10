@@ -23,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketDisconnect
 
+from tests.support.gated_stack_arrangement import GATED_STACK_POLICIES
 from webauth.config import (
     SessionLifetime,
     WebAuthConfig,
@@ -44,12 +45,10 @@ from webauth.middleware import (
     install_web_auth_middleware,
 )
 from webauth.policies import (
-    CsrfPolicy,
     PathRules,
     PublicRule,
     RateLimitBudget,
     RateLimitPolicy,
-    SecurityHeadersPolicy,
 )
 from webauth.ports import (
     AccountEvent,
@@ -506,8 +505,6 @@ WEBSOCKET_PATH = "/ws"
 WEBSOCKET_ADMITTED_PATH = "/ws-admitted"
 OPEN_PATHS = ("/health", "/login", "/hooks/x", "/static/x.css", "/optional")
 ALL_DEPENDENCIES_PATH = "/all"
-GATED_APP_HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
-GATED_STACK_POLICIES = {"security_headers": GATED_APP_HEADERS_POLICY, "csrf_origin": CsrfPolicy()}
 LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 WEBSOCKET_DEPENDENCY_PATH = "/ws-dependency"
 POLICY_VIOLATION_CLOSE_CODE = 1008

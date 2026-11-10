@@ -1,4 +1,4 @@
-"""The policies the sign-in paths derive for a host's gate, rate limit, cache, CSRF and body rules.
+"""The rules the installer derives from the sign-in paths for gate, budgets, cache and CSRF.
 
 Each case drives a FastAPI host through a `TestClient` over a stateful fake issuer.
 """
@@ -16,6 +16,7 @@ from starlette.responses import Response
 from tests.support.oidc_arrangement import FakeIssuer, a_relying_party
 from tests.support.oidc_login_host import (
     ADMISSION,
+    BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
     BACKCHANNEL_LOGOUT_PATH,
     CALLBACK_PATH,
     LOGOUT_PATH,
@@ -32,6 +33,8 @@ from webauth.config import install_web_auth_config
 from webauth.middleware import SessionGate, install_web_auth_middleware
 from webauth.policies import (
     BodySizePolicy,
+    BodySizeRule,
+    CacheControlRule,
     CsrfPolicy,
     PathRules,
     RateLimitBudget,
@@ -47,6 +50,9 @@ from webauth.sign_in_routes import (
 )
 
 FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
+HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+FOUR_KIB = 4 * 1024
+SIGN_IN_BUDGET_NAME = "sign-in"
 
 
 @dataclass
@@ -55,59 +61,36 @@ class GatedHost:
     issuer: FakeIssuer
 
 
-def _install_the_derived_middleware(
-    app: FastAPI,
-    sessions: SessionRecordsInMemory,
-    rate_budget: int | None,
-    exempts_backchannel: bool,
-) -> None:
-    install_web_auth_middleware(
-        app,
-        security_headers=SecurityHeadersPolicy(
-            content_security_policy="default-src 'self'",
-            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
-        ),
-        body_size=BodySizePolicy(
-            default_max_bytes=1024,
-            rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
-        ),
-        rate_limit=None
-        if rate_budget is None
-        else RateLimitPolicy(
-            default=RateLimitBudget("host", 1000, 60),
-            exempt=SIGN_IN_PATHS.backchannel if exempts_backchannel else PathRules(),
-            rules=(
-                RateLimitRule(
-                    paths=SIGN_IN_PATHS.browser_paths,
-                    budget=RateLimitBudget("sign-in", rate_budget, 60),
-                ),
-            ),
-        ),
-        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
-        session_gate=SessionGate(
-            session_transaction=sessions.in_transaction,
-            login_redirect=SIGN_IN_PATHS.login_redirect,
-            public=SIGN_IN_PATHS.public_rules,
-        ),
-    )
-
-
 def _a_gated_host(
-    rate_budget: int | None = None,
     *,
-    exempts_backchannel: bool = True,
+    sign_in_paths: SignInPaths = SIGN_IN_PATHS,
+    gated: bool = True,
+    security_headers: SecurityHeadersPolicy = HEADERS_POLICY,
+    body_size: BodySizePolicy | None = None,
+    rate_limit: RateLimitPolicy | None = None,
 ) -> GatedHost:
-    """A host whose gate, rate limit, cache, CSRF and body rules are the ones the paths derive.
-
-    Without ``exempts_backchannel`` the rate limit is left to ``browser_paths`` alone.
-    """
+    """A host the installer wires from its sign-in paths and the policies it passes."""
     config = a_web_auth_config()
     sessions = SessionRecordsInMemory()
     issuer = FakeIssuer(mint_id_token=lambda _nonce: "unused")
     relying_party = a_relying_party(post_token_request=issuer)
     app = FastAPI()
     install_web_auth_config(app, config)
-    _install_the_derived_middleware(app, sessions, rate_budget, exempts_backchannel)
+    install_web_auth_middleware(
+        app,
+        sign_in_paths=sign_in_paths,
+        security_headers=security_headers,
+        body_size=body_size,
+        rate_limit=rate_limit,
+        csrf_origin=CsrfPolicy(),
+        session_gate=SessionGate(
+            session_transaction=sessions.in_transaction,
+            login_redirect=sign_in_paths.login_redirect,
+            public=(),
+        )
+        if gated
+        else None,
+    )
     install_sign_in_routes(
         app,
         paths=SIGN_IN_PATHS,
@@ -124,6 +107,10 @@ def _a_gated_host(
     def album(album_id: str) -> str:
         return album_id
 
+    @app.post("/albums/{album_id}")
+    def post_album(album_id: str) -> str:
+        return album_id
+
     return GatedHost(
         TestClient(app, base_url=HTTPS_TEST_SERVER, follow_redirects=False),
         issuer,
@@ -134,7 +121,29 @@ def _a_transaction_nobody_enters() -> AbstractContextManager[SignInStores]:
     raise AssertionError("the gated host never signs anyone in")
 
 
-def test_the_derived_policies_open_the_sign_in_paths_and_send_a_signed_out_page_to_start() -> None:
+def _statuses_of_gets(host: GatedHost, path: str, count: int) -> list[int]:
+    return [host.client.get(path).status_code for _ in range(count)]
+
+
+def _backchannel_post(host: GatedHost, size: int = 0) -> int:
+    body = b"logout_token=" + b"x" * max(size - len(b"logout_token="), 0)
+    return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=body, headers=FORM_HEADER).status_code
+
+
+def test_the_installer_is_refused_without_sign_in_paths() -> None:
+    """SIGNIN-67: the installer requires `sign_in_paths`."""
+    app = FastAPI()
+    csrf_origin = CsrfPolicy()
+
+    with pytest.raises(TypeError, match="sign_in_paths"):
+        install_web_auth_middleware(  # type: ignore[call-arg]
+            app,
+            security_headers=HEADERS_POLICY,
+            csrf_origin=csrf_origin,
+        )
+
+
+def test_a_signed_out_page_is_sent_to_start() -> None:
     """SIGNIN-09: `login_redirect` sends a signed-out page to the start path."""
     host = _a_gated_host()
 
@@ -156,9 +165,26 @@ def test_a_signed_out_logout_passes_the_gate_and_enters_no_transaction() -> None
     assert response.status_code == 200
 
 
-def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
-    """SIGNIN-08: the derived cache rule marks the answers of all four routes `no-store`."""
-    host = _a_gated_host()
+@pytest.mark.parametrize(
+    "host_cache_rules",
+    [
+        pytest.param((), id="no host cache rule"),
+        pytest.param(
+            (CacheControlRule(PathRules(prefixes=("/",)), "public, max-age=60"),),
+            id="a host rule over every path",
+        ),
+    ],
+)
+def test_the_sign_in_paths_answer_no_store_ahead_of_the_hosts_cache_rules(
+    host_cache_rules: tuple[CacheControlRule, ...],
+) -> None:
+    """SIGNIN-08: the installer marks the answers of all four routes `no-store`, first."""
+    host = _a_gated_host(
+        security_headers=SecurityHeadersPolicy(
+            content_security_policy="default-src 'self'",
+            cache_control_rules=host_cache_rules,
+        ),
+    )
 
     answers = [
         host.client.get(START_PATH),
@@ -172,9 +198,34 @@ def test_the_derived_cache_rule_marks_the_sign_in_answers_no_store() -> None:
     assert [answer.headers["cache-control"] for answer in answers] == ["no-store"] * 4
 
 
-def test_the_derived_browser_paths_spend_one_sign_in_budget() -> None:
+def test_a_host_rule_keeps_deciding_the_paths_the_sign_in_paths_do_not_name() -> None:
+    host = _a_gated_host(
+        security_headers=SecurityHeadersPolicy(
+            content_security_policy="default-src 'self'",
+            cache_control_rules=(
+                CacheControlRule(PathRules(prefixes=("/",)), "public, max-age=60"),
+            ),
+        ),
+    )
+
+    assert host.client.get("/albums/1").headers["cache-control"] == "public, max-age=60"
+
+
+def test_the_forty_first_sign_in_request_in_ten_minutes_is_refused_without_a_host_policy() -> None:
+    """SIGNIN-69: the sign-in budget is 40 requests per 10 minutes when the host names none."""
+    host = _a_gated_host()
+
+    statuses = _statuses_of_gets(host, START_PATH, 41)
+
+    assert statuses[-1] == 429
+    assert 429 not in statuses[:-1]
+
+
+def test_start_callback_and_logout_spend_one_sign_in_budget() -> None:
     """SIGNIN-04: start, callback and logout spend one sign-in budget."""
-    host = _a_gated_host(rate_budget=3)
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 3, 60)),
+    )
 
     statuses = [
         host.client.get(START_PATH).status_code,
@@ -183,32 +234,224 @@ def test_the_derived_browser_paths_spend_one_sign_in_budget() -> None:
         host.client.get(START_PATH).status_code,
     ]
 
+    assert 429 not in statuses[:-1]
+    assert statuses[-1] == 429
+
+
+@pytest.mark.parametrize(
+    "rate_limit",
+    [
+        pytest.param(None, id="no host rate policy"),
+        pytest.param(
+            RateLimitPolicy(exempt=PathRules(exact=frozenset({"/health"}))),
+            id="a host policy that only adds an exemption",
+        ),
+    ],
+)
+def test_the_other_paths_spend_the_default_budget_of_600_per_minute(
+    rate_limit: RateLimitPolicy | None,
+) -> None:
+    """STACK-05: the policy's default budget is 600 per 60 seconds unless the host names one."""
+    host = _a_gated_host(rate_limit=rate_limit)
+
+    statuses = _statuses_of_gets(host, "/albums/1", 601)
+
     assert statuses[-1] == 429
     assert 429 not in statuses[:-1]
-
-
-def test_a_back_channel_post_reaches_the_route_past_the_gate_csrf_and_sign_in_budget() -> None:
-    """SIGNIN-05: the derived `backchannel` rules exempt the back-channel from the origin check."""
-    host = _a_gated_host(rate_budget=1)
-
-    statuses = [
-        host.client.post(
-            BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER
-        ).status_code
-        for _ in range(3)
-    ]
-
-    assert statuses == [400, 400, 400]
     assert host.client.get(START_PATH).status_code == 303
 
 
-def test_the_back_channel_path_is_not_a_browser_path() -> None:
-    host = _a_gated_host(rate_budget=1, exempts_backchannel=False)
+def test_a_sign_in_path_in_the_host_exemption_spends_no_budget() -> None:
+    """SIGNIN-72: a path in the host's exemption spends no budget, a sign-in path included."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(
+            sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 1, 60),
+            exempt=PathRules(exact=frozenset({START_PATH})),
+        ),
+    )
 
-    for _ in range(3):
-        host.client.post(BACKCHANNEL_LOGOUT_PATH, content=b"logout_token=bad", headers=FORM_HEADER)
+    assert _statuses_of_gets(host, START_PATH, 3) == [303, 303, 303]
 
+
+def test_head_and_options_on_a_sign_in_path_spend_the_sign_in_budget() -> None:
+    """SIGNIN-73: the rate limit counts every method on a path."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 2, 60)),
+    )
+
+    host.client.head(START_PATH)
+    host.client.options(START_PATH)
+
+    assert host.client.get(START_PATH).status_code == 429
+
+
+def test_a_sign_in_flood_does_not_spend_the_budget_of_the_other_paths() -> None:
+    host = _a_gated_host()
+    _statuses_of_gets(host, START_PATH, 41)
+
+    assert host.client.get("/albums/1").status_code != 429
+
+
+def test_a_host_rate_policy_decides_the_rest_and_the_sign_in_budget_comes_first() -> None:
+    """SIGNIN-68: the sign-in budget is the first rate rule, ahead of the host's own."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget("host", 2, 60),
+            rules=(
+                RateLimitRule(PathRules(prefixes=("/",)), RateLimitBudget("everything", 1, 60)),
+            ),
+        ),
+    )
+
+    assert _statuses_of_gets(host, START_PATH, 3) == [303, 303, 303]
+    assert _statuses_of_gets(host, "/albums/1", 2)[-1] == 429
+
+
+def test_a_host_sign_in_budget_applies_on_the_sign_in_paths() -> None:
+    """SIGNIN-69: a host policy may set another sign-in budget."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget("host", 1000, 60),
+            sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 3, 60),
+        ),
+    )
+
+    statuses = _statuses_of_gets(host, START_PATH, 4)
+
+    assert statuses[-1] == 429
+    assert 429 not in statuses[:-1]
+    assert 429 not in _statuses_of_gets(host, "/albums/1", 4)
+
+
+_DEFAULT_SIGN_IN_BUDGET = RateLimitPolicy(default=RateLimitBudget("host", 5, 60)).sign_in
+
+
+@pytest.mark.parametrize(
+    ("default", "rules"),
+    [
+        pytest.param(RateLimitBudget(SIGN_IN_BUDGET_NAME, 5, 60), (), id="as the default"),
+        pytest.param(
+            RateLimitBudget("host", 5, 60),
+            (
+                RateLimitRule(
+                    PathRules(prefixes=("/api/",)), RateLimitBudget(SIGN_IN_BUDGET_NAME, 5, 60)
+                ),
+            ),
+            id="as a rule",
+        ),
+        pytest.param(
+            _DEFAULT_SIGN_IN_BUDGET,
+            (),
+            id="the default sign-in budget as the default",
+        ),
+        pytest.param(
+            RateLimitBudget("host", 5, 60),
+            (RateLimitRule(PathRules(prefixes=("/api/",)), _DEFAULT_SIGN_IN_BUDGET),),
+            id="the default sign-in budget as a rule",
+        ),
+    ],
+)
+def test_a_host_budget_under_the_reserved_sign_in_name_fails_at_construction(
+    default: RateLimitBudget,
+    rules: tuple[RateLimitRule, ...],
+) -> None:
+    """SIGNIN-70: the name is reserved."""
+    with pytest.raises(ValueError, match=SIGN_IN_BUDGET_NAME):
+        RateLimitPolicy(default=default, rules=rules)
+
+
+def test_a_host_rule_named_default_clashes_with_the_default_budget_the_host_left_out() -> None:
+    """STACK-05: the budget left out is named "default", so a rule may not take that name."""
+    rule = RateLimitRule(PathRules(prefixes=("/api/",)), RateLimitBudget("default", 5, 60))
+
+    with pytest.raises(ValueError, match="default"):
+        RateLimitPolicy(rules=(rule,))
+
+
+def test_the_back_channel_is_exempt_from_the_rate_limit_and_from_csrf() -> None:
+    """SIGNIN-05, SIGNIN-06: the back-channel post spends no budget and needs no Origin."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget("host", 1, 60),
+            sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 1, 60),
+        ),
+    )
+
+    statuses = [_backchannel_post(host) for _ in range(4)]
+
+    assert statuses == [400] * 4
     assert host.client.get(START_PATH).status_code == 303
+
+
+def test_logout_is_never_exempt_from_csrf_or_the_rate_limit() -> None:
+    """SIGNIN-43, SIGNIN-44: logout is never exempt."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget("host", 1000, 60),
+            sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 1, 60),
+        ),
+    )
+
+    without_origin = host.client.post(LOGOUT_PATH, headers=FORM_HEADER)
+    first = host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM)
+    second = host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM)
+
+    assert (without_origin.status_code, first.status_code, second.status_code) == (403, 429, 429)
+
+
+@pytest.mark.parametrize(
+    "body_size",
+    [
+        pytest.param(None, id="no host body policy"),
+        pytest.param(
+            BodySizePolicy(
+                default_max_bytes=1024,
+                rules=(BodySizeRule(PathRules(prefixes=("/",)), 100, methods=frozenset({"POST"})),),
+            ),
+            id="a host rule over every path",
+        ),
+    ],
+)
+def test_the_back_channel_takes_a_32_kib_post_whatever_the_host_body_policy_says(
+    body_size: BodySizePolicy | None,
+) -> None:
+    """SIGNIN-07: the back-channel rule of 32 KiB comes ahead of the host's rules."""
+    host = _a_gated_host(body_size=body_size)
+
+    assert _backchannel_post(host, BACKCHANNEL_LOGOUT_MAX_BODY_BYTES) == 400
+    assert _backchannel_post(host, BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1) == 413
+
+
+@pytest.mark.parametrize(
+    "body_size",
+    [
+        pytest.param(None, id="no host body policy"),
+        pytest.param(
+            BodySizePolicy(rules=(BodySizeRule(PathRules(exact=frozenset({"/upload"})), 100),)),
+            id="a host policy with a rule and no default",
+        ),
+    ],
+)
+def test_a_body_over_4_kib_is_refused_unless_the_host_names_another_default(
+    body_size: BodySizePolicy | None,
+) -> None:
+    """STACK-06: the policy's default body limit is 4 KiB unless the host names one."""
+    host = _a_gated_host(body_size=body_size)
+
+    at_the_limit = host.client.post("/albums/1", content=b"x" * FOUR_KIB, headers=SAME_ORIGIN_FORM)
+    over = host.client.post("/albums/1", content=b"x" * (FOUR_KIB + 1), headers=SAME_ORIGIN_FORM)
+
+    assert at_the_limit.status_code != 413
+    assert over.status_code == 413
+
+
+def test_a_host_body_policy_decides_the_paths_the_back_channel_rule_does_not_name() -> None:
+    host = _a_gated_host(body_size=BodySizePolicy(default_max_bytes=1024))
+
+    within = host.client.post("/albums/1", content=b"x" * 1024, headers=SAME_ORIGIN_FORM)
+    over = host.client.post("/albums/1", content=b"x" * 1025, headers=SAME_ORIGIN_FORM)
+
+    assert (within.status_code, over.status_code) == (401, 413)
 
 
 @pytest.mark.parametrize(
@@ -224,19 +467,57 @@ def test_the_back_channel_path_is_not_a_browser_path() -> None:
         pytest.param("GET", BACKCHANNEL_LOGOUT_PATH, False, id="get back-channel"),
     ],
 )
-def test_the_derived_public_rules_open_exactly_four_methods_of_the_sign_in_paths(
+def test_a_signed_out_browser_reaches_exactly_four_methods_of_the_sign_in_paths(
     method: str,
     path: str,
     *,
     reaches_the_route: bool,
 ) -> None:
-    """SIGNIN-03: the public rules open `GET` of start and callback and `POST` of logout and
-    back-channel, and no other method."""
+    """SIGNIN-03: the installer opens `GET` of start and callback and `POST` of logout and
+    back-channel to the session gate, and no other method."""
     host = _a_gated_host()
 
     response = host.client.request(method, path, headers=SAME_ORIGIN_FORM)
 
     assert (response.status_code == 401) is not reaches_the_route
+
+
+def test_without_a_session_gate_a_signed_out_request_reaches_any_route() -> None:
+    host = _a_gated_host(gated=False)
+
+    assert host.client.get("/albums/1").status_code == 200
+
+
+def test_sign_in_paths_with_start_and_callback_only_derive_no_logout_or_back_channel_rule() -> None:
+    """SIGNIN-71: a route the paths do not name gets no rule."""
+    host = _a_gated_host(sign_in_paths=SignInPaths(start=START_PATH, callback=CALLBACK_PATH))
+
+    forged_logout = host.client.post(LOGOUT_PATH, headers=FORM_HEADER)
+    signed_out_logout = host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM)
+    forged_back_channel = host.client.post(BACKCHANNEL_LOGOUT_PATH, headers=FORM_HEADER)
+
+    assert (
+        forged_logout.status_code,
+        signed_out_logout.status_code,
+        forged_back_channel.status_code,
+    ) == (403, 401, 403)
+    assert "cache-control" not in signed_out_logout.headers
+
+
+@pytest.mark.parametrize(
+    "derived_name",
+    [
+        "browser_paths",
+        "backchannel",
+        "backchannel_body_size_rule",
+        "cache_control_rule",
+        "public_rules",
+    ],
+)
+def test_the_rules_the_installer_applies_are_no_attribute_of_the_sign_in_paths(
+    derived_name: str,
+) -> None:
+    assert not hasattr(SIGN_IN_PATHS, derived_name)
 
 
 _VALID_PATHS = {

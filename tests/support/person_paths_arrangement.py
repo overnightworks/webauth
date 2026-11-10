@@ -39,7 +39,6 @@ from tests.support.webauth_arrangement import (
     MEMBER_ROLE,
     FakeUser,
 )
-from webauth.policies import CsrfPolicy
 from webauth.ports import SignInStores
 from webauth.sign_in_routes import install_sign_in_routes
 
@@ -95,8 +94,7 @@ def a_person_app(**keywords: Any) -> BearerApp:
 def a_person_app_serving_back_channel_logout() -> BearerApp:
     """A person-path app that also serves the library's logout and back-channel logout routes."""
     app = a_person_app(
-        public=SIGN_IN_PATHS.public_rules,
-        policies={"csrf_origin": CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel)},
+        policies={"sign_in_paths": SIGN_IN_PATHS},
     )
     assert app.transaction is not None
     relying_party = a_relying_party(

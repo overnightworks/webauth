@@ -19,7 +19,6 @@ import argparse
 import ctypes
 import functools
 import html
-import importlib.util
 import json
 import logging
 import os
@@ -116,7 +115,7 @@ LOGOUT_PAGE_TEXT = LogoutPageText(language="en", button_label="Log out")
 ACCESS_TOKEN_PATH = "/access-token"  # noqa: S105  # a route, not a credential
 WORKLOAD_TOKEN_PATH = "/workload-token"  # noqa: S105  # a route, not a credential
 CURRENT_GROUPS_PATH = "/current-groups"
-BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = SIGN_IN_PATHS.backchannel_body_size_rule.max_bytes
+BACKCHANNEL_LOGOUT_MAX_BODY_BYTES = 32 * 1024
 DEFAULT_MAX_BODY_BYTES = 1024
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 REPOSITORY = Path(__file__).resolve().parents[3]
@@ -134,7 +133,11 @@ MARKED_ROUTES = (
     MarkedRoute("GET", "/api/notes/{note}"),
 )
 BEARER_GATE_LOGGER = "webauth.middleware.bearer_gate"
-BEARER_HOST_REQUESTS_PER_MINUTE = 10_000
+# A throwaway proof stack runs every sign-in from one address, so no budget may run out.
+PROOF_HOST_RATE_LIMIT = RateLimitPolicy(
+    default=RateLimitBudget("proof-host", 10_000, 60),
+    sign_in=RateLimitBudget("sign-in", 10_000, 60),
+)
 LEEWAY_SECONDS = 30
 USERINFO_TIMEOUT_SECONDS = 10
 BEARER_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")  # RFC 6750 b64token: fit for a header
@@ -155,14 +158,13 @@ LOGOUT_BUTTON = (
 
 @functools.cache
 def _arrangement() -> Any:
-    """The library suite's in-memory stores, loaded by path from ``tests/``."""
-    path = REPOSITORY / "tests" / "support" / "webauth_arrangement.py"
-    spec = importlib.util.spec_from_file_location("webauth_arrangement", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    """The library suite's in-memory stores, imported as the ``tests.support`` package.
+
+    The host runs as a script, so the repository root is not yet on the import path."""
+    sys.path.insert(0, str(REPOSITORY))
+    from tests.support import webauth_arrangement
+
+    return webauth_arrangement
 
 
 @dataclass(frozen=True)
@@ -383,15 +385,11 @@ def _install_stack(
 ) -> None:
     install_web_auth_middleware(
         app,
-        security_headers=SecurityHeadersPolicy(
-            default_content_security_policy(),
-            cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
-        ),
-        body_size=BodySizePolicy(
-            default_max_bytes=DEFAULT_MAX_BODY_BYTES,
-            rules=(SIGN_IN_PATHS.backchannel_body_size_rule,),
-        ),
-        csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
+        sign_in_paths=SIGN_IN_PATHS,
+        security_headers=SecurityHeadersPolicy(default_content_security_policy()),
+        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+        rate_limit=PROOF_HOST_RATE_LIMIT,
+        csrf_origin=CsrfPolicy(),
         **_bearer_policies(settings, world, transaction),
     )
 
@@ -414,16 +412,12 @@ def _bearer_policies(
     parties = AuthorizedParties(frozenset(settings.bearer_authorized_parties))
     resource = _resource_of(settings, transaction)
     return {
-        "rate_limit": RateLimitPolicy(
-            default=RateLimitBudget("bearer-host", BEARER_HOST_REQUESTS_PER_MINUTE, 60)
-        ),
         "session_gate": SessionGate(
             session_transaction=counted_session_transaction,
             login_redirect=None,
             # The gate would answer a dead cookie with 401 before the route runs; the call
             # answers `session-ended` itself.
             public=(
-                *SIGN_IN_PATHS.public_rules,
                 resource.public_rule,
                 PublicRule(
                     PathRules(exact=frozenset({CURRENT_GROUPS_PATH})),

@@ -28,7 +28,6 @@ from tests.support.oidc_login_host import (
     CLIENT_ID,
     DEFAULT_MAX_BODY_BYTES,
     LOGIN_GROUP,
-    LOGOUT_PATH,
     NOW,
     OTHER_SUBJECT,
     SAME_ORIGIN_FORM,
@@ -397,7 +396,6 @@ def test_an_oversized_logout_body_is_refused_and_ends_nothing(
     [
         pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}/", id="trailing-slash"),
         pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}-other", id="longer-name"),
-        pytest.param(LOGOUT_PATH, id="the-browser-logout"),
     ],
 )
 def test_a_path_next_to_the_back_channel_stays_csrf_protected(path: str) -> None:
@@ -691,7 +689,6 @@ def test_the_back_channel_answers_200_only_after_the_exit_returned(
     [
         pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}/", id="trailing-slash"),
         pytest.param(f"{BACKCHANNEL_LOGOUT_PATH}-other", id="longer-name"),
-        pytest.param(LOGOUT_PATH, id="the-browser-logout"),
     ],
 )
 def test_a_path_next_to_the_back_channel_spends_the_address_budget(path: str) -> None:

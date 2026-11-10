@@ -487,7 +487,12 @@ def the_logout_page(
         host_middleware(app)
     install_web_auth_config(app, config)
     if installed:
-        install_web_auth_middleware(app, security_headers=host_policy, csrf_origin=CsrfPolicy())
+        install_web_auth_middleware(
+            app,
+            sign_in_paths=SignInPaths(start="/login", callback="/callback", logout=LOGOUT_PATH),
+            security_headers=host_policy,
+            csrf_origin=CsrfPolicy(),
+        )
 
     install_sign_in_routes(
         app,

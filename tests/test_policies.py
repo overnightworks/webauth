@@ -342,7 +342,7 @@ class TestSecurityHeadersPolicy:
         [
             pytest.param(
                 SecurityHeadersPolicy(content_security_policy="default-src 'none'"),
-                "camera=(), microphone=(), geolocation=()",
+                "camera=(), microphone=(), geolocation=(), display-capture=()",
                 id="without-the-field",
             ),
             pytest.param(
@@ -355,7 +355,7 @@ class TestSecurityHeadersPolicy:
             ),
             pytest.param(
                 SecurityHeadersPolicy("default-src 'none'", ()),
-                "camera=(), microphone=(), geolocation=()",
+                "camera=(), microphone=(), geolocation=(), display-capture=()",
                 id="two-positional-arguments",
             ),
         ],
@@ -365,6 +365,7 @@ class TestSecurityHeadersPolicy:
         policy: SecurityHeadersPolicy,
         expected: str,
     ) -> None:
+        """STACK-07: the default header turns off display-capture with the other features."""
         app = FastAPI()
         install_web_auth_config(app, a_web_auth_config())
         app.add_middleware(SecurityHeadersMiddleware, policy=policy)

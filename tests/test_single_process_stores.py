@@ -581,14 +581,10 @@ class Browser:
         install_web_auth_config(app, self.config)
         install_web_auth_middleware(
             app,
-            security_headers=SecurityHeadersPolicy(
-                content_security_policy="default-src 'self'",
-                cache_control_rules=(SIGN_IN_PATHS.cache_control_rule,),
-            ),
-            body_size=BodySizePolicy(
-                default_max_bytes=1024, rules=(SIGN_IN_PATHS.backchannel_body_size_rule,)
-            ),
-            csrf_origin=CsrfPolicy(exempt=SIGN_IN_PATHS.backchannel),
+            sign_in_paths=SIGN_IN_PATHS,
+            security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+            body_size=BodySizePolicy(default_max_bytes=1024),
+            csrf_origin=CsrfPolicy(),
         )
         install_sign_in_routes(
             app,
