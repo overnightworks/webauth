@@ -449,7 +449,7 @@ budget, is judged against groups that are fresh and verified, not those of the l
 - **GROUPS-10** A store failure raises, and no groups are handed out then.
 - **GROUPS-11** A failed transaction exit raises, and no groups are handed out then.
 
-**GROUPS-12** A subgroup-aware check passes the tuple to `app_role` with `AdmissionConfig(bound_issuer=...,
+**GROUPS-12** A subgroup-aware check passes the tuple, or the `frozenset` the async reader answers, to `app_role` as it is, with `AdmissionConfig(bound_issuer=...,
 login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
 
 - **The source.** Only the new ID token counts:
@@ -484,7 +484,8 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   `webauth.session_groups` takes the host's `SessionTransaction`, as `current_groups` does:
   - **GROUPS-28** `await of_session(session_id)` and `await of_connection(connection)` answer the
     groups of a session, or of the session the connection's cookie names, as a `frozenset` or the
-    refusal `current_groups` answers, by one `current_groups` call on a worker thread.
+    refusal `current_groups` answers, by one `current_groups` call on a worker thread. The `frozenset`
+    passes to `app_role` as it is (GROUPS-12).
   - **GROUPS-29** A connection without a session answers `SIGN_IN_AGAIN` and makes no grant.
   - **GROUPS-30** A cancelled caller gets no answer, but its grant still stores its rotated refresh token.
   - It takes no lock, so overlapping calls are GROUPS-26. **Host duty:** The app maps each refusal to

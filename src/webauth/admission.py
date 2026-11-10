@@ -14,7 +14,7 @@ from enum import Enum, StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection
 
 __all__ = [
     "AdmissionConfig",
@@ -95,7 +95,7 @@ def _is_below(group_path: str, group: str) -> bool:
     return group.startswith(group_path + "/")
 
 
-def _is_member_of(group_path: str, groups: Sequence[str]) -> bool:
+def _is_member_of(group_path: str, groups: Collection[str]) -> bool:
     return any(group == group_path or _is_below(group_path, group) for group in groups)
 
 
@@ -107,7 +107,7 @@ class AppRole(StrEnum):
     USER = "user"
 
 
-def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | None:
+def app_role(groups: Collection[str], admission: AdmissionConfig) -> AppRole | None:
     """The role ``groups`` carry in the app ``admission`` describes.
 
     ``None`` means no member: the groups hold no path of ``admission.login_group``
@@ -119,7 +119,8 @@ def app_role(groups: Sequence[str], admission: AdmissionConfig) -> AppRole | Non
     ``admission.bound_issuer``: the caller has checked that the groups come from
     that issuer, as the callback's admission does. The caller also validates the raw
     groups claim, refusing any shape but a list of strings as webauth's login
-    does, and passes the normalized sequence of strings.
+    does, and passes the group paths as any collection of strings: a tuple, a list or
+    the ``frozenset`` that ``SessionGroups`` answers.
     """
     login_group = admission.login_group
     if isinstance(login_group, str) and not _is_member_of(login_group, groups):
