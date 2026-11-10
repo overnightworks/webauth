@@ -212,7 +212,7 @@ def test_a_host_rule_keeps_deciding_the_paths_the_sign_in_paths_do_not_name() ->
 
 
 def test_the_forty_first_sign_in_request_in_ten_minutes_is_refused_without_a_host_policy() -> None:
-    """SIGNIN-04: the sign-in budget is 40 requests per 10 minutes when the host names none."""
+    """SIGNIN-69: the sign-in budget is 40 requests per 10 minutes when the host names none."""
     host = _a_gated_host()
 
     statuses = _statuses_of_gets(host, START_PATH, 41)
@@ -358,6 +358,14 @@ def test_a_host_budget_under_the_reserved_sign_in_name_fails_at_construction(
     """SIGNIN-70: the name is reserved."""
     with pytest.raises(ValueError, match=SIGN_IN_BUDGET_NAME):
         RateLimitPolicy(default=default, rules=rules)
+
+
+def test_a_host_rule_named_default_clashes_with_the_default_budget_the_host_left_out() -> None:
+    """STACK-05: the budget left out is named "default", so a rule may not take that name."""
+    rule = RateLimitRule(PathRules(prefixes=("/api/",)), RateLimitBudget("default", 5, 60))
+
+    with pytest.raises(ValueError, match="default"):
+        RateLimitPolicy(rules=(rule,))
 
 
 def test_the_back_channel_is_exempt_from_the_rate_limit_and_from_csrf() -> None:

@@ -173,12 +173,13 @@ def install_web_auth_middleware(
     size, rate limit, bearer gate, CSRF origin, session gate.
 
     ``sign_in_paths`` is the one description of the sign-in routes. From it the installer
-    puts these rules ahead of the host's own, so the first match is the derived one:
-    ``no-store`` on every sign-in path; the back-channel path's exemption from CSRF and
-    from the rate limit and its 32 KiB ``POST`` body rule; with a session gate, the
-    public rules of the routes; and the policy's ``sign_in`` budget on start, callback and
-    logout. A host adds none of them. Without a ``rate_limit`` the default is 600
-    requests per 60 seconds per address, without a ``body_size`` it is 4 KiB.
+    puts these rules ahead of the host's own, so the first match is the derived one (a host
+    exemption wins, SIGNIN-72): ``no-store`` on every sign-in path; the back-channel
+    path's exemption from CSRF and from the rate limit and its 32 KiB ``POST`` body rule;
+    with a session gate, the public rules of the routes; and the policy's ``sign_in``
+    budget on start, callback and logout. A host adds none of them. Without a
+    ``rate_limit`` the default is 600 requests per 60 seconds per address, without a
+    ``body_size`` it is 4 KiB.
 
     Security headers sit outside everything so the library's own refusals (the
     413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500)

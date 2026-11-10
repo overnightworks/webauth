@@ -161,7 +161,7 @@ for the mechanism and its trust boundaries.
 
 What the installer applies when the host passes none:
 
-- **STACK-05** The policy's default budget is 600 requests per 60 seconds per address unless the host names one, and the installer applies that policy when the host passes none.
+- **STACK-05** The policy's default budget is 600 requests per 60 seconds per address unless the host names one, and the installer applies that policy when the host passes none; that budget is named "default", so a host rule takes another name unless the host names its own default.
 - **Host duty:** a host behind a shared proxy address, where many people share one budget (PROXY-06), passes its own policy.
 - **STACK-06** Without a `body_size`, and in a `BodySizePolicy` that names no default, the body limit is 4 KiB unless the host names another; a larger body gets 413.
 - **STACK-07** Without a `permissions_policy` the header turns off `camera`, `microphone`, `geolocation` and `display-capture`.
@@ -729,7 +729,7 @@ So the host lists the paths once. `login_redirect` is browser-absolute, so it is
 
 - **Host duty:** a host below a `root_path` builds its own `LoginRedirect`.
 - **SIGNIN-67** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
-- **SIGNIN-68** The derived rules come ahead of the host's own in every policy, so the first match is the derived one.
+- **SIGNIN-68** The derived rules come ahead of the host's own in every policy, so the first match is the derived one (a host exemption wins: SIGNIN-72).
 - **SIGNIN-69** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
 - **SIGNIN-70** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
 - **SIGNIN-71** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.

@@ -19,7 +19,6 @@ import argparse
 import ctypes
 import functools
 import html
-import importlib.util
 import json
 import logging
 import os
@@ -159,14 +158,13 @@ LOGOUT_BUTTON = (
 
 @functools.cache
 def _arrangement() -> Any:
-    """The library suite's in-memory stores, loaded by path from ``tests/``."""
-    path = REPOSITORY / "tests" / "support" / "webauth_arrangement.py"
-    spec = importlib.util.spec_from_file_location("webauth_arrangement", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    """The library suite's in-memory stores, imported as the ``tests.support`` package.
+
+    The host runs as a script, so the repository root is not yet on the import path."""
+    sys.path.insert(0, str(REPOSITORY))
+    from tests.support import webauth_arrangement
+
+    return webauth_arrangement
 
 
 @dataclass(frozen=True)
