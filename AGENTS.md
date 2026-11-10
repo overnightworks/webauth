@@ -21,7 +21,7 @@
 - A pull request that changes what a host sees states its **Breaking** line when a public contract changes, and the hosts' migration or "No migration".
 - `webauth.__version__` is the one version. It stays a plain string literal and is raised alone, in the pull request before the release.
 - A tag is never moved or re-created; a broken release gets the next patch tag.
-- A refusal of the release gate leaves no tag: dispatch the release again once its cause is gone, never bump the version for it. After a failed `tag` job, re-run the failed jobs, never all jobs.
+- A gate refusal leaves no tag, so the release is dispatched again once its cause is gone; after a failed `tag` job, re-run the failed jobs, never all jobs.
 
 ## Owners
 

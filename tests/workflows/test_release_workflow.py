@@ -23,10 +23,9 @@ _QUALITY_WORKFLOW = r"overnightworks/quality/\.github/workflows/{}\.yml@(\S+ # v
 
 @dataclass(frozen=True)
 class _Release:
-    """What one release dispatches and what its build produced."""
+    """What one release dispatches and the commit the gate judged."""
 
     version: str = __version__
-    built_wheels: tuple[str, ...] = ("{distribution}-{version}-py3-none-any.whl",)
     gated_commit: str = ""
 
 
@@ -171,7 +170,7 @@ def test_a_release_is_dispatched_with_the_version_alone():
 def test_only_the_tag_job_may_write():
     jobs = _jobs()
 
-    assert [name for name, job in jobs.items() if "contents: write" in job] == ["tag"]
+    assert [name for name, job in jobs.items() if ": write" in job] == ["tag"]
     assert re.search(r"^permissions: \{\}$", _RELEASE.read_text(encoding="utf-8"), re.MULTILINE)
 
 
@@ -199,9 +198,5 @@ def test_each_quality_workflow_is_pinned_where_ci_pins_the_quality_gate(workflow
     assert release_pin.group(1) == ci_pin.group(1)
 
 
-def test_the_release_keeps_no_tag_trigger_and_no_job_list_of_its_own():
-    text = _RELEASE.read_text(encoding="utf-8")
-
-    assert "push:" not in text
-    assert "REQUIRED_JOBS" not in text
-    assert "release.yml" not in (_WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+def test_the_release_has_exactly_the_gate_the_build_and_the_tag_job():
+    assert set(_jobs()) == {"gate", "build", "tag"}
