@@ -480,6 +480,15 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
 - **Residue.** The second transaction cannot rule out a session deleted after its load: with a
   store that commits each statement, a deletion before the transaction's exit also escapes when
   the rotation is omitted or echoed, as [Risks and Technical Debt](ARCHITECTURE.md#8-risks-and-technical-debt) says.
+- **The async reader.** `SessionGroups(relying_party, session_transaction, config)` from
+  `webauth.session_groups` takes the host's `SessionTransaction`, as `current_groups` does:
+  - **GROUPS-28** `await of_session(session_id)` and `await of_connection(connection)` answer the
+    groups of a session, or of the session the connection's cookie names, as a `frozenset` or the
+    refusal `current_groups` answers, by one `current_groups` call on a worker thread.
+  - **GROUPS-29** A connection without a session answers `SIGN_IN_AGAIN` and makes no grant.
+  - **GROUPS-30** A cancelled caller gets no answer, but its grant still stores its rotated refresh token.
+  - It takes no lock, so overlapping calls are GROUPS-26. **Host duty:** The app maps each refusal to
+    its own answer and names the group it checks.
 
 ## The protected resource
 

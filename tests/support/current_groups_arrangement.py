@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import SecretStr
+from starlette.requests import HTTPConnection
 
 from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_arrangement import (
@@ -31,13 +32,20 @@ from tests.support.oidc_arrangement import (
 )
 from tests.support.oidc_relying_party import a_relying_party_for
 from tests.support.session_store_arrangement import FakeSessionRecord, SessionRecordsInMemory
-from tests.support.webauth_arrangement import FIXED_INSTANT, SESSION_IDLE_SECONDS, a_web_auth_config
+from tests.support.webauth_arrangement import (
+    FIXED_INSTANT,
+    SESSION_IDLE_SECONDS,
+    a_web_auth_config,
+    session_cookie_header,
+)
+from webauth.cookies import sign_session_id
 from webauth.oidc import OidcRefusalReason, OidcRelyingParty
 from webauth.oidc_login import (
     AccessTokenRefusal,
     AccessTokenRefusalReason,
     current_groups,
 )
+from webauth.session_groups import SessionGroups
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -67,6 +75,10 @@ ROTATIONS = pytest.mark.parametrize(
 )
 SESSION_ENDED = AccessTokenRefusal(AccessTokenRefusalReason.SESSION_ENDED)
 SIGN_IN_AGAIN = AccessTokenRefusal(AccessTokenRefusalReason.SIGN_IN_AGAIN)
+
+
+def a_websocket_connection(headers: list[tuple[bytes, bytes]]) -> HTTPConnection:
+    return HTTPConnection({"type": "websocket", "headers": headers, "query_string": b""})
 
 
 def a_stored_id_token(**claims: Any) -> SecretStr:
@@ -153,6 +165,17 @@ class Arrangement:
             session_transaction=provider,
             config=self.config,
         )
+
+    def session_groups(self) -> SessionGroups:
+        return SessionGroups(
+            self.relying_party,
+            lambda: nullcontext(self.sessions),
+            self.config,
+        )
+
+    def connection_of_the_session(self) -> HTTPConnection:
+        cookie = sign_session_id(SESSION_ID, self.config.signing_key)
+        return a_websocket_connection([(b"cookie", session_cookie_header(cookie).encode())])
 
     @property
     def stored_refresh_token(self) -> str | None:
