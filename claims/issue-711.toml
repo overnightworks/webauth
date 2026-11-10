@@ -3,6 +3,6 @@ agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
 role = "builder"
 base = "0ca48c090830d7d23995845cd46a9002029bcbc5"
 branch = "claude/issue-711-session-groups-reader"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/_worker.py", "src/webauth/middleware/_worker.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/middleware/session_gate.py", "src/webauth/session_groups.py", "tests/support/current_groups_arrangement.py", "tests/support/oidc_arrangement.py", "tests/test_session_groups.py"]
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/_worker.py", "src/webauth/admission.py", "src/webauth/middleware/_worker.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/middleware/session_gate.py", "src/webauth/session_groups.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/current_groups_arrangement.py", "tests/support/oidc_arrangement.py", "tests/test_session_groups.py"]
 opened_commit = "28277758e04d8b14c61396cefad3d4d05a33641a"
 whole_reason = "One new public class lands with its contract sentences and the tests that prove them; the two support modules only gain the builder and the blocking grant the tests need."
