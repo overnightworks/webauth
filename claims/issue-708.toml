@@ -1,8 +1,0 @@
-claim_id = "57487efe69024c2684e1af05e3699ad4"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "395069463b132df76cd948789fc9052fde105249"
-branch = "claude/issue-708-arrangement-split"
-scope = ["tests"]
-opened_commit = "cdb8939e6601863a3e0ab529657e562233aa4451"
-whole_reason = "The moved session doubles change one import line in each of 18 test files, the support modules and the proof host in one move; splitting it would leave a half-moved subject."
