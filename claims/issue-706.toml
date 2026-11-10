@@ -1,0 +1,8 @@
+claim_id = "bfa56581bc7c4f9f92c202b1875bf582"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "10fad4cd69ae45f91df949768852f4e46ffe5e31"
+branch = "claude/issue-706-rate-limit-windows"
+scope = ["tests/middleware/test_stack.py", "tests/support/rate_limit_arrangement.py", "tests/support/webauth_arrangement.py", "tests/test_rate_limit_redis.py", "tests/test_sign_in_routes_derived_policies.py"]
+opened_commit = "d5dacb3395958e526a29ef1c98d4ce075db1d98a"
+whole_reason = "Moving the failing double to the new module changes its two users' imports in the same slice; production stays untouched."
