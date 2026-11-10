@@ -16,6 +16,12 @@ from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
+from tests.support.account_arrangement import (
+    FakeUser,
+    UsersInMemory,
+    WriteLockInMemory,
+    require_held_lock,
+)
 from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_REFRESH_TOKEN,
@@ -31,16 +37,11 @@ from tests.support.oidc_arrangement import (
     rs256,
     rsa_key,
 )
+from tests.support.session_store_arrangement import FakeSessionRecord, SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     HTTPS_TEST_SERVER,
-    FakeSessionRecord,
-    FakeUser,
     RecordingAuditSink,
-    SessionRecordsInMemory,
-    UsersInMemory,
-    WriteLockInMemory,
-    _require_held_lock,
     a_web_auth_config,
 )
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
@@ -150,7 +151,7 @@ class UsersWithoutUniqueUsernames(UsersInMemory):
     def create_for_subject(
         self, subject: str, username: str, role: str, kind: AccountKind
     ) -> FakeUser:
-        _require_held_lock(self._lock)
+        require_held_lock(self._lock)
         user = FakeUser(id=subject, username=username, role=role, kind=kind)
         self._users[subject] = user
         return user

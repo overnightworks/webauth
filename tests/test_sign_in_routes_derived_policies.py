@@ -25,11 +25,8 @@ from tests.support.oidc_login_host import (
     START_PATH,
 )
 from tests.support.rate_limit_arrangement import CheckedBudget, RecordingRateLimitBackend
-from tests.support.webauth_arrangement import (
-    HTTPS_TEST_SERVER,
-    SessionRecordsInMemory,
-    a_web_auth_config,
-)
+from tests.support.session_store_arrangement import SessionRecordsInMemory
+from tests.support.webauth_arrangement import HTTPS_TEST_SERVER, a_web_auth_config
 from webauth.config import install_web_auth_config
 from webauth.middleware import SessionGate, install_web_auth_middleware
 from webauth.policies import (

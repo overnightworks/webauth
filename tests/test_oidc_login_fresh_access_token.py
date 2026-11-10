@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import SecretStr
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_REFRESH_TOKEN,
@@ -27,17 +28,18 @@ from tests.support.oidc_arrangement import (
     a_relying_party,
     token_endpoint_answer,
 )
-from tests.support.webauth_arrangement import (
-    FIXED_INSTANT,
-    SESSION_ABSOLUTE_MAX_AGE_SECONDS,
-    SESSION_IDLE_SECONDS,
+from tests.support.session_store_arrangement import (
     FakeSessionRecord,
-    FakeUser,
     SessionRecordsInMemory,
     SessionsAnsweringReplace,
     SessionsEndedBeforeReplacingTheRefreshToken,
     SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
+)
+from tests.support.webauth_arrangement import (
+    FIXED_INSTANT,
+    SESSION_ABSOLUTE_MAX_AGE_SECONDS,
+    SESSION_IDLE_SECONDS,
     a_web_auth_config,
 )
 from webauth.config import WebAuthConfig

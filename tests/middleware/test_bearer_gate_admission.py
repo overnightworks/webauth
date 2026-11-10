@@ -52,11 +52,11 @@ from tests.support.person_paths_arrangement import (
     a_lena,
     a_person_app,
 )
+from tests.support.session_store_arrangement import SessionsThatMustNotBeAsked
 from tests.support.webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
     HTTPS_TEST_SERVER,
     LOGIN_REDIRECT,
-    SessionsThatMustNotBeAsked,
     a_web_auth_config,
     session_cookie_header,
 )

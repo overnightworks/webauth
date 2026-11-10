@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import SecretStr
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_arrangement import (
     ABSENT,
     APP_CLIENT_ID,
@@ -29,14 +30,8 @@ from tests.support.oidc_arrangement import (
     segment,
 )
 from tests.support.oidc_relying_party import a_relying_party_for
-from tests.support.webauth_arrangement import (
-    FIXED_INSTANT,
-    SESSION_IDLE_SECONDS,
-    FakeSessionRecord,
-    FakeUser,
-    SessionRecordsInMemory,
-    a_web_auth_config,
-)
+from tests.support.session_store_arrangement import FakeSessionRecord, SessionRecordsInMemory
+from tests.support.webauth_arrangement import FIXED_INSTANT, SESSION_IDLE_SECONDS, a_web_auth_config
 from webauth.oidc import OidcRefusalReason, OidcRelyingParty
 from webauth.oidc_login import (
     AccessTokenRefusal,

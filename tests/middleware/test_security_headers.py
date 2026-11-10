@@ -13,13 +13,12 @@ from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
+from tests.support.account_arrangement import UsersInMemory, WriteLockInMemory
 from tests.support.oidc_arrangement import LogoutPage, a_relying_party
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     RecordingAuditSink,
-    SessionRecordsInMemory,
-    UsersInMemory,
-    WriteLockInMemory,
     a_web_auth_config,
     an_http_scope,
     drive,

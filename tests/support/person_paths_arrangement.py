@@ -11,6 +11,7 @@ import pytest
 from fastapi import Response as AppResponse
 from httpx import Response
 
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
 from tests.support.gate_arrangement import (
     A_TOKEN,
     ADMISSION,
@@ -34,10 +35,6 @@ from tests.support.oidc_login_host import (
     StoreDown,
     TransactionKind,
     a_client_config,
-)
-from tests.support.webauth_arrangement import (
-    MEMBER_ROLE,
-    FakeUser,
 )
 from webauth.ports import SignInStores
 from webauth.sign_in_routes import install_sign_in_routes

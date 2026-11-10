@@ -18,6 +18,7 @@ from datetime import timedelta
 
 import pytest
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_ACCESS_TOKEN_CANARY,
@@ -53,7 +54,6 @@ from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     SESSION_IDLE_SECONDS,
-    FakeUser,
     signed_without_bound,
 )
 from webauth.cookies import (

@@ -11,13 +11,17 @@ from starlette.requests import HTTPConnection, Request
 from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from tests.support.account_arrangement import MEMBER_ROLE
+from tests.support.session_store_arrangement import (
+    SessionsAnsweringTouch,
+    SessionsThatMustNotBeAsked,
+)
 from tests.support.webauth_arrangement import (
     ALLOWED_HOST,
     ALLOWED_ORIGIN,
     CLIENT_ADDRESS,
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
-    MEMBER_ROLE,
     POLICY_VIOLATION_CLOSE_CODE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
@@ -25,8 +29,6 @@ from tests.support.webauth_arrangement import (
     WEBSOCKET_DEPENDENCY_PATH,
     WEBSOCKET_PATH,
     AuthApp,
-    SessionsAnsweringTouch,
-    SessionsThatMustNotBeAsked,
     a_session,
     a_web_auth_config,
     an_auth_app,

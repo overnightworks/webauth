@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from httpx import Response
 from starlette.websockets import WebSocketDisconnect
 
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
 from tests.support.gate_arrangement import (
     ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH,
     ADMITTED_ADMIN_PATH,
@@ -32,19 +33,19 @@ from tests.support.session_gate_arrangement import (
     counted,
     signed_in,
 )
-from tests.support.webauth_arrangement import (
-    ADMIN_ROLE,
-    ALL_DEPENDENCIES_PATH,
-    ALLOWED_ORIGIN,
-    MEMBER_ROLE,
-    WEBSOCKET_ADMITTED_PATH,
-    WEBSOCKET_PATH,
-    AuthApp,
-    FakeUser,
+from tests.support.session_store_arrangement import (
     SessionRecordsInMemory,
     SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
     SessionsThatMustNotBeAsked,
+)
+from tests.support.webauth_arrangement import (
+    ADMIN_ROLE,
+    ALL_DEPENDENCIES_PATH,
+    ALLOWED_ORIGIN,
+    WEBSOCKET_ADMITTED_PATH,
+    WEBSOCKET_PATH,
+    AuthApp,
     a_session,
     a_signed_in_same_origin_request,
     an_auth_app,

@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, Request, Response
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_arrangement import (
     ABSENT,
     a_logout_token,
@@ -46,7 +47,6 @@ from tests.support.oidc_login_host import (
 )
 from tests.support.webauth_arrangement import (
     SESSION_IDLE_SECONDS,
-    FakeUser,
     an_http_scope,
     body_of,
     drive,

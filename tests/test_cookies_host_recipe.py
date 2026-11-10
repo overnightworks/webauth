@@ -6,9 +6,10 @@ from http.cookies import SimpleCookie
 
 from fastapi import Request, Response
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_login_host import after_signing_in, an_oidc_host
 from tests.support.session_gate_arrangement import a_gated_app
-from tests.support.webauth_arrangement import FakeUser, a_session
+from tests.support.webauth_arrangement import a_session
 from webauth.cookies import issue_session_cookies
 from webauth.middleware.session_gate import admitted_user
 

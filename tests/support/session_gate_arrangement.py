@@ -6,10 +6,10 @@ from typing import Any
 
 from httpx import Response
 
+from tests.support.session_store_arrangement import SessionsRecordingTheirTransaction
 from tests.support.webauth_arrangement import (
     LOGIN_REDIRECT,
     AuthApp,
-    SessionsRecordingTheirTransaction,
     a_session,
     an_auth_app,
     session_cookie_header,
