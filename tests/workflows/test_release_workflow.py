@@ -118,14 +118,22 @@ def test_the_build_must_check_out_the_commit_the_gate_judged(tmp_path, release, 
             False,
         ),
         ((), __version__, False),
+        (None, __version__, False),
     ],
-    ids=["the expected wheel", "another version", "a second wheel", "no wheel"],
+    ids=[
+        "the expected wheel",
+        "another version",
+        "a second wheel",
+        "no wheel",
+        "no dist directory",
+    ],
 )
 def test_the_build_must_hold_exactly_the_wheel_at_the_dispatched_version(
     tmp_path, release, built_wheels, dispatched_version, passes
 ):
-    (tmp_path / "dist").mkdir()
-    for name in built_wheels:
+    if built_wheels is not None:
+        (tmp_path / "dist").mkdir()
+    for name in built_wheels or ():
         wheel = name.format(distribution=_distribution(), version=release.version)
         (tmp_path / "dist" / wheel).touch()
 
@@ -144,10 +152,10 @@ def _jobs() -> dict[str, str]:
     }
 
 
-def _with_keys(job: str) -> set[str]:
+def _with_values(job: str) -> dict[str, str]:
     with_block = re.search(r"    with:\n((?:      .*\n)+)", job)
     assert with_block
-    return set(re.findall(r"^      (\w+):", with_block.group(1), re.MULTILINE))
+    return dict(re.findall(r"^      (\w+): (.*)$", with_block.group(1), re.MULTILINE))
 
 
 def test_a_release_run_value_never_interpolates_an_expression():
@@ -177,10 +185,27 @@ def test_only_the_tag_job_may_write():
 def test_the_gate_and_the_tag_wait_for_the_jobs_before_them_and_carry_no_files():
     jobs = _jobs()
 
-    assert _with_keys(jobs["gate"]) == {"version"}
+    assert _with_values(jobs["gate"]).keys() == {"version"}
     assert "needs: gate\n" in jobs["build"]
     assert "needs: [gate, build]\n" in jobs["tag"]
-    assert _with_keys(jobs["tag"]) == {"version", "commit"}
+    assert _with_values(jobs["tag"]).keys() == {"version", "commit"}
+
+
+def test_the_tag_job_tags_the_commit_the_gate_judged_at_the_dispatched_version():
+    with_values = _with_values(_jobs()["tag"])
+
+    assert with_values["commit"] == "${{ needs.gate.outputs.commit }}"
+    assert with_values["version"] == "${{ inputs.version }}"
+
+
+def test_a_failed_or_skipped_gate_or_build_skips_the_jobs_after_it():
+    jobs = _jobs()
+
+    conditioned = [
+        name for name in ("build", "tag") if re.search(r"^    if:", jobs[name], re.MULTILINE)
+    ]
+
+    assert conditioned == []
 
 
 @pytest.mark.parametrize("workflow", ["release-gate", "release-tag"])

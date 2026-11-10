@@ -60,7 +60,10 @@ jobs:
       - name: Refuse unless the build holds exactly the wheel at the version
         run: |
           expected="overnightworks_webauth-${VERSION}-py3-none-any.whl"
-          built=$(find dist -maxdepth 1 -name '*.whl' -printf '%f\n' | sort | paste -sd, -)
+          built=""
+          if [ -d dist ]; then
+            built=$(find dist -maxdepth 1 -name '*.whl' -printf '%f\n' | sort | paste -sd, -)
+          fi
           if [ "$built" != "$expected" ]; then
             echo "Refused: the build must hold exactly $expected, but it holds ${built:-no wheel}." >&2
             exit 1
