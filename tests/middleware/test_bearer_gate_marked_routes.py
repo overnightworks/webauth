@@ -14,6 +14,7 @@ from collections.abc import Callable
 import pytest
 from starlette.middleware import Middleware
 
+from tests.support.account_arrangement import MEMBER_ROLE
 from tests.support.gate_arrangement import (
     A_MACHINE_NOTE,
     A_NOTE,
@@ -47,7 +48,7 @@ from tests.support.gate_arrangement import (
 )
 from tests.support.oidc_arrangement import ABSENT, ACCESS_TOKEN_NOW, OPERATOR_SUBJECT
 from tests.support.oidc_login_host import failing
-from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE
+from tests.support.webauth_arrangement import ADMIN_ROLE
 from webauth.middleware import MarkedRoute, ProtectedResource
 
 

@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from starlette.middleware import Middleware
 
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
 from tests.support.agent_arrangement import (
     AGENT_CLIENT,
     AGENT_NAME,
@@ -55,7 +56,7 @@ from tests.support.oidc_arrangement import (
     an_access_token,
 )
 from tests.support.oidc_login_host import StoreDown, TransactionKind, failing
-from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
+from tests.support.webauth_arrangement import ADMIN_ROLE
 from webauth.middleware import ProtectedResource
 from webauth.policies import PathRules
 from webauth.ports import AccountEvent, AccountEventKind, AccountKind, AgentFacts, AuthenticatedUser

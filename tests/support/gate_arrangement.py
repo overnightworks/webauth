@@ -13,7 +13,8 @@ from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
-from tests.support.gated_stack_arrangement import GATED_STACK_POLICIES
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser, WriteLockInMemory
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
@@ -29,15 +30,11 @@ from tests.support.oidc_login_host import (
     TransactionKind,
     UsersWithSnapshots,
 )
+from tests.support.session_store_arrangement import FakeSessionRecord, SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
-    MEMBER_ROLE,
     AuthApp,
-    FakeSessionRecord,
-    FakeUser,
     RecordingAuditSink,
-    SessionRecordsInMemory,
-    WriteLockInMemory,
     a_session,
     an_auth_app,
     session_cookie_header,
@@ -60,7 +57,6 @@ from webauth.middleware import (
     admitted_user,
     bearer_caller,
     install_resource_metadata,
-    install_web_auth_middleware,
     resource_person,
 )
 from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PublicRule
@@ -557,7 +553,7 @@ def _an_auth_app_behind_the_stack(
         **auth_app_keywords,
     )
     if not session_gate:
-        install_web_auth_middleware(auth.app, **{**GATED_STACK_POLICIES, **stack_policies})
+        install_the_gated_stack(auth.app, **stack_policies)
     auth.app.user_middleware.extend(inner_middleware)
     return auth
 

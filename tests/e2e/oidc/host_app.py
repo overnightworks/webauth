@@ -34,6 +34,7 @@ from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import anyio.to_thread
@@ -162,9 +163,13 @@ def _arrangement() -> Any:
 
     The host runs as a script, so the repository root is not yet on the import path."""
     sys.path.insert(0, str(REPOSITORY))
-    from tests.support import webauth_arrangement
+    from tests.support import account_arrangement, session_store_arrangement, webauth_arrangement
 
-    return webauth_arrangement
+    return SimpleNamespace(
+        accounts=account_arrangement,
+        sessions=session_store_arrangement,
+        webauth=webauth_arrangement,
+    )
 
 
 @dataclass(frozen=True)
@@ -251,10 +256,12 @@ class World:
             )
             for origin in settings.app_origins
         }
-        self.lock = arrangement.WriteLockInMemory()
-        self.accounts = arrangement.UsersInMemory(lock=self.lock)
-        self.sessions = arrangement.SessionRecordsInMemory(users=self.accounts, lock=self.lock)
-        self.audit = arrangement.RecordingAuditSink()
+        self.lock = arrangement.accounts.WriteLockInMemory()
+        self.accounts = arrangement.accounts.UsersInMemory(lock=self.lock)
+        self.sessions = arrangement.sessions.SessionRecordsInMemory(
+            users=self.accounts, lock=self.lock
+        )
+        self.audit = arrangement.webauth.RecordingAuditSink()
         self.callbacks_received = 0
         self.backchannel_accepted = 0
         self.backchannel_refused = 0
@@ -276,7 +283,7 @@ class World:
         return {
             "accounts": len(self.accounts.list()),
             "privileged_accounts": sum(
-                user.role != _arrangement().MEMBER_ROLE for user in self.accounts.list()
+                user.role != _arrangement().accounts.MEMBER_ROLE for user in self.accounts.list()
             ),
             "sessions": self.sessions.count_active(),
             "callbacks_received": self.callbacks_received,
@@ -507,7 +514,7 @@ def _install_counters(
 
 def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     arrangement = _arrangement()
-    config: WebAuthConfig = arrangement.a_web_auth_config(
+    config: WebAuthConfig = arrangement.webauth.a_web_auth_config(
         session_secret=SecretStr(settings.session_secret),
         cookie_samesite=settings.cookie_samesite,
         allowed_hosts_exact=frozenset(

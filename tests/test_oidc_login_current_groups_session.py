@@ -22,13 +22,13 @@ from tests.support.current_groups_arrangement import (
 from tests.support.oidc_arrangement import (
     ISSUED_REFRESH_TOKEN,
 )
-from tests.support.webauth_arrangement import (
-    SESSION_IDLE_SECONDS,
+from tests.support.session_store_arrangement import (
     SessionsAnsweringReplace,
     SessionsEndedBeforeReplacingTheRefreshToken,
     SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
 )
+from tests.support.webauth_arrangement import SESSION_IDLE_SECONDS
 from webauth.oidc_login import (
     fresh_access_token,
 )

@@ -9,16 +9,18 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tests.support.person_paths_arrangement import DisabledUser
+from tests.support.session_store_arrangement import (
+    FakeSessionRecord,
+    SessionRecordsInMemory,
+    SessionsAnsweringTouch,
+    SessionsEndedBetweenLoadAndTouch,
+)
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     SESSION_ABSOLUTE_MAX_AGE_SECONDS,
     SESSION_ID,
     SESSION_IDLE_SECONDS,
-    FakeSessionRecord,
-    SessionRecordsInMemory,
-    SessionsAnsweringTouch,
-    SessionsEndedBetweenLoadAndTouch,
     a_session,
     a_web_auth_config,
 )

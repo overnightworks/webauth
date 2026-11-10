@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request, WebSocket
 from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
 
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
 from tests.support.agent_arrangement import AGENT_NAME, AGENT_OWNER, an_agent_group_token
 from tests.support.gate_arrangement import (
     A_TOKEN,
@@ -46,7 +47,7 @@ from tests.support.oidc_arrangement import (
 )
 from tests.support.oidc_login_host import StoreDown, failing
 from tests.support.person_paths_arrangement import DisabledUser
-from tests.support.webauth_arrangement import ADMIN_ROLE, MEMBER_ROLE, FakeUser
+from tests.support.webauth_arrangement import ADMIN_ROLE
 from webauth.middleware import (
     MarkedRoute,
     ProtectedResource,

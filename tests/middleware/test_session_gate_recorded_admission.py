@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser, UsersInMemory
 from tests.support.gate_arrangement import (
     ADMITTED_ADMIN_PATH,
     ScopeRelay,
@@ -22,13 +23,10 @@ from tests.support.session_gate_arrangement import (
     counted,
     signed_in,
 )
+from tests.support.session_store_arrangement import SessionsRecordingTheirTransaction
 from tests.support.webauth_arrangement import (
     LOGIN_REDIRECT,
-    MEMBER_ROLE,
     AuthApp,
-    FakeUser,
-    SessionsRecordingTheirTransaction,
-    UsersInMemory,
     a_session,
     an_auth_app,
     session_cookie_header,

@@ -5,12 +5,11 @@ from __future__ import annotations
 import enum
 import hashlib
 import hmac
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager, nullcontext
-from dataclasses import dataclass, field, replace
+from collections.abc import Iterable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from itertools import count
-from threading import RLock, get_ident
+from threading import get_ident
 from typing import TYPE_CHECKING, Any, Final
 
 import anyio
@@ -23,7 +22,13 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketDisconnect
 
-from tests.support.gated_stack_arrangement import GATED_STACK_POLICIES
+from tests.support.account_arrangement import FakeUser
+from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.session_store_arrangement import (
+    FakeSessionRecord,
+    SessionRecordsInMemory,
+    SessionsRecordingTheirTransaction,
+)
 from webauth.config import (
     SessionLifetime,
     WebAuthConfig,
@@ -42,7 +47,6 @@ from webauth.middleware import (
     IpRateLimitMiddleware,
     SessionGate,
     admitted_user,
-    install_web_auth_middleware,
 )
 from webauth.policies import (
     PathRules,
@@ -52,12 +56,10 @@ from webauth.policies import (
 )
 from webauth.ports import (
     AccountEvent,
-    AccountKind,
     AuthenticatedUser,
     RateLimitBackend,
     SessionRecordStore,
     SessionTransaction,
-    UsernameTakenError,
 )
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
@@ -73,7 +75,6 @@ MIN_SESSION_SECRET_CHARS = 32
 SESSION_ID = "session-1"
 CLIENT_ADDRESS = "testclient"
 ADMIN_ROLE = "admin"
-MEMBER_ROLE = "user"
 SPEC_WITH_CONCURRENT_READER = "2.3"
 SPEC_WITHOUT_CONCURRENT_READER = "2.4"
 SESSION_IDLE_SECONDS = 3600
@@ -164,326 +165,6 @@ def a_rate_limited_client(
         default=RateLimitBudget(DEFAULT_BUDGET_NAME, max_requests, window_seconds),
     )
     return a_policy_rate_limited_client(rate_limits, policy, **config_overrides)
-
-
-@dataclass
-class FakeUser:
-    id: str = "user-1"
-    username: str = "alice"
-    role: str = MEMBER_ROLE
-    kind: AccountKind = AccountKind.PERSON
-
-
-class UnknownAccountError(LookupError):
-    """A session was requested for an account the arrangement does not hold."""
-
-
-class LockNotHeldError(RuntimeError):
-    """A store operation requires the host's write lock."""
-
-
-def _require_held_lock(lock: WriteLockInMemory | None) -> None:
-    if lock is not None and not lock.held:
-        raise LockNotHeldError("Store operation requires a held write lock")
-
-
-class UsersInMemory:
-    """Accounts sharing the same mutable records as the host's session store."""
-
-    def __init__(self, *users: FakeUser, lock: WriteLockInMemory | None = None) -> None:
-        self._lock = lock
-        self._users = {user.id: user for user in users}
-        self._usernames = {user.username: user for user in users}
-
-    def get(self, user_id: str) -> FakeUser | None:
-        return self._users.get(user_id)
-
-    def create_for_subject(
-        self, subject: str, username: str, role: str, kind: AccountKind
-    ) -> FakeUser:
-        return self._add(FakeUser(id=subject, username=username, role=role, kind=kind))
-
-    def set_role(self, user_id: str, role: str) -> FakeUser:
-        _require_held_lock(self._lock)
-        user = self._users[user_id]
-        user.role = role
-        return user
-
-    def set_kind(self, user_id: str, kind: AccountKind) -> FakeUser:
-        _require_held_lock(self._lock)
-        user = self._users[user_id]
-        user.kind = kind
-        return user
-
-    def _add(self, user: FakeUser) -> FakeUser:
-        _require_held_lock(self._lock)
-        if user.username in self._usernames:
-            raise UsernameTakenError("Username is already taken")
-        self._users[user.id] = user
-        self._usernames[user.username] = user
-        return user
-
-    def list(self) -> list[FakeUser]:
-        return list(self._users.values())
-
-
-@dataclass
-class WriteLockInMemory:
-    _lock: RLock = field(default_factory=RLock)
-    _hold_depth: int = field(default=0, init=False)
-
-    @property
-    def held(self) -> bool:
-        return self._hold_depth > 0
-
-    @contextmanager
-    def hold(self) -> Iterator[None]:
-        with self._lock:
-            self._hold_depth += 1
-            try:
-                yield
-            finally:
-                self._hold_depth -= 1
-
-
-@dataclass
-class FakeSessionRecord:
-    id: str
-    user: FakeUser
-    created_at: datetime
-    expires_at: datetime
-    refresh_token: SecretStr | None = None
-    id_token: SecretStr | None = None
-
-
-class SessionRecordsInMemory:
-    """Stored sessions, renewed in place and never committed. ``create`` and ``touch``
-    write the instants they are given; a deleted record yields no ID token."""
-
-    def __init__(
-        self,
-        record: FakeSessionRecord | None = None,
-        *,
-        users: UsersInMemory | None = None,
-        lock: WriteLockInMemory | None = None,
-    ) -> None:
-        self._lock = lock
-        self._records = {} if record is None else {record.id: record}
-        seeded_users = () if record is None else (record.user,)
-        self._users = users if users is not None else UsersInMemory(*seeded_users)
-        self._ids = count(1)
-        self.commit_failure: Exception | None = None
-
-    @property
-    def record(self) -> FakeSessionRecord | None:
-        return next(iter(self._records.values()), None)
-
-    @property
-    def stored_record(self) -> FakeSessionRecord:
-        """The one record the store holds; a store without one fails the test."""
-        record = self.record
-        assert record is not None
-        return record
-
-    def create(
-        self,
-        user_id: str,
-        *,
-        now: datetime,
-        expires_at: datetime,
-        refresh_token: SecretStr | None,
-        id_token: SecretStr | None,
-    ) -> FakeSessionRecord:
-        _require_held_lock(self._lock)
-        user = self._users.get(user_id)
-        if user is None:
-            raise UnknownAccountError("Account does not exist")
-        session_id = f"session-{next(self._ids)}"
-        while session_id in self._records:
-            session_id = f"session-{next(self._ids)}"
-        record = FakeSessionRecord(session_id, user, now, expires_at, refresh_token, id_token)
-        self._records[record.id] = record
-        return record
-
-    @contextmanager
-    def transaction(self) -> Iterator[None]:
-        """The host's transaction: leaving the block commits unless ``commit_failure``
-        is set, and an exception rolls back."""
-        committed = {session_id: replace(record) for session_id, record in self._records.items()}
-        try:
-            yield
-            if self.commit_failure is not None:
-                raise self.commit_failure
-        except BaseException:
-            self._records = committed
-            raise
-
-    def in_transaction(self) -> AbstractContextManager[SessionRecordStore]:
-        """The store inside its ``transaction``: a ``SessionTransaction`` provider."""
-        return self._store_in_transaction()
-
-    @contextmanager
-    def _store_in_transaction(self) -> Iterator[SessionRecordStore]:
-        with self.transaction():
-            yield self
-
-    def load(self, session_id: str) -> FakeSessionRecord | None:
-        return self._records.get(session_id)
-
-    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
-        record = self._records.get(session_id)
-        if record is None:
-            return False
-        record.expires_at = expires_at
-        return True
-
-    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
-        record = self._records.get(session_id)
-        if record is None:
-            return False
-        record.refresh_token = refresh_token
-        return True
-
-    def delete(self, session_id: str) -> None:
-        _require_held_lock(self._lock)
-        self._remove_record(session_id)
-
-    def _remove_record(self, session_id: str) -> None:
-        if (removed := self._records.pop(session_id, None)) is not None:
-            removed.id_token = None
-
-    def delete_for_user(self, user_id: str) -> int:
-        sessions = self.sessions_of(user_id)
-        for record in sessions:
-            self._remove_record(record.id)
-        return len(sessions)
-
-    def sessions_of(self, user_id: str) -> list[FakeSessionRecord]:
-        return [record for record in self._records.values() if record.user.id == user_id]
-
-    def list_active(self) -> list[FakeSessionRecord]:
-        return list(self._records.values())
-
-    def count_active(self) -> int:
-        return len(self._records)
-
-    def prune_overflow(self, user_id: str, keep_newest: int) -> None:
-        _require_held_lock(self._lock)
-        records = sorted(
-            self.sessions_of(user_id),
-            key=lambda record: record.created_at,
-            reverse=True,
-        )
-        for record in records[keep_newest:]:
-            self._remove_record(record.id)
-
-
-class SessionsRecordingTheirTransaction(SessionRecordsInMemory):
-    """A store that records, with the thread each ran on, the factory call (``open``),
-    ``load``, ``touch``, ``replace``, a clean exit (``commit``) and an exit by exception
-    (``rollback``)."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.events: list[tuple[str, int]] = []
-
-    @property
-    def event_names(self) -> list[str]:
-        return [name for name, _thread in self.events]
-
-    @property
-    def threads(self) -> set[int]:
-        return {thread for _name, thread in self.events}
-
-    def in_transaction(self) -> AbstractContextManager[SessionRecordStore]:
-        self.events.append(("open", get_ident()))
-        return self._recorded_transaction()
-
-    @contextmanager
-    def _recorded_transaction(self) -> Iterator[SessionRecordStore]:
-        try:
-            with super().in_transaction() as store:
-                yield store
-        except BaseException:
-            self.events.append(("rollback", get_ident()))
-            raise
-        self.events.append(("commit", get_ident()))
-
-    def load(self, session_id: str) -> FakeSessionRecord | None:
-        self.events.append(("load", get_ident()))
-        return super().load(session_id)
-
-    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
-        self.events.append(("touch", get_ident()))
-        return super().touch(session_id, expires_at=expires_at)
-
-    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
-        self.events.append(("replace", get_ident()))
-        return super().replace_refresh_token(session_id, refresh_token=refresh_token)
-
-
-class SessionsFailingToLoad(SessionRecordsInMemory):
-    """A store whose ``load`` raises while ``failing``, as a database that went away does."""
-
-    failing = True
-
-    def load(self, session_id: str) -> FakeSessionRecord | None:
-        if self.failing:
-            raise ConnectionError("session store down")
-        return super().load(session_id)
-
-
-class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
-    """A store whose session is ended by another request right after ``load`` reads it."""
-
-    def load(self, session_id: str) -> FakeSessionRecord | None:
-        record = super().load(session_id)
-        if record is not None:
-            self.delete(session_id)
-        return record
-
-
-class SessionsEndedBeforeReplacingTheRefreshToken(SessionRecordsInMemory):
-    """A store whose session is ended by another request right before the replace lands."""
-
-    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
-        self._remove_record(session_id)
-        return super().replace_refresh_token(session_id, refresh_token=refresh_token)
-
-
-class SessionsThatMustNotBeAsked(SessionRecordsInMemory):
-    """A store that fails the test on the first question put to it."""
-
-    def load(self, session_id: str) -> FakeSessionRecord | None:
-        raise AssertionError("the store was asked to load a session")
-
-    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
-        raise AssertionError("the store was asked to touch a session")
-
-    def delete(self, session_id: str) -> None:
-        raise AssertionError("the store was asked to delete a session")
-
-
-class SessionsAnsweringTouch(SessionRecordsInMemory):
-    """A store whose ``touch`` writes nothing and gives a fixed answer."""
-
-    def __init__(self, record: FakeSessionRecord, touch_answer: Any) -> None:
-        super().__init__(record)
-        self.touch_answer = touch_answer
-
-    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
-        return self.touch_answer
-
-
-class SessionsAnsweringReplace(SessionRecordsInMemory):
-    """A store whose ``replace_refresh_token`` writes nothing and gives a fixed answer."""
-
-    def __init__(self, record: FakeSessionRecord, replace_answer: Any) -> None:
-        super().__init__(record)
-        self.replace_answer = replace_answer
-
-    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
-        return self.replace_answer
 
 
 @dataclass
@@ -715,9 +396,7 @@ def an_auth_app(
             public=public,
             optional=optional or PathRules(),
         )
-        install_web_auth_middleware(
-            app, **{**GATED_STACK_POLICIES, **(stack_policies or {})}, session_gate=session_gate
-        )
+        install_the_gated_stack(app, session_gate=session_gate, **(stack_policies or {}))
     auth = AuthApp(
         client=TestClient(
             app,

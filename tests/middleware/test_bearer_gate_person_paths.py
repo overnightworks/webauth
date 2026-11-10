@@ -16,6 +16,7 @@ import pytest
 from fastapi import Depends, FastAPI, Request
 from httpx import Response
 
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
 from tests.support.gate_arrangement import (
     ADMISSION,
     EXPORT_PATH,
@@ -62,11 +63,7 @@ from tests.support.person_paths_arrangement import (
     the_account,
     the_challenge,
 )
-from tests.support.webauth_arrangement import (
-    ADMIN_ROLE,
-    MEMBER_ROLE,
-    FakeUser,
-)
+from tests.support.webauth_arrangement import ADMIN_ROLE
 from webauth.admission import NoAdmins
 from webauth.dependencies import current_user_dependency
 from webauth.https_client import KeySetFetchError

@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException
 from httpx import Response
 from starlette.websockets import WebSocket
 
+from tests.support.account_arrangement import MEMBER_ROLE
 from tests.support.gate_arrangement import (
     ADMISSION,
     EXPORT_PATH,
@@ -66,12 +67,7 @@ from tests.support.person_paths_arrangement import (
     the_account,
     the_challenge,
 )
-from tests.support.webauth_arrangement import (
-    ADMIN_ROLE,
-    LOGIN_REDIRECT,
-    MEMBER_ROLE,
-    SAME_ORIGIN_REQUEST,
-)
+from tests.support.webauth_arrangement import ADMIN_ROLE, LOGIN_REDIRECT, SAME_ORIGIN_REQUEST
 from webauth.dependencies import current_user_dependency
 from webauth.policies import (
     PathRules,

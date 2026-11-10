@@ -11,6 +11,13 @@ from dataclasses import asdict, dataclass, replace
 
 import pytest
 
+from tests.support.account_arrangement import (
+    MEMBER_ROLE,
+    FakeUser,
+    UsersInMemory,
+    WriteLockInMemory,
+    require_held_lock,
+)
 from tests.support.oidc_arrangement import a_fake_id_token
 from tests.support.oidc_login_host import (
     ADMIN_GROUP,
@@ -23,15 +30,7 @@ from tests.support.oidc_login_host import (
     NO_ADMINS,
     SUBJECT,
 )
-from tests.support.webauth_arrangement import (
-    ADMIN_ROLE,
-    MEMBER_ROLE,
-    FakeUser,
-    RecordingAuditSink,
-    UsersInMemory,
-    WriteLockInMemory,
-    _require_held_lock,
-)
+from tests.support.webauth_arrangement import ADMIN_ROLE, RecordingAuditSink
 from webauth.admission import (
     AdmissionConfig,
     AdmissionRefusal,
@@ -396,7 +395,7 @@ class UsersReplacingRecords(UsersInMemory):
     """A store whose records are frozen: a role write returns a new record."""
 
     def set_role(self, user_id: str, role: str) -> FakeUser:
-        _require_held_lock(self._lock)
+        require_held_lock(self._lock)
         replaced = replace(self._users[user_id], role=role)
         self._users[user_id] = replaced
         self._usernames[replaced.username] = replaced
@@ -407,7 +406,7 @@ class UsersMissingTheRoleRow(UsersInMemory):
     """A store whose role write finds no row, as after a concurrent delete."""
 
     def set_role(self, user_id: str, role: str) -> FakeUser:
-        _require_held_lock(self._lock)
+        require_held_lock(self._lock)
         raise LookupError(user_id)
 
 

@@ -17,6 +17,7 @@ import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from starlette.testclient import TestClient
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.gate_arrangement import (
     A_TOKEN,
     EXPORT_PATH,
@@ -44,7 +45,6 @@ from tests.support.oidc_arrangement import (
     REALM_ISSUER,
     an_access_token,
 )
-from tests.support.webauth_arrangement import FakeUser
 from webauth.middleware import (
     ProtectedResource,
     install_resource_metadata,

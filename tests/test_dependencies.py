@@ -11,18 +11,16 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.types import Message
 
+from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
+from tests.support.session_store_arrangement import SessionRecordsInMemory, SessionsAnsweringTouch
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     HTTPS_TEST_SERVER,
-    MEMBER_ROLE,
     SESSION_COOKIE_NAME,
     SESSION_ID,
     AuthApp,
-    FakeUser,
-    SessionRecordsInMemory,
-    SessionsAnsweringTouch,
     a_session,
     a_web_auth_config,
     an_auth_app,

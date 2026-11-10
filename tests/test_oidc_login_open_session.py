@@ -9,6 +9,7 @@ import pytest
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
 from tests.support.oidc_login_host import (
     OTHER_SUBJECT,
@@ -21,12 +22,11 @@ from tests.support.oidc_login_host import (
     failing,
     set_cookies,
 )
+from tests.support.session_store_arrangement import FakeSessionRecord
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
     FIXED_WALL_CLOCK,
     SESSION_IDLE_SECONDS,
-    FakeSessionRecord,
-    FakeUser,
     seeded_session,
     session_cookie_header,
     signed_without_bound,

@@ -26,6 +26,7 @@ from httpx import Response as HttpxResponse
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
+from tests.support.account_arrangement import FakeUser
 from tests.support.oidc_login_host import (
     ADMISSION,
     BACKCHANNEL_LOGOUT_PATH,
@@ -49,7 +50,6 @@ from tests.support.oidc_login_host import (
 )
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
-    FakeUser,
     an_http_scope,
     body_of,
     drive,
