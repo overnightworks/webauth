@@ -24,6 +24,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.oidc_arrangement import a_relying_party
+from tests.support.rate_limit_arrangement import AlwaysFailingRateLimitBackend
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
     ALLOWED_ORIGIN,
@@ -32,7 +33,6 @@ from tests.support.webauth_arrangement import (
     SAME_ORIGIN_REQUEST,
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
-    AlwaysFailingRateLimitBackend,
     SessionRecordsInMemory,
     a_signed_in_same_origin_request,
     a_web_auth_config,

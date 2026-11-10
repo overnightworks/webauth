@@ -24,6 +24,7 @@ from tests.support.oidc_login_host import (
     SIGN_IN_PATHS,
     START_PATH,
 )
+from tests.support.rate_limit_arrangement import CheckedBudget, RecordingRateLimitBackend
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     SessionRecordsInMemory,
@@ -42,7 +43,7 @@ from webauth.policies import (
     RateLimitRule,
     SecurityHeadersPolicy,
 )
-from webauth.ports import SignInStores
+from webauth.ports import RateLimitBackend, SignInStores
 from webauth.sign_in_routes import (
     LogoutPageText,
     SignInPaths,
@@ -68,9 +69,12 @@ def _a_gated_host(
     security_headers: SecurityHeadersPolicy = HEADERS_POLICY,
     body_size: BodySizePolicy | None = None,
     rate_limit: RateLimitPolicy | None = None,
+    rate_limits: RateLimitBackend | None = None,
 ) -> GatedHost:
     """A host the installer wires from its sign-in paths and the policies it passes."""
-    config = a_web_auth_config()
+    config = (
+        a_web_auth_config() if rate_limits is None else a_web_auth_config(rate_limits=rate_limits)
+    )
     sessions = SessionRecordsInMemory()
     issuer = FakeIssuer(mint_id_token=lambda _nonce: "unused")
     relying_party = a_relying_party(post_token_request=issuer)
@@ -259,6 +263,25 @@ def test_the_other_paths_spend_the_default_budget_of_600_per_minute(
     assert statuses[-1] == 429
     assert 429 not in statuses[:-1]
     assert host.client.get(START_PATH).status_code == 303
+
+
+@pytest.mark.parametrize(
+    ("path", "budget"),
+    [
+        pytest.param(START_PATH, CheckedBudget(limit=40, window_seconds=600), id="SIGNIN-69"),
+        pytest.param("/albums/1", CheckedBudget(limit=600, window_seconds=60), id="STACK-05"),
+    ],
+)
+def test_a_request_is_checked_with_the_limit_and_window_its_contract_names(
+    path: str, budget: CheckedBudget
+) -> None:
+    """SIGNIN-69: sign-in is 40 per 600 seconds; STACK-05: the default is 600 per 60 seconds."""
+    recorder = RecordingRateLimitBackend()
+    host = _a_gated_host(rate_limits=recorder)
+
+    host.client.get(path)
+
+    assert recorder.budgets_checked() == {budget}
 
 
 def test_a_sign_in_path_in_the_host_exemption_spends_no_budget() -> None:
