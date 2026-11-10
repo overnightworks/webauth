@@ -488,6 +488,8 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
     passes to `app_role` as it is (GROUPS-12).
   - **GROUPS-29** A connection without a session answers `SIGN_IN_AGAIN` and makes no grant.
   - **GROUPS-30** A cancelled caller gets no answer, but its grant still stores its rotated refresh token.
+    The cancellation reaches the caller only after the grant ends, so a timeout around the call fires
+    then, not at its deadline; the host's `SessionTransaction` is entered and left on the worker thread.
   - It takes no lock, so overlapping calls are GROUPS-26. **Host duty:** The app maps each refusal to
     its own answer and names the group it checks.
 

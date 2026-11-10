@@ -127,11 +127,13 @@ def test_a_cancelled_callers_grant_still_stores_its_rotated_refresh_token() -> N
         with anyio.fail_after(DEADLINE_SECONDS):
             async with anyio.create_task_group() as tasks:
                 tasks.start_soon(ask)
-                await anyio.to_thread.run_sync(held.wait_until_reached)
-                tasks.cancel_scope.cancel()
-                held.release()
+                try:
+                    await anyio.to_thread.run_sync(held.wait_until_reached)
+                    tasks.cancel_scope.cancel()
+                finally:
+                    held.release()
+        assert arrangement.stored_refresh_token not in {None, ISSUED_REFRESH_TOKEN}
 
     anyio.run(drive)
 
     assert answers == []
-    assert arrangement.stored_refresh_token not in {None, ISSUED_REFRESH_TOKEN}
