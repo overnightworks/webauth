@@ -137,6 +137,10 @@ pass and how a release is made. The commands live under `scripts/`:
 - `scripts/regenerate_build_constraints.sh` regenerates the hash-pinned build
   constraints from the setuptools floor in `pyproject.toml`.
 
+A release is dispatched with the version alone:
+`gh workflow run release.yml -R overnightworks/webauth -f version=X.Y.Z`. `main` must carry
+X.Y.Z in `webauth.__version__` and a green CI run.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
