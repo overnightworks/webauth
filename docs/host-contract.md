@@ -161,9 +161,9 @@ for the mechanism and its trust boundaries.
 
 What the installer applies when the host passes none:
 
-- **STACK-05** Without a `rate_limit` the installer applies 600 requests per 60 seconds per address; a host that passes a policy keeps its own default and rules.
+- **STACK-05** The policy's default budget is 600 requests per 60 seconds per address unless the host names one, and the installer applies that policy when the host passes none.
 - **Host duty:** a host behind a shared proxy address, where many people share one budget (PROXY-06), passes its own policy.
-- **STACK-06** Without a `body_size` the installer applies a body limit of 4 KiB; a larger body gets 413.
+- **STACK-06** Without a `body_size`, and in a `BodySizePolicy` that names no default, the body limit is 4 KiB unless the host names another; a larger body gets 413.
 - **STACK-07** Without a `permissions_policy` the header turns off `camera`, `microphone`, `geolocation` and `display-capture`.
 
 ## CSRF origin
@@ -733,6 +733,8 @@ So the host lists the paths once. `login_redirect` is browser-absolute, so it is
 - **SIGNIN-69** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
 - **SIGNIN-70** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
 - **SIGNIN-71** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.
+- **SIGNIN-72** A path in the host's `RateLimitPolicy.exempt` spends no budget, a sign-in path included.
+- **SIGNIN-73** The rate limit counts every method on a path, so `HEAD` and `OPTIONS` on a sign-in path spend the sign-in budget; a host's CORS middleware installed outside the stack answers preflights first.
 - **SIGNIN-10** The library serves the logout route at `SignInPaths.logout` for `POST` only,
 - **SIGNIN-11** with the page's text from the host's `logout_page_text`, read per request:
 - **SIGNIN-12** a `LogoutPageText` whose `button_label` is the title and the button,

@@ -97,8 +97,8 @@ scenarios 22 and 23 at 1280x800, runs against two further hosts, app A on
 (cookie ``lax``), each configured independently: its own Keycloak client
 (``d1-app-a``, ``d1-app-b``), its own session and account stores and its own
 signing secret, and each with ``build_app``'s ``/auth/backchannel-logout``
-route (the body-size, cache-control and CSRF exemptions ``build_app`` sets; no
-rate limit in this host). Each client carries ``frontchannelLogout: false``,
+route (the body-size, cache-control and CSRF exemptions ``build_app`` sets; a rate
+limit whose budgets the proof cannot exhaust). Each client carries ``frontchannelLogout: false``,
 ``backchannel.logout.url`` (its bridge, see ``shim.py``),
 ``backchannel.logout.session.required: "false"``,
 ``backchannel.logout.revoke.offline.tokens: "false"``,

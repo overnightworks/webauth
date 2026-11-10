@@ -20,7 +20,6 @@ from webauth.policies import (
     CsrfPolicy,
     PathRules,
     PublicRule,
-    RateLimitBudget,
     RateLimitPolicy,
     SecurityHeadersPolicy,
 )
@@ -44,8 +43,6 @@ _LIBRARY_MIDDLEWARE = (
 )
 
 _BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
-_DEFAULT_RATE_LIMIT = RateLimitPolicy(default=RateLimitBudget("default", 600, 60))
-_DEFAULT_BODY_SIZE = BodySizePolicy(default_max_bytes=4 * 1024)
 
 
 def _with_sign_in_rules(
@@ -91,7 +88,8 @@ def _with_sign_in_rules(
             ),
         ),
         replace(
-            rate_limit.with_sign_in_paths(browser),
+            rate_limit,
+            _sign_in_paths=browser,
             exempt=replace(rate_limit.exempt, exact=rate_limit.exempt.exact | backchannel.exact),
         ),
         replace(
@@ -125,8 +123,8 @@ def _library_middleware(
     security_headers, body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
         sign_in_paths,
         security_headers=security_headers,
-        body_size=body_size or _DEFAULT_BODY_SIZE,
-        rate_limit=rate_limit or _DEFAULT_RATE_LIMIT,
+        body_size=body_size or BodySizePolicy(),
+        rate_limit=rate_limit or RateLimitPolicy(),
         csrf_origin=csrf_origin,
         session_gate=session_gate,
     )

@@ -103,7 +103,7 @@ def a_body_limited_app(
     *, full_stack: bool = False, policy: BodySizePolicy | None = None
 ) -> FastAPI:
     app = FastAPI()
-    install_web_auth_config(app, A_CONFIG)
+    install_web_auth_config(app, a_web_auth_config())
     _add_the_body_reading_routes(app)
     body_size = policy or BodySizePolicy(default_max_bytes=LIMIT)
     if full_stack:

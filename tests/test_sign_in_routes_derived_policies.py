@@ -16,6 +16,7 @@ from starlette.responses import Response
 from tests.support.oidc_arrangement import FakeIssuer, a_relying_party
 from tests.support.oidc_login_host import (
     ADMISSION,
+    BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
     BACKCHANNEL_LOGOUT_PATH,
     CALLBACK_PATH,
     LOGOUT_PATH,
@@ -51,7 +52,6 @@ from webauth.sign_in_routes import (
 FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
 HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
 FOUR_KIB = 4 * 1024
-THIRTY_TWO_KIB = 32 * 1024
 SIGN_IN_BUDGET_NAME = "sign-in"
 
 
@@ -212,7 +212,7 @@ def test_a_host_rule_keeps_deciding_the_paths_the_sign_in_paths_do_not_name() ->
 
 
 def test_the_forty_first_sign_in_request_in_ten_minutes_is_refused_without_a_host_policy() -> None:
-    """SIGNIN-04: start, callback and logout spend one sign-in budget of 40 per 10 minutes."""
+    """SIGNIN-04: the sign-in budget is 40 requests per 10 minutes when the host names none."""
     host = _a_gated_host()
 
     statuses = _statuses_of_gets(host, START_PATH, 41)
@@ -221,15 +221,68 @@ def test_the_forty_first_sign_in_request_in_ten_minutes_is_refused_without_a_hos
     assert 429 not in statuses[:-1]
 
 
-def test_the_other_paths_spend_the_default_budget_of_600_per_minute_without_a_host_policy() -> None:
-    """STACK-05: a rate limit of 600 per 60 seconds is installed when the host passes none."""
-    host = _a_gated_host()
+def test_start_callback_and_logout_spend_one_sign_in_budget() -> None:
+    """SIGNIN-04: start, callback and logout spend one sign-in budget."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 3, 60)),
+    )
+
+    statuses = [
+        host.client.get(START_PATH).status_code,
+        host.client.get(CALLBACK_PATH).status_code,
+        host.client.post(LOGOUT_PATH, headers=SAME_ORIGIN_FORM).status_code,
+        host.client.get(START_PATH).status_code,
+    ]
+
+    assert 429 not in statuses[:-1]
+    assert statuses[-1] == 429
+
+
+@pytest.mark.parametrize(
+    "rate_limit",
+    [
+        pytest.param(None, id="no host rate policy"),
+        pytest.param(
+            RateLimitPolicy(exempt=PathRules(exact=frozenset({"/health"}))),
+            id="a host policy that only adds an exemption",
+        ),
+    ],
+)
+def test_the_other_paths_spend_the_default_budget_of_600_per_minute(
+    rate_limit: RateLimitPolicy | None,
+) -> None:
+    """STACK-05: the policy's default budget is 600 per 60 seconds unless the host names one."""
+    host = _a_gated_host(rate_limit=rate_limit)
 
     statuses = _statuses_of_gets(host, "/albums/1", 601)
 
     assert statuses[-1] == 429
     assert 429 not in statuses[:-1]
     assert host.client.get(START_PATH).status_code == 303
+
+
+def test_a_sign_in_path_in_the_host_exemption_spends_no_budget() -> None:
+    """SIGNIN-72: a path in the host's exemption spends no budget, a sign-in path included."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(
+            sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 1, 60),
+            exempt=PathRules(exact=frozenset({START_PATH})),
+        ),
+    )
+
+    assert _statuses_of_gets(host, START_PATH, 3) == [303, 303, 303]
+
+
+def test_head_and_options_on_a_sign_in_path_spend_the_sign_in_budget() -> None:
+    """SIGNIN-73: the rate limit counts every method on a path."""
+    host = _a_gated_host(
+        rate_limit=RateLimitPolicy(sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 2, 60)),
+    )
+
+    host.client.head(START_PATH)
+    host.client.options(START_PATH)
+
+    assert host.client.get(START_PATH).status_code == 429
 
 
 def test_a_sign_in_flood_does_not_spend_the_budget_of_the_other_paths() -> None:
@@ -357,13 +410,25 @@ def test_the_back_channel_takes_a_32_kib_post_whatever_the_host_body_policy_says
     """SIGNIN-07: the back-channel rule of 32 KiB comes ahead of the host's rules."""
     host = _a_gated_host(body_size=body_size)
 
-    assert _backchannel_post(host, THIRTY_TWO_KIB) == 400
-    assert _backchannel_post(host, THIRTY_TWO_KIB + 1) == 413
+    assert _backchannel_post(host, BACKCHANNEL_LOGOUT_MAX_BODY_BYTES) == 400
+    assert _backchannel_post(host, BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1) == 413
 
 
-def test_a_body_over_4_kib_is_refused_without_a_host_body_policy() -> None:
-    """STACK-06: a body limit of 4 KiB applies when the host passes none."""
-    host = _a_gated_host()
+@pytest.mark.parametrize(
+    "body_size",
+    [
+        pytest.param(None, id="no host body policy"),
+        pytest.param(
+            BodySizePolicy(rules=(BodySizeRule(PathRules(exact=frozenset({"/upload"})), 100),)),
+            id="a host policy with a rule and no default",
+        ),
+    ],
+)
+def test_a_body_over_4_kib_is_refused_unless_the_host_names_another_default(
+    body_size: BodySizePolicy | None,
+) -> None:
+    """STACK-06: the policy's default body limit is 4 KiB unless the host names one."""
+    host = _a_gated_host(body_size=body_size)
 
     at_the_limit = host.client.post("/albums/1", content=b"x" * FOUR_KIB, headers=SAME_ORIGIN_FORM)
     over = host.client.post("/albums/1", content=b"x" * (FOUR_KIB + 1), headers=SAME_ORIGIN_FORM)

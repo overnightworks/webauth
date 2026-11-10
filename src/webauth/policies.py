@@ -165,7 +165,7 @@ class RateLimitPolicy:
     ``"sign-in"`` by default, is reserved: neither ``default`` nor a rule may carry it.
     """
 
-    default: RateLimitBudget
+    default: RateLimitBudget = RateLimitBudget("default", 600, 60)
     rules: tuple[RateLimitRule, ...] = ()
     exempt: PathRules = PathRules()
     sign_in: RateLimitBudget = RateLimitBudget("sign-in", 40, 600)
@@ -182,16 +182,6 @@ class RateLimitPolicy:
 
     def is_exempt(self, path: str) -> bool:
         return self.exempt.matches(path)
-
-    def with_sign_in_paths(self, paths: PathRules) -> RateLimitPolicy:
-        """This policy with the ``sign_in`` budget spent on ``paths`` ahead of ``rules``."""
-        return RateLimitPolicy(
-            default=self.default,
-            rules=self.rules,
-            exempt=self.exempt,
-            sign_in=self.sign_in,
-            _sign_in_paths=paths,
-        )
 
     def budget_for(self, path: str) -> RateLimitBudget:
         """The one budget ``path`` spends from; the sign-in paths, then the first matching rule.
@@ -262,7 +252,7 @@ class PublicRule:
 class BodySizePolicy:
     """How large a request body may be, by default and on the routes that differ."""
 
-    default_max_bytes: int
+    default_max_bytes: int = 4 * 1024
     rules: tuple[BodySizeRule, ...] = ()
     start_send_seconds: float = 10.0
     """How long a response start may take to reach the server before the request fails."""

@@ -134,7 +134,11 @@ MARKED_ROUTES = (
     MarkedRoute("GET", "/api/notes/{note}"),
 )
 BEARER_GATE_LOGGER = "webauth.middleware.bearer_gate"
-BEARER_HOST_REQUESTS_PER_MINUTE = 10_000
+# A throwaway proof stack runs every sign-in from one address, so no budget may run out.
+PROOF_HOST_RATE_LIMIT = RateLimitPolicy(
+    default=RateLimitBudget("proof-host", 10_000, 60),
+    sign_in=RateLimitBudget("sign-in", 10_000, 60),
+)
 LEEWAY_SECONDS = 30
 USERINFO_TIMEOUT_SECONDS = 10
 BEARER_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")  # RFC 6750 b64token: fit for a header
@@ -386,6 +390,7 @@ def _install_stack(
         sign_in_paths=SIGN_IN_PATHS,
         security_headers=SecurityHeadersPolicy(default_content_security_policy()),
         body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+        rate_limit=PROOF_HOST_RATE_LIMIT,
         csrf_origin=CsrfPolicy(),
         **_bearer_policies(settings, world, transaction),
     )
@@ -409,9 +414,6 @@ def _bearer_policies(
     parties = AuthorizedParties(frozenset(settings.bearer_authorized_parties))
     resource = _resource_of(settings, transaction)
     return {
-        "rate_limit": RateLimitPolicy(
-            default=RateLimitBudget("bearer-host", BEARER_HOST_REQUESTS_PER_MINUTE, 60)
-        ),
         "session_gate": SessionGate(
             session_transaction=counted_session_transaction,
             login_redirect=None,
