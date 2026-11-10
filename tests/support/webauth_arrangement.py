@@ -132,13 +132,6 @@ BULK_BUDGET_NAME = "bulk"
 DEFAULT_RATE_WINDOW_SECONDS = 60
 
 
-class AlwaysFailingRateLimitBackend:
-    """A backend that can never answer, to prove the middleware fails closed."""
-
-    def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
-        raise ConnectionError("rate limiter down")
-
-
 def a_policy_rate_limited_client(
     rate_limits: RateLimitBackend,
     policy: RateLimitPolicy,

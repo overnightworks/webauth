@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import webauth.rate_limit
+from tests.support.rate_limit_arrangement import AlwaysFailingRateLimitBackend
 from tests.support.webauth_arrangement import (
     API_PATH,
     BULK_BUDGET_NAME,
@@ -19,7 +20,6 @@ from tests.support.webauth_arrangement import (
     DEFAULT_BUDGET_NAME,
     HTTPS_TEST_SERVER,
     RATE_LIMITED_PATH,
-    AlwaysFailingRateLimitBackend,
     a_policy_rate_limited_client,
     a_rate_limited_client,
 )

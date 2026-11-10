@@ -9,7 +9,7 @@
 
 [file_lines]
 "tests/e2e/oidc/prove.py" = 1395
-"tests/support/webauth_arrangement.py" = 866
+"tests/support/webauth_arrangement.py" = 859
 
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63
