@@ -60,6 +60,22 @@ def test_a_connection_without_a_session_cookie_answers_sign_in_again_and_makes_n
     assert arrangement.requests_made == 0
 
 
+def test_each_call_is_its_own_grant() -> None:
+    """The reader holds no answer: one instance asked twice for a session makes two grants."""
+    arrangement = an_arrangement()
+    session_groups = arrangement.session_groups()
+
+    async def ask_twice() -> None:
+        await session_groups.of_session(SESSION_ID)
+        requests_after_the_first = arrangement.requests_made
+        await session_groups.of_session(SESSION_ID)
+        assert arrangement.requests_made == 2 * requests_after_the_first
+
+    anyio.run(ask_twice)
+
+    assert arrangement.requests_made > 0
+
+
 def test_a_session_whose_refresh_token_was_already_used_still_reads_its_groups() -> None:
     """GROUPS-26, GROUPS-28: where the issuer lets a refresh token be used again, a session
     holding the token an earlier call spent still reads its groups."""
