@@ -43,8 +43,8 @@ The back-channel route is the issuer's back-channel logout, registered for ``POS
 issuer posts one URL-encoded form with one non-empty ``logout_token`` when a person's session
 at the issuer ends. The route answers in this order:
 
-1. A declared ``Content-Length`` over the back-channel limit gets 413 from the body-size middleware the
-   installer configures before any dependency runs.
+1. A declared ``Content-Length`` over the back-channel limit gets 413 from the body-size
+   middleware the installer configures before any dependency runs.
 2. ``backchannel_dependencies`` run before the body is read. A host answers an empty 404 by
    raising its own exception class and mapping it with
    ``app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))``:
