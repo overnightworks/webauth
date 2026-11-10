@@ -346,7 +346,7 @@ class GrantHeldUntilReleased:
     """A ``FakeIssuer.before_exchange`` that stops the grant on a worker thread until the test
     releases it, so a test acts while the grant is in flight and sleeps nowhere."""
 
-    def __init__(self, deadline_seconds: float = 10) -> None:
+    def __init__(self, deadline_seconds: float) -> None:
         self._deadline_seconds = deadline_seconds
         self._reached = threading.Event()
         self._released = threading.Event()

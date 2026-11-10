@@ -11,8 +11,8 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING
 
+from webauth._worker import on_worker
 from webauth.dependencies import session_id_from_request
-from webauth.middleware._worker import on_worker
 from webauth.oidc_login import AccessTokenRefusal, AccessTokenRefusalReason, current_groups
 
 if TYPE_CHECKING:

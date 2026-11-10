@@ -1,4 +1,4 @@
-"""The one way a gate runs blocking work off the event loop."""
+"""The one way webauth runs blocking work off the event loop."""
 
 from __future__ import annotations
 

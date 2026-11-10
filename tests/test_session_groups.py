@@ -76,21 +76,19 @@ def test_a_session_whose_refresh_token_was_already_used_still_reads_its_groups()
 
 
 @pytest.mark.parametrize(
-    ("arranged", "refusal"),
+    ("refresh_token", "ended", "refusal"),
     [
-        pytest.param({"refresh_token": None}, SIGN_IN_AGAIN, id="no-refresh-token"),
-        pytest.param(
-            {"refresh_token": ISSUED_REFRESH_TOKEN, "ended": True}, SESSION_ENDED, id="ended"
-        ),
+        pytest.param(None, False, SIGN_IN_AGAIN, id="no-refresh-token"),
+        pytest.param(ISSUED_REFRESH_TOKEN, True, SESSION_ENDED, id="ended"),
     ],
 )
 def test_a_refusal_of_current_groups_comes_back_unchanged(
-    arranged: dict[str, object],
+    refresh_token: str | None,
+    ended: bool,
     refusal: AccessTokenRefusal,
 ) -> None:
     """GROUPS-06, GROUPS-07, GROUPS-28: the refusal of `current_groups` is the answer."""
-    ended = bool(arranged.pop("ended", False))
-    arrangement = an_arrangement(**arranged)  # type: ignore[arg-type]
+    arrangement = an_arrangement(refresh_token=refresh_token)
     if ended:
         arrangement.sessions.delete(SESSION_ID)
 
@@ -102,7 +100,7 @@ def test_a_refusal_of_current_groups_comes_back_unchanged(
 def test_a_cancelled_callers_grant_still_stores_its_rotated_refresh_token() -> None:
     """GROUPS-30: cancelling the caller does not stop the grant, and the caller gets no answer."""
     arrangement = an_arrangement()
-    held = GrantHeldUntilReleased()
+    held = GrantHeldUntilReleased(DEADLINE_SECONDS)
     arrangement.issuer.before_exchange = held
     answers: list[object] = []
 
