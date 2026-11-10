@@ -1,8 +1,0 @@
-claim_id = "9ab83f00bfbd4e9e9dfef8a3c4640882"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "0ca48c090830d7d23995845cd46a9002029bcbc5"
-branch = "claude/issue-593-release-through-quality-gate"
-scope = [".github/workflows/ci.yml", ".github/workflows/release.yml", "AGENTS.md", "README.md", "tests/workflows/test_release_workflow.py"]
-opened_commit = "e4f979b3ab69748eda4326657a966ea033a796dd"
-whole_reason = "One release workflow changes with its step test, the stale comment in ci.yml that names its old job list, and the two documents that name the dispatch line."
