@@ -6,6 +6,7 @@
 - `uvx --from "git+https://github.com/overnightworks/quality@<sha>" quality check`, with the sha `.github/workflows/ci.yml` pins: the quality gate's local check.
 - `uv run pytest <test module>`: a targeted run of the tests that prove a change.
 - `scripts/regenerate_build_constraints.sh`: regenerates `.github/requirements-build.txt` after a change to the setuptools floor in `[build-system]` of `pyproject.toml`.
+- `gh workflow run release.yml -R overnightworks/webauth -f version=X.Y.Z`: the operator's release dispatch; `main` must carry X.Y.Z in `webauth.__version__` and a green CI run.
 - `scripts/run_oidc_proof.sh`: the real-browser proofs and the conformance suite in `tests/e2e/oidc/`, run only by hand as `docs/runbooks/` says.
 
 ## Rules
@@ -18,13 +19,13 @@
 - Tests arrange through the builders in `tests/support/`, never through a second set of fakes.
 - An allowance for a known secret false positive lives only in `quality/config.toml`.
 - A pull request that changes what a host sees states its **Breaking** line when a public contract changes, and the hosts' migration or "No migration".
-- `webauth.__version__` is the one version. It stays a plain string literal and is raised alone, in the pull request before the tag.
+- `webauth.__version__` is the one version. It stays a plain string literal and is raised alone, in the pull request before the release.
 - A tag is never moved or re-created; a broken release gets the next patch tag.
-- When the release workflow's `verify` job failed only because CI was still running, re-run it once CI is green; never bump the version for it.
+- A refusal of the release gate leaves no tag: dispatch the release again once its cause is gone, never bump the version for it. After a failed `tag` job, re-run the failed jobs, never all jobs.
 
 ## Owners
 
-- The head writes each release page by hand, from the open release item, which lists every change since the last tag.
+- The operator dispatches every release; after the run the head replaces GitHub's generated notes with the release page, written by hand from the open release item, which lists every change since the last tag.
 
 ## Documents
 
