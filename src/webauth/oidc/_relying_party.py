@@ -38,7 +38,6 @@ message this module writes.
 from __future__ import annotations
 
 import base64
-import hashlib
 import hmac
 import re
 import secrets
@@ -66,6 +65,7 @@ from webauth.jwt_verification import (
     _Rejected,
     _VerifiedClaims,
 )
+from webauth.oidc._authorization_url import authorization_url
 from webauth.oidc._client_config import OidcClientConfig
 from webauth.oidc._locale_claim import account_language_claim
 from webauth.policies import AuthorizedParties, _require_authorized_parties
@@ -291,21 +291,7 @@ class OidcRelyingParty:
             code_verifier=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             issued_at=int(self._wall_clock()),
         )
-        query = urllib.parse.urlencode(
-            {
-                "response_type": "code",
-                "client_id": self._config.client_id,
-                "redirect_uri": self._config.redirect_uri,
-                "scope": " ".join(self._config.scopes),
-                "state": pending.state,
-                "nonce": pending.nonce,
-                "code_challenge": _s256_code_challenge(pending.code_verifier),
-                "code_challenge_method": "S256",
-            }
-        )
-        return AuthorizationRequest(
-            url=f"{self._config.authorization_endpoint}?{query}", pending=pending
-        )
+        return AuthorizationRequest(url=authorization_url(self._config, pending), pending=pending)
 
     def _end_session_form(self, *, id_token_hint: SecretStr | None) -> EndSessionForm:
         return EndSessionForm(
@@ -659,11 +645,6 @@ def _basic_authorization(client_id: str, client_secret: SecretStr) -> SecretStr:
         urllib.parse.quote_plus(part) for part in (client_id, client_secret.get_secret_value())
     )
     return SecretStr(f"Basic {base64.b64encode(credentials.encode()).decode()}")
-
-
-def _s256_code_challenge(code_verifier: str) -> str:
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 def _is_same_secret(received: object, expected: str) -> bool:
