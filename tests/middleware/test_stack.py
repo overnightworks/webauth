@@ -57,7 +57,7 @@ from webauth.middleware import (
     SessionGateMiddleware,
     install_web_auth_middleware,
 )
-from webauth.middleware.path_refusal import PathRefusalMiddleware
+from webauth.middleware._path_refusal import PathRefusalMiddleware
 from webauth.policies import (
     AuthorizedParties,
     BodySizePolicy,

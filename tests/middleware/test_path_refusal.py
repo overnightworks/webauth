@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
+from importlib import import_module
+from pkgutil import iter_modules
+from types import ModuleType
 
 import pytest
 from fastapi import FastAPI, Request, WebSocket
@@ -31,6 +34,17 @@ from webauth.sign_in_routes import SignInPaths
 
 def a_headers_policy() -> SecurityHeadersPolicy:
     return SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+
+
+def public_middleware_modules() -> list[ModuleType]:
+    return [
+        webauth.middleware,
+        *(
+            import_module(f"webauth.middleware.{module.name}")
+            for module in iter_modules(webauth.middleware.__path__)
+            if not module.name.startswith("_")
+        ),
+    ]
 
 
 def some_sign_in_paths() -> SignInPaths:
@@ -223,7 +237,7 @@ class TestARouteWithAControlCharacterInItsPath:
             assert response.status_code == 200
             assert arrangement.route_runs != []
 
-    def test_a_minimal_install_refuses_and_webauth_middleware_does_not_export_the_class(
+    def test_a_minimal_install_refuses_and_no_public_middleware_module_exports_the_class(
         self,
     ) -> None:
         """STACK-11: always installed, no policy and no option, not exported."""
@@ -241,7 +255,11 @@ class TestARouteWithAControlCharacterInItsPath:
         response = TestClient(app, base_url=HTTPS_TEST_SERVER).get("/api/thing%0A")
 
         a_malformed_path_is_refused(response, headers_policy)
-        assert not [name for name in dir(webauth.middleware) if "PathRefusal" in name]
+        assert not [
+            module.__name__
+            for module in public_middleware_modules()
+            if "PathRefusalMiddleware" in module.__all__
+        ]
 
     def test_a_websocket_handshake_and_the_lifespan_pass_the_stack(self) -> None:
         """STACK-12: WebSocket and lifespan scopes pass."""
