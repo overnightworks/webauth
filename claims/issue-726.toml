@@ -1,8 +1,0 @@
-claim_id = "6b9111489b6e4fb9b57bab756c95b161"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "c3e8cab4b8e807763c6c5c73f0e752dcf653f8c1"
-branch = "claude/issue-726-start-route-names-language-to-issuer"
-scope = ["README.md", "docs/host-contract.md", "src/webauth/oidc", "src/webauth/oidc_login.py", "src/webauth/sign_in_routes.py", "tests/e2e/oidc/host_app.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_security_headers.py", "tests/support", "tests/test_oidc_callback.py", "tests/test_oidc_logout_token.py", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_derived_policies.py", "tests/test_sign_in_routes_ui_language.py", "tests/test_single_process_stores.py"]
-opened_commit = "390a9212cd2ba7b70e91877c38882f4b7dd8fd32"
-whole_reason = "One required keyword travels from the installer through the start sequence to the authorization URL; every test host and fixture that installs the routes or begins a login passes the new keyword."
