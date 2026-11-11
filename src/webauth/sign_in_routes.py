@@ -260,15 +260,9 @@ def install_sign_in_routes(
 
     The module docstring holds the back-channel's answers.
 
-    ``ui_language`` has no default: the start route calls it once per request with that request
-    and sends its answer to the issuer as ``ui_locales``, the person's language for the issuer's
-    pages. ``None`` sends none; a string that is not a language tag in shape (see
-    ``webauth.languages.is_language_tag``) raises ``ValueError`` from the start route, and the
-    request goes nowhere. A host passes ``resolve_language``'s answer for the request, or
-    ``lambda request: None`` when it names no language.
-
-    ``relying_party`` is read per request. ``keeps_id_token`` has no default: ``True`` stores
-    the login's ID token so the logout posts it as the hint, ``False`` stores none.
+    ``relying_party`` is read per request. ``ui_language`` is called once per start request and
+    its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
+    ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
     ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``
     is raised before a route is registered. ``paths.logout`` and ``logout_page_text`` come
     together: a host without a logout route passes ``None`` for both, and exactly one of them
