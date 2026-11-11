@@ -113,7 +113,7 @@ def test_the_logout_policy_admits_the_one_inline_script_by_hash_and_posts_to_two
 
 
 def test_rotation_and_renewal_keep_the_logins_id_token_for_the_logout() -> None:
-    """SIGNIN-65: renewal and rotation keep the login's own ID token as the logout hint."""
+    """SIGNIN-62: renewal and rotation keep the login's own ID token as the logout hint."""
     session_clock = FakeClock(float(NOW))
     host = after_signing_in(an_oidc_host(wall_clock=session_clock))
     login_token = host.issued_id_tokens[-1]

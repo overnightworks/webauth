@@ -770,7 +770,7 @@ By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) 
 
 ## The sign-in routes
 
-The operator ruled the host duty that a single-page app logs out by a top-level form POST, SIGNIN-61, the host duty that a host serving no logout route passes `False`, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
+The operator ruled the host duty that a single-page app logs out by a top-level form POST, SIGNIN-58, the host duty that a host serving no logout route passes `False`, SIGNIN-60 and SIGNIN-61; no other sentence of this section is ruled.
 
 - **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
   `FastAPI` app.
@@ -789,13 +789,13 @@ The operator ruled the host duty that a single-page app logs out by a top-level 
 So the host lists the paths once. `login_redirect` is browser-absolute, so it is right for an app at its origin's root.
 
 - **Host duty:** a host below a `root_path` builds its own `LoginRedirect`.
-- **SIGNIN-67** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
-- **SIGNIN-68** The derived rules come ahead of the host's own in every policy, so the first match is the derived one (a host exemption wins: SIGNIN-72).
-- **SIGNIN-69** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
-- **SIGNIN-70** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
-- **SIGNIN-71** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.
-- **SIGNIN-72** A path in the host's `RateLimitPolicy.exempt` spends no budget, a sign-in path included.
-- **SIGNIN-73** The rate limit counts every method on a path, so `HEAD` and `OPTIONS` on a sign-in path spend the sign-in budget; a host's CORS middleware installed outside the stack answers preflights first.
+- **SIGNIN-64** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
+- **SIGNIN-65** The derived rules come ahead of the host's own in every policy, so the first match is the derived one (a host exemption wins: SIGNIN-69).
+- **SIGNIN-66** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
+- **SIGNIN-67** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
+- **SIGNIN-68** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.
+- **SIGNIN-69** A path in the host's `RateLimitPolicy.exempt` spends no budget, a sign-in path included.
+- **SIGNIN-70** The rate limit counts every method on a path, so `HEAD` and `OPTIONS` on a sign-in path spend the sign-in budget; a host's CORS middleware installed outside the stack answers preflights first.
 - **SIGNIN-10** The library serves the logout route at `SignInPaths.logout` for `POST` only,
 - **SIGNIN-11** with the page's text from the host's `logout_page_text`, read per request:
 - **SIGNIN-12** a `LogoutPageText` whose `button_label` is the title and the button,
@@ -859,48 +859,43 @@ The back-channel logout route:
 - **SIGNIN-42** and must differ from every other path, `logout` included.
 - **SIGNIN-43** Only that exact path is exempt from the origin check, and logout is never exempt;
 - **SIGNIN-44** only that exact path is exempt from the rate limit, and logout is never exempt.
-- **SIGNIN-45** The host's `backchannel_dependencies` run before the body is read,
-- **SIGNIN-46** and are given only with that path or install raises `ValueError` before any route is registered.
-- **Host duty:** a host answers an empty 404 by raising its own exception class and mapping it with
-  `app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))`: an `HTTPException(404)` answers JSON, and a `Response` returned from a dependency does not stop the route.
 
 The answers are, in order:
 
-- **SIGNIN-47** 413 for a declared `Content-Length` over the bound, before any dependency;
-- **SIGNIN-48** the dependencies' own;
-- **SIGNIN-49** 413 for a streamed body over the bound;
-- **SIGNIN-50** an empty 400 for a request that is not one URL-encoded form with exactly one
+- **SIGNIN-45** 413 for a declared `Content-Length` over the bound, before the body is read;
+- **SIGNIN-46** 413 for a streamed body over the bound;
+- **SIGNIN-47** an empty 400 for a request that is not one URL-encoded form with exactly one
   non-empty `logout_token`, before any transaction is entered;
-- **SIGNIN-51** an empty 400 for a token that does not verify, before any transaction is entered;
-- **SIGNIN-52** an empty 200 after the clean exit of one `SignInTransaction` entry;
-- **SIGNIN-53** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
+- **SIGNIN-48** an empty 400 for a token that does not verify, before any transaction is entered;
+- **SIGNIN-49** an empty 200 after the clean exit of one `SignInTransaction` entry;
+- **SIGNIN-50** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
   sink or the exit.
 
-- **SIGNIN-54** A subject without an account is accepted and provisions nothing;
-- **SIGNIN-55** a known subject loses every session in every browser,
-- **SIGNIN-56** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
-- **SIGNIN-57** The route clears no cookie
-- **SIGNIN-58** and calls no issuer endpoint beyond the key fetch of verification.
-- **SIGNIN-59** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
+- **SIGNIN-51** A subject without an account is accepted and provisions nothing;
+- **SIGNIN-52** a known subject loses every session in every browser,
+- **SIGNIN-53** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
+- **SIGNIN-54** The route clears no cookie
+- **SIGNIN-55** and calls no issuer endpoint beyond the key fetch of verification.
+- **SIGNIN-56** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
 
 - **Host duty:** the host's transaction rolls back when the back-channel block raises, also when the audit
   sink fails after the deletion.
 - **Host duty:** the host's transaction commits only for an accepted token.
-- **SIGNIN-60** A per-call host keeps the sessions ended before the failure, and no event is emitted again.
+- **SIGNIN-57** A per-call host keeps the sessions ended before the failure, and no event is emitted again.
 
 The back-channel route is open to anyone who can reach it, and the token is its only control.
 
 - **Host duty:** the host lets the issuer reach it over an internal network alone, never the public route
   (tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
 
-- **SIGNIN-61** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
+- **SIGNIN-58** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
   default,
-- **SIGNIN-62** and validates `max_sessions` before it registers a route.
+- **SIGNIN-59** and validates `max_sessions` before it registers a route.
 - **Host duty:** a host that serves no logout route passes `False`.
-- **SIGNIN-63** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
-- **SIGNIN-64** With `True`, the row keeps the login's ID token for logout.
-- **SIGNIN-65** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
-- **SIGNIN-66** and the choice of a row that keeps none.
+- **SIGNIN-60** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
+- **SIGNIN-61** With `True`, the row keeps the login's ID token for logout.
+- **SIGNIN-62** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
+- **SIGNIN-63** and the choice of a row that keeps none.
 
 ## The single-process stores
 

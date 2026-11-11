@@ -596,7 +596,6 @@ class Browser:
             keeps_id_token=True,
             max_sessions=None,
             logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
-            backchannel_dependencies=(),
         )
         dependencies = current_user_dependency(
             session_store=lambda: stores.sessions, on_authenticated=lambda _user: None

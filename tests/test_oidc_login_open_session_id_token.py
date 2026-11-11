@@ -38,7 +38,7 @@ def logout_page(host: OidcHost) -> LogoutPage:
 
 
 def test_a_host_that_keeps_the_id_token_stores_it_and_the_logout_posts_it_as_the_hint() -> None:
-    """SIGNIN-64: a host that keeps the ID token stores it for the logout."""
+    """SIGNIN-61: a host that keeps the ID token stores it for the logout."""
     host, session, _clock = signed_in(keeps_id_token=True)
     [login_id_token] = host.issued_id_tokens
 
@@ -47,7 +47,7 @@ def test_a_host_that_keeps_the_id_token_stores_it_and_the_logout_posts_it_as_the
 
 
 def test_a_host_that_keeps_no_id_token_stores_the_refresh_token_and_no_id_token() -> None:
-    """SIGNIN-63: a host that keeps no ID token stores the refresh token and no ID token."""
+    """SIGNIN-60: a host that keeps no ID token stores the refresh token and no ID token."""
     host, session, _clock = signed_in(keeps_id_token=False)
 
     assert (session.refresh_token, session.id_token) == (SecretStr(ISSUED_REFRESH_TOKEN), None)
@@ -63,7 +63,7 @@ def test_a_logout_after_a_host_kept_no_id_token_ends_the_session_and_posts_no_hi
 
 
 def test_rotation_and_renewal_keep_no_id_token_for_a_host_that_keeps_none() -> None:
-    """SIGNIN-66: renewal and rotation keep no ID token for a host that keeps none."""
+    """SIGNIN-63: renewal and rotation keep no ID token for a host that keeps none."""
     host, session, clock = signed_in(keeps_id_token=False)
     expiry_before_renewal = session.expires_at
     host.issuer.refresh_answer_members = {"id_token": a_fake_id_token("issued-by-the-refresh")}
