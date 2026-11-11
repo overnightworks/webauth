@@ -69,6 +69,7 @@ _IDENTITY = OidcIdentity(
     preferred_username="operator",
     id_token=a_fake_id_token("the-identity-every-login-yields"),
     refresh_token=SecretStr(ISSUED_REFRESH_TOKEN),
+    account_language=None,
 )
 
 

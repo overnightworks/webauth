@@ -51,6 +51,7 @@ __all__ = [
     "AuthDependencies",
     "LoginRedirect",
     "ConnectionRefusal",
+    "account_language_of_session",
     "admit_session",
     "authenticate_websocket",
     "current_user_dependency",
@@ -430,6 +431,32 @@ def admit_session(
         role=record.user.role,
         agent=None,
     )
+
+
+def account_language_of_session(
+    connection: HTTPConnection,
+    *,
+    sessions: SessionRecordStore,
+    config: WebAuthConfig,
+) -> str | None:
+    """The account's language tag of the session the connection's cookie names, as the issuer
+    gave it at that session's sign-in, uninterpreted.
+
+    ``None`` when ``session_id_from_request`` answers ``None``, when the store holds no such
+    row, when the row is outside its lifetime by the rule ``admit_session`` applies, and when
+    the row holds none. It only calls ``load``: it never renews a session, refuses a request
+    or sets a cookie, so a public page may call it without sliding a session's expiry. A
+    failing store raises.
+    """
+    session_id = session_id_from_request(connection, config)
+    if session_id is None:
+        return None
+    record = sessions.load(session_id)
+    if record is None or not _is_admitted(
+        config.session_lifetime, record, _whole_second_now(config)
+    ):
+        return None
+    return record.account_language
 
 
 def _resolve_session(

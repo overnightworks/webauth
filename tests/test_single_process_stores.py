@@ -98,6 +98,7 @@ def open_session(
     expires_at: datetime = LATER,
     refresh_token: str | None = "refresh",
     id_token: str | None = "identity",
+    account_language: str | None = None,
 ) -> str:
     return stores.sessions.create(
         subject,
@@ -105,6 +106,7 @@ def open_session(
         expires_at=expires_at,
         refresh_token=None if refresh_token is None else SecretStr(refresh_token),
         id_token=None if id_token is None else SecretStr(id_token),
+        account_language=account_language,
     ).id
 
 
@@ -118,7 +120,12 @@ class TestTheBundle:
         with stores.transaction() as inside:
             inside.accounts.create_for_subject(SUBJECT_ONE, "name", "member", AccountKind.PERSON)
             session_id = inside.sessions.create(
-                SUBJECT_ONE, now=START, expires_at=LATER, refresh_token=None, id_token=None
+                SUBJECT_ONE,
+                now=START,
+                expires_at=LATER,
+                refresh_token=None,
+                id_token=None,
+                account_language=None,
             ).id
 
         loaded = stores.sessions.load(session_id)
@@ -378,6 +385,18 @@ class TestSessions:
         assert held_ids(stores, every_id) == every_id
         assert len(stores.sessions.records_of(SUBJECT_ONE).sessions) == 800
 
+    @pytest.mark.parametrize("account_language", ["de-CH", None])
+    def test_a_session_keeps_the_account_language_it_was_created_with(
+        self, stores: SingleProcessStores, account_language: str | None
+    ) -> None:
+        """MEMSTORE-21: create stores the account's language and load returns it."""
+        with_account(stores)
+
+        loaded = stores.sessions.load(open_session(stores, account_language=account_language))
+
+        assert loaded is not None
+        assert loaded.account_language == account_language
+
 
 class TestRecordsOf:
     def test_records_carry_the_times_and_no_session_id_or_token(
@@ -491,6 +510,7 @@ class TestSignInTransaction:
                     expires_at=LATER,
                     refresh_token=None,
                     id_token=None,
+                    account_language=None,
                 )
                 raise RuntimeError("boom")
 
