@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 
 import pytest
@@ -50,6 +52,7 @@ class Arrangement:
     routes: dict[str, str]
     route_runs: list[str] = field(default_factory=list)
     host_middleware_runs: list[str] = field(default_factory=list)
+    lifespan_events: list[str] = field(default_factory=list)
 
     def client(self, *, root_path: str = "") -> TestClient:
         return TestClient(
@@ -67,7 +70,15 @@ def a_stack_over_every_route() -> Arrangement:
 
     Its client is signed in, so a request the stack admits reaches its route.
     """
-    app = FastAPI()
+    lifespan_events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        lifespan_events.append("startup")
+        yield
+        lifespan_events.append("shutdown")
+
+    app = FastAPI(lifespan=lifespan)
     rate_limits = RecordingRateLimitBackend()
     sessions = SessionsRecordingTheirTransaction(a_session())
     config = replace(a_web_auth_config(), rate_limits=rate_limits)
@@ -84,7 +95,15 @@ def a_stack_over_every_route() -> Arrangement:
         "host": "/api/thing",
         "websocket": "/ws",
     }
-    arrangement = Arrangement(app, rate_limits, sessions, signed_in, headers_policy, routes)
+    arrangement = Arrangement(
+        app,
+        rate_limits,
+        sessions,
+        signed_in,
+        headers_policy,
+        routes,
+        lifespan_events=lifespan_events,
+    )
     install_web_auth_config(app, config)
 
     def run(request: Request) -> JSONResponse:
@@ -217,14 +236,18 @@ class TestARouteWithAControlCharacterInItsPath:
         a_malformed_path_is_refused(response, headers_policy)
         assert not [name for name in dir(webauth.middleware) if "PathRefusal" in name]
 
-    def test_a_websocket_handshake_with_such_a_path_passes_the_stack(self) -> None:
+    def test_a_websocket_handshake_and_the_lifespan_pass_the_stack(self) -> None:
         """STACK-12: WebSocket and lifespan scopes pass."""
         arrangement = a_stack_over_every_route()
         socket_path = arrangement.routes["websocket"]
 
-        with arrangement.client().websocket_connect(f"{socket_path}%0A"):
-            pass
+        with arrangement.client() as client:
+            with client.websocket_connect(f"{socket_path}%0A"):
+                pass
+            events_while_running = list(arrangement.lifespan_events)
 
+        assert events_while_running == ["startup"]
+        assert arrangement.lifespan_events == ["startup", "shutdown"]
         assert arrangement.route_runs == [f"{socket_path}\n"]
 
     @pytest.mark.parametrize(
