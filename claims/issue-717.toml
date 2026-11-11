@@ -1,8 +1,0 @@
-claim_id = "17c63c2b995d423e8f234f6f106ba5f1"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "c55f1eb8e76d9019353bfe1c2a834c75cc99f1b7"
-branch = "claude/issue-717-backchannel-no-host-dependencies"
-scope = ["docs/host-contract.md", "src/webauth/sign_in_routes.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/oidc_login_host.py", "tests/test_oidc_login_backchannel_logout.py", "tests/test_oidc_login_logout.py", "tests/test_oidc_login_open_session_id_token.py", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_derived_policies.py", "tests/test_single_process_stores.py"]
-opened_commit = "6b23c4f9329cee3c1a472323f3db3171fdd00559"
-whole_reason = "One parameter leaves one production file together with its three contract sentences; the other paths only drop the argument or follow the moved contract ids in their docstrings."
