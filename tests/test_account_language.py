@@ -45,11 +45,16 @@ CLAIMS_NOT_KEPT = {
 }
 
 
-def signed_in(*, locale_claim: object) -> tuple[OidcHost, SessionRecord, FakeClock]:
-    clock = FakeClock(FIXED_INSTANT.timestamp())
+@pytest.fixture
+def clock() -> FakeClock:
+    """The host's session clock, which the test moves."""
+    return FakeClock(FIXED_INSTANT.timestamp())
+
+
+def a_host_signed_in_with(locale_claim: object, clock: FakeClock) -> OidcHost:
     host = an_oidc_host(locale_claim=locale_claim, wall_clock=clock)
     assert host.callback(host.sign_in_at_issuer()).status_code == 303
-    return host, host.sessions.stored_record, clock
+    return host
 
 
 @pytest.mark.parametrize(
@@ -62,19 +67,19 @@ def signed_in(*, locale_claim: object) -> tuple[OidcHost, SessionRecord, FakeClo
     ],
 )
 def test_the_sign_in_keeps_the_locale_claim_of_at_most_35_characters_and_else_none(
-    claim: object, stored: str | None
+    claim: object, stored: str | None, clock: FakeClock
 ) -> None:
     """LANGUAGE-13: the ID token's `locale` claim is the account's language when it is a non-empty
     string of at most 35 characters, and `None` otherwise."""
-    _host, session, _clock = signed_in(locale_claim=claim)
+    session = a_host_signed_in_with(claim, clock).sessions.stored_record
 
     assert session.account_language == stored
 
 
 @pytest.mark.parametrize("claim", ["pt_BR", "DE-ch", " de", "x-private", "i-klingon", "de-*"])
-def test_the_tag_is_kept_as_the_issuer_gave_it(claim: str) -> None:
+def test_the_tag_is_kept_as_the_issuer_gave_it(claim: str, clock: FakeClock) -> None:
     """LANGUAGE-14: webauth neither checks the tag's shape nor normalises it."""
-    _host, session, _clock = signed_in(locale_claim=claim)
+    session = a_host_signed_in_with(claim, clock).sessions.stored_record
 
     assert session.account_language == claim
 
@@ -117,10 +122,13 @@ def _touched(host: OidcHost, session: SessionRecord, _clock: FakeClock) -> None:
     ],
 )
 def test_nothing_after_the_sign_in_writes_the_language_again(
-    write: Callable[[OidcHost, SessionRecord, FakeClock], None], changed_member: str
+    write: Callable[[OidcHost, SessionRecord, FakeClock], None],
+    changed_member: str,
+    clock: FakeClock,
 ) -> None:
     """LANGUAGE-16: the language is written once, when the callback creates the session."""
-    host, session, clock = signed_in(locale_claim="de-CH")
+    host = a_host_signed_in_with("de-CH", clock)
+    session = host.sessions.stored_record
     before = (session.account_language, getattr(session, changed_member))
 
     write(host, session, clock)
@@ -130,9 +138,11 @@ def test_nothing_after_the_sign_in_writes_the_language_again(
     assert getattr(after, changed_member) != before[1]
 
 
-def test_the_function_answers_the_language_of_the_session_the_request_carries() -> None:
+def test_the_function_answers_the_language_of_the_session_the_request_carries(
+    clock: FakeClock,
+) -> None:
     """LANGUAGE-17: a request with a live session's cookie reads the account's language."""
-    host, _session, clock = signed_in(locale_claim="de-CH")
+    host = a_host_signed_in_with("de-CH", clock)
 
     assert host.account_language() == "de-CH"
 
@@ -164,10 +174,10 @@ def _with_the_row_expired(_host: OidcHost, clock: FakeClock) -> None:
     ],
 )
 def test_the_function_answers_none_when_the_request_names_no_live_session(
-    spoil: Callable[[OidcHost, FakeClock], None],
+    spoil: Callable[[OidcHost, FakeClock], None], clock: FakeClock
 ) -> None:
     """LANGUAGE-18: no cookie, a forged one, an unknown row and an expired row read `None`."""
-    host, _session, clock = signed_in(locale_claim="de-CH")
+    host = a_host_signed_in_with("de-CH", clock)
     assert host.account_language() == "de-CH"
 
     spoil(host, clock)
@@ -186,10 +196,11 @@ def test_the_function_answers_none_to_a_request_the_bearer_gate_admitted() -> No
     assert (response.status_code, response.json()) == (200, {"language": None})
 
 
-def test_the_function_only_loads_and_never_renews_or_sets_a_cookie() -> None:
+def test_the_function_only_loads_and_never_renews_or_sets_a_cookie(clock: FakeClock) -> None:
     """LANGUAGE-19: the read leaves the row's `expires_at` as it is and sets no cookie, where a
     request the gate admits at the same instant renews it."""
-    host, session, clock = signed_in(locale_claim="de-CH")
+    host = a_host_signed_in_with("de-CH", clock)
+    session = host.sessions.stored_record
     expiry = session.expires_at
     clock.now += SESSION_IDLE_SECONDS / 2
 
@@ -202,9 +213,11 @@ def test_the_function_only_loads_and_never_renews_or_sets_a_cookie() -> None:
     assert host.sessions.stored_record.expires_at > expiry
 
 
-def test_a_failing_store_lets_the_function_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_failing_store_lets_the_function_raise(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
     """LANGUAGE-20: a store that cannot load raises; the function never answers `None` for it."""
-    host, _session, clock = signed_in(locale_claim="de-CH")
+    host = a_host_signed_in_with("de-CH", clock)
     cookie = host.client.cookies[host.config.session_cookie_name]
     request = Request(
         {
