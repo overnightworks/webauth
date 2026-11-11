@@ -1,0 +1,8 @@
+claim_id = "0e2c7a98b0a24feabe02839db5ec98b9"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "00d41d7022124f93aa9b6c5bb5a39c8bdbcf2be8"
+branch = "claude/issue-722-control-character-path-refusal"
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/_paths.py", "src/webauth/middleware/path_refusal.py", "src/webauth/middleware/stack.py", "tests/middleware/test_path_refusal.py", "tests/middleware/test_stack.py"]
+opened_commit = "527e764533b5ed43cd80c24a8a9740739c60b522"
+whole_reason = "One small middleware lands with its place in the stack, the one owner of the character set, its contract sentences and the order pin that names it."
