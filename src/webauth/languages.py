@@ -15,7 +15,7 @@ from typing import TypeIs
 __all__ = ["AppLanguages", "is_language_tag", "resolve_language"]
 
 _LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*")
-_WEIGHT = re.compile(r"[qQ]=(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)")
+_WEIGHT = re.compile(r"[qQ]=(0(?:\.\d{0,3})?|1(?:\.0{0,3})?)", re.ASCII)
 _OWS = " \t"
 
 

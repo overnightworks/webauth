@@ -204,6 +204,7 @@ def test_the_wildcard_range_is_skipped(
         ("de;q=x, fr", "fr"),
         ("de;q=1.5, fr", "fr"),
         ("de;q=0.1234, fr;q=0.5", "fr"),
+        ("de;q=0.\u0665, fr;q=0.4", "fr"),
         ("de;level=1, fr", "fr"),
     ],
     ids=[
@@ -213,6 +214,7 @@ def test_the_wildcard_range_is_skipped(
         "weight-not-a-number",
         "weight-above-one-decimal",
         "weight-four-decimals",
+        "weight-not-ascii-digits",
         "parameter-not-weight",
     ],
 )
