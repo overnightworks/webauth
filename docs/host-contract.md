@@ -165,7 +165,7 @@ What the installer refuses before any rule or route:
 - **STACK-08** A request whose route path, the path below `root_path`, carries a control character (U+0000 to U+001F or U+007F) gets 400 with the JSON body `{"detail": "Malformed request path"}` and the security headers. Starlette's route patterns end in `$`, which also matches before a final line feed, so without the refusal a path with a trailing newline reaches a route that the path rules, which compare exactly, do not know.
 - **STACK-09** The refusal sits directly inside the security headers and ahead of every other library middleware: a refused request spends no rate budget, opens no session lookup, and reaches neither a host middleware added before the call nor a route.
 - **STACK-10** The refusal reads the path below `root_path`; a control character in `root_path` itself refuses nothing.
-- **STACK-11** The installer always installs it. It has no policy and no option, `webauth.middleware` does not export it, and an app that already carries it is refused like any library middleware.
+- **STACK-11** The installer always installs it. It has no policy and no option. `webauth.middleware` exports the class so a host can name it in a stack-order check; `install_web_auth_middleware` stays the only supported way to add it, and an app that already carries it is refused like any library middleware.
 - **STACK-12** WebSocket and lifespan scopes pass: no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
 - **STACK-13** A path with a space, a `;`, a trailing slash or a non-ASCII character keeps the answer it has without the refusal.
 - **Host duty:** a route takes no control character in its path; free text goes in the query or the body.
