@@ -38,6 +38,7 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 - `oidc` owns authorization URLs, PKCE, callback/code/ID-token checks, access-token verification, refresh and client-credentials grants.
 - `service_callers` is how a service proves the caller of its API ([host contract](host-contract.md#a-services-callers)); it holds no policy and logs nothing.
 - `session_groups` reads a session's current groups for an async host on a worker thread.
+- `languages` resolves a person's language from the account's tag, the `Accept-Language` header and the app's languages with no I/O, and owns the shape of a language tag ([host contract](host-contract.md#a-persons-language)).
 - `https_client` owns outbound HTTPS; `oidc_transport.post_token_request_over_https` implements the injected `TokenRequestPost`.
 
 The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
