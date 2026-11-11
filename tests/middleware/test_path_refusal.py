@@ -65,20 +65,34 @@ class Arrangement:
         )
 
 
-def a_stack_over_every_route() -> Arrangement:
-    """A host with the sign-in routes, one host route and a WebSocket route behind the stack.
+def some_routes(sign_in_paths: SignInPaths) -> dict[str, str]:
+    return {
+        "start": sign_in_paths.start,
+        "callback": sign_in_paths.callback,
+        "logout": str(sign_in_paths.logout),
+        "backchannel": str(sign_in_paths.backchannel_logout),
+        "host": "/api/thing",
+        "websocket": "/ws",
+    }
 
-    Its client is signed in, so a request the stack admits reaches its route.
-    """
-    lifespan_events: list[str] = []
 
+def an_app_recording_its_lifespan(lifespan_events: list[str]) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         lifespan_events.append("startup")
         yield
         lifespan_events.append("shutdown")
 
-    app = FastAPI(lifespan=lifespan)
+    return FastAPI(lifespan=lifespan)
+
+
+def a_stack_over_every_route() -> Arrangement:
+    """A host with the sign-in routes, one host route and a WebSocket route behind the stack.
+
+    Its client is signed in, so a request the stack admits reaches its route.
+    """
+    lifespan_events: list[str] = []
+    app = an_app_recording_its_lifespan(lifespan_events)
     rate_limits = RecordingRateLimitBackend()
     sessions = SessionsRecordingTheirTransaction(a_session())
     config = replace(a_web_auth_config(), rate_limits=rate_limits)
@@ -87,14 +101,7 @@ def a_stack_over_every_route() -> Arrangement:
     }
     sign_in_paths = some_sign_in_paths()
     headers_policy = a_headers_policy()
-    routes = {
-        "start": sign_in_paths.start,
-        "callback": sign_in_paths.callback,
-        "logout": str(sign_in_paths.logout),
-        "backchannel": str(sign_in_paths.backchannel_logout),
-        "host": "/api/thing",
-        "websocket": "/ws",
-    }
+    routes = some_routes(sign_in_paths)
     arrangement = Arrangement(
         app,
         rate_limits,
