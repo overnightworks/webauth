@@ -229,6 +229,7 @@ def install_sign_in_routes(
     keeps_id_token: bool,
     max_sessions: int | None,
     logout_page_text: Callable[[Request], LogoutPageText] | None,
+    ui_language: Callable[[Request], str | None],
 ) -> None:
     """Register the start and callback routes of the sign-in, the logout route and the
     back-channel logout route on ``app``.
@@ -259,8 +260,9 @@ def install_sign_in_routes(
 
     The module docstring holds the back-channel's answers.
 
-    ``relying_party`` is read per request. ``keeps_id_token`` has no default: ``True`` stores
-    the login's ID token so the logout posts it as the hint, ``False`` stores none.
+    ``relying_party`` is read per request. ``ui_language`` is called once per start request and
+    its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
+    ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
     ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``
     is raised before a route is registered. ``paths.logout`` and ``logout_page_text`` come
     together: a host without a logout route passes ``None`` for both, and exactly one of them
@@ -270,7 +272,9 @@ def install_sign_in_routes(
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
     if (paths.logout is None) != (logout_page_text is None):
         raise ValueError("paths.logout and logout_page_text must both be given or both be None")
-    routes = _SignIn(relying_party, admission, transaction, refused, keeps_id_token, max_sessions)
+    routes = _SignIn(
+        relying_party, admission, transaction, refused, keeps_id_token, max_sessions, ui_language
+    )
 
     _register_routes(app, paths, routes, logout_page_text)
 
@@ -317,6 +321,7 @@ class _SignIn:
     refused: Callable[[Request, SignInRefusal], Response]
     keeps_id_token: bool
     max_sessions: int | None
+    ui_language: Callable[[Request], str | None]
 
     def start(self, request: Request, return_to: str | None) -> Response:
         answer = Response(status_code=303)
@@ -326,6 +331,7 @@ class _SignIn:
             answer,
             web_auth_config(request),
             return_to=return_to,
+            ui_locales=self.ui_language(request),
         )
         return answer
 

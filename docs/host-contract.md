@@ -501,6 +501,7 @@ the app builds once. `account_tag` is the account's tag as the issuer gave it, a
 `accept_language` is the request's `Accept-Language` header as one string: a host with several
 header lines joins them with commas. `account_language_of_session(connection, *, sessions, config)`
 from `webauth.dependencies` answers the account's tag for the request, from the session row.
+`install_sign_in_routes(..., ui_language=...)` names the resolved language to the issuer.
 
 **LANGUAGE-01** `AppLanguages` raises `ValueError` when built if an offered tag or the default is not a
 language tag in shape, the shape `SIGNIN-14` gives.
@@ -567,12 +568,37 @@ public page calls it without sliding a session's expiry.
 
 **LANGUAGE-20** A failing store raises.
 
+**LANGUAGE-21** `install_sign_in_routes` requires `ui_language: Callable[[Request], str | None]`, with no
+default: an install without it raises `TypeError` and registers no route.
+
+**LANGUAGE-22** The start route calls it once per request, with that request.
+
+**LANGUAGE-23** A tag sends `ui_locales=<tag>` in the authorization request (OpenID Connect Core 1.0
+section 3.1.2.1), exactly once and spelled as the host gave it. The rest of the request is the one
+sent without a language.
+
+**LANGUAGE-24** `None` sends no `ui_locales`.
+
+**LANGUAGE-25** A string that is not a language tag in shape (`pt_BR`, the empty string, two tags with a
+space) raises `ValueError` from the start route: a host's error, never sent to the issuer. The route
+sends no redirect and sets no pending cookie.
+
+**LANGUAGE-26** `OidcRelyingParty.begin_login(*, ui_locales)` requires the keyword and follows
+LANGUAGE-23 to LANGUAGE-25 on its own, for a host that begins a login itself. `is_language_tag` is the
+one judge of the shape.
+
+**LANGUAGE-27** The value is stored in neither the pending cookie nor the session, and webauth writes it
+to no log line.
+
 **Host duty:** The session table has a nullable column of at least `MAX_ACCOUNT_LANGUAGE_CHARS`
 characters, written at `create` and returned by the record as `account_language`; a row stored before
 the column reads `None`.
 
 **Host duty:** The app passes the function's answer to `resolve_language` as `account_tag` and writes only
 the resolver's answer into `<html lang>`, never an account's tag as received.
+
+**Host duty:** The `ui_language` callable answers `resolve_language`'s answer for the request, or `None` for
+a host that names no language (`lambda request: None`).
 
 ## The protected resource
 

@@ -522,8 +522,6 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         ),
     )
 
-    admission = _admission_of(settings)
-
     def relying_party_of(request: Request) -> OidcRelyingParty:
         relying_parties = world["world"].relying_parties
         # The issuer posts the back-channel to the bridge's own Host, which names no app origin.
@@ -575,12 +573,13 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         app,
         paths=SIGN_IN_PATHS,
         relying_party=relying_party_of,
-        admission=admission,
+        admission=_admission_of(settings),
         transaction=sign_in_transaction,
         refused=_remembering_refusal(world),
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
+        ui_language=lambda _request: None,
     )
 
     @app.get("/me")

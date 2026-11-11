@@ -94,7 +94,7 @@ def login() -> LoginScenario:
 def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identity(
     login: LoginScenario,
 ) -> None:
-    request = login.relying_party.begin_login()
+    request = login.relying_party.begin_login(ui_locales=None)
     login.token_endpoint.answer = issued(login.id_token(request.pending, {}))
     callback_query = login.callback(request.pending, {})
 
@@ -473,7 +473,9 @@ def test_an_empty_pending_state_never_matches_and_sends_no_token_request(
 def test_an_empty_pending_nonce_never_matches_a_token_minted_with_an_empty_nonce(
     login: LoginScenario,
 ) -> None:
-    pending = dataclasses.replace(login.relying_party.begin_login().pending, nonce="")
+    pending = dataclasses.replace(
+        login.relying_party.begin_login(ui_locales=None).pending, nonce=""
+    )
     login.token_endpoint.answer = issued(login.id_token(pending, {}))
 
     outcome = login.relying_party.complete_login(pending, login.callback(pending, {}))
@@ -481,10 +483,17 @@ def test_an_empty_pending_nonce_never_matches_a_token_minted_with_an_empty_nonce
     assert outcome == OidcRefusal(OidcRefusalReason.NONCE_MISMATCH)
 
 
+@pytest.mark.parametrize(
+    ("ui_locales", "language_parameter"),
+    [
+        pytest.param(None, {}, id="no-language"),
+        pytest.param("de-CH", {"ui_locales": ["de-CH"]}, id="named-language"),
+    ],
+)
 def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
-    login: LoginScenario,
+    login: LoginScenario, ui_locales: str | None, language_parameter: dict[str, list[str]]
 ) -> None:
-    request = login.relying_party.begin_login()
+    request = login.relying_party.begin_login(ui_locales=ui_locales)
     url = urllib.parse.urlsplit(request.url)
     pending = request.pending
 
@@ -498,6 +507,7 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
         "nonce": [pending.nonce],
         "code_challenge": [s256_code_challenge(pending.code_verifier)],
         "code_challenge_method": ["S256"],
+        **language_parameter,
     }
     assert url.fragment == ""
 
@@ -545,11 +555,11 @@ def test_a_pending_login_is_stamped_with_the_wall_clock_second_it_began(
 ) -> None:
     login.wall_clock.now = ACCESS_TOKEN_NOW + 0.75
 
-    assert login.relying_party.begin_login().pending.issued_at == ACCESS_TOKEN_NOW
+    assert login.relying_party.begin_login(ui_locales=None).pending.issued_at == ACCESS_TOKEN_NOW
 
 
 def test_two_logins_never_share_a_state_nonce_or_verifier(login: LoginScenario) -> None:
-    first, second = (login.relying_party.begin_login().pending for _ in range(2))
+    first, second = (login.relying_party.begin_login(ui_locales=None).pending for _ in range(2))
 
     values = [first.state, first.nonce, first.code_verifier]
     values += [second.state, second.nonce, second.code_verifier]

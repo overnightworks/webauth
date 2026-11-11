@@ -9,6 +9,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from typing import Any
 
+import anyio
 import pytest
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -43,6 +44,8 @@ from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     RecordingAuditSink,
     a_web_auth_config,
+    an_http_scope,
+    drive,
 )
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
 from webauth.config import WebAuthConfig, install_web_auth_config, web_auth_config
@@ -348,6 +351,14 @@ class OidcHost:
         params = {} if return_to is None else {"next": return_to}
         return self.client.get(START_PATH, params=params).headers["location"]
 
+    def drive_start(self) -> tuple[list[dict[str, object]], BaseException | None]:
+        """Visit the start route below the test client: the ASGI messages it sent and the
+        exception it raised, if any."""
+        app: FastAPI = self.client.app  # pyright: ignore[reportAssignmentType]
+        scope = an_http_scope(app, START_PATH, headers=[(b"host", b"testserver")])
+        messages, raised = anyio.run(lambda: drive(app, scope, body_chunks=[]))
+        return [dict(message) for message in messages], raised
+
     def sign_in_at_issuer(self, *, return_to: str | None = None) -> str:
         """Start a login and sign in at the issuer; answer the callback query."""
         return self.issuer.authorize(self.start(return_to=return_to))
@@ -429,6 +440,7 @@ def _add_the_login_routes(
     keeps_id_token: bool,
     admission: AdmissionConfig,
     logout_page_text: Callable[[Request], LogoutPageText],
+    ui_language: Callable[[Request], str | None],
 ) -> None:
     def refused(request: Request, refusal: SignInRefusal) -> Response:
         current = host()
@@ -445,6 +457,7 @@ def _add_the_login_routes(
         keeps_id_token=keeps_id_token,
         max_sessions=max_sessions,
         logout_page_text=logout_page_text,
+        ui_language=ui_language,
     )
 
 
@@ -564,6 +577,7 @@ def an_oidc_host(
     admission: AdmissionConfig = ADMISSION,
     account_store: type[UsersWithSnapshots] = UsersWithSnapshots,
     logout_page_text: Callable[[Request], LogoutPageText] = lambda _request: LOGOUT_PAGE_TEXT,
+    ui_language: Callable[[Request], str | None] = lambda _request: None,
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
@@ -584,6 +598,7 @@ def an_oidc_host(
         keeps_id_token=keeps_id_token,
         admission=admission,
         logout_page_text=logout_page_text,
+        ui_language=ui_language,
     )
     _add_the_signed_in_routes(app, stores.sessions)
     holder.append(

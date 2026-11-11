@@ -137,7 +137,7 @@ class LoginScenario:
         return urllib.parse.urlencode(changed(parameters, changes))
 
     def attempt(self, attempt: Attempt) -> tuple[PendingLogin, OidcIdentity | OidcRefusal]:
-        pending = self.relying_party.begin_login().pending
+        pending = self.relying_party.begin_login(ui_locales=None).pending
         self.wall_clock.now += attempt.elapsed_seconds
         self.token_endpoint.answer = attempt.token_answer(self.id_token(pending, attempt.claims))
         callback_query = self.callback(pending, attempt.callback) + attempt.appended_to_callback

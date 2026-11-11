@@ -109,6 +109,7 @@ def a_person_app_serving_back_channel_logout() -> BearerApp:
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
+        ui_language=lambda _request: None,
     )
     return app
 
