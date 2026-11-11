@@ -74,7 +74,6 @@ access proxy). Only the exact path is exempt from the origin check and the rate 
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
@@ -90,6 +89,7 @@ from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import _take_pending_login, issue_session_cookies
 from webauth.dependencies import LoginRedirect, session_id_from_request
+from webauth.languages import is_language_tag
 from webauth.oidc import OidcRefusal, OidcRefusalReason
 from webauth.oidc._relying_party import _callback_state
 from webauth.oidc_login import (
@@ -125,9 +125,6 @@ _RETURN_PATH_QUERY_NAME = "next"
 _SET_COOKIE = b"set-cookie"
 
 
-_LANGUAGE_TAG = re.compile(r"[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*")
-
-
 @dataclass(frozen=True)
 class LogoutPageText:
     """The words of the logout page and the language they are in, answered together.
@@ -140,7 +137,7 @@ class LogoutPageText:
     button_label: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.language, str) or _LANGUAGE_TAG.fullmatch(self.language) is None:
+        if not is_language_tag(self.language):
             raise ValueError(f"language is not a tag of letters and digits: {self.language!r}")
 
 
