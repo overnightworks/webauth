@@ -26,21 +26,18 @@ from webauth.middleware import SessionGate, install_web_auth_middleware
 from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
 from webauth.sign_in_routes import SignInPaths
 
-HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
-START_PATH = "/sign-in/start"
-CALLBACK_PATH = "/sign-in/callback"
-LOGOUT_PATH = "/sign-in/logout"
-BACKCHANNEL_PATH = "/sign-in/backchannel"
-SIGN_IN_PATHS = SignInPaths(
-    start=START_PATH,
-    callback=CALLBACK_PATH,
-    logout=LOGOUT_PATH,
-    backchannel_logout=BACKCHANNEL_PATH,
-)
-HOST_PATH = "/api/thing"
-WEBSOCKET_PATH = "/ws"
-ROUTES = (START_PATH, CALLBACK_PATH, LOGOUT_PATH, BACKCHANNEL_PATH, HOST_PATH)
-REFUSAL_BODY = {"detail": "Malformed request path"}
+
+def a_headers_policy() -> SecurityHeadersPolicy:
+    return SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+
+
+def some_sign_in_paths() -> SignInPaths:
+    return SignInPaths(
+        start="/sign-in/start",
+        callback="/sign-in/callback",
+        logout="/sign-in/logout",
+        backchannel_logout="/sign-in/backchannel",
+    )
 
 
 @dataclass
@@ -49,6 +46,8 @@ class Arrangement:
     rate_limits: RecordingRateLimitBackend
     sessions: SessionsRecordingTheirTransaction
     signed_in: dict[str, str]
+    headers_policy: SecurityHeadersPolicy
+    routes: dict[str, str]
     route_runs: list[str] = field(default_factory=list)
     host_middleware_runs: list[str] = field(default_factory=list)
 
@@ -75,17 +74,28 @@ def a_stack_over_every_route() -> Arrangement:
     signed_in = {
         name.decode(): value.decode() for name, value in a_signed_in_same_origin_request(config)
     }
-    arrangement = Arrangement(app, rate_limits, sessions, signed_in)
+    sign_in_paths = some_sign_in_paths()
+    headers_policy = a_headers_policy()
+    routes = {
+        "start": sign_in_paths.start,
+        "callback": sign_in_paths.callback,
+        "logout": str(sign_in_paths.logout),
+        "backchannel": str(sign_in_paths.backchannel_logout),
+        "host": "/api/thing",
+        "websocket": "/ws",
+    }
+    arrangement = Arrangement(app, rate_limits, sessions, signed_in, headers_policy, routes)
     install_web_auth_config(app, config)
 
     def run(request: Request) -> JSONResponse:
         arrangement.route_runs.append(request.scope["path"])
         return JSONResponse({"status": "ok"})
 
-    for path in ROUTES:
-        app.add_api_route(path, run, methods=["GET", "POST"])
+    for name, path in routes.items():
+        if name != "websocket":
+            app.add_api_route(path, run, methods=["GET", "POST"])
 
-    @app.websocket(WEBSOCKET_PATH)
+    @app.websocket(routes["websocket"])
     async def socket(websocket: WebSocket) -> None:
         arrangement.route_runs.append(websocket.scope["path"])
         await websocket.accept()
@@ -98,8 +108,8 @@ def a_stack_over_every_route() -> Arrangement:
 
     install_web_auth_middleware(
         app,
-        sign_in_paths=SIGN_IN_PATHS,
-        security_headers=HEADERS_POLICY,
+        sign_in_paths=sign_in_paths,
+        security_headers=headers_policy,
         csrf_origin=CsrfPolicy(),
         session_gate=SessionGate(
             session_transaction=sessions.in_transaction,
@@ -110,23 +120,23 @@ def a_stack_over_every_route() -> Arrangement:
     return arrangement
 
 
-def a_malformed_path_is_refused(response: Response) -> None:
+def a_malformed_path_is_refused(response: Response, headers_policy: SecurityHeadersPolicy) -> None:
     assert response.status_code == 400
-    assert response.json() == REFUSAL_BODY
-    assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
+    assert response.json() == {"detail": "Malformed request path"}
+    assert_carries_policy_headers(response.headers, headers_policy, hsts=True)
 
 
 class TestARouteWithAControlCharacterInItsPath:
-    @pytest.mark.parametrize("route", ROUTES)
+    @pytest.mark.parametrize("route", ["start", "callback", "logout", "backchannel", "host"])
     def test_a_trailing_line_feed_on_any_route_is_refused_with_the_headers_and_no_handler_runs(
         self, route: str
     ) -> None:
         """STACK-08: a route path with a control character gets 400 with the headers."""
         arrangement = a_stack_over_every_route()
 
-        response = arrangement.client().post(f"{route}%0A")
+        response = arrangement.client().post(f"{arrangement.routes[route]}%0A")
 
-        a_malformed_path_is_refused(response)
+        a_malformed_path_is_refused(response, arrangement.headers_policy)
         assert arrangement.route_runs == []
 
     @pytest.mark.parametrize(
@@ -145,9 +155,11 @@ class TestARouteWithAControlCharacterInItsPath:
     )
     def test_any_control_character_anywhere_in_the_path_is_refused(self, path: str) -> None:
         """STACK-08: U+0000 to U+001F and U+007F, anywhere in the route path."""
-        response = a_stack_over_every_route().client().get(path)
+        arrangement = a_stack_over_every_route()
 
-        a_malformed_path_is_refused(response)
+        response = arrangement.client().get(path)
+
+        a_malformed_path_is_refused(response, arrangement.headers_policy)
 
     def test_a_refused_request_spends_no_budget_opens_no_session_and_meets_no_host_middleware(
         self,
@@ -155,29 +167,32 @@ class TestARouteWithAControlCharacterInItsPath:
         """STACK-09: it sits ahead of the rate limit and the session gate, inside the call."""
         arrangement = a_stack_over_every_route()
 
-        a_malformed_path_is_refused(arrangement.client().get(f"{HOST_PATH}%0A"))
+        response = arrangement.client().get(f"{arrangement.routes['host']}%0A")
 
+        a_malformed_path_is_refused(response, arrangement.headers_policy)
         assert arrangement.rate_limits.checked == {}
         assert arrangement.sessions.event_names == []
         assert arrangement.host_middleware_runs == []
 
     @pytest.mark.parametrize(
-        ("root_path", "path", "refused"),
+        ("root_path", "path_template", "refused"),
         [
-            pytest.param("/app", f"/app{HOST_PATH}%0A", True, id="control-character-below-root"),
-            pytest.param("/ap\np", f"/ap%0Ap{HOST_PATH}", False, id="control-character-in-root"),
+            pytest.param("/app", "/app{host}%0A", True, id="control-character-below-root"),
+            pytest.param("/ap\np", "/ap%0Ap{host}", False, id="control-character-in-root"),
         ],
     )
     def test_under_a_root_path_the_route_path_decides(
-        self, root_path: str, path: str, refused: bool
+        self, root_path: str, path_template: str, refused: bool
     ) -> None:
         """STACK-10: the path below ``root_path`` is the one the refusal reads."""
         arrangement = a_stack_over_every_route()
 
-        response = arrangement.client(root_path=root_path).get(path)
+        response = arrangement.client(root_path=root_path).get(
+            path_template.format(host=arrangement.routes["host"])
+        )
 
         if refused:
-            a_malformed_path_is_refused(response)
+            a_malformed_path_is_refused(response, arrangement.headers_policy)
         else:
             assert response.status_code == 200
             assert arrangement.route_runs != []
@@ -187,28 +202,30 @@ class TestARouteWithAControlCharacterInItsPath:
     ) -> None:
         """STACK-11: always installed, no policy and no option, not exported."""
         app = FastAPI()
+        headers_policy = a_headers_policy()
         install_web_auth_config(app, a_web_auth_config())
-        app.add_api_route(HOST_PATH, lambda: {"status": "ok"})
+        app.add_api_route("/api/thing", lambda: {"status": "ok"})
         install_web_auth_middleware(
             app,
-            sign_in_paths=SIGN_IN_PATHS,
-            security_headers=HEADERS_POLICY,
+            sign_in_paths=some_sign_in_paths(),
+            security_headers=headers_policy,
             csrf_origin=CsrfPolicy(),
         )
 
-        response = TestClient(app, base_url=HTTPS_TEST_SERVER).get(f"{HOST_PATH}%0A")
+        response = TestClient(app, base_url=HTTPS_TEST_SERVER).get("/api/thing%0A")
 
-        a_malformed_path_is_refused(response)
+        a_malformed_path_is_refused(response, headers_policy)
         assert not [name for name in dir(webauth.middleware) if "PathRefusal" in name]
 
     def test_a_websocket_handshake_with_such_a_path_passes_the_stack(self) -> None:
         """STACK-12: WebSocket and lifespan scopes pass."""
         arrangement = a_stack_over_every_route()
+        socket_path = arrangement.routes["websocket"]
 
-        with arrangement.client().websocket_connect(f"{WEBSOCKET_PATH}%0A"):
+        with arrangement.client().websocket_connect(f"{socket_path}%0A"):
             pass
 
-        assert arrangement.route_runs == [f"{WEBSOCKET_PATH}\n"]
+        assert arrangement.route_runs == [f"{socket_path}\n"]
 
     @pytest.mark.parametrize(
         ("path", "status"),
