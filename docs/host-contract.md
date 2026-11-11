@@ -493,6 +493,55 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   - It takes no lock, so overlapping calls are GROUPS-26. **Host duty:** The app maps each refusal to
     its own answer and names the group it checks.
 
+## A person's language
+
+`resolve_language(languages, *, account_tag, accept_language)` from `webauth.languages` answers
+one of the app's own languages for a request. `languages` is an `AppLanguages(offered, default)`
+the app builds once. `account_tag` is the account's tag as the issuer gave it, and
+`accept_language` is the request's `Accept-Language` header as one string: a host with several
+header lines joins them with commas.
+
+**LANGUAGE-01** `AppLanguages` raises `ValueError` when built if an offered tag or the default is not a
+language tag in shape, the shape `SIGNIN-14` gives.
+
+**LANGUAGE-02** `AppLanguages` raises `ValueError` when built if `default` is not one of `offered` exactly
+as spelled, which includes an empty `offered`.
+
+**LANGUAGE-03** `AppLanguages` raises `ValueError` when built if two offered tags are equal ignoring case,
+the same tag included.
+
+**LANGUAGE-04** The answer is the first of these that finds an offered tag: the account's tag, then each
+language range of the header by descending weight, then `default`.
+
+**LANGUAGE-05** A range is matched by RFC 4647 Lookup (section 3.4): first as given, equal to an offered
+tag ignoring case; if none is, the range loses its last subtag and any single-character subtag left at
+its end, and is tried again, until nothing is left. `de-DE-u-co-phonebk` is tried as `de-DE-u-co`,
+`de-DE` and `de`.
+
+**LANGUAGE-06** A range never matches an offered tag more specific than itself: `de` does not find an
+offered `de-CH`.
+
+**LANGUAGE-07** The answer is the offered tag as the app spelled it: `de-de` answers an offered `de-DE`.
+
+**LANGUAGE-08** The header is a list of language ranges separated by commas, each with an optional `;q=`
+weight from 0 to 1 with at most three decimals, which is 1 when absent (RFC 9110 section 12.5.4). The
+ranges answer by descending weight, and equal weights keep the header's order.
+
+**LANGUAGE-09** A range of weight 0 is skipped and excludes no other element: `de;q=0, de` answers `de`
+when `de` is offered.
+
+**LANGUAGE-10** `*` is skipped, whatever its weight.
+
+**LANGUAGE-11** An element whose range is not a language tag in shape (`de-*`, `pt_BR`) or whose weight is
+malformed (`q=2`, `q=x`) is dropped alone, and the rest of the header still counts.
+
+**LANGUAGE-12** An account tag that is `None`, not a language tag in shape (`pt_BR`, `x-private`,
+`i-klingon`, the empty string), or that matches no offered tag counts as absent, and the header decides.
+Nothing is normalised: `" de"` is not `de`.
+
+**Host duty:** The app writes only the resolver's answer into `<html lang>`, never an account's tag as
+received.
+
 ## The protected resource
 
 A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, agent_group, authorized_parties, transaction, marked_routes)` and passes
