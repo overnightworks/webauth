@@ -140,8 +140,9 @@ for the mechanism and its trust boundaries.
 ## Where the host's own middleware goes
 
 - **STACK-01** Added before `install_web_auth_middleware`, a host middleware sits inside
-  the library stack, so a request the library refuses early (413 by `Content-Length`,
-  429, 503, the CSRF 403s, the session gate's 302 and 401) never reaches it.
+  the library stack, so a request the library refuses early (400 for a malformed path,
+  413 by `Content-Length`, 429, 503, the CSRF 403s, the session gate's 302 and 401) never
+  reaches it.
 - **Host duty:** put a middleware that must see only admitted requests (session lookups,
   audit) before the call.
 - **STACK-02** Added after the call, a host middleware sits outside the library stack and
@@ -158,6 +159,16 @@ for the mechanism and its trust boundaries.
   413 for a streamed body the route reads into the library 500.
 - **Host duty:** a host that relied on `BaseHTTPMiddleware`'s task isolation restores its
   own context, for example by resetting the token it set.
+
+What the installer refuses before any rule or route:
+
+- **STACK-08** A request whose route path, the path below `root_path`, carries a control character (U+0000 to U+001F or U+007F) gets 400 with the JSON body `{"detail": "Malformed request path"}` and the security headers. Starlette's route patterns end in `$`, which also matches before a final line feed, so without the refusal a path with a trailing newline reaches a route that the path rules, which compare exactly, do not know.
+- **STACK-09** The refusal sits directly inside the security headers and ahead of every other library middleware: a refused request spends no rate budget, opens no session lookup, and reaches neither a host middleware added before the call nor a route.
+- **STACK-10** The refusal reads the path below `root_path`; a control character in `root_path` itself refuses nothing.
+- **STACK-11** The installer always installs it. It has no policy and no option, `webauth.middleware` does not export it, and an app that already carries it is refused like any library middleware.
+- **STACK-12** WebSocket and lifespan scopes pass: no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
+- **STACK-13** A path with a space, a `;`, a trailing slash or a non-ASCII character keeps the answer it has without the refusal.
+- **Host duty:** a route takes no control character in its path; free text goes in the query or the body.
 
 What the installer applies when the host passes none:
 

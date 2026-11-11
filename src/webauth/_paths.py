@@ -29,6 +29,11 @@ _SEGMENT_SEPARATORS: Final = re.compile(r"[/\\]")
 _DOT_SEGMENT: Final = re.compile(r"(?:\.|%2e){1,2}", re.IGNORECASE)
 
 
+def carries_control_character(path: str) -> bool:
+    """Whether ``path`` holds a control character, U+0000 to U+001F or U+007F."""
+    return _CONTROL_CHARACTER.search(path) is not None
+
+
 def reads_as_another_host(path: str) -> bool:
     """Whether a browser reads ``path`` as an address on another host.
 
@@ -50,7 +55,7 @@ def same_app_path(connection: HTTPConnection, candidate: str | None) -> str | No
     and is refused; so is a literal ``#``, which a browser reads as the start of a
     fragment before it resolves those segments and which a request never carries.
     """
-    if not candidate or not candidate.startswith("/") or _CONTROL_CHARACTER.search(candidate):
+    if not candidate or not candidate.startswith("/") or carries_control_character(candidate):
         return None
     if _FRAGMENT_MARK in candidate or reads_as_another_host(candidate):
         return None

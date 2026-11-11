@@ -57,6 +57,7 @@ from webauth.middleware import (
     SessionGateMiddleware,
     install_web_auth_middleware,
 )
+from webauth.middleware._path_refusal import PathRefusalMiddleware
 from webauth.policies import (
     AuthorizedParties,
     BodySizePolicy,
@@ -509,13 +510,12 @@ class TestRefusedInstallation:
             accepted.append(repr(entry.cls))
         assert accepted == []
 
-    def test_a_full_install_with_a_bearer_gate_runs_it_after_the_rate_limit_and_before_csrf(
-        self,
-    ) -> None:
+    def test_a_full_install_with_a_bearer_gate_runs_the_library_in_one_order(self) -> None:
         app = a_fresh_app()
         install_full_stack(app, session_gate=A_SESSION_GATE, bearer_gate=A_BEARER_GATE)
         assert [entry.cls for entry in app.user_middleware] == [
             SecurityHeadersMiddleware,
+            PathRefusalMiddleware,
             BodySizeLimitMiddleware,
             IpRateLimitMiddleware,
             BearerGateMiddleware,
