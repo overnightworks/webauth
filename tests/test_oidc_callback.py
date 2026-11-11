@@ -483,10 +483,17 @@ def test_an_empty_pending_nonce_never_matches_a_token_minted_with_an_empty_nonce
     assert outcome == OidcRefusal(OidcRefusalReason.NONCE_MISMATCH)
 
 
+@pytest.mark.parametrize(
+    ("ui_locales", "language_parameter"),
+    [
+        pytest.param(None, {}, id="no-language"),
+        pytest.param("de-CH", {"ui_locales": ["de-CH"]}, id="named-language"),
+    ],
+)
 def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
-    login: LoginScenario,
+    login: LoginScenario, ui_locales: str | None, language_parameter: dict[str, list[str]]
 ) -> None:
-    request = login.relying_party.begin_login(ui_locales=None)
+    request = login.relying_party.begin_login(ui_locales=ui_locales)
     url = urllib.parse.urlsplit(request.url)
     pending = request.pending
 
@@ -500,6 +507,7 @@ def test_the_authorization_url_carries_exactly_the_code_flow_parameters(
         "nonce": [pending.nonce],
         "code_challenge": [s256_code_challenge(pending.code_verifier)],
         "code_challenge_method": ["S256"],
+        **language_parameter,
     }
     assert url.fragment == ""
 

@@ -45,13 +45,15 @@ def _named(parameters: list[tuple[str, str]], name: str) -> list[str]:
     return [value for key, value in parameters if key == name]
 
 
-def _names_of_the_request(host: OidcHost) -> list[str]:
-    return [name for name, _value in _parameters(host.start())]
+def _fixed_parameters_of_the_request(host: OidcHost) -> list[tuple[str, str]]:
+    """The request's parameters without the three a login draws afresh and without the language."""
+    drawn_afresh = {"state", "nonce", "code_challenge", LANGUAGE_PARAMETER}
+    return [(name, value) for name, value in _parameters(host.start()) if name not in drawn_afresh]
 
 
-def _redirected(messages: list[dict[str, object]]) -> bool:
+def _header_names_sent(messages: list[dict[str, object]]) -> list[bytes]:
     headers = [header for message in messages for header in message.get("headers", [])]  # pyright: ignore[reportGeneralTypeIssues]
-    return any(name == b"location" for name, _value in headers)
+    return [name for name, _value in headers]
 
 
 @pytest.mark.parametrize("tag", ["de", "de-CH", "DE-ch", "zh-Hant-TW"])
@@ -70,11 +72,10 @@ def test_no_language_sends_the_request_without_the_parameter_and_changes_no_othe
     without = an_oidc_host(ui_language=lambda _request: None)
     with_tag = an_oidc_host(ui_language=lambda _request: "de")
 
-    names_without = _names_of_the_request(without)
-    names_with_tag = _names_of_the_request(with_tag)
+    sent_without = _parameters(without.start())
 
-    assert LANGUAGE_PARAMETER not in names_without
-    assert [name for name in names_with_tag if name != LANGUAGE_PARAMETER] == names_without
+    assert LANGUAGE_PARAMETER not in [name for name, _value in sent_without]
+    assert _fixed_parameters_of_the_request(with_tag) == _fixed_parameters_of_the_request(without)
 
 
 def test_the_value_is_stored_in_no_pending_cookie_no_session_and_no_log_line(
@@ -126,7 +127,7 @@ def test_a_malformed_tag_raises_value_error_and_nothing_goes_to_the_issuer(tag: 
     messages, raised = host.drive_start()
 
     assert isinstance(raised, ValueError)
-    assert not _redirected(messages)
+    assert b"location" not in _header_names_sent(messages)
     assert not host.pending_cookie_names()
 
 
