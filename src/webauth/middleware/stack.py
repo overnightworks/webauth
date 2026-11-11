@@ -138,10 +138,12 @@ def _library_middleware(
             security_headers,
             cache_control_rules=(*no_store, *security_headers.cache_control_rules),
         )
-    entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
-    entries.append(Middleware(PathRefusalMiddleware))
-    entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
-    entries.append(Middleware(IpRateLimitMiddleware, policy=rate_limit))
+    entries = [
+        Middleware(SecurityHeadersMiddleware, policy=security_headers),
+        Middleware(PathRefusalMiddleware),
+        Middleware(BodySizeLimitMiddleware, policy=body_size),
+        Middleware(IpRateLimitMiddleware, policy=rate_limit),
+    ]
     if bearer_gate is not None:
         entries.append(Middleware(BearerGateMiddleware, policy=bearer_gate))
     entries.append(Middleware(CsrfOriginMiddleware, policy=csrf_origin))
