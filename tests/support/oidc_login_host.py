@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import enum
 import urllib.parse
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
-from fastapi import Depends, FastAPI, Request, Response, params
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
@@ -416,7 +416,6 @@ def _add_the_login_routes(
     keeps_id_token: bool,
     admission: AdmissionConfig,
     logout_page_text: Callable[[Request], LogoutPageText],
-    backchannel_dependencies: Sequence[params.Depends],
 ) -> None:
     def refused(request: Request, refusal: SignInRefusal) -> Response:
         current = host()
@@ -433,7 +432,6 @@ def _add_the_login_routes(
         keeps_id_token=keeps_id_token,
         max_sessions=max_sessions,
         logout_page_text=logout_page_text,
-        backchannel_dependencies=backchannel_dependencies,
     )
 
 
@@ -541,7 +539,6 @@ def an_oidc_host(
     admission: AdmissionConfig = ADMISSION,
     account_store: type[UsersWithSnapshots] = UsersWithSnapshots,
     logout_page_text: Callable[[Request], LogoutPageText] = lambda _request: LOGOUT_PAGE_TEXT,
-    backchannel_dependencies: Sequence[params.Depends] = (),
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
@@ -560,7 +557,6 @@ def an_oidc_host(
         keeps_id_token=keeps_id_token,
         admission=admission,
         logout_page_text=logout_page_text,
-        backchannel_dependencies=backchannel_dependencies,
     )
     _add_the_signed_in_routes(app, stores.sessions)
     holder.append(

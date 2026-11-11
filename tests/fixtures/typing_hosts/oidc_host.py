@@ -252,7 +252,6 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        backchannel_dependencies=[Depends(lambda: None)],
     )
 
 
