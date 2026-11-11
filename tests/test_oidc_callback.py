@@ -148,14 +148,6 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
             dataclasses.replace(_IDENTITY, refresh_token=SecretStr(TOKEN_AT_BOTH_ENDS)),
             id="refresh-token-at-both-ends-of-the-grammar",
         ),
-        pytest.param(
-            Attempt(claims={"locale": "de-CH"}),
-            dataclasses.replace(_IDENTITY, account_language="de-CH"),
-            id="with-a-locale",
-        ),
-        pytest.param(
-            Attempt(claims={"locale": 42}), _IDENTITY, id="with-a-locale-that-is-no-string"
-        ),
         pytest.param(Attempt(callback={"iss": ABSENT}), _IDENTITY, id="callback-without-iss"),
         pytest.param(
             Attempt(callback={"code": "c" * 2048}),

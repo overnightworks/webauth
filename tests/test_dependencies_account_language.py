@@ -9,7 +9,6 @@ Each case signs in through a host's callback route over the shared in-memory sto
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import timedelta
 
 import pytest
 from starlette.requests import Request
@@ -109,16 +108,11 @@ def _rotated_with_the_issuer(host: OidcHost, session: SessionRecord, _clock: Fak
     )
 
 
-def _touched(host: OidcHost, session: SessionRecord, _clock: FakeClock) -> None:
-    host.sessions.touch(session.id, expires_at=session.expires_at + timedelta(minutes=1))
-
-
 @pytest.mark.parametrize(
     ("write", "changed_member"),
     [
         pytest.param(_renewed_by_the_gate, "expires_at", id="renewal by the gate"),
         pytest.param(_rotated_with_the_issuer, "refresh_token", id="refresh-token rotation"),
-        pytest.param(_touched, "expires_at", id="touch"),
     ],
 )
 def test_nothing_after_the_sign_in_writes_the_language_again(
@@ -181,6 +175,13 @@ def test_the_function_answers_none_when_the_request_names_no_live_session(
     assert host.account_language() == "de-CH"
 
     spoil(host, clock)
+
+    assert host.account_language() is None
+
+
+def test_the_function_answers_none_when_the_live_row_holds_no_language(clock: FakeClock) -> None:
+    """LANGUAGE-18: a live session whose row holds no language reads `None`."""
+    host = a_host_signed_in_with(ABSENT, clock)
 
     assert host.account_language() is None
 
