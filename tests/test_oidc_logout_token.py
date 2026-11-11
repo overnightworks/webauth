@@ -230,7 +230,7 @@ def test_a_logout_token_that_does_not_hold_is_refused_with_its_reason(
 
 def test_an_id_token_is_not_a_logout_token() -> None:
     login = LoginScenario(FakeTokenEndpoint())
-    pending = login.relying_party.begin_login().pending
+    pending = login.relying_party.begin_login(ui_locales=None).pending
 
     outcome = login.relying_party.verify_logout_token(login.id_token(pending, {}))
 

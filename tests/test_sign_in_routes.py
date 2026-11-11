@@ -680,6 +680,7 @@ def _install_arguments() -> dict[str, object]:
         "keeps_id_token": True,
         "max_sessions": None,
         "logout_page_text": lambda _request: LogoutPageText(language="en", button_label="Sign out"),
+        "ui_language": lambda _request: None,
     }
 
 

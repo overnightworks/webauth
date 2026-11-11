@@ -135,9 +135,12 @@ def _start_login(
     config: WebAuthConfig,
     *,
     return_to: str | None,
+    ui_locales: str | None,
 ) -> str:
     """Begin a login: set its pending-login cookie on ``response`` and return
-    the authorization URL the start route redirects the browser to.
+    the authorization URL the start route redirects the browser to, naming ``ui_locales`` as the
+    person's language when it is not ``None``; a string that is not a language tag in shape
+    raises ``ValueError`` before any cookie is set.
 
     ``return_to`` is the raw path and query as the app sees them, ``root_path``
     included and not the percent-decoded ``request.url.path``, that the callback
@@ -156,7 +159,7 @@ def _start_login(
     sub-app is judged against that mount's ``root_path``. The fragment is lost,
     because browsers never send it.
     """
-    authorization = relying_party.begin_login()
+    authorization = relying_party.begin_login(ui_locales=ui_locales)
     pending = authorization.pending.returning_to(same_app_path(request, return_to))
     _begin_pending_login(
         request,

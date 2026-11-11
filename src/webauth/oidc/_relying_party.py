@@ -281,17 +281,25 @@ class OidcRelyingParty:
     def issuer(self) -> str:
         return self._config.issuer
 
-    def begin_login(self) -> AuthorizationRequest:
+    def begin_login(self, *, ui_locales: str | None) -> AuthorizationRequest:
         """The authorization URL to send the browser to, and the `PendingLogin`
         (state, nonce, PKCE verifier and `issued_at`, the wall-clock second it
-        began) the host keeps until the callback returns."""
+        began) the host keeps until the callback returns.
+
+        `ui_locales` is the language tag the host names for the issuer's pages, sent as the
+        `ui_locales` parameter of OpenID Connect Core section 3.1.2.1 and not kept in the
+        `PendingLogin`; `None` sends none. A string that is not a language tag in shape
+        raises `ValueError`."""
         pending = PendingLogin(
             state=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             nonce=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             code_verifier=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             issued_at=int(self._wall_clock()),
         )
-        return AuthorizationRequest(url=authorization_url(self._config, pending), pending=pending)
+        return AuthorizationRequest(
+            url=authorization_url(self._config, pending, ui_locales=ui_locales),
+            pending=pending,
+        )
 
     def _end_session_form(self, *, id_token_hint: SecretStr | None) -> EndSessionForm:
         return EndSessionForm(

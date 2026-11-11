@@ -102,6 +102,7 @@ def _a_gated_host(
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
+        ui_language=lambda _request: None,
     )
 
     @app.get("/albums/{album_id}")

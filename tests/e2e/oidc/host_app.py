@@ -581,6 +581,7 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
+        ui_language=lambda _request: None,
     )
 
     @app.get("/me")

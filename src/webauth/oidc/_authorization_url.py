@@ -8,6 +8,8 @@ import hashlib
 import urllib.parse
 from typing import TYPE_CHECKING
 
+from webauth.languages import is_language_tag
+
 if TYPE_CHECKING:
     from webauth.cookies import PendingLogin
     from webauth.oidc._client_config import OidcClientConfig
@@ -15,8 +17,15 @@ if TYPE_CHECKING:
 __all__ = ["authorization_url"]
 
 
-def authorization_url(config: OidcClientConfig, pending: PendingLogin) -> str:
-    """The issuer's authorization endpoint with the query that begins ``pending``."""
+def authorization_url(
+    config: OidcClientConfig, pending: PendingLogin, *, ui_locales: str | None
+) -> str:
+    """The issuer's authorization endpoint with the query that begins ``pending``, naming
+    ``ui_locales`` as the person's language when it is not ``None``. Raises ``ValueError`` for a
+    string that is not a language tag in shape, so nothing the host passed is ever sent as
+    anything but one tag."""
+    if ui_locales is not None and not is_language_tag(ui_locales):
+        raise ValueError("ui_locales is not a language tag in shape")
     query = urllib.parse.urlencode(
         {
             "response_type": "code",
@@ -27,6 +36,7 @@ def authorization_url(config: OidcClientConfig, pending: PendingLogin) -> str:
             "nonce": pending.nonce,
             "code_challenge": _s256_code_challenge(pending.code_verifier),
             "code_challenge_method": "S256",
+            **({} if ui_locales is None else {"ui_locales": ui_locales}),
         }
     )
     return f"{config.authorization_endpoint}?{query}"

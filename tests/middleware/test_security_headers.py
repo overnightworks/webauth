@@ -507,6 +507,7 @@ def the_logout_page(
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
+        ui_language=lambda _request: None,
     )
 
     return TestClient(app).post(LOGOUT_PATH, headers={"sec-fetch-site": "same-origin"})

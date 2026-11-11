@@ -57,6 +57,7 @@ from webauth.jwt_verification import (
     KeySetFetch,
     MonotonicClock,
 )
+from webauth.languages import AppLanguages, resolve_language
 from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
@@ -255,6 +256,15 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
+        ui_language=a_host_names_the_language_of_a_request,
+    )
+
+
+def a_host_names_the_language_of_a_request(request: Request) -> str | None:
+    return resolve_language(
+        AppLanguages(offered=("en", "de"), default="en"),
+        account_tag=None,
+        accept_language=request.headers.get("accept-language"),
     )
 
 
