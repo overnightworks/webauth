@@ -216,7 +216,7 @@ class TestARouteWithAControlCharacterInItsPath:
             assert response.status_code == 200
             assert arrangement.route_runs != []
 
-    def test_a_stack_installed_with_the_minimum_refuses_and_exports_no_way_to_install_it_alone(
+    def test_a_minimal_install_refuses_and_webauth_middleware_does_not_export_the_class(
         self,
     ) -> None:
         """STACK-11: always installed, no policy and no option, not exported."""
