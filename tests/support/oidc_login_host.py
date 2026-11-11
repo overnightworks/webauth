@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import enum
 import urllib.parse
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from typing import Any
 
+import anyio
 import pytest
-from fastapi import Depends, FastAPI, Request, Response, params
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
@@ -43,14 +44,16 @@ from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     RecordingAuditSink,
     a_web_auth_config,
+    an_http_scope,
+    drive,
 )
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
-from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.config import WebAuthConfig, install_web_auth_config, web_auth_config
 from webauth.cookies import (
     _pending_login_cookie_name,
     _pending_login_cookie_prefix,
 )
-from webauth.dependencies import current_user_dependency
+from webauth.dependencies import account_language_of_session, current_user_dependency
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     OidcClientConfig,
@@ -97,6 +100,7 @@ CLIENT_ID = "lab-app <\"&'>"
 START_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
+LANGUAGE_PATH = "/language"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
 LOGOUT_LANGUAGE = "en-US"
@@ -347,6 +351,14 @@ class OidcHost:
         params = {} if return_to is None else {"next": return_to}
         return self.client.get(START_PATH, params=params).headers["location"]
 
+    def drive_start(self) -> tuple[list[dict[str, object]], BaseException | None]:
+        """Visit the start route below the test client: the ASGI messages it sent and the
+        exception it raised, if any."""
+        app: FastAPI = self.client.app  # pyright: ignore[reportAssignmentType]
+        scope = an_http_scope(app, START_PATH, headers=[(b"host", b"testserver")])
+        messages, raised = anyio.run(lambda: drive(app, scope, body_chunks=[]))
+        return [dict(message) for message in messages], raised
+
     def sign_in_at_issuer(self, *, return_to: str | None = None) -> str:
         """Start a login and sign in at the issuer; answer the callback query."""
         return self.issuer.authorize(self.start(return_to=return_to))
@@ -357,6 +369,10 @@ class OidcHost:
             self.client.cookies.clear()
         headers = {} if cookie is None else {"cookie": cookie}
         return self.client.get(f"{CALLBACK_PATH}?{query}", headers=headers)
+
+    def account_language(self) -> str | None:
+        """What the host's page route answers from the browser's session cookie."""
+        return self.client.get(LANGUAGE_PATH).json()["language"]
 
     def pending_cookie_names(self) -> set[str]:
         prefix = _pending_login_cookie_prefix(secure=self.config.cookie_secure)
@@ -372,7 +388,14 @@ class OidcHost:
         return f"{name}={self.client.cookies[name]}"
 
 
-def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding: str = "") -> str:
+def an_id_token(
+    nonce: str,
+    wall_clock: FakeClock,
+    groups_claim: object,
+    padding: str = "",
+    *,
+    locale_claim: object = ABSENT,
+) -> str:
     claims = an_id_token_claims(
         int(wall_clock.now),
         issuer=BOUND_ISSUER,
@@ -381,6 +404,7 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding
         nonce=nonce,
         preferred_username="lena",
         groups=groups_claim,
+        locale=locale_claim,
     )
     claims = {name: value for name, value in claims.items() if value is not ABSENT}
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
@@ -416,7 +440,7 @@ def _add_the_login_routes(
     keeps_id_token: bool,
     admission: AdmissionConfig,
     logout_page_text: Callable[[Request], LogoutPageText],
-    backchannel_dependencies: Sequence[params.Depends],
+    ui_language: Callable[[Request], str | None],
 ) -> None:
     def refused(request: Request, refusal: SignInRefusal) -> Response:
         current = host()
@@ -433,7 +457,7 @@ def _add_the_login_routes(
         keeps_id_token=keeps_id_token,
         max_sessions=max_sessions,
         logout_page_text=logout_page_text,
-        backchannel_dependencies=backchannel_dependencies,
+        ui_language=ui_language,
     )
 
 
@@ -451,15 +475,26 @@ def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) ->
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
         return {"username": user.username}
 
+    @app.get(LANGUAGE_PATH)
+    def language(request: Request) -> dict[str, str | None]:
+        return {
+            "language": account_language_of_session(
+                request, sessions=sessions, config=web_auth_config(request)
+            )
+        }
+
 
 def _an_issuer_side(
     wall_clock: FakeClock,
     groups_claim: object,
+    locale_claim: object,
 ) -> tuple[FakeIssuer, FakeKeySetEndpoint, OidcRelyingParty, list[str]]:
     issued_id_tokens: list[str] = []
 
     def mint_id_token(nonce: str) -> str:
-        issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
+        issued_id_tokens.append(
+            an_id_token(nonce, wall_clock, groups_claim, locale_claim=locale_claim)
+        )
         return issued_id_tokens[-1]
 
     issuer = FakeIssuer(mint_id_token=mint_id_token)
@@ -530,6 +565,7 @@ def _a_client_of(app: FastAPI, root_path: str) -> TestClient:
 def an_oidc_host(
     *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
+    locale_claim: object = ABSENT,
     address_budget: int | None = None,
     max_sessions: int | None = None,
     root_path: str = "",
@@ -541,7 +577,7 @@ def an_oidc_host(
     admission: AdmissionConfig = ADMISSION,
     account_store: type[UsersWithSnapshots] = UsersWithSnapshots,
     logout_page_text: Callable[[Request], LogoutPageText] = lambda _request: LOGOUT_PAGE_TEXT,
-    backchannel_dependencies: Sequence[params.Depends] = (),
+    ui_language: Callable[[Request], str | None] = lambda _request: None,
     **config_overrides: object,
 ) -> OidcHost:
     config = a_web_auth_config(**config_overrides)
@@ -549,7 +585,9 @@ def an_oidc_host(
         users, stored_session, transaction_kind, strict_records, account_store
     )
     wall_clock = FakeClock(float(NOW))
-    issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(wall_clock, groups_claim)
+    issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(
+        wall_clock, groups_claim, locale_claim
+    )
     app = _a_host_app(config, address_budget, behind_base_http_middleware)
     holder: list[OidcHost] = []
     _add_the_login_routes(
@@ -560,7 +598,7 @@ def an_oidc_host(
         keeps_id_token=keeps_id_token,
         admission=admission,
         logout_page_text=logout_page_text,
-        backchannel_dependencies=backchannel_dependencies,
+        ui_language=ui_language,
     )
     _add_the_signed_in_routes(app, stores.sessions)
     holder.append(

@@ -102,6 +102,7 @@ def _a_gated_host(
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
+        ui_language=lambda _request: None,
     )
 
     @app.get("/albums/{album_id}")
@@ -132,7 +133,7 @@ def _backchannel_post(host: GatedHost, size: int = 0) -> int:
 
 
 def test_the_installer_is_refused_without_sign_in_paths() -> None:
-    """SIGNIN-67: the installer requires `sign_in_paths`."""
+    """SIGNIN-64: the installer requires `sign_in_paths`."""
     app = FastAPI()
     csrf_origin = CsrfPolicy()
 
@@ -213,7 +214,7 @@ def test_a_host_rule_keeps_deciding_the_paths_the_sign_in_paths_do_not_name() ->
 
 
 def test_the_forty_first_sign_in_request_in_ten_minutes_is_refused_without_a_host_policy() -> None:
-    """SIGNIN-69: the sign-in budget is 40 requests per 10 minutes when the host names none."""
+    """SIGNIN-66: the sign-in budget is 40 requests per 10 minutes when the host names none."""
     host = _a_gated_host()
 
     statuses = _statuses_of_gets(host, START_PATH, 41)
@@ -265,14 +266,14 @@ def test_the_other_paths_spend_the_default_budget_of_600_per_minute(
 @pytest.mark.parametrize(
     ("path", "budget"),
     [
-        pytest.param(START_PATH, CheckedBudget(limit=40, window_seconds=600), id="SIGNIN-69"),
+        pytest.param(START_PATH, CheckedBudget(limit=40, window_seconds=600), id="SIGNIN-66"),
         pytest.param("/albums/1", CheckedBudget(limit=600, window_seconds=60), id="STACK-05"),
     ],
 )
 def test_a_request_is_checked_with_the_limit_and_window_its_contract_names(
     path: str, budget: CheckedBudget
 ) -> None:
-    """SIGNIN-69: sign-in is 40 per 600 seconds; STACK-05: the default is 600 per 60 seconds."""
+    """SIGNIN-66: sign-in is 40 per 600 seconds; STACK-05: the default is 600 per 60 seconds."""
     recorder = RecordingRateLimitBackend()
     host = _a_gated_host(rate_limits=recorder)
 
@@ -282,7 +283,7 @@ def test_a_request_is_checked_with_the_limit_and_window_its_contract_names(
 
 
 def test_a_sign_in_path_in_the_host_exemption_spends_no_budget() -> None:
-    """SIGNIN-72: a path in the host's exemption spends no budget, a sign-in path included."""
+    """SIGNIN-69: a path in the host's exemption spends no budget, a sign-in path included."""
     host = _a_gated_host(
         rate_limit=RateLimitPolicy(
             sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 1, 60),
@@ -294,7 +295,7 @@ def test_a_sign_in_path_in_the_host_exemption_spends_no_budget() -> None:
 
 
 def test_head_and_options_on_a_sign_in_path_spend_the_sign_in_budget() -> None:
-    """SIGNIN-73: the rate limit counts every method on a path."""
+    """SIGNIN-70: the rate limit counts every method on a path."""
     host = _a_gated_host(
         rate_limit=RateLimitPolicy(sign_in=RateLimitBudget(SIGN_IN_BUDGET_NAME, 2, 60)),
     )
@@ -313,7 +314,7 @@ def test_a_sign_in_flood_does_not_spend_the_budget_of_the_other_paths() -> None:
 
 
 def test_a_host_rate_policy_decides_the_rest_and_the_sign_in_budget_comes_first() -> None:
-    """SIGNIN-68: the sign-in budget is the first rate rule, ahead of the host's own."""
+    """SIGNIN-65: the sign-in budget is the first rate rule, ahead of the host's own."""
     host = _a_gated_host(
         rate_limit=RateLimitPolicy(
             default=RateLimitBudget("host", 2, 60),
@@ -328,7 +329,7 @@ def test_a_host_rate_policy_decides_the_rest_and_the_sign_in_budget_comes_first(
 
 
 def test_a_host_sign_in_budget_applies_on_the_sign_in_paths() -> None:
-    """SIGNIN-69: a host policy may set another sign-in budget."""
+    """SIGNIN-66: a host policy may set another sign-in budget."""
     host = _a_gated_host(
         rate_limit=RateLimitPolicy(
             default=RateLimitBudget("host", 1000, 60),
@@ -375,7 +376,7 @@ def test_a_host_budget_under_the_reserved_sign_in_name_fails_at_construction(
     default: RateLimitBudget,
     rules: tuple[RateLimitRule, ...],
 ) -> None:
-    """SIGNIN-70: the name is reserved."""
+    """SIGNIN-67: the name is reserved."""
     with pytest.raises(ValueError, match=SIGN_IN_BUDGET_NAME):
         RateLimitPolicy(default=default, rules=rules)
 
@@ -509,7 +510,7 @@ def test_without_a_session_gate_a_signed_out_request_reaches_any_route() -> None
 
 
 def test_sign_in_paths_with_start_and_callback_only_derive_no_logout_or_back_channel_rule() -> None:
-    """SIGNIN-71: a route the paths do not name gets no rule."""
+    """SIGNIN-68: a route the paths do not name gets no rule."""
     host = _a_gated_host(sign_in_paths=SignInPaths(start=START_PATH, callback=CALLBACK_PATH))
 
     forged_logout = host.client.post(LOGOUT_PATH, headers=FORM_HEADER)

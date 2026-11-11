@@ -18,7 +18,7 @@ from datetime import timedelta
 
 import anyio
 import pytest
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -591,7 +591,7 @@ def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_ex
 
 
 def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises() -> None:
-    """SIGNIN-61: install without `keeps_id_token` raises `TypeError` and registers no route."""
+    """SIGNIN-58: install without `keeps_id_token` raises `TypeError` and registers no route."""
     app = FastAPI()
     arguments = _install_arguments()
     del arguments["keeps_id_token"]
@@ -615,7 +615,7 @@ def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises()
 def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_is_registered(
     max_sessions: object,
 ) -> None:
-    """SIGNIN-62: install validates `max_sessions` before it registers a route."""
+    """SIGNIN-59: install validates `max_sessions` before it registers a route."""
     app = FastAPI()
     arguments = {**_install_arguments(), "max_sessions": max_sessions}
 
@@ -680,25 +680,8 @@ def _install_arguments() -> dict[str, object]:
         "keeps_id_token": True,
         "max_sessions": None,
         "logout_page_text": lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        "backchannel_dependencies": (),
+        "ui_language": lambda _request: None,
     }
-
-
-def test_back_channel_dependencies_without_a_back_channel_path_refuse_install_before_any_route() -> (  # noqa: E501
-    None
-):
-    """SIGNIN-46: dependencies without the back-channel path refuse install before any route."""
-    app = FastAPI()
-    arguments = {
-        **_install_arguments(),
-        "paths": SignInPaths(start=START_PATH, callback=CALLBACK_PATH, logout=LOGOUT_PATH),
-        "backchannel_dependencies": [Depends(lambda: None)],
-    }
-
-    with pytest.raises(ValueError, match="backchannel"):
-        install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
-
-    assert not _sign_in_routes_of(app)
 
 
 def _sign_in_routes_of(app: FastAPI) -> list[str]:

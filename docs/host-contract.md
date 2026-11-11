@@ -510,7 +510,9 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
 one of the app's own languages for a request. `languages` is an `AppLanguages(offered, default)`
 the app builds once. `account_tag` is the account's tag as the issuer gave it, and
 `accept_language` is the request's `Accept-Language` header as one string: a host with several
-header lines joins them with commas.
+header lines joins them with commas. `account_language_of_session(connection, *, sessions, config)`
+from `webauth.dependencies` answers the account's tag for the request, from the session row.
+`install_sign_in_routes(..., ui_language=...)` names the resolved language to the issuer.
 
 **LANGUAGE-01** `AppLanguages` raises `ValueError` when built if an offered tag or the default is not a
 language tag in shape, the shape `SIGNIN-14` gives.
@@ -550,8 +552,64 @@ malformed (`q=2`, `q=x`) is dropped alone, and the rest of the header still coun
 `i-klingon`, the empty string), or that matches no offered tag counts as absent, and the header decides.
 Nothing is normalised: `" de"` is not `de`.
 
-**Host duty:** The app writes only the resolver's answer into `<html lang>`, never an account's tag as
-received.
+**LANGUAGE-13** The callback reads the verified ID token's `locale` claim into the session row it creates,
+as `SessionRecord.account_language`: kept when it is a non-empty string of at most
+`MAX_ACCOUNT_LANGUAGE_CHARS` characters (35, the length RFC 5646 section 4.4.1 asks every implementation
+to support) and every character of it is printable (`str.isprintable`), else `None`: a missing claim, a
+claim that is not a string, the empty string, a longer one, one carrying a control character such as NUL or a
+line break. The printable rule is storage hygiene, not a judgement of the tag.
+
+**LANGUAGE-14** The tag is kept as the issuer gave it: webauth neither checks its shape nor normalises it.
+`resolve_language` is the one place that judges a tag.
+
+**LANGUAGE-15** A `locale` claim never refuses a sign-in.
+
+**LANGUAGE-16** The tag is written once, when the callback creates the session. Renewal, refresh-token
+rotation and `touch` leave it, so a change of the account's language shows after the next sign-in.
+
+**LANGUAGE-17** `account_language_of_session(connection, *, sessions, config)` answers the
+`account_language` of the session the connection's cookie names.
+
+**LANGUAGE-18** It answers `None` when `session_id_from_request` does (no cookie, a forged or doubled one,
+a request the bearer gate admitted), when the store holds no such row, when the row is outside its
+lifetime by the rule `admit_session` applies, and when the row holds none.
+
+**LANGUAGE-19** It only calls `load`: it never renews a session, refuses a request or sets a cookie, so a
+public page calls it without sliding a session's expiry.
+
+**LANGUAGE-20** A failing store raises.
+
+**LANGUAGE-21** `install_sign_in_routes` requires `ui_language: Callable[[Request], str | None]`, with no
+default: an install without it raises `TypeError` and registers no route.
+
+**LANGUAGE-22** The start route calls it once per request, with that request.
+
+**LANGUAGE-23** A tag sends `ui_locales=<tag>` in the authorization request (OpenID Connect Core 1.0
+section 3.1.2.1), exactly once and spelled as the host gave it. The rest of the request is the one
+sent without a language.
+
+**LANGUAGE-24** `None` sends no `ui_locales`.
+
+**LANGUAGE-25** A string that is not a language tag in shape (`pt_BR`, the empty string, two tags with a
+space) raises `ValueError` from the start route: a host's error, never sent to the issuer. The route
+sends no redirect and sets no pending cookie.
+
+**LANGUAGE-26** `OidcRelyingParty.begin_login(*, ui_locales)` requires the keyword and follows
+LANGUAGE-23 to LANGUAGE-25 on its own, for a host that begins a login itself. `is_language_tag` is the
+one judge of the shape.
+
+**LANGUAGE-27** The value is stored in neither the pending cookie nor the session, and webauth writes it
+to no log line.
+
+**Host duty:** The session table has a nullable column of at least `MAX_ACCOUNT_LANGUAGE_CHARS`
+characters, written at `create` and returned by the record as `account_language`; a row stored before
+the column reads `None`.
+
+**Host duty:** The app passes the function's answer to `resolve_language` as `account_tag` and writes only
+the resolver's answer into `<html lang>`, never an account's tag as received.
+
+**Host duty:** The `ui_language` callable answers `resolve_language`'s answer for the request, or `None` for
+a host that names no language (`lambda request: None`).
 
 ## The protected resource
 
@@ -781,7 +839,7 @@ By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) 
 
 ## The sign-in routes
 
-The operator ruled the host duty that a single-page app logs out by a top-level form POST, SIGNIN-61, the host duty that a host serving no logout route passes `False`, SIGNIN-63 and SIGNIN-64; no other sentence of this section is ruled.
+The operator ruled the host duty that a single-page app logs out by a top-level form POST; SIGNIN-58; the host duty that a host serving no logout route passes `False`; SIGNIN-60; SIGNIN-61; no other sentence of this section is ruled.
 
 - **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
   `FastAPI` app.
@@ -800,13 +858,13 @@ The operator ruled the host duty that a single-page app logs out by a top-level 
 So the host lists the paths once. `login_redirect` is browser-absolute, so it is right for an app at its origin's root.
 
 - **Host duty:** a host below a `root_path` builds its own `LoginRedirect`.
-- **SIGNIN-67** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
-- **SIGNIN-68** The derived rules come ahead of the host's own in every policy, so the first match is the derived one (a host exemption wins: SIGNIN-72).
-- **SIGNIN-69** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
-- **SIGNIN-70** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
-- **SIGNIN-71** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.
-- **SIGNIN-72** A path in the host's `RateLimitPolicy.exempt` spends no budget, a sign-in path included.
-- **SIGNIN-73** The rate limit counts every method on a path, so `HEAD` and `OPTIONS` on a sign-in path spend the sign-in budget; a host's CORS middleware installed outside the stack answers preflights first.
+- **SIGNIN-64** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
+- **SIGNIN-65** The derived rules come ahead of the host's own in every policy, so the first match is the derived one (a host exemption wins: SIGNIN-69).
+- **SIGNIN-66** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
+- **SIGNIN-67** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
+- **SIGNIN-68** A `SignInPaths` without `logout` or `backchannel_logout` derives no rule for the route it leaves out.
+- **SIGNIN-69** A path in the host's `RateLimitPolicy.exempt` spends no budget, a sign-in path included.
+- **SIGNIN-70** The rate limit counts every method on a path, so `HEAD` and `OPTIONS` on a sign-in path spend the sign-in budget; a host's CORS middleware installed outside the stack answers preflights first.
 - **SIGNIN-10** The library serves the logout route at `SignInPaths.logout` for `POST` only,
 - **SIGNIN-11** with the page's text from the host's `logout_page_text`, read per request:
 - **SIGNIN-12** a `LogoutPageText` whose `button_label` is the title and the button,
@@ -870,48 +928,43 @@ The back-channel logout route:
 - **SIGNIN-42** and must differ from every other path, `logout` included.
 - **SIGNIN-43** Only that exact path is exempt from the origin check, and logout is never exempt;
 - **SIGNIN-44** only that exact path is exempt from the rate limit, and logout is never exempt.
-- **SIGNIN-45** The host's `backchannel_dependencies` run before the body is read,
-- **SIGNIN-46** and are given only with that path or install raises `ValueError` before any route is registered.
-- **Host duty:** a host answers an empty 404 by raising its own exception class and mapping it with
-  `app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))`: an `HTTPException(404)` answers JSON, and a `Response` returned from a dependency does not stop the route.
 
 The answers are, in order:
 
-- **SIGNIN-47** 413 for a declared `Content-Length` over the bound, before any dependency;
-- **SIGNIN-48** the dependencies' own;
-- **SIGNIN-49** 413 for a streamed body over the bound;
-- **SIGNIN-50** an empty 400 for a request that is not one URL-encoded form with exactly one
+- **SIGNIN-45** 413 for a declared `Content-Length` over the bound, before the body is read;
+- **SIGNIN-46** 413 for a streamed body over the bound;
+- **SIGNIN-47** an empty 400 for a request that is not one URL-encoded form with exactly one
   non-empty `logout_token`, before any transaction is entered;
-- **SIGNIN-51** an empty 400 for a token that does not verify, before any transaction is entered;
-- **SIGNIN-52** an empty 200 after the clean exit of one `SignInTransaction` entry;
-- **SIGNIN-53** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
+- **SIGNIN-48** an empty 400 for a token that does not verify, before any transaction is entered;
+- **SIGNIN-49** an empty 200 after the clean exit of one `SignInTransaction` entry;
+- **SIGNIN-50** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
   sink or the exit.
 
-- **SIGNIN-54** A subject without an account is accepted and provisions nothing;
-- **SIGNIN-55** a known subject loses every session in every browser,
-- **SIGNIN-56** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
-- **SIGNIN-57** The route clears no cookie
-- **SIGNIN-58** and calls no issuer endpoint beyond the key fetch of verification.
-- **SIGNIN-59** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
+- **SIGNIN-51** A subject without an account is accepted and provisions nothing;
+- **SIGNIN-52** a known subject loses every session in every browser,
+- **SIGNIN-53** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
+- **SIGNIN-54** The route clears no cookie
+- **SIGNIN-55** and calls no issuer endpoint beyond the key fetch of verification.
+- **SIGNIN-56** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
 
 - **Host duty:** the host's transaction rolls back when the back-channel block raises, also when the audit
   sink fails after the deletion.
 - **Host duty:** the host's transaction commits only for an accepted token.
-- **SIGNIN-60** A per-call host keeps the sessions ended before the failure, and no event is emitted again.
+- **SIGNIN-57** A per-call host keeps the sessions ended before the failure, and no event is emitted again.
 
 The back-channel route is open to anyone who can reach it, and the token is its only control.
 
 - **Host duty:** the host lets the issuer reach it over an internal network alone, never the public route
   (tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
 
-- **SIGNIN-61** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
+- **SIGNIN-58** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
   default,
-- **SIGNIN-62** and validates `max_sessions` before it registers a route.
+- **SIGNIN-59** and validates `max_sessions` before it registers a route.
 - **Host duty:** a host that serves no logout route passes `False`.
-- **SIGNIN-63** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
-- **SIGNIN-64** With `True`, the row keeps the login's ID token for logout.
-- **SIGNIN-65** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
-- **SIGNIN-66** and the choice of a row that keeps none.
+- **SIGNIN-60** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
+- **SIGNIN-61** With `True`, the row keeps the login's ID token for logout.
+- **SIGNIN-62** Renewal and refresh-token rotation preserve the original token of a row that keeps it,
+- **SIGNIN-63** and the choice of a row that keeps none.
 
 ## The single-process stores
 
@@ -938,6 +991,7 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **MEMSTORE-18** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
 - **MEMSTORE-19** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
 - **MEMSTORE-20** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
+- **MEMSTORE-21** `create` keeps the account's language it is given on the session, and `load` returns it.
 - **Host duty:** an entry copies both tables, so its cost grows with the stored accounts and sessions; keep the store small by calling `delete_expired` on a timer.
 
 The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.

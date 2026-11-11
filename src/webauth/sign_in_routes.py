@@ -44,22 +44,17 @@ issuer posts one URL-encoded form with one non-empty ``logout_token`` when a per
 at the issuer ends. The route answers in this order:
 
 1. A declared ``Content-Length`` over the back-channel limit gets 413 from the body-size
-   middleware the installer configures before any dependency runs.
-2. ``backchannel_dependencies`` run before the body is read. A host answers an empty 404 by
-   raising its own exception class and mapping it with
-   ``app.add_exception_handler(ThatError, lambda request, error: Response(status_code=404))``:
-   an ``HTTPException(404)`` answers JSON, and a ``Response`` returned from a dependency does
-   not stop the endpoint.
-3. The body is read outside every catch, so a streamed oversized body gets 413.
-4. A request that is not one form with exactly one non-empty ``logout_token``, or whose token
+   middleware the installer configures before the body is read.
+2. The body is read outside every catch, so a streamed oversized body gets 413.
+3. A request that is not one form with exactly one non-empty ``logout_token``, or whose token
    does not verify, gets an empty 400. The token is verified before the transaction, so a
    refusal enters none.
-5. 200 only after a clean exit of the one ``SignInTransaction`` entry, in which a subject
+4. 200 only after a clean exit of the one ``SignInTransaction`` entry, in which a subject
    with an account loses every session in every browser and one ``BACKCHANNEL_LOGOUT`` event
    with ``actor_id=None`` is recorded when at least one session ended. A subject without an
    account is accepted and provisions nothing. The route clears no cookie and calls no
    issuer endpoint beyond the key fetch of verification.
-6. Any exception in ``relying_party``, the verification, a store, the audit sink or the exit
+5. Any exception in ``relying_party``, the verification, a store, the audit sink or the exit
    gets an empty 400 and is then re-raised.
 
 The host's transaction rolls back when the block raises, also when the audit sink fails after
@@ -104,9 +99,8 @@ from webauth.oidc_login import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
-    from fastapi import params
     from starlette.types import Message, Receive, Scope, Send
 
     from webauth.cookies import PendingLogin
@@ -235,7 +229,7 @@ def install_sign_in_routes(
     keeps_id_token: bool,
     max_sessions: int | None,
     logout_page_text: Callable[[Request], LogoutPageText] | None,
-    backchannel_dependencies: Sequence[params.Depends] = (),
+    ui_language: Callable[[Request], str | None],
 ) -> None:
     """Register the start and callback routes of the sign-in, the logout route and the
     back-channel logout route on ``app``.
@@ -264,11 +258,11 @@ def install_sign_in_routes(
     The logout route ends the session the request's cookie names and answers the page that
     ends the issuer's; ``logout_page_text`` is read per request: its label and ``<html lang>``.
 
-    ``backchannel_dependencies`` need ``paths.backchannel_logout``, or ``ValueError`` is raised
-    before a route is registered. The module docstring holds the back-channel's answers.
+    The module docstring holds the back-channel's answers.
 
-    ``relying_party`` is read per request. ``keeps_id_token`` has no default: ``True`` stores
-    the login's ID token so the logout posts it as the hint, ``False`` stores none.
+    ``relying_party`` is read per request. ``ui_language`` is called once per start request and
+    its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
+    ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
     ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``
     is raised before a route is registered. ``paths.logout`` and ``logout_page_text`` come
     together: a host without a logout route passes ``None`` for both, and exactly one of them
@@ -278,11 +272,11 @@ def install_sign_in_routes(
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
     if (paths.logout is None) != (logout_page_text is None):
         raise ValueError("paths.logout and logout_page_text must both be given or both be None")
-    if backchannel_dependencies and paths.backchannel_logout is None:
-        raise ValueError("backchannel_dependencies need paths.backchannel_logout")
-    routes = _SignIn(relying_party, admission, transaction, refused, keeps_id_token, max_sessions)
+    routes = _SignIn(
+        relying_party, admission, transaction, refused, keeps_id_token, max_sessions, ui_language
+    )
 
-    _register_routes(app, paths, routes, logout_page_text, backchannel_dependencies)
+    _register_routes(app, paths, routes, logout_page_text)
 
 
 def _register_routes(
@@ -290,7 +284,6 @@ def _register_routes(
     paths: SignInPaths,
     routes: _SignIn,
     logout_page_text: Callable[[Request], LogoutPageText] | None,
-    backchannel_dependencies: Sequence[params.Depends],
 ) -> None:
     def start(request: Request, next: str | None = None) -> Response:  # noqa: A002
         return routes.start(request, next)
@@ -316,7 +309,6 @@ def _register_routes(
             paths.backchannel_logout,
             backchannel_logout,
             methods=["POST"],
-            dependencies=list(backchannel_dependencies),
             include_in_schema=False,
         )
 
@@ -329,6 +321,7 @@ class _SignIn:
     refused: Callable[[Request, SignInRefusal], Response]
     keeps_id_token: bool
     max_sessions: int | None
+    ui_language: Callable[[Request], str | None]
 
     def start(self, request: Request, return_to: str | None) -> Response:
         answer = Response(status_code=303)
@@ -338,6 +331,7 @@ class _SignIn:
             answer,
             web_auth_config(request),
             return_to=return_to,
+            ui_locales=self.ui_language(request),
         )
         return answer
 

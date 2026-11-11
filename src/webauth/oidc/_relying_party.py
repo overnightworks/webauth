@@ -38,7 +38,6 @@ message this module writes.
 from __future__ import annotations
 
 import base64
-import hashlib
 import hmac
 import re
 import secrets
@@ -66,7 +65,9 @@ from webauth.jwt_verification import (
     _Rejected,
     _VerifiedClaims,
 )
+from webauth.oidc._authorization_url import authorization_url
 from webauth.oidc._client_config import OidcClientConfig
+from webauth.oidc._locale_claim import account_language_claim
 from webauth.policies import AuthorizedParties, _require_authorized_parties
 from webauth.ports import AgentFacts
 
@@ -189,8 +190,8 @@ class OidcIdentity:
     paths, uninterpreted; `session_id` is the issuer's `sid`; `id_token` is the
     verified ID token as received, which only ever goes back to the issuer as
     the logout hint; `refresh_token` is the one the code exchange issued, or
-    `None` when the issuer gave none. The exchange's access token is never
-    kept."""
+    `None` when the issuer gave none; `account_language` is the `locale` claim, or `None`.
+    The exchange's access token is never kept."""
 
     subject: str
     issuer: str
@@ -199,6 +200,7 @@ class OidcIdentity:
     preferred_username: str | None
     id_token: str = field(repr=False)
     refresh_token: SecretStr | None
+    account_language: str | None
 
 
 @dataclass(frozen=True)
@@ -279,30 +281,24 @@ class OidcRelyingParty:
     def issuer(self) -> str:
         return self._config.issuer
 
-    def begin_login(self) -> AuthorizationRequest:
+    def begin_login(self, *, ui_locales: str | None) -> AuthorizationRequest:
         """The authorization URL to send the browser to, and the `PendingLogin`
         (state, nonce, PKCE verifier and `issued_at`, the wall-clock second it
-        began) the host keeps until the callback returns."""
+        began) the host keeps until the callback returns.
+
+        `ui_locales` is the language tag the host names for the issuer's pages, sent as the
+        `ui_locales` parameter of OpenID Connect Core section 3.1.2.1 and not kept in the
+        `PendingLogin`; `None` sends none. A string that is not a language tag in shape
+        raises `ValueError`."""
         pending = PendingLogin(
             state=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             nonce=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             code_verifier=secrets.token_urlsafe(_PENDING_SECRET_BYTES),
             issued_at=int(self._wall_clock()),
         )
-        query = urllib.parse.urlencode(
-            {
-                "response_type": "code",
-                "client_id": self._config.client_id,
-                "redirect_uri": self._config.redirect_uri,
-                "scope": " ".join(self._config.scopes),
-                "state": pending.state,
-                "nonce": pending.nonce,
-                "code_challenge": _s256_code_challenge(pending.code_verifier),
-                "code_challenge_method": "S256",
-            }
-        )
         return AuthorizationRequest(
-            url=f"{self._config.authorization_endpoint}?{query}", pending=pending
+            url=authorization_url(self._config, pending, ui_locales=ui_locales),
+            pending=pending,
         )
 
     def _end_session_form(self, *, id_token_hint: SecretStr | None) -> EndSessionForm:
@@ -659,11 +655,6 @@ def _basic_authorization(client_id: str, client_secret: SecretStr) -> SecretStr:
     return SecretStr(f"Basic {base64.b64encode(credentials.encode()).decode()}")
 
 
-def _s256_code_challenge(code_verifier: str) -> str:
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-
-
 def _is_same_secret(received: object, expected: str) -> bool:
     if not expected or not isinstance(received, str) or not is_utf8(received):
         return False
@@ -752,6 +743,7 @@ def _identity_of(
         preferred_username=_optional_string_claim(id_token.claims, "preferred_username"),
         id_token=raw_id_token,
         refresh_token=refresh_token,
+        account_language=account_language_claim(id_token.claims),
     )
 
 

@@ -135,9 +135,12 @@ def _start_login(
     config: WebAuthConfig,
     *,
     return_to: str | None,
+    ui_locales: str | None,
 ) -> str:
     """Begin a login: set its pending-login cookie on ``response`` and return
-    the authorization URL the start route redirects the browser to.
+    the authorization URL the start route redirects the browser to, naming ``ui_locales`` as the
+    person's language when it is not ``None``; a string that is not a language tag in shape
+    raises ``ValueError`` before any cookie is set.
 
     ``return_to`` is the raw path and query as the app sees them, ``root_path``
     included and not the percent-decoded ``request.url.path``, that the callback
@@ -156,7 +159,7 @@ def _start_login(
     sub-app is judged against that mount's ``root_path``. The fragment is lost,
     because browsers never send it.
     """
-    authorization = relying_party.begin_login()
+    authorization = relying_party.begin_login(ui_locales=ui_locales)
     pending = authorization.pending.returning_to(same_app_path(request, return_to))
     _begin_pending_login(
         request,
@@ -185,9 +188,9 @@ def _write_sign_in(
     (``replaced_session_id``) is ended, whoever it belongs to; when ``max_sessions`` is a number,
     the account's newest ``max_sessions - 1`` sessions are kept and the rest ended, so neither
     the replaced session nor the new one counts against the cap; the new session is created,
-    expiring one idle period later, and holds the login's refresh token and, when
-    ``keeps_id_token`` is true, its ID token. Never commits, takes no lock and sets no cookie.
-    Raises ``_UsernameTakenSignal`` before any session is touched.
+    expiring one idle period later, and holds the login's refresh token, its account language
+    and, when ``keeps_id_token`` is true, its ID token. Never commits, takes no lock and sets no
+    cookie. Raises ``_UsernameTakenSignal`` before any session is touched.
     """
     account = _admit_account(
         admitted.identity,
@@ -207,6 +210,7 @@ def _write_sign_in(
         expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
         refresh_token=identity.refresh_token,
         id_token=SecretStr(identity.id_token) if keeps_id_token else None,
+        account_language=identity.account_language,
     ).id
 
 

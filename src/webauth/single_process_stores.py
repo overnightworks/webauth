@@ -57,6 +57,7 @@ class StoredSession:
     expires_at: datetime
     refresh_token: SecretStr | None
     id_token: SecretStr | None = field(repr=False)
+    account_language: str | None
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ class _SessionRow:
     expires_at: datetime
     refresh_token: SecretStr | None
     id_token: SecretStr | None = field(repr=False)
+    account_language: str | None
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,7 @@ def _joined(row: _SessionRow, user: StoredAccount) -> StoredSession:
         expires_at=row.expires_at,
         refresh_token=row.refresh_token,
         id_token=row.id_token,
+        account_language=row.account_language,
     )
 
 
@@ -195,6 +198,7 @@ class SingleProcessSessionStore:
         expires_at: datetime,
         refresh_token: SecretStr | None,
         id_token: SecretStr | None,
+        account_language: str | None,
     ) -> StoredSession:
         """Mint the session under a fresh id and drop every session expired at `now`."""
         row = _SessionRow(
@@ -204,6 +208,7 @@ class SingleProcessSessionStore:
             expires_at=expires_at,
             refresh_token=refresh_token,
             id_token=id_token,
+            account_language=account_language,
         )
         with self._tables.guard:
             user = self._tables.accounts[user_id]

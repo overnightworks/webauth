@@ -53,6 +53,7 @@ LENA = OidcIdentity(
     preferred_username="lena",
     id_token=a_fake_id_token("lena"),
     refresh_token=None,
+    account_language=None,
 )
 
 

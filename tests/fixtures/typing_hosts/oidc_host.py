@@ -41,6 +41,7 @@ from webauth.dependencies import (
     AuthDependencies,
     ConnectionRefusal,
     LoginRedirect,
+    account_language_of_session,
     admit_session,
     authenticate_websocket,
     current_user_dependency,
@@ -56,6 +57,7 @@ from webauth.jwt_verification import (
     KeySetFetch,
     MonotonicClock,
 )
+from webauth.languages import AppLanguages, resolve_language
 from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
@@ -152,6 +154,7 @@ class HostSession:
     expires_at: datetime
     refresh_token: SecretStr | None
     id_token: SecretStr | None
+    account_language: str | None
 
 
 class HostAccounts:
@@ -179,9 +182,10 @@ class HostSessions:
         expires_at: datetime,
         refresh_token: SecretStr | None,
         id_token: SecretStr | None,
+        account_language: str | None,
     ) -> HostSession:
         user = HostAccount(user_id, "someone", "user", AccountKind.PERSON)
-        return HostSession("id", user, now, expires_at, refresh_token, id_token)
+        return HostSession("id", user, now, expires_at, refresh_token, id_token, account_language)
 
     def load(self, session_id: str) -> HostSession | None:
         return None
@@ -252,7 +256,15 @@ def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingP
         keeps_id_token=True,
         max_sessions=None,
         logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        backchannel_dependencies=[Depends(lambda: None)],
+        ui_language=a_host_names_the_language_of_a_request,
+    )
+
+
+def a_host_names_the_language_of_a_request(request: Request) -> str | None:
+    return resolve_language(
+        AppLanguages(offered=("en", "de"), default="en"),
+        account_tag=None,
+        accept_language=request.headers.get("accept-language"),
     )
 
 
@@ -473,6 +485,13 @@ def a_host_admits_a_session_without_a_request(
     config: WebAuthConfig,
 ) -> AuthenticatedUser | ConnectionRefusal:
     return admit_session(session_id, sessions=HostSessions(), config=config)
+
+
+def a_host_reads_the_account_language(
+    connection: HTTPConnection,
+    config: WebAuthConfig,
+) -> str | None:
+    return account_language_of_session(connection, sessions=HostSessions(), config=config)
 
 
 def a_host_installs_the_middleware(
