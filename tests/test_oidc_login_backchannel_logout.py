@@ -372,21 +372,12 @@ def an_oversized_streamed_body() -> Iterator[bytes]:
         yield b"x" * 1024
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        pytest.param(b"x" * (BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1), id="declared"),
-        pytest.param(an_oversized_streamed_body(), id="streamed"),
-    ],
-)
-def test_an_oversized_logout_body_is_refused_and_ends_nothing(
-    body: bytes | Iterator[bytes],
-) -> None:
-    """SIGNIN-07, SIGNIN-46: a body over the derived bound gets 413, a streamed one before the form
-    is read."""
+def test_a_streamed_logout_body_over_the_bound_is_refused_and_ends_nothing() -> None:
+    """SIGNIN-07, SIGNIN-46: a streamed body over the derived bound gets 413 before the form is
+    read."""
     host = a_host_with_sessions(subject_sessions=1)
 
-    response = post_backchannel_logout(host, body)
+    response = post_backchannel_logout(host, an_oversized_streamed_body())
 
     assert (response.status_code, sessions_of(host, SUBJECT)) == (413, 1)
 
@@ -529,12 +520,23 @@ def test_after_back_channel_logout_no_stored_row_holds_the_login_token() -> None
 
 
 def test_a_declared_oversized_body_gets_413_before_the_body_is_read() -> None:
-    """SIGNIN-45: a declared `Content-Length` over the bound gets 413 before the body is read."""
-    host = an_oidc_host()
+    """SIGNIN-07, SIGNIN-45: a declared `Content-Length` over the bound gets 413 before the body is
+    read, and ends nothing."""
+    host = a_host_with_sessions(subject_sessions=1)
+    chunks_read: list[bytes] = []
 
-    response = post_backchannel_logout(host, b"x" * (BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1))
+    def a_body_that_records_its_reading() -> Iterator[bytes]:
+        for chunk in an_oversized_streamed_body():
+            chunks_read.append(chunk)
+            yield chunk
 
-    assert response.status_code == 413
+    response = post_backchannel_logout(
+        host,
+        a_body_that_records_its_reading(),
+        {**FORM, "content-length": str(BACKCHANNEL_LOGOUT_MAX_BODY_BYTES + 1)},
+    )
+
+    assert (response.status_code, chunks_read, sessions_of(host, SUBJECT)) == (413, [], 1)
 
 
 def _a_relying_party_that_raises(_request: Request) -> NoReturn:
