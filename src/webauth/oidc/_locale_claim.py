@@ -9,6 +9,8 @@ from webauth.ports import MAX_ACCOUNT_LANGUAGE_CHARS
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+__all__ = ["account_language_claim"]
+
 
 def account_language_claim(claims: Mapping[str, object]) -> str | None:
     """The ``locale`` claim as the issuer gave it, or ``None`` when it is missing, no string,
