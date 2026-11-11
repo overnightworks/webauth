@@ -1,0 +1,8 @@
+claim_id = "1e6a6cb987354ab0907957a0f879273a"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "b6e49099653b176feb51fe6b0444bc8a30e3e874"
+branch = "claude/issue-731-export-path-refusal"
+scope = ["docs/host-contract.md", "src/webauth/middleware/__init__.py", "src/webauth/middleware/_path_refusal.py", "src/webauth/middleware/path_refusal.py", "src/webauth/middleware/stack.py", "tests/middleware/test_path_refusal.py", "tests/middleware/test_stack.py"]
+opened_commit = "0f7f3eba84ff5fd86fd5abded1c8db09b01b321b"
+whole_reason = "One class moves to a public module name, and its export, its contract sentence and the two tests that import it move with it."
