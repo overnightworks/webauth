@@ -101,6 +101,9 @@ def _weighted_range(element: str) -> tuple[str, float] | None:
         return None
     if not parameters:
         return language_range, 1.0
-    if len(parameters) == 1 and (weight := _WEIGHT.fullmatch(parameters[0].strip(_OWS))) is not None:
+    if (
+        len(parameters) == 1
+        and (weight := _WEIGHT.fullmatch(parameters[0].strip(_OWS))) is not None
+    ):
         return language_range, float(weight.group(1))
     return None
