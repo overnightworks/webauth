@@ -1,8 +1,0 @@
-claim_id = "a4a9805f12f9412d909949b6a4a1bc3c"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "c02e10cfec6fdd4d179a56b2a95864744e53f440"
-branch = "claude/issue-718-one-pure-function-resolves-a-person-s-la"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/languages.py", "src/webauth/sign_in_routes.py", "tests/test_languages.py"]
-opened_commit = "657cda793305ae817f9abd73ae02ba31fd582454"
-whole_reason = "One new pure module lands with its contract sentences and tests; sign_in_routes only hands its tag pattern to the new owner and the two documents gain the section and the module line."
