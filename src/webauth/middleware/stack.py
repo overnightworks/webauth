@@ -10,6 +10,7 @@ from starlette.middleware import Middleware
 from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
 from webauth.middleware.body_size import BodySizeLimitMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware
+from webauth.middleware.path_refusal import PathRefusalMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
 from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware
@@ -35,6 +36,7 @@ __all__ = [
 
 _LIBRARY_MIDDLEWARE = (
     SecurityHeadersMiddleware,
+    PathRefusalMiddleware,
     BodySizeLimitMiddleware,
     IpRateLimitMiddleware,
     BearerGateMiddleware,
@@ -137,6 +139,7 @@ def _library_middleware(
             cache_control_rules=(*no_store, *security_headers.cache_control_rules),
         )
     entries = [Middleware(SecurityHeadersMiddleware, policy=security_headers)]
+    entries.append(Middleware(PathRefusalMiddleware))
     entries.append(Middleware(BodySizeLimitMiddleware, policy=body_size))
     entries.append(Middleware(IpRateLimitMiddleware, policy=rate_limit))
     if bearer_gate is not None:
@@ -169,8 +172,8 @@ def install_web_auth_middleware(
     bearer_gate: BearerGate | None = None,
     session_gate: SessionGate | None = None,
 ) -> None:
-    """Install the library's middleware outermost first: security headers, body
-    size, rate limit, bearer gate, CSRF origin, session gate.
+    """Install the library's middleware outermost first: security headers, path refusal,
+    body size, rate limit, bearer gate, CSRF origin, session gate.
 
     ``sign_in_paths`` is the one description of the sign-in routes. From it the installer puts these
     rules ahead of the host's own, so the first match is the derived one (a path the host exempts
@@ -181,8 +184,10 @@ def install_web_auth_middleware(
     without a ``body_size`` it is 4 KiB.
 
     Security headers sit outside everything so the library's own refusals (the
-    413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500)
-    carry them; the body size limit refuses a body declared too large before it
+    400 for a path, the 413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500)
+    carry them; the path refusal answers 400 to a request whose route path carries a control
+    character (U+0000 to U+001F, U+007F), before a rule or a route reads it; the body size
+    limit refuses a body declared too large before it
     costs a rate-limit budget or a session lookup; the rate limit sits outside
     CSRF so a refused forgery spends budget; the session gate sits inside all
     of them, so a request refused before admission never costs a session lookup
