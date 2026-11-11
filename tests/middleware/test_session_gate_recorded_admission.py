@@ -57,6 +57,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
             expires_at=now + timedelta(minutes=30),
             refresh_token=None,
             id_token=None,
+            account_language=None,
         )
         first = a_gated_app(
             record,

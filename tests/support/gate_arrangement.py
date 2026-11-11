@@ -43,6 +43,7 @@ from webauth.admission import AdmissionConfig
 from webauth.config import web_auth_config
 from webauth.dependencies import (
     LoginRedirect,
+    account_language_of_session,
     current_user_dependency,
     session_id_from_request,
 )
@@ -76,6 +77,7 @@ PERSON_ADMITTED_ADMIN_PATH = "/api/admitted-admin"
 PERSON_CALLER_PATH = "/api/caller"
 MACHINE_AS_PERSON_PATH = "/api/admin/as-person"
 MACHINE_SESSION_PATH = "/api/admin/session"
+MACHINE_LANGUAGE_PATH = "/api/admin/language"
 FOREIGN_SECRET_PATH = "/hooks/fetch"  # noqa: S105 - a path, not a credential
 EXPORT_PATH = "/api/admin/export"
 UNDECLARED_PATH = "/api/admin/forgotten"
@@ -272,6 +274,17 @@ def add_machine_routes(auth: AuthApp) -> None:
         _caller: BearerCaller = Depends(bearer_caller),
     ) -> dict[str, str | None]:
         return {"session": session_id_from_request(request, web_auth_config(request))}
+
+    @auth.app.get(MACHINE_LANGUAGE_PATH)
+    def machine_language(
+        request: Request,
+        _caller: BearerCaller = Depends(bearer_caller),
+    ) -> dict[str, str | None]:
+        return {
+            "language": account_language_of_session(
+                request, sessions=auth.sessions, config=web_auth_config(request)
+            )
+        }
 
     @auth.app.get(RAISING_PATH)
     def raising(_caller: BearerCaller = Depends(bearer_caller)) -> None:

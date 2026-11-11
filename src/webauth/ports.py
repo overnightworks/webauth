@@ -24,7 +24,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from webauth import WebAuthError
 
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from pydantic import SecretStr
 
 __all__ = [
+    "MAX_ACCOUNT_LANGUAGE_CHARS",
     "AccountEvent",
     "AccountEventKind",
     "AccountKind",
@@ -50,6 +51,10 @@ __all__ = [
     "UsernameTakenError",
     "WallClock",
 ]
+
+MAX_ACCOUNT_LANGUAGE_CHARS: Final = 35
+"""The longest account language tag webauth keeps, the length RFC 5646 section 4.4.1 asks every
+implementation to support. A host's column takes at least this many characters."""
 
 WallClock = Callable[[], float]
 """Seconds since the epoch. The library reads it once per session decision, as
@@ -156,6 +161,13 @@ class SessionRecord(Protocol):
         the callback route opened for a host that keeps none (``keeps_id_token=False``)."""
         ...
 
+    @property
+    def account_language(self) -> str | None:
+        """The account's language tag as the issuer gave it at this session's sign-in, in at
+        most ``MAX_ACCOUNT_LANGUAGE_CHARS`` characters, uninterpreted. No secret. ``None`` when
+        the issuer gave none or the row was stored before the host held it."""
+        ...
+
 
 class SubjectUserStore(Protocol):
     """Accounts an identity provider vouches for, keyed by its subject.
@@ -227,6 +239,7 @@ class SessionRecordStore(Protocol):
         expires_at: datetime,
         refresh_token: SecretStr | None,
         id_token: SecretStr | None,
+        account_language: str | None,
     ) -> SessionRecord:
         """Create the session and return it.
 
@@ -235,7 +248,8 @@ class SessionRecordStore(Protocol):
         ``get_secret_value()``; the library bounds the value only by the 64 KiB
         token response, so the column takes no smaller length. The ID token is
         part of the row the same way, as ``SessionRecord.id_token`` says, and
-        ``None`` when the host keeps none.
+        ``None`` when the host keeps none. ``account_language`` is part of the row as
+        ``SessionRecord.account_language`` says, written here and by no other call.
 
         The store mints the new session's id with at least 128 bits from a
         CSPRNG, in at most 135 characters. The cookie signs the id alone, so a
@@ -276,7 +290,7 @@ class SessionRecordStore(Protocol):
 
         The store writes the ``expires_at`` it is given and computes none of
         its own: the library alone applies ``WebAuthConfig.session_lifetime``.
-        It leaves the refresh token and the ID token untouched.
+        It leaves the refresh token, the ID token and the account's language untouched.
         """
         ...
 

@@ -499,7 +499,8 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
 one of the app's own languages for a request. `languages` is an `AppLanguages(offered, default)`
 the app builds once. `account_tag` is the account's tag as the issuer gave it, and
 `accept_language` is the request's `Accept-Language` header as one string: a host with several
-header lines joins them with commas.
+header lines joins them with commas. `account_language_of_session(connection, *, sessions, config)`
+from `webauth.dependencies` answers the account's tag for the request, from the session row.
 
 **LANGUAGE-01** `AppLanguages` raises `ValueError` when built if an offered tag or the default is not a
 language tag in shape, the shape `SIGNIN-14` gives.
@@ -539,8 +540,37 @@ malformed (`q=2`, `q=x`) is dropped alone, and the rest of the header still coun
 `i-klingon`, the empty string), or that matches no offered tag counts as absent, and the header decides.
 Nothing is normalised: `" de"` is not `de`.
 
-**Host duty:** The app writes only the resolver's answer into `<html lang>`, never an account's tag as
-received.
+**LANGUAGE-13** The callback reads the verified ID token's `locale` claim into the session row it creates,
+as `SessionRecord.account_language`: kept when it is a non-empty string of at most
+`MAX_ACCOUNT_LANGUAGE_CHARS` characters (35, the length RFC 5646 section 4.4.1 asks every implementation
+to support), else `None`: a missing claim, a claim that is not a string, the empty string, a longer one.
+
+**LANGUAGE-14** The tag is kept as the issuer gave it: webauth neither checks its shape nor normalises it.
+`resolve_language` is the one place that judges a tag.
+
+**LANGUAGE-15** A `locale` claim never refuses a sign-in.
+
+**LANGUAGE-16** The tag is written once, when the callback creates the session. Renewal, refresh-token
+rotation and `touch` leave it, so a change of the account's language shows after the next sign-in.
+
+**LANGUAGE-17** `account_language_of_session(connection, *, sessions, config)` answers the
+`account_language` of the session the connection's cookie names.
+
+**LANGUAGE-18** It answers `None` when `session_id_from_request` does (no cookie, a forged or doubled one,
+a request the bearer gate admitted), when the store holds no such row, when the row is outside its
+lifetime by the rule `admit_session` applies, and when the row holds none.
+
+**LANGUAGE-19** It only calls `load`: it never renews a session, refuses a request or sets a cookie, so a
+public page calls it without sliding a session's expiry.
+
+**LANGUAGE-20** A failing store raises.
+
+**Host duty:** The session table has a nullable column of at least `MAX_ACCOUNT_LANGUAGE_CHARS`
+characters, written at `create` and returned by the record as `account_language`; a row stored before
+the column reads `None`.
+
+**Host duty:** The app passes the function's answer to `resolve_language` as `account_tag` and writes only
+the resolver's answer into `<html lang>`, never an account's tag as received.
 
 ## The protected resource
 
@@ -770,7 +800,7 @@ By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) 
 
 ## The sign-in routes
 
-The operator ruled the host duty that a single-page app logs out by a top-level form POST, SIGNIN-58, the host duty that a host serving no logout route passes `False`, SIGNIN-60 and SIGNIN-61; no other sentence of this section is ruled.
+The operator ruled the host duty that a single-page app logs out by a top-level form POST; SIGNIN-58; the host duty that a host serving no logout route passes `False`; SIGNIN-60; SIGNIN-61; no other sentence of this section is ruled.
 
 - **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
   `FastAPI` app.
@@ -922,6 +952,7 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **MEMSTORE-18** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
 - **MEMSTORE-19** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
 - **MEMSTORE-20** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
+- **MEMSTORE-21** `create` keeps the account's language it is given on the session, and `load` returns it.
 - **Host duty:** an entry copies both tables, so its cost grows with the stored accounts and sessions; keep the store small by calling `delete_expired` on a timer.
 
 The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.

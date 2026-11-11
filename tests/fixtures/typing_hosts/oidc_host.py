@@ -41,6 +41,7 @@ from webauth.dependencies import (
     AuthDependencies,
     ConnectionRefusal,
     LoginRedirect,
+    account_language_of_session,
     admit_session,
     authenticate_websocket,
     current_user_dependency,
@@ -152,6 +153,7 @@ class HostSession:
     expires_at: datetime
     refresh_token: SecretStr | None
     id_token: SecretStr | None
+    account_language: str | None
 
 
 class HostAccounts:
@@ -179,9 +181,10 @@ class HostSessions:
         expires_at: datetime,
         refresh_token: SecretStr | None,
         id_token: SecretStr | None,
+        account_language: str | None,
     ) -> HostSession:
         user = HostAccount(user_id, "someone", "user", AccountKind.PERSON)
-        return HostSession("id", user, now, expires_at, refresh_token, id_token)
+        return HostSession("id", user, now, expires_at, refresh_token, id_token, account_language)
 
     def load(self, session_id: str) -> HostSession | None:
         return None
@@ -472,6 +475,13 @@ def a_host_admits_a_session_without_a_request(
     config: WebAuthConfig,
 ) -> AuthenticatedUser | ConnectionRefusal:
     return admit_session(session_id, sessions=HostSessions(), config=config)
+
+
+def a_host_reads_the_account_language(
+    connection: HTTPConnection,
+    config: WebAuthConfig,
+) -> str | None:
+    return account_language_of_session(connection, sessions=HostSessions(), config=config)
 
 
 def a_host_installs_the_middleware(

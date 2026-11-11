@@ -69,6 +69,7 @@ _IDENTITY = OidcIdentity(
     preferred_username="operator",
     id_token=a_fake_id_token("the-identity-every-login-yields"),
     refresh_token=SecretStr(ISSUED_REFRESH_TOKEN),
+    account_language=None,
 )
 
 
@@ -146,6 +147,14 @@ def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identit
             Attempt(token_answer=_issued_with(refresh_token=TOKEN_AT_BOTH_ENDS)),
             dataclasses.replace(_IDENTITY, refresh_token=SecretStr(TOKEN_AT_BOTH_ENDS)),
             id="refresh-token-at-both-ends-of-the-grammar",
+        ),
+        pytest.param(
+            Attempt(claims={"locale": "de-CH"}),
+            dataclasses.replace(_IDENTITY, account_language="de-CH"),
+            id="with-a-locale",
+        ),
+        pytest.param(
+            Attempt(claims={"locale": 42}), _IDENTITY, id="with-a-locale-that-is-no-string"
         ),
         pytest.param(Attempt(callback={"iss": ABSENT}), _IDENTITY, id="callback-without-iss"),
         pytest.param(

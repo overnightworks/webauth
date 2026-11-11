@@ -67,6 +67,7 @@ from webauth.jwt_verification import (
     _VerifiedClaims,
 )
 from webauth.oidc._client_config import OidcClientConfig
+from webauth.oidc._locale_claim import account_language_claim
 from webauth.policies import AuthorizedParties, _require_authorized_parties
 from webauth.ports import AgentFacts
 
@@ -189,8 +190,8 @@ class OidcIdentity:
     paths, uninterpreted; `session_id` is the issuer's `sid`; `id_token` is the
     verified ID token as received, which only ever goes back to the issuer as
     the logout hint; `refresh_token` is the one the code exchange issued, or
-    `None` when the issuer gave none. The exchange's access token is never
-    kept."""
+    `None` when the issuer gave none; `account_language` is the `locale` claim, or `None`.
+    The exchange's access token is never kept."""
 
     subject: str
     issuer: str
@@ -199,6 +200,7 @@ class OidcIdentity:
     preferred_username: str | None
     id_token: str = field(repr=False)
     refresh_token: SecretStr | None
+    account_language: str | None
 
 
 @dataclass(frozen=True)
@@ -752,6 +754,7 @@ def _identity_of(
         preferred_username=_optional_string_claim(id_token.claims, "preferred_username"),
         id_token=raw_id_token,
         refresh_token=refresh_token,
+        account_language=account_language_claim(id_token.claims),
     )
 
 

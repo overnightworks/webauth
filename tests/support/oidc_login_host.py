@@ -45,12 +45,12 @@ from tests.support.webauth_arrangement import (
     a_web_auth_config,
 )
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
-from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.config import WebAuthConfig, install_web_auth_config, web_auth_config
 from webauth.cookies import (
     _pending_login_cookie_name,
     _pending_login_cookie_prefix,
 )
-from webauth.dependencies import current_user_dependency
+from webauth.dependencies import account_language_of_session, current_user_dependency
 from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     OidcClientConfig,
@@ -97,6 +97,7 @@ CLIENT_ID = "lab-app <\"&'>"
 START_PATH = "/login/oidc"
 CALLBACK_PATH = "/auth/callback"
 LOGOUT_PATH = "/logout"
+LANGUAGE_PATH = "/language"
 END_SESSION_ENDPOINT = f"{BOUND_ISSUER}/protocol/openid-connect/logout"
 LOGOUT_BUTTON_LABEL = "Sign <out> & \"go'"
 LOGOUT_LANGUAGE = "en-US"
@@ -358,6 +359,10 @@ class OidcHost:
         headers = {} if cookie is None else {"cookie": cookie}
         return self.client.get(f"{CALLBACK_PATH}?{query}", headers=headers)
 
+    def account_language(self) -> str | None:
+        """What the host's page route answers from the browser's session cookie."""
+        return self.client.get(LANGUAGE_PATH).json()["language"]
+
     def pending_cookie_names(self) -> set[str]:
         prefix = _pending_login_cookie_prefix(secure=self.config.cookie_secure)
         return {name for name in self.client.cookies if name.startswith(prefix)}
@@ -372,7 +377,14 @@ class OidcHost:
         return f"{name}={self.client.cookies[name]}"
 
 
-def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding: str = "") -> str:
+def an_id_token(
+    nonce: str,
+    wall_clock: FakeClock,
+    groups_claim: object,
+    padding: str = "",
+    *,
+    locale_claim: object = ABSENT,
+) -> str:
     claims = an_id_token_claims(
         int(wall_clock.now),
         issuer=BOUND_ISSUER,
@@ -381,6 +393,7 @@ def an_id_token(nonce: str, wall_clock: FakeClock, groups_claim: object, padding
         nonce=nonce,
         preferred_username="lena",
         groups=groups_claim,
+        locale=locale_claim,
     )
     claims = {name: value for name, value in claims.items() if value is not ABSENT}
     header = {"alg": "RS256", "kid": "issuer-key", "typ": "JWT"}
@@ -449,15 +462,26 @@ def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) ->
     def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
         return {"username": user.username}
 
+    @app.get(LANGUAGE_PATH)
+    def language(request: Request) -> dict[str, str | None]:
+        return {
+            "language": account_language_of_session(
+                request, sessions=sessions, config=web_auth_config(request)
+            )
+        }
+
 
 def _an_issuer_side(
     wall_clock: FakeClock,
     groups_claim: object,
+    locale_claim: object,
 ) -> tuple[FakeIssuer, FakeKeySetEndpoint, OidcRelyingParty, list[str]]:
     issued_id_tokens: list[str] = []
 
     def mint_id_token(nonce: str) -> str:
-        issued_id_tokens.append(an_id_token(nonce, wall_clock, groups_claim))
+        issued_id_tokens.append(
+            an_id_token(nonce, wall_clock, groups_claim, locale_claim=locale_claim)
+        )
         return issued_id_tokens[-1]
 
     issuer = FakeIssuer(mint_id_token=mint_id_token)
@@ -528,6 +552,7 @@ def _a_client_of(app: FastAPI, root_path: str) -> TestClient:
 def an_oidc_host(
     *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
+    locale_claim: object = ABSENT,
     address_budget: int | None = None,
     max_sessions: int | None = None,
     root_path: str = "",
@@ -546,7 +571,9 @@ def an_oidc_host(
         users, stored_session, transaction_kind, strict_records, account_store
     )
     wall_clock = FakeClock(float(NOW))
-    issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(wall_clock, groups_claim)
+    issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(
+        wall_clock, groups_claim, locale_claim
+    )
     app = _a_host_app(config, address_budget, behind_base_http_middleware)
     holder: list[OidcHost] = []
     _add_the_login_routes(

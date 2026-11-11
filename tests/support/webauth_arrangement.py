@@ -243,6 +243,7 @@ def seeded_session(
             expires_at=expires_at,
             refresh_token=refresh_token,
             id_token=None,
+            account_language=None,
         )
 
 
