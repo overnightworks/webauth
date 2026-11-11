@@ -260,6 +260,16 @@ class TestARouteWithAControlCharacterInItsPath:
             for module in public_middleware_modules()
             if "PathRefusalMiddleware" in module.__all__
         ]
+        assert not [
+            module.__name__
+            for module in public_middleware_modules()
+            if any(
+                isinstance(value, type)
+                and value.__name__ == "PathRefusalMiddleware"
+                and value.__module__ == module.__name__
+                for value in vars(module).values()
+            )
+        ]
 
     def test_a_websocket_handshake_and_the_lifespan_pass_the_stack(self) -> None:
         """STACK-12: WebSocket and lifespan scopes pass."""
