@@ -1,0 +1,8 @@
+claim_id = "ed9eb829279d4488ba0b71960d9ddbc8"
+agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
+role = "builder"
+base = "45b63dd349c98f98b29dac354720a609a4c2daaa"
+branch = "claude/issue-720-account-language-on-the-session-row"
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/dependencies.py", "src/webauth/oidc", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/single_process_stores.py", "tests/e2e/oidc/host_app.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_session_gate_recorded_admission.py", "tests/support", "tests/test_account_language.py", "tests/test_oidc_callback.py", "tests/test_oidc_login_admission.py", "tests/test_single_process_stores.py"]
+opened_commit = "eca1c1020e9189b644b2fb3f26384401f75a041b"
+whole_reason = "The account's language travels from the ID token's claim through the identity, the port and the session row to one read function; a port member without its writer and reader would ship an unproven contract, and every store double implements the new members."
