@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.types import ASGIApp
 
-__all__ = []
+__all__ = [
+    "PathRefusalMiddleware",
+]
 
 
 class PathRefusalMiddleware(RefusalMiddleware[None]):

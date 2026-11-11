@@ -52,12 +52,12 @@ from webauth.middleware import (
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
     MachinePaths,
+    PathRefusalMiddleware,
     SecurityHeadersMiddleware,
     SessionGate,
     SessionGateMiddleware,
     install_web_auth_middleware,
 )
-from webauth.middleware._path_refusal import PathRefusalMiddleware
 from webauth.policies import (
     AuthorizedParties,
     BodySizePolicy,

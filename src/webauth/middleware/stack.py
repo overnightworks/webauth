@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 from starlette.middleware import Middleware
 
-from webauth.middleware._path_refusal import PathRefusalMiddleware
 from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
 from webauth.middleware.body_size import BodySizeLimitMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware
+from webauth.middleware.path_refusal import PathRefusalMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
 from webauth.middleware.security_headers import SecurityHeadersMiddleware
 from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware

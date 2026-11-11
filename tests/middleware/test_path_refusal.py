@@ -5,9 +5,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
-from importlib import import_module
-from pkgutil import iter_modules
-from types import ModuleType
 
 import pytest
 from fastapi import FastAPI, Request, WebSocket
@@ -34,17 +31,6 @@ from webauth.sign_in_routes import SignInPaths
 
 def a_headers_policy() -> SecurityHeadersPolicy:
     return SecurityHeadersPolicy(content_security_policy="default-src 'self'")
-
-
-def public_middleware_modules() -> list[ModuleType]:
-    return [
-        webauth.middleware,
-        *(
-            import_module(f"webauth.middleware.{module.name}")
-            for module in iter_modules(webauth.middleware.__path__)
-            if not module.name.startswith("_")
-        ),
-    ]
 
 
 def some_sign_in_paths() -> SignInPaths:
@@ -237,10 +223,10 @@ class TestARouteWithAControlCharacterInItsPath:
             assert response.status_code == 200
             assert arrangement.route_runs != []
 
-    def test_a_minimal_install_refuses_and_no_public_middleware_module_exports_the_class(
+    def test_a_minimal_install_refuses_and_carries_the_class_the_package_exports(
         self,
     ) -> None:
-        """STACK-11: always installed, no policy and no option, not exported."""
+        """STACK-11: always installed, no policy and no option, exported by the package."""
         app = FastAPI()
         headers_policy = a_headers_policy()
         install_web_auth_config(app, a_web_auth_config())
@@ -255,20 +241,8 @@ class TestARouteWithAControlCharacterInItsPath:
         response = TestClient(app, base_url=HTTPS_TEST_SERVER).get("/api/thing%0A")
 
         a_malformed_path_is_refused(response, headers_policy)
-        assert not [
-            module.__name__
-            for module in public_middleware_modules()
-            if "PathRefusalMiddleware" in module.__all__
-        ]
-        assert not [
-            module.__name__
-            for module in public_middleware_modules()
-            if any(
-                isinstance(value, type)
-                and value.__name__ == "PathRefusalMiddleware"
-                and value.__module__ == module.__name__
-                for value in vars(module).values()
-            )
+        assert webauth.middleware.PathRefusalMiddleware in [
+            entry.cls for entry in app.user_middleware
         ]
 
     def test_a_websocket_handshake_and_the_lifespan_pass_the_stack(self) -> None:
