@@ -89,8 +89,9 @@ def test_the_value_is_stored_in_no_pending_cookie_no_session_and_no_log_line(
 
     query = host.sign_in_at_issuer()
     pending_cookie = host.pending_cookie(query)
-    host.callback(query)
+    callback = host.callback(query)
 
+    assert callback.status_code == 303
     assert host.account_language() is None
     assert tag not in pending_cookie
     assert tag not in caplog.text
@@ -128,7 +129,7 @@ def test_a_malformed_tag_raises_value_error_and_nothing_goes_to_the_issuer(tag: 
 
     assert isinstance(raised, ValueError)
     assert b"location" not in _header_names_sent(messages)
-    assert not host.pending_cookie_names()
+    assert b"set-cookie" not in _header_names_sent(messages)
 
 
 @pytest.mark.parametrize("tag", ["de", "de-CH", None])
