@@ -41,6 +41,9 @@ CLAIMS_NOT_KEPT = {
     "a list": ["de"],
     "the empty string": "",
     "one character past the bound": ONE_CHARACTER_TOO_MANY,
+    "a NUL": "de\x00",
+    "a line break inside": "de\r\nSet-Cookie: x",
+    "a tab": "de\tCH",
 }
 
 
@@ -65,17 +68,20 @@ def a_host_signed_in_with(locale_claim: object, clock: FakeClock) -> OidcHost:
         *[pytest.param(claim, None, id=name) for name, claim in CLAIMS_NOT_KEPT.items()],
     ],
 )
-def test_the_sign_in_keeps_the_locale_claim_of_at_most_35_characters_and_else_none(
+def test_the_sign_in_keeps_the_locale_claim_of_at_most_35_printable_characters_and_else_none(
     claim: object, stored: str | None, clock: FakeClock
 ) -> None:
     """LANGUAGE-13: the ID token's `locale` claim is the account's language when it is a non-empty
-    string of at most 35 characters, and `None` otherwise."""
+    string of at most 35 printable characters, and `None` otherwise."""
     session = a_host_signed_in_with(claim, clock).sessions.stored_record
 
     assert session.account_language == stored
 
 
-@pytest.mark.parametrize("claim", ["pt_BR", "DE-ch", " de", "x-private", "i-klingon", "de-*"])
+@pytest.mark.parametrize(
+    "claim",
+    ["pt_BR", "DE-ch", " de", "de CH", "<b>", "日本語", "x-private", "i-klingon", "de-*"],
+)
 def test_the_tag_is_kept_as_the_issuer_gave_it(claim: str, clock: FakeClock) -> None:
     """LANGUAGE-14: webauth neither checks the tag's shape nor normalises it."""
     session = a_host_signed_in_with(claim, clock).sessions.stored_record

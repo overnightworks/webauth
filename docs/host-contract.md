@@ -543,7 +543,9 @@ Nothing is normalised: `" de"` is not `de`.
 **LANGUAGE-13** The callback reads the verified ID token's `locale` claim into the session row it creates,
 as `SessionRecord.account_language`: kept when it is a non-empty string of at most
 `MAX_ACCOUNT_LANGUAGE_CHARS` characters (35, the length RFC 5646 section 4.4.1 asks every implementation
-to support), else `None`: a missing claim, a claim that is not a string, the empty string, a longer one.
+to support) and every character of it is printable (`str.isprintable`), else `None`: a missing claim, a
+claim that is not a string, the empty string, a longer one, one carrying a control character such as NUL or a
+line break. The printable rule is storage hygiene, not a judgement of the tag.
 
 **LANGUAGE-14** The tag is kept as the issuer gave it: webauth neither checks its shape nor normalises it.
 `resolve_language` is the one place that judges a tag.

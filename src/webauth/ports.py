@@ -164,8 +164,8 @@ class SessionRecord(Protocol):
     @property
     def account_language(self) -> str | None:
         """The account's language tag as the issuer gave it at this session's sign-in, in at
-        most ``MAX_ACCOUNT_LANGUAGE_CHARS`` characters, uninterpreted. No secret. ``None`` when
-        the issuer gave none or the row was stored before the host held it."""
+        most ``MAX_ACCOUNT_LANGUAGE_CHARS`` printable characters, uninterpreted. No secret.
+        ``None`` when the issuer gave none or the row was stored before the host held it."""
         ...
 
 
