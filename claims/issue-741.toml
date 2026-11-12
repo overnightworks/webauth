@@ -1,8 +1,0 @@
-claim_id = "59a3f46fd37f4f7e90ca9c7c2532395f"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "db056da6862bfe98efcf5e58c265d07fee86b21b"
-branch = "claude/issue-741-exchange-admitted-token"
-scope = ["docs/ARCHITECTURE.md", "docs/VISION.md", "docs/host-contract.md", "src/webauth/dependencies.py", "src/webauth/middleware/__init__.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc/__init__.py", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc/_token_endpoint.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_bearer_gate_exchange.py", "tests/middleware/test_bearer_gate_resource.py", "tests/support/exchange_arrangement.py"]
-opened_commit = "a8560e1ffe8e748676851e96f91ddb628510ae05"
-whole_reason = "The private grant has exactly one caller, the public function, so the two land together with their contract sentences and tests."
