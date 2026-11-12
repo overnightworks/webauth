@@ -42,7 +42,7 @@ _REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
 _ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
 _BEARER_TOKEN_TYPE = "bearer"  # noqa: S105 - token type not a credential
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
-# RFC 8693 section 2.2.2: an issuer may refuse an exchange it understood with 403.
+# Keycloak refuses a token exchange its client may not make with 403 and `access_denied`.
 _EXCHANGE_ERROR_STATUSES = _TOKEN_ERROR_STATUSES | {HTTPStatus.FORBIDDEN}
 _TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"  # noqa: S105 - grant type
 _ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"  # noqa: S105 - token type
