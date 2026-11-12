@@ -22,6 +22,7 @@ from tests.support.oidc_arrangement import (
     REALM_JWKS_URL,
     FakeClock,
     FakeKeySetEndpoint,
+    a_realm_client_config,
     a_relying_party,
     an_access_token,
     served_key_set,
@@ -168,6 +169,16 @@ def test_the_verifier_refuses_media_types_it_cannot_compare(keywords: dict[str, 
         ),
         pytest.param({"aud": [APP_CLIENT_ID, OTHER_APP]}, INVALID_CLAIM, id="own-and-another-app"),
         pytest.param({"aud": [APP_CLIENT_ID, "account"]}, INVALID_CLAIM, id="own-and-account"),
+        pytest.param(
+            {"aud": [RESOURCE_URL, APP_CLIENT_ID, OTHER_APP]},
+            INVALID_CLAIM,
+            id="url-own-and-another",
+        ),
+        pytest.param(
+            {"aud": [RESOURCE_URL, OTHER_APP]},
+            rejected(RejectionReason.INVALID_AUDIENCE),
+            id="url-and-another-app",
+        ),
     ],
 )
 def test_the_audience_must_be_the_app_alone(
@@ -350,8 +361,12 @@ def resource_verified(
     *,
     scope: str = "mcp:tools",
     admits_client_audience: bool = False,
+    client_id: str = APP_CLIENT_ID,
 ) -> VerifiedAccessToken | OidcRefusal:
-    verifier = a_relying_party(fetch_key_set=a_key_set()).resource_token_verifier(
+    relying_party = a_relying_party(
+        config=a_realm_client_config(client_id=client_id), fetch_key_set=a_key_set()
+    )
+    verifier = relying_party.resource_token_verifier(
         resource_url=RESOURCE_URL,
         scope=scope,
         authorized_parties=HAL,
@@ -393,7 +408,6 @@ ADMITTED_FOR_THE_RESOURCE = VerifiedAccessToken(
     groups=("/apps/x/admin",),
     preferred_username=None,
 )
-INVALID_CLAIM = OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
 
 
 @pytest.mark.parametrize(
@@ -402,8 +416,8 @@ INVALID_CLAIM = OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
         ([RESOURCE_URL, APP_CLIENT_ID], True, ADMITTED_FOR_THE_RESOURCE),
         ([APP_CLIENT_ID, RESOURCE_URL], True, ADMITTED_FOR_THE_RESOURCE),
         (RESOURCE_URL, True, ADMITTED_FOR_THE_RESOURCE),
-        ([RESOURCE_URL, APP_CLIENT_ID], False, INVALID_CLAIM),
         ([APP_CLIENT_ID, RESOURCE_URL], False, INVALID_CLAIM),
+        ([RESOURCE_URL, APP_CLIENT_ID, OTHER_APP], False, INVALID_CLAIM),
         ([RESOURCE_URL, APP_CLIENT_ID, OTHER_APP], True, INVALID_CLAIM),
         ([RESOURCE_URL, OTHER_APP], True, INVALID_CLAIM),
         ([APP_CLIENT_ID, APP_CLIENT_ID], True, rejected(RejectionReason.INVALID_AUDIENCE)),
@@ -414,8 +428,8 @@ INVALID_CLAIM = OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
         "pair-url-first-admitted",
         "pair-client-first-admitted",
         "url-alone-admitted",
-        "pair-without-the-flag",
         "reversed-pair-without-the-flag",
+        "pair-and-a-third-without-the-flag",
         "pair-and-a-third",
         "url-and-another-app",
         "client-id-twice",
@@ -437,14 +451,6 @@ def test_a_resource_admits_the_client_beside_its_url_only_with_the_flag(
     assert resource_verified(token, admits_client_audience=admits_client_audience) == outcome
 
 
-def test_the_app_verifier_refuses_the_url_and_client_pair() -> None:
-    """RESOURCE-86: the app's own verifier takes no flag and keeps the client as the only
-    audience."""
-    token = an_access_token(claims={"aud": [RESOURCE_URL, APP_CLIENT_ID]})
-
-    assert verified(token) == INVALID_CLAIM
-
-
 @pytest.mark.parametrize(
     ("claims", "outcome"),
     [
@@ -455,7 +461,7 @@ def test_the_app_verifier_refuses_the_url_and_client_pair() -> None:
     ids=["unlisted-party", "other-scope", "agent-without-its-claims"],
 )
 def test_the_pair_keeps_every_other_check_of_the_resource(
-    claims: dict[str, Any],
+    claims: dict[str, object],
     outcome: OidcRefusal,
 ) -> None:
     """RESOURCE-18: a token with the url and the client id is decided by the party, the scope
@@ -465,6 +471,16 @@ def test_the_pair_keeps_every_other_check_of_the_resource(
     )
 
     assert resource_verified(token, admits_client_audience=True) == outcome
+
+
+def test_a_repeated_audience_stays_refused_when_the_client_id_is_the_resource_url() -> None:
+    """RESOURCE-86: a client id equal to the `url` does not turn a repeated audience into the
+    admitted pair."""
+    token = an_access_token(claims={"aud": [RESOURCE_URL, RESOURCE_URL], "scope": "mcp:tools"})
+
+    outcome = resource_verified(token, admits_client_audience=True, client_id=RESOURCE_URL)
+
+    assert outcome == INVALID_CLAIM
 
 
 def test_a_resource_token_is_refused_by_the_app_verifier() -> None:

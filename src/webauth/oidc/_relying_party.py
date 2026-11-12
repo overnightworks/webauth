@@ -496,7 +496,7 @@ class OidcRelyingParty:
         admits_client_audience: bool = False,
     ) -> VerifiedAccessToken | OidcRefusal:
         admitted_audiences = [(audience,)]
-        if admits_client_audience:
+        if admits_client_audience and self._config.client_id != audience:
             admitted_audiences += [
                 (audience, self._config.client_id),
                 (self._config.client_id, audience),
