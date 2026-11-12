@@ -10,6 +10,7 @@ of `a_bearer_app`; the tokens are real RS256 `at+jwt`s.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 import pytest
 from starlette.middleware import Middleware
@@ -31,6 +32,7 @@ from tests.support.gate_arrangement import (
     REFUSED_AS_RUNTIME_ERROR,
     RESOURCE_CHALLENGE,
     RESOURCE_GROUP,
+    RESOURCE_URL,
     THE_COOKIE_PERSON,
     BearerApp,
     RewritingTheRequest,
@@ -46,7 +48,12 @@ from tests.support.gate_arrangement import (
     the_accounts,
     the_transaction,
 )
-from tests.support.oidc_arrangement import ABSENT, ACCESS_TOKEN_NOW, OPERATOR_SUBJECT
+from tests.support.oidc_arrangement import (
+    ABSENT,
+    ACCESS_TOKEN_NOW,
+    APP_CLIENT_ID,
+    OPERATOR_SUBJECT,
+)
 from tests.support.oidc_login_host import failing
 from tests.support.webauth_arrangement import ADMIN_ROLE
 from webauth.middleware import MarkedRoute, ProtectedResource
@@ -260,6 +267,62 @@ def test_an_invalid_token_is_a_401_with_the_challenge_and_a_valid_cookie_decides
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == f'{RESOURCE_CHALLENGE}, error="invalid_token"'
     assert_admitted_nothing(app)
+
+
+def an_app_whose_resource_admits_the_client_audience() -> tuple[BearerApp, ProtectedResource]:
+    opted_in = replace(a_resource(marked_routes=MARKED_ROUTES), admits_client_audience=True)
+    app = a_bearer_app(
+        person_paths=PERSON_PATHS,
+        resource=opted_in,
+        known_accounts=(a_known_person(),),
+    )
+    return app, opted_in
+
+
+@pytest.mark.parametrize(
+    "audience",
+    [[RESOURCE_URL, APP_CLIENT_ID], [APP_CLIENT_ID, RESOURCE_URL]],
+    ids=["url-first", "client-first"],
+)
+def test_a_resource_that_admits_the_client_audience_admits_the_pair_on_a_marked_route(
+    audience: list[str],
+) -> None:
+    """RESOURCE-18, RESOURCE-84: an opted-in resource admits a token whose audiences are its
+    `url` and the app's client id, in either order, on a marked route as the capped person."""
+    app, resource = an_app_whose_resource_admits_the_client_audience()
+    token = an_interactive_agent_token(resource, aud=audience)
+
+    response = app.ask(A_NOTE, authorization=bearing(token))
+
+    assert (response.status_code, response.json()) == (
+        200,
+        {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE},
+    )
+
+
+def test_an_opted_in_resource_refuses_a_third_audience_on_a_marked_route() -> None:
+    """RESOURCE-56, RESOURCE-84: the pair with a third audience is a 401 `invalid_token` with
+    the challenge beside a valid cookie, and nothing is admitted."""
+    app, resource = an_app_whose_resource_admits_the_client_audience()
+    token = an_interactive_agent_token(resource, aud=[RESOURCE_URL, APP_CLIENT_ID, "another-app"])
+
+    response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == f'{RESOURCE_CHALLENGE}, error="invalid_token"'
+    assert_admitted_nothing(app)
+
+
+def test_an_opted_in_resource_ignores_the_client_id_alone_on_a_marked_route() -> None:
+    """RESOURCE-53, RESOURCE-84: a token naming the client id without the `url` is ignored on a
+    marked route and the cookie decides."""
+    app, _resource = an_app_whose_resource_admits_the_client_audience()
+    token = a_token(groups=[RESOURCE_GROUP])
+
+    response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
+
+    assert (response.status_code, response.json()) == (200, THE_COOKIE_PERSON)
+    assert the_transaction(app).entries == 0
 
 
 @pytest.mark.parametrize(

@@ -32,12 +32,14 @@ from tests.support.gate_arrangement import (
     PERSON_PREFIX,
     PERSON_REALM,
     REALM_INSUFFICIENT_SCOPE,
+    RESOURCE_URL,
     a_key_set_answering,
+    a_resource,
     a_token,
     bearing,
     relayed,
 )
-from tests.support.oidc_arrangement import ABSENT, OPERATOR_SUBJECT
+from tests.support.oidc_arrangement import ABSENT, APP_CLIENT_ID, OPERATOR_SUBJECT
 from tests.support.oidc_login_host import (
     RecordingSignInTransaction,
     StoreDown,
@@ -413,6 +415,25 @@ def test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_wit
     )
     assert isinstance(app.transaction, RecordingSignInTransaction)
     assert (app.transaction.entries, ran(app)) == (0, [])
+
+
+@pytest.mark.parametrize(
+    "audience",
+    [[RESOURCE_URL, APP_CLIENT_ID], [APP_CLIENT_ID, RESOURCE_URL]],
+    ids=["url-first", "client-first"],
+)
+def test_a_person_path_refuses_the_url_and_client_pair_beside_a_resource_that_admits_it(
+    audience: list[str],
+) -> None:
+    """RESOURCE-86, RESOURCE-87: a token naming the resource's `url` and the app's client id is
+    a 401 `invalid_token` on a person path of a gate whose resource admits the pair, and
+    admits no one."""
+    app = a_person_app(resource=replace(a_resource(), admits_client_audience=True))
+
+    response = app.ask(PERSON_ME_PATH, authorization=bearing(a_token(aud=audience)))
+
+    assert (response.status_code, the_challenge(response)) == (401, PERSON_INVALID_TOKEN)
+    assert (the_account(app), ran(app)) == (None, [])
 
 
 @pytest.mark.parametrize(

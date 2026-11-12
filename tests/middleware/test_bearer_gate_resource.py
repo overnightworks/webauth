@@ -25,6 +25,7 @@ from tests.support.gate_arrangement import (
     PERSON_PATHS,
     REALM,
     RESOURCE_GROUP,
+    RESOURCE_URL,
     BearerApp,
     a_bearer_app,
     a_bearer_gate,
@@ -41,6 +42,7 @@ from tests.support.gate_arrangement import (
 from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_NOW,
+    APP_CLIENT_ID,
     OPERATOR_SUBJECT,
     REALM_ISSUER,
     an_access_token,
@@ -233,6 +235,9 @@ def entry_point_answer(app: BearerApp, resource: ProtectedResource, token: str) 
 WRONG_FOR_THE_RESOURCE: dict[str, Callable[[ProtectedResource], str]] = {
     "app-bearer": lambda resource: a_token(),
     "two-audiences": lambda resource: a_resource_token(resource, aud=[resource.url, "another-app"]),
+    "url-and-client-id": lambda resource: a_resource_token(
+        resource, aud=[resource.url, APP_CLIENT_ID]
+    ),
     "other-audience": lambda resource: a_resource_token(resource, aud="https://other.example/mcp"),
     "wrong-issuer": lambda resource: a_resource_token(resource, iss="https://evil.example/r"),
     "expired": lambda resource: a_resource_token(resource, exp=ACCESS_TOKEN_NOW - 1_000),
@@ -410,6 +415,49 @@ def test_a_resource_with_anything_but_authorized_parties_raises(parties: object)
     resource = a_resource()
     with pytest.raises(TypeError, match="authorized_parties"):
         replace(resource, authorized_parties=parties)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("flag", [1, "yes", None])
+def test_a_resource_that_admits_the_client_audience_by_anything_but_a_bool_raises(
+    flag: object,
+) -> None:
+    """RESOURCE-84: `admits_client_audience` that is not a `bool` is a `TypeError`."""
+    with pytest.raises(TypeError, match="admits_client_audience"):
+        replace(a_resource(), admits_client_audience=flag)  # type: ignore[arg-type]
+
+
+def test_a_resource_admits_the_client_audience_only_when_declared_to() -> None:
+    """RESOURCE-84: the flag is `False` by default."""
+    assert a_resource().admits_client_audience is False
+
+
+@pytest.mark.parametrize(
+    ("claims", "status"),
+    [
+        pytest.param({"aud": [RESOURCE_URL, APP_CLIENT_ID]}, 200, id="pair-url-first"),
+        pytest.param({"aud": [APP_CLIENT_ID, RESOURCE_URL]}, 200, id="pair-client-first"),
+        pytest.param({"aud": [RESOURCE_URL, APP_CLIENT_ID], "groups": []}, 403, id="pair-no-group"),
+    ],
+)
+def test_a_resource_that_admits_the_client_audience_admits_the_pair_for_its_group(
+    claims: dict[str, object],
+    status: int,
+) -> None:
+    """RESOURCE-18, RESOURCE-84: an opted-in resource admits a token whose audiences are
+    exactly its `url` and the app's client id, in either order, and the required group decides
+    for the pair as for the `url` alone."""
+    resource = replace(a_resource(), admits_client_audience=True)
+    app = a_bearer_app(
+        paths=PathRules(),
+        resource=resource,
+        known_accounts=(a_known_person(),),
+    )
+    token = a_resource_token(resource, **{"groups": [RESOURCE_GROUP], **claims})
+
+    response = app.ask(resource.entry_point, authorization=bearing(token))
+
+    assert response.status_code == status
+    assert app.auth.route_runs == ([resource.entry_point] if status == 200 else [])
 
 
 @pytest.mark.parametrize(
