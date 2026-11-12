@@ -20,7 +20,7 @@ from webauth.oidc import (
     TokenEndpointError,
     TokenRequest,
 )
-from webauth.oidc._relying_party import _MAX_TOKEN_RESPONSE_BYTES
+from webauth.oidc._token_endpoint import _MAX_TOKEN_RESPONSE_BYTES
 
 __all__ = ["post_token_request_over_https"]
 

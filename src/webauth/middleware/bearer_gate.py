@@ -42,7 +42,8 @@ from webauth.oidc import (
     VerifiedAccessToken,
 )
 from webauth.oidc._client_config import _PLAIN_AUTHORITY, _is_endpoint_url
-from webauth.oidc._relying_party import _ACCESS_TOKEN, _names_another_audience
+from webauth.oidc._relying_party import _names_another_audience
+from webauth.oidc._token_endpoint import _ACCESS_TOKEN
 from webauth.oidc_login import _admit_resource_holder, _admit_token_holder
 from webauth.policies import (
     AuthorizedParties,
