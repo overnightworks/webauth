@@ -21,7 +21,7 @@ record holds the account behind the token, and `current_user` returns it.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Final
@@ -46,6 +46,8 @@ from webauth.ports import SessionRecordStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from webauth.oidc import ExchangedAccess, OidcRefusal
 
 __all__ = [
     "AuthDependencies",
@@ -523,7 +525,8 @@ class _BearerAdmission:
     ``principal`` is the machine's ``BearerCaller`` on a machine path and the
     account behind the token on a person path. ``resource_method`` is the request method of
     a resource admission, at its entry point or on a marked route, which holds for that method
-    alone; a person path's record leaves it unset.
+    alone; a person path's record leaves it unset. ``token_exchange`` is set only at a resource
+    admission: the admitting relying party's grant, which is no token.
 
     Only a SHA-256 digest of the `Authorization` value is kept, in request
     memory, so the record does not store the token. It says the gate admitted
@@ -536,6 +539,9 @@ class _BearerAdmission:
     authorization_digest: bytes
     principal: ports.BearerCaller | ports.AuthenticatedUser
     resource_method: str | None = None
+    token_exchange: Callable[[str, tuple[str, ...]], ExchangedAccess | OidcRefusal] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @property
     def is_resource_admission(self) -> bool:
@@ -551,6 +557,7 @@ def _record_bearer_admission(
     principal: ports.BearerCaller | ports.AuthenticatedUser,
     *,
     resource_method: str | None = None,
+    token_exchange: Callable[[str, tuple[str, ...]], ExchangedAccess | OidcRefusal] | None = None,
 ) -> None:
     (authorization,) = connection.headers.getlist("authorization")
     connection.scope[_BEARER_ADMISSION_SCOPE_KEY] = _BearerAdmission(
@@ -559,6 +566,7 @@ def _record_bearer_admission(
         authorization_digest=_authorization_digest(authorization),
         principal=principal,
         resource_method=resource_method,
+        token_exchange=token_exchange,
     )
 
 

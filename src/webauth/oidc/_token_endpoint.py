@@ -42,6 +42,10 @@ _REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
 _ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
 _BEARER_TOKEN_TYPE = "bearer"  # noqa: S105 - token type not a credential
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
+# RFC 8693 section 2.2.2: an issuer may refuse an exchange it understood with 403.
+_EXCHANGE_ERROR_STATUSES = _TOKEN_ERROR_STATUSES | {HTTPStatus.FORBIDDEN}
+_TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"  # noqa: S105 - grant type
+_ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"  # noqa: S105 - token type
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,20 @@ def _bearer_access_token(document: Mapping[str, object]) -> SecretStr:
     ):
         raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
     return SecretStr(access_token)
+
+
+def _exchanged_lifetime_seconds(document: Mapping[str, object]) -> int:
+    """The `expires_in` of an exchange's answer, which must be of the access-token type and
+    carry a whole number of seconds of at least 1."""
+    expires_in = document.get("expires_in")
+    if (
+        document.get("issued_token_type") != _ACCESS_TOKEN_TYPE
+        or not isinstance(expires_in, int)
+        or isinstance(expires_in, bool)
+        or expires_in < 1
+    ):
+        raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+    return expires_in
 
 
 def _raw_id_token_of(document: Mapping[str, object]) -> str:

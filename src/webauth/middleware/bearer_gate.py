@@ -36,6 +36,7 @@ from webauth.dependencies import (
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.oidc import (
+    ExchangedAccess,
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
@@ -71,6 +72,7 @@ __all__ = [
     "PersonPaths",
     "ProtectedResource",
     "bearer_caller",
+    "exchanged_access_token",
     "install_resource_metadata",
     "is_resource_admission",
     "resource_person",
@@ -502,7 +504,12 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             return self._refused(_REFUSAL_OF_ADMISSION[person])
         if person is None:
             return self._refused(_Refusal.RESOURCE_NOT_ADMITTED)
-        _record_bearer_admission(request, person, resource_method=request.method)
+        _record_bearer_admission(
+            request,
+            person,
+            resource_method=request.method,
+            token_exchange=self._policy.relying_party._token_exchange,
+        )
         return None
 
     async def _person_refusal(
@@ -565,7 +572,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         return refusal.response(challenge)
 
 
-def _credential_of(request: Request) -> str | _Refusal:
+def _credential_of(request: HTTPConnection) -> str | _Refusal:
     """The bearer credential of the one ``Authorization`` line, or why there is none.
 
     The first rule that applies decides: no or empty value; repeated line; no
@@ -640,6 +647,29 @@ def resource_person(connection: HTTPConnection) -> AuthenticatedUser:
             "route, and read the person on the resource's entry point or marked route itself.",
         )
     return person
+
+
+async def exchanged_access_token(
+    connection: HTTPConnection, *, scopes: tuple[str, ...]
+) -> ExchangedAccess | OidcRefusal:
+    """The access token an RFC 8693 exchange of the token this request's resource admitted
+    yields for ``scopes``, with the whole second it expires at; or why the issuer refused.
+
+    The token goes to the token endpoint of the relying party whose gate admitted it, on a
+    worker thread, and is neither returned nor stored. ``RuntimeError`` exactly where
+    ``resource_person`` raises, and when the query gained an ``access_token`` after admission;
+    then ``ValueError`` for ``scopes`` that are no non-empty tuple of RFC 6749 scope tokens.
+    Nothing is posted in either case.
+    """
+    admission = _bearer_admission(connection)
+    credential = None if admission is None else _credential_of(connection)
+    if admission is None or admission.token_exchange is None or not isinstance(credential, str):
+        raise RuntimeError(
+            "The bearer gate admitted no resource token for this request: install it with "
+            "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
+            "route, and exchange on the resource's entry point or marked route itself.",
+        )
+    return await on_worker(partial(admission.token_exchange, credential, scopes))
 
 
 def is_resource_admission(connection: HTTPConnection) -> bool:

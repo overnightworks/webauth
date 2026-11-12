@@ -6,6 +6,7 @@ from webauth.oidc._client_config import OidcClientConfig
 from webauth.oidc._relying_party import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     AuthorizationRequest,
+    ExchangedAccess,
     OidcIdentity,
     OidcRelyingParty,
     RenewedAccess,
@@ -24,6 +25,7 @@ from webauth.oidc._token_endpoint import (
 __all__ = [
     "PENDING_LOGIN_MAX_AGE_SECONDS",
     "AuthorizationRequest",
+    "ExchangedAccess",
     "OidcClientConfig",
     "OidcIdentity",
     "OidcRefusal",
