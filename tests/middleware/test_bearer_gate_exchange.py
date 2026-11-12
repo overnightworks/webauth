@@ -20,14 +20,7 @@ from starlette.requests import HTTPConnection
 
 from tests.support.exchange_arrangement import (
     ACCESS_TOKEN_TYPE,
-    EXCHANGE_PATH,
-    EXCHANGE_SCOPES,
-    EXCHANGE_SOCKET_PATH,
-    EXCHANGED_LIFETIME_SECONDS,
-    EXCHANGED_TOKEN,
-    MACHINE_EXCHANGE_PATH,
-    OTHER_ISSUER,
-    PERSON_EXCHANGE_PATH,
+    SCENARIO,
     ExchangeApp,
     an_exchange_answer,
     an_exchange_app,
@@ -64,19 +57,19 @@ def the_raised(exchange: ExchangeApp) -> list[str]:
 @pytest.mark.parametrize(
     ("path", "bearer", "changes"),
     [
-        pytest.param(EXCHANGE_PATH, "none", {}, id="session"),
-        pytest.param(PERSON_EXCHANGE_PATH, "path", {}, id="person-path-bearer"),
-        pytest.param(MACHINE_EXCHANGE_PATH, "path", {}, id="machine-path-bearer"),
-        pytest.param(EXCHANGE_PATH, "resource", {"app": FastAPI()}, id="sub-app"),
+        pytest.param(SCENARIO.path, "none", {}, id="session"),
+        pytest.param(SCENARIO.person_path, "path", {}, id="person-path-bearer"),
+        pytest.param(SCENARIO.machine_path, "path", {}, id="machine-path-bearer"),
+        pytest.param(SCENARIO.path, "resource", {"app": FastAPI()}, id="sub-app"),
         pytest.param(
-            EXCHANGE_PATH,
+            SCENARIO.path,
             "resource",
             {"headers": [(b"authorization", b"Bearer other")]},
             id="header-changed",
         ),
-        pytest.param(EXCHANGE_PATH, "resource", {"method": "POST"}, id="method-changed"),
+        pytest.param(SCENARIO.path, "resource", {"method": "POST"}, id="method-changed"),
         pytest.param(
-            EXCHANGE_PATH,
+            SCENARIO.path,
             "resource",
             {"query_string": b"access_token=other"},
             id="access-token-in-the-query",
@@ -101,14 +94,14 @@ def test_the_call_raises_where_resource_person_raises_and_posts_nothing(
 
 
 def test_the_call_raises_on_a_websocket_and_posts_nothing() -> None:
-    """EXCHANGE-01: a WebSocket is no admission, a bearer header or not."""
+    """EXCHANGE-01: a WebSocket is no admission, even with a bearer header."""
     exchange = an_exchange_app()
     auth = exchange.app.auth
     headers = [("authorization", f"Bearer {exchange.admitted_token()}")]
 
     with (
         auth.client,
-        auth.connect(EXCHANGE_SOCKET_PATH, cookie=auth.signed_cookie(), headers=headers) as socket,
+        auth.connect(SCENARIO.socket_path, cookie=auth.signed_cookie(), headers=headers) as socket,
     ):
         answer = socket.receive_json()
 
@@ -152,7 +145,7 @@ def test_admission_is_judged_before_scopes() -> None:
 def test_the_token_is_posted_only_to_the_token_endpoint_of_the_gate_that_admitted_it() -> None:
     """EXCHANGE-04: each call goes to its own gate's issuer, two gates over two issuers."""
     first = an_exchange_app()
-    second = an_exchange_app(issuer_url=OTHER_ISSUER)
+    second = an_exchange_app(issuer_url=SCENARIO.other_issuer)
 
     for exchange in (first, second, first):
         exchange.exchange()
@@ -163,9 +156,9 @@ def test_the_token_is_posted_only_to_the_token_endpoint_of_the_gate_that_admitte
 
 
 def test_the_exchange_posts_the_token_exchange_form_authenticated_as_the_gates_client() -> None:
-    """EXCHANGE-05: the form is the five members, `subject_token` is the admitted token byte for
-    byte and several scopes are joined by one space; the client authenticates as it does for its
-    other grants."""
+    """EXCHANGE-05, EXCHANGE-14: the form is the five members and names no audience,
+    `subject_token` is the admitted token byte for byte and several scopes are joined by one
+    space; the client authenticates as it does for its other grants."""
     exchange = an_exchange_app()
     token = exchange.admitted_token()
     exchange.scopes = ("calendar:read", "calendar:write", "notes:read")
@@ -225,7 +218,7 @@ def test_a_cancelled_caller_gets_no_answer_and_its_cancellation_after_the_post_e
 
     async def ask() -> None:
         try:
-            answers.append(await exchanged_access_token(connection, scopes=EXCHANGE_SCOPES))
+            answers.append(await exchanged_access_token(connection, scopes=SCENARIO.scopes))
         finally:
             exchange.issuer.events.append("caller-left")
 
@@ -252,7 +245,7 @@ def test_an_accepted_answer_expires_when_the_clock_before_the_post_says_and_read
     """EXCHANGE-08, EXCHANGE-12: `expires_at` is the whole-second clock before the post plus
     `expires_in`, which may lie after the admitted token's own expiry; `refresh_token` and `scope`
     are not read and the token type is read in any case."""
-    lifetime = 10 * EXCHANGED_LIFETIME_SECONDS
+    lifetime = 10 * SCENARIO.lifetime_seconds
     exchange = an_exchange_app(
         an_exchange_answer(
             token_type=token_type, expires_in=lifetime, refresh_token=7, scope=["unread"]
@@ -263,7 +256,7 @@ def test_an_accepted_answer_expires_when_the_clock_before_the_post_says_and_read
     exchange.exchange()
 
     assert exchange.outcomes == [
-        ExchangedAccess(SecretStr(EXCHANGED_TOKEN), ACCESS_TOKEN_NOW + lifetime)
+        ExchangedAccess(SecretStr(SCENARIO.exchanged_token), ACCESS_TOKEN_NOW + lifetime)
     ]
 
 
@@ -310,8 +303,9 @@ def test_an_answer_that_does_not_hold_is_refused_as_token_endpoint_failed(
     [(400, "invalid_request"), (401, "invalid_client"), (403, "access_denied")],
 )
 def test_an_issuer_error_is_refused_with_its_code(status: int, code: str) -> None:
-    """EXCHANGE-10: an `error` answered 400, 401 or, for this grant, 403 is
-    `TOKEN_REQUEST_REFUSED` carrying that code and no free text."""
+    """EXCHANGE-10, EXCHANGE-13: an `error` answered 400, 401 or, for this grant, 403 is
+    `TOKEN_REQUEST_REFUSED` carrying that code and no free text; the admitted request is no proof
+    the issuer accepts the token now."""
     exchange = an_exchange_app(
         token_endpoint_answer(status, {"error": code, "error_description": "free text"})
     )
@@ -346,7 +340,7 @@ def test_no_token_and_no_issuer_text_reaches_a_response_a_log_the_scope_or_a_rep
     exchange_keys = set(exchange.relay.added)
     scopes.append(repr(exchange.relay.added))
     exchange.issuer.answer = token_endpoint_answer(
-        400, {"error": "invalid_request", "error_description": EXCHANGED_TOKEN}
+        400, {"error": "invalid_request", "error_description": SCENARIO.exchanged_token}
     )
     refusal = exchange.exchange(token=token)
     scopes.append(repr(exchange.relay.added))
@@ -358,5 +352,5 @@ def test_no_token_and_no_issuer_text_reaches_a_response_a_log_the_scope_or_a_rep
         repr(exchange.issuer.requests),
         *scopes,
     ]
-    assert all(secret not in text for secret in (token, EXCHANGED_TOKEN) for text in shown)
+    assert all(secret not in text for secret in (token, SCENARIO.exchanged_token) for text in shown)
     assert exchange_keys == entry_keys

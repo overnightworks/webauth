@@ -24,6 +24,7 @@ from tests.support.gate_arrangement import (
     relayed,
 )
 from tests.support.oidc_arrangement import (
+    APP_CLIENT_ID,
     REALM_ISSUER,
     FakeTokenEndpoint,
     a_realm_client_config,
@@ -49,26 +50,35 @@ from webauth.oidc import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-EXCHANGE_PATH = "/exchange"
-PERSON_EXCHANGE_PATH = f"{PERSON_PREFIX}exchange"
-MACHINE_EXCHANGE_PATH = f"{MACHINE_PREFIX}exchange"
-EXCHANGE_SOCKET_PATH = "/exchange-socket"
-EXCHANGED_TOKEN = "exchanged-token-canary-never-shown"  # noqa: S105
 ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"  # noqa: S105
-EXCHANGED_LIFETIME_SECONDS = 300
-EXCHANGE_SCOPES = ("calendar:read", "calendar:write")
-OTHER_ISSUER = "https://other-login.example.org/realms/workshop"
-EXCHANGE_ROUTE = MarkedRoute("GET", EXCHANGE_PATH)
+
+
+@dataclass(frozen=True)
+class ExchangeScenario:
+    """The values one exchange scenario is built around: where its routes are, what the issuer
+    hands out and which scopes and issuers its tests exchange for and at."""
+
+    path: str = "/exchange"
+    person_path: str = f"{PERSON_PREFIX}exchange"
+    machine_path: str = f"{MACHINE_PREFIX}exchange"
+    socket_path: str = "/exchange-socket"
+    exchanged_token: str = "exchanged-token-canary-never-shown"  # noqa: S105
+    lifetime_seconds: int = 300
+    scopes: tuple[str, ...] = ("calendar:read", "calendar:write")
+    other_issuer: str = "https://other-login.example.org/realms/workshop"
+
+
+SCENARIO = ExchangeScenario()
 
 
 def an_exchange_answer(**changes: Any) -> TokenEndpointAnswer:
     """The issuer's accepted answer to a token exchange; `changes` replace its members, and
     `ABSENT` removes one."""
     document = {
-        "access_token": EXCHANGED_TOKEN,
+        "access_token": SCENARIO.exchanged_token,
         "issued_token_type": ACCESS_TOKEN_TYPE,
         "token_type": "Bearer",
-        "expires_in": EXCHANGED_LIFETIME_SECONDS,
+        "expires_in": SCENARIO.lifetime_seconds,
     }
     return token_endpoint_answer(200, changed(document, changes))
 
@@ -104,14 +114,14 @@ class ExchangeApp:
     relying_party: OidcRelyingParty
     relay: ScopeRelay
     issuer_url: str = REALM_ISSUER
-    scopes: Any = EXCHANGE_SCOPES
+    scopes: Any = SCENARIO.scopes
     outcomes: list[ExchangedAccess | OidcRefusal] = field(default_factory=list)
     raised: list[Exception] = field(default_factory=list)
     route_threads: list[int] = field(default_factory=list)
 
     def exchange(
         self,
-        path: str = EXCHANGE_PATH,
+        path: str = SCENARIO.path,
         *,
         token: str | None = None,
         cookie: bool = False,
@@ -127,7 +137,9 @@ class ExchangeApp:
         return _token_endpoint_of(self.issuer_url)
 
     def admitted_token(self) -> str:
-        return an_interactive_agent_token(self.resource, iss=self.issuer_url)
+        return an_interactive_agent_token(
+            self.resource, iss=self.issuer_url, aud=[self.resource.url, APP_CLIENT_ID]
+        )
 
     def moving_the_clock_during_the_post(self, seconds: float) -> None:
         def move() -> None:
@@ -153,14 +165,14 @@ def _exchange_route(exchange: ExchangeApp) -> Callable[[Request], Any]:
 def _add_exchange_routes(exchange: ExchangeApp) -> None:
     app = exchange.app.auth.app
     route = _exchange_route(exchange)
-    for path in (EXCHANGE_PATH, PERSON_EXCHANGE_PATH, MACHINE_EXCHANGE_PATH):
+    for path in (SCENARIO.path, SCENARIO.person_path, SCENARIO.machine_path):
         app.add_api_route(path, route, methods=["GET", "POST"])
 
-    @app.websocket(EXCHANGE_SOCKET_PATH)
+    @app.websocket(SCENARIO.socket_path)
     async def socket(websocket: WebSocket) -> None:
         await websocket.accept()
         try:
-            await exchanged_access_token(websocket, scopes=EXCHANGE_SCOPES)
+            await exchanged_access_token(websocket, scopes=SCENARIO.scopes)
         except RuntimeError as error:
             exchange.raised.append(error)
         await websocket.send_json({"raised": len(exchange.raised)})
@@ -173,7 +185,7 @@ def _token_endpoint_of(issuer_url: str) -> str:
 
 def _posting_to(app: BearerApp, issuer: ExchangeIssuer, issuer_url: str) -> OidcRelyingParty:
     """Replaces the app's gate by one over `issuer_url` whose relying party posts to `issuer`
-    and whose resource marks `EXCHANGE_ROUTE`, which `a_bearer_app` leaves to the host."""
+    and whose resource marks the scenario's route, which `a_bearer_app` leaves to the host."""
     entry = next(m for m in app.auth.app.user_middleware if m.cls is BearerGateMiddleware)
     gate = entry.kwargs["policy"]
     assert isinstance(gate, BearerGate)
@@ -187,7 +199,7 @@ def _posting_to(app: BearerApp, issuer: ExchangeIssuer, issuer_url: str) -> Oidc
         wall_clock=app.clock,
     )
     admission = replace(gate.admission, bound_issuer=issuer_url)
-    resource = replace(gate.resource, marked_routes=frozenset({EXCHANGE_ROUTE}))
+    resource = replace(gate.resource, marked_routes=frozenset({MarkedRoute("GET", SCENARIO.path)}))
     entry.kwargs["policy"] = replace(
         gate, relying_party=party, admission=admission, resource=resource
     )
@@ -203,11 +215,12 @@ def an_exchange_app(
     """An app whose resource admits `an_interactive_agent_token`s and whose gate exchanges at
     `issuer_url`, which answers `answer` (default `an_exchange_answer()`).
 
-    `EXCHANGE_PATH` is a marked route of the resource, `PERSON_EXCHANGE_PATH` is on a person path,
-    `MACHINE_EXCHANGE_PATH` on a machine path and `EXCHANGE_SOCKET_PATH` is a WebSocket; each
-    calls `exchanged_access_token` for `ExchangeApp.scopes`.
+    `SCENARIO.path` is a marked route of the resource, `SCENARIO.person_path` is on a person
+    path, `SCENARIO.machine_path` on a machine path and `SCENARIO.socket_path` is a WebSocket; each
+    calls `exchanged_access_token` for `ExchangeApp.scopes`. The resource admits the client
+    audience, and `admitted_token` names it beside the resource.
     """
-    resource = a_resource()
+    resource = replace(a_resource(), admits_client_audience=True)
     issuer = ExchangeIssuer(answer or an_exchange_answer())
     app = a_bearer_app(
         resource=resource,
