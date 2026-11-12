@@ -426,7 +426,7 @@ def test_a_resource_that_admits_the_client_audience_by_anything_but_a_bool_raise
         replace(a_resource(), admits_client_audience=flag)  # type: ignore[arg-type]
 
 
-def test_a_resource_admits_the_client_audience_only_when_declared_to() -> None:
+def test_a_resource_does_not_admit_the_client_audience_by_default() -> None:
     """RESOURCE-84: the flag is `False` by default."""
     assert a_resource().admits_client_audience is False
 

@@ -17,13 +17,15 @@ checked here, as OpenID Connect Core asks of the relying party. A refresh
 token in the answer must be RFC 6749 Appendix A.17's `1*VSCHAR`, or the login
 is refused as `TOKEN_ENDPOINT_FAILED`; the access token is not read.
 
-`renew_access` and `workload_access_token` (a `client_credentials` grant for the
-host's scopes) are each one POST with the code exchange's client authentication,
+`renew_access`, `workload_access_token` (a `client_credentials` grant for the
+host's scopes) and the bearer gate's token exchange (RFC 8693, of the access token a resource
+admitted) are each one POST with the code exchange's client authentication,
 no cache and no lock, so every call is a fresh token. The issuer's answer must be a Bearer
 token (`token_type` compared in ASCII case-insensitively) whose `access_token`
 has RFC 6750's `b64token` shape; anything else, and a sent or received refresh
 token outside `1*VSCHAR`, is `TOKEN_ENDPOINT_FAILED`. The status handling is
-the code exchange's, so an issuer's `error` is `TOKEN_REQUEST_REFUSED`. No
+the code exchange's, so an issuer's `error` is `TOKEN_REQUEST_REFUSED`; the token exchange also
+reads it from a 403. No
 token is decoded: judging its claims belongs to whoever receives it.
 
 The state, nonce and verifier are each `_PENDING_SECRET_BYTES` random bytes,

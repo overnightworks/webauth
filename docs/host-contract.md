@@ -775,6 +775,33 @@ On a marked route:
 - **RESOURCE-82** it is false on a session, on a person-path token (on a marked route below a person path too, and for a token of another audience on a marked route), on a machine request, on a request without a credential, on a WebSocket, and in an app without a bearer gate;
 - **RESOURCE-83** it raises `RuntimeError` where a bearer admission is recorded but no longer holds for this request: in a sub-app, and after the `Authorization` header or the method changed. Otherwise it never raises.
 
+## The exchange of an admitted token
+
+An app whose protected resource admitted a caller's token acts for that caller at another service by exchanging the token at the issuer (RFC 8693).
+`await webauth.middleware.exchanged_access_token(connection, scopes=...)` answers an `ExchangedAccess` (`access_token`, a `SecretStr`, and `expires_at`, whole wall-clock seconds) or an `OidcRefusal`.
+
+- **EXCHANGE-01** It raises `RuntimeError` exactly where `resource_person` raises (RESOURCE-66 to RESOURCE-68): on a session, person or machine request, in a sub-app, after the `Authorization` header or the method changed, and on a WebSocket. Nothing is posted.
+- **EXCHANGE-02** It then reads the credential again with the gate's one grammar, and any refusal of that reading is the same `RuntimeError`, which can only happen when `access_token` was added to the query after admission.
+- **EXCHANGE-03** `scopes` is judged after the admission, by the rule and with the message of `workload_access_token`: a non-empty tuple of RFC 6749 scope tokens, else `ValueError`, and nothing is posted.
+- **EXCHANGE-04** The token is posted only to the token endpoint of the relying party whose gate admitted it, as that gate's client, `client_secret_basic`; the admission record carries that relying party's grant, so no registry and no relying-party argument exists.
+- **EXCHANGE-05** The form is `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token` byte for byte, `subject_token_type` and `requested_token_type` both `urn:ietf:params:oauth:token-type:access_token`, and `scope` the `scopes` joined by one space; it names no `audience` and no `resource`. Nothing is cached or locked, so each call is one post.
+- **EXCHANGE-06** The post runs on a worker thread, not on the event loop.
+- **EXCHANGE-07** A cancelled caller gets no answer, and its cancellation arrives after the post ends (GROUPS-30).
+- **EXCHANGE-08** An accepted answer holds the workload grant's bearer token (`token_type` compared in ASCII case-insensitively, an `access_token` of RFC 6750's `b64token` shape), an `issued_token_type` equal to `urn:ietf:params:oauth:token-type:access_token` and an `expires_in` that is a whole number of at least 1 (`bool` and `float` are not); `expires_at` is the wall clock read before the post, in whole seconds, plus `expires_in`. `refresh_token` and `scope` are not read.
+- **EXCHANGE-09** Any other answer, a transport error, an answer that is not JSON and an answer without an `error` code on a refused status is `TOKEN_ENDPOINT_FAILED`; requiring `expires_in` is stricter than RFC 8693 section 2.2.1, which recommends it.
+- **EXCHANGE-10** Unlike every other grant, a 403 with an `error` code is `TOKEN_REQUEST_REFUSED` with that code (as 400 and 401 are); the issuer's free text is never carried.
+- **EXCHANGE-11** It never returns, stores or logs the admitted token; the host sees only the exchanged one.
+- **EXCHANGE-12** The exchanged expiry is never compared with the admitted token's; it can lie after it.
+- **EXCHANGE-13** The admission is no freshness proof: the issuer judges the subject token, so a call late in a long request can be refused.
+- **EXCHANGE-14** The exchanged token's audiences are what the realm gives the requested scopes; the call names none.
+- **Host duty:** `scopes` come from the host's configuration, never from the request. Admission at the resource proves access to the resource, not agreement to a downstream scope; what the app may obtain for a principal is the issuer's policy (the realm offers the scope to the app's client) and the service's group check.
+- **Host duty:** A held exchanged token is keyed by `resource_person(connection).id` of the same request.
+- **Host duty:** At most one exchange is in flight per principal, and a refusal is not retried on every request; the post runs on the worker threads the gate's verifier uses.
+- **Host duty:** A resource whose token must be exchangeable declares `admits_client_audience=True` (RESOURCE-18).
+- **Host duty:** A host's test passes its own `post_token_request` to the gate's relying party and answers this grant type there (beside HOSTTEST-04).
+
+The operator ruled the sentence that says the call exists for every app and names the delegation policy: the issuer grants an exchanged scope only when the realm offers it to the app's client and the principal is in the service's group, and the service checks that group. No other sentence here is ruled.
+
 ## A service's callers
 
 A service that is not a browser app (no sessions, no sign-in) admits an app acting for a person, with

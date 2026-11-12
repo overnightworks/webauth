@@ -12,7 +12,7 @@ Every app integrates it the same way, from its documentation alone, without read
 once, and every app gets it by taking the next release.
 
 It follows OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0 (RFC 6749) with
-bearer tokens (RFC 6750), JSON Web Token (RFC 7519) and Fetch Metadata.
+bearer tokens (RFC 6750), OAuth 2.0 Token Exchange (RFC 8693), JSON Web Token (RFC 7519) and Fetch Metadata.
 
 It is made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot
 derive from the code, and the code is clean enough that the next agent changes it without fear.

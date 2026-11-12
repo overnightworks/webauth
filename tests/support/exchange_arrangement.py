@@ -175,7 +175,9 @@ def _posting_to(app: BearerApp, issuer: ExchangeIssuer, issuer_url: str) -> Oidc
     """Replaces the app's gate by one over `issuer_url` whose relying party posts to `issuer`
     and whose resource marks `EXCHANGE_ROUTE`, which `a_bearer_app` leaves to the host."""
     entry = next(m for m in app.auth.app.user_middleware if m.cls is BearerGateMiddleware)
-    gate: BearerGate = entry.kwargs["policy"]
+    gate = entry.kwargs["policy"]
+    assert isinstance(gate, BearerGate)
+    assert gate.resource is not None
     party = a_relying_party(
         config=a_realm_client_config(
             issuer=issuer_url, token_endpoint=_token_endpoint_of(issuer_url)

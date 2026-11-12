@@ -74,6 +74,7 @@ from webauth.middleware import (
     admitted_admin,
     admitted_user,
     bearer_caller,
+    exchanged_access_token,
     install_resource_metadata,
     install_web_auth_middleware,
     is_resource_admission,
@@ -81,6 +82,7 @@ from webauth.middleware import (
 )
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
+    ExchangedAccess,
     OidcClientConfig,
     OidcIdentity,
     OidcRefusal,
@@ -415,6 +417,17 @@ def a_host_reads_the_resource_person(app: FastAPI) -> None:
     @app.post("/mcp")
     def mcp(request: Request) -> str:
         return resource_person(request).username
+
+
+def a_host_exchanges_the_admitted_token(app: FastAPI) -> None:
+    @app.post("/mcp/calendar")
+    async def calendar(request: Request) -> str:
+        exchanged: ExchangedAccess | OidcRefusal = await exchanged_access_token(
+            request, scopes=("calendar:read",)
+        )
+        if isinstance(exchanged, OidcRefusal):
+            return exchanged.reason.value
+        return f"{exchanged.access_token.get_secret_value()} until {exchanged.expires_at}"
 
 
 def a_host_reads_whether_the_resource_admitted_the_request(
