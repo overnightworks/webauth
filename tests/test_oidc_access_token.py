@@ -345,12 +345,18 @@ def test_an_unavailable_key_set_refuses_the_token() -> None:
     assert outcome == rejected(RejectionReason.KEY_SET_UNAVAILABLE)
 
 
-def resource_verified(token: str, *, scope: str = "mcp:tools") -> VerifiedAccessToken | OidcRefusal:
+def resource_verified(
+    token: str,
+    *,
+    scope: str = "mcp:tools",
+    admits_client_audience: bool = False,
+) -> VerifiedAccessToken | OidcRefusal:
     verifier = a_relying_party(fetch_key_set=a_key_set()).resource_token_verifier(
         resource_url=RESOURCE_URL,
         scope=scope,
         authorized_parties=HAL,
         agent_group="/agents",
+        admits_client_audience=admits_client_audience,
     )
     return verifier(token)
 
@@ -380,6 +386,85 @@ def test_a_resource_token_must_name_the_resource_as_its_only_audience(
     token = an_access_token(claims={"aud": audience, "scope": "mcp:tools"})
 
     assert resource_verified(token) == refusal
+
+
+ADMITTED_FOR_THE_RESOURCE = VerifiedAccessToken(
+    subject=OPERATOR_SUBJECT,
+    groups=("/apps/x/admin",),
+    preferred_username=None,
+)
+INVALID_CLAIM = OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
+
+
+@pytest.mark.parametrize(
+    ("audience", "admits_client_audience", "outcome"),
+    [
+        ([RESOURCE_URL, APP_CLIENT_ID], True, ADMITTED_FOR_THE_RESOURCE),
+        ([APP_CLIENT_ID, RESOURCE_URL], True, ADMITTED_FOR_THE_RESOURCE),
+        (RESOURCE_URL, True, ADMITTED_FOR_THE_RESOURCE),
+        ([RESOURCE_URL, APP_CLIENT_ID], False, INVALID_CLAIM),
+        ([APP_CLIENT_ID, RESOURCE_URL], False, INVALID_CLAIM),
+        ([RESOURCE_URL, APP_CLIENT_ID, OTHER_APP], True, INVALID_CLAIM),
+        ([RESOURCE_URL, OTHER_APP], True, INVALID_CLAIM),
+        ([APP_CLIENT_ID, APP_CLIENT_ID], True, rejected(RejectionReason.INVALID_AUDIENCE)),
+        ([RESOURCE_URL, RESOURCE_URL], True, INVALID_CLAIM),
+        (APP_CLIENT_ID, True, rejected(RejectionReason.INVALID_AUDIENCE)),
+    ],
+    ids=[
+        "pair-url-first-admitted",
+        "pair-client-first-admitted",
+        "url-alone-admitted",
+        "pair-without-the-flag",
+        "reversed-pair-without-the-flag",
+        "pair-and-a-third",
+        "url-and-another-app",
+        "client-id-twice",
+        "url-twice",
+        "client-id-alone",
+    ],
+)
+def test_a_resource_admits_the_client_beside_its_url_only_with_the_flag(
+    audience: Any,
+    admits_client_audience: bool,
+    outcome: VerifiedAccessToken | OidcRefusal,
+) -> None:
+    """RESOURCE-18, RESOURCE-84, RESOURCE-86: with the flag a token whose audiences are the
+    `url`, or exactly the `url` and the app's client id in either order, passes; a repeated
+    value, a third audience and the client id alone do not; without the flag only the `url`
+    alone passes."""
+    token = an_access_token(claims={"aud": audience, "scope": "mcp:tools"})
+
+    assert resource_verified(token, admits_client_audience=admits_client_audience) == outcome
+
+
+def test_the_app_verifier_refuses_the_url_and_client_pair() -> None:
+    """RESOURCE-86: the app's own verifier takes no flag and keeps the client as the only
+    audience."""
+    token = an_access_token(claims={"aud": [RESOURCE_URL, APP_CLIENT_ID]})
+
+    assert verified(token) == INVALID_CLAIM
+
+
+@pytest.mark.parametrize(
+    ("claims", "outcome"),
+    [
+        ({"azp": "stranger"}, OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH)),
+        ({"scope": "mcp:other"}, OidcRefusal(OidcRefusalReason.INSUFFICIENT_SCOPE)),
+        ({"groups": ["/agents"]}, INVALID_CLAIM),
+    ],
+    ids=["unlisted-party", "other-scope", "agent-without-its-claims"],
+)
+def test_the_pair_keeps_every_other_check_of_the_resource(
+    claims: dict[str, Any],
+    outcome: OidcRefusal,
+) -> None:
+    """RESOURCE-18: a token with the url and the client id is decided by the party, the scope
+    and the agent claims as a token with the url alone."""
+    token = an_access_token(
+        claims={"aud": [RESOURCE_URL, APP_CLIENT_ID], "scope": "mcp:tools", **claims}
+    )
+
+    assert resource_verified(token, admits_client_audience=True) == outcome
 
 
 def test_a_resource_token_is_refused_by_the_app_verifier() -> None:

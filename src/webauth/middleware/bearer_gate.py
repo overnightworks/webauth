@@ -222,6 +222,12 @@ class ProtectedResource:
     token whose audience is not ``url``, the request is decided as if unmarked. ``TypeError``
     for ``marked_routes`` that is not a ``frozenset`` of ``MarkedRoute``. The gate runs before
     routing, so a match must resolve to the host's marked operation: the host proves it.
+
+    ``admits_client_audience`` is for an app that exchanges the token the resource admitted at the
+    issuer, which exchanges only a token that names the exchanging client: the resource then
+    admits a token whose audiences are ``url`` and the relying party's client id, in either
+    order, besides one whose only audience is ``url``. It is ``False`` by default, ``TypeError``
+    for anything but a ``bool``, and changes no machine or person path.
     """
 
     url: str
@@ -231,6 +237,7 @@ class ProtectedResource:
     authorized_parties: AuthorizedParties
     transaction: SignInTransaction
     marked_routes: frozenset[MarkedRoute] = frozenset()
+    admits_client_audience: bool = False
 
     def __post_init__(self) -> None:
         _require_authorized_parties(self.authorized_parties)
@@ -238,6 +245,8 @@ class ProtectedResource:
             isinstance(route, MarkedRoute) for route in self.marked_routes
         ):
             raise TypeError("ProtectedResource.marked_routes must be a frozenset of MarkedRoute")
+        if not isinstance(self.admits_client_audience, bool):
+            raise TypeError("ProtectedResource.admits_client_audience must be a bool")
         _require_group_path("ProtectedResource.required_group", self.required_group)
         _require_group_path("ProtectedResource.agent_group", self.agent_group)
         if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
@@ -410,6 +419,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                     scope=resource.scope,
                     authorized_parties=resource.authorized_parties,
                     agent_group=resource.agent_group,
+                    admits_client_audience=resource.admits_client_audience,
                 )
             )
         )

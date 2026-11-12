@@ -13,7 +13,7 @@ import logging
 import threading
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import httpx
@@ -31,6 +31,7 @@ from tests.support.gate_arrangement import (
     REALM_INSUFFICIENT_SCOPE,
     REALM_INVALID_REQUEST,
     REALM_INVALID_TOKEN,
+    RESOURCE_URL,
     UNDECLARED_PATH,
     BearerApp,
     a_bearer_app,
@@ -45,6 +46,7 @@ from tests.support.gate_arrangement import (
 )
 from tests.support.oidc_arrangement import (
     ABSENT,
+    APP_CLIENT_ID,
     OPERATOR_SUBJECT,
     a_relying_party,
     an_access_token,
@@ -231,6 +233,28 @@ def test_a_request_without_a_valid_admin_token_is_refused_with_a_challenge(
         {"detail": answer.detail},
     )
     assert_answers_no_store(response)
+    assert app.auth.route_runs == []
+
+
+@pytest.mark.parametrize(
+    "audience",
+    [[RESOURCE_URL, APP_CLIENT_ID], [APP_CLIENT_ID, RESOURCE_URL]],
+    ids=["url-first", "client-first"],
+)
+def test_a_machine_path_refuses_the_url_and_client_pair_beside_a_resource_that_admits_it(
+    audience: list[str],
+) -> None:
+    """MACHINE-09, RESOURCE-86: a token naming the resource's `url` and the app's client id is
+    refused on a machine path of a gate whose resource admits the pair."""
+    resource = replace(a_resource(), admits_client_audience=True)
+    app = a_bearer_app(resource=resource)
+
+    response = app.ask(EXPORT_PATH, authorization=bearing(a_token(aud=audience)))
+
+    assert (response.status_code, response.headers["www-authenticate"]) == (
+        401,
+        REALM_INVALID_TOKEN,
+    )
     assert app.auth.route_runs == []
 
 

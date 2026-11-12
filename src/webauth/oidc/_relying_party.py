@@ -451,6 +451,7 @@ class OidcRelyingParty:
         scope: str,
         authorized_parties: AuthorizedParties,
         agent_group: str,
+        admits_client_audience: bool = False,
     ) -> Callable[[str], VerifiedAccessToken | OidcRefusal]:
         """A check of an access token presented to the resource at `resource_url`.
 
@@ -462,8 +463,9 @@ class OidcRelyingParty:
         `VerifiedAccessToken.agent`; anything else is `INVALID_ACCESS_CLAIM`, decided before
         the scope. Its `scope` claim, a string of space-separated tokens, must include
         `scope` exactly, or the refusal is `INSUFFICIENT_SCOPE`. The realm alone decides
-        which clients can mint a token for `resource_url`. `TypeError` for anything but
-        `AuthorizedParties`."""
+        which clients can mint a token for `resource_url`. With `admits_client_audience`
+        the audiences may also be exactly `resource_url` and this client's ID, in either
+        order. `TypeError` for anything but `AuthorizedParties`."""
         _require_authorized_parties(authorized_parties)
         jwt_verifier = self._verifier_for(resource_url)
 
@@ -472,7 +474,11 @@ class OidcRelyingParty:
             if isinstance(outcome, OidcRefusal):
                 return outcome
             profile = self._access_token_profile(
-                outcome, authorized_parties, audience=resource_url, agent_group=agent_group
+                outcome,
+                authorized_parties,
+                audience=resource_url,
+                agent_group=agent_group,
+                admits_client_audience=admits_client_audience,
             )
             if isinstance(profile, VerifiedAccessToken) and not _holds_scope(outcome.claims, scope):
                 return OidcRefusal(OidcRefusalReason.INSUFFICIENT_SCOPE)
@@ -487,8 +493,15 @@ class OidcRelyingParty:
         *,
         audience: str,
         agent_group: str | None = None,
+        admits_client_audience: bool = False,
     ) -> VerifiedAccessToken | OidcRefusal:
-        if token.subject is None or token.audiences != (audience,):
+        admitted_audiences = [(audience,)]
+        if admits_client_audience:
+            admitted_audiences += [
+                (audience, self._config.client_id),
+                (self._config.client_id, audience),
+            ]
+        if token.subject is None or token.audiences not in admitted_audiences:
             return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
         groups = _group_paths(token.claims)
         is_agent = groups is not None and agent_group in groups

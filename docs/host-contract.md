@@ -613,7 +613,7 @@ a host that names no language (`lambda request: None`).
 
 ## The protected resource
 
-A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, agent_group, authorized_parties, transaction, marked_routes)` and passes
+A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, agent_group, authorized_parties, transaction, marked_routes, admits_client_audience)` and passes
 it as `BearerGate(resource=...)`.
 
 - **RESOURCE-01** A gate needs one kind of path, and the resource counts as one.
@@ -651,7 +651,9 @@ At the entry point, on every method and the exact path only:
   - **RESOURCE-16** an RS256 `at+jwt`,
   - **RESOURCE-17** of the relying party's issuer,
   - **RESOURCE-18** whose only audience is the resource's `url` (not the app's client ID,
-    not a list of two),
+    not a list of two); a resource declared with `admits_client_audience=True` also admits a token
+    whose audiences are exactly its `url` and the relying party's client ID, in either order, and
+    nothing else,
   - **RESOURCE-19** and whose `azp` is one of the resource's parties, unless the next rule applies.
 - **RESOURCE-70** A token whose validated `groups` list holds `agent_group` as one element passes the party check
   (RESOURCE-19) whatever its `azp`, and other groups beside it change nothing. Every other check of
@@ -664,6 +666,13 @@ At the entry point, on every method and the exact path only:
   token check, so this refusal comes before the scope (RESOURCE-20), before the group refusals (RESOURCE-21,
   RESOURCE-22) and before any `transaction` entry, also when the `azp` is among the resource's parties.
 - **RESOURCE-74** Without the agent group both claims are ignored and the token is a person's, with `agent` `None`.
+- **RESOURCE-84** `admits_client_audience` is `False` by default, and anything but a `bool` is a `TypeError`.
+- **RESOURCE-85** It exists for an app that exchanges the admitted token at the issuer, which exchanges only a token that
+  names the exchanging client; an app that does not exchange leaves it off.
+- **RESOURCE-86** A token naming the `url` and the client ID is refused on the machine paths and on the person paths
+  whatever the flag says (MACHINE-09 and the person paths' one-audience rule stay), and on a resource without the flag.
+- **RESOURCE-87** With the flag on, the one-audience check of the machine and person paths is the layer between a token
+  minted for the resource and the rights of a person path.
 - **RESOURCE-20** A token that passes that but whose `scope` claim, read as space-separated tokens, lacks the
   resource's scope (absent, not a string, another scope, or the scope only as a substring of
   another): 403 with `error="insufficient_scope"` and the same two parameters, and no route runs.
@@ -738,7 +747,7 @@ On a marked route:
   - **RESOURCE-54** it is never a resource admission.
 - Any other refusal answers there as at the entry point with the challenge, a valid cookie beside it deciding nothing:
   - **RESOURCE-55** a refused credential;
-  - **RESOURCE-56** an invalid or expired token, and a token naming the resource among two audiences;
+  - **RESOURCE-56** an invalid or expired token, and a token naming the resource among audiences its check does not admit;
   - **RESOURCE-57** `insufficient_scope`.
 - A token that holds runs the entry point's admission:
   - **RESOURCE-58** the groups lack `required_group`: the plain 403;
