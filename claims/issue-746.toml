@@ -1,7 +1,0 @@
-claim_id = "a3ac247ab5674d378dd684baf5ed7bf6"
-agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
-role = "builder"
-base = "46bf8d3338b74dd9d5eb266fb702cac975f3fc17"
-branch = "claude/issue-746-host-contract-group-check"
-scope = ["docs/host-contract.md"]
-opened_commit = "3f963b361aeaee64a7ca5ebf855549189ecda4d0"
