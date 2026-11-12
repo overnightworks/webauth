@@ -7,16 +7,18 @@ from webauth.oidc._relying_party import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     AuthorizationRequest,
     OidcIdentity,
-    OidcRefusal,
-    OidcRefusalReason,
     OidcRelyingParty,
     RenewedAccess,
+    VerifiedAccessToken,
+    VerifiedLogout,
+)
+from webauth.oidc._token_endpoint import (
+    OidcRefusal,
+    OidcRefusalReason,
     TokenEndpointAnswer,
     TokenEndpointError,
     TokenRequest,
     TokenRequestPost,
-    VerifiedAccessToken,
-    VerifiedLogout,
 )
 
 __all__ = [
