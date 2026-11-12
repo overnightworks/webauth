@@ -800,7 +800,7 @@ An app whose protected resource admitted a caller's token acts for that caller a
 - **Host duty:** A resource whose token must be exchangeable declares `admits_client_audience=True` (RESOURCE-18).
 - **Host duty:** A host's test passes its own `post_token_request` to the gate's relying party and answers this grant type there (beside HOSTTEST-04).
 
-The operator ruled the sentence that says the call exists for every app and names the delegation policy: the issuer grants an exchanged scope only when the realm offers it to the app's client and the principal is in the service's group, and the service checks that group. No other sentence here is ruled.
+The operator ruled the sentence that says the call exists for every app and names the delegation policy: the issuer grants an exchanged scope only when the realm offers it to the app's client, and the service alone checks that the principal is in its group. No other sentence here is ruled.
 
 ## A service's callers
 
