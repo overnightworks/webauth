@@ -1,8 +1,0 @@
-claim_id = "e92ffc3da2764d47862de309d760380e"
-agent = "Claude 0ba09b25-ba15-45bd-8e25-0825f831d37b"
-role = "builder"
-base = "887e2f100cb885e3b939e70aeee293038a6413e7"
-branch = "claude/issue-737-token-endpoint-module"
-scope = ["docs/ARCHITECTURE.md", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc/__init__.py", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc/_token_endpoint.py", "src/webauth/oidc_transport.py", "src/webauth/service_callers.py", "src/webauth/sign_in_routes.py"]
-opened_commit = "007c8cf3f733cbbb8b1daba1a28339c6c1ce4733"
-whole_reason = "One set of definitions moves to a new module, and each file that imports a moved name follows in the same change."
