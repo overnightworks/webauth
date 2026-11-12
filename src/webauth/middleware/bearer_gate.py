@@ -307,7 +307,8 @@ class BearerGate:
     resource, is decided as an unmarked path. On the other paths
     the token must come from ``relying_party``'s issuer, name its client as the only
     audience and carry an ``azp`` among the parties of the path's kind. At the entry point
-    the only audience is the resource's URL and the parties are the resource's. A machine
+    the only audience is the resource's URL or, with ``admits_client_audience``, exactly the URL
+    and the relying party's client ID, and the parties are the resource's. A machine
     path also needs ``admission.admin_group`` or a group below it. On a person path
     the token is the account behind its subject, admitted as a sign-in admits it.
     ``ValueError`` when the gate has no kind, for ``NoAdmins`` with machine
