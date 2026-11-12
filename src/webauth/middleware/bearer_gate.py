@@ -661,9 +661,15 @@ async def exchanged_access_token(
     then ``ValueError`` for ``scopes`` that are no non-empty tuple of RFC 6749 scope tokens.
     Nothing is posted in either case.
     """
+    admitted = _resource_person_admitted(connection) is not None
     admission = _bearer_admission(connection)
     credential = None if admission is None else _credential_of(connection)
-    if admission is None or admission.token_exchange is None or not isinstance(credential, str):
+    if (
+        not admitted
+        or admission is None
+        or admission.token_exchange is None
+        or not isinstance(credential, str)
+    ):
         raise RuntimeError(
             "The bearer gate admitted no resource token for this request: install it with "
             "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
