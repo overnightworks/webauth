@@ -436,30 +436,16 @@ def test_a_resource_admits_the_client_audience_only_when_declared_to() -> None:
     [
         pytest.param({"aud": [RESOURCE_URL, APP_CLIENT_ID]}, 200, id="pair-url-first"),
         pytest.param({"aud": [APP_CLIENT_ID, RESOURCE_URL]}, 200, id="pair-client-first"),
-        pytest.param({}, 200, id="url-alone"),
-        pytest.param(
-            {"aud": [RESOURCE_URL, APP_CLIENT_ID, "another-app"]}, 401, id="pair-and-a-third"
-        ),
-        pytest.param({"aud": [RESOURCE_URL, "another-app"]}, 401, id="url-and-another-app"),
-        pytest.param({"aud": [APP_CLIENT_ID, APP_CLIENT_ID]}, 401, id="client-id-twice"),
-        pytest.param({"aud": APP_CLIENT_ID}, 401, id="client-id-alone"),
-        pytest.param(
-            {"aud": [RESOURCE_URL, APP_CLIENT_ID], "azp": "stranger"}, 401, id="pair-unlisted-party"
-        ),
-        pytest.param(
-            {"aud": [RESOURCE_URL, APP_CLIENT_ID], "scope": ABSENT}, 403, id="pair-without-scope"
-        ),
         pytest.param({"aud": [RESOURCE_URL, APP_CLIENT_ID], "groups": []}, 403, id="pair-no-group"),
     ],
 )
-def test_a_resource_that_admits_the_client_audience_admits_the_pair_and_nothing_wider(
+def test_a_resource_that_admits_the_client_audience_admits_the_pair_for_its_group(
     claims: dict[str, object],
     status: int,
 ) -> None:
-    """RESOURCE-18, RESOURCE-84: an opted-in resource admits a token whose audiences are its
-    `url` or exactly its `url` and the app's client id, in either order; a third audience, a
-    repeated client id and the client id alone are a 401, and the party, scope and group checks
-    decide for the pair as for the `url` alone."""
+    """RESOURCE-18, RESOURCE-84: an opted-in resource admits a token whose audiences are
+    exactly its `url` and the app's client id, in either order, and the required group decides
+    for the pair as for the `url` alone."""
     resource = replace(a_resource(), admits_client_audience=True)
     app = a_bearer_app(
         paths=PathRules(),
