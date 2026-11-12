@@ -17,14 +17,17 @@ checked here, as OpenID Connect Core asks of the relying party. A refresh
 token in the answer must be RFC 6749 Appendix A.17's `1*VSCHAR`, or the login
 is refused as `TOKEN_ENDPOINT_FAILED`; the access token is not read.
 
-`renew_access` and `workload_access_token` (a `client_credentials` grant for the
-host's scopes) are each one POST with the code exchange's client authentication,
-no cache and no lock, so every call is a fresh token. The issuer's answer must be a Bearer
-token (`token_type` compared in ASCII case-insensitively) whose `access_token`
-has RFC 6750's `b64token` shape; anything else, and a sent or received refresh
-token outside `1*VSCHAR`, is `TOKEN_ENDPOINT_FAILED`. The status handling is
-the code exchange's, so an issuer's `error` is `TOKEN_REQUEST_REFUSED`. No
-token is decoded: judging its claims belongs to whoever receives it.
+`renew_access`, `workload_access_token` (a `client_credentials` grant for the
+host's scopes) and the bearer gate's token exchange (RFC 8693, of the access
+token a resource admitted) are each one POST with the code exchange's client
+authentication, no cache and no lock, so every call is a fresh token. The
+issuer's answer must be a Bearer token (`token_type` compared in ASCII
+case-insensitively) whose `access_token` has RFC 6750's `b64token` shape;
+anything else is `TOKEN_ENDPOINT_FAILED`, and so is a sent or received refresh
+token outside `1*VSCHAR`, except that the token exchange never reads a
+`refresh_token`. The status handling is the code exchange's, so an issuer's
+`error` is `TOKEN_REQUEST_REFUSED`; the token exchange also reads it from a
+403. No token is decoded: judging its claims belongs to whoever receives it.
 
 The state, nonce and verifier are each `_PENDING_SECRET_BYTES` random bytes,
 and the received state and nonce are compared in constant time. A pending
@@ -64,13 +67,17 @@ from webauth.oidc._authorization_url import authorization_url
 from webauth.oidc._client_config import OidcClientConfig
 from webauth.oidc._locale_claim import account_language_claim
 from webauth.oidc._token_endpoint import (
+    _ACCESS_TOKEN_TYPE,
+    _EXCHANGE_ERROR_STATUSES,
     _TOKEN_ERROR_STATUSES,
+    _TOKEN_EXCHANGE_GRANT,
     OidcRefusal,
     OidcRefusalReason,
     TokenEndpointError,
     TokenRequest,
     TokenRequestPost,
     _bearer_access_token,
+    _exchanged_lifetime_seconds,
     _idp_error_code,
     _is_refresh_token,
     _issued_refresh_token,
@@ -87,6 +94,7 @@ if TYPE_CHECKING:
 __all__ = [
     "PENDING_LOGIN_MAX_AGE_SECONDS",
     "AuthorizationRequest",
+    "ExchangedAccess",
     "OidcIdentity",
     "OidcRelyingParty",
     "RenewedAccess",
@@ -138,6 +146,15 @@ class RenewedAccess:
 
     access_token: SecretStr
     refresh_token: SecretStr | None
+
+
+@dataclass(frozen=True)
+class ExchangedAccess:
+    """What a token exchange yields: the access token and the whole wall-clock second it
+    expires at."""
+
+    access_token: SecretStr
+    expires_at: int
 
 
 @dataclass(frozen=True)
@@ -352,13 +369,42 @@ class OidcRelyingParty:
         give the client a service account holding the role the receiver
         demands; an issuer `error` such as `unauthorized_client` (no service
         account) or `invalid_scope` (not assigned) is carried as `idp_error`."""
-        if not scopes or not is_scope_token_tuple(scopes):
-            raise ValueError("scopes must be a non-empty tuple of RFC 6749 scope tokens")
+        _require_scopes(scopes)
         try:
             document = self._token_answer(
                 self._grant_request({"grant_type": "client_credentials", "scope": " ".join(scopes)})
             )
             return _bearer_access_token(document)
+        except _RefusalError as refusal:
+            return refusal.refusal
+
+    def _token_exchange(
+        self, subject_token: str, scopes: tuple[str, ...]
+    ) -> ExchangedAccess | OidcRefusal:
+        """The access token an RFC 8693 exchange of `subject_token` for `scopes` yields.
+
+        `scopes` is judged as `workload_access_token` judges it. The grant names no audience and
+        no resource; the answer's `expires_in` counts from the wall clock read before the post,
+        and its refresh token and scope are not read. An issuer's `error` is carried also from
+        a 403."""
+        _require_scopes(scopes)
+        started_at = int(self._wall_clock())
+        try:
+            document = self._token_answer(
+                self._grant_request(
+                    {
+                        "grant_type": _TOKEN_EXCHANGE_GRANT,
+                        "subject_token": subject_token,
+                        "subject_token_type": _ACCESS_TOKEN_TYPE,
+                        "requested_token_type": _ACCESS_TOKEN_TYPE,
+                        "scope": " ".join(scopes),
+                    }
+                ),
+                error_statuses=_EXCHANGE_ERROR_STATUSES,
+            )
+            return ExchangedAccess(
+                _bearer_access_token(document), started_at + _exchanged_lifetime_seconds(document)
+            )
         except _RefusalError as refusal:
             return refusal.refusal
 
@@ -381,7 +427,12 @@ class OidcRelyingParty:
         document = self._token_answer(request)
         return _raw_id_token_of(document), _issued_refresh_token(document)
 
-    def _token_answer(self, request: TokenRequest) -> Mapping[str, object]:
+    def _token_answer(
+        self,
+        request: TokenRequest,
+        *,
+        error_statuses: frozenset[HTTPStatus] = _TOKEN_ERROR_STATUSES,
+    ) -> Mapping[str, object]:
         try:
             answer = self._post_token_request(request)
         except TokenEndpointError as error:
@@ -389,9 +440,7 @@ class OidcRelyingParty:
         document = _token_answer_document(answer.body)
         if answer.status == HTTPStatus.OK:
             return document
-        if answer.status in _TOKEN_ERROR_STATUSES and isinstance(
-            error := document.get("error"), str
-        ):
+        if answer.status in error_statuses and isinstance(error := document.get("error"), str):
             raise _RefusalError(
                 OidcRefusal(
                     OidcRefusalReason.TOKEN_REQUEST_REFUSED,
@@ -495,12 +544,12 @@ class OidcRelyingParty:
         agent_group: str | None = None,
         admits_client_audience: bool = False,
     ) -> VerifiedAccessToken | OidcRefusal:
-        admitted_audiences = [(audience,)]
+        admitted_audiences = {(audience,)}
         if admits_client_audience and self._config.client_id != audience:
-            admitted_audiences += [
+            admitted_audiences |= {
                 (audience, self._config.client_id),
                 (self._config.client_id, audience),
-            ]
+            }
         if token.subject is None or token.audiences not in admitted_audiences:
             return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
         groups = _group_paths(token.claims)
@@ -545,6 +594,11 @@ class OidcRelyingParty:
         if "azp" in id_token.claims:
             return id_token.claims["azp"] == self._config.client_id
         return len(id_token.audiences) == 1
+
+
+def _require_scopes(scopes: object) -> None:
+    if not scopes or not is_scope_token_tuple(scopes):
+        raise ValueError("scopes must be a non-empty tuple of RFC 6749 scope tokens")
 
 
 def _callback_state(callback_query: str) -> str | OidcRefusal:
