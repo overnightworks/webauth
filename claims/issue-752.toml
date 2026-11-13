@@ -1,7 +1,0 @@
-claim_id = "da7675d84a604686876010714c259012"
-agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
-role = "builder"
-base = "df8ba165fe6712ecf8e4c5f1bcb02858587669fb"
-branch = "claude/issue-752-the-host-contract-names-the-platform-as"
-scope = ["docs/host-contract.md"]
-opened_commit = "b7a5e735672064d33501f66199c396418c658358"
