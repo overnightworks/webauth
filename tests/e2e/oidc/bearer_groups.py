@@ -1,6 +1,6 @@
 """``current_groups`` at a real Keycloak: ``CHECK refreshed-id-token-facts`` and scenarios 73 to 76.
 
-The check: hal's client mints with a nonce, refreshes, and reads the ID token's claims and its
+The check: the bearer client mints with a nonce, refreshes, and reads the ID token's claims and its
 groups; then a group is removed by the admin API and the next refresh must lack it. The
 scenarios drive ``GET /current-groups`` of the bearer host with a signed-in person's cookie.
 
@@ -19,7 +19,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from bearer_run import HAL, BearerRun, Call, Person, claims_of, session_cookies
+from bearer_run import BEARER_CLIENT, BearerRun, Call, Person, claims_of, session_cookies
 from host_app import CURRENT_GROUPS_PATH
 from realm import USER_GROUP, add_child_group, remove_from_group, user_id_of
 
@@ -35,7 +35,11 @@ COMPACT_JWS = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*")
 def refresh(run: BearerRun, refresh_token: str) -> dict[str, str]:
     answer = httpx.post(
         run.settings.token_endpoint,
-        data={"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": HAL},
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": BEARER_CLIENT,
+        },
         verify=ssl.create_default_context(cafile=str(run.ca_certificate)),
     )
     assert answer.status_code == 200, f"the refresh answered {answer.status_code}"
@@ -47,7 +51,7 @@ def refreshed_id_token_facts(run: BearerRun, person: Person, proof: Proof) -> st
     group_id = add_child_group(admin, CHECK_GROUP_NAME, person.username)
     group_path = f"{USER_GROUP}/{CHECK_GROUP_NAME}"
     nonce = f"nonce-{time.time_ns()}"
-    minted = run.mint(person, HAL, CHECK_SCOPE, nonce=nonce)
+    minted = run.mint(person, BEARER_CLIENT, CHECK_SCOPE, nonce=nonce)
     original = claims_of(minted["id_token"])
     assert original["nonce"] == nonce, "the minted ID token carries another nonce"
     assert group_path in original["groups"], "the minted ID token lacks the group"
@@ -57,7 +61,7 @@ def refreshed_id_token_facts(run: BearerRun, person: Person, proof: Proof) -> st
     claims = claims_of(refreshed["id_token"])
     assert "nonce" not in claims, "the refreshed ID token carries a nonce key"
     assert claims["sub"] == original["sub"], "the refreshed sub differs"
-    assert claims["aud"] == HAL, f"the refreshed aud is {claims['aud']!r}"
+    assert claims["aud"] == BEARER_CLIENT, f"the refreshed aud is {claims['aud']!r}"
     assert claims["azp"] == original["azp"], "the refreshed azp differs"
     assert claims["iss"] == original["iss"], "the refreshed iss differs"
     assert claims["iat"] >= started, "the refreshed iat precedes the grant's start"

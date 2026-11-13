@@ -1,5 +1,5 @@
-"""The bearer proof's shared run: the host, hal's tokens, one request to a machine route, and the
-assertions on its answer."""
+"""The bearer proof's shared run: the host, the bearer client's tokens, one request to a machine
+route, and the assertions on its answer."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from webauth.cookies import DEFAULT_SESSION_COOKIE_NAME
 if TYPE_CHECKING:
     from prove import Proof
 
-HAL = "d1-hal"
+BEARER_CLIENT = "d1-bearer"
 GATE_LINE = re.compile(r"Bearer request refused: (?P<case>[a-z-]+)(?: \((?P<reason>[^)]*)\))?")
 CHALLENGE = 'Bearer realm="admin"'
 SUBJECT = "person-1"
@@ -44,7 +44,7 @@ class Person:
 
 @dataclass(frozen=True)
 class Call:
-    """One request to a machine route: what hal (or someone else) sends."""
+    """One request to a machine route: what the bearer client (or someone else) sends."""
 
     method: str
     path: str
@@ -55,7 +55,7 @@ class Call:
 
 @dataclass
 class BearerRun:
-    """The bearer host, hal's tokens and every answer the host gave a machine route."""
+    """The bearer host, the client's tokens and every answer the host gave a machine route."""
 
     proof: Proof
     host: Host
@@ -140,14 +140,14 @@ class BearerRun:
                     self.proof.fill_keycloak_form(page, None, person.password, person.username)
         except PlaywrightTimeoutError as error:
             raise AssertionError(
-                f"Keycloak did not redirect to hal: {page.inner_text('body')[:200]!r}"
+                f"Keycloak did not redirect to the bearer client: {page.inner_text('body')[:200]!r}"
             ) from error
         return failed.value.url
 
     def mint(
         self, person: Person, client_id: str, scope: str, nonce: str | None = None
     ) -> dict[str, str]:
-        """hal's authorization code request with PKCE at Keycloak, and the code exchange."""
+        """The client's authorization code request with PKCE at Keycloak, and the code exchange."""
         redirect_uri = self.redirect_uris[client_id]
         verifier = secrets.token_urlsafe(48)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())

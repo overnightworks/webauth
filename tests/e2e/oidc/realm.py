@@ -176,9 +176,9 @@ def audience_scope_representation(
 
 
 def add_resource(admin: Admin, resource_url: str, members: tuple[str, ...]) -> tuple[str, ...]:
-    """The resource's group, with ``members`` in it, and the two client scopes that carry its URL
-    as audience: ``RESOURCE_SCOPE`` also names itself in ``scope``, ``RESOURCE_AUDIENCE_SCOPE``
-    does not. The scope names."""
+    """The realm's resource group, with ``members`` in it, and the two client scopes that carry
+    its URL as audience: ``RESOURCE_SCOPE`` also names itself in ``scope``,
+    ``RESOURCE_AUDIENCE_SCOPE`` does not. The scope names."""
     scopes = (RESOURCE_SCOPE, RESOURCE_AUDIENCE_SCOPE)
     for name in scopes:
         admin.create(
@@ -187,8 +187,7 @@ def add_resource(admin: Admin, resource_url: str, members: tuple[str, ...]) -> t
                 name, resource_url, resource=True, in_token_scope=name == RESOURCE_SCOPE
             ),
         )
-    parent = admin.get(f"/{REALM}/group-by-path{USER_GROUP}")["id"]
-    group = admin.create(f"/{REALM}/groups/{parent}/children", {"name": RESOURCE_GROUP_NAME})
+    group = admin.get(f"/{REALM}/group-by-path{USER_GROUP}/{RESOURCE_GROUP_NAME}")["id"]
     for name in members:
         person = admin.get(f"/{REALM}/users?username={name}&exact=true")[0]["id"]
         admin.put(f"/{REALM}/users/{person}/groups/{group}")

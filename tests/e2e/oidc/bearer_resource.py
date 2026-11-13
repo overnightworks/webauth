@@ -31,8 +31,8 @@ from __future__ import annotations
 from typing import Any
 
 from bearer_run import (
+    BEARER_CLIENT,
     EXPORT,
-    HAL,
     ME,
     PERSON_CHALLENGE_INVALID_TOKEN,
     BearerRun,
@@ -262,7 +262,7 @@ def mint_agent_tokens(run: BearerRun) -> str:
         ("agent_two_audiences", people["user"], f"{AGENT_SCOPE} aud-d1-host"),
         ("agent_no_scope", people["user"], f"openid {RESOURCE_AUDIENCE_SCOPE}"),
     ):
-        run.tokens[name] = run.mint(person, HAL, scope)["access_token"]
+        run.tokens[name] = run.mint(person, BEARER_CLIENT, scope)["access_token"]
     claims = claims_of(run.tokens["agent_user"])
     assert as_list(claims["aud"]) == [audience], claims["aud"]
     assert RESOURCE_SCOPE in claims["scope"].split(), claims["scope"]

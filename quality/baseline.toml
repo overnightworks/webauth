@@ -8,7 +8,7 @@
 "_surface_of_source" = 20
 
 [file_lines]
-"tests/e2e/oidc/prove.py" = 1395
+"tests/e2e/oidc/prove.py" = 1393
 
 [function_lines."src/webauth/https_client.py"]
 "_exchange" = 63
