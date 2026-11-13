@@ -26,7 +26,7 @@ neither an ID nor a label explains.
   `X-Forwarded-For` chain carries; listing every proxy between the client and the app is
   the simple way to be sure. With a CDN, a tunnel and a reverse proxy in front of the
   app, list whichever of their addresses appear in the chain. The operator's
-  [hal](https://github.com/overnightworks/hal) project owns that reachability
+  [platform](https://github.com/overnightworks/platform) project owns that reachability
   infrastructure.
 - **Host duty:** turn the ASGI server's own forwarded-header handling off (uvicorn's
   `proxy_headers`, on by default: `proxy_headers=False` or `--no-proxy-headers`);
