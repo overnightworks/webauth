@@ -1,10 +1,10 @@
-"""Plays hal against real Keycloak: the bearer gate admits, or refuses, real access tokens.
+"""Plays a bearer app's CLI against real Keycloak: the bearer gate admits or refuses real tokens.
 
 ``drive_bearer_phase`` runs after the back-channel phase of ``prove.py`` and prints
-``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 76. hal is two public
-clients (``d1-hal``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and the optional
-audience scopes; ``d1-app-c`` is a client that exists only to be an audience. hal gets its
-codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
+``SCENARIO <number> <width> <origin>`` for scenarios 28 to 51 and 55 to 76. The bearer app
+is two public clients (``d1-bearer``, ``d1-other``) with PKCE, ``at+jwt`` access tokens and
+the optional audience scopes; ``d1-app-c`` is a client that exists only to be an audience. It
+gets its codes from a browser signed in at Keycloak (the redirect to the loopback port nobody
 listens on fails, and Playwright's failed request names the code), posts the code exchange
 itself, and sends the access token as the ``Authorization`` header to the bearer host:
 ``build_app`` with ``bearer_authorized_parties``, whose routes under ``/api/admin/`` are E
@@ -31,7 +31,8 @@ header ``typ`` of the first minted token. Each scenario's id is the matrix id of
 The person-path scenarios send tokens to ``/api/me``; their ids are the matrix's H1 to H6.
 
 - 55 (H1) a member who never signed in to the app: the token answers that person with the
-  user role and the Keycloak username; one account, one ``USER_CREATED``, no session.
+  user role and the subject as username, because the realm's access tokens carry no
+  ``preferred_username``; one account, one ``USER_CREATED``, no session.
 - 56 (H2) the same person after a browser sign-in: the token answers the same username and id.
 - 57 (H3) ``POST /api/me`` with the token, no ``Origin`` and no cookie reaches the route.
 - 58 (H4) the outsider's token: 403 ``No access``, and no account is created.
@@ -80,8 +81,8 @@ from bearer_resource import (
     tokens_the_resource_refuses,
 )
 from bearer_run import (
+    BEARER_CLIENT,
     EXPORT,
-    HAL,
     ME,
     PERSON_CHALLENGE_INVALID_TOKEN,
     SUBJECT,
@@ -130,7 +131,7 @@ from realm import (
 if TYPE_CHECKING:
     from prove import Proof
 
-OTHER_HAL = "d1-other"
+OTHER_BEARER_CLIENT = "d1-other"
 AUDIENCE_APP = "d1-app-c"
 HOST_AUDIENCE = CLIENT_ID
 HOST_SCOPE = "openid aud-d1-host"
@@ -305,8 +306,10 @@ def sign_out_leaves_the_token(run: BearerRun) -> str:
 
 def short_token_works_before_it_expires(run: BearerRun) -> str:
     person = run.people["admin"]
-    with short_lived_tokens(run.proof.fresh_admin, run.client_uuids[HAL], SHORT_LIFESPAN_SECONDS):
-        run.tokens["short"] = run.mint(person, HAL, HOST_SCOPE)["access_token"]
+    with short_lived_tokens(
+        run.proof.fresh_admin, run.client_uuids[BEARER_CLIENT], SHORT_LIFESPAN_SECONDS
+    ):
+        run.tokens["short"] = run.mint(person, BEARER_CLIENT, HOST_SCOPE)["access_token"]
     answer = run.send(Call("GET", EXPORT, run.tokens["short"]))
     assert_answer(answer, 200)
     return f"a {SHORT_LIFESPAN_SECONDS} s token minted for d1-admin opens E before its exp (200)"
@@ -365,12 +368,15 @@ def member_token_creates_the_account(run: BearerRun) -> str:
     reset_host(run.host)
     answer = run.send(Call("GET", ME, run.tokens["user"]))
     assert_person_answer(answer, 200)
-    expected = {"id": claims_of(run.tokens["user"])["sub"], "username": USER_NAME, "role": "user"}
+    subject = claims_of(run.tokens["user"])["sub"]
+    expected = {"id": subject, "username": subject, "role": "user"}
     assert answer.json() == expected, answer.json()
     held = run.state()
     assert (held["accounts"], held["account_events"], held["sessions"]) == (1, 1, 0), held
     assert held["session_transactions"] == 0, held
-    return f"{USER_NAME}'s token on /api/me: 200; accounts 1, events 1, sessions 0"
+    return (
+        f"{USER_NAME}'s token on /api/me: 200, named by its subject; 1 account, 1 event, 0 sessions"
+    )
 
 
 def token_and_browser_name_the_same_person(run: BearerRun) -> str:
@@ -429,8 +435,8 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     (33, a_cookie_alone_is_refused("delete")),
     (34, a_cookie_alone_is_refused("probe")),
     (35, a_cookie_cannot_save_the_session_route),
-    (36, token_is_refused(Refused("id_token", "d1-hal's ID token (typ JWT, aud d1-hal)"))),
-    (38, token_is_refused(Refused("refresh_token", "d1-hal's refresh token"))),
+    (36, token_is_refused(Refused("id_token", "d1-bearer's ID token (typ JWT, aud d1-bearer)"))),
+    (38, token_is_refused(Refused("refresh_token", "d1-bearer's refresh token"))),
     (39, token_is_refused(Refused("audience_app", "a token for d1-app-c only"))),
     (40, token_is_refused(Refused("audience_host_and_app", "a token for d1-host and d1-app-c"))),
     (41, token_is_refused(Refused("audience_host_and_account", "a token for d1-host and account"))),
@@ -489,27 +495,35 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
 def mint_tokens(run: BearerRun) -> str:
     """One authorization request per scope variant; each person signs in at Keycloak once."""
     people = run.people
-    first = run.mint(people["admin"], HAL, HOST_SCOPE)
+    first = run.mint(people["admin"], BEARER_CLIENT, HOST_SCOPE)
     run.tokens |= {
         "admin": first["access_token"],
         "id_token": first["id_token"],
         "refresh_token": first["refresh_token"],
     }
-    run.tokens["user"] = run.mint(people["user"], HAL, HOST_SCOPE)["access_token"]
-    run.tokens["outsider"] = run.mint(people["outsider"], HAL, HOST_SCOPE)["access_token"]
+    run.tokens["user"] = run.mint(people["user"], BEARER_CLIENT, HOST_SCOPE)["access_token"]
+    run.tokens["outsider"] = run.mint(people["outsider"], BEARER_CLIENT, HOST_SCOPE)["access_token"]
     for name, scope in (
         ("audience_app", "openid aud-d1-app-c"),
         ("audience_host_and_app", "openid aud-d1-host aud-d1-app-c"),
         ("audience_host_and_account", "openid aud-d1-host aud-account"),
     ):
-        run.tokens[name] = run.mint(people["admin"], HAL, scope)["access_token"]
-    run.tokens["other_client"] = run.mint(people["admin"], OTHER_HAL, HOST_SCOPE)["access_token"]
+        run.tokens[name] = run.mint(people["admin"], BEARER_CLIENT, scope)["access_token"]
+    run.tokens["other_client"] = run.mint(people["admin"], OTHER_BEARER_CLIENT, HOST_SCOPE)[
+        "access_token"
+    ]
     for name, audiences in EXPECTED_AUDIENCES.items():
         claims = claims_of(run.tokens[name])
         assert set(as_list(claims["aud"])) == audiences, f"{name} names {claims['aud']!r}"
-    assert claims_of(run.tokens["id_token"])["aud"] == HAL, "the ID token's aud is not d1-hal"
-    assert claims_of(run.tokens["other_client"])["azp"] == OTHER_HAL, "azp is not d1-other"
-    return f"{len(run.tokens)} tokens minted for {HAL} and {OTHER_HAL} with PKCE"
+    assert claims_of(run.tokens["id_token"])["aud"] == BEARER_CLIENT, (
+        "the ID token's aud is not d1-bearer"
+    )
+    assert claims_of(run.tokens["other_client"])["azp"] == OTHER_BEARER_CLIENT, (
+        "azp is not d1-other"
+    )
+    return (
+        f"{len(run.tokens)} tokens minted for {BEARER_CLIENT} and {OTHER_BEARER_CLIENT} with PKCE"
+    )
 
 
 def access_token_type_is_at_jwt(run: BearerRun) -> str:
@@ -520,7 +534,7 @@ def access_token_type_is_at_jwt(run: BearerRun) -> str:
 
 
 def prepare_keycloak(proof: Proof, resource_url: str) -> tuple[dict[str, str], dict[str, str]]:
-    """hal's clients and the audiences they may ask for; their uuids and redirect URIs."""
+    """The bearer app's clients and the audiences they may ask for; their uuids, redirects."""
     admin = proof.fresh_admin()
     for name, audience in AUDIENCE_SCOPES.items():
         admin.create(f"/{REALM}/client-scopes", audience_scope_representation(name, audience))
@@ -529,7 +543,8 @@ def prepare_keycloak(proof: Proof, resource_url: str) -> tuple[dict[str, str], d
         f"/{REALM}/clients", {"clientId": AUDIENCE_APP, "enabled": True, "bearerOnly": True}
     )
     redirect_uris = {
-        client_id: f"http://{LOOPBACK}:{free_port()}/callback" for client_id in (HAL, OTHER_HAL)
+        client_id: f"http://{LOOPBACK}:{free_port()}/callback"
+        for client_id in (BEARER_CLIENT, OTHER_BEARER_CLIENT)
     }
     client_uuids = {
         client_id: admin.create(
@@ -571,8 +586,8 @@ def drive_bearer_phase(
     shim_port: int,
     settings: HostSettings,
 ) -> None:
-    """The bearer host, started and stopped here; hal's tokens come through a browser."""
-    settings = dataclasses.replace(settings, bearer_authorized_parties=(HAL,))
+    """The bearer host, started and stopped here; its tokens come through a browser."""
+    settings = dataclasses.replace(settings, bearer_authorized_parties=(BEARER_CLIENT,))
     hostname = urllib.parse.urlsplit(settings.app_origins[0]).hostname
     assert hostname is not None
     client_uuids, redirect_uris = prepare_keycloak(

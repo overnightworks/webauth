@@ -365,10 +365,10 @@ def runtime_leftovers(scratch: Path) -> list[str]:
     return left
 
 
-def leftovers(scratch: Path, container_filter: str) -> list[str]:
+def leftovers(scratch: Path, container_name_prefix: str | None) -> list[str]:
     left = runtime_leftovers(scratch)
     try:
-        if containers := containers_left(container_filter):
+        if container_name_prefix and (containers := containers_left(container_name_prefix)):
             left.append(f"containers left behind: {containers}")
     except (subprocess.SubprocessError, OSError) as error:
         left.append(f"could not look for left-over containers: {error}")

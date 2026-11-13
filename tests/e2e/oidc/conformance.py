@@ -12,7 +12,7 @@ drives every module the expectation table does not skip, with the host app
 the redirects. A module without a table row, or a row without a module, fails
 the run. It writes one row per module and exports the plan into the run
 directory's ``export/`` (the runbook says how to handle it). It needs Docker
-and no hal checkout. The host's ``login_group`` and ``admin_group`` do not apply:
+and no platform checkout. The host's ``login_group`` and ``admin_group`` do not apply:
 the suite's tokens carry no ``groups`` claim, so this driver states the value of
 ``EverySubject.OF_THE_BOUND_ISSUER`` and of ``NoAdmins.IN_THIS_APP``.
 
@@ -103,7 +103,7 @@ from harness import (
 from host_app import HostSettings
 from playwright.sync_api import Browser, sync_playwright
 from shim import TlsShim
-from suite import HeldSuite, SuiteApi
+from suite import PROJECT_RECORD, HeldSuite, SuiteApi
 
 from webauth.admission import EverySubject, NoAdmins
 from webauth.jwt_verification import RejectionReason, _is_rs256_verification_key
@@ -595,6 +595,7 @@ def conform(scratch: Path) -> int:
     export_dir.mkdir()
     run = RunRecord(evidence_dir)
     suite = HeldSuite(SUITE_HOST, lambda: raise_if_stop_pending(run))
+    (scratch / PROJECT_RECORD).write_text(f"{suite.project}\n")
     stop_on_first_signal(run)
     try:
         with runtime_directory(scratch) as runtime:

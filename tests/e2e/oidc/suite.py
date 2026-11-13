@@ -23,6 +23,7 @@ from stack import StackError
 COMPOSE_FILE = Path(__file__).with_name("suite-compose.yaml")
 SERVER_PORT_IN_CONTAINER = 8080
 PROJECT_LABEL = "com.docker.compose.project"
+PROJECT_RECORD = "suite-project"  # in the run directory; run_oidc_proof.sh cleanup reads it
 READY_SECONDS = 240
 READY_POLL_SECONDS = 2
 COMPOSE_TIMEOUT_SECONDS = 120

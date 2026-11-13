@@ -1,13 +1,13 @@
-"""Hal's Keycloak stack, held for the run, and the admin calls the proof needs.
+"""The platform's Keycloak, held for the run, and the admin calls the proof needs.
 
-Hal keeps the one copy of the realm and the compose project; this module only
-runs its ``hold`` mode as a subprocess and talks to the admin API it names."""
+The platform keeps the one copy of the realm and names the compose project; this
+module only runs its ``scripts/keycloak_hold.sh`` as a subprocess and talks to the
+admin API the hold names."""
 
 from __future__ import annotations
 
 import json
 import subprocess
-import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,10 +16,11 @@ from typing import Any
 
 import httpx
 
-HAL_SHA_FILE = Path(__file__).with_name("hal_sha.txt")
-PROBE_FILES = "compose.yaml keycloak probe/keycloak src/hal traefik.yml dynamic".split()
-PROBE_PROJECT = "edge-kc-probe"
-KEYCLOAK_NETWORK = "keycloak"
+PLATFORM_SHA_FILE = Path(__file__).with_name("platform_sha.txt")
+HOLD_SCRIPT = "scripts/keycloak_hold.sh"
+# The hold's scratch directory in the run's runtime directory; run_oidc_proof.sh cleanup reads
+# the project file the hold writes there.
+HOLD_SCRATCH_NAME = "stack"
 READY_MARK = "READY "
 HOLD_ENDED = "HOLD ENDED"
 STOP_WAIT_SECONDS = 180  # run_oidc_proof.sh: --kill-after must exceed the worst-case cleanup
@@ -31,14 +32,13 @@ class StackError(Exception):
     pass
 
 
-def require_pinned_clean_hal(hal: Path) -> None:
-    pinned = HAL_SHA_FILE.read_text().strip()
-    head = _git(hal, "rev-parse", "HEAD").strip()
+def require_pinned_clean_platform(platform: Path) -> None:
+    pinned = PLATFORM_SHA_FILE.read_text().strip()
+    head = _git(platform, "rev-parse", "HEAD").strip()
     if head != pinned:
-        raise StackError(f"hal is at {head}, the harness is pinned to {pinned}")
-    dirty = _git(hal, "status", "--porcelain", "--", *PROBE_FILES)
-    if dirty.strip():
-        raise StackError("hal has changes in files the probe consumes")
+        raise StackError(f"the platform is at {head}, the harness is pinned to {pinned}")
+    if _git(platform, "status", "--porcelain").strip():
+        raise StackError("the platform checkout has changes")
 
 
 def docker(*arguments: str) -> str:
@@ -53,11 +53,11 @@ def docker(*arguments: str) -> str:
     ).stdout
 
 
-def _git(hal: Path, *arguments: str) -> str:
+def _git(checkout: Path, *arguments: str) -> str:
     # Fixed command list
     return subprocess.run(  # noqa: S603
         # The operator's own PATH by design
-        ["git", "-C", str(hal), *arguments],  # noqa: S607
+        ["git", "-C", str(checkout), *arguments],  # noqa: S607
         check=True,
         capture_output=True,
         text=True,
@@ -110,9 +110,11 @@ class Admin:
 
 @dataclass
 class HeldStack:
-    """``with HeldStack(hal, scratch) as stack`` brings the stack up and removes it on exit."""
+    """``with HeldStack(platform, scratch) as stack`` brings the stack up and removes it on exit.
 
-    hal: Path
+    ``scratch`` is a directory that does not exist yet or is empty."""
+
+    platform: Path
     scratch: Path
     output: list[str] = field(default_factory=list)
     ready: dict[str, Any] = field(default_factory=dict)
@@ -122,10 +124,14 @@ class HeldStack:
     def __enter__(self) -> HeldStack:
         # Fixed command list
         self._process = subprocess.Popen(  # noqa: S603
-            [
-                sys.executable,
-                str(self.hal / "probe/keycloak/probe.py"),
-                "hold",
+            # The operator's own PATH by design
+            [  # noqa: S607
+                "mise",
+                "exec",
+                "-C",
+                str(self.platform),
+                "--",
+                HOLD_SCRIPT,
                 "--scratch",
                 str(self.scratch),
             ],
@@ -163,6 +169,9 @@ class HeldStack:
 
     def _stop(self) -> None:
         assert self._process is not None and self._process.stdin is not None
+        if not self.ready:
+            # The hold reads its stdin only after READY; before it, a signal ends the bring-up.
+            self._process.terminate()
         self._process.stdin.close()
         try:
             status = self._process.wait(timeout=STOP_WAIT_SECONDS)
@@ -178,21 +187,14 @@ class HeldStack:
     def edge_url(self) -> str:
         return self.ready["edge_url"]
 
+    @property
+    def project(self) -> str:
+        return self.ready["project"]
+
+    @property
     def keycloak_network(self) -> str:
-        """The name of the probe's ``keycloak`` network, the one Keycloak's container sits on."""
-        networks = docker(
-            "network",
-            "ls",
-            "--format",
-            "{{.Name}}",
-            "--filter",
-            f"label=com.docker.compose.project={PROBE_PROJECT}",
-            "--filter",
-            f"label=com.docker.compose.network={KEYCLOAK_NETWORK}",
-        ).split()
-        if len(networks) != 1:
-            raise StackError(f"the {KEYCLOAK_NETWORK} network is absent or ambiguous: {networks}")
-        return networks[0]
+        """The network Keycloak's container sits on."""
+        return self.ready["keycloak_network"]
 
     def admin(self) -> Admin:
         secret = Path(self.ready["admin_client_secret_file"]).read_text().strip()

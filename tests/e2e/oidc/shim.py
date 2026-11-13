@@ -1,4 +1,4 @@
-"""A TLS front for hal's plain-http Traefik, standing in for Cloudflare's tunnel.
+"""A TLS front for the plain-http edge of the held Keycloak, standing in for Cloudflare's tunnel.
 
 It terminates TLS with a throwaway certificate and forwards every request to
 the upstream with the public ``Host`` and ``X-Forwarded-Proto: https``, as
@@ -6,7 +6,7 @@ Cloudflare's tunnel does. It keeps no log and writes nothing.
 
 How a browser reaches this shim, and which certificate it trusts, is
 ``harness.py``'s, for each engine; ``edge_url`` is the READY line's
-address of the probe's Traefik, which the shim forwards to.
+address of the held Keycloak, which the shim forwards to.
 
 How Keycloak reaches the apps: Keycloak's back-channel logout is a request from
 its container to the app, and the apps bind loopback, which the browser's host
@@ -15,8 +15,7 @@ container's TCP to the host, including the ``keycloak`` network's gateway on
 every port (measured with a listener bound to the gateway and a container on a
 network of the same shape), so a listener on the host would never be called.
 ``CallbackBridge`` therefore puts a relay container on the stack's ``keycloak``
-network (``stack.py`` finds it by the compose labels and fails on an absent or
-ambiguous one): it listens on the container network and passes the bytes to a
+network (the READY line names it): it listens on the container network and passes the bytes to a
 unix socket in a private directory, where the host side accepts exactly ``POST
 /auth/backchannel-logout``, at most 32 KiB, and forwards it to the app's
 loopback HTTPS endpoint, verifying the throwaway CA. Anything else (``/state``,
@@ -26,7 +25,7 @@ keeps connections in a pool and does not retry a POST on one the bridge already
 closed. Every read waits at most 10 s, no body or header is logged, and the
 relay holds no secret (read-only, no capabilities, the caller's user id). The
 bridge is shut down, its container removed, before the held stack is released,
-and ``edge-kc-probe`` leftovers are listed at the end. The container's name
+and the relays still named after the stack's project are listed at the end. The container's name
 stands in for production's internal DNS name of the app: it shows that the
 route works behind an internal name, not that production's name resolves."""
 
@@ -49,7 +48,7 @@ from types import TracebackType
 
 from certificates import ThrowawayTls
 from host_app import BACKCHANNEL_LOGOUT_MAX_BODY_BYTES, BACKCHANNEL_LOGOUT_PATH, FORM_CONTENT_TYPE
-from stack import StackError, docker
+from stack import HeldStack, StackError, docker
 
 LOOPBACK = "127.0.0.1"
 HOP_BY_HOP = frozenset(
@@ -71,7 +70,6 @@ BRIDGE_TIMEOUT_SECONDS = 10
 RELAY_IMAGE = (
     "python:3.14-slim@sha256:cd89c30eda26ee911a4611b18680086e0ea42e6f5f8cbe653d07fa7958c9cec8"
 )
-RELAY_NAME_PREFIX = "edge-kc-probe-d1-callback-"
 RELAY_PORT = 8080
 RELAY_SOCKET = "/bridge/bridge.sock"
 RELAY_READY = "READY"
@@ -202,15 +200,20 @@ class _UnixServer(socketserver.ThreadingUnixStreamServer):
         """A relay that abandons a connection is no event worth a trace."""
 
 
+def relay_name_prefix(stack: HeldStack) -> str:
+    """The name every relay container of one stack starts with; the project is unique to the run."""
+    return f"{stack.project}-d1-callback-"
+
+
 class CallbackBridge:
-    """``with CallbackBridge(network, host_port, ca_certificate) as bridge`` makes
-    ``bridge.url`` reachable from containers of ``network`` and nowhere else. The relay
-    container holds no secret and logs nothing but its ready line; the unix socket lives
+    """``with CallbackBridge(stack, host_port, ca_certificate) as bridge`` makes
+    ``bridge.url`` reachable from containers of the stack's Keycloak network and nowhere else.
+    The relay container holds no secret and logs nothing but its ready line; the unix socket lives
     in a private directory that is removed with the bridge."""
 
-    def __init__(self, network: str, host_port: int, ca_certificate: Path) -> None:
-        self._network = network
-        self._name = f"{RELAY_NAME_PREFIX}{secrets.token_hex(4)}"
+    def __init__(self, stack: HeldStack, host_port: int, ca_certificate: Path) -> None:
+        self._network = stack.keycloak_network
+        self._name = f"{relay_name_prefix(stack)}{secrets.token_hex(4)}"
         self._host_port = host_port
         self._host_trust = ssl.create_default_context(cafile=str(ca_certificate))
         self._exit = contextlib.ExitStack()
