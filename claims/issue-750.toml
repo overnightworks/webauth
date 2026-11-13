@@ -1,8 +1,0 @@
-claim_id = "cb5940ae056344c383c7dbc8e8c5150b"
-agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
-role = "builder"
-base = "b327c5816d784d050038e593f26da3a57a539a47"
-branch = "claude/issue-750-the-real-browser-proof-runs-against-plat"
-scope = ["docs/runbooks", "scripts/run_oidc_proof.sh", "tests/e2e/oidc", "uv.lock"]
-opened_commit = "f827ebd329f0efb3622606bb11cb893a037c6913"
-whole_reason = "One move of the proof's issuer: the harness, its script and its runbooks change together."
