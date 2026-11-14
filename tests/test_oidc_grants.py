@@ -402,6 +402,29 @@ def test_a_workload_token_within_its_margin_is_replaced_before_it_is_handed_out(
     assert third == second
 
 
+@pytest.mark.parametrize(
+    ("seconds_after_the_post", "posts"),
+    [
+        pytest.param(269, 1, id="just-before-expires-in-less-30"),
+        pytest.param(270, 2, id="exactly-expires-in-less-30"),
+    ],
+)
+def test_a_workload_token_is_reused_strictly_before_30_seconds_short_of_its_lifetime(
+    seconds_after_the_post: int, posts: int
+) -> None:
+    """WORKLOAD-01, WORKLOAD-02: the margin is 30 s; at it the token is replaced."""
+
+    issuer = _a_reusing_issuer(expires_in=300)
+    clock = FakeClock(5_000.0)
+    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
+    _workload_access_token(relying_party)
+
+    clock.now += seconds_after_the_post
+    _workload_access_token(relying_party)
+
+    assert len(issuer.requests) == posts
+
+
 def test_a_workload_token_lives_from_the_clock_read_before_the_post() -> None:
     """WORKLOAD-01: the lifetime counts from the monotonic clock read before the post."""
 
