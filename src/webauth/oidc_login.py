@@ -58,6 +58,7 @@ module's.
 
 from __future__ import annotations
 
+import secrets
 import urllib.parse
 from dataclasses import dataclass
 from enum import Enum, StrEnum
@@ -112,6 +113,8 @@ __all__ = [
     "current_groups",
     "fresh_access_token",
 ]
+
+_SESSION_ID_BYTES: Final = 32
 
 
 class _UsernameTakenSignal(Exception):  # noqa: N818  # a signal inside the transaction, not an error
@@ -206,6 +209,7 @@ def _write_sign_in(
     identity = admitted.identity
     return stores.sessions.create(
         account.id,
+        session_id=secrets.token_urlsafe(_SESSION_ID_BYTES),
         now=now,
         expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
         refresh_token=identity.refresh_token,

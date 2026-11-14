@@ -11,11 +11,10 @@ every reader. The library never imports this module; the host wires it.
 
 from __future__ import annotations
 
-import secrets
 import threading
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from webauth.ports import SignInStores
 
@@ -37,8 +36,6 @@ __all__ = [
     "StoredSession",
     "SubjectRecords",
 ]
-
-_SESSION_ID_BYTES: Final = 32
 
 
 @dataclass(frozen=True)
@@ -194,15 +191,17 @@ class SingleProcessSessionStore:
         self,
         user_id: str,
         *,
+        session_id: str,
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
         id_token: SecretStr | None,
         account_language: str | None,
     ) -> StoredSession:
-        """Mint the session under a fresh id and drop every session expired at `now`."""
+        """Store the session under `session_id`, raising when a session holds it already, and
+        drop every session expired at `now`."""
         row = _SessionRow(
-            id=secrets.token_urlsafe(_SESSION_ID_BYTES),
+            id=session_id,
             subject=user_id,
             created_at=now,
             expires_at=expires_at,
@@ -212,6 +211,8 @@ class SingleProcessSessionStore:
         )
         with self._tables.guard:
             user = self._tables.accounts[user_id]
+            if session_id in self._tables.rows:
+                raise ValueError("Session id is already stored")
             self._tables.drop_expired(now)
             self._tables.rows[row.id] = row
         return _joined(row, user)

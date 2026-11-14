@@ -9,6 +9,7 @@ rolls back.
 from __future__ import annotations
 
 import dataclasses
+import re
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -105,6 +106,7 @@ def _signed_in_holding_session_of_bystander(host: OidcHost) -> tuple[str, str]:
         BYSTANDER.id,
         now,
         now + timedelta(hours=1),
+        session_id=_BYSTANDER_SESSION_ID,
     )
     query = host.sign_in_at_issuer()
     session_cookie = session_cookie_header(sign_session_id(replaced.id, host.config.signing_key))
@@ -175,6 +177,19 @@ def test_an_admitted_callback_signs_in_with_one_entry_and_one_session_cookie(
     assert [(account.id, account.kind) for account in host.accounts.list()] == [
         (SUBJECT, AccountKind.PERSON)
     ]
+
+
+def test_each_sign_in_mints_a_distinct_session_id_of_256_bits_in_urlsafe_base64() -> None:
+    """SIGNIN-71: the callback mints the id of every new session: 43 URL-safe characters."""
+    host = an_oidc_host()
+
+    ids = []
+    for _ in range(2):
+        host.callback(host.sign_in_at_issuer())
+        ids.append(host.sessions.stored_record.id)
+
+    assert len(set(ids)) == 2
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]{43}", session_id) for session_id in ids)
 
 
 @pytest.mark.parametrize(
@@ -356,6 +371,7 @@ class BlockFault:
     per_call_residue: object
 
 
+_BYSTANDER_SESSION_ID = "bystander-session"
 _BYSTANDER_ACCOUNT = (OTHER_SUBJECT, "user")
 _NEW_ACCOUNT = (SUBJECT, "user")
 
@@ -364,7 +380,7 @@ _BLOCK_FAULTS = [
         BlockFault(
             lambda host, patch: failing(host.accounts, "create_for_subject", patch),
             (BYSTANDER,),
-            ([_BYSTANDER_ACCOUNT], ["session-1"], []),
+            ([_BYSTANDER_ACCOUNT], [_BYSTANDER_SESSION_ID], []),
         ),
         id="create_for_subject raises: nothing was written",
     ),
@@ -372,7 +388,7 @@ _BLOCK_FAULTS = [
         BlockFault(
             lambda host, patch: failing(host.accounts, "set_role", patch),
             (BYSTANDER, LEGACY_ADMIN),
-            (sorted([_BYSTANDER_ACCOUNT, (SUBJECT, "admin")]), ["session-1"], []),
+            (sorted([_BYSTANDER_ACCOUNT, (SUBJECT, "admin")]), [_BYSTANDER_SESSION_ID], []),
         ),
         id="set_role raises: the role stands",
     ),
@@ -388,7 +404,7 @@ _BLOCK_FAULTS = [
         BlockFault(
             lambda host, patch: failing(host.audit, "account_event", patch),
             (BYSTANDER,),
-            (sorted([_BYSTANDER_ACCOUNT, _NEW_ACCOUNT]), ["session-1"], []),
+            (sorted([_BYSTANDER_ACCOUNT, _NEW_ACCOUNT]), [_BYSTANDER_SESSION_ID], []),
         ),
         id="the audit sink raises: the account stays without its event",
     ),

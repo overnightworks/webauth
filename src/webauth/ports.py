@@ -235,13 +235,14 @@ class SessionRecordStore(Protocol):
         self,
         user_id: str,
         *,
+        session_id: str,
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
         id_token: SecretStr | None,
         account_language: str | None,
     ) -> SessionRecord:
-        """Create the session and return it.
+        """Create the session under ``session_id`` and return it.
 
         The refresh token is part of the session row: whatever ends the row
         ends it, and no other row or table holds it. The host writes it with
@@ -251,10 +252,11 @@ class SessionRecordStore(Protocol):
         ``None`` when the host keeps none. ``account_language`` is part of the row as
         ``SessionRecord.account_language`` says, written here and by no other call.
 
-        The store mints the new session's id with at least 128 bits from a
-        CSPRNG, in at most 135 characters. The cookie signs the id alone, so a
-        store that hands out an id again gives every old signed cookie for that
-        id the new session.
+        ``session_id`` is an opaque, cookie-safe string the library mints and the
+        store keeps as given. The cookie signs the id alone, so a store that
+        accepted an id it already holds would give every old signed cookie for
+        that id the new session: the call raises when a session is stored under
+        ``session_id`` and leaves that row unchanged.
         """
         ...
 

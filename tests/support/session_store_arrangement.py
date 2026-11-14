@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
-from itertools import count
 from threading import get_ident
 from typing import Any
 
@@ -48,7 +47,6 @@ class SessionRecordsInMemory:
         self._records = {} if record is None else {record.id: record}
         seeded_users = () if record is None else (record.user,)
         self._users = users if users is not None else UsersInMemory(*seeded_users)
-        self._ids = count(1)
         self.commit_failure: Exception | None = None
 
     @property
@@ -66,6 +64,7 @@ class SessionRecordsInMemory:
         self,
         user_id: str,
         *,
+        session_id: str,
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
@@ -76,9 +75,8 @@ class SessionRecordsInMemory:
         user = self._users.get(user_id)
         if user is None:
             raise UnknownAccountError("Account does not exist")
-        session_id = f"session-{next(self._ids)}"
-        while session_id in self._records:
-            session_id = f"session-{next(self._ids)}"
+        if session_id in self._records:
+            raise ValueError("Session id is already stored")
         record = FakeSessionRecord(
             session_id, user, now, expires_at, refresh_token, id_token, account_language
         )

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
-import re
 import threading
 import urllib.parse
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from itertools import chain
@@ -69,7 +69,6 @@ START = datetime(2026, 1, 1, tzinfo=UTC)
 LATER = START + timedelta(hours=1)
 SUBJECT_ONE = "subject-one"
 SUBJECT_TWO = "subject-two"
-SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{43,135}")
 
 
 def an_event(subject: str = SUBJECT_ONE) -> AccountEvent:
@@ -99,9 +98,11 @@ def open_session(
     refresh_token: str | None = "refresh",
     id_token: str | None = "identity",
     account_language: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     return stores.sessions.create(
         subject,
+        session_id=session_id or f"session-{uuid.uuid4().hex}",
         now=now,
         expires_at=expires_at,
         refresh_token=None if refresh_token is None else SecretStr(refresh_token),
@@ -121,6 +122,7 @@ class TestTheBundle:
             inside.accounts.create_for_subject(SUBJECT_ONE, "name", "member", AccountKind.PERSON)
             session_id = inside.sessions.create(
                 SUBJECT_ONE,
+                session_id="given",
                 now=START,
                 expires_at=LATER,
                 refresh_token=None,
@@ -209,16 +211,44 @@ class TestAccounts:
 
 
 class TestSessions:
-    def test_session_ids_are_distinct_url_safe_and_long_enough(
+    def test_create_stores_the_session_under_the_id_it_is_given(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-02: a session id is distinct, URL-safe and 43 to 135 characters."""
+        """MEMSTORE-02: create keeps the id it is given and load finds the session under it."""
         with_account(stores)
 
-        ids = [open_session(stores) for _ in range(200)]
+        created = stores.sessions.create(
+            SUBJECT_ONE,
+            session_id="given",
+            now=START,
+            expires_at=LATER,
+            refresh_token=None,
+            id_token=None,
+            account_language=None,
+        )
 
-        assert len(set(ids)) == 200
-        assert all(SESSION_ID_PATTERN.fullmatch(session_id) for session_id in ids)
+        loaded = stores.sessions.load("given")
+        assert loaded is not None
+        assert (created.id, loaded.id) == ("given", "given")
+
+    @pytest.mark.parametrize(
+        "second_now",
+        [START, START + timedelta(hours=2)],
+        ids=["while the stored session lives", "after the stored session expired"],
+    )
+    def test_create_with_a_stored_id_raises_and_keeps_the_stored_session(
+        self, stores: SingleProcessStores, second_now: datetime
+    ) -> None:
+        """MEMSTORE-22: create with an id already stored raises and never overwrites its row."""
+        with_account(stores)
+        open_session(stores, session_id="taken", refresh_token="first", expires_at=LATER)
+
+        with pytest.raises(ValueError, match="already stored"):
+            open_session(stores, session_id="taken", refresh_token="second", now=second_now)
+
+        kept = stores.sessions.load("taken")
+        assert kept is not None
+        assert kept.refresh_token == SecretStr("first")
 
     @pytest.mark.parametrize(
         "write",
@@ -506,6 +536,7 @@ class TestSignInTransaction:
             with transaction() as inside:
                 inside.sessions.create(
                     SUBJECT_ONE,
+                    session_id="given",
                     now=START,
                     expires_at=LATER,
                     refresh_token=None,

@@ -53,6 +53,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
         sessions = SessionsRecordingTheirTransaction(record, users=users)
         second = sessions.create(
             second_user.id,
+            session_id="second-session",
             now=now,
             expires_at=now + timedelta(minutes=30),
             refresh_token=None,
