@@ -27,7 +27,6 @@ from webauth.single_process_stores import (
 )
 from webauth.store_contract import StoreAdapter
 
-
 _UUID_LENGTH = 36
 _SIGN_IN_SESSION_ID_LENGTH = 43
 
