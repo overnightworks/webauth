@@ -179,17 +179,15 @@ def _client_from_chain(
     Whatever a client writes into the header itself ends up left of the entry
     its proxy appended for it, so it is never read -- a poisoned prefix cannot
     change this answer. An entry that is not an address, or a chain of trusted
-    hops deeper than the deployment can plausibly be, names nobody; the entry
-    is logged only as far as an address could reach, so a huge one identifies
-    the fault without filling the log.
+    hops deeper than the deployment can plausibly be, names nobody; the
+    warning states the reason only, because header contents are never logged.
     """
     for entry in islice(entries, _MAX_FORWARDED_FOR_HOPS):
         hop = _canonical_address(entry)
         if hop is None:
             _log.warning(
-                "X-Forwarded-For carries %r where the nearest proxy should have "
-                "appended an address; keying this request on the direct peer.",
-                entry[:_MAX_ADDRESS_CHARS],
+                "X-Forwarded-For carries no address where the nearest proxy should "
+                "have appended one; keying this request on the direct peer."
             )
             return None
         if not trusted_proxies.trusts(hop):
