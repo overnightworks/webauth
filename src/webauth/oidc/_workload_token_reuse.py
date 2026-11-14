@@ -30,6 +30,9 @@ states, or the refusal."""
 # 20 s) plus clock skew; a token that lives no longer than this is never kept, so the margin
 # cannot cause endless replacement.
 _MARGIN_SECONDS = 30
+# The largest whole number of seconds a float deadline holds exactly; a longer lifetime is
+# not a usable one and the token it came with is not kept.
+_MAX_LIFETIME_SECONDS = 2**53
 
 
 @dataclass(frozen=True)
@@ -99,7 +102,7 @@ class WorkloadTokenReuse:
         if isinstance(result, OidcRefusal):
             return result, None
         token, lifetime = result
-        if lifetime is None or lifetime <= _MARGIN_SECONDS:
+        if lifetime is None or not _MARGIN_SECONDS < lifetime <= _MAX_LIFETIME_SECONDS:
             return token, None
         return token, _HeldToken(token, started_at + lifetime - _MARGIN_SECONDS)
 

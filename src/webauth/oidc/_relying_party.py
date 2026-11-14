@@ -383,8 +383,8 @@ class OidcRelyingParty:
         injected monotonic clock, read before its post, has advanced its `expires_in`
         less a margin. At most one grant per `scopes` is in flight across threads; callers
         that arrive meanwhile share its outcome, a refusal or a raised error included.
-        Neither is kept, nor is an answer without a whole `expires_in` of at least 1 or
-        with one no longer than the margin."""
+        Neither is kept, nor is an answer without a whole `expires_in` of at least 1, with one no
+        longer than the margin, or with one too large for a float deadline."""
         _require_scopes(scopes)
         return self._workload_tokens.token(scopes)
 

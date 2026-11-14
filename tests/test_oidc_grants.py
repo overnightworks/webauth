@@ -6,7 +6,6 @@ Each yields its access token or a refusal with its reason, and no repr shows a t
 from __future__ import annotations
 
 import logging
-import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -367,41 +366,6 @@ def _a_relying_party_at(
     )
 
 
-def test_consecutive_workload_calls_within_the_lifetime_post_the_grant_once() -> None:
-    """WORKLOAD-01: a token is handed out again within its lifetime, with one post."""
-
-    issuer = _a_reusing_issuer()
-    clock = FakeClock(5_000.0)
-    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
-
-    first = _workload_access_token(relying_party)
-    clock.now += 100
-    second = _workload_access_token(relying_party)
-
-    assert len(issuer.requests) == 1
-    assert isinstance(first, SecretStr)
-    assert second == first
-
-
-def test_a_workload_token_within_its_margin_is_replaced_before_it_is_handed_out() -> None:
-    """WORKLOAD-02: a token within its margin is replaced before it is handed out."""
-
-    issuer = _a_reusing_issuer()
-    clock = FakeClock(5_000.0)
-    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
-    first = _workload_access_token(relying_party)
-
-    clock.now += 299
-    second = _workload_access_token(relying_party)
-    clock.now += 100
-    third = _workload_access_token(relying_party)
-
-    assert len(issuer.requests) == 2
-    assert isinstance(second, SecretStr)
-    assert second != first
-    assert third == second
-
-
 @pytest.mark.parametrize(
     ("seconds_after_the_post", "posts"),
     [
@@ -417,35 +381,16 @@ def test_a_workload_token_is_reused_strictly_before_30_seconds_short_of_its_life
     issuer = _a_reusing_issuer(expires_in=300)
     clock = FakeClock(5_000.0)
     relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
-    _workload_access_token(relying_party)
+    first = _workload_access_token(relying_party)
 
     clock.now += seconds_after_the_post
-    _workload_access_token(relying_party)
+    second = _workload_access_token(relying_party)
+    third = _workload_access_token(relying_party)
 
     assert len(issuer.requests) == posts
-
-
-def test_a_lifetime_too_large_for_the_clock_ends_the_grant_and_the_next_call_posts_again() -> None:
-    """WORKLOAD-03, WORKLOAD-04: a failure after the post is shared and forgotten too."""
-
-    issuer = _a_reusing_issuer(expires_in=10**309)
-    relying_party = _a_relying_party_at(issuer)
-    outcomes: list[object] = []
-
-    def call() -> None:
-        try:
-            outcomes.append(_workload_access_token(relying_party))
-        except OverflowError as error:
-            outcomes.append(error)
-
-    for _ in range(2):
-        caller = threading.Thread(target=call, daemon=True)
-        caller.start()
-        caller.join(GRANT_DEADLINE_SECONDS)
-        assert not caller.is_alive()
-
-    assert [type(outcome) for outcome in outcomes] == [OverflowError, OverflowError]
-    assert len(issuer.requests) == 2
+    assert isinstance(second, SecretStr)
+    assert (second == first) is (posts == 1)
+    assert third == second
 
 
 def test_a_workload_token_lives_from_the_clock_read_before_the_post() -> None:
@@ -491,6 +436,7 @@ def test_a_wall_clock_jump_changes_nothing_about_how_long_a_workload_token_is_re
         pytest.param(True, id="boolean"),
         pytest.param(1, id="one-second"),
         pytest.param(20, id="shorter-than-a-render"),
+        pytest.param(10**309, id="too-large-for-a-float-deadline"),
     ],
 )
 def test_a_workload_token_without_a_usable_lifetime_is_handed_out_and_not_kept(
