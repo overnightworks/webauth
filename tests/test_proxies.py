@@ -269,6 +269,19 @@ def test_a_chain_that_names_nobody_is_logged(
     assert [record.levelno for record in caplog.records] == [logging.WARNING]
 
 
+def test_the_warning_for_a_nearest_entry_that_is_not_an_address_quotes_none_of_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Header contents are never logged, however recognisable."""
+    trusted = TrustedProxies.parse(_PROXY_NETWORK)
+    with caplog.at_level(logging.WARNING, logger="webauth.proxies"):
+        _get_client_ip(_TRUSTED_PEER, ["not-an-ip-SENTINEL"], trusted)
+    assert caplog.records
+    for record in caplog.records:
+        logged = [record.getMessage(), *map(str, record.args or ())]
+        assert not any("SENTINEL" in text or "not-an-ip" in text for text in logged)
+
+
 def test_client_ip_ignores_a_chain_from_an_untrusted_peer() -> None:
     """PROXY-01: a peer that is not trusted keeps its own address whatever its chain says."""
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
