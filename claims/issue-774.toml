@@ -1,0 +1,8 @@
+claim_id = "b0899fcfe9764ca69d769a1f052ed284"
+agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
+role = "builder"
+base = "80f194023733e5ba82a5c7efe7c7c7cd4370a5dd"
+branch = "claude/issue-774-limiter-outage-logs-once"
+scope = ["docs/host-contract.md", "src/webauth/middleware/rate_limit.py", "tests/middleware/test_stack.py", "tests/test_rate_limit_redis.py"]
+opened_commit = "a8c04fa558088ffe221b1bc3da8af0c054af0981"
+whole_reason = "One owner change: the limiter-unavailable logging of the rate-limit middleware, its tests and its host-contract row."
