@@ -1035,6 +1035,31 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 
 The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
 
+## Proving a store adapter
+
+`webauth.store_contract` holds the duties of the account, session and sign-in transaction ports as checks, for a host that implements them over its database. It adds no dependency beyond webauth's own (the ports take pydantic's `SecretStr`) and needs no test framework.
+
+- **Host duty:** the host builds one `StoreAdapter` in its own fixture, from its `accounts`, `sessions` and `transaction` over its database, and runs every check of `STORE_CHECKS` against it, for example by parametrizing its database test over the tuple.
+- **STORECHECK-01** A check returns when the adapter keeps its duty and raises `AssertionError` when it breaks it, whatever the interpreter's assert setting.
+- **STORECHECK-02** A check mints its own random subjects, usernames and session ids and takes its times from itself, so the checks run in parallel against a shared database and the adapter needs no clock.
+- **Host duty:** the host removes the rows the checks leave.
+- **STORECHECK-03** The checks prove, per port duty:
+  - `create` stores the session under exactly the given id, and `load` finds it.
+  - A second `create` under a stored id raises, expired row included, and leaves the stored row unchanged.
+  - `load` of an unknown or deleted id answers `None`.
+  - `prune_overflow` keeps the newest sessions by `created_at`, and `0` keeps none.
+  - `delete_for_user` returns how many sessions ended.
+  - `touch` and `replace_refresh_token` answer `True` or `False` as `bool`, and write no row for a missing session.
+  - `get` compares the subject exactly, with no case, accent, trailing-space or Unicode-normalization folding.
+  - `set_role`, `set_kind` and a session `create` for a missing account raise.
+- **STORECHECK-04** Two `SignInTransaction` entries exclude each other across processes. The check holds one entry open in its own process, enters a second one in a child started with `spawn` that inherits no connection or lock, and fails when the child makes a store call inside its entry before the first one exits, or does not leave its entry cleanly once the first one has.
+- **Host duty:** for that check the host sets `StoreAdapter.transaction_in_another_process` to a picklable callable without arguments that builds its `SignInTransaction` in the child, for example a frozen dataclass that carries the database location.
+- **Host duty:** a host that runs one worker leaves it unset and skips the checks whose `crosses_processes` is true.
+- **STORECHECK-05** A correct adapter always passes the cross-process check. A broken one is caught unless the child is scheduled later than the window the first entry stays open.
+- **STORECHECK-06** No check covers `SessionTransaction`.
+
+webauth runs the kit against `SingleProcessStores` for every check but the cross-process one, against a file-lock adapter and its lockless twin for the cross-process one, and against a broken adapter for each check. The kit takes over the proof of MEMSTORE-02 (create and load), MEMSTORE-03, the raising of MEMSTORE-04, MEMSTORE-05 and MEMSTORE-08 for any adapter; `SingleProcessStores` keeps its tests for the rest of its rows.
+
 ## Testing a host
 
 A test that needs a signed-in person needs no issuer:

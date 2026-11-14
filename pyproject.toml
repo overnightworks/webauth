@@ -79,6 +79,7 @@ pythonpath = ["."]
 
 [tool.coverage.run]
 branch = true
+patch = ["subprocess"]
 
 [tool.deptry.per_rule_ignores]
 # rate_limit imports redis only under TYPE_CHECKING, which deptry does not count as use

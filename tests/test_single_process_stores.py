@@ -146,36 +146,6 @@ class TestTheBundle:
 
 
 class TestAccounts:
-    @pytest.mark.parametrize(
-        "asked",
-        ["SUBJECT-\u00e9", "subject-\u00e9 ", "subject-e\u0301"],
-        ids=["case", "trailing-space", "decomposed-unicode"],
-    )
-    def test_get_matches_the_subject_exactly(self, stores: SingleProcessStores, asked: str) -> None:
-        """MEMSTORE-03: get compares the subject character for character."""
-        stores.accounts.create_for_subject("subject-\u00e9", "name", "member", AccountKind.PERSON)
-
-        assert stores.accounts.get(asked) is None
-        assert stores.accounts.get("subject-\u00e9") is not None
-
-    @pytest.mark.parametrize(
-        "call",
-        [
-            lambda stores: stores.accounts.set_role("absent", "admin"),
-            lambda stores: stores.accounts.set_kind("absent", AccountKind.AGENT),
-            lambda stores: open_session(stores, "absent"),
-        ],
-        ids=["set_role", "set_kind", "create-session"],
-    )
-    def test_a_write_on_a_missing_account_raises(
-        self, stores: SingleProcessStores, call: Callable[[SingleProcessStores], object]
-    ) -> None:
-        """MEMSTORE-04: a write on a missing account raises."""
-        with pytest.raises(KeyError):
-            call(stores)
-
-        assert stores.accounts.get("absent") is None
-
     def test_set_role_and_set_kind_change_only_their_field(
         self, stores: SingleProcessStores
     ) -> None:
@@ -211,26 +181,6 @@ class TestAccounts:
 
 
 class TestSessions:
-    def test_create_stores_the_session_under_the_id_it_is_given(
-        self, stores: SingleProcessStores
-    ) -> None:
-        """MEMSTORE-02: create keeps the id it is given and load finds the session under it."""
-        with_account(stores)
-
-        created = stores.sessions.create(
-            SUBJECT_ONE,
-            session_id="given",
-            now=START,
-            expires_at=LATER,
-            refresh_token=None,
-            id_token=None,
-            account_language=None,
-        )
-
-        loaded = stores.sessions.load("given")
-        assert loaded is not None
-        assert (created.id, loaded.id) == ("given", "given")
-
     @pytest.mark.parametrize(
         "second_now",
         [START, START + timedelta(hours=2)],
@@ -249,25 +199,6 @@ class TestSessions:
         kept = stores.sessions.load("taken")
         assert kept is not None
         assert kept.refresh_token == SecretStr("first")
-
-    @pytest.mark.parametrize(
-        "write",
-        [
-            lambda stores, session_id: stores.sessions.touch(session_id, expires_at=LATER),
-            lambda stores, session_id: stores.sessions.replace_refresh_token(
-                session_id, refresh_token=SecretStr("new")
-            ),
-        ],
-        ids=["touch", "replace_refresh_token"],
-    )
-    def test_a_write_on_a_missing_session_answers_false_and_creates_no_row(
-        self,
-        stores: SingleProcessStores,
-        write: Callable[[SingleProcessStores, str], object],
-    ) -> None:
-        """MEMSTORE-05: touch and replace_refresh_token on a missing row answer False."""
-        assert write(stores, "absent") is False
-        assert stores.sessions.load("absent") is None
 
     def test_touch_writes_the_given_expiry_and_keeps_both_tokens(
         self, stores: SingleProcessStores
@@ -310,27 +241,6 @@ class TestSessions:
         stores.sessions.delete("absent")
 
         assert stores.sessions.load(session_id) is not None
-
-    @pytest.mark.parametrize("keep_newest", [0, 1, 2, 5])
-    def test_prune_overflow_keeps_the_newest_by_creation(
-        self, stores: SingleProcessStores, keep_newest: int
-    ) -> None:
-        """MEMSTORE-08: prune_overflow keeps the newest N by creation."""
-        with_account(stores)
-        with_account(stores, SUBJECT_TWO)
-        created = [
-            open_session(
-                stores, now=START + timedelta(minutes=minute), expires_at=LATER + timedelta(days=1)
-            )
-            for minute in (3, 1, 4, 2)
-        ]
-        other = open_session(stores, SUBJECT_TWO, expires_at=LATER + timedelta(days=1))
-        newest_first = [created[2], created[0], created[3], created[1]]
-
-        stores.sessions.prune_overflow(SUBJECT_ONE, keep_newest)
-
-        assert held_ids(stores, newest_first) == newest_first[:keep_newest]
-        assert stores.sessions.load(other) is not None
 
     def test_delete_for_user_ends_every_session_counts_them_and_removes_the_account(
         self, stores: SingleProcessStores
