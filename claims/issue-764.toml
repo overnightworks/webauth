@@ -1,8 +1,0 @@
-claim_id = "362e32f7226e40f5aeaa48193eb83779"
-agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
-role = "builder"
-base = "d41e380d2bbdbb8e98cf313699d07f4891c7e46d"
-branch = "claude/issue-764-kit-id-shapes"
-scope = ["docs/host-contract.md", "src/webauth/oidc_login.py", "src/webauth/store_contract.py", "tests/support/store_contract_arrangement.py", "tests/test_store_contract.py"]
-opened_commit = "6a39c07906097dc6d7e40248474c68f758fd30d8"
-whole_reason = "One coherent kit fix: the session id's single owner, the kit's id shapes, their doc line and the regression test."
