@@ -1045,7 +1045,7 @@ The adapter has no public guard, no write-lock class and no `SessionTransaction`
 - **Host duty:** the host removes the rows the checks leave.
 - **STORECHECK-03** The checks prove, per port duty:
   - `create` stores the session under exactly the given id, and `load` finds it.
-  - A second `create` under a stored id raises, expired row included, and leaves the stored row unchanged.
+  - A second `create` under a stored id raises, expired row included, and leaves the stored row unchanged. Any exception counts: `ValueError` is `SingleProcessStores`' own (MEMSTORE-22).
   - `load` of an unknown or deleted id answers `None`.
   - `prune_overflow` keeps the newest sessions by `created_at`, and `0` keeps none.
   - `delete_for_user` returns how many sessions ended.
