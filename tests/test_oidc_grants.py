@@ -5,7 +5,9 @@ Each yields its access token or a refusal with its reason, and no repr shows a t
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -15,13 +17,17 @@ from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_NOW,
     CLIENT_SECRET,
+    GRANT_DEADLINE_SECONDS,
     ISSUED_REFRESH_TOKEN,
     TOKEN_ENDPOINT,
     FakeClock,
     FakeIssuer,
     FakeTokenEndpoint,
+    GrantHeldUntilReleased,
+    SignallingClock,
     a_fake_id_token,
     a_realm_client_config,
+    a_relying_party,
     changed,
     token_endpoint_answer,
 )
@@ -308,7 +314,7 @@ def test_the_workload_grant_takes_scopes_only_by_keyword_and_posts_nothing(
     assert issuer.requests == []
 
 
-def test_two_workload_calls_post_twice_and_yield_two_different_tokens() -> None:
+def test_two_workload_calls_post_twice_when_the_answer_carries_no_lifetime() -> None:
     issuer = _an_issuer()
     relying_party = _granting(issuer)
 
@@ -341,3 +347,249 @@ def test_no_repr_shows_a_token_a_grant_sent_or_received() -> None:
         BASIC_AUTHORIZATION,
     ):
         assert secret not in shown
+
+
+def _a_reusing_issuer(**members: Any) -> FakeIssuer:
+    issuer = _an_issuer()
+    issuer.workload_answer_members = {"expires_in": 300, **members}
+    return issuer
+
+
+def _a_relying_party_at(
+    issuer: TokenRequestPost,
+    *,
+    monotonic_clock: FakeClock | None = None,
+    wall_clock: FakeClock | None = None,
+) -> OidcRelyingParty:
+    return a_relying_party(
+        post_token_request=issuer, monotonic_clock=monotonic_clock, wall_clock=wall_clock
+    )
+
+
+@pytest.mark.parametrize(
+    ("seconds_after_the_post", "posts"),
+    [
+        pytest.param(269, 1, id="just-before-expires-in-less-30"),
+        pytest.param(270, 2, id="exactly-expires-in-less-30"),
+    ],
+)
+def test_a_workload_token_is_reused_strictly_before_30_seconds_short_of_its_lifetime(
+    seconds_after_the_post: int, posts: int
+) -> None:
+    """WORKLOAD-01, WORKLOAD-02: the margin is 30 s; at it the token is replaced."""
+
+    issuer = _a_reusing_issuer(expires_in=300)
+    clock = FakeClock(5_000.0)
+    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
+    first = _workload_access_token(relying_party)
+
+    clock.now += seconds_after_the_post
+    second = _workload_access_token(relying_party)
+    third = _workload_access_token(relying_party)
+
+    assert len(issuer.requests) == posts
+    assert isinstance(second, SecretStr)
+    assert (second == first) is (posts == 1)
+    assert third == second
+
+
+def test_a_workload_token_lives_from_the_clock_read_before_the_post() -> None:
+    """WORKLOAD-01: the lifetime counts from the monotonic clock read before the post."""
+
+    clock = FakeClock(5_000.0)
+    issuer = _a_reusing_issuer()
+    issuer.before_exchange = lambda: setattr(clock, "now", clock.now + 299)
+    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
+
+    _workload_access_token(relying_party)
+    _workload_access_token(relying_party)
+
+    assert len(issuer.requests) == 2
+
+
+@pytest.mark.parametrize("wall_clock_jump", [-86_400.0, 86_400.0 * 365], ids=["back", "forward"])
+def test_a_wall_clock_jump_changes_nothing_about_how_long_a_workload_token_is_reused(
+    wall_clock_jump: float,
+) -> None:
+    """WORKLOAD-01: the reuse follows the monotonic clock."""
+
+    issuer = _a_reusing_issuer()
+    wall_clock = FakeClock(float(ACCESS_TOKEN_NOW))
+    relying_party = _a_relying_party_at(issuer, wall_clock=wall_clock)
+
+    _workload_access_token(relying_party)
+    wall_clock.now += wall_clock_jump
+    _workload_access_token(relying_party)
+
+    assert len(issuer.requests) == 1
+
+
+@pytest.mark.parametrize(
+    "lifetime",
+    [
+        pytest.param(ABSENT, id="absent"),
+        pytest.param(None, id="null"),
+        pytest.param(0, id="zero"),
+        pytest.param(-300, id="negative"),
+        pytest.param(300.5, id="fraction"),
+        pytest.param("300", id="string"),
+        pytest.param(True, id="boolean"),
+        pytest.param(1, id="one-second"),
+        pytest.param(20, id="shorter-than-a-render"),
+        pytest.param(10**309, id="too-large-for-a-float-deadline"),
+    ],
+)
+def test_a_workload_token_without_a_usable_lifetime_is_handed_out_and_not_kept(
+    lifetime: object,
+) -> None:
+    """WORKLOAD-04: an answer without a lifetime longer than the margin is not kept."""
+
+    issuer = _a_reusing_issuer(expires_in=lifetime)
+    relying_party = _a_relying_party_at(issuer)
+
+    first = _workload_access_token(relying_party)
+    second = _workload_access_token(relying_party)
+
+    assert len(issuer.requests) == 2
+    assert isinstance(first, SecretStr)
+    assert isinstance(second, SecretStr)
+    assert second != first
+
+
+def test_different_scope_tuples_get_separate_entries() -> None:
+    """WORKLOAD-01: a scope tuple is an entry's key exactly as given, order included."""
+
+    issuer = _a_reusing_issuer()
+    relying_party = _a_relying_party_at(issuer)
+    scope_sets = [("svc-a", "profile"), ("profile", "svc-a"), ("svc-b",)]
+
+    firsts = [relying_party.workload_access_token(scopes=scopes) for scopes in scope_sets]
+    seconds = [relying_party.workload_access_token(scopes=scopes) for scopes in scope_sets]
+
+    assert [request.form["scope"] for request in issuer.requests] == [
+        "svc-a profile",
+        "profile svc-a",
+        "svc-b",
+    ]
+    assert seconds == firsts
+    tokens = [token for token in firsts if isinstance(token, SecretStr)]
+    assert len({token.get_secret_value() for token in tokens}) == len(scope_sets)
+
+
+def test_a_refused_workload_grant_is_not_reused_once_the_issuer_answers_a_token() -> None:
+    """WORKLOAD-04: a refusal is not kept."""
+
+    issuer = _a_reusing_issuer()
+    issuer.service_accounts_enabled = False
+    relying_party = _a_relying_party_at(issuer)
+    refusal = _workload_access_token(relying_party)
+    issuer.service_accounts_enabled = True
+
+    granted = _workload_access_token(relying_party)
+
+    assert isinstance(refusal, OidcRefusal)
+    assert isinstance(granted, SecretStr)
+    assert len(issuer.requests) == 2
+
+
+def _concurrent_workload_calls(
+    relying_party: OidcRelyingParty,
+    held: GrantHeldUntilReleased,
+    clock: SignallingClock,
+    waiters: int,
+) -> list[object]:
+    """The outcomes of one call that reaches the issuer and `waiters` calls that join it
+    while it is held; a raised error is an outcome."""
+
+    def call() -> object:
+        try:
+            return _workload_access_token(relying_party)
+        except Exception as error:  # noqa: BLE001 - the error is the outcome under test
+            return error
+
+    with ThreadPoolExecutor(max_workers=waiters + 1) as pool:
+        leader = pool.submit(call)
+        held.wait_until_reached()
+        joined = [pool.submit(call) for _ in range(waiters)]
+        for _ in range(1 + waiters):
+            assert clock.reads.acquire(timeout=GRANT_DEADLINE_SECONDS)
+        held.release()
+        return [
+            leader.result(GRANT_DEADLINE_SECONDS),
+            *(each.result(GRANT_DEADLINE_SECONDS) for each in joined),
+        ]
+
+
+@pytest.mark.parametrize(
+    ("configure_issuer", "kept"),
+    [
+        pytest.param(
+            lambda issuer: setattr(issuer, "service_accounts_enabled", False), False, id="refusal"
+        ),
+        pytest.param(
+            lambda issuer: issuer.workload_answer_members.pop("expires_in"), False, id="no-lifetime"
+        ),
+        pytest.param(lambda _issuer: None, True, id="token-with-a-lifetime"),
+    ],
+)
+def test_concurrent_workload_calls_for_one_key_post_once_and_share_the_answer(
+    configure_issuer: Callable[[FakeIssuer], object], kept: bool
+) -> None:
+    """WORKLOAD-03, WORKLOAD-04: waiters share the one grant's answer; only a token is kept."""
+
+    held = GrantHeldUntilReleased(GRANT_DEADLINE_SECONDS)
+    issuer = _a_reusing_issuer()
+    configure_issuer(issuer)
+    issuer.before_exchange = held
+    clock = SignallingClock(5_000.0)
+    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
+
+    outcomes = _concurrent_workload_calls(relying_party, held, clock, waiters=2)
+    posts_while_shared = len(issuer.requests)
+    _workload_access_token(relying_party)
+
+    assert outcomes == [outcomes[0]] * 3
+    assert posts_while_shared == 1
+    assert len(issuer.requests) == (1 if kept else 2)
+
+
+def test_concurrent_workload_calls_share_a_raised_error_and_the_next_call_posts_again() -> None:
+    """WORKLOAD-03, WORKLOAD-04: waiters share a raised error, which is not kept."""
+
+    held = GrantHeldUntilReleased(GRANT_DEADLINE_SECONDS)
+    error = RuntimeError("the transport broke")
+    issuer = _a_reusing_issuer()
+
+    def hold_and_break_the_first_post() -> None:
+        held()
+        if len(issuer.requests) == 1:
+            raise error
+
+    issuer.before_exchange = hold_and_break_the_first_post
+    clock = SignallingClock(5_000.0)
+    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
+
+    outcomes = _concurrent_workload_calls(relying_party, held, clock, waiters=2)
+    posts_while_shared = len(issuer.requests)
+    next_call = _workload_access_token(relying_party)
+
+    assert outcomes == [error] * 3
+    assert posts_while_shared == 1
+    assert isinstance(next_call, SecretStr)
+    assert len(issuer.requests) == 2
+
+
+def test_no_log_shows_a_workload_token_an_entry_keeps(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """WORKLOAD-06: a kept token is in no log."""
+
+    issuer = _a_reusing_issuer()
+    relying_party = _a_relying_party_at(issuer)
+
+    with caplog.at_level(logging.DEBUG):
+        token = _workload_access_token(relying_party)
+        _workload_access_token(relying_party)
+
+    assert isinstance(token, SecretStr)
+    assert token.get_secret_value() not in caplog.text

@@ -802,6 +802,23 @@ An app whose protected resource admitted a caller's token acts for that caller a
 
 The operator ruled the sentence that says the call exists for every app and names the delegation policy: the issuer grants an exchanged scope only when the realm offers it to the app's client, and the service alone checks that the principal is in its group. No other sentence here is ruled.
 
+## The app's own token
+
+An app that calls a service on its own authority asks `OidcRelyingParty.workload_access_token(scopes=...)` for the client's own token, a `client_credentials` grant (RFC 6749 section 4.4). The call answers a `SecretStr` or an `OidcRefusal`. The grant issues no refresh token, so a new grant is the renewal, and the relying party reuses the token until shortly before it expires.
+
+- **WORKLOAD-01** A token is kept by the relying-party instance, per `scopes` tuple exactly as given (the order is the form's `scope`), and handed out again while the injected monotonic clock, read before the post, has advanced less than `expires_in` minus the margin. Different tuples have separate entries; a wall-clock jump neither prolongs nor shortens the reuse.
+- **WORKLOAD-02** The margin is 30 s: the time from hand-out to the receiver's one check at opening (a speech render takes up to 20 s) plus skew. A token within its margin is replaced before it is handed out.
+- **WORKLOAD-03** At most one grant per `scopes` tuple is in flight, across threads. Callers that arrive while it runs wait for it and share its outcome, a refusal or a raised error included.
+- **WORKLOAD-04** A refusal, a raised error, an answer without a whole `expires_in` of at least 1 (`bool` and `float` are not), an answer whose `expires_in` is at most the margin, and one too large for a float deadline (above 2^53 s) are handed out and not kept, so the next call posts again.
+- **WORKLOAD-05** The answer is read as before: a bearer `token_type` (compared in ASCII case-insensitively) and an `access_token` of RFC 6750's `b64token` shape, anything else is `TOKEN_ENDPOINT_FAILED`. Unlike the exchange it needs no `issued_token_type`, which RFC 6749 does not send for this grant, and an unusable `expires_in` does not refuse the answer.
+- **WORKLOAD-06** The token stays a `SecretStr` in the entry; no `repr`, log or error shows it.
+- **WORKLOAD-07** A role the realm removes, or a token it revokes, stays in use until the entry ends, at most `expires_in` minus the margin; the service decides on its own check (CALLER-20). No forced refresh exists.
+- **Host duty:** `scopes` come from the host's configuration, so the entries stay as few as the configured scope sets.
+- **Host duty:** The host builds the relying party in each worker process after a fork; one built before and used in the child can inherit a held lock.
+- Each process keeps its own token. Callers waiting on a grant wait as long as the post, which the transport's deadlines bound except for name resolution.
+
+EXCHANGE-05 stays true for the exchange: it caches nothing and locks nothing.
+
 ## A service's callers
 
 A service that is not a browser app (no sessions, no sign-in) admits an app acting for a person, with

@@ -20,10 +20,14 @@ is refused as `TOKEN_ENDPOINT_FAILED`; the access token is not read.
 `renew_access`, `workload_access_token` (a `client_credentials` grant for the
 host's scopes) and the bearer gate's token exchange (RFC 8693, of the access
 token a resource admitted) are each one POST with the code exchange's client
-authentication, no cache and no lock, so every call is a fresh token. The
-issuer's answer must be a Bearer token (`token_type` compared in ASCII
-case-insensitively) whose `access_token` has RFC 6750's `b64token` shape;
-anything else is `TOKEN_ENDPOINT_FAILED`, and so is a sent or received refresh
+authentication. `renew_access` and the exchange keep nothing and lock nothing,
+so each call is a fresh token. `workload_access_token` reuses the client's own
+token per scope tuple until a margin before its `expires_in` on the injected
+monotonic clock, with one grant in flight per tuple across threads; a refusal, a
+raised error and an answer without a usable lifetime are shared with the callers
+waiting on that grant and then forgotten. The issuer's answer must be a Bearer token
+(`token_type` compared in ASCII case-insensitively) whose `access_token` has RFC 6750's
+`b64token` shape; anything else is `TOKEN_ENDPOINT_FAILED`, and so is a sent or received refresh
 token outside `1*VSCHAR`, except that the token exchange never reads a
 `refresh_token`. The status handling is the code exchange's, so an issuer's
 `error` is `TOKEN_REQUEST_REFUSED`; the token exchange also reads it from a
@@ -81,10 +85,12 @@ from webauth.oidc._token_endpoint import (
     _idp_error_code,
     _is_refresh_token,
     _issued_refresh_token,
+    _lifetime_seconds,
     _raw_id_token_of,
     _RefusalError,
     _token_answer_document,
 )
+from webauth.oidc._workload_token_reuse import WorkloadTokenReuse
 from webauth.policies import AuthorizedParties, _require_authorized_parties
 from webauth.ports import AgentFacts
 
@@ -203,6 +209,9 @@ class OidcRelyingParty:
         self._fetch_key_set = fetch_key_set
         self._monotonic_clock = monotonic_clock
         self._jwt_verifier = self._verifier_for(config.client_id)
+        self._workload_tokens = WorkloadTokenReuse(
+            self._workload_grant, monotonic_clock=monotonic_clock
+        )
 
     def _verifier_for(self, audience: str) -> _JwtVerifier:
         return _JwtVerifier(
@@ -368,13 +377,26 @@ class OidcRelyingParty:
         anything else raises `ValueError` and posts nothing. The realm must
         give the client a service account holding the role the receiver
         demands; an issuer `error` such as `unauthorized_client` (no service
-        account) or `invalid_scope` (not assigned) is carried as `idp_error`."""
+        account) or `invalid_scope` (not assigned) is carried as `idp_error`.
+
+        A token is kept for `scopes` exactly as given, and handed out again until the
+        injected monotonic clock, read before its post, has advanced its `expires_in`
+        less a margin. At most one grant per `scopes` is in flight across threads; callers
+        that arrive meanwhile share its outcome, a refusal or a raised error included.
+        Neither is kept, nor is an answer without a whole `expires_in` of at least 1, with one no
+        longer than the margin, or with one too large for a float deadline."""
         _require_scopes(scopes)
+        return self._workload_tokens.token(scopes)
+
+    def _workload_grant(
+        self, scopes: tuple[str, ...]
+    ) -> tuple[SecretStr, int | None] | OidcRefusal:
+        """The grant's token and the lifetime its answer states, or its refusal."""
         try:
             document = self._token_answer(
                 self._grant_request({"grant_type": "client_credentials", "scope": " ".join(scopes)})
             )
-            return _bearer_access_token(document)
+            return _bearer_access_token(document), _lifetime_seconds(document)
         except _RefusalError as refusal:
             return refusal.refusal
 
