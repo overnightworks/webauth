@@ -3,6 +3,6 @@ agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
 role = "builder"
 base = "5a3dd30689bc9166eb0e72fc073621f478e8f098"
 branch = "claude/issue-761-workload-token-reuse"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc/_token_endpoint.py", "tests/support/oidc_arrangement.py", "tests/test_oidc_grants.py"]
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc/_token_endpoint.py", "src/webauth/oidc/_workload_token_reuse.py", "tests/support/oidc_arrangement.py", "tests/test_oidc_grants.py"]
 opened_commit = "ff7f9467a0ae4f6eae969716025359d975ca69b4"
 whole_reason = "One owner change: the workload token cache in the relying party, its lifetime reader, its fake, its tests and its host-contract rows."
