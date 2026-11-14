@@ -167,7 +167,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 - ASGI owns HTTP framing (h11 and httptools may legally differ), so the body-size limit counts streamed bytes and never re-parses framing.
 - Outbound calls are https only, bounded and without redirects, because the issuer is trusted only over TLS ([Trust](#trust)).
 - A host without the `redis` extra imports everything, so the extra stays optional ([`AGENTS.md`](../AGENTS.md)).
-- The port contract ships in the wheel as `webauth.store_contract`: the library trusts the store and cannot detect a broken one ([Trust](#trust), boundary 4), a database adapter can be exercised only by its host, and each host that wrote the checks itself would let them drift apart. The module imports only the standard library and `webauth.ports`, so a production install gains no dependency, and it is versioned with the port it proves ([host contract](host-contract.md#proving-a-store-adapter)).
+- The port contract ships in the wheel as `webauth.store_contract`: the library trusts the store and cannot detect a broken one ([Trust](#trust), boundary 4), a database adapter can be exercised only by its host, and each host that wrote the checks itself would let them drift apart. The module adds no dependency beyond webauth's own (the ports take pydantic's `SecretStr`), so a production install gains none, and it is versioned with the port it proves ([host contract](host-contract.md#proving-a-store-adapter)).
 
 ## 7. Not chosen
 

@@ -1037,11 +1037,11 @@ The adapter has no public guard, no write-lock class and no `SessionTransaction`
 
 ## Proving a store adapter
 
-`webauth.store_contract` holds the duties of the account, session and sign-in transaction ports as checks, for a host that implements them over its database. It needs only the standard library and `webauth.ports`, and no test framework.
+`webauth.store_contract` holds the duties of the account, session and sign-in transaction ports as checks, for a host that implements them over its database. It adds no dependency beyond webauth's own (the ports take pydantic's `SecretStr`) and needs no test framework.
 
 - **Host duty:** the host builds one `StoreAdapter` in its own fixture, from its `accounts`, `sessions` and `transaction` over its database, and runs every check of `STORE_CHECKS` against it, for example by parametrizing its database test over the tuple.
 - **STORECHECK-01** A check returns when the adapter keeps its duty and raises `AssertionError` when it breaks it, whatever the interpreter's assert setting.
-- **STORECHECK-02** A check mints its own random subjects and session ids and takes its times from itself, so the checks run in parallel against a shared database and the adapter needs no clock.
+- **STORECHECK-02** A check mints its own random subjects, usernames and session ids and takes its times from itself, so the checks run in parallel against a shared database and the adapter needs no clock.
 - **Host duty:** the host removes the rows the checks leave.
 - **STORECHECK-03** The checks prove, per port duty:
   - `create` stores the session under exactly the given id, and `load` finds it.
@@ -1052,7 +1052,7 @@ The adapter has no public guard, no write-lock class and no `SessionTransaction`
   - `touch` and `replace_refresh_token` answer `True` or `False` as `bool`, and write no row for a missing session.
   - `get` compares the subject exactly, with no case, accent, trailing-space or Unicode-normalization folding.
   - `set_role`, `set_kind` and a session `create` for a missing account raise.
-- **STORECHECK-04** Two `SignInTransaction` entries exclude each other across processes. The check holds one entry open in its own process, enters a second one in a child started with `spawn` that inherits no connection or lock, and fails when the child makes a store call inside its entry before the first one exits.
+- **STORECHECK-04** Two `SignInTransaction` entries exclude each other across processes. The check holds one entry open in its own process, enters a second one in a child started with `spawn` that inherits no connection or lock, and fails when the child makes a store call inside its entry before the first one exits, or does not leave its entry cleanly once the first one has.
 - **Host duty:** for that check the host sets `StoreAdapter.transaction_in_another_process` to a picklable callable without arguments that builds its `SignInTransaction` in the child, for example a frozen dataclass that carries the database location.
 - **Host duty:** a host that runs one worker leaves it unset and skips the checks whose `crosses_processes` is true.
 - **STORECHECK-05** A correct adapter always passes the cross-process check. A broken one is caught unless the child is scheduled later than the window the first entry stays open.
