@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import multiprocessing
 from collections.abc import Callable
 from operator import attrgetter
 from pathlib import Path
@@ -11,21 +10,24 @@ import pytest
 
 from tests.support.store_contract_arrangement import (
     BROKEN_ADAPTERS,
+    FailsOnExit,
     FailsToBuild,
     FailsToEnter,
-    FileLockedTransactionFactory,
     a_correct_single_process_adapter,
     a_file_locked_adapter,
+    a_session_adapter_that_changes_the_row_before_refusing,
     an_adapter_with_other_process,
+    an_adapter_with_unique_usernames,
 )
 from webauth.ports import SignInTransaction
-from webauth.store_contract import STORE_CHECKS, StoreCheck, _enter_in_the_other_process
+from webauth.store_contract import STORE_CHECKS, StoreCheck
 
 CROSS_PROCESS_CHECKS = [check for check in STORE_CHECKS if check.crosses_processes]
 IN_PROCESS_CHECKS = [check for check in STORE_CHECKS if not check.crosses_processes]
 
 
 def test_every_check_is_paired_with_one_broken_adapter() -> None:
+    """STORECHECK-01: every check has a broken adapter it refuses."""
     names = [check.name for check in STORE_CHECKS]
 
     assert len(set(names)) == len(names)
@@ -34,16 +36,18 @@ def test_every_check_is_paired_with_one_broken_adapter() -> None:
 
 @pytest.mark.parametrize("check", IN_PROCESS_CHECKS, ids=attrgetter("name"))
 def test_a_single_process_adapter_passes_every_in_process_check(check: StoreCheck) -> None:
+    """STORECHECK-01, STORECHECK-03: a correct adapter passes each duty check."""
     check.run(a_correct_single_process_adapter())
 
 
-def test_exactly_one_check_crosses_processes() -> None:
-    assert [check.name for check in CROSS_PROCESS_CHECKS] == [
-        "sign_in_entries_serialise_across_processes"
-    ]
+@pytest.mark.parametrize("check", IN_PROCESS_CHECKS, ids=attrgetter("name"))
+def test_an_adapter_with_unique_usernames_passes_every_in_process_check(check: StoreCheck) -> None:
+    """STORECHECK-02: a check gives each account a username no other account holds."""
+    check.run(an_adapter_with_unique_usernames())
 
 
 def test_the_file_lock_adapter_passes_the_cross_process_check(tmp_path: Path) -> None:
+    """STORECHECK-04, STORECHECK-05: a lock that spans processes passes the cross-process check."""
     (check,) = CROSS_PROCESS_CHECKS
 
     check.run(a_file_locked_adapter(tmp_path / "sign-in.lock"))
@@ -51,8 +55,17 @@ def test_the_file_lock_adapter_passes_the_cross_process_check(tmp_path: Path) ->
 
 @pytest.mark.parametrize("check", STORE_CHECKS, ids=attrgetter("name"))
 def test_each_check_refuses_its_broken_adapter(check: StoreCheck) -> None:
+    """STORECHECK-01, STORECHECK-03, STORECHECK-04: a broken adapter fails its check."""
     with pytest.raises(AssertionError):
         check.run(BROKEN_ADAPTERS[check.name]())
+
+
+def test_a_refused_create_that_changed_any_field_of_the_row_fails_the_check() -> None:
+    """STORECHECK-03: a refused create leaves the whole stored row unchanged."""
+    (check,) = (c for c in IN_PROCESS_CHECKS if c.name == "a_stored_id_is_refused_and_its_row_kept")
+
+    with pytest.raises(AssertionError):
+        check.run(a_session_adapter_that_changes_the_row_before_refusing())
 
 
 @pytest.mark.parametrize(
@@ -64,20 +77,30 @@ def test_the_cross_process_check_fails_loud_when_the_other_process_cannot_serve(
     factory: Callable[[], SignInTransaction],
     tmp_path: Path,
 ) -> None:
+    """STORECHECK-04: the second process must reach its entry and call the store."""
     (check,) = CROSS_PROCESS_CHECKS
 
     with pytest.raises(AssertionError):
         check.run(an_adapter_with_other_process(factory, tmp_path / "sign-in.lock"))
 
 
-def test_the_other_process_signals_before_it_enters_and_after_its_store_call(
+def test_the_cross_process_check_fails_loud_when_the_other_process_cannot_leave_its_entry(
     tmp_path: Path,
 ) -> None:
-    # Coverage does not follow the spawned process that runs this function.
-    messages, sender = multiprocessing.Pipe(duplex=False)
+    """STORECHECK-04: the second process must leave its entry cleanly."""
+    (check,) = CROSS_PROCESS_CHECKS
+    lock_path = tmp_path / "sign-in.lock"
 
-    _enter_in_the_other_process(
-        FileLockedTransactionFactory(tmp_path / "sign-in.lock"), "subject", sender
-    )
+    with pytest.raises(AssertionError):
+        check.run(an_adapter_with_other_process(FailsOnExit(lock_path), lock_path))
 
-    assert [messages.recv(), messages.recv()] == ["about to enter", "called the store"]
+
+def test_an_unpicklable_transaction_factory_surfaces_its_own_error(tmp_path: Path) -> None:
+    """STORECHECK-04: a factory the second process cannot receive raises its own error."""
+    (check,) = CROSS_PROCESS_CHECKS
+    adapter = an_adapter_with_other_process(lambda: FailsToBuild()(), tmp_path / "sign-in.lock")
+
+    with pytest.raises(Exception) as raised:
+        check.run(adapter)
+
+    assert not isinstance(raised.value, AssertionError)

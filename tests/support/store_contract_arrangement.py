@@ -16,7 +16,7 @@ from typing import cast
 from pydantic import SecretStr
 
 from tests.support.webauth_arrangement import RecordingAuditSink
-from webauth.ports import AccountKind, SignInStores, SignInTransaction
+from webauth.ports import AccountKind, SignInStores, SignInTransaction, UsernameTakenError
 from webauth.single_process_stores import (
     SingleProcessAccountStore,
     SingleProcessSessionStore,
@@ -81,6 +81,43 @@ class OverwritesAStoredSession(SingleProcessSessionStore):
         account_language: str | None,
     ) -> StoredSession:
         self.delete(session_id)
+        return super().create(
+            user_id,
+            session_id=session_id,
+            now=now,
+            expires_at=expires_at,
+            refresh_token=refresh_token,
+            id_token=id_token,
+            account_language=account_language,
+        )
+
+
+class ChangesTheStoredRowThenRefuses(SingleProcessSessionStore):
+    def create(
+        self,
+        user_id: str,
+        *,
+        session_id: str,
+        now: datetime,
+        expires_at: datetime,
+        refresh_token: SecretStr | None,
+        id_token: SecretStr | None,
+        account_language: str | None,
+    ) -> StoredSession:
+        stored = super().load(session_id)
+        if stored is not None:
+            self.delete(session_id)
+            super().create(
+                stored.user.id,
+                session_id=session_id,
+                now=stored.created_at,
+                expires_at=expires_at,
+                refresh_token=stored.refresh_token,
+                id_token=stored.id_token,
+                account_language=stored.account_language,
+            )
+            message = "the session id is taken"
+            raise RuntimeError(message)
         return super().create(
             user_id,
             session_id=session_id,
@@ -171,6 +208,20 @@ class FoldsSubjects(SingleProcessAccountStore):
 
 def _folded(subject: str) -> str:
     return unicodedata.normalize("NFKD", subject).casefold().rstrip()
+
+
+class RefusesATakenUsername(SingleProcessAccountStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self._usernames: set[str] = set()
+
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> StoredAccount:
+        if username in self._usernames:
+            raise UsernameTakenError
+        self._usernames.add(username)
+        return super().create_for_subject(subject, username, role, kind)
 
 
 class CreatesAMissingAccountOnWrite(SingleProcessAccountStore):
@@ -282,6 +333,40 @@ class FailsToEnter:
 
     def __call__(self) -> SignInTransaction:
         return _FailingEntry()
+
+
+def an_adapter_with_unique_usernames() -> StoreAdapter:
+    return _with_accounts(RefusesATakenUsername)()
+
+
+def a_session_adapter_that_changes_the_row_before_refusing() -> StoreAdapter:
+    return _with_sessions(ChangesTheStoredRowThenRefuses)()
+
+
+@dataclass(frozen=True)
+class FailsOnExit:
+    """A factory whose locked transaction stores fine and raises when its entry exits."""
+
+    lock_path: Path
+
+    def __call__(self) -> SignInTransaction:
+        return _FailingExit(FileLockedTransactionFactory(self.lock_path)())
+
+
+@dataclass(frozen=True)
+class _FailingExit:
+    inner: SignInTransaction
+
+    def __call__(self) -> AbstractContextManager[SignInStores]:
+        return _raises_on_exit(self.inner())
+
+
+@contextmanager
+def _raises_on_exit(entry: AbstractContextManager[SignInStores]) -> Iterator[SignInStores]:
+    with entry as stores:
+        yield stores
+    message = "the other process cannot leave its entry"
+    raise RuntimeError(message)
 
 
 def an_adapter_with_other_process(

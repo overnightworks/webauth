@@ -1,13 +1,14 @@
 """Checks that prove a host's store adapters keep the duties of the ports in `webauth.ports`.
 
 A host builds one `StoreAdapter` in its own fixture and runs every check of `STORE_CHECKS`
-against it, for example by parametrizing its database test over the tuple. The module needs only
-the standard library and `webauth.ports`, and no test framework: a check raises `AssertionError`
-when the adapter breaks a duty and returns when it keeps it.
+against it, for example by parametrizing its database test over the tuple. The module adds no
+dependency beyond webauth's own, which includes pydantic's `SecretStr` that the ports take, and
+needs no test framework: a check raises `AssertionError` when the adapter breaks a duty and returns
+when it keeps it.
 
-Each check mints its own random subjects and session ids, so checks run in parallel against a
-shared database. The host owns the cleanup of the rows they leave. Every call takes its times from
-the check, so the adapter needs no clock.
+Each check mints its own random subjects, usernames and session ids, so checks run in parallel
+against a shared database. The host owns the cleanup of the rows they leave. Every call takes its
+times from the check, so the adapter needs no clock.
 
 The cross-process check proves that two `SignInTransaction` entries exclude each other across
 processes, which a host with several workers or pods needs and an in-process lock does not give. It
@@ -25,6 +26,7 @@ import multiprocessing
 import unicodedata
 import uuid
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
@@ -40,6 +42,7 @@ from webauth.ports import (
 
 if TYPE_CHECKING:
     from multiprocessing.connection import Connection
+    from multiprocessing.process import BaseProcess
 
 __all__ = [
     "STORE_CHECKS",
@@ -110,7 +113,7 @@ def _a_session_id() -> str:
 
 def _an_account(adapter: StoreAdapter) -> str:
     subject = _a_subject()
-    adapter.accounts.create_for_subject(subject, "contract", "member", AccountKind.PERSON)
+    adapter.accounts.create_for_subject(subject, subject, "member", AccountKind.PERSON)
     return subject
 
 
@@ -134,6 +137,23 @@ def _a_session(
         account_language="de",
     )
     return stored_id
+
+
+def _stored_fields(adapter: StoreAdapter, session_id: str) -> tuple[object, ...] | None:
+    session = adapter.sessions.load(session_id)
+    return (
+        None
+        if session is None
+        else (
+            session.id,
+            session.user.id,
+            session.created_at,
+            session.expires_at,
+            session.refresh_token,
+            session.id_token,
+            session.account_language,
+        )
+    )
 
 
 def _stored_ids(adapter: StoreAdapter, session_ids: list[str]) -> list[str]:
@@ -166,6 +186,7 @@ def _a_stored_id_is_refused_and_its_row_kept(adapter: StoreAdapter) -> None:
     now = datetime.now(UTC)
     first = SecretStr(uuid.uuid4().hex)
     session_id = _a_session(adapter, subject, now=now, refresh_token=first)
+    stored = _stored_fields(adapter, session_id)
 
     for second_now in (now, now + 2 * _SESSION_LIFETIME):
         _require_raises(
@@ -179,9 +200,8 @@ def _a_stored_id_is_refused_and_its_row_kept(adapter: StoreAdapter) -> None:
             "create accepted an id the store already holds",
         )
 
-    kept = adapter.sessions.load(session_id)
     _require(
-        kept is not None and kept.refresh_token == first,
+        stored is not None and _stored_fields(adapter, session_id) == stored,
         "a refused create changed the stored row",
     )
 
@@ -269,7 +289,7 @@ def _touch_and_replace_refresh_token_answer_a_bool(adapter: StoreAdapter) -> Non
 
 def _get_compares_the_subject_exactly(adapter: StoreAdapter) -> None:
     subject = f"Subject-é-{uuid.uuid4().hex}"
-    adapter.accounts.create_for_subject(subject, "contract", "member", AccountKind.PERSON)
+    adapter.accounts.create_for_subject(subject, subject, "member", AccountKind.PERSON)
     folded = {
         "case": subject.upper(),
         "trailing space": f"{subject} ",
@@ -323,6 +343,12 @@ def _heard(messages: Connection, within_seconds: float) -> str | None:
         return None
 
 
+def _end(process: BaseProcess) -> None:
+    process.terminate()
+    process.join()
+    process.close()
+
+
 def _sign_in_entries_serialise_across_processes(adapter: StoreAdapter) -> None:
     build_transaction = adapter.transaction_in_another_process
     _require(
@@ -336,10 +362,15 @@ def _sign_in_entries_serialise_across_processes(adapter: StoreAdapter) -> None:
         target=_enter_in_the_other_process,
         args=(build_transaction, subject, other_end),
     )
-    try:
+    with ExitStack() as cleanup:
+        cleanup.callback(messages.close)
+        cleanup.callback(other_end.close)
         with adapter.transaction() as stores:
             stores.accounts.get(subject)
             other.start()
+            # Registered once the process exists: a start that fails, for example on a factory
+            # that cannot be pickled, must surface as itself.
+            cleanup.callback(_end, other)
             other_end.close()
             _require(
                 _heard(messages, _OTHER_PROCESS_SECONDS) == _ABOUT_TO_ENTER,
@@ -354,12 +385,11 @@ def _sign_in_entries_serialise_across_processes(adapter: StoreAdapter) -> None:
             _heard(messages, _OTHER_PROCESS_SECONDS) == _CALLED_THE_STORE,
             "the second process did not complete its entry after the first entry exited",
         )
-    finally:
         other.join(timeout=_OTHER_PROCESS_SECONDS)
-        other.terminate()
-        other.join()
-        other.close()
-        messages.close()
+        _require(
+            other.exitcode == 0,
+            "the second process did not leave its entry cleanly after the first entry exited",
+        )
 
 
 STORE_CHECKS: Final = (
