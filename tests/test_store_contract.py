@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pickle
 from collections.abc import Callable
 from operator import attrgetter
 from pathlib import Path
@@ -108,7 +109,5 @@ def test_an_unpicklable_transaction_factory_surfaces_its_own_error(tmp_path: Pat
     (check,) = CROSS_PROCESS_CHECKS
     adapter = an_adapter_with_other_process(lambda: FailsToBuild()(), tmp_path / "sign-in.lock")
 
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(pickle.PicklingError):
         check.run(adapter)
-
-    assert not isinstance(raised.value, AssertionError)
