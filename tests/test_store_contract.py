@@ -56,16 +56,20 @@ def test_the_file_lock_adapter_passes_the_cross_process_check(tmp_path: Path) ->
 @pytest.mark.parametrize("check", STORE_CHECKS, ids=attrgetter("name"))
 def test_each_check_refuses_its_broken_adapter(check: StoreCheck) -> None:
     """STORECHECK-01, STORECHECK-03, STORECHECK-04: a broken adapter fails its check."""
+    broken_adapter = BROKEN_ADAPTERS[check.name]()
+
     with pytest.raises(AssertionError):
-        check.run(BROKEN_ADAPTERS[check.name]())
+        check.run(broken_adapter)
 
 
 def test_a_refused_create_that_changed_any_field_of_the_row_fails_the_check() -> None:
     """STORECHECK-03: a refused create leaves the whole stored row unchanged."""
     (check,) = (c for c in IN_PROCESS_CHECKS if c.name == "a_stored_id_is_refused_and_its_row_kept")
 
+    adapter = a_session_adapter_that_changes_the_row_before_refusing()
+
     with pytest.raises(AssertionError):
-        check.run(a_session_adapter_that_changes_the_row_before_refusing())
+        check.run(adapter)
 
 
 @pytest.mark.parametrize(
@@ -80,8 +84,10 @@ def test_the_cross_process_check_fails_loud_when_the_other_process_cannot_serve(
     """STORECHECK-04: the second process must reach its entry and call the store."""
     (check,) = CROSS_PROCESS_CHECKS
 
+    adapter = an_adapter_with_other_process(factory, tmp_path / "sign-in.lock")
+
     with pytest.raises(AssertionError):
-        check.run(an_adapter_with_other_process(factory, tmp_path / "sign-in.lock"))
+        check.run(adapter)
 
 
 def test_the_cross_process_check_fails_loud_when_the_other_process_cannot_leave_its_entry(
@@ -91,8 +97,10 @@ def test_the_cross_process_check_fails_loud_when_the_other_process_cannot_leave_
     (check,) = CROSS_PROCESS_CHECKS
     lock_path = tmp_path / "sign-in.lock"
 
+    adapter = an_adapter_with_other_process(FailsOnExit(lock_path), lock_path)
+
     with pytest.raises(AssertionError):
-        check.run(an_adapter_with_other_process(FailsOnExit(lock_path), lock_path))
+        check.run(adapter)
 
 
 def test_an_unpicklable_transaction_factory_surfaces_its_own_error(tmp_path: Path) -> None:
