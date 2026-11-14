@@ -231,6 +231,15 @@ class CreatesAMissingAccountOnWrite(SingleProcessAccountStore):
         return super().set_role(user_id, role)
 
 
+class RefusesARoleWebauthDoesNotWrite(SingleProcessAccountStore):
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> StoredAccount:
+        if role not in {"admin", "user"}:
+            raise ValueError(role)
+        return super().create_for_subject(subject, username, role, kind)
+
+
 def _with_sessions(
     sessions_class: Callable[[SingleProcessAccountStore], SingleProcessSessionStore],
 ) -> Callable[[], StoreAdapter]:
@@ -337,6 +346,10 @@ class FailsToEnter:
 
 def an_adapter_with_unique_usernames() -> StoreAdapter:
     return _with_accounts(RefusesATakenUsername)()
+
+
+def an_adapter_with_a_closed_role_type() -> StoreAdapter:
+    return _with_accounts(RefusesARoleWebauthDoesNotWrite)()
 
 
 def a_session_adapter_that_changes_the_row_before_refusing() -> StoreAdapter:
