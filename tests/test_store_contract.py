@@ -18,11 +18,12 @@ from tests.support.store_contract_arrangement import (
     a_file_locked_adapter,
     a_session_adapter_that_changes_the_row_before_refusing,
     an_adapter_with_a_closed_role_type,
+    an_adapter_with_columns_that_fit_only_webauths_ids,
     an_adapter_with_other_process,
     an_adapter_with_unique_usernames,
 )
 from webauth.ports import SignInTransaction
-from webauth.store_contract import STORE_CHECKS, StoreCheck
+from webauth.store_contract import STORE_CHECKS, StoreAdapter, StoreCheck
 
 CROSS_PROCESS_CHECKS = [check for check in STORE_CHECKS if check.crosses_processes]
 IN_PROCESS_CHECKS = [check for check in STORE_CHECKS if not check.crosses_processes]
@@ -36,24 +37,23 @@ def test_every_check_is_paired_with_one_broken_adapter() -> None:
     assert set(BROKEN_ADAPTERS) == set(names)
 
 
+@pytest.mark.parametrize(
+    "build_adapter",
+    [
+        a_correct_single_process_adapter,
+        an_adapter_with_unique_usernames,
+        an_adapter_with_a_closed_role_type,
+        an_adapter_with_columns_that_fit_only_webauths_ids,
+    ],
+)
 @pytest.mark.parametrize("check", IN_PROCESS_CHECKS, ids=attrgetter("name"))
-def test_a_single_process_adapter_passes_every_in_process_check(check: StoreCheck) -> None:
-    """STORECHECK-01, STORECHECK-03: a correct adapter passes each duty check."""
-    check.run(a_correct_single_process_adapter())
-
-
-@pytest.mark.parametrize("check", IN_PROCESS_CHECKS, ids=attrgetter("name"))
-def test_an_adapter_with_unique_usernames_passes_every_in_process_check(check: StoreCheck) -> None:
-    """STORECHECK-02: a check gives each account a username no other account holds."""
-    check.run(an_adapter_with_unique_usernames())
-
-
-@pytest.mark.parametrize("check", IN_PROCESS_CHECKS, ids=attrgetter("name"))
-def test_an_adapter_that_refuses_any_role_webauth_does_not_write_passes_every_in_process_check(
-    check: StoreCheck,
+def test_a_correct_adapter_passes_every_in_process_check(
+    check: StoreCheck, build_adapter: Callable[[], StoreAdapter]
 ) -> None:
-    """STORECHECK-03: the kit creates its accounts only with a role webauth writes."""
-    check.run(an_adapter_with_a_closed_role_type())
+    """STORECHECK-01 to STORECHECK-03: whatever a correct adapter arranges differently, a check
+    gives each account a unique username and a role webauth writes, mints subjects of a uuid's
+    length and session ids of sign-in's."""
+    check.run(build_adapter())
 
 
 def test_the_file_lock_adapter_passes_the_cross_process_check(tmp_path: Path) -> None:

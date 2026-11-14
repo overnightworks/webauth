@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import SecretStr
 
+from webauth.oidc_login import new_session_id
 from webauth.ports import (
     AccountKind,
     SessionRecordStore,
@@ -104,11 +105,11 @@ def _require_raises(call: Callable[[], object], message: str) -> None:
 
 
 def _a_subject() -> str:
-    return f"contract-subject-{uuid.uuid4().hex}"
+    return str(uuid.uuid4())
 
 
 def _a_session_id() -> str:
-    return f"contract-session-{uuid.uuid4().hex}"
+    return new_session_id()
 
 
 def _an_account(adapter: StoreAdapter) -> str:
@@ -288,7 +289,7 @@ def _touch_and_replace_refresh_token_answer_a_bool(adapter: StoreAdapter) -> Non
 
 
 def _get_compares_the_subject_exactly(adapter: StoreAdapter) -> None:
-    subject = f"Subject-é-{uuid.uuid4().hex}"
+    subject = f"é{uuid.uuid4().hex}"
     adapter.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
     folded = {
         "case": subject.upper(),

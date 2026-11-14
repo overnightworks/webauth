@@ -27,6 +27,9 @@ from webauth.single_process_stores import (
 )
 from webauth.store_contract import StoreAdapter
 
+_UUID_LENGTH = 36
+_SIGN_IN_SESSION_ID_LENGTH = 43
+
 
 def a_correct_single_process_adapter() -> StoreAdapter:
     stores = SingleProcessStores(audit=RecordingAuditSink())
@@ -238,6 +241,45 @@ class RefusesARoleWebauthDoesNotWrite(SingleProcessAccountStore):
         if role not in {"admin", "user"}:
             raise ValueError(role)
         return super().create_for_subject(subject, username, role, kind)
+
+
+class RefusesASubjectThatDoesNotFitAUuid(SingleProcessAccountStore):
+    def create_for_subject(
+        self, subject: str, username: str, role: str, kind: AccountKind
+    ) -> StoredAccount:
+        if len(subject) > _UUID_LENGTH:
+            raise ValueError(subject)
+        return super().create_for_subject(subject, username, role, kind)
+
+
+class RefusesASessionIdThatDoesNotFitSignIns(SingleProcessSessionStore):
+    def create(
+        self,
+        user_id: str,
+        *,
+        session_id: str,
+        now: datetime,
+        expires_at: datetime,
+        refresh_token: SecretStr | None,
+        id_token: SecretStr | None,
+        account_language: str | None,
+    ) -> StoredSession:
+        if len(session_id) > _SIGN_IN_SESSION_ID_LENGTH:
+            raise ValueError(session_id)
+        return super().create(
+            user_id,
+            session_id=session_id,
+            now=now,
+            expires_at=expires_at,
+            refresh_token=refresh_token,
+            id_token=id_token,
+            account_language=account_language,
+        )
+
+
+def an_adapter_with_columns_that_fit_only_webauths_ids() -> StoreAdapter:
+    accounts = RefusesASubjectThatDoesNotFitAUuid()
+    return _adapter_over(accounts, RefusesASessionIdThatDoesNotFitSignIns(accounts))
 
 
 def _with_sessions(
