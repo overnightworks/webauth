@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import fakeredis
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 import webauth.rate_limit
-from tests.support.rate_limit_arrangement import AlwaysFailingRateLimitBackend
+from tests.support.rate_limit_arrangement import (
+    AlwaysFailingRateLimitBackend,
+    SwitchableRateLimitBackend,
+)
 from tests.support.webauth_arrangement import (
     API_PATH,
     BULK_BUDGET_NAME,
@@ -198,6 +204,71 @@ class TestMiddlewareOverRedisBackend:
         assert rejected.status_code == 503
         assert rejected.headers["Retry-After"] == "5"
         assert rejected.json() == {"detail": "Rate limiter unavailable"}
+
+
+class TestLimiterOutageLogging:
+    SECRET_MESSAGE = "redis://:hunter2@cache.internal:6379 refused"
+    OUTAGE_REQUESTS = 8
+
+    @staticmethod
+    def a_switchable_client() -> tuple[TestClient, SwitchableRateLimitBackend]:
+        backend = SwitchableRateLimitBackend(
+            failure=ConnectionError(TestLimiterOutageLogging.SECRET_MESSAGE)
+        )
+        return a_rate_limited_client(backend, max_requests=5), backend
+
+    @staticmethod
+    def records_of(caplog: pytest.LogCaptureFixture, level: int) -> list[logging.LogRecord]:
+        return [
+            record
+            for record in caplog.records
+            if record.levelno == level and record.name == "webauth.middleware.rate_limit"
+        ]
+
+    @staticmethod
+    def get_concurrently(client: TestClient, count: int) -> list[httpx.Response]:
+        async def drive() -> list[httpx.Response]:
+            transport = httpx.ASGITransport(app=client.app)
+            async with httpx.AsyncClient(transport=transport, base_url=HTTPS_TEST_SERVER) as http:
+                requests = (http.get(RATE_LIMITED_PATH) for _ in range(count))
+                return list(await asyncio.gather(*requests))
+
+        return asyncio.run(drive())
+
+    def test_concurrent_refusals_log_one_error_with_the_class_name_only(self, caplog) -> None:
+        client, backend = self.a_switchable_client()
+        backend.down = True
+        caplog.set_level(logging.INFO)
+        responses = self.get_concurrently(client, self.OUTAGE_REQUESTS)
+        errors = self.records_of(caplog, logging.ERROR)
+        assert len(errors) == 1
+        assert "ConnectionError" in errors[0].getMessage()
+        assert "hunter2" not in caplog.text
+        assert errors[0].exc_info is None
+        assert [(r.status_code, r.headers["Retry-After"]) for r in responses] == [
+            (503, "5")
+        ] * self.OUTAGE_REQUESTS
+
+    def test_recovery_logs_one_info_with_the_refused_count(self, caplog) -> None:
+        client, backend = self.a_switchable_client()
+        caplog.set_level(logging.INFO)
+        backend.down = True
+        self.get_concurrently(client, self.OUTAGE_REQUESTS)
+        backend.down = False
+        assert client.get(RATE_LIMITED_PATH).status_code == 200
+        assert client.get(RATE_LIMITED_PATH).status_code == 200
+        recoveries = self.records_of(caplog, logging.INFO)
+        assert len(recoveries) == 1
+        assert str(self.OUTAGE_REQUESTS) in recoveries[0].getMessage()
+
+    def test_a_second_outage_logs_again(self, caplog) -> None:
+        client, backend = self.a_switchable_client()
+        caplog.set_level(logging.INFO)
+        for down in (True, False, True):
+            backend.down = down
+            client.get(RATE_LIMITED_PATH)
+        assert len(self.records_of(caplog, logging.ERROR)) == 2
+        assert len(self.records_of(caplog, logging.INFO)) == 1
 
 
 class TestRedisKeysOfNamedBudgets:

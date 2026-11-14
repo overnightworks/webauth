@@ -169,6 +169,7 @@ What the installer refuses before any rule or route:
 - **STACK-12** WebSocket and lifespan scopes pass: no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
 - **STACK-13** A path with a space, a `;`, a trailing slash or a non-ASCII character keeps the answer it has without the refusal.
 - **Host duty:** a route takes no control character in its path; free text goes in the query or the body.
+- **STACK-14** A rate limiter that raises fails closed: each refused request answers 503 with `Retry-After: 5`. The host's log gets one ERROR line when an outage opens, carrying only the exception's class name (no traceback, no message, no address or path), and one INFO line when the limiter next answers, carrying the count of requests refused meanwhile; refusals in between log nothing. The state is per process, so each pod logs its own outage. A host whose backend raises from a bug logs its own traceback; watch the limiter's health through the host's own check.
 
 What the installer applies when the host passes none:
 
