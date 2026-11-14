@@ -17,6 +17,7 @@ from tests.support.store_contract_arrangement import (
     a_correct_single_process_adapter,
     a_file_locked_adapter,
     a_session_adapter_that_changes_the_row_before_refusing,
+    an_adapter_with_a_closed_role_type,
     an_adapter_with_other_process,
     an_adapter_with_unique_usernames,
 )
@@ -45,6 +46,14 @@ def test_a_single_process_adapter_passes_every_in_process_check(check: StoreChec
 def test_an_adapter_with_unique_usernames_passes_every_in_process_check(check: StoreCheck) -> None:
     """STORECHECK-02: a check gives each account a username no other account holds."""
     check.run(an_adapter_with_unique_usernames())
+
+
+@pytest.mark.parametrize("check", IN_PROCESS_CHECKS, ids=attrgetter("name"))
+def test_an_adapter_that_refuses_any_role_webauth_does_not_write_passes_every_in_process_check(
+    check: StoreCheck,
+) -> None:
+    """STORECHECK-03: the kit creates its accounts only with a role webauth writes."""
+    check.run(an_adapter_with_a_closed_role_type())
 
 
 def test_the_file_lock_adapter_passes_the_cross_process_check(tmp_path: Path) -> None:

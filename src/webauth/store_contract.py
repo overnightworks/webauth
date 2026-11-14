@@ -113,7 +113,7 @@ def _a_session_id() -> str:
 
 def _an_account(adapter: StoreAdapter) -> str:
     subject = _a_subject()
-    adapter.accounts.create_for_subject(subject, subject, "member", AccountKind.PERSON)
+    adapter.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
     return subject
 
 
@@ -289,7 +289,7 @@ def _touch_and_replace_refresh_token_answer_a_bool(adapter: StoreAdapter) -> Non
 
 def _get_compares_the_subject_exactly(adapter: StoreAdapter) -> None:
     subject = f"Subject-é-{uuid.uuid4().hex}"
-    adapter.accounts.create_for_subject(subject, subject, "member", AccountKind.PERSON)
+    adapter.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
     folded = {
         "case": subject.upper(),
         "trailing space": f"{subject} ",
