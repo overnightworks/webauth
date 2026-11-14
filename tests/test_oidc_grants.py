@@ -387,6 +387,8 @@ def _a_relying_party_at(
 
 
 def test_consecutive_workload_calls_within_the_lifetime_post_the_grant_once() -> None:
+    """WORKLOAD-01: a token is handed out again within its lifetime, with one post."""
+
     issuer = _a_reusing_issuer()
     clock = FakeClock(5_000.0)
     relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
@@ -401,6 +403,8 @@ def test_consecutive_workload_calls_within_the_lifetime_post_the_grant_once() ->
 
 
 def test_a_workload_token_within_its_margin_is_replaced_before_it_is_handed_out() -> None:
+    """WORKLOAD-02: a token within its margin is replaced before it is handed out."""
+
     issuer = _a_reusing_issuer()
     clock = FakeClock(5_000.0)
     relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
@@ -418,6 +422,8 @@ def test_a_workload_token_within_its_margin_is_replaced_before_it_is_handed_out(
 
 
 def test_a_workload_token_lives_from_the_clock_read_before_the_post() -> None:
+    """WORKLOAD-01: the lifetime counts from the monotonic clock read before the post."""
+
     clock = FakeClock(5_000.0)
     issuer = _a_reusing_issuer()
     issuer.before_exchange = lambda: setattr(
@@ -435,6 +441,8 @@ def test_a_workload_token_lives_from_the_clock_read_before_the_post() -> None:
 def test_a_wall_clock_jump_changes_nothing_about_how_long_a_workload_token_is_reused(
     wall_clock_jump: float,
 ) -> None:
+    """WORKLOAD-01: the reuse follows the monotonic clock."""
+
     issuer = _a_reusing_issuer()
     wall_clock = FakeClock(float(ACCESS_TOKEN_NOW))
     relying_party = _a_relying_party_at(issuer, wall_clock=wall_clock)
@@ -463,6 +471,8 @@ def test_a_wall_clock_jump_changes_nothing_about_how_long_a_workload_token_is_re
 def test_a_workload_token_without_a_usable_lifetime_is_handed_out_and_not_kept(
     lifetime: object,
 ) -> None:
+    """WORKLOAD-04: an answer without a lifetime longer than the margin is not kept."""
+
     issuer = _a_reusing_issuer(expires_in=lifetime)
     relying_party = _a_relying_party_at(issuer)
 
@@ -476,6 +486,8 @@ def test_a_workload_token_without_a_usable_lifetime_is_handed_out_and_not_kept(
 
 
 def test_different_scope_tuples_get_separate_entries() -> None:
+    """WORKLOAD-01: a scope tuple is an entry's key exactly as given, order included."""
+
     issuer = _a_reusing_issuer()
     relying_party = _a_relying_party_at(issuer)
     scope_sets = [("svc-a", "profile"), ("profile", "svc-a"), ("svc-b",)]
@@ -489,10 +501,13 @@ def test_different_scope_tuples_get_separate_entries() -> None:
         "svc-b",
     ]
     assert seconds == firsts
-    assert len({token.get_secret_value() for token in firsts}) == len(scope_sets)
+    tokens = [token for token in firsts if isinstance(token, SecretStr)]
+    assert len({token.get_secret_value() for token in tokens}) == len(scope_sets)
 
 
 def test_a_refused_workload_grant_is_not_reused_once_the_issuer_answers_a_token() -> None:
+    """WORKLOAD-04: a refusal is not kept."""
+
     issuer = _a_reusing_issuer()
     issuer.service_accounts_enabled = False
     relying_party = _a_relying_party_at(issuer)
@@ -561,6 +576,8 @@ def _concurrent_workload_calls(
 def test_concurrent_workload_calls_for_one_key_post_once_and_share_the_answer(
     configure_issuer: Callable[[FakeIssuer], object], kept: bool
 ) -> None:
+    """WORKLOAD-03, WORKLOAD-04: waiters share the one grant's answer; only a token is kept."""
+
     held = GrantHeldUntilReleased(DEADLINE_SECONDS)
     issuer = _a_reusing_issuer()
     configure_issuer(issuer)
@@ -578,6 +595,8 @@ def test_concurrent_workload_calls_for_one_key_post_once_and_share_the_answer(
 
 
 def test_concurrent_workload_calls_share_a_raised_error_and_the_next_call_posts_again() -> None:
+    """WORKLOAD-03, WORKLOAD-04: waiters share a raised error, which is not kept."""
+
     held = GrantHeldUntilReleased(DEADLINE_SECONDS)
     error = _Boom("the transport broke")
     failing = _held_then_raising(held, error)
@@ -604,6 +623,8 @@ def test_concurrent_workload_calls_share_a_raised_error_and_the_next_call_posts_
 def test_no_repr_and_no_log_shows_a_workload_token_an_entry_keeps(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """WORKLOAD-06: a kept token is in no repr and no log."""
+
     issuer = _a_reusing_issuer()
     relying_party = _a_relying_party_at(issuer)
 

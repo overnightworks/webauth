@@ -23,13 +23,11 @@ token a resource admitted) are each one POST with the code exchange's client
 authentication. `renew_access` and the exchange keep nothing and lock nothing,
 so each call is a fresh token. `workload_access_token` reuses the client's own
 token per scope tuple until a margin before its `expires_in` on the injected
-monotonic clock, with one grant in flight per
-tuple across threads; a refusal, a raised error and an answer without a usable
-lifetime are shared with the callers waiting on that grant and then forgotten.
-The
-issuer's answer must be a Bearer token (`token_type` compared in ASCII
-case-insensitively) whose `access_token` has RFC 6750's `b64token` shape;
-anything else is `TOKEN_ENDPOINT_FAILED`, and so is a sent or received refresh
+monotonic clock, with one grant in flight per tuple across threads; a refusal, a
+raised error and an answer without a usable lifetime are shared with the callers
+waiting on that grant and then forgotten. The issuer's answer must be a Bearer token
+(`token_type` compared in ASCII case-insensitively) whose `access_token` has RFC 6750's
+`b64token` shape; anything else is `TOKEN_ENDPOINT_FAILED`, and so is a sent or received refresh
 token outside `1*VSCHAR`, except that the token exchange never reads a
 `refresh_token`. The status handling is the code exchange's, so an issuer's
 `error` is `TOKEN_REQUEST_REFUSED`; the token exchange also reads it from a
