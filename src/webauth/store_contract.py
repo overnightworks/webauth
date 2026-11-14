@@ -120,7 +120,7 @@ def _a_session(
     *,
     session_id: str | None = None,
     now: datetime | None = None,
-    refresh_token: str | None = "refresh",
+    refresh_token: SecretStr | None = None,
 ) -> str:
     created_at = datetime.now(UTC) if now is None else now
     stored_id = _a_session_id() if session_id is None else session_id
@@ -129,7 +129,7 @@ def _a_session(
         session_id=stored_id,
         now=created_at,
         expires_at=created_at + _SESSION_LIFETIME,
-        refresh_token=None if refresh_token is None else SecretStr(refresh_token),
+        refresh_token=refresh_token,
         id_token=SecretStr("identity"),
         account_language="de",
     )
@@ -164,19 +164,24 @@ def _create_keeps_the_given_id(adapter: StoreAdapter) -> None:
 def _a_stored_id_is_refused_and_its_row_kept(adapter: StoreAdapter) -> None:
     subject = _an_account(adapter)
     now = datetime.now(UTC)
-    session_id = _a_session(adapter, subject, now=now, refresh_token="first")
+    first = SecretStr(uuid.uuid4().hex)
+    session_id = _a_session(adapter, subject, now=now, refresh_token=first)
 
     for second_now in (now, now + 2 * _SESSION_LIFETIME):
         _require_raises(
             lambda second_now=second_now: _a_session(
-                adapter, subject, session_id=session_id, now=second_now, refresh_token="second"
+                adapter,
+                subject,
+                session_id=session_id,
+                now=second_now,
+                refresh_token=SecretStr(uuid.uuid4().hex),
             ),
             "create accepted an id the store already holds",
         )
 
     kept = adapter.sessions.load(session_id)
     _require(
-        kept is not None and kept.refresh_token == SecretStr("first"),
+        kept is not None and kept.refresh_token == first,
         "a refused create changed the stored row",
     )
 
