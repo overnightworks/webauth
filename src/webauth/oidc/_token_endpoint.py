@@ -162,18 +162,22 @@ def _bearer_access_token(document: Mapping[str, object]) -> SecretStr:
     return SecretStr(access_token)
 
 
-def _exchanged_lifetime_seconds(document: Mapping[str, object]) -> int:
-    """The `expires_in` of an exchange's answer, which must be of the access-token type and
-    carry a whole number of seconds of at least 1."""
+def _lifetime_seconds(document: Mapping[str, object]) -> int | None:
+    """The `expires_in` of a grant's answer when it is a whole number of seconds of at
+    least 1, else `None`."""
     expires_in = document.get("expires_in")
-    if (
-        document.get("issued_token_type") != _ACCESS_TOKEN_TYPE
-        or not isinstance(expires_in, int)
-        or isinstance(expires_in, bool)
-        or expires_in < 1
-    ):
-        raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+    if not isinstance(expires_in, int) or isinstance(expires_in, bool) or expires_in < 1:
+        return None
     return expires_in
+
+
+def _exchanged_lifetime_seconds(document: Mapping[str, object]) -> int:
+    """The lifetime of an exchange's answer, which must be of the access-token type and
+    carry a usable `expires_in`."""
+    lifetime = _lifetime_seconds(document)
+    if document.get("issued_token_type") != _ACCESS_TOKEN_TYPE or lifetime is None:
+        raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
+    return lifetime
 
 
 def _raw_id_token_of(document: Mapping[str, object]) -> str:

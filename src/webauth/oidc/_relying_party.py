@@ -20,7 +20,13 @@ is refused as `TOKEN_ENDPOINT_FAILED`; the access token is not read.
 `renew_access`, `workload_access_token` (a `client_credentials` grant for the
 host's scopes) and the bearer gate's token exchange (RFC 8693, of the access
 token a resource admitted) are each one POST with the code exchange's client
-authentication, no cache and no lock, so every call is a fresh token. The
+authentication. `renew_access` and the exchange keep nothing and lock nothing,
+so each call is a fresh token. `workload_access_token` reuses the client's own
+token per scope tuple until a margin before its `expires_in` on the injected
+monotonic clock, with one grant in flight per
+tuple across threads; a refusal, a raised error and an answer without a usable
+lifetime are shared with the callers waiting on that grant and then forgotten.
+The
 issuer's answer must be a Bearer token (`token_type` compared in ASCII
 case-insensitively) whose `access_token` has RFC 6750's `b64token` shape;
 anything else is `TOKEN_ENDPOINT_FAILED`, and so is a sent or received refresh
@@ -43,8 +49,10 @@ from __future__ import annotations
 import base64
 import hmac
 import secrets
+import threading
 import urllib.parse
 from collections.abc import Callable, Mapping
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from types import MappingProxyType
@@ -81,6 +89,7 @@ from webauth.oidc._token_endpoint import (
     _idp_error_code,
     _is_refresh_token,
     _issued_refresh_token,
+    _lifetime_seconds,
     _raw_id_token_of,
     _RefusalError,
     _token_answer_document,
@@ -106,11 +115,27 @@ _MAX_AUTHORIZATION_CODE_CHARS = 2048
 PENDING_LOGIN_MAX_AGE_SECONDS = 600
 _LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
 _AGENT_NAME_MAX_LENGTH = 64
+# The time from hand-out to the receiver's one check at opening (a speech render takes up to
+# 20 s) plus clock skew; a token that lives no longer than this is never kept, so the margin
+# cannot cause endless replacement.
+_WORKLOAD_TOKEN_MARGIN_SECONDS = 30
 
 _LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105 - token type not a credential
 _ACCESS_TOKEN_MEDIA_TYPES = frozenset({"at+jwt", "application/at+jwt"})
 # An identifier fixed by OpenID Connect Back-Channel Logout 1.0 section 2.4, never fetched.
 _BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR(S5332)
+
+
+@dataclass(frozen=True)
+class _HeldWorkloadToken:
+    token: SecretStr = field(repr=False)
+    usable_until: float
+
+
+@dataclass(frozen=True)
+class _WorkloadGrantLead:
+    in_flight: Future[SecretStr | OidcRefusal]
+    started_at: float
 
 
 @dataclass(frozen=True)
@@ -203,6 +228,9 @@ class OidcRelyingParty:
         self._fetch_key_set = fetch_key_set
         self._monotonic_clock = monotonic_clock
         self._jwt_verifier = self._verifier_for(config.client_id)
+        self._workload_guard = threading.Lock()
+        self._held_workload_tokens: dict[tuple[str, ...], _HeldWorkloadToken] = {}
+        self._workload_grants_in_flight: dict[tuple[str, ...], Future[SecretStr | OidcRefusal]] = {}
 
     def _verifier_for(self, audience: str) -> _JwtVerifier:
         return _JwtVerifier(
@@ -368,13 +396,84 @@ class OidcRelyingParty:
         anything else raises `ValueError` and posts nothing. The realm must
         give the client a service account holding the role the receiver
         demands; an issuer `error` such as `unauthorized_client` (no service
-        account) or `invalid_scope` (not assigned) is carried as `idp_error`."""
+        account) or `invalid_scope` (not assigned) is carried as `idp_error`.
+
+        A token is kept for `scopes` exactly as given, and handed out again until the
+        injected monotonic clock, read before its post, has advanced its `expires_in`
+        less a margin. At most one grant per `scopes` is in flight across threads; callers
+        that arrive meanwhile share its outcome, a refusal or a raised error included.
+        Neither is kept, nor is an answer without a whole `expires_in` of at least 1 or
+        with one no longer than the margin."""
         _require_scopes(scopes)
+        match self._held_or_joined_or_led_workload_grant(scopes):
+            case SecretStr() as held:
+                return held
+            case Future() as shared:
+                return shared.result()
+            case _WorkloadGrantLead() as lead:
+                return self._lead_workload_grant(scopes, lead)
+
+    def _held_or_joined_or_led_workload_grant(
+        self, scopes: tuple[str, ...]
+    ) -> SecretStr | Future[SecretStr | OidcRefusal] | _WorkloadGrantLead:
+        """The held token, the grant in flight to wait on, or the grant this caller now leads.
+
+        The clock is read under the guard once the grant in flight exists or is found."""
+        with self._workload_guard:
+            in_flight = self._workload_grants_in_flight.get(scopes)
+            if in_flight is None:
+                in_flight = self._workload_grants_in_flight[scopes] = Future()
+                started_at = self._monotonic_clock()
+                held = self._held_workload_tokens.get(scopes)
+                if held is None or started_at >= held.usable_until:
+                    return _WorkloadGrantLead(in_flight, started_at)
+                del self._workload_grants_in_flight[scopes]
+                return held.token
+            self._monotonic_clock()
+            return in_flight
+
+    def _lead_workload_grant(
+        self, scopes: tuple[str, ...], lead: _WorkloadGrantLead
+    ) -> SecretStr | OidcRefusal:
+        try:
+            result = self._workload_grant(scopes)
+        except BaseException as error:
+            self._end_workload_grant(scopes, kept=None)
+            lead.in_flight.set_exception(error)
+            raise
+        if isinstance(result, OidcRefusal):
+            outcome: SecretStr | OidcRefusal = result
+            kept = None
+        else:
+            outcome, lifetime = result
+            kept = (
+                _HeldWorkloadToken(
+                    outcome, lead.started_at + lifetime - _WORKLOAD_TOKEN_MARGIN_SECONDS
+                )
+                if lifetime is not None and lifetime > _WORKLOAD_TOKEN_MARGIN_SECONDS
+                else None
+            )
+        self._end_workload_grant(scopes, kept)
+        lead.in_flight.set_result(outcome)
+        return outcome
+
+    def _end_workload_grant(self, scopes: tuple[str, ...], kept: _HeldWorkloadToken | None) -> None:
+        with self._workload_guard:
+            del self._workload_grants_in_flight[scopes]
+            if kept is None:
+                self._held_workload_tokens.pop(scopes, None)
+            else:
+                self._held_workload_tokens[scopes] = kept
+
+    def _workload_grant(
+        self, scopes: tuple[str, ...]
+    ) -> tuple[SecretStr, int | None] | OidcRefusal:
+        """The grant's token and the lifetime its answer states, or its refusal."""
         try:
             document = self._token_answer(
                 self._grant_request({"grant_type": "client_credentials", "scope": " ".join(scopes)})
             )
-            return _bearer_access_token(document)
+            return _bearer_access_token(document), _lifetime_seconds(document)
         except _RefusalError as refusal:
             return refusal.refusal
 
