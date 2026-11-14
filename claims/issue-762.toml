@@ -1,8 +1,0 @@
-claim_id = "70472d616ca04c0f9f75d2e3c31f06c2"
-agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
-role = "builder"
-base = "5a3dd30689bc9166eb0e72fc073621f478e8f098"
-branch = "claude/issue-762-kit-account-role"
-scope = ["docs/host-contract.md", "src/webauth/store_contract.py", "tests/support/store_contract_arrangement.py", "tests/test_store_contract.py"]
-opened_commit = "884c099ec90e2830b2c996e6e15ba888322cd213"
-whole_reason = "One coherent kit fix: the source change, its doc line and the regression test with its arrangement builder."
