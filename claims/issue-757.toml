@@ -1,0 +1,8 @@
+claim_id = "bfc9cdc308e44d789bcd0c9a20e2739b"
+agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
+role = "builder"
+base = "556e8173d5026b1770c12e500e594cf143aed832"
+branch = "claude/issue-757-a-host-proves-its-store-adapter-against"
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/store_contract.py", "tests/support/store_contract_arrangement.py", "tests/test_single_process_stores.py", "tests/test_store_contract.py"]
+opened_commit = "7bf50e94a006b514b02c4381dbee316e0a308f3b"
+whole_reason = "One new public module with its own proof, its test doubles, the tests whose proof it takes over and the two documents that name it."
