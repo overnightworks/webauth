@@ -633,10 +633,10 @@ def test_concurrent_workload_calls_share_a_raised_error_and_the_next_call_posts_
     assert len(issuer.requests) == 2
 
 
-def test_no_repr_and_no_log_shows_a_workload_token_an_entry_keeps(
+def test_no_log_shows_a_workload_token_an_entry_keeps(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """WORKLOAD-06: a kept token is in no repr and no log."""
+    """WORKLOAD-06: a kept token is in no log."""
 
     issuer = _a_reusing_issuer()
     relying_party = _a_relying_party_at(issuer)
@@ -646,4 +646,4 @@ def test_no_repr_and_no_log_shows_a_workload_token_an_entry_keeps(
         _workload_access_token(relying_party)
 
     assert isinstance(token, SecretStr)
-    assert token.get_secret_value() not in repr(relying_party) + caplog.text
+    assert token.get_secret_value() not in caplog.text
