@@ -47,10 +47,8 @@ from __future__ import annotations
 import base64
 import hmac
 import secrets
-import threading
 import urllib.parse
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from types import MappingProxyType
@@ -92,6 +90,7 @@ from webauth.oidc._token_endpoint import (
     _RefusalError,
     _token_answer_document,
 )
+from webauth.oidc._workload_token_reuse import WorkloadTokenReuse
 from webauth.policies import AuthorizedParties, _require_authorized_parties
 from webauth.ports import AgentFacts
 
@@ -113,27 +112,11 @@ _MAX_AUTHORIZATION_CODE_CHARS = 2048
 PENDING_LOGIN_MAX_AGE_SECONDS = 600
 _LOGOUT_TOKEN_MAX_AGE_SECONDS = 120
 _AGENT_NAME_MAX_LENGTH = 64
-# The time from hand-out to the receiver's one check at opening (a speech render takes up to
-# 20 s) plus clock skew; a token that lives no longer than this is never kept, so the margin
-# cannot cause endless replacement.
-_WORKLOAD_TOKEN_MARGIN_SECONDS = 30
 
 _LOGOUT_TOKEN_TYPE = "logout+jwt"  # noqa: S105 - token type not a credential
 _ACCESS_TOKEN_MEDIA_TYPES = frozenset({"at+jwt", "application/at+jwt"})
 # An identifier fixed by OpenID Connect Back-Channel Logout 1.0 section 2.4, never fetched.
 _BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR(S5332)
-
-
-@dataclass(frozen=True)
-class _HeldWorkloadToken:
-    token: SecretStr = field(repr=False)
-    usable_until: float
-
-
-@dataclass(frozen=True)
-class _WorkloadGrantLead:
-    in_flight: Future[SecretStr | OidcRefusal]
-    started_at: float
 
 
 @dataclass(frozen=True)
@@ -226,9 +209,9 @@ class OidcRelyingParty:
         self._fetch_key_set = fetch_key_set
         self._monotonic_clock = monotonic_clock
         self._jwt_verifier = self._verifier_for(config.client_id)
-        self._workload_guard = threading.Lock()
-        self._held_workload_tokens: dict[tuple[str, ...], _HeldWorkloadToken] = {}
-        self._workload_grants_in_flight: dict[tuple[str, ...], Future[SecretStr | OidcRefusal]] = {}
+        self._workload_tokens = WorkloadTokenReuse(
+            self._workload_grant, monotonic_clock=monotonic_clock
+        )
 
     def _verifier_for(self, audience: str) -> _JwtVerifier:
         return _JwtVerifier(
@@ -403,67 +386,7 @@ class OidcRelyingParty:
         Neither is kept, nor is an answer without a whole `expires_in` of at least 1 or
         with one no longer than the margin."""
         _require_scopes(scopes)
-        match self._held_or_joined_or_led_workload_grant(scopes):
-            case SecretStr() as held:
-                return held
-            case Future() as shared:
-                return shared.result()
-            case _WorkloadGrantLead() as lead:
-                return self._lead_workload_grant(scopes, lead)
-
-    def _held_or_joined_or_led_workload_grant(
-        self, scopes: tuple[str, ...]
-    ) -> SecretStr | Future[SecretStr | OidcRefusal] | _WorkloadGrantLead:
-        """The held token, the grant in flight to wait on, or the grant this caller now leads.
-
-        The clock is read under the guard once the grant in flight exists or is found."""
-        with self._workload_guard:
-            in_flight = self._workload_grants_in_flight.get(scopes)
-            if in_flight is None:
-                in_flight = self._workload_grants_in_flight[scopes] = Future()
-                started_at = self._monotonic_clock()
-                held = self._held_workload_tokens.get(scopes)
-                if held is None or started_at >= held.usable_until:
-                    return _WorkloadGrantLead(in_flight, started_at)
-                del self._workload_grants_in_flight[scopes]
-                return held.token
-            self._monotonic_clock()
-            return in_flight
-
-    def _lead_workload_grant(
-        self, scopes: tuple[str, ...], lead: _WorkloadGrantLead
-    ) -> SecretStr | OidcRefusal:
-        try:
-            outcome, kept = self._workload_outcome(scopes, lead.started_at)
-        except BaseException as error:
-            self._end_workload_grant(scopes, kept=None)
-            lead.in_flight.set_exception(error)
-            raise
-        self._end_workload_grant(scopes, kept)
-        lead.in_flight.set_result(outcome)
-        return outcome
-
-    def _workload_outcome(
-        self, scopes: tuple[str, ...], started_at: float
-    ) -> tuple[SecretStr | OidcRefusal, _HeldWorkloadToken | None]:
-        """The grant's outcome and the entry it earns, if any."""
-        result = self._workload_grant(scopes)
-        if isinstance(result, OidcRefusal):
-            return result, None
-        token, lifetime = result
-        if lifetime is None or lifetime <= _WORKLOAD_TOKEN_MARGIN_SECONDS:
-            return token, None
-        return token, _HeldWorkloadToken(
-            token, started_at + lifetime - _WORKLOAD_TOKEN_MARGIN_SECONDS
-        )
-
-    def _end_workload_grant(self, scopes: tuple[str, ...], kept: _HeldWorkloadToken | None) -> None:
-        with self._workload_guard:
-            del self._workload_grants_in_flight[scopes]
-            if kept is None:
-                self._held_workload_tokens.pop(scopes, None)
-            else:
-                self._held_workload_tokens[scopes] = kept
+        return self._workload_tokens.token(scopes)
 
     def _workload_grant(
         self, scopes: tuple[str, ...]
