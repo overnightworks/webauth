@@ -434,26 +434,28 @@ class OidcRelyingParty:
         self, scopes: tuple[str, ...], lead: _WorkloadGrantLead
     ) -> SecretStr | OidcRefusal:
         try:
-            result = self._workload_grant(scopes)
+            outcome, kept = self._workload_outcome(scopes, lead.started_at)
         except BaseException as error:
             self._end_workload_grant(scopes, kept=None)
             lead.in_flight.set_exception(error)
             raise
-        if isinstance(result, OidcRefusal):
-            outcome: SecretStr | OidcRefusal = result
-            kept = None
-        else:
-            outcome, lifetime = result
-            kept = (
-                _HeldWorkloadToken(
-                    outcome, lead.started_at + lifetime - _WORKLOAD_TOKEN_MARGIN_SECONDS
-                )
-                if lifetime is not None and lifetime > _WORKLOAD_TOKEN_MARGIN_SECONDS
-                else None
-            )
         self._end_workload_grant(scopes, kept)
         lead.in_flight.set_result(outcome)
         return outcome
+
+    def _workload_outcome(
+        self, scopes: tuple[str, ...], started_at: float
+    ) -> tuple[SecretStr | OidcRefusal, _HeldWorkloadToken | None]:
+        """The grant's outcome and the entry it earns, if any."""
+        result = self._workload_grant(scopes)
+        if isinstance(result, OidcRefusal):
+            return result, None
+        token, lifetime = result
+        if lifetime is None or lifetime <= _WORKLOAD_TOKEN_MARGIN_SECONDS:
+            return token, None
+        return token, _HeldWorkloadToken(
+            token, started_at + lifetime - _WORKLOAD_TOKEN_MARGIN_SECONDS
+        )
 
     def _end_workload_grant(self, scopes: tuple[str, ...], kept: _HeldWorkloadToken | None) -> None:
         with self._workload_guard:

@@ -425,6 +425,29 @@ def test_a_workload_token_is_reused_strictly_before_30_seconds_short_of_its_life
     assert len(issuer.requests) == posts
 
 
+def test_a_lifetime_too_large_for_the_clock_ends_the_grant_and_the_next_call_posts_again() -> None:
+    """WORKLOAD-03, WORKLOAD-04: a failure after the post is shared and forgotten too."""
+
+    issuer = _a_reusing_issuer(expires_in=10**309)
+    relying_party = _a_relying_party_at(issuer)
+    outcomes: list[object] = []
+
+    def call() -> None:
+        try:
+            outcomes.append(_workload_access_token(relying_party))
+        except OverflowError as error:
+            outcomes.append(error)
+
+    for _ in range(2):
+        caller = threading.Thread(target=call, daemon=True)
+        caller.start()
+        caller.join(GRANT_DEADLINE_SECONDS)
+        assert not caller.is_alive()
+
+    assert [type(outcome) for outcome in outcomes] == [OverflowError, OverflowError]
+    assert len(issuer.requests) == 2
+
+
 def test_a_workload_token_lives_from_the_clock_read_before_the_post() -> None:
     """WORKLOAD-01: the lifetime counts from the monotonic clock read before the post."""
 
