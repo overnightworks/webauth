@@ -1,7 +1,0 @@
-claim_id = "efb29c50279c479988d673839f7d3186"
-agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
-role = "builder"
-base = "d1fdabf979445be2c7a5fe7099a47fba51d3f681"
-branch = "claude/issue-771-xff-warning-without-value"
-scope = ["src/webauth/proxies.py", "tests/test_proxies.py"]
-opened_commit = "57da0405a6a3d264614cb1b46293c3ad11e2498c"
