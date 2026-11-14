@@ -20,6 +20,19 @@ class AlwaysFailingRateLimitBackend:
         raise ConnectionError("rate limiter down")
 
 
+class SwitchableRateLimitBackend:
+    """A backend that raises while ``down`` and otherwise allows every request."""
+
+    def __init__(self, *, failure: Exception) -> None:
+        self.down = False
+        self._failure = failure
+
+    def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
+        if self.down:
+            raise self._failure
+        return True
+
+
 class RecordingRateLimitBackend:
     """A working backend that remembers the limit and window each key was checked with."""
 

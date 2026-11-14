@@ -26,6 +26,8 @@ __all__ = [
 _log = logging.getLogger(__name__)
 
 _LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
+_OUTAGE_OPENED_TEXT: Final = "IP rate limiter unavailable, rejecting requests: %s"
+_OUTAGE_CLOSED_TEXT: Final = "IP rate limiter available again, %d requests were rejected"
 
 
 def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
@@ -51,6 +53,20 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
       before rate admission.
     """
 
+    # Outage state lives on the event loop: it is read and written with no await between.
+    _refused_during_outage: int | None = None
+
+    def _note_limiter_failure(self, failure: Exception) -> None:
+        if self._refused_during_outage is None:
+            self._refused_during_outage = 0
+            _log.error(_OUTAGE_OPENED_TEXT, type(failure).__name__)
+        self._refused_during_outage += 1
+
+    def _note_limiter_answered(self) -> None:
+        if self._refused_during_outage is not None:
+            _log.info(_OUTAGE_CLOSED_TEXT, self._refused_during_outage)
+            self._refused_during_outage = None
+
     async def _refusal(self, request: Request) -> JSONResponse | None:
         path = route_path(request.scope)
         if self._policy.is_exempt(path):
@@ -67,16 +83,17 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
                     window_seconds=budget.window_seconds,
                 )
             )
-        except Exception:
+        except Exception as failure:
             # The worker call is shielded: a cancellation arriving during it is delivered only here.
             await checkpoint_if_cancelled()
-            _log.exception("IP rate limiter unavailable -- rejecting request")
+            self._note_limiter_failure(failure)
             return JSONResponse(
                 {"detail": "Rate limiter unavailable"},
                 status_code=503,
                 headers={"Retry-After": str(_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
             )
         await checkpoint_if_cancelled()
+        self._note_limiter_answered()
         if not allowed:
             return JSONResponse(
                 {"detail": "Too many requests"},
