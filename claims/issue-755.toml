@@ -1,0 +1,8 @@
+claim_id = "96531bdf88ef49579c8e5ee9c5702264"
+agent = "Claude 6b2d22d3-515b-4912-99eb-010df1b5a621"
+role = "builder"
+base = "5abff27c223a4e7bbaab491852227e3bbad7a9a1"
+branch = "claude/issue-755-webauth-mints-the-session-id-and-a-store"
+scope = ["docs/host-contract.md", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/single_process_stores.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_session_gate_recorded_admission.py", "tests/support/session_store_arrangement.py", "tests/support/webauth_arrangement.py", "tests/test_sign_in_routes.py", "tests/test_single_process_stores.py"]
+opened_commit = "ec4fcf7d2a061b83d62d2a4a4d4f8092fb584e0e"
+whole_reason = "One Breaking signature change with its only caller, its one shipped store and the test doubles that implement it."
