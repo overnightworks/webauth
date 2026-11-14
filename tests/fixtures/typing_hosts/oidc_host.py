@@ -180,6 +180,7 @@ class HostSessions:
         self,
         user_id: str,
         *,
+        session_id: str,
         now: datetime,
         expires_at: datetime,
         refresh_token: SecretStr | None,
@@ -187,7 +188,9 @@ class HostSessions:
         account_language: str | None,
     ) -> HostSession:
         user = HostAccount(user_id, "someone", "user", AccountKind.PERSON)
-        return HostSession("id", user, now, expires_at, refresh_token, id_token, account_language)
+        return HostSession(
+            session_id, user, now, expires_at, refresh_token, id_token, account_language
+        )
 
     def load(self, session_id: str) -> HostSession | None:
         return None

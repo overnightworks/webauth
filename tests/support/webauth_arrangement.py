@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 import hashlib
 import hmac
+import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -234,11 +235,14 @@ def seeded_session(
     now: datetime,
     expires_at: datetime,
     refresh_token: SecretStr | None = None,
+    session_id: str | None = None,
 ) -> FakeSessionRecord:
-    """A stored session of ``user_id``, created the way a host does: under its write lock."""
+    """A stored session of ``user_id``, created the way a host does: under its write lock,
+    under ``session_id`` or a fresh one."""
     with hold:
         return sessions.create(
             user_id,
+            session_id=session_id or f"session-{uuid.uuid4().hex}",
             now=now,
             expires_at=expires_at,
             refresh_token=refresh_token,
