@@ -1041,7 +1041,7 @@ The adapter has no public guard, no write-lock class and no `SessionTransaction`
 
 - **Host duty:** the host builds one `StoreAdapter` in its own fixture, from its `accounts`, `sessions` and `transaction` over its database, and runs every check of `STORE_CHECKS` against it, for example by parametrizing its database test over the tuple.
 - **STORECHECK-01** A check returns when the adapter keeps its duty and raises `AssertionError` when it breaks it, whatever the interpreter's assert setting.
-- **STORECHECK-02** A check mints its own random subjects, usernames and session ids and takes its times from itself, so the checks run in parallel against a shared database and the adapter needs no clock.
+- **STORECHECK-02** A check mints its own random subjects, usernames and session ids and takes its times from itself, with session ids of the form sign-in writes (`new_session_id()` in `webauth.oidc_login`, 43 characters) and subjects of at most 36 characters, the length of a uuid `sub`, so the checks run in parallel against a shared database and the adapter needs no clock.
 - **Host duty:** the host removes the rows the checks leave.
 - **STORECHECK-03** The checks prove, per port duty:
   - `create` stores the session under exactly the given id, and `load` finds it.

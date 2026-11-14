@@ -112,9 +112,15 @@ __all__ = [
     "AccessTokenRefusalReason",
     "current_groups",
     "fresh_access_token",
+    "new_session_id",
 ]
 
 _SESSION_ID_BYTES: Final = 32
+
+
+def new_session_id() -> str:
+    """The id sign-in gives a new session: 43 URL-safe characters from 32 random bytes."""
+    return secrets.token_urlsafe(_SESSION_ID_BYTES)
 
 
 class _UsernameTakenSignal(Exception):  # noqa: N818  # a signal inside the transaction, not an error
@@ -209,7 +215,7 @@ def _write_sign_in(
     identity = admitted.identity
     return stores.sessions.create(
         account.id,
-        session_id=secrets.token_urlsafe(_SESSION_ID_BYTES),
+        session_id=new_session_id(),
         now=now,
         expires_at=_renewed_expiry(config.session_lifetime, now=now, created_at=now),
         refresh_token=identity.refresh_token,
