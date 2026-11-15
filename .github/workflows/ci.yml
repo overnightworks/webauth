@@ -19,6 +19,20 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+        env:
+          POSTGRES_PASSWORD: webauth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      WEBAUTH_TEST_POSTGRES_URL: postgresql+psycopg://postgres:webauth@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -54,6 +68,20 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:18.6-alpine3.24@sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395
+        env:
+          POSTGRES_PASSWORD: webauth
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      WEBAUTH_TEST_POSTGRES_URL: postgresql+psycopg://postgres:webauth@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -68,7 +96,7 @@ jobs:
         run: uv venv --python 3.14
 
       - name: Install the lowest declared versions
-        run: uv pip install --resolution lowest-direct -e ".[redis]" --group dev
+        run: uv pip install --resolution lowest-direct -e ".[redis,postgres]" --group dev
 
       - name: Tests
         run: .venv/bin/pytest tests -q -n auto

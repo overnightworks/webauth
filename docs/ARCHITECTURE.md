@@ -2,7 +2,7 @@
 
 ## 1. Context and Scope
 
-webauth runs inside a FastAPI host, with no deployment, schema or ORM. Host developers start at the [README](../README.md).
+webauth runs inside a FastAPI host, with no deployment of its own and no schema or ORM in its core. Host developers start at the [README](../README.md).
 
 ```mermaid
 flowchart LR
@@ -34,6 +34,7 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 - `middleware` enforces the malformed-path refusal, body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
 - `proxies` derives client identity from trusted peers; `rate_limit` measures sliding windows in Redis or in process.
 - `single_process_stores` implements the account, session and sign-in transaction ports in process memory for a one-worker host; no other module imports it.
+- `postgres` is the optional `[postgres]` extra: the session table, the session store and the sign-in shell over a connection the host opened, on the host's side of the ports; no other module imports it, and it alone imports SQLAlchemy.
 - `ports` defines host Protocols, `AuthenticatedUser` and `BearerCaller`; `jwt_verification` verifies RS256 against cached issuer keys.
 - `oidc` owns authorization URLs, PKCE, callback/code/ID-token checks, access-token verification, refresh, client-credentials and token-exchange grants.
 - `service_callers` is how a service proves the caller of its API ([host contract](host-contract.md#a-services-callers)); it holds no policy and logs nothing.
@@ -119,7 +120,7 @@ The callback's admission decision and its account write share `AdmissionConfig`;
 ## 4. Deployment View
 
 webauth has no deployment of its own: each host runs it in its own process at a git-pinned tag ([Install](../README.md#install)).
-Rate-limit windows shared across processes need the `redis` extra ([Rate limiting](#rate-limiting-and-the-optional-redis-extra)).
+Rate-limit windows shared across processes need the `redis` extra ([Rate limiting](#rate-limiting-and-the-optional-redis-extra)); sessions in the host's Postgres need the `postgres` extra ([Sessions in Postgres](#sessions-in-postgres-the-optional-postgres-extra)).
 The proof harness runs by hand on the operator's machine, in Docker, on free loopback ports ([runbooks](runbooks/run-the-browser-proof.md)).
 The operator's account and environment are trusted. A same-user race between listing and removal in `scripts/run_oidc_proof.sh` is out of scope.
 
@@ -133,10 +134,14 @@ The operator's account and environment are trusted. A same-user race between lis
 
 `WebAuthConfig.rate_limits` supplies `RateLimitBackend`; `RateLimitPolicy` sets budgets. Backend errors fail closed. `RedisRateLimitBackend` shares windows across processes and needs `[redis]`; `SingleProcessRateLimitBackend` needs no Redis, for one worker only.
 
+### Sessions in Postgres, the optional Postgres extra
+
+`webauth.postgres` implements `SessionRecordStore` and the session half of `SignInTransaction` over a SQLAlchemy `Connection` the host has opened inside its own transaction. It opens no engine, pool or transaction and never begins, commits or rolls back, so the library still never commits and the host's `engine.begin()` decides what a failure keeps. The host keeps its accounts table, its `SubjectUserStore` and its `AuditSink`; the extra owns the session table, which the host's Alembic creates from `session_table`. Session ids are stored as their SHA-256 hex digest, so a copy of the table holds no live cookie. [The host contract](host-contract.md#the-postgres-session-store) owns the duties.
+
 ### Proof strategy
 
 CI's `checks` job runs `scripts/run_static_checks.sh` (ruff, format, deptry, pyright, the typing hosts against the built wheel), `pytest tests` with branch coverage and the hash-pinned build;
-`lowest-direct` runs the tests at the lowest declared versions with the `redis` extra; `quality / verdict` takes the coverage artifact, SonarCloud and the import contracts.
+both jobs run against a Postgres service, so the tests of the `postgres` extra, the store contract kit among them, run on a real database; `lowest-direct` runs the tests at the lowest declared versions with the `redis` and `postgres` extras; `quality / verdict` takes the coverage artifact, SonarCloud and the import contracts.
 The browser proof (Chromium, Firefox and WebKit against a real Keycloak) and the OIDF conformance suite run by hand through `scripts/run_oidc_proof.sh` and the [runbooks](runbooks/run-the-browser-proof.md); CI only lints `tests/e2e/`.
 The host contract names the test that proves each rule.
 
@@ -149,7 +154,7 @@ The host contract names the test that proves each rule.
    - The realm alone decides which clients can mint a token for an app's MCP audience; a protected resource's agent group lets a token of any such client past the party check, and the token's own claims (`agent_owner`, `agent_name`) then decide only who the agent says it is, not whether it is admitted.
    - A resource that admits the app's client beside its `url` (`admits_client_audience`) accepts a token the app's sign-in client can also exchange; the flag governs the local admission, and the realm alone decides which tokens name both and which scopes that client may ask for.
 3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only the logout route's page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
-4. **Host store to library (ports):** webauth mints the session id, and the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): keep the id it is given and refuse a duplicate, exact comparison, atomicity, serialization of sign-in entries, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty; a host proves its adapters with [the store contract kit](host-contract.md#proving-a-store-adapter), and the in-memory adapter keeps atomicity and serialization ([host contract](host-contract.md#the-single-process-stores)). The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. An ID token stored there carries the person's identity claims, not an authentication credential; a copy nevertheless allows its holder to invoke the [hinted logout](host-contract.md#what-every-app-gets). The row also holds the account's language tag, which is no credential.
+4. **Host store to library (ports):** webauth mints the session id, and the store is trusted to keep its Protocol docstring duties ([`webauth.ports`](../src/webauth/ports.py)): keep the id it is given and refuse a duplicate, exact comparison, atomicity, serialization of sign-in entries, and raising on a missing row. The library re-derives every decision it owns from the record's fields, so a wrong `expires_at` is refused ([Session lifetime](#session-lifetime)). It does not detect a store that breaks a duty; a host proves its adapters with [the store contract kit](host-contract.md#proving-a-store-adapter), and the in-memory adapter keeps atomicity and serialization ([host contract](host-contract.md#the-single-process-stores)). The store holds the session's refresh token in plain text, and a dump of it holds no credential usable on its own: the issuer renews it only with the client secret. An ID token stored there carries the person's identity claims, not an authentication credential; a copy nevertheless allows its holder to invoke the [hinted logout](host-contract.md#what-every-app-gets). The row also holds the account's language tag, which is no credential. The `postgres` extra stores the session id only as its SHA-256 hex digest, so a dump of its table holds no live cookie.
 5. **Host infrastructure** (`WallClock`, Redis, the logging pipeline): trusted. The library itself never logs a token, secret, cookie or session id, and keeps urllib3 from logging during its exchanges.
 6. **The back-channel logout route:** anyone who can reach it is untrusted. The token signature is the control; reachability is the host's duty ([Back-channel logout](#back-channel-logout)).
 7. **Bearer caller to library:** anyone who can reach a gated path is untrusted. [The bearer gate](#the-bearer-gate) owns the mechanism and the [host contract](host-contract.md#the-hosts-machine-routes) owns token lifetime, cookie handling and socket exclusions; the residues are in [Risks](#8-risks-and-technical-debt). An app that exchanges the token its resource admitted ([host contract](host-contract.md#the-exchange-of-an-admitted-token)) spends its caller's identity at every service the realm lets its client ask for, bounded by the realm's scopes and the service's group check.
@@ -166,7 +171,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 - The pending login lives in its own signed cookie, one per login, so two tabs never overwrite each other and the library keeps no server-side store ([`oidc_login`](../src/webauth/oidc_login.py)).
 - ASGI owns HTTP framing (h11 and httptools may legally differ), so the body-size limit counts streamed bytes and never re-parses framing.
 - Outbound calls are https only, bounded and without redirects, because the issuer is trusted only over TLS ([Trust](#trust)).
-- A host without the `redis` extra imports everything, so the extra stays optional ([`AGENTS.md`](../AGENTS.md)).
+- A host without the `redis` or `postgres` extra imports every module but `webauth.postgres`, so each extra stays optional ([`AGENTS.md`](../AGENTS.md)).
 - The port contract ships in the wheel as `webauth.store_contract`: the library trusts the store and cannot detect a broken one ([Trust](#trust), boundary 4), a database adapter can be exercised only by its host, and each host that wrote the checks itself would let them drift apart. The module adds no dependency beyond webauth's own (the ports take pydantic's `SecretStr`), so a production install gains none, and it is versioned with the port it proves ([host contract](host-contract.md#proving-a-store-adapter)).
 
 ## 7. Not chosen

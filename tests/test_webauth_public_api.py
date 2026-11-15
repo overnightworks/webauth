@@ -450,29 +450,36 @@ def test_a_typing_host_takes_only_public_names(host: Path) -> None:
     assert _offences_of(host, only_public=True) == []
 
 
-def _is_webauth_or_redis_module(name: str) -> bool:
-    return name.split(".")[0] in {"webauth", "redis"}
+OPTIONAL_EXTRAS = {"redis", "sqlalchemy"}
+MODULES_OF_THE_EXTRAS = {"webauth.postgres"}
+CORE_MODULES = [name for name in WEBAUTH_MODULES if name not in MODULES_OF_THE_EXTRAS]
+
+
+def _is_webauth_or_extra_module(name: str) -> bool:
+    return name.split(".")[0] in {"webauth", *OPTIONAL_EXTRAS}
 
 
 @pytest.fixture
-def webauth_modules_imported_afresh_without_redis() -> Iterator[None]:
+def webauth_modules_imported_afresh_without_the_extras() -> Iterator[None]:
     original = {
-        name: module for name, module in sys.modules.items() if _is_webauth_or_redis_module(name)
+        name: module for name, module in sys.modules.items() if _is_webauth_or_extra_module(name)
     }
     for name in original:
         del sys.modules[name]
-    sys.modules["redis"] = None  # pyright: ignore[reportArgumentType] -- None blocks the import on purpose
+    for extra in OPTIONAL_EXTRAS:
+        sys.modules[extra] = None  # pyright: ignore[reportArgumentType] -- None blocks the import on purpose
     try:
         yield
     finally:
-        for name in [name for name in sys.modules if _is_webauth_or_redis_module(name)]:
+        for name in [name for name in sys.modules if _is_webauth_or_extra_module(name)]:
             del sys.modules[name]
         sys.modules.update(original)
 
 
-@pytest.mark.usefixtures("webauth_modules_imported_afresh_without_redis")
-def test_every_module_imports_and_the_single_process_backend_counts_without_redis() -> None:
-    for module_name in WEBAUTH_MODULES:
+@pytest.mark.usefixtures("webauth_modules_imported_afresh_without_the_extras")
+def test_the_core_imports_and_the_single_process_backend_counts_without_the_extras() -> None:
+    """PGSTORE-08."""
+    for module_name in CORE_MODULES:
         importlib.import_module(module_name)
     backend = sys.modules["webauth.rate_limit"].SingleProcessRateLimitBackend()
 
@@ -480,9 +487,10 @@ def test_every_module_imports_and_the_single_process_backend_counts_without_redi
     assert not backend.is_allowed("address", limit=1, window_seconds=60)
 
 
-@pytest.mark.usefixtures("webauth_modules_imported_afresh_without_redis")
-def test_every_module_imports_when_the_login_module_is_imported_first() -> None:
-    for module_name in ["webauth.oidc_login", *WEBAUTH_MODULES]:
+@pytest.mark.usefixtures("webauth_modules_imported_afresh_without_the_extras")
+def test_the_core_imports_when_the_login_module_is_imported_first() -> None:
+    """PGSTORE-08."""
+    for module_name in ["webauth.oidc_login", *CORE_MODULES]:
         importlib.import_module(module_name)
 
 

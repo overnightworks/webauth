@@ -1053,6 +1053,25 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 
 The adapter has no public guard, no write-lock class and no `SessionTransaction` class: the port's own docstring names `lambda: nullcontext(sessions)`.
 
+## The Postgres session store
+
+`webauth.postgres`, from the `postgres` extra (`overnightworks-webauth[postgres]`, which adds SQLAlchemy 2; the host brings its driver), implements the session half of the ports over a SQLAlchemy `Connection` the host has opened inside its own transaction. The host keeps its accounts table, its `SubjectUserStore` and its `AuditSink`.
+
+- **Host duty:** the host's Alembic creates the table. `session_table(metadata, accounts.c.id)` puts `sessions` on the host's `MetaData`, referencing the host's account id column, and runs no DDL. A release that changes the table names the host's migration in its notes.
+- **PGSTORE-01** `sessions` holds `id_hash` (text, primary key), `account_id` (text, not null, foreign key to the account id column, `ON DELETE CASCADE`), `created_at` and `expires_at` (timestamptz, not null), `refresh_token`, `id_token` and `account_language` (text), with indexes on `(account_id, created_at)` and on `expires_at`. An Alembic autogenerate over a table so migrated shows no difference.
+- **PGSTORE-02** `PostgresSessionStore(connection, accounts, sessions_table)` runs every call on the connection and never begins, commits or rolls back: the host's `SessionTransaction` and `SignInTransaction` are `with engine.begin() as connection:` around it, and what a failure keeps is the host's.
+- **PGSTORE-03** `sign_in_entry(connection, advisory_lock_key=..., accounts=..., audit=..., sessions_table=...)` takes `pg_advisory_xact_lock` on the key before it yields any store, so entries over one database run one at a time across pods until the host's transaction ends. It yields the host's `accounts` and the session store over the same connection, and holds the block's audit events back until the block has ended without an exception: a block that raises reports none, and a sink that fails fails the entry, which the host rolls back.
+- **Host duty:** the host picks the lock key, one integer no other advisory lock in its database uses, and its transaction (`engine.begin()`) opens before the shell is entered.
+- **PGSTORE-04** A session is stored under the SHA-256 hex digest of its id and `create` and `load` hand the raw id back; `touch`, `replace_refresh_token` and `delete` find the row by the same digest, and no row holds a raw id, so a stored value is no live cookie. Account ids are never hashed.
+- **PGSTORE-05** `load` reads the session row, then its account through the host's `SubjectUserStore` over the same connection, and returns `None` when the account is gone; it returns an expired row, and the gate refuses it. The module has no expiry sweep: an expired row stays until the host deletes it.
+- **PGSTORE-06** `delete_for_user` ends every session of the account and keeps the account; deleting an account deletes its sessions.
+- **PGSTORE-07** A failure of the database in a store call or in the lock raises `SessionStoreError`, whose text carries no statement, parameter, id, token or subject and which hides the database error it replaces. `database_errors_as_store_errors()` maps the same way around the host's `engine.begin()`, so a connection that cannot open and a commit that fails raise it too, and it passes every other exception, `UsernameTakenError` and the library's own among them, unchanged.
+- **Host duty:** the host creates its engine with `hide_parameters=True` and logs nothing from `sqlalchemy.engine` at `INFO` or `DEBUG` and sets no `echo`, because result logging prints rows, which hold refresh tokens and subjects.
+- **Host duty:** the host's `AuditSink` and `SubjectUserStore` write over the same connection. A sink that writes elsewhere, to a log or a queue, can emit an event of an entry whose commit then fails; that residue is the host's.
+- **PGSTORE-08** The core imports without the extra: no module but `webauth.postgres` imports SQLAlchemy, and no module imports `webauth.postgres`.
+
+webauth runs the store contract kit against the extra over a real Postgres, the cross-process check included; a block that raises, an audit sink that fails and a commit that fails each leave no session row.
+
 ## Proving a store adapter
 
 `webauth.store_contract` holds the duties of the account, session and sign-in transaction ports as checks, for a host that implements them over its database. It adds no dependency beyond webauth's own (the ports take pydantic's `SecretStr`) and needs no test framework.

@@ -6,7 +6,7 @@ webauth takes sign-in and its security off every app. It signs people in through
 them signed in, and signs them out at the app and at the provider. It lets other programs call an app with credentials of
 their own. Around that it guards every app the same way: it turns away requests that another site forged, has the browser
 apply its protections, limits how often one address may try, and records what happened for a later security review. An
-app tells it where to keep what must last and has nothing else of its own to build.
+app tells it where to keep what must last, or takes the optional Postgres adapter for the session half, and has nothing else of its own to build.
 
 Every app integrates it the same way, from its documentation alone, without reading its code. A security fix is made
 once, and every app gets it by taking the next release.
@@ -24,7 +24,7 @@ that build and integrate them. One app's need shapes webauth for every app, so e
 
 ## Deliberate non-goals
 
-- No storage of its own: each app keeps what must last.
+- No storage of its own beyond the session half: each app keeps its accounts, its audit and what else must last, and webauth stores only sessions, only as an optional adapter over the app's own database connection.
 - No deployment of its own: each app chooses the release it runs.
 - No identity provider and no password login: it relies on an OpenID Connect provider to say who someone is.
 - No compatibility layers: a change that breaks its callers breaks cleanly, says so, and leaves nothing of the old form

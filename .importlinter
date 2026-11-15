@@ -1,5 +1,6 @@
-# The library holds no schema and no ORM: everything durable reaches it
-# through the ports the host application implements. quality's CI gate (its
+# The library holds no schema and no ORM of its own: everything durable reaches it
+# through the ports the host application implements, and the optional Postgres
+# module is the one place that reaches SQLAlchemy. quality's CI gate (its
 # import-contract rule) checks these contracts over the real import graph, so
 # an indirect chain is caught as well as a direct import.
 [importlinter]
@@ -7,13 +8,23 @@ include_external_packages = True
 root_packages =
     webauth
 
-[importlinter:contract:webauth-does-not-import-sqlalchemy]
-name = webauth persists nothing itself
-type = forbidden
-source_modules =
-    webauth
-forbidden_modules =
+[importlinter:contract:only-the-postgres-module-imports-sqlalchemy]
+name = only webauth.postgres imports sqlalchemy
+type = protected
+protected_modules =
     sqlalchemy
+allowed_importers =
+    webauth.postgres
+
+# The Postgres module is the optional `[postgres]` extra for the session half. No webauth
+# module imports it, so a host without the extra imports every other module.
+[importlinter:contract:no-webauth-module-imports-the-postgres-module]
+name = webauth.postgres is imported by no other webauth module
+type = protected
+protected_modules =
+    webauth.postgres
+allowed_importers =
+    webauth.postgres
 
 # The JWT verifier is reached only through the OpenID Connect relying party
 # and the service caller check, the cryptographic stack only through the
