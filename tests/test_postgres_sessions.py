@@ -281,6 +281,32 @@ def test_a_session_is_stored_under_the_hash_of_its_id_and_handed_back_under_its_
     assert "refresh-secret" not in repr(created)
 
 
+def test_touch_and_a_replaced_refresh_token_persist_and_keep_the_other_fields(
+    host: PostgresHost,
+) -> None:
+    """PGSTORE-04: `touch` changes only the expiry, `replace_refresh_token` only the token."""
+    session_id = a_session(host.sessions, an_account(host))
+    before = host.sessions.load(session_id)
+    assert before is not None
+    later = before.expires_at + timedelta(hours=2)
+
+    assert host.sessions.touch(session_id, expires_at=later)
+    touched = host.sessions.load(session_id)
+    assert host.sessions.replace_refresh_token(session_id, refresh_token=SecretStr("replacement"))
+    replaced = host.sessions.load(session_id)
+
+    assert touched is not None
+    assert replaced is not None
+    assert touched.expires_at == later
+    assert touched.refresh_token == before.refresh_token
+    assert replaced.refresh_token == SecretStr("replacement")
+    assert (replaced.expires_at, replaced.id_token, replaced.account_language) == (
+        later,
+        before.id_token,
+        before.account_language,
+    )
+
+
 def test_a_failed_call_raises_the_store_error_with_nothing_of_its_parameters(
     host: PostgresHost,
 ) -> None:
