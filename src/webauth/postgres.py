@@ -129,7 +129,7 @@ def sign_in_entry(
     with database_errors_as_store_errors():
         connection.execute(select(func.pg_advisory_xact_lock(advisory_lock_key)))
     deferred = DeferredAudit()
-    yield SignInStores(
+    yield SignInStores(  # NOSONAR(S9152) the flush runs only when the block succeeds
         accounts=accounts,
         sessions=PostgresSessionStore(connection, accounts, sessions_table),
         audit=deferred,
