@@ -132,11 +132,16 @@ def test_the_extra_passes_every_store_check(check: StoreCheck, host: PostgresHos
 
 def test_a_block_that_raises_leaves_no_session_and_no_account(host: PostgresHost) -> None:
     """PGSTORE-02: the host's rollback takes the block's writes with it."""
-    with pytest.raises(BlockFailed), host.transaction() as stores:
-        subject = str(uuid.uuid4())
-        stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
-        a_session(stores.sessions, subject)
-        raise BlockFailed
+
+    def sign_in_and_raise() -> None:
+        with host.transaction() as stores:
+            subject = str(uuid.uuid4())
+            stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
+            a_session(stores.sessions, subject)
+            raise BlockFailed
+
+    with pytest.raises(BlockFailed):
+        sign_in_and_raise()
 
     assert host.count_rows(host.tables.sessions) == 0
     assert host.count_rows(host.tables.accounts) == 0
@@ -150,13 +155,17 @@ def test_an_audit_sink_that_fails_leaves_no_session_and_raises_its_own_error(
         host.engine, host.tables, host.location.advisory_lock_key, FailingAudit()
     )
 
-    with pytest.raises(AuditFailed), transaction() as stores:
-        subject = str(uuid.uuid4())
-        stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
-        a_session(stores.sessions, subject)
-        stores.audit.account_event(
-            AccountEvent(AccountEventKind.USER_CREATED, None, subject, role="user")
-        )
+    def sign_in_with_an_event() -> None:
+        with transaction() as stores:
+            subject = str(uuid.uuid4())
+            stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
+            a_session(stores.sessions, subject)
+            stores.audit.account_event(
+                AccountEvent(AccountEventKind.USER_CREATED, None, subject, role="user")
+            )
+
+    with pytest.raises(AuditFailed):
+        sign_in_with_an_event()
 
     assert host.count_rows(host.tables.sessions) == 0
     assert host.count_rows(host.tables.accounts) == 0
@@ -173,9 +182,13 @@ def test_a_failing_commit_leaves_no_session_and_raises_the_store_error(host: Pos
             )
         )
 
-    with pytest.raises(SessionStoreError), host.transaction() as stores:
-        a_session(stores.sessions, subject)
-        a_session(stores.sessions, subject)
+    def sign_in_twice() -> None:
+        with host.transaction() as stores:
+            a_session(stores.sessions, subject)
+            a_session(stores.sessions, subject)
+
+    with pytest.raises(SessionStoreError):
+        sign_in_twice()
 
     assert host.count_rows(host.tables.sessions) == 0
 
