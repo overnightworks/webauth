@@ -28,7 +28,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 
 from tests.support.postgres_arrangement import (
-    SIGN_IN_LOCK_KEY,
     HostSignInTransaction,
     PostgresAccountStore,
     PostgresHost,
@@ -147,7 +146,9 @@ def test_an_audit_sink_that_fails_leaves_no_session_and_raises_its_own_error(
     host: PostgresHost,
 ) -> None:
     """PGSTORE-03: a failing sink fails the entry."""
-    transaction = HostSignInTransaction(host.engine, host.tables, FailingAudit())
+    transaction = HostSignInTransaction(
+        host.engine, host.tables, host.location.advisory_lock_key, FailingAudit()
+    )
 
     with pytest.raises(AuditFailed), transaction() as stores:
         subject = str(uuid.uuid4())
@@ -215,25 +216,29 @@ def test_deleting_an_account_ends_its_sessions_and_ending_a_session_keeps_the_ac
     assert host.count_rows(host.tables.sessions) == 0
 
 
-def locks_held_on(host: PostgresHost) -> int:
-    with host.engine.connect() as connection:
-        return connection.execute(
-            text(
-                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'"
-                " AND granted AND objid = :key"
-            ),
-            {"key": SIGN_IN_LOCK_KEY},
-        ).scalar_one()
-
-
 def test_an_entry_holds_the_advisory_lock_from_its_enter_until_its_exit(
     host: PostgresHost,
 ) -> None:
     """PGSTORE-03: the lock is held before the first store call."""
     with host.transaction():
-        held_inside = locks_held_on(host)
+        held_inside = host.locks_held()
 
-    assert (held_inside, locks_held_on(host)) == (1, 0)
+    assert (held_inside, host.locks_held()) == (1, 0)
+
+
+def test_an_entry_of_another_host_holds_nothing_on_this_hosts_lock_key(
+    host: PostgresHost,
+) -> None:
+    """The lock key is the host's own, so parallel tests share no lock."""
+    with a_schema_of_its_own(postgres_url()) as other_location:
+        other = PostgresHost(other_location)
+        try:
+            with other.transaction():
+                held_by_another = host.locks_held()
+        finally:
+            other.close()
+
+    assert held_by_another == 0
 
 
 def test_a_session_is_stored_under_the_hash_of_its_id_and_handed_back_under_its_id(

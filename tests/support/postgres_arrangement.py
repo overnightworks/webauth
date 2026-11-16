@@ -34,7 +34,8 @@ if TYPE_CHECKING:
     from webauth.ports import AuditSink
 
 POSTGRES_URL_VARIABLE: Final = "WEBAUTH_TEST_POSTGRES_URL"
-SIGN_IN_LOCK_KEY: Final = 779
+_LOCK_KEY_MASK: Final = 0x7FFFFFFF
+"""A key below 2**31 is the `objid` of its `pg_locks` row, with `classid` 0."""
 
 
 def postgres_url() -> str:
@@ -50,10 +51,12 @@ def postgres_url() -> str:
 @dataclass(frozen=True)
 class DatabaseLocation:
     """A database and the schema one test owns in it; every connection of the location sees only
-    that schema, so tests share one database and run in parallel."""
+    that schema, so tests share one database and run in parallel. Its sign-in lock key is as much
+    its own: an advisory lock belongs to the whole database, not to a schema."""
 
     url: str
     schema: str
+    advisory_lock_key: int
 
     def engine(self) -> Engine:
         return create_engine(
@@ -65,7 +68,8 @@ class DatabaseLocation:
 
 @contextmanager
 def a_schema_of_its_own(url: str) -> Iterator[DatabaseLocation]:
-    location = DatabaseLocation(url, f"webauth_test_{uuid.uuid4().hex}")
+    identity = uuid.uuid4()
+    location = DatabaseLocation(url, f"webauth_test_{identity.hex}", identity.int & _LOCK_KEY_MASK)
     engine = create_engine(url)
     with engine.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA "{location.schema}"'))
@@ -148,6 +152,7 @@ class HostSignInTransaction:
 
     engine: Engine
     tables: HostTables
+    advisory_lock_key: int
     audit: AuditSink = field(default_factory=RecordingAuditSink)
 
     def __call__(self) -> AbstractContextManager[SignInStores]:
@@ -158,7 +163,7 @@ class HostSignInTransaction:
         with database_errors_as_store_errors(), self.engine.begin() as connection:
             with sign_in_entry(
                 connection,
-                advisory_lock_key=SIGN_IN_LOCK_KEY,
+                advisory_lock_key=self.advisory_lock_key,
                 accounts=PostgresAccountStore(connection, self.tables.accounts),
                 audit=self.audit,
                 sessions_table=self.tables.sessions,
@@ -173,7 +178,9 @@ class TransactionInAnotherProcess:
     location: DatabaseLocation
 
     def __call__(self) -> SignInTransaction:
-        return HostSignInTransaction(self.location.engine(), a_hosts_tables())
+        return HostSignInTransaction(
+            self.location.engine(), a_hosts_tables(), self.location.advisory_lock_key
+        )
 
 
 class PostgresHost:
@@ -192,11 +199,26 @@ class PostgresHost:
         self.accounts = PostgresAccountStore(self._autocommit, self.tables.accounts)
         self.sessions = PostgresSessionStore(self._autocommit, self.accounts, self.tables.sessions)
         self.audit = RecordingAuditSink()
-        self.transaction = HostSignInTransaction(self.engine, self.tables, self.audit)
+        self.transaction = HostSignInTransaction(
+            self.engine, self.tables, location.advisory_lock_key, self.audit
+        )
 
     def close(self) -> None:
         self._autocommit.close()
         self.engine.dispose()
+
+    def locks_held(self) -> int:
+        """The advisory locks held on this host's sign-in key, by any backend of its database."""
+        with self.engine.connect() as connection:
+            return connection.execute(
+                text(
+                    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
+                    " AND database = (SELECT oid FROM pg_database"
+                    " WHERE datname = current_database())"
+                    " AND classid = 0 AND objid = :key"
+                ),
+                {"key": self.location.advisory_lock_key},
+            ).scalar_one()
 
     def count_rows(self, table: Table) -> int:
         with self.engine.connect() as connection:
