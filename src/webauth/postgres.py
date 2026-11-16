@@ -197,10 +197,10 @@ class PostgresSessionStore:
     ) -> SessionRecord:
         """Store the session under the hash of `session_id`; a held hash, an expired row's
         included, is refused by the primary key and leaves the row unchanged."""
-        user = self._accounts.get(user_id)
-        if user is None:
-            raise SessionStoreError(_STORE_ERROR_MESSAGE)
         with database_errors_as_store_errors():
+            user = self._accounts.get(user_id)
+            if user is None:
+                raise SessionStoreError(_STORE_ERROR_MESSAGE)
             row = self._connection.execute(
                 insert(self._table)
                 .values(
@@ -223,10 +223,8 @@ class PostgresSessionStore:
             row = self._connection.execute(
                 select(self._table).where(self._table.c.id_hash == _stored_key(session_id))
             ).one_or_none()
-        if row is None:
-            return None
-        user = self._accounts.get(row.account_id)
-        return None if user is None else _stored_session(session_id, row, user)
+            user = None if row is None else self._accounts.get(row.account_id)
+        return None if row is None or user is None else _stored_session(session_id, row, user)
 
     def touch(self, session_id: str, *, expires_at: datetime) -> bool:
         return self._updated(session_id, expires_at=expires_at)

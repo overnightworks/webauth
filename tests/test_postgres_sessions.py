@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import traceback
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from operator import attrgetter
 
@@ -71,6 +71,11 @@ class FailingAudit:
 class KnowsNoAccounts(PostgresAccountStore):
     def get(self, user_id: str) -> None:
         return None
+
+
+class AccountReadFails(PostgresAccountStore):
+    def get(self, user_id: str) -> None:
+        raise OperationalError("SELECT 1", {"id": user_id}, Exception("secret detail"))
 
 
 @pytest.fixture
@@ -284,6 +289,31 @@ def test_a_session_whose_account_the_hosts_store_no_longer_knows_loads_as_none(
             connection, KnowsNoAccounts(connection, host.tables.accounts), host.tables.sessions
         )
         assert store.load(session_id) is None
+
+
+def create_a_session(store: PostgresSessionStore, subject: str, session_id: str) -> None:
+    a_session(store, subject)
+
+
+def load_a_session(store: PostgresSessionStore, subject: str, session_id: str) -> None:
+    store.load(session_id)
+
+
+@pytest.mark.parametrize("call", [create_a_session, load_a_session], ids=attrgetter("__name__"))
+def test_a_failed_account_read_raises_the_store_error(
+    call: Callable[[PostgresSessionStore, str, str], None], host: PostgresHost
+) -> None:
+    """PGSTORE-07: the host's account read inside a store call is a store call's failure."""
+    subject = an_account(host)
+    session_id = a_session(host.sessions, subject)
+    with host.engine.connect() as connection:
+        store = PostgresSessionStore(
+            connection, AccountReadFails(connection, host.tables.accounts), host.tables.sessions
+        )
+        with pytest.raises(SessionStoreError) as raised:
+            call(store, subject, session_id)
+
+    assert "secret" not in what_a_log_shows_of(raised.value)
 
 
 def test_a_connection_that_cannot_open_raises_the_store_error() -> None:
