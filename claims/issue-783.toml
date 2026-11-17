@@ -1,0 +1,8 @@
+claim_id = "af8b0245945b42d4ad0ebb839a3e96a5"
+agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
+role = "builder"
+base = "5dade8f865d415ddb4b83299b950ed174c2b0ded"
+branch = "claude/issue-783-log-lines-follow-fleet-logging-standard"
+scope = ["docs/host-contract.md", "pyproject.toml", "src/webauth/jwt_verification.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/middleware/rate_limit.py", "src/webauth/proxies.py", "tests", "uv.lock"]
+opened_commit = "4edfd129d9fdd39f677c2440914a9f22f06b0274"
+whole_reason = "One adoption of the logging standard across webauth's four logging modules and their tests."
