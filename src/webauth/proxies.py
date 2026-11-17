@@ -29,6 +29,7 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
+_IGNORED_EVENT: Final = "forwarded_for.ignored"
 
 _IpAddress = IPv4Address | IPv6Address
 _IpNetwork = IPv4Network | IPv6Network
@@ -185,19 +186,12 @@ def _client_from_chain(
     for entry in islice(entries, _MAX_FORWARDED_FOR_HOPS):
         hop = _canonical_address(entry)
         if hop is None:
-            _log.warning(
-                "X-Forwarded-For carries no address where the nearest proxy should "
-                "have appended one; keying this request on the direct peer."
-            )
+            _log.warning(_IGNORED_EVENT, extra={"reason": "not_an_address"})
             return None
         if not trusted_proxies.trusts(hop):
             return hop
     if next(entries, None) is not None:
-        _log.warning(
-            "X-Forwarded-For names more than %d trusted hops in a row; keying this "
-            "request on the direct peer.",
-            _MAX_FORWARDED_FOR_HOPS,
-        )
+        _log.warning(_IGNORED_EVENT, extra={"reason": "too_many_trusted_hops"})
     return None
 
 

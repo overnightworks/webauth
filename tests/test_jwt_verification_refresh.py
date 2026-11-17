@@ -75,9 +75,10 @@ def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
         verifier.verify(issuer.token())
 
     [warning] = caplog.records
-    assert logged_cause in warning.getMessage()
-    assert REALM_ISSUER not in warning.getMessage()
-    assert _URL_SECRET not in warning.getMessage()
+    assert warning.getMessage() == "key_set_refresh.failed"
+    assert warning.reason == logged_cause
+    assert REALM_ISSUER not in str(vars(warning))
+    assert _URL_SECRET not in str(vars(warning))
 
 
 def test_the_key_set_is_cached_on_the_monotonic_clock_until_its_ttl(

@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from webauth.ports import WallClock
 
 _log = logging.getLogger(__name__)
+_REFRESH_FAILED_EVENT = "key_set_refresh.failed"
 
 _MAX_TOKEN_CHARACTERS = 8 * 1024
 _MAX_HEADER_SEGMENT_CHARACTERS = 512
@@ -386,7 +387,7 @@ class _JwtVerifier:
                 self._last_refresh_failed = False
                 return
             self._last_refresh_failed = True
-            _log.warning("Refreshing the key set failed: %s", failure)
+            _log.warning(_REFRESH_FAILED_EVENT, extra={"reason": failure.value})
         finally:
             self._refresh_lock.release()
 
