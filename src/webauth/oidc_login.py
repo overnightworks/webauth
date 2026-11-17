@@ -137,6 +137,14 @@ class _AdmittedLogin:
     role: str
 
 
+@dataclass(frozen=True)
+class _SignedIn:
+    """What one sign-in wrote: the new session's id and the account it belongs to."""
+
+    session_id: str
+    person_id: str
+
+
 def _start_login(
     relying_party: OidcRelyingParty,
     request: Request,
@@ -188,9 +196,9 @@ def _write_sign_in(
     replaced_session_id: str | None,
     max_sessions: int | None,
     keeps_id_token: bool,
-) -> str:
+) -> _SignedIn:
     """The writes of one sign-in, inside the host's ``SignInTransaction``: the account, then
-    the session. Answers the new session's id, copied before the exit.
+    the session. Answers the new session's id and the account's, copied before the exit.
 
     The session is opened at the instant of one ``config.wall_clock`` reading, the same whole
     second the session decider reads, in this order: the session the request's cookie names
@@ -213,7 +221,7 @@ def _write_sign_in(
     if max_sessions is not None:
         stores.sessions.prune_overflow(account.id, max_sessions - 1)
     identity = admitted.identity
-    return stores.sessions.create(
+    session = stores.sessions.create(
         account.id,
         session_id=new_session_id(),
         now=now,
@@ -221,7 +229,8 @@ def _write_sign_in(
         refresh_token=identity.refresh_token,
         id_token=SecretStr(identity.id_token) if keeps_id_token else None,
         account_language=identity.account_language,
-    ).id
+    )
+    return _SignedIn(session_id=session.id, person_id=account.id)
 
 
 def _log_out(
