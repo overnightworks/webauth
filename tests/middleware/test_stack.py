@@ -49,6 +49,7 @@ from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
     BodySizeLimitMiddleware,
+    ClientAddressMiddleware,
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
     MachinePaths,
@@ -515,6 +516,7 @@ class TestRefusedInstallation:
         install_full_stack(app, session_gate=A_SESSION_GATE, bearer_gate=A_BEARER_GATE)
         assert [entry.cls for entry in app.user_middleware] == [
             SecurityHeadersMiddleware,
+            ClientAddressMiddleware,
             PathRefusalMiddleware,
             BodySizeLimitMiddleware,
             IpRateLimitMiddleware,
