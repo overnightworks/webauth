@@ -1,8 +1,0 @@
-claim_id = "dc5f93679aff4cf18933d2eff15eb10b"
-agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
-role = "builder"
-base = "afdd45531ee0bd1b23724a3daef86bb4f9dc42eb"
-branch = "claude/issue-779-postgres-extra-session-store-and-sign-in"
-scope = [".github/workflows/ci.yml", ".importlinter", "AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "docs/VISION.md", "docs/host-contract.md", "pyproject.toml", "quality/config.toml", "src/webauth/__init__.py", "src/webauth/_deferred_audit.py", "src/webauth/postgres.py", "src/webauth/single_process_stores.py", "tests/support/postgres_arrangement.py", "tests/support/store_contract_arrangement.py", "tests/test_postgres_sessions.py", "tests/test_webauth_public_api.py", "uv.lock"]
-opened_commit = "3ea374d839738c95ae4511c8f53e4f8482cbaeaf"
-whole_reason = "The extra, its CI job, its import check and the docs that name the new boundary prove one capability only together."
