@@ -178,7 +178,8 @@ class RecordingAuditSink:
 
 WEBSOCKET_PATH = "/ws"
 WEBSOCKET_ADMITTED_PATH = "/ws-admitted"
-OPEN_PATHS = ("/health", "/login", "/hooks/x", "/static/x.css", "/optional")
+ADMITTED_READER_PATH = "/health"
+OPEN_PATHS = (ADMITTED_READER_PATH, "/login", "/hooks/x", "/static/x.css", "/optional")
 ALL_DEPENDENCIES_PATH = "/all"
 LOGIN_REDIRECT = LoginRedirect(path="/login", redirect_query_param="next")
 WEBSOCKET_DEPENDENCY_PATH = "/ws-dependency"

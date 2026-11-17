@@ -16,6 +16,7 @@ from tests.support.account_arrangement import FakeUser
 from tests.support.agent_arrangement import an_agent_group_token
 from tests.support.gate_arrangement import (
     EXPORT_PATH,
+    PERSON_ADMITTED_ME_PATH,
     PERSON_ME_PATH,
     PERSON_PATHS,
     a_bearer_app,
@@ -25,7 +26,6 @@ from tests.support.gate_arrangement import (
     an_interactive_agent_token,
     bearing,
 )
-from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import OPERATOR_SUBJECT
 from tests.support.oidc_login_host import CALLBACK_PATH, SUBJECT, an_oidc_host
 from tests.support.person_paths_arrangement import MEMBER_TOKEN, a_lena, a_person_app
@@ -36,13 +36,19 @@ from tests.support.request_line_arrangement import (
     logging_request_lines,
     request_lines_written,
 )
-from tests.support.session_gate_arrangement import a_gated_app, a_plain_app, ask, signed_in
-from tests.support.webauth_arrangement import SESSION_ID, a_session
+from tests.support.session_gate_arrangement import (
+    a_gated_app,
+    a_stacked_plain_app,
+    ask,
+    signed_in,
+)
+from tests.support.webauth_arrangement import ADMITTED_READER_PATH, SESSION_ID, a_session
 from webauth.policies import PathRules, RateLimitPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from tests.support.webauth_arrangement import AuthApp
     from webauth.middleware import ProtectedResource
 
 UNTRUSTED_PEER = "198.51.100.77"
@@ -51,56 +57,37 @@ OVERSIZED_BODY = b"x" * 1_000_000
 NOT_AN_ADDRESS = "not-an-address"
 
 
-def test_a_session_admitted_by_the_gate_is_the_sub_of_its_request_line(
+@pytest.mark.parametrize(
+    ("guard", "path", "with_cookie", "status", "sub"),
+    [
+        pytest.param(
+            a_gated_app, ADMITTED_READER_PATH, True, 200, "user-1", id="the-gate-admits-a-session"
+        ),
+        pytest.param(a_gated_app, "/me", False, 401, None, id="the-gate-refuses-no-session"),
+        pytest.param(
+            a_stacked_plain_app, "/me", True, 200, "user-1", id="the-dependency-admits-a-session"
+        ),
+        pytest.param(
+            a_stacked_plain_app, "/me", False, 401, None, id="the-dependency-refuses-none"
+        ),
+    ],
+)
+def test_the_request_line_has_the_account_its_session_guard_admitted_as_sub(
     capsys: pytest.CaptureFixture[str],
+    guard: Callable[..., AuthApp],
+    path: str,
+    with_cookie: bool,
+    status: int,
+    sub: str | None,
 ) -> None:
-    app = a_gated_app(a_session(user=FakeUser(id="user-1", username="alice")))
+    app = guard(a_session(user=FakeUser(id="user-1", username="alice")))
     logging_request_lines(app.app)
 
     with request_lines_written(capsys) as lines:
-        response = ask(app, "/me", cookie=signed_in(app))
+        response = ask(app, path, cookie=signed_in(app) if with_cookie else None)
 
     (line,) = lines
-    assert (response.status_code, line["sub"]) == (200, "user-1")
-
-
-def test_a_request_the_session_gate_refuses_has_no_sub(capsys: pytest.CaptureFixture[str]) -> None:
-    app = a_gated_app()
-    logging_request_lines(app.app)
-
-    with request_lines_written(capsys) as lines:
-        response = ask(app, "/me")
-
-    (line,) = lines
-    assert (response.status_code, line["sub"]) == (401, None)
-
-
-def test_a_route_guarded_by_the_dependency_alone_has_the_resolved_account_as_sub(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    app = a_plain_app(a_session(user=FakeUser(id="user-1", username="alice")))
-    install_the_gated_stack(app.app)
-    logging_request_lines(app.app)
-
-    with request_lines_written(capsys) as lines:
-        response = ask(app, "/me", cookie=signed_in(app))
-
-    (line,) = lines
-    assert (response.status_code, line["sub"]) == (200, "user-1")
-
-
-def test_a_route_guarded_by_the_dependency_alone_has_no_sub_for_an_anonymous_request(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    app = a_plain_app(None)
-    install_the_gated_stack(app.app)
-    logging_request_lines(app.app)
-
-    with request_lines_written(capsys) as lines:
-        response = ask(app, "/me")
-
-    (line,) = lines
-    assert (response.status_code, line["sub"]) == (401, None)
+    assert (response.status_code, line["sub"]) == (status, sub)
 
 
 def test_a_token_on_a_person_path_is_the_sub_of_its_request_line(
@@ -110,7 +97,7 @@ def test_a_token_on_a_person_path_is_the_sub_of_its_request_line(
     logging_request_lines(app.auth.app)
 
     with request_lines_written(capsys) as lines:
-        response = app.ask(PERSON_ME_PATH, authorization=bearing(MEMBER_TOKEN))
+        response = app.ask(PERSON_ADMITTED_ME_PATH, authorization=bearing(MEMBER_TOKEN))
 
     (line,) = lines
     assert (response.status_code, line["sub"]) == (200, OPERATOR_SUBJECT)
