@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 import urllib3
+from logline import StepTimer
 from pydantic import SecretStr
 from urllib3.util import create_urllib3_context
 
@@ -59,6 +60,9 @@ __all__ = [
     "is_https_url",
 ]
 
+_log = logging.getLogger(__name__)
+
+_REFUSED_STATUS_REASON = "status_not_accepted"
 _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 
@@ -139,8 +143,10 @@ def fetch_key_set_over_https(
         )
     try:
         answer = _exchange(
+            "key_set_fetch.ended",
             "GET",
             url,
+            failure_is_handled=True,
             accepts_status=_is_key_set_status,
             timeout_seconds=timeout_seconds,
             deadline_seconds=deadline_seconds,
@@ -181,8 +187,10 @@ def _post_form_over_https(
     if not is_https_url(url):
         raise _HttpsExchangeError(ExchangeFailure.NOT_AN_HTTPS_URL)
     answer = _exchange(
+        "token_request.ended",
         "POST",
         url,
+        failure_is_handled=False,
         accepts_status=_is_form_answer_status,
         timeout_seconds=timeout_seconds,
         deadline_seconds=deadline_seconds,
@@ -228,9 +236,11 @@ def _is_form_answer_status(status: int) -> bool:
 
 
 def _exchange(
+    event: str,
     method: str,
     url: str,
     *,
+    failure_is_handled: bool,
     accepts_status: Callable[[int], bool],
     timeout_seconds: float,
     deadline_seconds: float,
@@ -255,39 +265,45 @@ def _exchange(
         raise ValueError(f"deadline_seconds must be positive, not {deadline_seconds}")
     deadline = _Deadline.after(deadline_seconds)
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
-    try:
-        with (
-            _urllib3_unlogged(),
-            urllib3.PoolManager(
-                timeout=timeout, retries=False, ssl_context=_tls_context_under(deadline)
-            ) as pool,
-        ):
-            response = pool.request(
-                method,
-                url,
-                headers=headers,
-                body=body,
-                redirect=False,
-                preload_content=False,
-                decode_content=False,
-            )
-            try:
-                if not accepts_status(response.status):
-                    return _RefusedStatus(response.status)
-                return _HttpsAnswer(response.status, response.read(max_body_bytes + 1))
-            finally:
-                response.close()
-    except urllib3.exceptions.SSLError:
-        failure = ExchangeFailure.TLS_FAILED
-    # Before TimeoutError, which urllib3 makes its base class.
-    except urllib3.exceptions.NewConnectionError:
-        failure = ExchangeFailure.UNREACHABLE
-    except urllib3.exceptions.TimeoutError:
-        failure = ExchangeFailure.TIMED_OUT
-    except urllib3.exceptions.HTTPError, OSError:
-        failure = ExchangeFailure.BROKEN_OFF
-    if deadline.has_passed():
-        failure = ExchangeFailure.TIMED_OUT
+    with StepTimer(event, _log) as step:
+        if failure_is_handled:
+            step.handled()
+        try:
+            with (
+                _urllib3_unlogged(),
+                urllib3.PoolManager(
+                    timeout=timeout, retries=False, ssl_context=_tls_context_under(deadline)
+                ) as pool,
+            ):
+                response = pool.request(
+                    method,
+                    url,
+                    headers=headers,
+                    body=body,
+                    redirect=False,
+                    preload_content=False,
+                    decode_content=False,
+                )
+                try:
+                    step.add(status=response.status)
+                    if not accepts_status(response.status):
+                        step.refuse(_REFUSED_STATUS_REASON)
+                        return _RefusedStatus(response.status)
+                    return _HttpsAnswer(response.status, response.read(max_body_bytes + 1))
+                finally:
+                    response.close()
+        except urllib3.exceptions.SSLError:
+            failure = ExchangeFailure.TLS_FAILED
+        # Before TimeoutError, which urllib3 makes its base class.
+        except urllib3.exceptions.NewConnectionError:
+            failure = ExchangeFailure.UNREACHABLE
+        except urllib3.exceptions.TimeoutError:
+            failure = ExchangeFailure.TIMED_OUT
+        except urllib3.exceptions.HTTPError, OSError:
+            failure = ExchangeFailure.BROKEN_OFF
+        if deadline.has_passed():
+            failure = ExchangeFailure.TIMED_OUT
+        step.fail(failure.name.lower())
     # Raised outside the handler so urllib3's error is not even its context.
     raise _HttpsExchangeError(failure)
 

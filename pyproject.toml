@@ -23,6 +23,7 @@ dependencies = [
     "cryptography>=50.0.2,<51",
     "pyjwt[crypto]>=2.15.1,<3",
     "urllib3>=2.6.3,<3",
+    "overnightworks-logline>=0.5,<0.6",
 ]
 
 [project.optional-dependencies]
@@ -41,11 +42,15 @@ dev = [
     "ruff>=0.4,<1",
     "pyright>=1.1.414,<2",
     "deptry==0.25.1",
+    "overnightworks-logline",
 ]
 e2e = [
     "playwright==1.62.0",
     "uvicorn[standard]==0.41.0",
 ]
+
+[tool.uv.sources]
+overnightworks-logline = { git = "https://github.com/overnightworks/logline", tag = "v0.5.0", group = "dev" }
 
 [project.urls]
 Repository = "https://github.com/overnightworks/webauth"
