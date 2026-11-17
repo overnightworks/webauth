@@ -236,15 +236,14 @@ def install_sign_in_routes(
     """Register the start and callback routes of the sign-in, the logout route and the
     back-channel logout route on ``app``.
 
-    The start route stores the pending login in its own signed cookie, with the
-    ``next`` query value as the path to return to, and redirects (303) to the issuer. The
-    callback clears exactly the pending cookie its state names and, once the transaction's
-    exit returned, answers 303 to that return path, or to the app root when there is none,
-    with the session cookie; the account's ``id`` is then the ``sub`` of the callback's request
-    line. Every other answer is the host's ``refused`` hook's, which
-    receives the cause and returns any ``Response``. Every callback answer sent after the
-    pending cookie was selected carries its deletion, also the hook's, the 500 of a failure
-    in the hook or in the transaction, and an answer that fails before it starts; a failure
+    The start route stores the pending login in its own signed cookie, with the ``next`` query value
+    as the path to return to, and redirects (303) to the issuer. The callback clears exactly the
+    pending cookie its state names and, once the transaction's exit returned, answers 303 to that
+    return path, or to the app root when there is none, with the session cookie; the account's
+    ``id`` is then the ``sub`` of the callback's request line. Every other answer is the host's
+    ``refused`` hook's, which receives the cause and returns any ``Response``. Every callback answer
+    sent after the pending cookie was selected carries its deletion, also the hook's, the 500 of a
+    failure in the hook or in the transaction, and an answer that fails before it starts; a failure
     is then re-raised once that 500 is sent. Nothing is sent after an answer has started.
 
     A callback names a usable state when it carries ``state`` exactly once,
