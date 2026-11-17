@@ -28,6 +28,7 @@ import urllib3
 from pydantic import SecretStr
 
 import webauth.https_client
+from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
     DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
@@ -780,6 +781,12 @@ def _ended_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [record for record in caplog.records if record.name == "webauth.https_client"]
 
 
+def _fields_besides_the_duration(line: logging.LogRecord) -> dict[str, object]:
+    fields = fields_of(line)
+    assert isinstance(fields.pop("duration_ms"), int | float)
+    return fields
+
+
 def test_a_token_request_writes_one_ended_line_with_the_status(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -787,9 +794,8 @@ def test_a_token_request_writes_one_ended_line_with_the_status(
     post_token_request_over_https(_token_request(f"{token_server.base_url}/token?{_URL_QUERY}"))
 
     [line] = _ended_lines(caplog)
-    assert line.getMessage() == "token_request.ended"
-    assert (line.levelno, line.outcome, line.status) == (logging.INFO, "ok", 200)
-    assert line.duration_ms >= 0
+    assert (line.levelno, line.getMessage()) == (logging.INFO, "token_request.ended")
+    assert _fields_besides_the_duration(line) == {"outcome": "ok", "status": 200}
     _assert_no_canary_in(caplog.text)
 
 
@@ -800,8 +806,8 @@ def test_a_key_set_fetch_writes_one_ended_line_with_the_status(
     fetch_key_set_over_https(f"{token_server.base_url}/certs")
 
     [line] = _ended_lines(caplog)
-    assert line.getMessage() == "key_set_fetch.ended"
-    assert (line.levelno, line.outcome, line.status) == (logging.INFO, "ok", 200)
+    assert (line.levelno, line.getMessage()) == (logging.INFO, "key_set_fetch.ended")
+    assert _fields_besides_the_duration(line) == {"outcome": "ok", "status": 200}
 
 
 def test_a_key_set_answered_with_another_status_ends_refused_with_that_status(
@@ -811,13 +817,12 @@ def test_a_key_set_answered_with_another_status_ends_refused_with_that_status(
         fetch_key_set_over_https(f"{token_server.base_url}/moved")
 
     [line] = _ended_lines(caplog)
-    assert line.getMessage() == "key_set_fetch.ended"
-    assert (line.levelno, line.outcome, line.reason) == (
-        logging.INFO,
-        "refused",
-        "status_not_accepted",
-    )
-    assert line.status == 302
+    assert (line.levelno, line.getMessage()) == (logging.INFO, "key_set_fetch.ended")
+    assert _fields_besides_the_duration(line) == {
+        "outcome": "refused",
+        "reason": "status_not_accepted",
+        "status": 302,
+    }
 
 
 @pytest.mark.parametrize(
@@ -838,8 +843,7 @@ def test_an_unreachable_origin_ends_failed_with_a_reason_and_no_error_text(
         exchange(f"https://127.0.0.1:{closed_port}/path?{_URL_QUERY}")
 
     [line] = _ended_lines(caplog)
-    assert line.getMessage() == event
-    assert (line.levelno, line.outcome, line.reason) == (level, "failed", "unreachable")
-    assert not hasattr(line, "error_type")
+    assert (line.levelno, line.getMessage()) == (level, event)
+    assert _fields_besides_the_duration(line) == {"outcome": "failed", "reason": "unreachable"}
     assert line.exc_info is None
     _assert_no_canary_in(caplog.text)

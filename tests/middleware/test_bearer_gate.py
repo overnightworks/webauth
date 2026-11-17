@@ -44,6 +44,7 @@ from tests.support.gate_arrangement import (
     assert_no_store_and_no_cookie,
     bearing,
 )
+from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
     ABSENT,
     APP_CLIENT_ID,
@@ -313,8 +314,7 @@ def test_every_refusal_is_logged_once_with_its_case_or_reason(
     assert [record.levelno for record in records] == [answer.level]
     [record] = records
     assert record.getMessage() == "bearer.refused"
-    fields = {getattr(record, name, None) for name in ("reason", "oidc_reason", "token_rejection")}
-    assert set(answer.logged) <= fields
+    assert set(answer.logged) <= set(fields_of(record).values())
 
 
 def gate_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:

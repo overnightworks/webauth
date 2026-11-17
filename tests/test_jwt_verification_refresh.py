@@ -17,6 +17,7 @@ from tests.support.jwt_issuer import (
     KEY_SET_TTL_SECONDS,
     IssuerScenario,
 )
+from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
     REALM_ISSUER,
     key_set_document,
@@ -77,7 +78,7 @@ def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
 
     [warning] = caplog.records
     assert warning.getMessage() == "key_set_refresh.failed"
-    assert warning.reason == logged_cause
+    assert fields_of(warning) == {"reason": logged_cause}
     assert REALM_ISSUER not in str(vars(warning))
     assert _URL_SECRET not in str(vars(warning))
 

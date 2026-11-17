@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from tests.support.log_records import fields_of
 from tests.support.webauth_arrangement import a_web_auth_config
 from webauth import proxies
 from webauth.config import install_web_auth_config
@@ -269,11 +270,8 @@ def test_a_chain_that_names_nobody_is_logged(
     with caplog.at_level(logging.WARNING, logger="webauth.proxies"):
         assert _get_client_ip(_TRUSTED_PEER, forwarded_for, trusted) == _TRUSTED_PEER
     [record] = caplog.records
-    assert (record.levelno, record.getMessage(), record.reason) == (
-        logging.WARNING,
-        "forwarded_for.ignored",
-        reason,
-    )
+    assert (record.levelno, record.getMessage()) == (logging.WARNING, "forwarded_for.ignored")
+    assert fields_of(record) == {"reason": reason}
 
 
 def test_the_warning_for_a_nearest_entry_that_is_not_an_address_quotes_none_of_it(
