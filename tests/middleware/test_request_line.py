@@ -7,6 +7,7 @@ to install it, and reads the one `request.ended` line the request wrote.
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import pytest
@@ -214,6 +215,20 @@ def test_a_malformed_forwarding_header_leaves_the_peer_as_the_ip(
 
     (line,) = lines
     assert line["ip"] == TRUSTED_PEER
+
+
+def test_a_malformed_forwarding_header_is_logged_as_ignored_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = a_gated_app()
+
+    with (
+        caplog.at_level(logging.WARNING, logger="webauth.proxies"),
+        a_client_behind_the_proxy(app.app) as client,
+    ):
+        client.get("/me", headers={"x-forwarded-for": NOT_AN_ADDRESS})
+
+    assert [record.getMessage() for record in caplog.records] == ["forwarded_for.ignored"]
 
 
 @pytest.mark.parametrize(
