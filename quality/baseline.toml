@@ -11,7 +11,7 @@
 "tests/e2e/oidc/prove.py" = 1393
 
 [function_lines."src/webauth/https_client.py"]
-"_exchange" = 63
+"_exchange" = 62
 
 [function_lines."tests/e2e/oidc/host_app.py"]
 "build_app" = 83
