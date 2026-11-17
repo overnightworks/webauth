@@ -112,6 +112,7 @@ class _HttpsExchangeError(Exception):
 class _HttpsAnswer:
     status: int
     body: bytes = field(repr=False)
+    exceeds_limit: bool
 
 
 @dataclass(frozen=True)
@@ -209,7 +210,7 @@ def _post_form_over_https(
     )
     if isinstance(answer, _RefusedStatus):
         raise _HttpsExchangeError(ExchangeFailure.REDIRECTED)
-    if len(answer.body) > max_body_bytes:
+    if answer.exceeds_limit:
         raise _HttpsExchangeError(ExchangeFailure.TOO_LARGE)
     return answer
 
@@ -312,8 +313,11 @@ def _exchange(
                         if not accepts_status(response.status):
                             step.refuse(_REFUSED_STATUS_REASON)
                             return _RefusedStatus(response.status)
-                        answer = _HttpsAnswer(response.status, response.read(max_body_bytes + 1))
-                        if len(answer.body) > max_body_bytes:
+                        read = response.read(max_body_bytes + 1)
+                        answer = _HttpsAnswer(
+                            response.status, read, exceeds_limit=len(read) > max_body_bytes
+                        )
+                        if answer.exceeds_limit:
                             step.fail(ExchangeFailure.TOO_LARGE.log_reason)
                         return answer
                     finally:
