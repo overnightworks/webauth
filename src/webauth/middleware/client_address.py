@@ -15,13 +15,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ClientAddressMiddleware",
-    "resolved_client_address",
 ]
 
 _CLIENT_ADDRESS_SCOPE_KEY: Final = "webauth.client_address"
 
 
-def resolved_client_address(connection: HTTPConnection) -> str:
+def _resolved_client_address(connection: HTTPConnection) -> str:
     """``resolve_client_ip``'s answer, computed once for this request.
 
     Resolving writes a ``forwarded_for.ignored`` warning for a header it ignores, so a second
@@ -48,5 +47,5 @@ class ClientAddressMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
-            set_client_ip(scope, resolved_client_address(Request(scope)))
+            set_client_ip(scope, _resolved_client_address(Request(scope)))
         await self._app(scope, receive, send)
