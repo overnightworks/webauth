@@ -1,0 +1,8 @@
+claim_id = "f13b73f8b69b495380d37610a15956d4"
+agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
+role = "builder"
+base = "b16edf3fd3e4bf06cc4aa97a31b07d26b98e85d3"
+branch = "claude/issue-782-gates-stamp-request-line-sub-and-ip"
+scope = ["docs/host-contract.md", "src/webauth/middleware", "src/webauth/oidc_login.py", "src/webauth/proxies.py", "src/webauth/sign_in_routes.py", "tests"]
+opened_commit = "c0c082b7309e044da307cd484617b1363d0fa1c1"
+whole_reason = "Setting sub and ip on the request line is one capability across the gates, the sign-in callback and the client-address resolution, proved together through the installed middleware."
