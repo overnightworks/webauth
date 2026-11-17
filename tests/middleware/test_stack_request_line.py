@@ -25,6 +25,7 @@ from tests.support.gate_arrangement import (
     an_interactive_agent_token,
     bearing,
 )
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import OPERATOR_SUBJECT
 from tests.support.oidc_login_host import CALLBACK_PATH, SUBJECT, an_oidc_host
 from tests.support.person_paths_arrangement import MEMBER_TOKEN, a_lena, a_person_app
@@ -35,7 +36,7 @@ from tests.support.request_line_arrangement import (
     logging_request_lines,
     request_lines_written,
 )
-from tests.support.session_gate_arrangement import a_gated_app, ask, signed_in
+from tests.support.session_gate_arrangement import a_gated_app, a_plain_app, ask, signed_in
 from tests.support.webauth_arrangement import SESSION_ID, a_session
 from webauth.policies import PathRules, RateLimitPolicy
 
@@ -65,6 +66,34 @@ def test_a_session_admitted_by_the_gate_is_the_sub_of_its_request_line(
 
 def test_a_request_the_session_gate_refuses_has_no_sub(capsys: pytest.CaptureFixture[str]) -> None:
     app = a_gated_app()
+    logging_request_lines(app.app)
+
+    with request_lines_written(capsys) as lines:
+        response = ask(app, "/me")
+
+    (line,) = lines
+    assert (response.status_code, line["sub"]) == (401, None)
+
+
+def test_a_route_guarded_by_the_dependency_alone_has_the_resolved_account_as_sub(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app = a_plain_app(a_session(user=FakeUser(id="user-1", username="alice")))
+    install_the_gated_stack(app.app)
+    logging_request_lines(app.app)
+
+    with request_lines_written(capsys) as lines:
+        response = ask(app, "/me", cookie=signed_in(app))
+
+    (line,) = lines
+    assert (response.status_code, line["sub"]) == (200, "user-1")
+
+
+def test_a_route_guarded_by_the_dependency_alone_has_no_sub_for_an_anonymous_request(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    app = a_plain_app(None)
+    install_the_gated_stack(app.app)
     logging_request_lines(app.app)
 
     with request_lines_written(capsys) as lines:
@@ -155,7 +184,7 @@ def test_the_callback_that_signs_a_person_in_carries_the_person_on_its_own_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     host = an_oidc_host()
-    logging_request_lines(host.client.app)  # pyright: ignore[reportArgumentType]
+    logging_request_lines(host.app)
     query = host.sign_in_at_issuer()
 
     with request_lines_written(capsys) as lines:

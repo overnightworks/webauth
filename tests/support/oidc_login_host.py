@@ -7,7 +7,7 @@ import urllib.parse
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 import anyio
 import pytest
@@ -341,6 +341,11 @@ class OidcHost:
     relying_party_of: Callable[[Request], OidcRelyingParty] | None = None
     """What the host's relying-party callable answers; a test replaces it."""
 
+    @property
+    def app(self) -> FastAPI:
+        """The host application behind `client`."""
+        return cast("FastAPI", self.client.app)
+
     def read_relying_party(self, request: Request) -> OidcRelyingParty:
         if self.relying_party_of is None:
             return self.relying_party
@@ -354,9 +359,8 @@ class OidcHost:
     def drive_start(self) -> tuple[list[dict[str, object]], BaseException | None]:
         """Visit the start route below the test client: the ASGI messages it sent and the
         exception it raised, if any."""
-        app: FastAPI = self.client.app  # pyright: ignore[reportAssignmentType]
-        scope = an_http_scope(app, START_PATH, headers=[(b"host", b"testserver")])
-        messages, raised = anyio.run(lambda: drive(app, scope, body_chunks=[]))
+        scope = an_http_scope(self.app, START_PATH, headers=[(b"host", b"testserver")])
+        messages, raised = anyio.run(lambda: drive(self.app, scope, body_chunks=[]))
         return [dict(message) for message in messages], raised
 
     def sign_in_at_issuer(self, *, return_to: str | None = None) -> str:
