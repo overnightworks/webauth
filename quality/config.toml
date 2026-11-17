@@ -11,3 +11,9 @@ what = 'import contract "only webauth.oidc imports webauth.jwt_verification" rem
 item = "#520"
 date = 2026-10-29
 reason = "the service caller check is a second owner of the JWT verifier, so the contract is renamed and allows webauth.service_callers"
+
+[[gate.loosened]]
+what = 'import contract "webauth persists nothing itself" removed'
+item = "#779"
+date = 2026-11-16
+reason = "the optional Postgres module is the one place that reaches SQLAlchemy, so the contract is replaced by one that allows only webauth.postgres to import it"

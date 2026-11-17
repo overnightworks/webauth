@@ -7,8 +7,8 @@ The user model, schema, transaction boundaries and HTTP
 routes stay with the host application, and so does every response but the
 library's own refusals and its 500.
 
-The library persists nothing itself: it holds no schema and no ORM, and the
-`.importlinter` contract keeps it that way.
+The library persists nothing itself: its core holds no schema and no ORM, and the
+`.importlinter` contracts confine SQLAlchemy to the optional `webauth.postgres`.
 """
 
 __version__ = "0.40.1"

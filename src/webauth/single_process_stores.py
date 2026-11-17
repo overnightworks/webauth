@@ -16,6 +16,7 @@ from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from webauth._deferred_audit import DeferredAudit
 from webauth.ports import SignInStores
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
     from pydantic import SecretStr
 
-    from webauth.ports import AccountEvent, AccountKind, AuditSink
+    from webauth.ports import AccountKind, AuditSink
 
 __all__ = [
     "SessionTimes",
@@ -294,16 +295,6 @@ class SingleProcessSessionStore:
         )
 
 
-class _DeferredAudit:
-    """Holds an entry's events until it commits, so a rolled-back entry reports none."""
-
-    def __init__(self) -> None:
-        self.events: list[AccountEvent] = []
-
-    def account_event(self, event: AccountEvent) -> None:
-        self.events.append(event)
-
-
 class SingleProcessSignInTransaction:
     """One sign-in entry at a time; a block that raises leaves both stores as they were at entry.
 
@@ -340,7 +331,7 @@ class _SignInEntry:
         self._accounts = accounts
         self._sessions = sessions
         self._audit = audit
-        self._deferred = _DeferredAudit()
+        self._deferred = DeferredAudit()
         self._held = ExitStack()
         self._snapshot: _Snapshot
         self._entered = False
@@ -369,8 +360,7 @@ class _SignInEntry:
                 self._tables.restore(self._snapshot)
                 return
             try:
-                for event in self._deferred.events:
-                    self._audit.account_event(event)
+                self._deferred.flush_to(self._audit)
             except BaseException:
                 self._tables.restore(self._snapshot)
                 raise
