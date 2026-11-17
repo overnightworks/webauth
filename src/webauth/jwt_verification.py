@@ -378,16 +378,18 @@ class _JwtVerifier:
                 named, sole = _parse_key_set(self._fetch_key_set(self._jwks_url))
             # The injected fetch's message is not this module's to vouch for:
             # it may quote the key-set URL, and that URL may hold a secret.
-            except KeySetFetchError:
-                failure = _RefreshFailure.FETCH_FAILED
+            except KeySetFetchError as error:
+                failure, error_type = _RefreshFailure.FETCH_FAILED, type(error).__name__
             except _InvalidKeySetError as refusal:
-                failure = refusal.failure
+                failure, error_type = refusal.failure, type(refusal).__name__
             else:
                 self._key_set = _KeySet(named=named, sole=sole, fetched_at=now)
                 self._last_refresh_failed = False
                 return
             self._last_refresh_failed = True
-            _log.warning(_REFRESH_FAILED_EVENT, extra={"reason": failure.value})
+            _log.warning(
+                _REFRESH_FAILED_EVENT, extra={"reason": failure.value, "error_type": error_type}
+            )
         finally:
             self._refresh_lock.release()
 

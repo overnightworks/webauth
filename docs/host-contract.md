@@ -184,7 +184,7 @@ Every line webauth writes goes through the standard-library logger of its own mo
 
 - **LOG-01** `rate_limit_outage.started` (ERROR) carries `error_type`, the exception's class name; `rate_limit_outage.ended` (INFO) carries `refused_count`, the requests refused meanwhile.
 - **LOG-02** `bearer.refused` carries `reason`, the refusal case (`no-credentials` at INFO, every other case at WARNING), and, when the token was refused, `oidc_reason` and `token_rejection` when one applies.
-- **LOG-03** `key_set_refresh.failed` (WARNING) carries `reason`, the code of why the refresh failed.
+- **LOG-03** `key_set_refresh.failed` (WARNING) carries `reason`, the code of why the refresh failed, and `error_type`, the class name of the error that ended it.
 - **LOG-04** `forwarded_for.ignored` (WARNING) carries `reason`: `not_an_address` when the nearest entry of the chain is no address, `too_many_trusted_hops` when more trusted hops follow in a row than the bound.
 - **LOG-05** The calls to the issuer each write one `.ended` line through logline's `StepTimer`: `key_set_fetch.ended` and `token_request.ended` carry `duration_ms`, `outcome`, `status` once the origin answered, and a `reason` code when the call failed or the origin answered a status it does not accept (`refused`, at INFO). A failed fetch is a WARNING, since the verifier goes on with the key set it holds; a failed token request is an ERROR.
 

@@ -40,25 +40,28 @@ _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signa
 
 
 @pytest.mark.parametrize(
-    ("response", "logged_cause"),
+    ("response", "logged_cause", "logged_error_type"),
     [
         pytest.param(
             KeySetFetchError(f"GET {_SECRET_BEARING_JWKS_URL} answered 503"),
             "fetch-failed",
+            "KeySetFetchError",
             id="failed-fetch-quoting-its-url",
         ),
-        pytest.param(b"[]", "not-json", id="invalid-key-set"),
+        pytest.param(b"[]", "not-json", "_InvalidKeySetError", id="invalid-key-set"),
         pytest.param(
             key_set_document(
                 public_jwk(rsa_key("current"), _URL_SECRET),
                 public_jwk(rsa_key("other"), _URL_SECRET),
             ),
             "duplicate-key-id",
+            "_InvalidKeySetError",
             id="key-set-repeating-a-kid",
         ),
         pytest.param(
             key_set_document(weak_public_jwk(_URL_SECRET)),
             "key-too-short",
+            "_InvalidKeySetError",
             id="key-set-with-a-weak-key",
         ),
     ],
@@ -68,8 +71,10 @@ def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
     caplog: pytest.LogCaptureFixture,
     response: bytes | Exception,
     logged_cause: str,
+    logged_error_type: str,
 ) -> None:
-    """LOG-03: a failed refresh is one `key_set_refresh.failed` event with its cause code."""
+    """LOG-03: a failed refresh is one `key_set_refresh.failed` event with its cause code and the
+    class name of the error, never its text."""
     verifier = issuer.verifier_with(jwks_url=_SECRET_BEARING_JWKS_URL)
     issuer.serve(response)
 
@@ -78,7 +83,7 @@ def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
 
     [warning] = caplog.records
     assert warning.getMessage() == "key_set_refresh.failed"
-    assert fields_of(warning) == {"reason": logged_cause}
+    assert fields_of(warning) == {"reason": logged_cause, "error_type": logged_error_type}
     assert REALM_ISSUER not in str(vars(warning))
     assert _URL_SECRET not in str(vars(warning))
 
