@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Final
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
-from logline import set_client_ip
 from starlette.responses import JSONResponse
 
 from webauth.config import web_auth_config
@@ -40,8 +39,7 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """Spend one request of the client's budget for the budget it falls into.
 
     The budget belongs to the client's address, or to its IPv6 /64 -- see
-    ``_budget_address``. A path in the policy's ``exempt`` spends nothing. The resolved
-    address of every request goes on the request line as its ``ip``. The
+    ``_budget_address``. A path in the policy's ``exempt`` spends nothing. The
     limiter key is ``<name>:<address>``, so renaming a budget starts it fresh.
 
     A limiter that raises answers 503 with ``Retry-After``, failing closed; so
@@ -71,7 +69,6 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
         client_ip = resolve_client_ip(request)
-        set_client_ip(request.scope, client_ip)
         path = route_path(request.scope)
         if self._policy.is_exempt(path):
             return None

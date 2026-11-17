@@ -31,7 +31,7 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 - `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `oidc_login` and the bearer gate apply it and services call `app_role`.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
 - `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users and records bearer admission.
-- `middleware` enforces the malformed-path refusal, body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
+- `middleware` sets the request line's client address and enforces the malformed-path refusal, body size, CSRF, rate limits, security headers and bearer/session gates in one installed order.
 - `proxies` derives client identity from trusted peers; `rate_limit` measures sliding windows in Redis or in process.
 - `single_process_stores` implements the account, session and sign-in transaction ports in process memory for a one-worker host; no other module imports it.
 - `postgres` is the optional `[postgres]` extra: the session table, the session store and the sign-in shell over a connection the host opened, on the host's side of the ports; no other module imports it, and it alone imports SQLAlchemy.
