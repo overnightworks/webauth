@@ -21,6 +21,7 @@ from tests.support.jwt_issuer import (
     passed_over_keys,
     token_without_kid,
 )
+from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
     ABSENT,
     key_set_document,
@@ -257,11 +258,13 @@ def _defective_key_sets() -> list[Any]:
     ]
 
 
-def _logged_refresh_failures(caplog: pytest.LogCaptureFixture) -> list[str]:
+def _logged_refresh_failures(caplog: pytest.LogCaptureFixture) -> list[object]:
     return [
-        record.getMessage()
+        fields_of(record)["reason"]
         for record in caplog.records
-        if record.name == "webauth.jwt_verification" and record.levelno == logging.WARNING
+        if record.name == "webauth.jwt_verification"
+        and record.levelno == logging.WARNING
+        and record.getMessage() == "key_set_refresh.failed"
     ]
 
 
@@ -278,8 +281,7 @@ def test_a_defective_key_set_is_refused_as_a_whole(
         refused = issuer.verifier.verify(issuer.token())
 
     assert refused == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
-    [logged] = _logged_refresh_failures(caplog)
-    assert logged.endswith(failure)
+    assert _logged_refresh_failures(caplog) == [failure]
 
 
 def test_a_key_set_of_exactly_the_byte_limit_is_accepted(issuer: IssuerScenario) -> None:
@@ -438,7 +440,7 @@ def test_a_failed_refresh_keeps_the_last_valid_key_set_until_its_ttl(
 
     with caplog.at_level(logging.WARNING, logger="webauth.jwt_verification"):
         refreshing = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
-    assert [message.endswith(failure) for message in _logged_refresh_failures(caplog)] == [True]
+    assert _logged_refresh_failures(caplog) == [failure]
     cooling_down = issuer.verifier.verify(issuer.token(header={"kid": "rotated-key"}))
     still_cached = issuer.verifier.verify(issuer.token())
     issuer.monotonic_clock.now += KEY_SET_TTL_SECONDS

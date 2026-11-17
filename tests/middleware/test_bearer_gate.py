@@ -361,7 +361,7 @@ def assert_nothing_leaks(
         f"{name}: {value}" for response in responses for name, value in response.headers.items()
     ]
     library_log = "\n".join(
-        caplog.handler.format(record)
+        f"{caplog.handler.format(record)} {fields_of(record)}"
         for record in caplog.records
         if record.name.split(".")[0] == "webauth"
     )
