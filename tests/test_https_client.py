@@ -26,20 +26,22 @@ import urllib3
 
 import webauth.https_client
 from tests.support.oidc_arrangement import (
-    CANARY_BASIC_AUTHORIZATION,
-    CANARY_CODE,
-    CANARY_TOKEN_FORM,
-    CANARY_URL_QUERY,
     DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
     LoopbackHttpsServer,
+    unanswering_loopback_port,
+    unconnectable_loopback_port,
+)
+from tests.support.token_request_canaries import (
+    CANARY_BASIC_AUTHORIZATION,
+    CANARY_CODE,
+    CANARY_TOKEN_FORM,
+    CANARY_URL_QUERY,
     a_canary_token_request,
     assert_no_canary_in,
     post_canary_token_form,
-    unanswering_loopback_port,
-    unconnectable_loopback_port,
 )
 from webauth.https_client import (
     ExchangeFailure,

@@ -14,8 +14,10 @@ import pytest
 
 from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
-    CANARY_URL_QUERY,
     LoopbackHttpsServer,
+)
+from tests.support.token_request_canaries import (
+    CANARY_URL_QUERY,
     a_canary_token_request,
     assert_no_canary_in,
     post_canary_token_form,
