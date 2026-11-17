@@ -7,7 +7,6 @@ import base64
 import contextlib
 import hashlib
 import json
-import re
 import secrets
 import ssl
 import urllib.parse
@@ -28,7 +27,7 @@ if TYPE_CHECKING:
     from prove import Proof
 
 BEARER_CLIENT = "d1-bearer"
-GATE_LINE = re.compile(r"Bearer request refused: (?P<case>[a-z-]+)(?: \((?P<reason>[^)]*)\))?")
+GATE_EVENT = "bearer.refused"
 CHALLENGE = 'Bearer realm="admin"'
 SUBJECT = "person-1"
 EXPORT = f"/api/admin/people/{SUBJECT}/export"
@@ -94,14 +93,15 @@ class BearerRun:
     def state(self) -> dict[str, Any]:
         return host_state(self.host)
 
-    def gate_lines(self) -> list[str]:
-        lines = self.host.log_file.read_text().splitlines()
-        return [line for line in lines if GATE_LINE.search(line)]
+    def gate_lines(self) -> list[dict[str, Any]]:
+        texts = self.host.log_file.read_text().splitlines()
+        lines = (json.loads(text) for text in texts if text.startswith("{"))
+        return [line for line in lines if line["event"] == GATE_EVENT]
 
     def last_gate_reason(self) -> str:
-        match = GATE_LINE.search(self.gate_lines()[-1])
-        assert match is not None
-        return f"{match['case']} ({match['reason']})" if match["reason"] else match["case"]
+        line = self.gate_lines()[-1]
+        codes = [line[field] for field in ("oidc_reason", "token_rejection") if field in line]
+        return f"{line['reason']} ({', '.join(codes)})" if codes else line["reason"]
 
     # --- Keycloak and the browser ---
 
