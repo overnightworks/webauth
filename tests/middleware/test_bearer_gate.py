@@ -310,7 +310,10 @@ def test_every_refusal_is_logged_once_with_its_case_or_reason(
 
     records = gate_records(caplog)
     assert [record.levelno for record in records] == [answer.level]
-    assert all(word in records[0].getMessage() for word in answer.logged)
+    [record] = records
+    assert record.getMessage() == "bearer.refused"
+    fields = {getattr(record, name, None) for name in ("reason", "oidc_reason", "token_rejection")}
+    assert set(answer.logged) <= fields
 
 
 def gate_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
