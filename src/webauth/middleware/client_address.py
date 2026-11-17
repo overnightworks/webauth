@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ClientAddressMiddleware",
+    "resolved_client_address",
 ]
 
 _CLIENT_ADDRESS_SCOPE_KEY: Final = "webauth.client_address"
