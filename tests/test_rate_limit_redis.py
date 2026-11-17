@@ -242,7 +242,8 @@ class TestLimiterOutageLogging:
         responses = self.get_concurrently(client, self.OUTAGE_REQUESTS)
         errors = self.records_of(caplog, logging.ERROR)
         assert len(errors) == 1
-        assert "ConnectionError" in errors[0].getMessage()
+        assert errors[0].getMessage() == "rate_limit_outage.started"
+        assert errors[0].error_type == "ConnectionError"
         assert "hunter2" not in caplog.text
         assert errors[0].exc_info is None
         assert [(r.status_code, r.headers["Retry-After"]) for r in responses] == [
@@ -259,7 +260,8 @@ class TestLimiterOutageLogging:
         assert client.get(RATE_LIMITED_PATH).status_code == 200
         recoveries = self.records_of(caplog, logging.INFO)
         assert len(recoveries) == 1
-        assert str(self.OUTAGE_REQUESTS) in recoveries[0].getMessage()
+        assert recoveries[0].getMessage() == "rate_limit_outage.ended"
+        assert recoveries[0].refused_count == self.OUTAGE_REQUESTS
 
     def test_a_second_outage_logs_again(self, caplog) -> None:
         client, backend = self.a_switchable_client()
