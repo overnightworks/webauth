@@ -8,75 +8,22 @@ and reason, and that the URL's query secret never reaches the log.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
-from pathlib import Path
-from types import MappingProxyType
+from collections.abc import Callable
 
 import pytest
-from pydantic import SecretStr
 
 from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
+    CANARY_URL_QUERY,
     LoopbackHttpsServer,
-    closed_loopback_port,
-    loopback_https_server,
+    a_canary_token_request,
+    assert_no_canary_in,
+    post_canary_token_form,
 )
-from webauth.https_client import (
-    KeySetFetchError,
-    _HttpsExchangeError,
-    _post_form_over_https,
-    fetch_key_set_over_https,
-)
-from webauth.oidc import TokenRequest
+from webauth.https_client import KeySetFetchError, _HttpsExchangeError, fetch_key_set_over_https
 from webauth.oidc_transport import post_token_request_over_https
 
-_URL_QUERY = "session=canary-url-query"
-_CLIENT_SECRET_CREDENTIALS = "Basic canary-basic-credentials"  # noqa: S105
-_CANARIES = (_URL_QUERY, _CLIENT_SECRET_CREDENTIALS)
-
-
-@pytest.fixture
-def token_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[LoopbackHttpsServer]:
-    with loopback_https_server(tmp_path, monkeypatch) as server:
-        yield server
-
-
-@pytest.fixture
-def closed_port() -> Iterator[int]:
-    with closed_loopback_port() as port:
-        yield port
-
-
-@pytest.fixture(autouse=True)
-def every_log_record(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG)
-
-
-def _token_request(url: str) -> TokenRequest:
-    return TokenRequest(
-        url=url,
-        form=MappingProxyType({"grant_type": "authorization_code", "code": "canary-code"}),
-        authorization=SecretStr(_CLIENT_SECRET_CREDENTIALS),
-    )
-
-
-def _assert_no_canary_in(text: str) -> None:
-    assert not [canary for canary in _CANARIES if canary in text]
-
-
-def _fetch_key_set(url: str) -> object:
-    return fetch_key_set_over_https(url)
-
-
-def _post_token_form(url: str) -> object:
-    request = _token_request(url)
-    return _post_form_over_https(
-        url,
-        request.form,
-        authorization=request.authorization,
-        max_body_bytes=64 * 1024,
-        timeout_seconds=5,
-    )
+pytestmark = pytest.mark.usefixtures("every_log_record")
 
 
 def _ended_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -93,12 +40,14 @@ def test_a_token_request_writes_one_ended_line_with_the_status(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
     """LOG-05: the token request's one line carries its duration, outcome and status."""
-    post_token_request_over_https(_token_request(f"{token_server.base_url}/token?{_URL_QUERY}"))
+    post_token_request_over_https(
+        a_canary_token_request(f"{token_server.base_url}/token?{CANARY_URL_QUERY}")
+    )
 
     [line] = _ended_lines(caplog)
     assert (line.levelno, line.getMessage()) == (logging.INFO, "token_request.ended")
     assert _fields_besides_the_duration(line) == {"outcome": "ok", "status": 200}
-    _assert_no_canary_in(caplog.text)
+    assert_no_canary_in(caplog.text)
 
 
 def test_a_key_set_fetch_writes_one_ended_line_with_the_status(
@@ -130,8 +79,12 @@ def test_a_key_set_answered_with_another_status_ends_refused_with_that_status(
 @pytest.mark.parametrize(
     ("event", "exchange", "level"),
     [
-        pytest.param("key_set_fetch.ended", _fetch_key_set, logging.WARNING, id="key-set"),
-        pytest.param("token_request.ended", _post_token_form, logging.ERROR, id="token-request"),
+        pytest.param(
+            "key_set_fetch.ended", fetch_key_set_over_https, logging.WARNING, id="key-set"
+        ),
+        pytest.param(
+            "token_request.ended", post_canary_token_form, logging.ERROR, id="token-request"
+        ),
     ],
 )
 def test_an_unreachable_origin_ends_failed_with_a_reason_and_the_error_class_only(
@@ -142,7 +95,7 @@ def test_an_unreachable_origin_ends_failed_with_a_reason_and_the_error_class_onl
     level: int,
 ) -> None:
     with pytest.raises((KeySetFetchError, _HttpsExchangeError)):
-        exchange(f"https://127.0.0.1:{closed_port}/path?{_URL_QUERY}")
+        exchange(f"https://127.0.0.1:{closed_port}/path?{CANARY_URL_QUERY}")
 
     [line] = _ended_lines(caplog)
     assert (line.levelno, line.getMessage()) == (level, event)
@@ -152,7 +105,7 @@ def test_an_unreachable_origin_ends_failed_with_a_reason_and_the_error_class_onl
         "error_type": "NewConnectionError",
     }
     assert line.exc_info is None
-    _assert_no_canary_in(caplog.text)
+    assert_no_canary_in(caplog.text)
 
 
 @pytest.mark.parametrize("path", ["/oversized", "/token-past-limit"], ids=["far", "one-byte"])
@@ -163,7 +116,7 @@ def test_a_token_answer_past_the_size_limit_ends_failed_as_too_large(
 ) -> None:
     """LOG-05: an answer the caller then refuses for its size is no `ok` line."""
     with pytest.raises(_HttpsExchangeError):
-        _post_token_form(f"{token_server.base_url}{path}")
+        post_canary_token_form(f"{token_server.base_url}{path}")
 
     [line] = _ended_lines(caplog)
     assert (line.levelno, line.getMessage()) == (logging.ERROR, "token_request.ended")
