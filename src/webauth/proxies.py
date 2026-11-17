@@ -186,12 +186,12 @@ def _client_from_chain(
     for entry in islice(entries, _MAX_FORWARDED_FOR_HOPS):
         hop = _canonical_address(entry)
         if hop is None:
-            _log.warning(_IGNORED_EVENT, extra={"reason": "not_an_address"})
+            _log.warning(_IGNORED_EVENT, extra={"reason": "not-an-address"})
             return None
         if not trusted_proxies.trusts(hop):
             return hop
     if next(entries, None) is not None:
-        _log.warning(_IGNORED_EVENT, extra={"reason": "too_many_trusted_hops"})
+        _log.warning(_IGNORED_EVENT, extra={"reason": "too-many-trusted-hops"})
     return None
 
 

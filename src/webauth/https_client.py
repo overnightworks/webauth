@@ -62,7 +62,7 @@ __all__ = [
 
 _log = logging.getLogger(__name__)
 
-_REFUSED_STATUS_REASON = "status_not_accepted"
+_REFUSED_STATUS_REASON = "status-not-accepted"
 _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 
@@ -96,7 +96,16 @@ class ExchangeFailure(StrEnum):
     @property
     def log_reason(self) -> str:
         """The code a `.ended` line carries for this failure."""
-        return self.name.lower()
+        return _LOG_REASONS[self]
+
+
+_LOG_REASONS = {
+    ExchangeFailure.TLS_FAILED: "tls-failed",
+    ExchangeFailure.TIMED_OUT: "timed-out",
+    ExchangeFailure.BROKEN_OFF: "broken-off",
+    ExchangeFailure.UNREACHABLE: "unreachable",
+    ExchangeFailure.TOO_LARGE: "too-large",
+}
 
 
 class _HttpsExchangeError(Exception):

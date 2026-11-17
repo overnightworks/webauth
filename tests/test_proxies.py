@@ -251,10 +251,10 @@ def test_an_entry_too_long_to_be_an_address_is_never_parsed(
 @pytest.mark.parametrize(
     ("forwarded_for", "reason"),
     [
-        pytest.param(["garbage"], "not_an_address", id="an entry that is not an address"),
+        pytest.param(["garbage"], "not-an-address", id="an entry that is not an address"),
         pytest.param(
             [_CLIENT_BEYOND_THE_HOP_BOUND],
-            "too_many_trusted_hops",
+            "too-many-trusted-hops",
             id="more trusted hops than the bound",
         ),
     ],

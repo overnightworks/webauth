@@ -155,7 +155,6 @@ class _RefreshFailure(StrEnum):
     """Why a key-set refresh failed, in codes this module owns: the issuer,
     the URL and the remote key IDs stay out of the log."""
 
-    FETCH_FAILED = "fetch-failed"
     TOO_LARGE = "too-large"
     NOT_JSON = "not-json"
     KEY_COUNT_OUT_OF_RANGE = "key-count-out-of-range"
@@ -377,19 +376,16 @@ class _JwtVerifier:
             try:
                 named, sole = _parse_key_set(self._fetch_key_set(self._jwks_url))
             # The injected fetch's message is not this module's to vouch for:
-            # it may quote the key-set URL, and that URL may hold a secret.
-            except KeySetFetchError as error:
-                failure, error_type = _RefreshFailure.FETCH_FAILED, type(error).__name__
+            # it may quote the key-set URL, and that URL may hold a secret. The
+            # fetch has logged its own failure, which is not logged again here.
+            except KeySetFetchError:
+                self._last_refresh_failed = True
             except _InvalidKeySetError as refusal:
-                failure, error_type = refusal.failure, type(refusal).__name__
+                self._last_refresh_failed = True
+                _log.warning(_REFRESH_FAILED_EVENT, extra={"reason": refusal.failure.value})
             else:
                 self._key_set = _KeySet(named=named, sole=sole, fetched_at=now)
                 self._last_refresh_failed = False
-                return
-            self._last_refresh_failed = True
-            _log.warning(
-                _REFRESH_FAILED_EVENT, extra={"reason": failure.value, "error_type": error_type}
-            )
         finally:
             self._refresh_lock.release()
 

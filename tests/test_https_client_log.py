@@ -73,7 +73,7 @@ def test_a_key_set_answered_with_another_status_ends_refused_with_that_status(
     assert (line.levelno, line.getMessage()) == (logging.INFO, "key_set_fetch.ended")
     assert _fields_besides_the_duration(line) == {
         "outcome": "refused",
-        "reason": "status_not_accepted",
+        "reason": "status-not-accepted",
         "status": 302,
     }
 
@@ -124,6 +124,6 @@ def test_a_token_answer_past_the_size_limit_ends_failed_as_too_large(
     assert (line.levelno, line.getMessage()) == (logging.ERROR, "token_request.ended")
     assert _fields_besides_the_duration(line) == {
         "outcome": "failed",
-        "reason": "too_large",
+        "reason": "too-large",
         "status": 200,
     }
