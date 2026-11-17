@@ -853,16 +853,15 @@ def test_an_unreachable_origin_ends_failed_with_a_reason_and_the_error_class_onl
     _assert_no_canary_in(caplog.text)
 
 
-@pytest.mark.parametrize("target", [_oversized, _one_byte_past_the_limit], ids=["far", "one-byte"])
+@pytest.mark.parametrize("path", ["/oversized", "/token-past-limit"], ids=["far", "one-byte"])
 def test_a_token_answer_past_the_size_limit_ends_failed_as_too_large(
     token_server: LoopbackHttpsServer,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
-    target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch], str],
+    path: str,
 ) -> None:
     """LOG-05: an answer the caller then refuses for its size is no `ok` line."""
     with pytest.raises(_HttpsExchangeError):
-        _post_token_form(target(token_server, monkeypatch))
+        _post_token_form(f"{token_server.base_url}{path}")
 
     [line] = _ended_lines(caplog)
     assert (line.levelno, line.getMessage()) == (logging.ERROR, "token_request.ended")
