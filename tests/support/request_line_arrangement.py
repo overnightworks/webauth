@@ -15,8 +15,8 @@ from tests.support.webauth_arrangement import HTTPS_TEST_SERVER
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    import pytest
     from fastapi import FastAPI
-    from pytest import CaptureFixture
 
 TRUSTED_PEER = "172.16.0.9"
 FORWARDED_CLIENT = "203.0.113.7"
@@ -28,7 +28,7 @@ def logging_request_lines(app: FastAPI) -> None:
 
 
 @contextmanager
-def request_lines_written(capsys: CaptureFixture[str]) -> Iterator[list[dict[str, Any]]]:
+def request_lines_written(capsys: pytest.CaptureFixture[str]) -> Iterator[list[dict[str, Any]]]:
     """The request lines the block's requests write, in order; filled when the block ends.
 
     `configure` binds the stdout of the moment, so it runs inside the test, after `capsys`; what
