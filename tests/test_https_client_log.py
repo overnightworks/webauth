@@ -8,6 +8,7 @@ and reason, and that the URL's query secret never reaches the log.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 
 import pytest
@@ -22,7 +23,13 @@ from tests.support.token_request_canaries import (
     assert_no_canary_in,
     post_canary_token_form,
 )
-from webauth.https_client import KeySetFetchError, _HttpsExchangeError, fetch_key_set_over_https
+from webauth.https_client import (
+    ExchangeFailure,
+    KeySetFetchError,
+    _HttpsExchangeError,
+    _log_reason,
+    fetch_key_set_over_https,
+)
 from webauth.oidc_transport import post_token_request_over_https
 
 pytestmark = pytest.mark.usefixtures("every_log_record")
@@ -108,6 +115,13 @@ def test_an_unreachable_origin_ends_failed_with_a_reason_and_the_error_class_onl
     }
     assert line.exc_info is None
     assert_no_canary_in(caplog.text)
+
+
+@pytest.mark.parametrize("failure", list(ExchangeFailure), ids=lambda failure: failure.name)
+def test_every_exchange_failure_has_a_hyphenated_lower_case_log_reason(
+    failure: ExchangeFailure,
+) -> None:
+    assert re.fullmatch(r"[a-z]+(-[a-z]+)*", _log_reason(failure))
 
 
 @pytest.mark.parametrize("path", ["/oversized", "/token-past-limit"], ids=["far", "one-byte"])

@@ -93,19 +93,10 @@ class ExchangeFailure(StrEnum):
     REDIRECTED = "the origin answered with a redirect, which is never followed"
     TOO_LARGE = "the origin's answer exceeds its size limit"
 
-    @property
-    def log_reason(self) -> str:
-        """The code a `.ended` line carries for this failure."""
-        return _LOG_REASONS[self]
 
-
-_LOG_REASONS = {
-    ExchangeFailure.TLS_FAILED: "tls-failed",
-    ExchangeFailure.TIMED_OUT: "timed-out",
-    ExchangeFailure.BROKEN_OFF: "broken-off",
-    ExchangeFailure.UNREACHABLE: "unreachable",
-    ExchangeFailure.TOO_LARGE: "too-large",
-}
+def _log_reason(failure: ExchangeFailure) -> str:
+    """The code a `.ended` line carries for `failure`: its name in lower case with hyphens."""
+    return failure.name.lower().replace("_", "-")
 
 
 class _HttpsExchangeError(Exception):
@@ -281,7 +272,7 @@ def _read_answer(
         read = response.read(max_body_bytes + 1)
         answer = _HttpsAnswer(response.status, read, exceeds_limit=len(read) > max_body_bytes)
         if answer.exceeds_limit:
-            step.fail(ExchangeFailure.TOO_LARGE.log_reason)
+            step.fail(_log_reason(ExchangeFailure.TOO_LARGE))
         return answer
     finally:
         response.close()
@@ -342,7 +333,7 @@ def _exchange(
                     return _read_answer(response, step, accepts_status, max_body_bytes)
             except (urllib3.exceptions.HTTPError, OSError) as error:
                 failure = _failure_of(error, deadline)
-                step.fail(failure.log_reason)
+                step.fail(_log_reason(failure))
                 # The timer writes the error's class name, never its message, as `error_type`.
                 raise
     except urllib3.exceptions.HTTPError, OSError:
