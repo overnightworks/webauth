@@ -65,6 +65,9 @@ NOT_AN_ADDRESS = "not-an-address"
         ),
         pytest.param(a_gated_app, "/me", False, 401, None, id="the-gate-refuses-no-session"),
         pytest.param(
+            a_gated_app, "/me", True, 200, "user-1", id="the-gate-and-the-dependency-agree"
+        ),
+        pytest.param(
             a_stacked_plain_app, "/me", True, 200, "user-1", id="the-dependency-admits-a-session"
         ),
         pytest.param(
