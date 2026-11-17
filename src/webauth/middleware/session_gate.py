@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
+from logline import set_sub
 from starlette.requests import HTTPConnection
 
 from webauth._paths import _has_dot_segment
@@ -82,7 +83,8 @@ class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
     """Refuse a request without a live session, and record who the others are.
 
     The decision is recorded for the request, so ``current_user`` and its
-    dependants return it instead of admitting the session a second time.
+    dependants return it instead of admitting the session a second time. The admitted
+    account's ``id`` goes on the request line as its ``sub``.
     """
 
     async def _refusal(self, request: Request) -> Response | None:
@@ -111,6 +113,8 @@ class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
         if isinstance(admission, ConnectionRefusal) and not optional:
             return _refusal_response(request, admission, self._policy.login_redirect)
         _record_gate_admission(request, _GateAdmission(config, reading, admission))
+        if isinstance(admission, AuthenticatedUser):
+            set_sub(request.scope, admission.id)
         return None
 
     def _admit(
