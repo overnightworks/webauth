@@ -256,6 +256,28 @@ def _failure_of(error: Exception, deadline: _Deadline) -> ExchangeFailure:
     return ExchangeFailure.BROKEN_OFF
 
 
+def _read_answer(
+    response: urllib3.BaseHTTPResponse,
+    step: StepTimer,
+    accepts_status: Callable[[int], bool],
+    max_body_bytes: int,
+) -> _HttpsAnswer | _RefusedStatus:
+    """The response judged by its status and, when accepted, read at most one byte past the
+    limit; the response is closed either way."""
+    try:
+        step.add(status=response.status)
+        if not accepts_status(response.status):
+            step.refuse(_REFUSED_STATUS_REASON)
+            return _RefusedStatus(response.status)
+        read = response.read(max_body_bytes + 1)
+        answer = _HttpsAnswer(response.status, read, exceeds_limit=len(read) > max_body_bytes)
+        if answer.exceeds_limit:
+            step.fail(ExchangeFailure.TOO_LARGE.log_reason)
+        return answer
+    finally:
+        response.close()
+
+
 def _exchange(
     event: str,
     method: str,
@@ -308,20 +330,7 @@ def _exchange(
                         preload_content=False,
                         decode_content=False,
                     )
-                    try:
-                        step.add(status=response.status)
-                        if not accepts_status(response.status):
-                            step.refuse(_REFUSED_STATUS_REASON)
-                            return _RefusedStatus(response.status)
-                        read = response.read(max_body_bytes + 1)
-                        answer = _HttpsAnswer(
-                            response.status, read, exceeds_limit=len(read) > max_body_bytes
-                        )
-                        if answer.exceeds_limit:
-                            step.fail(ExchangeFailure.TOO_LARGE.log_reason)
-                        return answer
-                    finally:
-                        response.close()
+                    return _read_answer(response, step, accepts_status, max_body_bytes)
             except (urllib3.exceptions.HTTPError, OSError) as error:
                 failure = _failure_of(error, deadline)
                 step.fail(failure.log_reason)
