@@ -169,7 +169,7 @@ What the installer refuses before any rule or route:
 - **STACK-12** WebSocket and lifespan scopes pass: no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
 - **STACK-13** A path with a space, a `;`, a trailing slash or a non-ASCII character keeps the answer it has without the refusal.
 - **Host duty:** a route takes no control character in its path; free text goes in the query or the body.
-- **STACK-14** A rate limiter that raises fails closed: each refused request answers 503 with `Retry-After: 5`. The host's log gets one ERROR line when an outage opens, carrying only the exception's class name (no traceback, no message, no address or path), and one INFO line when the limiter next answers, carrying the count of requests refused meanwhile; refusals in between log nothing. The state is per process, so each pod logs its own outage. A host whose backend raises from a bug logs its own traceback; watch the limiter's health through the host's own check.
+- **STACK-14** A rate limiter that raises fails closed: each refused request answers 503 with `Retry-After: 5`. The host's log gets one `rate_limit_outage.started` line at ERROR when an outage opens, and one `rate_limit_outage.ended` line at INFO when the limiter next answers; refusals in between log nothing (fields: [What webauth logs](#what-webauth-logs)). The state is per process, so each pod logs its own outage. A host whose backend raises from a bug logs its own traceback; watch the limiter's health through the host's own check.
 
 What the installer applies when the host passes none:
 
@@ -177,6 +177,16 @@ What the installer applies when the host passes none:
 - **Host duty:** a host behind a shared proxy address, where many people share one budget (PROXY-06), passes its own policy.
 - **STACK-06** Without a `body_size`, and in a `BodySizePolicy` that names no default, the body limit is 4 KiB unless the host names another; a larger body gets 413.
 - **STACK-07** Without a `permissions_policy` the header turns off `camera`, `microphone`, `geolocation` and `display-capture`.
+
+## What webauth logs
+
+Every line webauth writes goes through the standard-library logger of its own module, with a literal `<noun>.<verb_past>` event as the message and its values as scalar fields in `extra=`, as the fleet logging standard of [logline](https://github.com/overnightworks/logline) asks. A host that calls logline's `configure` gets each line as one JSON record. webauth depends on `overnightworks-logline` as a version range by name, so the host pins its git tag and the tag must lie in that range. No line carries a traceback, a message, an address, a path, a header, a token or a key.
+
+- **LOG-01** `rate_limit_outage.started` (ERROR) carries `error_type`, the exception's class name; `rate_limit_outage.ended` (INFO) carries `refused_count`, the requests refused meanwhile.
+- **LOG-02** `bearer.refused` carries `reason`, the refusal case (`no-credentials` at INFO, every other case at WARNING), and, when the token was refused, `oidc_reason` and `token_rejection` when one applies.
+- **LOG-03** `key_set_refresh.failed` (WARNING) carries `reason`, the code of why the refresh failed.
+- **LOG-04** `forwarded_for.ignored` (WARNING) carries `reason`: `not_an_address` when the nearest entry of the chain is no address, `too_many_trusted_hops` when more trusted hops follow in a row than the bound.
+- **LOG-05** The calls to the issuer each write one `.ended` line through logline's `StepTimer`: `key_set_fetch.ended` and `token_request.ended` carry `duration_ms`, `outcome`, `status` once the origin answered, and a `reason` code when the call failed or the origin answered a status it does not accept (`refused`, at INFO). A failed fetch is a WARNING, since the verifier goes on with the key set it holds; a failed token request is an ERROR.
 
 ## CSRF origin
 

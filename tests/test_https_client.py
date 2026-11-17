@@ -783,6 +783,7 @@ def _ended_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
 def test_a_token_request_writes_one_ended_line_with_the_status(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """LOG-05: the token request's one line carries its duration, outcome and status."""
     post_token_request_over_https(_token_request(f"{token_server.base_url}/token?{_URL_QUERY}"))
 
     [line] = _ended_lines(caplog)
@@ -795,6 +796,7 @@ def test_a_token_request_writes_one_ended_line_with_the_status(
 def test_a_key_set_fetch_writes_one_ended_line_with_the_status(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """LOG-05: the key-set fetch's one line carries its duration, outcome and status."""
     fetch_key_set_over_https(f"{token_server.base_url}/certs")
 
     [line] = _ended_lines(caplog)

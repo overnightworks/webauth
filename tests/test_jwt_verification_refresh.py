@@ -68,6 +68,7 @@ def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
     response: bytes | Exception,
     logged_cause: str,
 ) -> None:
+    """LOG-03: a failed refresh is one `key_set_refresh.failed` event with its cause code."""
     verifier = issuer.verifier_with(jwks_url=_SECRET_BEARING_JWKS_URL)
     issuer.serve(response)
 

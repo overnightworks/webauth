@@ -263,7 +263,7 @@ def test_a_chain_that_names_nobody_is_logged(
     reason: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Keying on the peer pools unrelated visitors into one budget, so a chain
+    """LOG-04: keying on the peer pools unrelated visitors into one budget, so a chain
     the proxy should have written correctly is a fault to see, not a default."""
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     with caplog.at_level(logging.WARNING, logger="webauth.proxies"):

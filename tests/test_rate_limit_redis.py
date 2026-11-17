@@ -236,6 +236,7 @@ class TestLimiterOutageLogging:
         return asyncio.run(drive())
 
     def test_concurrent_refusals_log_one_error_with_the_class_name_only(self, caplog) -> None:
+        """LOG-01: the outage opens one event with the exception's class name."""
         client, backend = self.a_switchable_client()
         backend.down = True
         caplog.set_level(logging.INFO)
@@ -251,6 +252,7 @@ class TestLimiterOutageLogging:
         ] * self.OUTAGE_REQUESTS
 
     def test_recovery_logs_one_info_with_the_refused_count(self, caplog) -> None:
+        """LOG-01: the outage's end is one event with the refused count."""
         client, backend = self.a_switchable_client()
         caplog.set_level(logging.INFO)
         backend.down = True

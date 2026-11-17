@@ -303,6 +303,7 @@ def test_every_refusal_is_logged_once_with_its_case_or_reason(
     sent: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-02: a refusal is one `bearer.refused` event whose fields name its case and codes."""
     app = a_bearer_app(key_sets=a_key_set_answering(key_set_response))
 
     with caplog.at_level(logging.DEBUG):

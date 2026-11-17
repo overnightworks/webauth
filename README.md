@@ -112,6 +112,15 @@ dependencies = [
 
 The host's lock records the commit of the tag. A build needs git and builds webauth from source.
 
+webauth depends on `overnightworks-logline` as a version range by name (`>=0.5,<0.6`), so the host pins logline's git tag in its own `dependencies`, as [logline's README](https://github.com/overnightworks/logline#install) says, and a tag outside the range is refused:
+
+```toml
+dependencies = [
+    "overnightworks-webauth @ git+https://github.com/overnightworks/webauth@vX.Y.Z",
+    "overnightworks-logline @ git+https://github.com/overnightworks/logline@vA.B.C",
+]
+```
+
 A host's Dependabot entry for uv ignores `overnightworks-*`, because Dependabot looks the name up on PyPI. Real uv Dependabot runs in hosts end green with this pin, both with webauth alone and with other overnightworks libraries pinned by git beside it.
 
 Two extras are optional: `redis` shares rate-limit windows across processes, and `postgres` stores the sessions in the host's Postgres over its SQLAlchemy 2 connection ([the host contract](docs/host-contract.md#the-postgres-session-store)); the host brings its own driver. Name one the same way, with `overnightworks-webauth[postgres] @ git+https://github.com/overnightworks/webauth@vX.Y.Z`.
