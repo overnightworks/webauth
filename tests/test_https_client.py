@@ -832,7 +832,7 @@ def test_a_key_set_answered_with_another_status_ends_refused_with_that_status(
         pytest.param("token_request.ended", _post_token_form, logging.ERROR, id="token-request"),
     ],
 )
-def test_an_unreachable_origin_ends_failed_with_a_reason_and_no_error_text(
+def test_an_unreachable_origin_ends_failed_with_a_reason_and_the_error_class_only(
     closed_port: int,
     caplog: pytest.LogCaptureFixture,
     event: str,
@@ -844,6 +844,30 @@ def test_an_unreachable_origin_ends_failed_with_a_reason_and_no_error_text(
 
     [line] = _ended_lines(caplog)
     assert (line.levelno, line.getMessage()) == (level, event)
-    assert _fields_besides_the_duration(line) == {"outcome": "failed", "reason": "unreachable"}
+    assert _fields_besides_the_duration(line) == {
+        "outcome": "failed",
+        "reason": "unreachable",
+        "error_type": "NewConnectionError",
+    }
     assert line.exc_info is None
     _assert_no_canary_in(caplog.text)
+
+
+@pytest.mark.parametrize("target", [_oversized, _one_byte_past_the_limit], ids=["far", "one-byte"])
+def test_a_token_answer_past_the_size_limit_ends_failed_as_too_large(
+    token_server: LoopbackHttpsServer,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch], str],
+) -> None:
+    """LOG-05: an answer the caller then refuses for its size is no `ok` line."""
+    with pytest.raises(_HttpsExchangeError):
+        _post_token_form(target(token_server, monkeypatch))
+
+    [line] = _ended_lines(caplog)
+    assert (line.levelno, line.getMessage()) == (logging.ERROR, "token_request.ended")
+    assert _fields_besides_the_duration(line) == {
+        "outcome": "failed",
+        "reason": "too_large",
+        "status": 200,
+    }
