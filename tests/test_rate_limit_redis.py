@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import webauth.rate_limit
+from tests.support.log_records import fields_of
 from tests.support.rate_limit_arrangement import (
     AlwaysFailingRateLimitBackend,
     SwitchableRateLimitBackend,
@@ -236,13 +237,15 @@ class TestLimiterOutageLogging:
         return asyncio.run(drive())
 
     def test_concurrent_refusals_log_one_error_with_the_class_name_only(self, caplog) -> None:
+        """LOG-01: the outage opens one event with the exception's class name."""
         client, backend = self.a_switchable_client()
         backend.down = True
         caplog.set_level(logging.INFO)
         responses = self.get_concurrently(client, self.OUTAGE_REQUESTS)
         errors = self.records_of(caplog, logging.ERROR)
         assert len(errors) == 1
-        assert "ConnectionError" in errors[0].getMessage()
+        assert errors[0].getMessage() == "rate_limit_outage.started"
+        assert fields_of(errors[0]) == {"error_type": "ConnectionError"}
         assert "hunter2" not in caplog.text
         assert errors[0].exc_info is None
         assert [(r.status_code, r.headers["Retry-After"]) for r in responses] == [
@@ -250,6 +253,7 @@ class TestLimiterOutageLogging:
         ] * self.OUTAGE_REQUESTS
 
     def test_recovery_logs_one_info_with_the_refused_count(self, caplog) -> None:
+        """LOG-01: the outage's end is one event with the refused count."""
         client, backend = self.a_switchable_client()
         caplog.set_level(logging.INFO)
         backend.down = True
@@ -259,7 +263,8 @@ class TestLimiterOutageLogging:
         assert client.get(RATE_LIMITED_PATH).status_code == 200
         recoveries = self.records_of(caplog, logging.INFO)
         assert len(recoveries) == 1
-        assert str(self.OUTAGE_REQUESTS) in recoveries[0].getMessage()
+        assert recoveries[0].getMessage() == "rate_limit_outage.ended"
+        assert fields_of(recoveries[0]) == {"refused_count": self.OUTAGE_REQUESTS}
 
     def test_a_second_outage_logs_again(self, caplog) -> None:
         client, backend = self.a_switchable_client()

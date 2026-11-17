@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 import urllib3
+from logline import StepTimer
 from pydantic import SecretStr
 from urllib3.util import create_urllib3_context
 
@@ -59,6 +60,9 @@ __all__ = [
     "is_https_url",
 ]
 
+_log = logging.getLogger(__name__)
+
+_REFUSED_STATUS_REASON = "status-not-accepted"
 _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 
@@ -90,6 +94,11 @@ class ExchangeFailure(StrEnum):
     TOO_LARGE = "the origin's answer exceeds its size limit"
 
 
+def _log_reason(failure: ExchangeFailure) -> str:
+    """The code a `.ended` line carries for `failure`: its name in lower case with hyphens."""
+    return failure.name.lower().replace("_", "-")
+
+
 class _HttpsExchangeError(Exception):
     """An HTTPS exchange that brought back no usable answer; its message is
     the `failure`'s."""
@@ -103,6 +112,7 @@ class _HttpsExchangeError(Exception):
 class _HttpsAnswer:
     status: int
     body: bytes = field(repr=False)
+    exceeds_limit: bool
 
 
 @dataclass(frozen=True)
@@ -139,8 +149,10 @@ def fetch_key_set_over_https(
         )
     try:
         answer = _exchange(
+            "key_set_fetch.ended",
             "GET",
             url,
+            failure_is_handled=True,
             accepts_status=_is_key_set_status,
             timeout_seconds=timeout_seconds,
             deadline_seconds=deadline_seconds,
@@ -181,8 +193,10 @@ def _post_form_over_https(
     if not is_https_url(url):
         raise _HttpsExchangeError(ExchangeFailure.NOT_AN_HTTPS_URL)
     answer = _exchange(
+        "token_request.ended",
         "POST",
         url,
+        failure_is_handled=False,
         accepts_status=_is_form_answer_status,
         timeout_seconds=timeout_seconds,
         deadline_seconds=deadline_seconds,
@@ -196,7 +210,7 @@ def _post_form_over_https(
     )
     if isinstance(answer, _RefusedStatus):
         raise _HttpsExchangeError(ExchangeFailure.REDIRECTED)
-    if len(answer.body) > max_body_bytes:
+    if answer.exceeds_limit:
         raise _HttpsExchangeError(ExchangeFailure.TOO_LARGE)
     return answer
 
@@ -227,10 +241,49 @@ def _is_form_answer_status(status: int) -> bool:
     return not HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST
 
 
+def _failure_of(error: Exception, deadline: _Deadline) -> ExchangeFailure:
+    """What a transport error means for the exchange; a passed deadline makes it a timeout
+    whatever urllib3 made of the error."""
+    if deadline.has_passed():
+        return ExchangeFailure.TIMED_OUT
+    if isinstance(error, urllib3.exceptions.SSLError):
+        return ExchangeFailure.TLS_FAILED
+    # Before TimeoutError, which urllib3 makes its base class.
+    if isinstance(error, urllib3.exceptions.NewConnectionError):
+        return ExchangeFailure.UNREACHABLE
+    if isinstance(error, urllib3.exceptions.TimeoutError):
+        return ExchangeFailure.TIMED_OUT
+    return ExchangeFailure.BROKEN_OFF
+
+
+def _read_answer(
+    response: urllib3.BaseHTTPResponse,
+    step: StepTimer,
+    accepts_status: Callable[[int], bool],
+    max_body_bytes: int,
+) -> _HttpsAnswer | _RefusedStatus:
+    """The response judged by its status and, when accepted, read at most one byte past the
+    limit; the response is closed either way."""
+    try:
+        step.add(status=response.status)
+        if not accepts_status(response.status):
+            step.refuse(_REFUSED_STATUS_REASON)
+            return _RefusedStatus(response.status)
+        read = response.read(max_body_bytes + 1)
+        answer = _HttpsAnswer(response.status, read, exceeds_limit=len(read) > max_body_bytes)
+        if answer.exceeds_limit:
+            step.fail(_log_reason(ExchangeFailure.TOO_LARGE))
+        return answer
+    finally:
+        response.close()
+
+
 def _exchange(
+    event: str,
     method: str,
     url: str,
     *,
+    failure_is_handled: bool,
     accepts_status: Callable[[int], bool],
     timeout_seconds: float,
     deadline_seconds: float,
@@ -255,39 +308,36 @@ def _exchange(
         raise ValueError(f"deadline_seconds must be positive, not {deadline_seconds}")
     deadline = _Deadline.after(deadline_seconds)
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
+    # Only a transport error leaves the timer's block without a return, and it sets `failure`.
+    failure = ExchangeFailure.BROKEN_OFF
     try:
-        with (
-            _urllib3_unlogged(),
-            urllib3.PoolManager(
-                timeout=timeout, retries=False, ssl_context=_tls_context_under(deadline)
-            ) as pool,
-        ):
-            response = pool.request(
-                method,
-                url,
-                headers=headers,
-                body=body,
-                redirect=False,
-                preload_content=False,
-                decode_content=False,
-            )
+        with StepTimer(event, _log) as step:
+            if failure_is_handled:
+                step.handled()
             try:
-                if not accepts_status(response.status):
-                    return _RefusedStatus(response.status)
-                return _HttpsAnswer(response.status, response.read(max_body_bytes + 1))
-            finally:
-                response.close()
-    except urllib3.exceptions.SSLError:
-        failure = ExchangeFailure.TLS_FAILED
-    # Before TimeoutError, which urllib3 makes its base class.
-    except urllib3.exceptions.NewConnectionError:
-        failure = ExchangeFailure.UNREACHABLE
-    except urllib3.exceptions.TimeoutError:
-        failure = ExchangeFailure.TIMED_OUT
+                with (
+                    _urllib3_unlogged(),
+                    urllib3.PoolManager(
+                        timeout=timeout, retries=False, ssl_context=_tls_context_under(deadline)
+                    ) as pool,
+                ):
+                    response = pool.request(
+                        method,
+                        url,
+                        headers=headers,
+                        body=body,
+                        redirect=False,
+                        preload_content=False,
+                        decode_content=False,
+                    )
+                    return _read_answer(response, step, accepts_status, max_body_bytes)
+            except (urllib3.exceptions.HTTPError, OSError) as error:
+                failure = _failure_of(error, deadline)
+                step.fail(_log_reason(failure))
+                # The timer writes the error's class name, never its message, as `error_type`.
+                raise
     except urllib3.exceptions.HTTPError, OSError:
-        failure = ExchangeFailure.BROKEN_OFF
-    if deadline.has_passed():
-        failure = ExchangeFailure.TIMED_OUT
+        pass
     # Raised outside the handler so urllib3's error is not even its context.
     raise _HttpsExchangeError(failure)
 

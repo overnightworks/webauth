@@ -42,6 +42,7 @@ import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
+from logline import configure
 from pydantic import SecretStr
 
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
@@ -133,7 +134,6 @@ MARKED_ROUTES = (
     MarkedRoute("GET", "/notes-admin"),
     MarkedRoute("GET", "/api/notes/{note}"),
 )
-BEARER_GATE_LOGGER = "webauth.middleware.bearer_gate"
 # A throwaway proof stack runs every sign-in from one address, so no budget may run out.
 PROOF_HOST_RATE_LIMIT = RateLimitPolicy(
     default=RateLimitBudget("proof-host", 10_000, 60),
@@ -751,15 +751,6 @@ def _add_bearer_routes(
         return {"id": person.id, "username": person.username, "role": person.role}
 
 
-def log_the_bearer_gate() -> None:
-    """Uvicorn leaves this logger at WARNING, which would lose the gate's INFO refusals."""
-    gate_logger = logging.getLogger(BEARER_GATE_LOGGER)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter("%(name)s %(levelname)s %(message)s"))
-    gate_logger.addHandler(handler)
-    gate_logger.setLevel(logging.INFO)
-
-
 def die_with_parent(parent_pid: int) -> None:
     """Linux ``PR_SET_PDEATHSIG``: a host nobody can stop must not outlive its run."""
     pr_set_pdeathsig = 1
@@ -776,8 +767,7 @@ def main() -> None:
     arguments = parser.parse_args()
     die_with_parent(arguments.parent_pid)
     settings = HostSettings.read(arguments.settings)
-    if settings.is_bearer_host:
-        log_the_bearer_gate()
+    configure("webauth-e2e-host")
     world = {"world": World(settings)}
     _Observation(settings.observe_port, world, lambda: World(settings))
     uvicorn.run(
@@ -786,8 +776,7 @@ def main() -> None:
         port=settings.port,
         ssl_certfile=settings.tls_certificate,
         ssl_keyfile=settings.tls_key,
-        log_level="warning",
-        access_log=False,
+        log_config=None,
     )
 
 

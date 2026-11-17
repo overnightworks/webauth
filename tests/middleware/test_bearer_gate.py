@@ -44,6 +44,7 @@ from tests.support.gate_arrangement import (
     assert_no_store_and_no_cookie,
     bearing,
 )
+from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
     ABSENT,
     APP_CLIENT_ID,
@@ -303,6 +304,7 @@ def test_every_refusal_is_logged_once_with_its_case_or_reason(
     sent: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-02: a refusal is one `bearer.refused` event whose fields name its case and codes."""
     app = a_bearer_app(key_sets=a_key_set_answering(key_set_response))
 
     with caplog.at_level(logging.DEBUG):
@@ -310,7 +312,9 @@ def test_every_refusal_is_logged_once_with_its_case_or_reason(
 
     records = gate_records(caplog)
     assert [record.levelno for record in records] == [answer.level]
-    assert all(word in records[0].getMessage() for word in answer.logged)
+    [record] = records
+    assert record.getMessage() == "bearer.refused"
+    assert set(answer.logged) <= set(fields_of(record).values())
 
 
 def gate_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -357,7 +361,7 @@ def assert_nothing_leaks(
         f"{name}: {value}" for response in responses for name, value in response.headers.items()
     ]
     library_log = "\n".join(
-        caplog.handler.format(record)
+        f"{caplog.handler.format(record)} {fields_of(record)}"
         for record in caplog.records
         if record.name.split(".")[0] == "webauth"
     )

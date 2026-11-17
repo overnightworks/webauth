@@ -8,7 +8,6 @@ secrets in the client secret, the code and the PKCE verifier.
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import gzip
 import inspect
@@ -18,14 +17,12 @@ import sys
 import time
 import traceback
 import urllib.parse
-from collections.abc import Callable, Iterator
-from pathlib import Path
-from types import MappingProxyType, SimpleNamespace
+from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Concatenate
 
 import pytest
 import urllib3
-from pydantic import SecretStr
 
 import webauth.https_client
 from tests.support.oidc_arrangement import (
@@ -34,10 +31,17 @@ from tests.support.oidc_arrangement import (
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
     LoopbackHttpsServer,
-    closed_loopback_port,
-    loopback_https_server,
     unanswering_loopback_port,
     unconnectable_loopback_port,
+)
+from tests.support.token_request_canaries import (
+    CANARY_BASIC_AUTHORIZATION,
+    CANARY_CODE,
+    CANARY_TOKEN_FORM,
+    CANARY_URL_QUERY,
+    a_canary_token_request,
+    assert_no_canary_in,
+    post_canary_token_form,
 )
 from webauth.https_client import (
     ExchangeFailure,
@@ -46,53 +50,12 @@ from webauth.https_client import (
     _post_form_over_https,
     fetch_key_set_over_https,
 )
-from webauth.oidc import TokenEndpointError, TokenRequest
+from webauth.oidc import TokenEndpointError
 from webauth.oidc_transport import post_token_request_over_https
 
-_CLIENT_ID = "notes-app"
-# Canary whose recognisable text is the point
-_CLIENT_SECRET = "canary-client-secret"  # noqa: S105
-_CODE = "canary-authorization-code"
-_CODE_VERIFIER = "canary-code-verifier"
-_URL_QUERY = "session=canary-url-query"
 _URL_SECRET = "s3cr3t-in-the-url"  # noqa: S105
-_FORM = {
-    "grant_type": "authorization_code",
-    "code": _CODE,
-    "redirect_uri": "https://notes.example.org/auth/callback",
-    "code_verifier": _CODE_VERIFIER,
-}
-_BASIC_CREDENTIALS = base64.b64encode(f"{_CLIENT_ID}:{_CLIENT_SECRET}".encode()).decode()
-_BASIC_AUTHORIZATION = f"Basic {_BASIC_CREDENTIALS}"
-# The client secret travels only inside the Basic credentials.
-_CANARIES = (_CLIENT_SECRET, _BASIC_CREDENTIALS, _CODE, _CODE_VERIFIER, _URL_QUERY)
 
-
-@pytest.fixture
-def token_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[LoopbackHttpsServer]:
-    with loopback_https_server(tmp_path, monkeypatch) as server:
-        yield server
-
-
-@pytest.fixture
-def closed_port() -> Iterator[int]:
-    with closed_loopback_port() as port:
-        yield port
-
-
-@pytest.fixture(autouse=True)
-def every_log_record(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.DEBUG)
-
-
-def _token_request(url: str) -> TokenRequest:
-    return TokenRequest(
-        url=url, form=MappingProxyType(_FORM), authorization=SecretStr(_BASIC_AUTHORIZATION)
-    )
-
-
-def _assert_no_canary_in(text: str) -> None:
-    assert not [canary for canary in _CANARIES if canary in text]
+pytestmark = pytest.mark.usefixtures("every_log_record")
 
 
 def _urllib3_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -103,22 +66,24 @@ def test_a_token_answer_comes_back_with_its_status_and_body(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
     answer = post_token_request_over_https(
-        _token_request(f"{token_server.base_url}/token?{_URL_QUERY}")
+        a_canary_token_request(f"{token_server.base_url}/token?{CANARY_URL_QUERY}")
     )
 
     assert (answer.status, answer.body) == (200, SERVED_TOKEN_ANSWER)
-    _assert_no_canary_in(repr(answer) + caplog.text)
+    assert_no_canary_in(repr(answer) + caplog.text)
 
 
 def test_an_answer_reflecting_the_request_in_its_headers_leaves_no_urllib3_record_and_no_canary(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
-    post_token_request_over_https(_token_request(f"{token_server.base_url}/token-reflecting"))
+    post_token_request_over_https(
+        a_canary_token_request(f"{token_server.base_url}/token-reflecting")
+    )
 
     [received] = token_server.received
-    assert _CODE.encode() in received.body
+    assert CANARY_CODE.encode() in received.body
     assert _urllib3_records(caplog) == []
-    _assert_no_canary_in(caplog.text)
+    assert_no_canary_in(caplog.text)
 
 
 # Modules `import urllib3` does not load: webauth.https_client creates their
@@ -161,7 +126,9 @@ def test_a_urllib3_module_loaded_later_logs_nothing_during_an_exchange(
         _logging_the_url(urllib3.PoolManager.request, module_name),
     )
 
-    post_token_request_over_https(_token_request(f"{token_server.base_url}/token?{_URL_QUERY}"))
+    post_token_request_over_https(
+        a_canary_token_request(f"{token_server.base_url}/token?{CANARY_URL_QUERY}")
+    )
 
     assert _urllib3_records(caplog) == []
 
@@ -177,7 +144,9 @@ def test_urllib3_still_logs_for_the_host_outside_an_exchange(
 def test_an_issuer_refusal_comes_back_as_an_answer_not_an_error(
     token_server: LoopbackHttpsServer,
 ) -> None:
-    answer = post_token_request_over_https(_token_request(f"{token_server.base_url}/token-refused"))
+    answer = post_token_request_over_https(
+        a_canary_token_request(f"{token_server.base_url}/token-refused")
+    )
 
     assert (answer.status, answer.body) == (400, REFUSED_TOKEN_ANSWER)
 
@@ -186,7 +155,7 @@ def test_a_token_answer_of_exactly_the_size_limit_comes_back_whole(
     token_server: LoopbackHttpsServer,
 ) -> None:
     answer = post_token_request_over_https(
-        _token_request(f"{token_server.base_url}/token-at-limit")
+        a_canary_token_request(f"{token_server.base_url}/token-at-limit")
     )
 
     assert len(answer.body) == 64 * 1024
@@ -195,14 +164,17 @@ def test_a_token_answer_of_exactly_the_size_limit_comes_back_whole(
 def test_the_token_request_is_one_form_post_authenticated_with_basic(
     token_server: LoopbackHttpsServer,
 ) -> None:
-    post_token_request_over_https(_token_request(f"{token_server.base_url}/token"))
+    post_token_request_over_https(a_canary_token_request(f"{token_server.base_url}/token"))
 
     [received] = token_server.received
     assert (received.method, received.path) == ("POST", "/token")
-    assert received.headers["authorization"] == _BASIC_AUTHORIZATION
+    assert received.headers["authorization"] == CANARY_BASIC_AUTHORIZATION
     assert received.headers["accept"] == "application/json"
     assert received.headers["content-type"] == "application/x-www-form-urlencoded"
-    assert dict(urllib.parse.parse_qsl(received.body.decode(), strict_parsing=True)) == _FORM
+    assert (
+        dict(urllib.parse.parse_qsl(received.body.decode(), strict_parsing=True))
+        == CANARY_TOKEN_FORM
+    )
 
 
 def _redirecting(server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch) -> str:
@@ -281,7 +253,7 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
     refusal: str,
     requests_sent: int,
 ) -> None:
-    request = _token_request(f"{target(token_server, monkeypatch)}?{_URL_QUERY}")
+    request = a_canary_token_request(f"{target(token_server, monkeypatch)}?{CANARY_URL_QUERY}")
     started = time.monotonic()
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(request, timeout_seconds=0.2)
@@ -289,7 +261,7 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
     assert str(refused.value).startswith(refusal)
     assert len(token_server.received) == requests_sent
     assert time.monotonic() - started < SILENT_HOLD_SECONDS / 2
-    _assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
+    assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
     assert refused.value.__cause__ is None
     assert refused.value.__context__ is None
 
@@ -304,7 +276,9 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
             id="key-set-fetch",
         ),
         pytest.param(
-            lambda url: post_token_request_over_https(_token_request(url), timeout_seconds=0.2),
+            lambda url: post_token_request_over_https(
+                a_canary_token_request(url), timeout_seconds=0.2
+            ),
             TokenEndpointError,
             "^the token request failed: the origin answered with a redirect,"
             " which is never followed$",
@@ -357,22 +331,11 @@ def _fetch_key_set(url: str, **limits: float) -> object:
     return fetch_key_set_over_https(url, **limits)
 
 
-def _post_token_form(url: str, timeout_seconds: float = 5, **limits: float) -> object:
-    return _post_form_over_https(
-        url,
-        _FORM,
-        authorization=SecretStr(_BASIC_AUTHORIZATION),
-        max_body_bytes=64 * 1024,
-        timeout_seconds=timeout_seconds,
-        **limits,
-    )
-
-
 _EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
     ("exchange", "error"),
     [
         pytest.param(_fetch_key_set, KeySetFetchError, id="key-set-fetch"),
-        pytest.param(_post_token_form, _HttpsExchangeError, id="token-post"),
+        pytest.param(post_canary_token_form, _HttpsExchangeError, id="token-post"),
     ],
 )
 
@@ -453,10 +416,10 @@ def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
     host: str,
 ) -> None:
     with pytest.raises(error) as refused:
-        exchange(f"https://{host}/certs?{_URL_QUERY}")
+        exchange(f"https://{host}/certs?{CANARY_URL_QUERY}")
 
     assert refused.value.failure is ExchangeFailure.BROKEN_OFF
-    _assert_no_canary_in("".join(traceback.format_exception(refused.value)))
+    assert_no_canary_in("".join(traceback.format_exception(refused.value)))
 
 
 _DEFAULT_DEADLINE_SECONDS = 10
@@ -515,7 +478,7 @@ def test_a_deadline_of_zero_or_less_is_refused_naming_the_parameter(
 
 
 @pytest.mark.parametrize(
-    "exchange", [_fetch_key_set, _post_token_form], ids=["key-set-fetch", "token-post"]
+    "exchange", [_fetch_key_set, post_canary_token_form], ids=["key-set-fetch", "token-post"]
 )
 @pytest.mark.parametrize("timeout_seconds", [0, -1])
 def test_a_timeout_of_zero_or_less_is_refused_naming_the_parameter(
@@ -526,7 +489,7 @@ def test_a_timeout_of_zero_or_less_is_refused_naming_the_parameter(
 
 
 def test_a_token_request_with_a_non_positive_timeout_is_refused_naming_the_timeout() -> None:
-    request = _token_request("https://127.0.0.1:1/token")
+    request = a_canary_token_request("https://127.0.0.1:1/token")
 
     with pytest.raises(ValueError, match="timeout_seconds must be positive"):
         post_token_request_over_https(request, timeout_seconds=0)
@@ -719,7 +682,7 @@ def test_one_exchange_raises_exactly_one_connect_audit_event(
 def test_a_token_request_with_a_non_positive_deadline_is_refused_naming_the_deadline(
     deadline_seconds: float,
 ) -> None:
-    request = _token_request("https://127.0.0.1:1/token")
+    request = a_canary_token_request("https://127.0.0.1:1/token")
 
     with pytest.raises(ValueError, match="deadline_seconds must be positive"):
         post_token_request_over_https(request, deadline_seconds=deadline_seconds)
@@ -728,7 +691,7 @@ def test_a_token_request_with_a_non_positive_deadline_is_refused_naming_the_dead
 def test_a_token_request_that_timed_out_names_the_timeout_as_its_failure(
     token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    request = _token_request(_stalled(token_server, monkeypatch))
+    request = a_canary_token_request(_stalled(token_server, monkeypatch))
 
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(request, timeout_seconds=0.2)
@@ -741,7 +704,7 @@ def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
 ) -> None:
     # The drip keeps every single step inside timeout_seconds, so only the
     # supplied total deadline can end the exchange.
-    request = _token_request(f"{token_server.base_url}/dripping-body")
+    request = a_canary_token_request(f"{token_server.base_url}/dripping-body")
     started = time.monotonic()
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(
@@ -756,7 +719,7 @@ def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
 
 
 def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> None:
-    request = _token_request("https://127.0.0.1:1/token")
+    request = a_canary_token_request("https://127.0.0.1:1/token")
 
     with pytest.raises(ValueError, match="timeout_seconds"):
         post_token_request_over_https(request, timeout_seconds=3, deadline_seconds=2)
@@ -765,12 +728,12 @@ def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
     closed_port: int, caplog: pytest.LogCaptureFixture
 ) -> None:
-    request = _token_request(f"https://127.0.0.1:{closed_port}/token?{_URL_QUERY}")
+    request = a_canary_token_request(f"https://127.0.0.1:{closed_port}/token?{CANARY_URL_QUERY}")
 
     with pytest.raises(
         TokenEndpointError, match="^the token request failed: the origin could not be reached$"
     ) as refused:
         post_token_request_over_https(request)
 
-    _assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
+    assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
     assert refused.value.__context__ is None

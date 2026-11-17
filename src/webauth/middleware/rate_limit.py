@@ -26,8 +26,8 @@ __all__ = [
 _log = logging.getLogger(__name__)
 
 _LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
-_OUTAGE_OPENED_TEXT: Final = "IP rate limiter unavailable, rejecting requests: %s"
-_OUTAGE_CLOSED_TEXT: Final = "IP rate limiter available again, %d requests were rejected"
+_OUTAGE_STARTED_EVENT: Final = "rate_limit_outage.started"
+_OUTAGE_ENDED_EVENT: Final = "rate_limit_outage.ended"
 
 
 def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
@@ -59,12 +59,12 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     def _note_limiter_failure(self, failure: Exception) -> None:
         if self._refused_during_outage is None:
             self._refused_during_outage = 0
-            _log.error(_OUTAGE_OPENED_TEXT, type(failure).__name__)
+            _log.error(_OUTAGE_STARTED_EVENT, extra={"error_type": type(failure).__name__})
         self._refused_during_outage += 1
 
     def _note_limiter_answered(self) -> None:
         if self._refused_during_outage is not None:
-            _log.info(_OUTAGE_CLOSED_TEXT, self._refused_during_outage)
+            _log.info(_OUTAGE_ENDED_EVENT, extra={"refused_count": self._refused_during_outage})
             self._refused_during_outage = None
 
     async def _refusal(self, request: Request) -> JSONResponse | None:

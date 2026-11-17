@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from webauth.ports import WallClock
 
 _log = logging.getLogger(__name__)
+_REFRESH_FAILED_EVENT = "key_set_refresh.failed"
 
 _MAX_TOKEN_CHARACTERS = 8 * 1024
 _MAX_HEADER_SEGMENT_CHARACTERS = 512
@@ -154,7 +155,6 @@ class _RefreshFailure(StrEnum):
     """Why a key-set refresh failed, in codes this module owns: the issuer,
     the URL and the remote key IDs stay out of the log."""
 
-    FETCH_FAILED = "fetch-failed"
     TOO_LARGE = "too-large"
     NOT_JSON = "not-json"
     KEY_COUNT_OUT_OF_RANGE = "key-count-out-of-range"
@@ -376,17 +376,16 @@ class _JwtVerifier:
             try:
                 named, sole = _parse_key_set(self._fetch_key_set(self._jwks_url))
             # The injected fetch's message is not this module's to vouch for:
-            # it may quote the key-set URL, and that URL may hold a secret.
+            # it may quote the key-set URL, and that URL may hold a secret. The
+            # fetch has logged its own failure, which is not logged again here.
             except KeySetFetchError:
-                failure = _RefreshFailure.FETCH_FAILED
+                self._last_refresh_failed = True
             except _InvalidKeySetError as refusal:
-                failure = refusal.failure
+                self._last_refresh_failed = True
+                _log.warning(_REFRESH_FAILED_EVENT, extra={"reason": refusal.failure.value})
             else:
                 self._key_set = _KeySet(named=named, sole=sole, fetched_at=now)
                 self._last_refresh_failed = False
-                return
-            self._last_refresh_failed = True
-            _log.warning("Refreshing the key set failed: %s", failure)
         finally:
             self._refresh_lock.release()
 

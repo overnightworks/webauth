@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from tests.support.log_records import fields_of
 from tests.support.webauth_arrangement import a_web_auth_config
 from webauth import proxies
 from webauth.config import install_web_auth_config
@@ -248,25 +249,29 @@ def test_an_entry_too_long_to_be_an_address_is_never_parsed(
 
 
 @pytest.mark.parametrize(
-    "forwarded_for",
+    ("forwarded_for", "reason"),
     [
-        pytest.param(["garbage"], id="an entry that is not an address"),
+        pytest.param(["garbage"], "not-an-address", id="an entry that is not an address"),
         pytest.param(
             [_CLIENT_BEYOND_THE_HOP_BOUND],
+            "too-many-trusted-hops",
             id="more trusted hops than the bound",
         ),
     ],
 )
 def test_a_chain_that_names_nobody_is_logged(
     forwarded_for: list[str],
+    reason: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Keying on the peer pools unrelated visitors into one budget, so a chain
+    """LOG-04: keying on the peer pools unrelated visitors into one budget, so a chain
     the proxy should have written correctly is a fault to see, not a default."""
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     with caplog.at_level(logging.WARNING, logger="webauth.proxies"):
         assert _get_client_ip(_TRUSTED_PEER, forwarded_for, trusted) == _TRUSTED_PEER
-    assert [record.levelno for record in caplog.records] == [logging.WARNING]
+    [record] = caplog.records
+    assert (record.levelno, record.getMessage()) == (logging.WARNING, "forwarded_for.ignored")
+    assert fields_of(record) == {"reason": reason}
 
 
 def test_the_warning_for_a_nearest_entry_that_is_not_an_address_quotes_none_of_it(
@@ -278,8 +283,9 @@ def test_the_warning_for_a_nearest_entry_that_is_not_an_address_quotes_none_of_i
         _get_client_ip(_TRUSTED_PEER, ["not-an-ip-SENTINEL"], trusted)
     assert caplog.records
     for record in caplog.records:
-        logged = [record.getMessage(), *map(str, record.args or ())]
-        assert not any("SENTINEL" in text or "not-an-ip" in text for text in logged)
+        logged = str(vars(record))
+        assert "SENTINEL" not in logged
+        assert "not-an-ip" not in logged
 
 
 def test_client_ip_ignores_a_chain_from_an_untrusted_peer() -> None:

@@ -650,12 +650,22 @@ wheels = [
 ]
 
 [[package]]
+name = "overnightworks-logline"
+version = "0.5.0"
+source = { git = "https://github.com/overnightworks/logline?tag=v0.5.0#8c96e5890458b42f9ddb97dc26ce4a6880011db4" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "structlog" },
+]
+
+[[package]]
 name = "overnightworks-webauth"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "overnightworks-logline" },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "starlette" },
@@ -676,6 +686,7 @@ dev = [
     { name = "deptry" },
     { name = "fakeredis", extra = ["lua"] },
     { name = "httpx" },
+    { name = "overnightworks-logline" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyright" },
     { name = "pytest" },
@@ -693,6 +704,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.0,<5" },
     { name = "cryptography", specifier = ">=50.0.2,<51" },
     { name = "fastapi", specifier = ">=0.123.7,<1" },
+    { name = "overnightworks-logline", specifier = ">=0.5,<0.6" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1,<3" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0,<9" },
@@ -708,6 +720,7 @@ dev = [
     { name = "deptry", specifier = "==0.25.1" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.20,<3" },
     { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?tag=v0.5.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pyright", specifier = ">=1.1.414,<2" },
     { name = "pytest", specifier = ">=7.4,<10" },
@@ -1142,6 +1155,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/48/bb/3d8757f21e9a53d9035c9eb039a777047139a16bfdbedfc7a58241c3d914/starlette-1.10.0.tar.gz", hash = "sha256:b8399098d4c1e3522734f7235dc79b1fc967f96cf139c81e0fa30479e0685f9b", size = 2734356, upload-time = "2026-10-24T15:04:12.342Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/2e/947cfe02def9371c07cd5bf5b6b61c829e9aecb9904db02a66cfafbc1eec/starlette-1.10.0-py3-none-any.whl", hash = "sha256:478c0ab3b4ced6e82719849c118fa406f0278a3499c1a898cd15cd31bdc38ce4", size = 80571, upload-time = "2026-10-24T15:04:10.371Z" },
+]
+
+[[package]]
+name = "structlog"
+version = "26.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5e/89/b4a0bcfdf4f71a3dea31379f095929613d7e4528a0996bca6aa964cd0dca/structlog-26.1.0.tar.gz", hash = "sha256:f63a716cbd1b1291cf7661de7794b455acfa4c43c5bcf1630e6ad5ddc1adb3b7", size = 1459881, upload-time = "2026-06-06T07:33:39.348Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/18/489c97b834dfff9cf2fc2507cede4bcd4b11e67f84bc462acd1992496f86/structlog-26.1.0-py3-none-any.whl", hash = "sha256:e081a26d6c373e6d201eca24eede26d8ffab07f88f477822e679183428d3d91e", size = 73764, upload-time = "2026-06-06T07:33:38.046Z" },
 ]
 
 [[package]]

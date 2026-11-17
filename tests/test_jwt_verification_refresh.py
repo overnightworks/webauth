@@ -17,6 +17,7 @@ from tests.support.jwt_issuer import (
     KEY_SET_TTL_SECONDS,
     IssuerScenario,
 )
+from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import (
     REALM_ISSUER,
     key_set_document,
@@ -27,7 +28,7 @@ from tests.support.oidc_arrangement import (
     weak_public_jwk,
 )
 from webauth import jwt_verification
-from webauth.https_client import KeySetFetchError
+from webauth.https_client import KeySetFetchError, fetch_key_set_over_https
 from webauth.jwt_verification import (
     RejectionReason,
     _Rejected,
@@ -41,11 +42,6 @@ _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signa
 @pytest.mark.parametrize(
     ("response", "logged_cause"),
     [
-        pytest.param(
-            KeySetFetchError(f"GET {_SECRET_BEARING_JWKS_URL} answered 503"),
-            "fetch-failed",
-            id="failed-fetch-quoting-its-url",
-        ),
         pytest.param(b"[]", "not-json", id="invalid-key-set"),
         pytest.param(
             key_set_document(
@@ -65,9 +61,11 @@ _SECRET_BEARING_JWKS_URL = f"https://login.example.org/certs/{_URL_SECRET}?signa
 def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
     issuer: IssuerScenario,
     caplog: pytest.LogCaptureFixture,
-    response: bytes | Exception,
+    response: bytes,
     logged_cause: str,
 ) -> None:
+    """LOG-03: a refresh that fetched an invalid key set is one `key_set_refresh.failed` event
+    with its cause code, no error class and none of its text."""
     verifier = issuer.verifier_with(jwks_url=_SECRET_BEARING_JWKS_URL)
     issuer.serve(response)
 
@@ -75,9 +73,26 @@ def test_a_failed_refresh_is_logged_by_its_cause_code_alone(
         verifier.verify(issuer.token())
 
     [warning] = caplog.records
-    assert logged_cause in warning.getMessage()
-    assert REALM_ISSUER not in warning.getMessage()
-    assert _URL_SECRET not in warning.getMessage()
+    assert warning.getMessage() == "key_set_refresh.failed"
+    assert fields_of(warning) == {"reason": logged_cause}
+    assert REALM_ISSUER not in str(vars(warning))
+    assert _URL_SECRET not in str(vars(warning))
+
+
+@pytest.mark.usefixtures("every_log_record")
+def test_an_unreachable_key_set_origin_logs_the_fetch_and_no_refresh_failure(
+    issuer: IssuerScenario, closed_port: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """LOG-03: the fetch's own `.ended` line is the one record of a failed fetch."""
+    verifier = issuer.verifier_with(
+        jwks_url=f"https://127.0.0.1:{closed_port}/certs",
+        fetch_key_set=fetch_key_set_over_https,
+    )
+
+    refused = verifier.verify(issuer.token())
+
+    assert refused == _Rejected(RejectionReason.KEY_SET_UNAVAILABLE)
+    assert [record.getMessage() for record in caplog.records] == ["key_set_fetch.ended"]
 
 
 def test_the_key_set_is_cached_on_the_monotonic_clock_until_its_ttl(

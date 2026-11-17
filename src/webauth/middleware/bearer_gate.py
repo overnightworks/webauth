@@ -79,6 +79,7 @@ __all__ = [
 ]
 
 _LOGGER: Final = logging.getLogger(__name__)
+_REFUSED_EVENT: Final = "bearer.refused"
 _MACHINE_CHALLENGE: Final = ('realm="admin"',)
 _METADATA_PREFIX: Final = "/.well-known/oauth-protected-resource"
 _AUTH_SCHEME: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
@@ -558,17 +559,13 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         *,
         challenge: tuple[str, ...] = (),
     ) -> JSONResponse:
+        fields: dict[str, str] = {"reason": refusal.case}
+        if reason is not None:
+            fields["oidc_reason"] = reason.reason.value
+            if reason.token_rejection is not None:
+                fields["token_rejection"] = reason.token_rejection.value
         level = logging.INFO if refusal is _Refusal.NO_CREDENTIALS else logging.WARNING
-        if reason is None:
-            _LOGGER.log(level, "Bearer request refused: %s", refusal.case)
-        else:
-            _LOGGER.log(
-                level,
-                "Bearer request refused: %s (%s, %s)",
-                refusal.case,
-                reason.reason.value,
-                None if reason.token_rejection is None else reason.token_rejection.value,
-            )
+        _LOGGER.log(level, _REFUSED_EVENT, extra=fields)
         return refusal.response(challenge)
 
 
