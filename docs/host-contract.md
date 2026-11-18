@@ -498,8 +498,11 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   - **GROUPS-26** Where the issuer lets a refresh token be used again, two overlapping calls, with
     each other or with `fresh_access_token`, each succeed and the last replacement written wins.
   - **GROUPS-27** An echoed token never overwrites a replacement.
-  - Where the issuer refuses reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session.
-  - **Host duty:** An app that calls this on every turn must expect that.
+  - The fleet's issuer allows reuse: the realm export in overnightworks/platform
+    (`infrastructure/keycloak/realm.yaml`) sets no revoke-on-use for refresh tokens, so overlapping
+    calls are the GROUPS-26 case and give no false `SIGN_IN_AGAIN` there, two overlapping `fresh_access_token` calls included.
+  - Where the issuer is configured to refuse reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session.
+  - **Host duty:** An app that calls this on every turn against such an issuer must expect that.
 - **Residue.** The second transaction cannot rule out a session deleted after its load: with a
   store that commits each statement, a deletion before the transaction's exit also escapes when
   the rotation is omitted or echoed, as [Risks and Technical Debt](ARCHITECTURE.md#8-risks-and-technical-debt) says.
