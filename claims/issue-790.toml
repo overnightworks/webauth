@@ -1,0 +1,8 @@
+claim_id = "606b5317645d409380ff6363b84eae3a"
+agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
+role = "builder"
+base = "b16edf3fd3e4bf06cc4aa97a31b07d26b98e85d3"
+branch = "claude/issue-790-postgres-expired-session-sweep"
+scope = ["docs/host-contract.md", "src/webauth/postgres.py", "tests/support/postgres_arrangement.py", "tests/test_postgres_sessions.py"]
+opened_commit = "caa77231686388e5fa33058bc1a899b2731574bd"
+whole_reason = "The sweep is one callable, its Postgres proof and its host-contract lines; they change together."
