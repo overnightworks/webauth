@@ -1,7 +1,0 @@
-claim_id = "02d15319cf924ba2809af8a1ed62c26f"
-agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
-role = "builder"
-base = "f55ad0863b74e835efc51812c63bef875e0b2a5f"
-branch = "claude/issue-794-release-0-41-0"
-scope = ["src/webauth/__init__.py"]
-opened_commit = "cb787a67947454a75ed857fc9ef9dfa50bd29e92"
