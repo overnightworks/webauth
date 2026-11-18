@@ -123,8 +123,9 @@ def delete_expired(connection: Connection, sessions_table: Table, now: datetime)
     `connection`: a repeat deletes nothing, and a sweep that meets another pod's waits for that
     transaction and then finds those rows gone. Two sweeps that lock rows in opposite orders can
     deadlock; the database aborts one with `SessionStoreError` and the host retries in a fresh
-    transaction or on its next cycle.
+    transaction or on its next cycle. A naive `now` raises `ValueError` before any statement.
     """
+    _require_aware(now)
     with database_errors_as_store_errors():
         return connection.execute(
             delete(sessions_table).where(sessions_table.c.expires_at < now.replace(microsecond=0))
@@ -167,6 +168,13 @@ def stored_key(session_id: str) -> str:
     `PostgresStoredKeySessions` finds the session by it.
     """
     return hashlib.sha256(session_id.encode()).hexdigest()
+
+
+def _require_aware(*instants: datetime) -> None:
+    """Refuse a naive instant before any statement: the database would read it in the session's
+    time zone and store or compare a different moment."""
+    if any(instant.utcoffset() is None for instant in instants):
+        raise ValueError("A session instant needs a timezone")
 
 
 def _secret(token: str | None) -> SecretStr | None:
@@ -221,6 +229,7 @@ class _SessionRows(ABC):
         return None if row is None or user is None else _stored_session(session_id, row, user)
 
     def touch(self, session_id: str, *, expires_at: datetime) -> bool:
+        _require_aware(expires_at)
         return self._updated(session_id, expires_at=expires_at)
 
     def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
@@ -283,7 +292,9 @@ class PostgresSessionStore(_SessionRows):
         account_language: str | None,
     ) -> SessionRecord:
         """Store the session under the hash of `session_id`; a held hash, an expired row's
-        included, is refused by the primary key and leaves the row unchanged."""
+        included, is refused by the primary key and leaves the row unchanged. A naive `now` or
+        `expires_at` raises `ValueError` before any statement."""
+        _require_aware(now, expires_at)
         with database_errors_as_store_errors():
             user = self._accounts.get(user_id)
             if user is None:

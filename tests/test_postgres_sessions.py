@@ -7,6 +7,7 @@ import traceback
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from operator import attrgetter
 
@@ -451,6 +452,73 @@ def test_a_failed_call_raises_the_store_error_with_nothing_of_its_parameters(
     shown = what_a_log_shows_of(raised.value)
     for private in ("abc", ABC_DIGEST, subject, "refresh-secret", "identity-secret"):
         assert private not in shown
+
+
+AWARENESS = pytest.mark.parametrize(
+    "aware", [True, False], ids=["aware instant accepted", "naive instant refused"]
+)
+
+
+def an_instant(instant: datetime, *, aware: bool) -> datetime:
+    return instant if aware else instant.replace(tzinfo=None)
+
+
+def refusal_unless(aware: bool) -> AbstractContextManager[object]:
+    return nullcontext() if aware else pytest.raises(ValueError)
+
+
+@AWARENESS
+@pytest.mark.parametrize("naive_field", ["now", "expires_at"])
+def test_create_refuses_a_naive_instant_and_stores_no_row(
+    host: PostgresHost, scenario: ExpirySweepScenario, aware: bool, naive_field: str
+) -> None:
+    """PGSTORE-09."""
+    subject = an_account(host)
+    instants = {"now": scenario.instant, "expires_at": scenario.instant + timedelta(hours=1)}
+    instants[naive_field] = an_instant(instants[naive_field], aware=aware)
+
+    with refusal_unless(aware):
+        host.sessions.create(
+            subject,
+            session_id="abc",
+            refresh_token=None,
+            id_token=None,
+            account_language=None,
+            **instants,
+        )
+
+    assert host.count_rows(host.tables.sessions) == int(aware)
+
+
+@AWARENESS
+def test_touch_refuses_a_naive_expiry_and_changes_no_row(
+    host: PostgresHost, scenario: ExpirySweepScenario, aware: bool
+) -> None:
+    """PGSTORE-09."""
+    session_id = scenario.session(an_account(host), expires_after=timedelta(hours=1))
+    later = an_instant(scenario.instant + timedelta(hours=2), aware=aware)
+
+    with refusal_unless(aware):
+        host.sessions.touch(session_id, expires_at=later)
+
+    stored = host.sessions.load(session_id)
+    assert stored is not None
+    assert stored.expires_at == (
+        scenario.instant + timedelta(hours=2) if aware else scenario.instant + timedelta(hours=1)
+    )
+
+
+@AWARENESS
+def test_the_sweep_refuses_a_naive_now_and_deletes_no_row(
+    host: PostgresHost, scenario: ExpirySweepScenario, aware: bool
+) -> None:
+    """PGSTORE-09."""
+    scenario.session(an_account(host), expires_after=-ONE_SECOND)
+
+    with refusal_unless(aware):
+        host.sweep(an_instant(scenario.instant, aware=aware))
+
+    assert host.count_rows(host.tables.sessions) == int(not aware)
 
 
 def test_a_session_whose_account_the_hosts_store_no_longer_knows_loads_as_none(

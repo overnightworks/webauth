@@ -337,8 +337,9 @@ def fresh_access_token(
     ``invalid_grant`` and answers a false ``SIGN_IN_AGAIN``.
 
     Call it from a worker thread, outside any open session transaction and
-    outside any open session or sign-in transaction, with a ``session_id`` that
-    ``session_id_from_request`` bounded. It raises when the store fails, when
+    outside any open session or sign-in transaction. ``session_id`` is the cookie's id,
+    which ``session_id_from_request`` bounds, or, when ``session_transaction`` yields a
+    stored-key view (PGSTORE-11), the session's stored key. It raises when the store fails, when
     ``replace_refresh_token`` answers anything but a ``bool``, or when the
     transaction's exit fails; no token is handed out then.
     """
@@ -398,9 +399,11 @@ def current_groups(
     verified ID token of a refresh grant made in this call; ``()`` is no membership.
 
     It shares ``fresh_access_token``'s grant, second transaction, rotation and overlap
-    behaviour, and its refusals. The stored ID token plays no part. A replacement refresh
-    token is stored even when the new ID token is refused (``ISSUER_UNAVAILABLE`` with
-    ``issuer_refusal`` naming why), and a session gone by then is ``SESSION_ENDED``."""
+    behaviour, its refusals, and what ``session_id`` is: the cookie's id or, through a
+    stored-key view (PGSTORE-11), the session's stored key. The stored ID token plays no
+    part. A replacement refresh token is stored even when the new ID token is refused
+    (``ISSUER_UNAVAILABLE`` with ``issuer_refusal`` naming why), and a session gone by then
+    is ``SESSION_ENDED``."""
     held = _evidence_of_standing_session(session_id, session_transaction, config)
     if isinstance(held, AccessTokenRefusal):
         return held
