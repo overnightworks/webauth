@@ -575,13 +575,13 @@ def test_the_stored_key_is_the_sha256_hex_digest_of_the_session_id() -> None:
 
 
 def test_the_stored_key_view_reads_and_changes_the_row_under_its_stored_key(
-    host: PostgresHost,
+    host: PostgresHost, scenario: ExpirySweepScenario
 ) -> None:
     """PGSTORE-10, PGSTORE-11: the view finds the row the raw-keyed store keeps and answers the
     stored key as the record's id, and a raw id finds nothing in it."""
-    session_id = a_stored_session(host.sessions, an_account(host))
+    session_id = scenario.session(an_account(host), expires_after=timedelta(hours=1))
     key = stored_key(session_id)
-    later = datetime.now(UTC) + timedelta(days=2)
+    later = scenario.instant + timedelta(days=2)
 
     with host.engine.begin() as connection:
         view = a_stored_key_view(connection, host.tables)
@@ -603,11 +603,11 @@ def test_the_stored_key_view_reads_and_changes_the_row_under_its_stored_key(
 
 
 def test_the_stored_key_view_refuses_to_create_a_session_so_a_hash_never_becomes_a_cookie(
-    host: PostgresHost,
+    host: PostgresHost, scenario: ExpirySweepScenario
 ) -> None:
     """PGSTORE-11."""
     subject = an_account(host)
-    now = datetime.now(UTC)
+    now = scenario.instant
 
     with host.engine.begin() as connection:
         view = a_stored_key_view(connection, host.tables)
