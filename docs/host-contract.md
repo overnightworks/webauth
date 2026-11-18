@@ -180,13 +180,14 @@ What the installer applies when the host passes none:
 
 ## What webauth logs
 
-Every line webauth writes goes through the standard-library logger of its own module, with a literal `<noun>.<verb_past>` event as the message and its values as scalar fields in `extra=`, as the fleet logging standard of [logline](https://github.com/overnightworks/logline) asks. A host that calls logline's `configure` gets each line as one JSON record. webauth depends on `overnightworks-logline` as a version range by name, so the host pins its git tag and the tag must lie in that range. No line carries a traceback, a message, an address, a path, a header, a token or a key.
+Every line webauth writes goes through the standard-library logger of its own module, with a literal `<noun>.<verb_past>` event as the message and its values as scalar fields in `extra=`, as the fleet logging standard of [logline](https://github.com/overnightworks/logline) asks. A host that calls logline's `configure` gets each line as one JSON record. webauth depends on `overnightworks-logline` as a version range by name, so the host pins its git tag and the tag must lie in that range. No line webauth writes carries a traceback, a message, an address, a path, a header, a token or a key; the request line below is logline's own.
 
 - **LOG-01** `rate_limit_outage.started` (ERROR) carries `error_type`, the exception's class name; `rate_limit_outage.ended` (INFO) carries `refused_count`, the requests refused meanwhile.
 - **LOG-02** `bearer.refused` carries `reason`, the refusal case (`no-credentials` at INFO, every other case at WARNING), and, when the token was refused, `oidc_reason` and `token_rejection` when one applies.
 - **LOG-03** `key_set_refresh.failed` (WARNING) carries `reason`, the code of why the fetched key set was refused (for example `not-json`, `duplicate-key-id`, `key-too-short`), and no error class. A refresh that failed because the fetch failed writes no such line: the fetch's own `key_set_fetch.ended` line (LOG-05) already records that failure.
 - **LOG-04** `forwarded_for.ignored` (WARNING) carries `reason`: `not-an-address` when the nearest entry of the chain is no address, `too-many-trusted-hops` when more trusted hops follow in a row than the bound. Behind uvicorn's own proxy-header handling (its default `--proxy-headers` with `forwarded-allow-ips`), uvicorn rewrites the peer from `X-Forwarded-For` before webauth sees it, so `TrustedProxies` and this line apply only when the host turns uvicorn's handling off.
 - **LOG-05** The calls to the issuer each write one `.ended` line through logline's `StepTimer`: `key_set_fetch.ended` and `token_request.ended` carry `duration_ms`, `outcome`, `status` once the origin answered, a `reason` code when the call failed (`unreachable`, `tls-failed`, `timed-out`, `broken-off` or `too-large`) or the origin answered a status it does not accept (`status-not-accepted`, outcome `refused`, at INFO), and `error_type`, the class name of the transport error, when the call failed on one (an answer past the size limit fails as `too-large` with no error). A failed fetch is a WARNING, since the verifier goes on with the key set it holds; a failed token request is an ERROR.
+- **LOG-06** The request line, `request.ended`, is written by logline's `RequestLineMiddleware`, which the host still installs after every other middleware and whose `configure` it still calls; webauth installs neither. Where that middleware wraps webauth's stack, webauth gives the line its `sub` and `ip`, so the host sets neither with `set_sub` or `set_client_ip`. `ip` is the client address `TrustedProxies` resolves (the rightmost hop no entry vouches for), set on every http request of the stack by the middleware just inside the security headers, so every refusal's line carries it, an exempt path included. `sub` is the `id` of the account `admitted_user` returns: the session gate sets it for a live session on a gated or optional path, the bearer gate for the account behind a token on a person path or at a protected resource, and the sign-in callback sets it once it has signed a person in, so the callback's own line carries the new person, and `current_user` sets it for the account it resolves, so a route guarded by `current_user_dependency` alone, with no `SessionGate`, carries it too. A request with no admitted account, and a machine admitted on a machine path (a `BearerCaller`, no account), has `sub` `null`.
 
 ## CSRF origin
 
@@ -497,8 +498,11 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   - **GROUPS-26** Where the issuer lets a refresh token be used again, two overlapping calls, with
     each other or with `fresh_access_token`, each succeed and the last replacement written wins.
   - **GROUPS-27** An echoed token never overwrites a replacement.
-  - Where the issuer refuses reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session.
-  - **Host duty:** An app that calls this on every turn must expect that.
+  - The fleet's issuer allows reuse: the realm export in overnightworks/platform
+    (`infrastructure/keycloak/realm.yaml`) sets no revoke-on-use for refresh tokens, so overlapping
+    calls are the GROUPS-26 case and give no false `SIGN_IN_AGAIN` there, two overlapping `fresh_access_token` calls included.
+  - Where the issuer is configured to refuse reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session.
+  - **Host duty:** An app that calls this on every turn against such an issuer must expect that.
 - **Residue.** The second transaction cannot rule out a session deleted after its load: with a
   store that commits each statement, a deletion before the transaction's exit also escapes when
   the rotation is omitted or echoed, as [Risks and Technical Debt](ARCHITECTURE.md#8-risks-and-technical-debt) says.

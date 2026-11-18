@@ -76,6 +76,7 @@ from typing import TYPE_CHECKING
 
 import anyio.to_thread
 from fastapi import FastAPI, Request  # noqa: TC002  # FastAPI reads the annotation at runtime
+from logline import set_sub
 from starlette.responses import RedirectResponse, Response
 
 from webauth._paths import _has_dot_segment, reads_as_another_host, same_app_path
@@ -93,6 +94,7 @@ from webauth.oidc_login import (
     _decide_admission,
     _log_out,
     _receive_backchannel_logout,
+    _SignedIn,
     _start_login,
     _UsernameTakenSignal,
     _write_sign_in,
@@ -234,14 +236,14 @@ def install_sign_in_routes(
     """Register the start and callback routes of the sign-in, the logout route and the
     back-channel logout route on ``app``.
 
-    The start route stores the pending login in its own signed cookie, with the
-    ``next`` query value as the path to return to, and redirects (303) to the issuer. The
-    callback clears exactly the pending cookie its state names and, once the transaction's
-    exit returned, answers 303 to that return path, or to the app root when there is none,
-    with the session cookie. Every other answer is the host's ``refused`` hook's, which
-    receives the cause and returns any ``Response``. Every callback answer sent after the
-    pending cookie was selected carries its deletion, also the hook's, the 500 of a failure
-    in the hook or in the transaction, and an answer that fails before it starts; a failure
+    The start route stores the pending login in its own signed cookie, with the ``next`` query value
+    as the path to return to, and redirects (303) to the issuer. The callback clears exactly the
+    pending cookie its state names and, once the transaction's exit returned, answers 303 to that
+    return path, or to the app root when there is none, with the session cookie; the account's
+    ``id`` is then the ``sub`` of the callback's request line. Every other answer is the host's
+    ``refused`` hook's, which receives the cause and returns any ``Response``. Every callback answer
+    sent after the pending cookie was selected carries its deletion, also the hook's, the 500 of a
+    failure in the hook or in the transaction, and an answer that fails before it starts; a failure
     is then re-raised once that 500 is sent. Nothing is sent after an answer has started.
 
     A callback names a usable state when it carries ``state`` exactly once,
@@ -397,14 +399,15 @@ class _SignIn:
             return self._refuse(request, admitted)
         replaced_session_id = session_id_from_request(request, config)
         try:
-            session_id = self._write(admitted, config, replaced_session_id)
+            signed_in = self._write(admitted, config, replaced_session_id)
         except _UsernameTakenSignal:
             return self._refuse(request, AdmissionRefusal.USERNAME_TAKEN)
+        set_sub(request.scope, signed_in.person_id)
         answer = RedirectResponse(
             same_app_path(request, pending.return_to) or _app_root(request),
             status_code=303,
         )
-        issue_session_cookies(answer, session_id, config)
+        issue_session_cookies(answer, signed_in.session_id, config)
         return answer
 
     def _write(
@@ -412,7 +415,7 @@ class _SignIn:
         admitted: _AdmittedLogin,
         config: WebAuthConfig,
         replaced_session_id: str | None,
-    ) -> str:
+    ) -> _SignedIn:
         with self.transaction() as stores:
             return _write_sign_in(
                 stores,
