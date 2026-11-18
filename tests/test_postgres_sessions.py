@@ -40,7 +40,6 @@ from tests.support.postgres_arrangement import (
     a_schema_of_its_own,
     postgres_url,
 )
-from tests.support.webauth_arrangement import a_web_auth_config
 from webauth.dependencies import ConnectionRefusal, admit_session
 from webauth.ports import (
     AccountEvent,
@@ -286,7 +285,9 @@ def test_a_sweep_within_the_second_of_an_expiry_keeps_the_session_the_gate_admit
     assert not isinstance(admitted, ConnectionRefusal)
 
 
-def test_a_repeated_sweep_deletes_nothing(host: PostgresHost, scenario: ExpirySweepScenario) -> None:
+def test_a_repeated_sweep_deletes_nothing(
+    host: PostgresHost, scenario: ExpirySweepScenario
+) -> None:
     """PGSTORE-09."""
     scenario.session(an_account(host), expires_after=-ONE_SECOND)
     scenario.sweep()

@@ -114,10 +114,11 @@ def delete_expired(connection: Connection, sessions_table: Table, now: datetime)
 
     The session gate reads its clock in whole seconds and admits a session until `expires_at`, an
     expiry equal to that second included, so this reads `now` in whole seconds too and deletes
-    what the gate refuses. It is one conditional delete inside the host's transaction on `connection`: a repeat
-    deletes nothing, and a sweep that meets another pod's waits for that transaction and then finds
-    those rows gone. Two sweeps that lock rows in opposite orders can deadlock; the database aborts
-    one with `SessionStoreError` and the host retries in a fresh transaction or on its next cycle.
+    what the gate refuses. It is one conditional delete inside the host's transaction on
+    `connection`: a repeat deletes nothing, and a sweep that meets another pod's waits for that
+    transaction and then finds those rows gone. Two sweeps that lock rows in opposite orders can
+    deadlock; the database aborts one with `SessionStoreError` and the host retries in a fresh
+    transaction or on its next cycle.
     """
     with database_errors_as_store_errors():
         return connection.execute(
