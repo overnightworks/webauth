@@ -97,13 +97,6 @@ def host() -> Iterator[PostgresHost]:
             arranged.close()
 
 
-def a_session(sessions: SessionRecordStore, subject: str, session_id: str | None = None) -> str:
-    now = datetime.now(UTC)
-    return a_stored_session(
-        sessions, subject, now=now, expires_at=now + timedelta(hours=1), session_id=session_id
-    )
-
-
 def what_a_log_shows_of(error: SessionStoreError) -> str:
     """The error as a traceback prints it, without the source lines of the frames: its own text
     and, unless the error hides it, the error it replaced."""
@@ -139,7 +132,7 @@ def test_a_block_that_raises_leaves_no_session_and_no_account(host: PostgresHost
         with host.transaction() as stores:
             subject = str(uuid.uuid4())
             stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
-            a_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
             raise BlockFailed
 
     with pytest.raises(BlockFailed):
@@ -161,7 +154,7 @@ def test_an_audit_sink_that_fails_leaves_no_session_and_raises_its_own_error(
         with transaction() as stores:
             subject = str(uuid.uuid4())
             stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
-            a_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
             stores.audit.account_event(
                 AccountEvent(AccountEventKind.USER_CREATED, None, subject, role="user")
             )
@@ -186,8 +179,8 @@ def test_a_failing_commit_leaves_no_session_and_raises_the_store_error(host: Pos
 
     def sign_in_twice() -> None:
         with host.transaction() as stores:
-            a_session(stores.sessions, subject)
-            a_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
 
     with pytest.raises(SessionStoreError):
         sign_in_twice()
@@ -219,8 +212,8 @@ def test_deleting_an_account_ends_its_sessions_and_ending_a_session_keeps_the_ac
 ) -> None:
     """PGSTORE-06."""
     subject = an_account(host)
-    ended = a_session(host.sessions, subject)
-    kept = a_session(host.sessions, subject)
+    ended = a_stored_session(host.sessions, subject)
+    kept = a_stored_session(host.sessions, subject)
 
     host.sessions.delete(ended)
 
@@ -417,7 +410,7 @@ def test_touch_and_a_replaced_refresh_token_persist_and_keep_the_other_fields(
     host: PostgresHost,
 ) -> None:
     """PGSTORE-04: `touch` changes only the expiry, `replace_refresh_token` only the token."""
-    session_id = a_session(host.sessions, an_account(host))
+    session_id = a_stored_session(host.sessions, an_account(host))
     before = host.sessions.load(session_id)
     assert before is not None
     later = before.expires_at + timedelta(hours=2)
@@ -444,10 +437,10 @@ def test_a_failed_call_raises_the_store_error_with_nothing_of_its_parameters(
 ) -> None:
     """PGSTORE-07."""
     subject = an_account(host)
-    a_session(host.sessions, subject, session_id="abc")
+    a_stored_session(host.sessions, subject, session_id="abc")
 
     with pytest.raises(SessionStoreError) as raised:
-        a_session(host.sessions, subject, session_id="abc")
+        a_stored_session(host.sessions, subject, session_id="abc")
 
     shown = what_a_log_shows_of(raised.value)
     for private in ("abc", ABC_DIGEST, subject, "refresh-secret", "identity-secret"):
@@ -458,7 +451,7 @@ def test_a_session_whose_account_the_hosts_store_no_longer_knows_loads_as_none(
     host: PostgresHost,
 ) -> None:
     """PGSTORE-05."""
-    session_id = a_session(host.sessions, an_account(host))
+    session_id = a_stored_session(host.sessions, an_account(host))
 
     with host.engine.connect() as connection:
         store = PostgresSessionStore(
@@ -468,7 +461,7 @@ def test_a_session_whose_account_the_hosts_store_no_longer_knows_loads_as_none(
 
 
 def create_a_session(store: PostgresSessionStore, subject: str, session_id: str) -> None:
-    a_session(store, subject)
+    a_stored_session(store, subject)
 
 
 def load_a_session(store: PostgresSessionStore, subject: str, session_id: str) -> None:
@@ -481,7 +474,7 @@ def test_a_failed_account_read_raises_the_store_error(
 ) -> None:
     """PGSTORE-07: the host's account read inside a store call is a store call's failure."""
     subject = an_account(host)
-    session_id = a_session(host.sessions, subject)
+    session_id = a_stored_session(host.sessions, subject)
     with host.engine.connect() as connection:
         store = PostgresSessionStore(
             connection, AccountReadFails(connection, host.tables.accounts), host.tables.sessions

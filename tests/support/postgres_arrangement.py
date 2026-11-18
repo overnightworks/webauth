@@ -260,18 +260,21 @@ def a_stored_session(
     sessions: SessionRecordStore,
     subject: str,
     *,
-    now: datetime,
-    expires_at: datetime,
+    now: datetime | None = None,
+    expires_at: datetime | None = None,
     session_id: str | None = None,
+    refresh_token: str = "refresh-secret",  # noqa: S107
 ) -> str:
-    """Creates a session with tokens and a language, and returns its id."""
+    """Creates a session with tokens and a language, and returns its id; unless told, it starts
+    now and lives an hour."""
+    started = datetime.now(UTC) if now is None else now
     identifier = uuid.uuid4().hex if session_id is None else session_id
     sessions.create(
         subject,
         session_id=identifier,
-        now=now,
-        expires_at=expires_at,
-        refresh_token=SecretStr("refresh-secret"),
+        now=started,
+        expires_at=started + timedelta(hours=1) if expires_at is None else expires_at,
+        refresh_token=SecretStr(refresh_token),
         id_token=SecretStr("identity-secret"),
         account_language="de",
     )
