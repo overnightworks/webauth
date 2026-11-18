@@ -9,12 +9,15 @@ commits. The host's migrations create the table `session_table` puts on its `Met
 runs DDL. `delete_expired` is the sweep the host schedules.
 
 A session id is stored as the SHA-256 hex digest of the id, so a stored row is no live cookie. The
-store hands the raw id back from `create` and `load`; account ids are never hashed.
+store hands the raw id back from `create` and `load`; account ids are never hashed. That digest is
+the session's stored key: `stored_key` computes it, and `PostgresStoredKeySessions` reads and
+changes the same rows by it, for a host that keeps the key beside its own rows and has no raw id.
 """
 
 from __future__ import annotations
 
 import hashlib
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
@@ -51,11 +54,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PostgresSessionStore",
+    "PostgresStoredKeySessions",
     "SessionStoreError",
     "database_errors_as_store_errors",
     "delete_expired",
     "session_table",
     "sign_in_entry",
+    "stored_key",
 ]
 
 _TABLE_NAME: Final = "sessions"
@@ -155,7 +160,12 @@ def sign_in_entry(
     deferred.flush_to(audit)
 
 
-def _stored_key(session_id: str) -> str:
+def stored_key(session_id: str) -> str:
+    """The key a session's row carries: the SHA-256 hex digest of its id, which the row never holds.
+
+    A host column may reference it (`ON DELETE SET NULL` is the host's to declare), and
+    `PostgresStoredKeySessions` finds the session by it.
+    """
     return hashlib.sha256(session_id.encode()).hexdigest()
 
 
@@ -186,14 +196,10 @@ def _stored_session(session_id: str, row: Row[Any], user: UserRecord) -> _Stored
     )
 
 
-class PostgresSessionStore:
-    """The sessions in the host's table, every call run on the host's `connection`.
-
-    Each call is part of whatever transaction the host has open on `connection`; the store commits
-    nothing. A database failure raises `SessionStoreError`. `load` reads the account through the
-    host's `accounts` store over the same connection, and returns `None` when the account is gone,
-    and an expired row as the port says: the gate refuses it.
-    """
+class _SessionRows(ABC):
+    """The calls of both stores that find a row by its key: `_key_of` turns the id a caller gives
+    into the row's key. Each call is part of whatever transaction the host has open on
+    `connection`; nothing here commits."""
 
     def __init__(
         self, connection: Connection, accounts: SubjectUserStore, sessions_table: Table
@@ -202,44 +208,14 @@ class PostgresSessionStore:
         self._accounts = accounts
         self._table = sessions_table
 
-    def create(
-        self,
-        user_id: str,
-        *,
-        session_id: str,
-        now: datetime,
-        expires_at: datetime,
-        refresh_token: SecretStr | None,
-        id_token: SecretStr | None,
-        account_language: str | None,
-    ) -> SessionRecord:
-        """Store the session under the hash of `session_id`; a held hash, an expired row's
-        included, is refused by the primary key and leaves the row unchanged."""
-        with database_errors_as_store_errors():
-            user = self._accounts.get(user_id)
-            if user is None:
-                raise SessionStoreError(_STORE_ERROR_MESSAGE)
-            row = self._connection.execute(
-                insert(self._table)
-                .values(
-                    id_hash=_stored_key(session_id),
-                    account_id=user_id,
-                    created_at=now,
-                    expires_at=expires_at,
-                    refresh_token=None
-                    if refresh_token is None
-                    else refresh_token.get_secret_value(),
-                    id_token=None if id_token is None else id_token.get_secret_value(),
-                    account_language=account_language,
-                )
-                .returning(self._table)
-            ).one()
-        return _stored_session(session_id, row, user)
+    @abstractmethod
+    def _key_of(self, session_id: str) -> str:
+        """The key of the row that `session_id` names."""
 
     def load(self, session_id: str) -> SessionRecord | None:
         with database_errors_as_store_errors():
             row = self._connection.execute(
-                select(self._table).where(self._table.c.id_hash == _stored_key(session_id))
+                select(self._table).where(self._table.c.id_hash == self._key_of(session_id))
             ).one_or_none()
             user = None if row is None else self._accounts.get(row.account_id)
         return None if row is None or user is None else _stored_session(session_id, row, user)
@@ -253,7 +229,7 @@ class PostgresSessionStore:
     def delete(self, session_id: str) -> None:
         with database_errors_as_store_errors():
             self._connection.execute(
-                delete(self._table).where(self._table.c.id_hash == _stored_key(session_id))
+                delete(self._table).where(self._table.c.id_hash == self._key_of(session_id))
             )
 
     def delete_for_user(self, user_id: str) -> int:
@@ -277,7 +253,81 @@ class PostgresSessionStore:
         with database_errors_as_store_errors():
             result = self._connection.execute(
                 update(self._table)
-                .where(self._table.c.id_hash == _stored_key(session_id))
+                .where(self._table.c.id_hash == self._key_of(session_id))
                 .values(**values)
             )
         return result.rowcount == 1
+
+
+class PostgresSessionStore(_SessionRows):
+    """The sessions in the host's table, every call run on the host's `connection`.
+
+    Each call is part of whatever transaction the host has open on `connection`; the store commits
+    nothing. A database failure raises `SessionStoreError`. `load` reads the account through the
+    host's `accounts` store over the same connection, and returns `None` when the account is gone,
+    and an expired row as the port says: the gate refuses it.
+    """
+
+    def _key_of(self, session_id: str) -> str:
+        return stored_key(session_id)
+
+    def create(
+        self,
+        user_id: str,
+        *,
+        session_id: str,
+        now: datetime,
+        expires_at: datetime,
+        refresh_token: SecretStr | None,
+        id_token: SecretStr | None,
+        account_language: str | None,
+    ) -> SessionRecord:
+        """Store the session under the hash of `session_id`; a held hash, an expired row's
+        included, is refused by the primary key and leaves the row unchanged."""
+        with database_errors_as_store_errors():
+            user = self._accounts.get(user_id)
+            if user is None:
+                raise SessionStoreError(_STORE_ERROR_MESSAGE)
+            row = self._connection.execute(
+                insert(self._table)
+                .values(
+                    id_hash=stored_key(session_id),
+                    account_id=user_id,
+                    created_at=now,
+                    expires_at=expires_at,
+                    refresh_token=None
+                    if refresh_token is None
+                    else refresh_token.get_secret_value(),
+                    id_token=None if id_token is None else id_token.get_secret_value(),
+                    account_language=account_language,
+                )
+                .returning(self._table)
+            ).one()
+        return _stored_session(session_id, row, user)
+
+
+class PostgresStoredKeySessions(_SessionRows):
+    """The same rows as `PostgresSessionStore`, found by the stored key, for the host's background
+    reads (`current_groups`, `fresh_access_token`) that hold the key beside its own rows and never
+    the raw id.
+
+    A call takes the stored key where the raw-keyed store takes the id, and a record's `id` is the
+    stored key it was given, so a raw id finds nothing here, as a stored key finds nothing in the
+    raw-keyed store. `create` refuses, so a stored key never becomes a session id.
+    """
+
+    def _key_of(self, session_id: str) -> str:
+        return session_id
+
+    def create(
+        self,
+        user_id: str,
+        *,
+        session_id: str,
+        now: datetime,
+        expires_at: datetime,
+        refresh_token: SecretStr | None,
+        id_token: SecretStr | None,
+        account_language: str | None,
+    ) -> SessionRecord:
+        raise TypeError("A stored key names a session and cannot start one")

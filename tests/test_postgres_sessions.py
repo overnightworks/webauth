@@ -30,18 +30,24 @@ from sqlalchemy import (
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 
+from tests.support.current_groups_arrangement import GROUPS, SESSION_ENDED, SESSION_ID
+from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
 from tests.support.postgres_arrangement import (
     ExpirySweepScenario,
     HostSignInTransaction,
     PostgresAccountStore,
     PostgresHost,
+    StoredKeyReads,
     TransactionInAnotherProcess,
     a_hosts_tables,
     a_schema_of_its_own,
+    a_stored_key_view,
     a_stored_session,
     postgres_url,
+    stored_key_reads_of,
 )
 from webauth.dependencies import ConnectionRefusal, admit_session
+from webauth.oidc_login import AccessTokenRefusal, current_groups, fresh_access_token
 from webauth.ports import (
     AccountEvent,
     AccountEventKind,
@@ -53,6 +59,7 @@ from webauth.postgres import (
     SessionStoreError,
     database_errors_as_store_errors,
     delete_expired,
+    stored_key,
 )
 from webauth.store_contract import STORE_CHECKS, StoreAdapter, StoreCheck
 
@@ -560,3 +567,156 @@ def test_an_alembic_autogenerate_against_the_migrated_session_table_shows_no_dif
             engine.dispose()
 
     assert differences == []
+
+
+def test_the_stored_key_is_the_sha256_hex_digest_of_the_session_id() -> None:
+    """PGSTORE-10."""
+    assert stored_key("abc") == ABC_DIGEST
+
+
+def test_the_stored_key_view_reads_and_changes_the_row_under_its_stored_key(
+    host: PostgresHost,
+) -> None:
+    """PGSTORE-10, PGSTORE-11: the view finds the row the raw-keyed store keeps and answers the
+    stored key as the record's id, and a raw id finds nothing in it."""
+    session_id = a_stored_session(host.sessions, an_account(host))
+    key = stored_key(session_id)
+    later = datetime.now(UTC) + timedelta(days=2)
+
+    with host.engine.begin() as connection:
+        view = a_stored_key_view(connection, host.tables)
+        loaded = view.load(key)
+        raw_id_found = view.load(session_id)
+        touched = view.touch(key, expires_at=later)
+        replaced = view.replace_refresh_token(key, refresh_token=SecretStr("replacement"))
+
+    after = host.sessions.load(session_id)
+    assert loaded is not None
+    assert loaded.id == key
+    assert raw_id_found is None
+    assert (touched, replaced) == (True, True)
+    assert after is not None
+    assert (after.expires_at, after.refresh_token) == (later, SecretStr("replacement"))
+    with host.engine.begin() as connection:
+        a_stored_key_view(connection, host.tables).delete(key)
+    assert host.sessions.load(session_id) is None
+
+
+def test_the_stored_key_view_refuses_to_create_a_session_so_a_hash_never_becomes_a_cookie(
+    host: PostgresHost,
+) -> None:
+    """PGSTORE-11."""
+    subject = an_account(host)
+    now = datetime.now(UTC)
+
+    with host.engine.begin() as connection:
+        view = a_stored_key_view(connection, host.tables)
+        with pytest.raises(TypeError):
+            view.create(
+                subject,
+                session_id=ABC_DIGEST,
+                now=now,
+                expires_at=now + timedelta(hours=1),
+                refresh_token=None,
+                id_token=None,
+                account_language=None,
+            )
+
+    assert host.count_rows(host.tables.sessions) == 0
+
+
+@pytest.fixture
+def reads(host: PostgresHost) -> Iterator[StoredKeyReads]:
+    arranged = stored_key_reads_of(host)
+    try:
+        yield arranged
+    finally:
+        arranged.engine.dispose()
+
+
+def read_groups(reads: StoredKeyReads, session_id: str) -> object:
+    return current_groups(
+        reads.groups.relying_party,
+        session_id,
+        session_transaction=reads.transaction,
+        config=reads.groups.config,
+    )
+
+
+def read_an_access_token(reads: StoredKeyReads, session_id: str) -> object:
+    return fresh_access_token(
+        reads.groups.relying_party,
+        session_id,
+        session_transaction=reads.transaction,
+        config=reads.groups.config,
+    )
+
+
+BACKGROUND_READS = pytest.mark.parametrize(
+    "read", [read_groups, read_an_access_token], ids=attrgetter("__name__")
+)
+
+
+def test_current_groups_reads_the_groups_of_a_session_named_by_its_stored_key(
+    reads: StoredKeyReads,
+) -> None:
+    """PGSTORE-11."""
+    assert read_groups(reads, reads.stored_key) == tuple(GROUPS)
+
+
+def test_fresh_access_token_reads_a_token_for_a_session_named_by_its_stored_key(
+    reads: StoredKeyReads,
+) -> None:
+    """PGSTORE-11."""
+    reads.groups.answer_with_access_token()
+
+    token = read_an_access_token(reads, reads.stored_key)
+
+    assert token == SecretStr(reads.groups.answered_tokens[-1])
+
+
+@BACKGROUND_READS
+def test_a_rotated_refresh_token_is_stored_under_the_original_stored_key(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11: a rotation replaces the token in the row and adds none."""
+    read(reads, reads.stored_key)
+
+    assert reads.refresh_token in reads.groups.issuer.refresh_tokens - {ISSUED_REFRESH_TOKEN}
+    assert reads.host.count_rows(reads.host.tables.sessions) == 1
+
+
+@BACKGROUND_READS
+def test_a_session_deleted_during_the_grant_is_session_ended_and_never_recreated(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11."""
+    reads.groups.issuer.before_exchange = lambda: reads.host.sessions.delete(SESSION_ID)
+
+    assert read(reads, reads.stored_key) == SESSION_ENDED
+    assert reads.host.count_rows(reads.host.tables.sessions) == 0
+
+
+@BACKGROUND_READS
+def test_no_connection_of_the_host_is_out_while_the_issuer_is_asked(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11: the two host transactions are separate, with none open during the grant."""
+    checked_out_during_grant: list[int] = []
+    reads.groups.issuer.before_exchange = lambda: checked_out_during_grant.append(
+        reads.connections_checked_out
+    )
+
+    outcome = read(reads, reads.stored_key)
+
+    assert not isinstance(outcome, AccessTokenRefusal)
+    assert checked_out_during_grant == [0]
+
+
+@BACKGROUND_READS
+def test_a_raw_session_id_finds_no_session_through_the_stored_key_view(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11: one store never accepts both key forms."""
+    assert read(reads, SESSION_ID) == SESSION_ENDED
+    assert reads.groups.requests_made == 0
