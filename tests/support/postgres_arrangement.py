@@ -6,6 +6,7 @@ The accounts table follows what a host keeps; the extra owns only the session ta
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -21,12 +22,14 @@ from webauth.ports import AccountKind, SignInStores, SignInTransaction
 from webauth.postgres import (
     PostgresSessionStore,
     database_errors_as_store_errors,
+    delete_expired,
     session_table,
     sign_in_entry,
 )
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
+    from datetime import datetime
 
     from sqlalchemy import Row
     from sqlalchemy.engine import Connection, Engine
@@ -34,6 +37,7 @@ if TYPE_CHECKING:
     from webauth.ports import AuditSink
 
 POSTGRES_URL_VARIABLE: Final = "WEBAUTH_TEST_POSTGRES_URL"
+BLOCKED_BACKEND_DEADLINE_SECONDS: Final = 30
 _LOCK_KEY_MASK: Final = 0x7FFFFFFF
 """A key below 2**31 is the `objid` of its `pg_locks` row, with `classid` 0."""
 
@@ -219,6 +223,31 @@ class PostgresHost:
                 ),
                 {"key": self.location.advisory_lock_key},
             ).scalar_one()
+
+    def sweep(self, now: datetime) -> int:
+        """The host's expiry sweep: `delete_expired` in a transaction of its own."""
+        with self.engine.begin() as connection:
+            return delete_expired(connection, self.tables.sessions, now)
+
+    def wait_until_blocked_by(self, connection: Connection) -> None:
+        """Return once another backend waits for a lock that `connection` holds."""
+        blocker = connection.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        deadline = time.monotonic() + BLOCKED_BACKEND_DEADLINE_SECONDS
+        while not self._is_blocked_by(blocker):
+            assert time.monotonic() < deadline, "no backend waits for the lock"
+
+    def _is_blocked_by(self, blocker: int) -> bool:
+        with self.engine.connect() as connection:
+            return (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity"
+                        " WHERE :blocker = ANY(pg_blocking_pids(pid))"
+                    ),
+                    {"blocker": blocker},
+                ).scalar_one()
+                > 0
+            )
 
     def count_rows(self, table: Table) -> int:
         with self.engine.connect() as connection:
