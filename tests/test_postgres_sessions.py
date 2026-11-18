@@ -679,10 +679,15 @@ def test_fresh_access_token_reads_a_token_for_a_session_named_by_its_stored_key(
 def test_a_rotated_refresh_token_is_stored_under_the_original_stored_key(
     reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
 ) -> None:
-    """PGSTORE-11: a rotation replaces the token in the row and adds none."""
+    """PGSTORE-11: a rotation replaces the token in the row and adds none, and a later read
+    through the view presents the rotated token."""
+    read(reads, reads.stored_key)
+    rotated = reads.refresh_token
+
     read(reads, reads.stored_key)
 
-    assert reads.refresh_token in reads.groups.issuer.refresh_tokens - {ISSUED_REFRESH_TOKEN}
+    assert rotated in reads.groups.issuer.refresh_tokens - {ISSUED_REFRESH_TOKEN}
+    assert reads.groups.issuer.requests[-1].form["refresh_token"] == rotated
     assert reads.host.count_rows(reads.host.tables.sessions) == 1
 
 
