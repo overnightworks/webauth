@@ -11,6 +11,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
+from logline import set_sub
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
@@ -511,6 +512,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             resource_method=request.method,
             token_exchange=self._policy.relying_party._token_exchange,
         )
+        set_sub(request.scope, person.id)
         return None
 
     async def _person_refusal(
@@ -537,6 +539,7 @@ class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         if isinstance(person, AdmissionRefusal):
             return self._refused(_REFUSAL_OF_ADMISSION[person])
         _record_bearer_admission(request, person)
+        set_sub(request.scope, person.id)
         return None
 
     async def _verified(

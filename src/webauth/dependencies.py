@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Final
 from urllib.parse import urlencode
 
 from fastapi import Depends, HTTPException, Request
+from logline import set_sub
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, Response
 
@@ -127,6 +128,9 @@ def current_user_dependency(
     the store ``session_store`` builds is not asked.
     ``on_authenticated`` is handed the account once the request's identity is
     established, so the application can bind it into its own log context.
+    The account's ``id`` is also the ``sub`` of the request line, as it is
+    behind the gates, so an application that guards by this dependency alone
+    needs no code of its own for it; a refused request sets none.
     ``login_redirect`` is unset by default: a missing or dead session then
     keeps answering 401, byte-identically to a host that never names one.
     A dependency can only raise ``HTTPException``, so the 302 still carries
@@ -141,6 +145,7 @@ def current_user_dependency(
         user = _gate_or_own_admission(request, sessions)
         if isinstance(user, ConnectionRefusal):
             raise _http_refusal(request, user, login_redirect)
+        set_sub(request.scope, user.id)
         on_authenticated(user)
         return user
 

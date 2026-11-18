@@ -13,8 +13,9 @@ from starlette.responses import JSONResponse
 from webauth.config import web_auth_config
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
+from webauth.middleware.client_address import _resolved_client_address
 from webauth.policies import RateLimitBudget, RateLimitPolicy
-from webauth.proxies import _budget_address, resolve_client_ip
+from webauth.proxies import _budget_address
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -68,11 +69,12 @@ class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
             self._refused_during_outage = None
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
+        client_ip = _resolved_client_address(request)
         path = route_path(request.scope)
         if self._policy.is_exempt(path):
             return None
         config = web_auth_config(request)
-        budget_identity = _budget_address(resolve_client_ip(request))
+        budget_identity = _budget_address(client_ip)
         budget = self._policy.budget_for(path)
         try:
             allowed = await to_thread.run_sync(
