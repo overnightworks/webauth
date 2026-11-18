@@ -499,7 +499,7 @@ login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of
   - **GROUPS-27** An echoed token never overwrites a replacement.
   - The fleet's issuer allows reuse: the realm export in overnightworks/platform
     (`infrastructure/keycloak/realm.yaml`) sets no revoke-on-use for refresh tokens, so overlapping
-    calls are the GROUPS-26 case and give no false `SIGN_IN_AGAIN` there.
+    calls are the GROUPS-26 case and give no false `SIGN_IN_AGAIN` there, two overlapping `fresh_access_token` calls included.
   - Where the issuer is configured to refuse reuse, the second call answers a false `SIGN_IN_AGAIN` on a standing session.
   - **Host duty:** An app that calls this on every turn against such an issuer must expect that.
 - **Residue.** The second transaction cannot rule out a session deleted after its load: with a
