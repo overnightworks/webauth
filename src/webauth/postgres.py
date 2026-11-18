@@ -112,15 +112,16 @@ def session_table(metadata: MetaData, account_id: Column[str]) -> Table:
 def delete_expired(connection: Connection, sessions_table: Table, now: datetime) -> int:
     """Delete every session whose expiry lies before `now` and return how many went.
 
-    The session gate admits a session until `expires_at` and no longer, so this deletes what it
-    refuses. It is one conditional delete inside the host's transaction on `connection`: a repeat
+    The session gate reads its clock in whole seconds and admits a session until `expires_at`, an
+    expiry equal to that second included, so this reads `now` in whole seconds too and deletes
+    what the gate refuses. It is one conditional delete inside the host's transaction on `connection`: a repeat
     deletes nothing, and a sweep that meets another pod's waits for that transaction and then finds
     those rows gone. Two sweeps that lock rows in opposite orders can deadlock; the database aborts
     one with `SessionStoreError` and the host retries in a fresh transaction or on its next cycle.
     """
     with database_errors_as_store_errors():
         return connection.execute(
-            delete(sessions_table).where(sessions_table.c.expires_at < now)
+            delete(sessions_table).where(sessions_table.c.expires_at < now.replace(microsecond=0))
         ).rowcount
 
 

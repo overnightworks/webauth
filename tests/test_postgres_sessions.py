@@ -31,6 +31,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 
 from tests.support.postgres_arrangement import (
+    ExpirySweepScenario,
     HostSignInTransaction,
     PostgresAccountStore,
     PostgresHost,
@@ -59,9 +60,8 @@ from webauth.store_contract import STORE_CHECKS, StoreAdapter, StoreCheck
 # SHA-256 of "abc", the published test vector of FIPS 180-2.
 ABC_DIGEST = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
-SWEEP_INSTANT = datetime(2026, 11, 18, 12, 0, tzinfo=UTC)
-ONE_SECOND = timedelta(seconds=1)
 EXPIRED_SESSIONS_PER_SWEEP = 25
+ONE_SECOND = timedelta(seconds=1)
 
 
 class BlockFailed(Exception):
@@ -97,20 +97,14 @@ def host() -> Iterator[PostgresHost]:
             arranged.close()
 
 
-def a_session(
-    sessions: SessionRecordStore,
-    subject: str,
-    session_id: str | None = None,
-    *,
-    expires_at: datetime | None = None,
-) -> str:
+def a_session(sessions: SessionRecordStore, subject: str, session_id: str | None = None) -> str:
     now = datetime.now(UTC)
     identifier = uuid.uuid4().hex if session_id is None else session_id
     sessions.create(
         subject,
         session_id=identifier,
         now=now,
-        expires_at=now + timedelta(hours=1) if expires_at is None else expires_at,
+        expires_at=now + timedelta(hours=1),
         refresh_token=SecretStr("refresh-secret"),
         id_token=SecretStr("identity-secret"),
         account_language="de",
@@ -245,21 +239,26 @@ def test_deleting_an_account_ends_its_sessions_and_ending_a_session_keeps_the_ac
     assert host.count_rows(host.tables.sessions) == 0
 
 
+@pytest.fixture
+def scenario(host: PostgresHost) -> ExpirySweepScenario:
+    return ExpirySweepScenario(host)
+
+
 def test_the_sweep_deletes_the_expired_sessions_and_keeps_the_others_and_the_accounts(
-    host: PostgresHost,
+    host: PostgresHost, scenario: ExpirySweepScenario
 ) -> None:
     """PGSTORE-09: a session expires when its expiry lies before now, as the gate reads it."""
     subject = an_account(host)
     expired = [
-        a_session(host.sessions, subject, expires_at=SWEEP_INSTANT - ONE_SECOND),
-        a_session(host.sessions, subject, expires_at=SWEEP_INSTANT - timedelta(days=30)),
+        scenario.session(subject, expires_after=-ONE_SECOND),
+        scenario.session(subject, expires_after=-timedelta(days=30)),
     ]
     kept = [
-        a_session(host.sessions, subject, expires_at=SWEEP_INSTANT),
-        a_session(host.sessions, subject, expires_at=SWEEP_INSTANT + ONE_SECOND),
+        scenario.session(subject, expires_after=timedelta(0)),
+        scenario.session(subject, expires_after=ONE_SECOND),
     ]
 
-    deleted = host.sweep(SWEEP_INSTANT)
+    deleted = scenario.sweep()
 
     assert deleted == len(expired)
     assert [host.sessions.load(session_id) is None for session_id in expired + kept] == [
@@ -271,24 +270,39 @@ def test_the_sweep_deletes_the_expired_sessions_and_keeps_the_others_and_the_acc
     assert host.accounts.get(subject) is not None
 
 
-def test_a_repeated_sweep_deletes_nothing(host: PostgresHost) -> None:
-    """PGSTORE-09."""
-    a_session(host.sessions, an_account(host), expires_at=SWEEP_INSTANT - ONE_SECOND)
-    host.sweep(SWEEP_INSTANT)
+def test_a_sweep_within_the_second_of_an_expiry_keeps_the_session_the_gate_admits(
+    host: PostgresHost, scenario: ExpirySweepScenario
+) -> None:
+    """PGSTORE-09: the gate reads its clock in whole seconds, so the sweep does too."""
+    fraction = timedelta(milliseconds=500)
+    session_id = scenario.session(an_account(host), expires_after=timedelta(0))
 
-    assert host.sweep(SWEEP_INSTANT) == 0
+    deleted = scenario.sweep(after=fraction)
+    admitted = admit_session(
+        session_id, sessions=host.sessions, config=scenario.gate_config(after=fraction)
+    )
+
+    assert deleted == 0
+    assert not isinstance(admitted, ConnectionRefusal)
+
+
+def test_a_repeated_sweep_deletes_nothing(host: PostgresHost, scenario: ExpirySweepScenario) -> None:
+    """PGSTORE-09."""
+    scenario.session(an_account(host), expires_after=-ONE_SECOND)
+    scenario.sweep()
+
+    assert scenario.sweep() == 0
 
 
 def test_load_returns_an_expired_session_the_gate_refuses_until_a_sweep_ends_it(
-    host: PostgresHost,
+    host: PostgresHost, scenario: ExpirySweepScenario
 ) -> None:
     """PGSTORE-05, PGSTORE-09."""
-    session_id = a_session(host.sessions, an_account(host), expires_at=SWEEP_INSTANT - ONE_SECOND)
-    config = a_web_auth_config(wall_clock=lambda: SWEEP_INSTANT.timestamp())
+    session_id = scenario.session(an_account(host), expires_after=-ONE_SECOND)
 
     loaded = host.sessions.load(session_id)
-    refused = admit_session(session_id, sessions=host.sessions, config=config)
-    host.sweep(SWEEP_INSTANT)
+    refused = admit_session(session_id, sessions=host.sessions, config=scenario.gate_config())
+    scenario.sweep()
 
     assert loaded is not None
     assert refused is ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
@@ -296,18 +310,18 @@ def test_load_returns_an_expired_session_the_gate_refuses_until_a_sweep_ends_it(
 
 
 def test_two_sweeps_at_once_leave_no_expired_session_and_delete_each_one_once(
-    host: PostgresHost,
+    host: PostgresHost, scenario: ExpirySweepScenario
 ) -> None:
     """PGSTORE-09: the second sweep waits for the first's transaction, then finds nothing left."""
     subject = an_account(host)
     for _ in range(EXPIRED_SESSIONS_PER_SWEEP):
-        a_session(host.sessions, subject, expires_at=SWEEP_INSTANT - ONE_SECOND)
-    kept = a_session(host.sessions, subject, expires_at=SWEEP_INSTANT + ONE_SECOND)
+        scenario.session(subject, expires_after=-ONE_SECOND)
+    kept = scenario.session(subject, expires_after=ONE_SECOND)
 
     with host.engine.connect() as first, ThreadPoolExecutor(max_workers=1) as other_pod:
         with first.begin():
-            deleted_by_first = delete_expired(first, host.tables.sessions, SWEEP_INSTANT)
-            second = other_pod.submit(host.sweep, SWEEP_INSTANT)
+            deleted_by_first = delete_expired(first, host.tables.sessions, scenario.instant)
+            second = other_pod.submit(scenario.sweep)
             host.wait_until_blocked_by(first)
         deleted_by_second = second.result()
 
@@ -317,31 +331,34 @@ def test_two_sweeps_at_once_leave_no_expired_session_and_delete_each_one_once(
 
 
 def test_a_sweep_that_a_rollback_undoes_leaves_the_expired_sessions_for_the_next_sweep(
-    host: PostgresHost,
+    host: PostgresHost, scenario: ExpirySweepScenario
 ) -> None:
     """PGSTORE-09: the host retries a failed sweep in a fresh transaction."""
-    a_session(host.sessions, an_account(host), expires_at=SWEEP_INSTANT - ONE_SECOND)
+    scenario.session(an_account(host), expires_after=-ONE_SECOND)
 
     with host.engine.connect() as connection:
         with connection.begin() as transaction:
             deleted_in_the_failed_one = delete_expired(
-                connection, host.tables.sessions, SWEEP_INSTANT
+                connection, host.tables.sessions, scenario.instant
             )
             transaction.rollback()
 
-    assert (deleted_in_the_failed_one, host.sweep(SWEEP_INSTANT)) == (1, 1)
+    assert (deleted_in_the_failed_one, scenario.sweep()) == (1, 1)
 
 
 def test_a_failed_sweep_raises_the_store_error_with_nothing_of_its_statement(
-    host: PostgresHost,
+    host: PostgresHost, scenario: ExpirySweepScenario
 ) -> None:
     """PGSTORE-07, PGSTORE-09."""
     unmigrated = Table("unmigrated", MetaData(), Column("expires_at", DateTime(timezone=True)))
 
     with host.engine.connect() as connection, pytest.raises(SessionStoreError) as raised:
-        delete_expired(connection, unmigrated, SWEEP_INSTANT)
+        delete_expired(connection, unmigrated, scenario.instant)
 
-    assert "unmigrated" not in what_a_log_shows_of(raised.value)
+    shown = what_a_log_shows_of(raised.value)
+    assert "unmigrated" not in shown
+    assert str(scenario.instant) not in shown
+    assert scenario.instant.isoformat() not in shown
 
 
 def test_an_entry_holds_the_advisory_lock_from_its_enter_until_its_exit(

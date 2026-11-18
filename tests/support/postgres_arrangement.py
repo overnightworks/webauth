@@ -11,13 +11,15 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import Column, MetaData, Table, Text, create_engine, insert, select, text, update
 
 from tests.support.account_arrangement import FakeUser
-from tests.support.webauth_arrangement import RecordingAuditSink
+from tests.support.webauth_arrangement import RecordingAuditSink, a_web_auth_config
 from webauth.ports import AccountKind, SignInStores, SignInTransaction
 from webauth.postgres import (
     PostgresSessionStore,
@@ -29,11 +31,11 @@ from webauth.postgres import (
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
-    from datetime import datetime
 
     from sqlalchemy import Row
     from sqlalchemy.engine import Connection, Engine
 
+    from webauth.config import WebAuthConfig
     from webauth.ports import AuditSink
 
 POSTGRES_URL_VARIABLE: Final = "WEBAUTH_TEST_POSTGRES_URL"
@@ -252,3 +254,35 @@ class PostgresHost:
     def count_rows(self, table: Table) -> int:
         with self.engine.connect() as connection:
             return len(connection.execute(select(table)).all())
+
+
+@dataclass(frozen=True)
+class ExpirySweepScenario:
+    """One deterministic instant at which a host sweeps and its session gate reads the clock.
+
+    A session is created `SESSION_AGE` before the instant and expires at an offset from it, so the
+    gate refuses it for its expiry alone; `sweep` and `gate_config` read the instant plus an offset
+    for the fractions of a second a wall clock has."""
+
+    host: PostgresHost
+    instant: datetime = datetime(2026, 11, 18, 12, 0, tzinfo=UTC)
+    session_age: timedelta = timedelta(minutes=30)
+
+    def session(self, subject: str, *, expires_after: timedelta) -> str:
+        identifier = uuid.uuid4().hex
+        self.host.sessions.create(
+            subject,
+            session_id=identifier,
+            now=self.instant - self.session_age,
+            expires_at=self.instant + expires_after,
+            refresh_token=SecretStr("refresh-secret"),
+            id_token=SecretStr("identity-secret"),
+            account_language="de",
+        )
+        return identifier
+
+    def sweep(self, *, after: timedelta = timedelta(0)) -> int:
+        return self.host.sweep(self.instant + after)
+
+    def gate_config(self, *, after: timedelta = timedelta(0)) -> WebAuthConfig:
+        return a_web_auth_config(wall_clock=lambda: (self.instant + after).timestamp())
