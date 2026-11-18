@@ -1,7 +1,0 @@
-claim_id = "11315a94aa31405ca5e6d3e5587e3b69"
-agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
-role = "builder"
-base = "b16edf3fd3e4bf06cc4aa97a31b07d26b98e85d3"
-branch = "claude/issue-781-fresh-access-token-issuer-reuse"
-scope = ["docs/host-contract.md"]
-opened_commit = "343468990060df6332bb9d32db29269cbf186def"
