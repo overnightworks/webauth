@@ -353,13 +353,19 @@ def test_a_failed_sweep_raises_the_store_error_with_nothing_of_its_statement(
     """PGSTORE-07, PGSTORE-09."""
     unmigrated = Table("unmigrated", MetaData(), Column("expires_at", DateTime(timezone=True)))
 
-    with host.engine.connect() as connection, pytest.raises(SessionStoreError) as raised:
-        delete_expired(connection, unmigrated, scenario.instant)
+    revealing_engine = create_engine(
+        host.location.url, connect_args={"options": f"-csearch_path={host.location.schema}"}
+    )
+    try:
+        with revealing_engine.connect() as connection, pytest.raises(SessionStoreError) as raised:
+            delete_expired(connection, unmigrated, scenario.instant)
+    finally:
+        revealing_engine.dispose()
 
     shown = what_a_log_shows_of(raised.value)
     assert "unmigrated" not in shown
-    assert str(scenario.instant) not in shown
-    assert scenario.instant.isoformat() not in shown
+    assert "[SQL" not in shown
+    assert repr(scenario.instant) not in shown
 
 
 def test_an_entry_holds_the_advisory_lock_from_its_enter_until_its_exit(
