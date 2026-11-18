@@ -9,6 +9,7 @@ from httpx import Response
 from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.session_store_arrangement import SessionsRecordingTheirTransaction
 from tests.support.webauth_arrangement import (
+    ADMITTED_READER_PATH,
     LOGIN_REDIRECT,
     AuthApp,
     a_session,
@@ -19,7 +20,9 @@ from webauth.policies import PathRules, PublicRule
 
 LOGIN_PATH = "/login"
 
-ONLY_LOGIN_AND_HEALTH = (PublicRule(PathRules(exact=frozenset({LOGIN_PATH, "/health"}))),)
+ONLY_LOGIN_AND_HEALTH = (
+    PublicRule(PathRules(exact=frozenset({LOGIN_PATH, ADMITTED_READER_PATH}))),
+)
 
 
 def a_gated_app(

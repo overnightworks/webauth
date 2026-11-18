@@ -25,6 +25,7 @@ from tests.support.session_gate_arrangement import (
 )
 from tests.support.session_store_arrangement import SessionsRecordingTheirTransaction
 from tests.support.webauth_arrangement import (
+    ADMITTED_READER_PATH,
     LOGIN_REDIRECT,
     AuthApp,
     a_session,
@@ -88,7 +89,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
         assert arrangement.gate_entries
         arrangement.first_relay.replay = arrangement.gate_entries
         assert ask(arrangement.first, "/me").json() == {"detail": "Authentication required"}
-        assert ask(arrangement.first, "/health").json() == {"username": None}
+        assert ask(arrangement.first, ADMITTED_READER_PATH).json() == {"username": None}
 
     @pytest.mark.parametrize("planted", ["replayed", "an-account-under-each-key"])
     def test_a_replay_on_an_app_with_its_own_config_is_ignored(
@@ -109,7 +110,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
         cookie = signed_in(arrangement.first)
         assert ask(other, "/me", cookie=cookie).json() == {"detail": "Session expired"}
         with pytest.raises(RuntimeError):
-            ask(other, "/health", cookie=cookie)
+            ask(other, ADMITTED_READER_PATH, cookie=cookie)
         with pytest.raises(RuntimeError):
             ask(other, ADMITTED_ADMIN_PATH, cookie=cookie)
 
@@ -136,11 +137,11 @@ class TestARecordedAdmissionBelongsToItsRequest:
         ) == (1, 1)
         assert ask(shared, "/me").json() == {"detail": "Authentication required"}
         with pytest.raises(RuntimeError):
-            ask(shared, "/health", cookie=arrangement.second_cookie)
+            ask(shared, ADMITTED_READER_PATH, cookie=arrangement.second_cookie)
         with pytest.raises(RuntimeError):
             ask(shared, ADMITTED_ADMIN_PATH, cookie=arrangement.second_cookie)
         with pytest.raises(RuntimeError):
-            ask(shared, "/health")
+            ask(shared, ADMITTED_READER_PATH)
 
     def test_a_replay_for_the_same_cookie_is_reused_without_a_store_read(
         self,
@@ -157,7 +158,7 @@ class TestARecordedAdmissionBelongsToItsRequest:
         arrangement.sessions.events.clear()
         cookie = signed_in(arrangement.first)
         assert ask(shared, "/me", cookie=cookie).json()["username"] == "alice"
-        assert ask(shared, "/health", cookie=cookie).json() == {"username": "alice"}
+        assert ask(shared, ADMITTED_READER_PATH, cookie=cookie).json() == {"username": "alice"}
         assert (
             counted(arrangement.sessions, "load"),
             counted(arrangement.sessions, "touch"),
