@@ -6,7 +6,7 @@ The host brings its driver and keeps its accounts table, its `SubjectUserStore` 
 never begins, commits or rolls back: the host's `SessionTransaction` and `SignInTransaction` are
 `with engine.begin() as connection:` around the store and the shell, so the library still never
 commits. The host's migrations create the table `session_table` puts on its `MetaData`; nothing here
-runs DDL.
+runs DDL. `delete_expired` is the sweep the host schedules.
 
 A session id is stored as the SHA-256 hex digest of the id, so a stored row is no live cookie. The
 store hands the raw id back from `create` and `load`; account ids are never hashed.
@@ -53,6 +53,7 @@ __all__ = [
     "PostgresSessionStore",
     "SessionStoreError",
     "database_errors_as_store_errors",
+    "delete_expired",
     "session_table",
     "sign_in_entry",
 ]
@@ -106,6 +107,23 @@ def session_table(metadata: MetaData, account_id: Column[str]) -> Table:
         Index("sessions_account_created_at", "account_id", "created_at"),
         Index("sessions_expires_at", "expires_at"),
     )
+
+
+def delete_expired(connection: Connection, sessions_table: Table, now: datetime) -> int:
+    """Delete every session whose expiry lies before `now` and return how many went.
+
+    The session gate reads its clock in whole seconds and admits a session until `expires_at`, an
+    expiry equal to that second included, so this reads `now` in whole seconds too and deletes
+    what the gate refuses. It is one conditional delete inside the host's transaction on
+    `connection`: a repeat deletes nothing, and a sweep that meets another pod's waits for that
+    transaction and then finds those rows gone. Two sweeps that lock rows in opposite orders can
+    deadlock; the database aborts one with `SessionStoreError` and the host retries in a fresh
+    transaction or on its next cycle.
+    """
+    with database_errors_as_store_errors():
+        return connection.execute(
+            delete(sessions_table).where(sessions_table.c.expires_at < now.replace(microsecond=0))
+        ).rowcount
 
 
 @contextmanager

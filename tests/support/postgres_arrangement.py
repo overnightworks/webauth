@@ -6,21 +6,25 @@ The accounts table follows what a host keeps; the extra owns only the session ta
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import Column, MetaData, Table, Text, create_engine, insert, select, text, update
 
 from tests.support.account_arrangement import FakeUser
-from tests.support.webauth_arrangement import RecordingAuditSink
+from tests.support.webauth_arrangement import RecordingAuditSink, a_web_auth_config
 from webauth.ports import AccountKind, SignInStores, SignInTransaction
 from webauth.postgres import (
     PostgresSessionStore,
     database_errors_as_store_errors,
+    delete_expired,
     session_table,
     sign_in_entry,
 )
@@ -31,9 +35,11 @@ if TYPE_CHECKING:
     from sqlalchemy import Row
     from sqlalchemy.engine import Connection, Engine
 
-    from webauth.ports import AuditSink
+    from webauth.config import WebAuthConfig
+    from webauth.ports import AuditSink, SessionRecordStore
 
 POSTGRES_URL_VARIABLE: Final = "WEBAUTH_TEST_POSTGRES_URL"
+BLOCKED_BACKEND_DEADLINE_SECONDS: Final = 30
 _LOCK_KEY_MASK: Final = 0x7FFFFFFF
 """A key below 2**31 is the `objid` of its `pg_locks` row, with `classid` 0."""
 
@@ -220,6 +226,80 @@ class PostgresHost:
                 {"key": self.location.advisory_lock_key},
             ).scalar_one()
 
+    def sweep(self, now: datetime) -> int:
+        """The host's expiry sweep: `delete_expired` in a transaction of its own."""
+        with self.engine.begin() as connection:
+            return delete_expired(connection, self.tables.sessions, now)
+
+    def wait_until_blocked_by(self, connection: Connection) -> None:
+        """Return once another backend waits for a lock that `connection` holds."""
+        blocker = connection.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        deadline = time.monotonic() + BLOCKED_BACKEND_DEADLINE_SECONDS
+        while not self._is_blocked_by(blocker):
+            assert time.monotonic() < deadline, "no backend waits for the lock"
+
+    def _is_blocked_by(self, blocker: int) -> bool:
+        with self.engine.connect() as connection:
+            return (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity"
+                        " WHERE :blocker = ANY(pg_blocking_pids(pid))"
+                    ),
+                    {"blocker": blocker},
+                ).scalar_one()
+                > 0
+            )
+
     def count_rows(self, table: Table) -> int:
         with self.engine.connect() as connection:
             return len(connection.execute(select(table)).all())
+
+
+def a_stored_session(
+    sessions: SessionRecordStore,
+    subject: str,
+    *,
+    now: datetime,
+    expires_at: datetime,
+    session_id: str | None = None,
+) -> str:
+    """Creates a session with tokens and a language, and returns its id."""
+    identifier = uuid.uuid4().hex if session_id is None else session_id
+    sessions.create(
+        subject,
+        session_id=identifier,
+        now=now,
+        expires_at=expires_at,
+        refresh_token=SecretStr("refresh-secret"),
+        id_token=SecretStr("identity-secret"),
+        account_language="de",
+    )
+    return identifier
+
+
+@dataclass(frozen=True)
+class ExpirySweepScenario:
+    """One deterministic instant at which a host sweeps and its session gate reads the clock.
+
+    A session is created `SESSION_AGE` before the instant and expires at an offset from it, so the
+    gate refuses it for its expiry alone; `sweep` and `gate_config` read the instant plus an offset
+    for the fractions of a second a wall clock has."""
+
+    host: PostgresHost
+    instant: datetime = datetime(2026, 11, 18, 12, 0, tzinfo=UTC)
+    session_age: timedelta = timedelta(minutes=30)
+
+    def session(self, subject: str, *, expires_after: timedelta) -> str:
+        return a_stored_session(
+            self.host.sessions,
+            subject,
+            now=self.instant - self.session_age,
+            expires_at=self.instant + expires_after,
+        )
+
+    def sweep(self, *, after: timedelta = timedelta(0)) -> int:
+        return self.host.sweep(self.instant + after)
+
+    def gate_config(self, *, after: timedelta = timedelta(0)) -> WebAuthConfig:
+        return a_web_auth_config(wall_clock=lambda: (self.instant + after).timestamp())
