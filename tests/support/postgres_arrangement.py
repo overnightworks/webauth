@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
 
     from webauth.config import WebAuthConfig
-    from webauth.ports import AuditSink
+    from webauth.ports import AuditSink, SessionRecordStore
 
 POSTGRES_URL_VARIABLE: Final = "WEBAUTH_TEST_POSTGRES_URL"
 BLOCKED_BACKEND_DEADLINE_SECONDS: Final = 30
@@ -256,6 +256,28 @@ class PostgresHost:
             return len(connection.execute(select(table)).all())
 
 
+def a_stored_session(
+    sessions: SessionRecordStore,
+    subject: str,
+    *,
+    now: datetime,
+    expires_at: datetime,
+    session_id: str | None = None,
+) -> str:
+    """Creates a session with tokens and a language, and returns its id."""
+    identifier = uuid.uuid4().hex if session_id is None else session_id
+    sessions.create(
+        subject,
+        session_id=identifier,
+        now=now,
+        expires_at=expires_at,
+        refresh_token=SecretStr("refresh-secret"),
+        id_token=SecretStr("identity-secret"),
+        account_language="de",
+    )
+    return identifier
+
+
 @dataclass(frozen=True)
 class ExpirySweepScenario:
     """One deterministic instant at which a host sweeps and its session gate reads the clock.
@@ -269,17 +291,12 @@ class ExpirySweepScenario:
     session_age: timedelta = timedelta(minutes=30)
 
     def session(self, subject: str, *, expires_after: timedelta) -> str:
-        identifier = uuid.uuid4().hex
-        self.host.sessions.create(
+        return a_stored_session(
+            self.host.sessions,
             subject,
-            session_id=identifier,
             now=self.instant - self.session_age,
             expires_at=self.instant + expires_after,
-            refresh_token=SecretStr("refresh-secret"),
-            id_token=SecretStr("identity-secret"),
-            account_language="de",
         )
-        return identifier
 
     def sweep(self, *, after: timedelta = timedelta(0)) -> int:
         return self.host.sweep(self.instant + after)

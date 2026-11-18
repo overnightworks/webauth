@@ -38,6 +38,7 @@ from tests.support.postgres_arrangement import (
     TransactionInAnotherProcess,
     a_hosts_tables,
     a_schema_of_its_own,
+    a_stored_session,
     postgres_url,
 )
 from webauth.dependencies import ConnectionRefusal, admit_session
@@ -98,17 +99,9 @@ def host() -> Iterator[PostgresHost]:
 
 def a_session(sessions: SessionRecordStore, subject: str, session_id: str | None = None) -> str:
     now = datetime.now(UTC)
-    identifier = uuid.uuid4().hex if session_id is None else session_id
-    sessions.create(
-        subject,
-        session_id=identifier,
-        now=now,
-        expires_at=now + timedelta(hours=1),
-        refresh_token=SecretStr("refresh-secret"),
-        id_token=SecretStr("identity-secret"),
-        account_language="de",
+    return a_stored_session(
+        sessions, subject, now=now, expires_at=now + timedelta(hours=1), session_id=session_id
     )
-    return identifier
 
 
 def what_a_log_shows_of(error: SessionStoreError) -> str:
