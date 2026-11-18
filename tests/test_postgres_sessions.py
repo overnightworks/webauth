@@ -46,7 +46,6 @@ from webauth.ports import (
     AccountEvent,
     AccountEventKind,
     AccountKind,
-    SessionRecordStore,
     UsernameTakenError,
 )
 from webauth.postgres import (
