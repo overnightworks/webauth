@@ -354,7 +354,7 @@ class StoredKeyReads:
         return (
             None
             if record is None or record.refresh_token is None
-            else (record.refresh_token.get_secret_value())
+            else record.refresh_token.get_secret_value()
         )
 
     @property
