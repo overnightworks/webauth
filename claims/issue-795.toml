@@ -1,0 +1,8 @@
+claim_id = "47debf6894e748f185b1034a8c40398a"
+agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
+role = "builder"
+base = "758ad7f9d658924a2eb6f85bd40759e21a9f3c76"
+branch = "claude/issue-795-postgres-stored-key-reads"
+scope = ["docs/host-contract.md", "src/webauth/postgres.py", "tests/support/postgres_arrangement.py", "tests/test_postgres_sessions.py"]
+opened_commit = "c1b874911c8055a29eb0b15b21aaaa3ac270035a"
+whole_reason = "The stored-key view is one owner change in the Postgres module, its Postgres proof, its builder and its host-contract lines."
