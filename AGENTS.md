@@ -6,7 +6,7 @@
 - `uvx --from "git+https://github.com/overnightworks/quality@<sha>" quality check`, with the sha `.github/workflows/ci.yml` pins: the quality gate's local check.
 - `uv run pytest <test module>`: a targeted run of the tests that prove a change.
 - `scripts/regenerate_build_constraints.sh`: regenerates `.github/requirements-build.txt` after a change to the setuptools floor in `[build-system]` of `pyproject.toml`.
-- `gh workflow run release.yml -R overnightworks/webauth -f version=X.Y.Z`: the operator's release dispatch; `main` must carry X.Y.Z in `webauth.__version__` and a green CI run.
+- `gh workflow run release.yml -R overnightworks/webauth -f version=X.Y.Z`: the release dispatch, an agent's step once the version pull request has landed with its review and CI green. `main` must carry X.Y.Z in `webauth.__version__` and a green CI run.
 - `scripts/run_oidc_proof.sh`: the real-browser proofs and the conformance suite in `tests/e2e/oidc/`, run only by hand as `docs/runbooks/` says.
 
 ## Rules
@@ -27,7 +27,7 @@
 
 ## Owners
 
-- The operator dispatches every release; after the run the head replaces GitHub's generated notes with the release page, written by hand from the open release item, which lists every change since the last tag.
+- After the release run, the head replaces GitHub's generated notes with the release page, written by hand from the open release item, which lists every change since the last tag.
 
 ## Documents
 
