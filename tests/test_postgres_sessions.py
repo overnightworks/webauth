@@ -608,6 +608,7 @@ def test_the_stored_key_view_refuses_to_create_a_session_so_a_hash_never_becomes
     """PGSTORE-11."""
     subject = an_account(host)
     now = scenario.instant
+    expires_at = now + timedelta(hours=1)
 
     with host.engine.begin() as connection:
         view = a_stored_key_view(connection, host.tables)
@@ -616,7 +617,7 @@ def test_the_stored_key_view_refuses_to_create_a_session_so_a_hash_never_becomes
                 subject,
                 session_id=ABC_DIGEST,
                 now=now,
-                expires_at=now + timedelta(hours=1),
+                expires_at=expires_at,
                 refresh_token=None,
                 id_token=None,
                 account_language=None,
