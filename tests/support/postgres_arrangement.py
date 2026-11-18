@@ -17,16 +17,21 @@ from typing import TYPE_CHECKING, Any, Final
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import Column, MetaData, Table, Text, create_engine, insert, select, text, update
+from sqlalchemy.pool import QueuePool
 
 from tests.support.account_arrangement import FakeUser
+from tests.support.current_groups_arrangement import SESSION_ID, Arrangement, an_arrangement
+from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
 from tests.support.webauth_arrangement import RecordingAuditSink, a_web_auth_config
 from webauth.ports import AccountKind, SignInStores, SignInTransaction
 from webauth.postgres import (
     PostgresSessionStore,
+    PostgresStoredKeySessions,
     database_errors_as_store_errors,
     delete_expired,
     session_table,
     sign_in_entry,
+    stored_key,
 )
 
 if TYPE_CHECKING:
@@ -177,6 +182,28 @@ class HostSignInTransaction:
                 yield stores
 
 
+def a_stored_key_view(connection: Connection, tables: HostTables) -> PostgresStoredKeySessions:
+    return PostgresStoredKeySessions(
+        connection, PostgresAccountStore(connection, tables.accounts), tables.sessions
+    )
+
+
+@dataclass(frozen=True)
+class HostStoredKeyTransaction:
+    """The host's `SessionTransaction` over the stored-key view, one transaction per call."""
+
+    engine: Engine
+    tables: HostTables
+
+    def __call__(self) -> AbstractContextManager[SessionRecordStore]:
+        return self._entry()
+
+    @contextmanager
+    def _entry(self) -> Iterator[SessionRecordStore]:
+        with database_errors_as_store_errors(), self.engine.begin() as connection:
+            yield a_stored_key_view(connection, self.tables)
+
+
 @dataclass(frozen=True)
 class TransactionInAnotherProcess:
     """Builds, in any process, the host's transaction over the location's database."""
@@ -260,18 +287,21 @@ def a_stored_session(
     sessions: SessionRecordStore,
     subject: str,
     *,
-    now: datetime,
-    expires_at: datetime,
+    now: datetime | None = None,
+    expires_at: datetime | None = None,
     session_id: str | None = None,
+    refresh_token: str = "refresh-secret",  # noqa: S107
 ) -> str:
-    """Creates a session with tokens and a language, and returns its id."""
+    """Creates a session with tokens and a language, and returns its id; unless told, it starts
+    now and lives an hour."""
+    started = datetime.now(UTC) if now is None else now
     identifier = uuid.uuid4().hex if session_id is None else session_id
     sessions.create(
         subject,
         session_id=identifier,
-        now=now,
-        expires_at=expires_at,
-        refresh_token=SecretStr("refresh-secret"),
+        now=started,
+        expires_at=started + timedelta(hours=1) if expires_at is None else expires_at,
+        refresh_token=SecretStr(refresh_token),
         id_token=SecretStr("identity-secret"),
         account_language="de",
     )
@@ -303,3 +333,56 @@ class ExpirySweepScenario:
 
     def gate_config(self, *, after: timedelta = timedelta(0)) -> WebAuthConfig:
         return a_web_auth_config(wall_clock=lambda: (self.instant + after).timestamp())
+
+
+@dataclass
+class StoredKeyReads:
+    """The session `an_arrangement` describes, stored in the host's table under its account, and
+    the host's stored-key `SessionTransaction` on an engine of its own, whose pool shows whether a
+    transaction is open."""
+
+    host: PostgresHost
+    groups: Arrangement
+    engine: Engine
+    transaction: HostStoredKeyTransaction
+    stored_key: str
+
+    @property
+    def refresh_token(self) -> str | None:
+        """What the table holds, read through the raw id the cookie carries."""
+        record = self.host.sessions.load(SESSION_ID)
+        return (
+            None
+            if record is None or record.refresh_token is None
+            else record.refresh_token.get_secret_value()
+        )
+
+    @property
+    def connections_checked_out(self) -> int:
+        assert isinstance(self.engine.pool, QueuePool)
+        return self.engine.pool.checkedout()
+
+
+def stored_key_reads_of(host: PostgresHost) -> StoredKeyReads:
+    groups = an_arrangement()
+    record = groups.sessions.load(SESSION_ID)
+    assert record is not None
+    host.accounts.create_for_subject(
+        record.user.id, record.user.username, record.user.role, record.user.kind
+    )
+    a_stored_session(
+        host.sessions,
+        record.user.id,
+        now=record.created_at,
+        expires_at=record.expires_at,
+        session_id=SESSION_ID,
+        refresh_token=ISSUED_REFRESH_TOKEN,
+    )
+    engine = host.location.engine()
+    return StoredKeyReads(
+        host,
+        groups,
+        engine,
+        HostStoredKeyTransaction(engine, host.tables),
+        stored_key(SESSION_ID),
+    )

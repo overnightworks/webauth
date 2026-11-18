@@ -7,6 +7,7 @@ import traceback
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from operator import attrgetter
 
@@ -30,23 +31,28 @@ from sqlalchemy import (
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 
+from tests.support.current_groups_arrangement import GROUPS, SESSION_ENDED, SESSION_ID
+from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
 from tests.support.postgres_arrangement import (
     ExpirySweepScenario,
     HostSignInTransaction,
     PostgresAccountStore,
     PostgresHost,
+    StoredKeyReads,
     TransactionInAnotherProcess,
     a_hosts_tables,
     a_schema_of_its_own,
+    a_stored_key_view,
     a_stored_session,
     postgres_url,
+    stored_key_reads_of,
 )
 from webauth.dependencies import ConnectionRefusal, admit_session
+from webauth.oidc_login import AccessTokenRefusal, current_groups, fresh_access_token
 from webauth.ports import (
     AccountEvent,
     AccountEventKind,
     AccountKind,
-    SessionRecordStore,
     UsernameTakenError,
 )
 from webauth.postgres import (
@@ -54,6 +60,7 @@ from webauth.postgres import (
     SessionStoreError,
     database_errors_as_store_errors,
     delete_expired,
+    stored_key,
 )
 from webauth.store_contract import STORE_CHECKS, StoreAdapter, StoreCheck
 
@@ -97,13 +104,6 @@ def host() -> Iterator[PostgresHost]:
             arranged.close()
 
 
-def a_session(sessions: SessionRecordStore, subject: str, session_id: str | None = None) -> str:
-    now = datetime.now(UTC)
-    return a_stored_session(
-        sessions, subject, now=now, expires_at=now + timedelta(hours=1), session_id=session_id
-    )
-
-
 def what_a_log_shows_of(error: SessionStoreError) -> str:
     """The error as a traceback prints it, without the source lines of the frames: its own text
     and, unless the error hides it, the error it replaced."""
@@ -139,7 +139,7 @@ def test_a_block_that_raises_leaves_no_session_and_no_account(host: PostgresHost
         with host.transaction() as stores:
             subject = str(uuid.uuid4())
             stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
-            a_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
             raise BlockFailed
 
     with pytest.raises(BlockFailed):
@@ -161,7 +161,7 @@ def test_an_audit_sink_that_fails_leaves_no_session_and_raises_its_own_error(
         with transaction() as stores:
             subject = str(uuid.uuid4())
             stores.accounts.create_for_subject(subject, subject, "user", AccountKind.PERSON)
-            a_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
             stores.audit.account_event(
                 AccountEvent(AccountEventKind.USER_CREATED, None, subject, role="user")
             )
@@ -186,8 +186,8 @@ def test_a_failing_commit_leaves_no_session_and_raises_the_store_error(host: Pos
 
     def sign_in_twice() -> None:
         with host.transaction() as stores:
-            a_session(stores.sessions, subject)
-            a_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
+            a_stored_session(stores.sessions, subject)
 
     with pytest.raises(SessionStoreError):
         sign_in_twice()
@@ -219,8 +219,8 @@ def test_deleting_an_account_ends_its_sessions_and_ending_a_session_keeps_the_ac
 ) -> None:
     """PGSTORE-06."""
     subject = an_account(host)
-    ended = a_session(host.sessions, subject)
-    kept = a_session(host.sessions, subject)
+    ended = a_stored_session(host.sessions, subject)
+    kept = a_stored_session(host.sessions, subject)
 
     host.sessions.delete(ended)
 
@@ -417,7 +417,7 @@ def test_touch_and_a_replaced_refresh_token_persist_and_keep_the_other_fields(
     host: PostgresHost,
 ) -> None:
     """PGSTORE-04: `touch` changes only the expiry, `replace_refresh_token` only the token."""
-    session_id = a_session(host.sessions, an_account(host))
+    session_id = a_stored_session(host.sessions, an_account(host))
     before = host.sessions.load(session_id)
     assert before is not None
     later = before.expires_at + timedelta(hours=2)
@@ -444,21 +444,88 @@ def test_a_failed_call_raises_the_store_error_with_nothing_of_its_parameters(
 ) -> None:
     """PGSTORE-07."""
     subject = an_account(host)
-    a_session(host.sessions, subject, session_id="abc")
+    a_stored_session(host.sessions, subject, session_id="abc")
 
     with pytest.raises(SessionStoreError) as raised:
-        a_session(host.sessions, subject, session_id="abc")
+        a_stored_session(host.sessions, subject, session_id="abc")
 
     shown = what_a_log_shows_of(raised.value)
     for private in ("abc", ABC_DIGEST, subject, "refresh-secret", "identity-secret"):
         assert private not in shown
 
 
+AWARENESS = pytest.mark.parametrize(
+    "aware", [True, False], ids=["aware instant accepted", "naive instant refused"]
+)
+
+
+def an_instant(instant: datetime, *, aware: bool) -> datetime:
+    return instant if aware else instant.replace(tzinfo=None)
+
+
+def refusal_unless(aware: bool) -> AbstractContextManager[object]:
+    return nullcontext() if aware else pytest.raises(ValueError)
+
+
+@AWARENESS
+@pytest.mark.parametrize("naive_field", ["now", "expires_at"])
+def test_create_refuses_a_naive_instant_and_stores_no_row(
+    host: PostgresHost, scenario: ExpirySweepScenario, aware: bool, naive_field: str
+) -> None:
+    """PGSTORE-09."""
+    subject = an_account(host)
+    instants = {"now": scenario.instant, "expires_at": scenario.instant + timedelta(hours=1)}
+    instants[naive_field] = an_instant(instants[naive_field], aware=aware)
+
+    with refusal_unless(aware):
+        host.sessions.create(
+            subject,
+            session_id="abc",
+            refresh_token=None,
+            id_token=None,
+            account_language=None,
+            **instants,
+        )
+
+    assert host.count_rows(host.tables.sessions) == int(aware)
+
+
+@AWARENESS
+def test_touch_refuses_a_naive_expiry_and_changes_no_row(
+    host: PostgresHost, scenario: ExpirySweepScenario, aware: bool
+) -> None:
+    """PGSTORE-09."""
+    session_id = scenario.session(an_account(host), expires_after=timedelta(hours=1))
+    later = an_instant(scenario.instant + timedelta(hours=2), aware=aware)
+
+    with refusal_unless(aware):
+        host.sessions.touch(session_id, expires_at=later)
+
+    stored = host.sessions.load(session_id)
+    assert stored is not None
+    assert stored.expires_at == (
+        scenario.instant + timedelta(hours=2) if aware else scenario.instant + timedelta(hours=1)
+    )
+
+
+@AWARENESS
+def test_the_sweep_refuses_a_naive_now_and_deletes_no_row(
+    host: PostgresHost, scenario: ExpirySweepScenario, aware: bool
+) -> None:
+    """PGSTORE-09."""
+    scenario.session(an_account(host), expires_after=-ONE_SECOND)
+
+    with refusal_unless(aware):
+        host.sweep(an_instant(scenario.instant, aware=aware))
+
+    assert host.count_rows(host.tables.sessions) == int(not aware)
+
+
 def test_a_session_whose_account_the_hosts_store_no_longer_knows_loads_as_none(
     host: PostgresHost,
 ) -> None:
     """PGSTORE-05."""
-    session_id = a_session(host.sessions, an_account(host))
+    session_id = a_stored_session(host.sessions, an_account(host))
 
     with host.engine.connect() as connection:
         store = PostgresSessionStore(
@@ -468,7 +535,7 @@ def test_a_session_whose_account_the_hosts_store_no_longer_knows_loads_as_none(
 
 
 def create_a_session(store: PostgresSessionStore, subject: str, session_id: str) -> None:
-    a_session(store, subject)
+    a_stored_session(store, subject)
 
 
 def load_a_session(store: PostgresSessionStore, subject: str, session_id: str) -> None:
@@ -481,7 +548,7 @@ def test_a_failed_account_read_raises_the_store_error(
 ) -> None:
     """PGSTORE-07: the host's account read inside a store call is a store call's failure."""
     subject = an_account(host)
-    session_id = a_session(host.sessions, subject)
+    session_id = a_stored_session(host.sessions, subject)
     with host.engine.connect() as connection:
         store = PostgresSessionStore(
             connection, AccountReadFails(connection, host.tables.accounts), host.tables.sessions
@@ -568,3 +635,162 @@ def test_an_alembic_autogenerate_against_the_migrated_session_table_shows_no_dif
             engine.dispose()
 
     assert differences == []
+
+
+def test_the_stored_key_is_the_sha256_hex_digest_of_the_session_id() -> None:
+    """PGSTORE-10."""
+    assert stored_key("abc") == ABC_DIGEST
+
+
+def test_the_stored_key_view_reads_and_changes_the_row_under_its_stored_key(
+    host: PostgresHost, scenario: ExpirySweepScenario
+) -> None:
+    """PGSTORE-10, PGSTORE-11: the view finds the row the raw-keyed store keeps and answers the
+    stored key as the record's id, and a raw id finds nothing in it."""
+    session_id = scenario.session(an_account(host), expires_after=timedelta(hours=1))
+    key = stored_key(session_id)
+    later = scenario.instant + timedelta(days=2)
+
+    with host.engine.begin() as connection:
+        view = a_stored_key_view(connection, host.tables)
+        loaded = view.load(key)
+        raw_id_found = view.load(session_id)
+        touched = view.touch(key, expires_at=later)
+        replaced = view.replace_refresh_token(key, refresh_token=SecretStr("replacement"))
+
+    after = host.sessions.load(session_id)
+    assert loaded is not None
+    assert loaded.id == key
+    assert raw_id_found is None
+    assert (touched, replaced) == (True, True)
+    assert after is not None
+    assert (after.expires_at, after.refresh_token) == (later, SecretStr("replacement"))
+    with host.engine.begin() as connection:
+        a_stored_key_view(connection, host.tables).delete(key)
+    assert host.sessions.load(session_id) is None
+
+
+def test_the_stored_key_view_refuses_to_create_a_session_so_a_hash_never_becomes_a_cookie(
+    host: PostgresHost, scenario: ExpirySweepScenario
+) -> None:
+    """PGSTORE-11."""
+    subject = an_account(host)
+    now = scenario.instant
+    expires_at = now + timedelta(hours=1)
+
+    with host.engine.begin() as connection:
+        view = a_stored_key_view(connection, host.tables)
+        with pytest.raises(TypeError):
+            view.create(
+                subject,
+                session_id=ABC_DIGEST,
+                now=now,
+                expires_at=expires_at,
+                refresh_token=None,
+                id_token=None,
+                account_language=None,
+            )
+
+    assert host.count_rows(host.tables.sessions) == 0
+
+
+@pytest.fixture
+def reads(host: PostgresHost) -> Iterator[StoredKeyReads]:
+    arranged = stored_key_reads_of(host)
+    try:
+        yield arranged
+    finally:
+        arranged.engine.dispose()
+
+
+def read_groups(reads: StoredKeyReads, session_id: str) -> object:
+    return current_groups(
+        reads.groups.relying_party,
+        session_id,
+        session_transaction=reads.transaction,
+        config=reads.groups.config,
+    )
+
+
+def read_an_access_token(reads: StoredKeyReads, session_id: str) -> object:
+    return fresh_access_token(
+        reads.groups.relying_party,
+        session_id,
+        session_transaction=reads.transaction,
+        config=reads.groups.config,
+    )
+
+
+BACKGROUND_READS = pytest.mark.parametrize(
+    "read", [read_groups, read_an_access_token], ids=attrgetter("__name__")
+)
+
+
+def test_current_groups_reads_the_groups_of_a_session_named_by_its_stored_key(
+    reads: StoredKeyReads,
+) -> None:
+    """PGSTORE-11."""
+    assert read_groups(reads, reads.stored_key) == tuple(GROUPS)
+
+
+def test_fresh_access_token_reads_a_token_for_a_session_named_by_its_stored_key(
+    reads: StoredKeyReads,
+) -> None:
+    """PGSTORE-11."""
+    reads.groups.answer_with_access_token()
+
+    token = read_an_access_token(reads, reads.stored_key)
+
+    assert token == SecretStr(reads.groups.answered_tokens[-1])
+
+
+@BACKGROUND_READS
+def test_a_rotated_refresh_token_is_stored_under_the_original_stored_key(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11: a rotation replaces the token in the row and adds none, and a later read
+    through the view presents the rotated token."""
+    read(reads, reads.stored_key)
+    rotated = reads.refresh_token
+
+    read(reads, reads.stored_key)
+
+    assert rotated in reads.groups.issuer.refresh_tokens - {ISSUED_REFRESH_TOKEN}
+    assert reads.groups.issuer.requests[-1].form["refresh_token"] == rotated
+    assert reads.host.count_rows(reads.host.tables.sessions) == 1
+
+
+@BACKGROUND_READS
+def test_a_session_deleted_during_the_grant_is_session_ended_and_never_recreated(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11."""
+    reads.groups.issuer.before_exchange = lambda: reads.host.sessions.delete(SESSION_ID)
+
+    assert read(reads, reads.stored_key) == SESSION_ENDED
+    assert reads.host.count_rows(reads.host.tables.sessions) == 0
+
+
+@BACKGROUND_READS
+def test_no_connection_of_the_host_is_out_while_the_issuer_is_asked(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11: the two host transactions are separate, with none open during the grant."""
+    checked_out_during_grant: list[int] = []
+    reads.groups.issuer.before_exchange = lambda: checked_out_during_grant.append(
+        reads.connections_checked_out
+    )
+
+    outcome = read(reads, reads.stored_key)
+
+    assert not isinstance(outcome, AccessTokenRefusal)
+    assert checked_out_during_grant == [0]
+
+
+@BACKGROUND_READS
+def test_a_raw_session_id_finds_no_session_through_the_stored_key_view(
+    reads: StoredKeyReads, read: Callable[[StoredKeyReads, str], object]
+) -> None:
+    """PGSTORE-11: one store never accepts both key forms."""
+    assert read(reads, SESSION_ID) == SESSION_ENDED
+    assert reads.groups.requests_made == 0
