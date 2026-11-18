@@ -1,7 +1,0 @@
-claim_id = "bc35618afed146458cb4d0240e84d871"
-agent = "Claude 6ccf3f5a-f664-4702-8121-5da978b872de"
-role = "builder"
-base = "b16edf3fd3e4bf06cc4aa97a31b07d26b98e85d3"
-branch = "claude/issue-788-release-dispatch-by-agent"
-scope = ["AGENTS.md"]
-opened_commit = "adc49e893ee7cdf72b60a7c9d4c72e9ebc74be9f"
