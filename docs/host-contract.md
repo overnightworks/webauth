@@ -10,7 +10,9 @@ neither an ID nor a label explains.
 
 ## Trusted proxies
 
-`WebAuthConfig.trusted_proxies` names the trusted proxy addresses for the host.
+`ClientAddressMiddleware(app, trusted_proxies=TrustedProxies.parse("10.0.0.0/8"))` names the
+trusted proxy addresses for the host. It is the one place a host configures them; `WebAuthConfig`
+carries none.
 
 - **PROXY-01** A request from a peer that `trusted_proxies` does not list keeps the
   peer's address and the connection's own scheme, whatever forwarded headers it carries.
@@ -32,6 +34,29 @@ neither an ID nor a label explains.
   `proxy_headers`, on by default: `proxy_headers=False` or `--no-proxy-headers`);
   `trusted_proxies` decides alone only when the server does not rewrite the client
   address or scheme from those headers.
+- **PROXY-07** The host adds the writer itself, as a plain ASGI wrapper around the app it
+  serves and immediately inside logline's `RequestLineMiddleware`:
+  `RequestLineMiddleware(ClientAddressMiddleware(app, trusted_proxies=...))`. `install_web_auth_middleware`
+  installs no writer. On a Starlette app the same line is `app.add_middleware(ClientAddressMiddleware,
+  trusted_proxies=...)` after the installer call and after every host middleware that can answer
+  by itself (a CORS layer answers a preflight), followed by logline's. Everything inside it, a
+  preflight, a router's own 404 and 405 and a WebSocket included, then carries the resolved client
+  as the `ip` of its line (LOG-06). `trusted_proxies` is a required keyword with no default.
+- **PROXY-08** The writer resolves each http and websocket scope once, records the address and
+  whether the connection is HTTPS (`https` or `wss`, or `X-Forwarded-Proto` from a trusted peer),
+  and rewrites neither the scope's peer nor its scheme; any other scope passes untouched. A host
+  reads the record through `webauth.proxies.client_address(connection)` and
+  `webauth.proxies.request_is_https(connection)`, which only read: no host resolves a second
+  time, and `forwarded_for.ignored` (LOG-04) is written at most once per request. One writer in
+  front of several apps that each carry a stack resolves once for all of them.
+- **PROXY-09** Without the writer, the first request fails loud: an http request answers the
+  library 500 with the security headers and its exception reaches the server, a WebSocket
+  raises before the app runs, and `client_address` raises `RuntimeError` naming the writer. webauth
+  never falls back to the socket peer. The installer refuses an app that already carries the
+  writer, since one added before the call sits inside the stack.
+- **Host duty:** put the writer immediately inside logline's `RequestLineMiddleware`. No library
+  check catches a writer placed inside a CORS layer or a router that answers by itself; those
+  answers then name the proxy. A host's own test of its middleware order proves the position.
 
 ## What every app gets
 
@@ -147,7 +172,8 @@ for the mechanism and its trust boundaries.
   audit) before the call.
 - **STACK-02** Added after the call, a host middleware sits outside the library stack and
   sees every library refusal with its headers already set; it is the place for access
-  logs and metrics.
+  logs and metrics. The client-address writer is the outermost of them but logline's own
+  (PROXY-07).
 - **STACK-03** A response or exception that such a host middleware produces itself does
   not carry the library headers.
 - **STACK-04** The library middleware run the app in the caller's task, so a `ContextVar`
@@ -166,7 +192,7 @@ What the installer refuses before any rule or route:
 - **STACK-09** The refusal sits directly inside the security headers and ahead of every other library middleware: a refused request spends no rate budget, opens no session lookup, and reaches neither a host middleware added before the call nor a route.
 - **STACK-10** The refusal reads the path below `root_path`; a control character in `root_path` itself refuses nothing.
 - **STACK-11** The installer always installs it. It has no policy and no option. `webauth.middleware` exports the class so a host can name it in a stack-order check; `install_web_auth_middleware` stays the only supported way to add it, and an app that already carries it is refused like any library middleware.
-- **STACK-12** WebSocket and lifespan scopes pass: no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
+- **STACK-12** The lifespan scope passes, and a WebSocket scope passes once the security headers have read the recorded client (PROXY-09): no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
 - **STACK-13** A path with a space, a `;`, a trailing slash or a non-ASCII character keeps the answer it has without the refusal.
 - **Host duty:** a route takes no control character in its path; free text goes in the query or the body.
 - **STACK-14** A rate limiter that raises fails closed: each refused request answers 503 with `Retry-After: 5`. The host's log gets one `rate_limit_outage.started` line at ERROR when an outage opens, and one `rate_limit_outage.ended` line at INFO when the limiter next answers; refusals in between log nothing (fields: [What webauth logs](#what-webauth-logs)). The state is per process, so each pod logs its own outage. A host whose backend raises from a bug logs its own traceback; watch the limiter's health through the host's own check.
@@ -187,7 +213,7 @@ Every line webauth writes goes through the standard-library logger of its own mo
 - **LOG-03** `key_set_refresh.failed` (WARNING) carries `reason`, the code of why the fetched key set was refused (for example `not-json`, `duplicate-key-id`, `key-too-short`), and no error class. A refresh that failed because the fetch failed writes no such line: the fetch's own `key_set_fetch.ended` line (LOG-05) already records that failure.
 - **LOG-04** `forwarded_for.ignored` (WARNING) carries `reason`: `not-an-address` when the nearest entry of the chain is no address, `too-many-trusted-hops` when more trusted hops follow in a row than the bound. Behind uvicorn's own proxy-header handling (its default `--proxy-headers` with `forwarded-allow-ips`), uvicorn rewrites the peer from `X-Forwarded-For` before webauth sees it, so `TrustedProxies` and this line apply only when the host turns uvicorn's handling off.
 - **LOG-05** The calls to the issuer each write one `.ended` line through logline's `StepTimer`: `key_set_fetch.ended` and `token_request.ended` carry `duration_ms`, `outcome`, `status` once the origin answered, a `reason` code when the call failed (`unreachable`, `tls-failed`, `timed-out`, `broken-off` or `too-large`) or the origin answered a status it does not accept (`status-not-accepted`, outcome `refused`, at INFO), and `error_type`, the class name of the transport error, when the call failed on one (an answer past the size limit fails as `too-large` with no error). A failed fetch is a WARNING, since the verifier goes on with the key set it holds; a failed token request is an ERROR.
-- **LOG-06** The request line, `request.ended`, is written by logline's `RequestLineMiddleware`, which the host still installs after every other middleware and whose `configure` it still calls; webauth installs neither. Where that middleware wraps webauth's stack, webauth gives the line its `sub` and `ip`, so the host sets neither with `set_sub` or `set_client_ip`. `ip` is the client address `TrustedProxies` resolves (the rightmost hop no entry vouches for), set on every http request of the stack by the middleware just inside the security headers, so every refusal's line carries it, an exempt path included. `sub` is the `id` of the account `admitted_user` returns: the session gate sets it for a live session on a gated or optional path, the bearer gate for the account behind a token on a person path or at a protected resource, and the sign-in callback sets it once it has signed a person in, so the callback's own line carries the new person, and `current_user` sets it for the account it resolves, so a route guarded by `current_user_dependency` alone, with no `SessionGate`, carries it too. A request with no admitted account, and a machine admitted on a machine path (a `BearerCaller`, no account), has `sub` `null`.
+- **LOG-06** The request line, `request.ended`, is written by logline's `RequestLineMiddleware`, which the host still installs after every other middleware and whose `configure` it still calls; webauth installs neither. The host adds `ClientAddressMiddleware(app, trusted_proxies=...)` immediately inside it (PROXY-07). That writer gives the line its `ip`, so the host sets it with no `set_client_ip`; webauth's stack gives it `sub`, so the host sets that with no `set_sub`. `ip` is the client address `TrustedProxies` resolves (the rightmost hop no entry vouches for), set for every http request and every WebSocket the writer wraps, so a proxied preflight, an outer router's own 404 and 405, every refusal of the stack and an exempt path carry it; a WebSocket's line carries it on logline 1.0 and later, since below that a WebSocket has no line. `sub` is the `id` of the account `admitted_user` returns: the session gate sets it for a live session on a gated or optional path, the bearer gate for the account behind a token on a person path or at a protected resource, and the sign-in callback sets it once it has signed a person in, so the callback's own line carries the new person, and `current_user` sets it for the account it resolves, so a route guarded by `current_user_dependency` alone, with no `SessionGate`, carries it too. A request with no admitted account, and a machine admitted on a machine path (a `BearerCaller`, no account), has `sub` `null`.
 
 ## CSRF origin
 

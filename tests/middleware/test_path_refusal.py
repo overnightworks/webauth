@@ -249,7 +249,7 @@ class TestARouteWithAControlCharacterInItsPath:
         ]
 
     def test_a_websocket_handshake_and_the_lifespan_pass_the_stack(self) -> None:
-        """STACK-12: WebSocket and lifespan scopes pass."""
+        """STACK-12: the lifespan scope and a WebSocket scope pass the stack."""
         arrangement = a_stack_over_every_route()
         socket_path = arrangement.routes["websocket"]
 

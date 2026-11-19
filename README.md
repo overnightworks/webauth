@@ -18,12 +18,13 @@ pins it.
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
+from logline import RequestLineMiddleware
 from pydantic import SecretStr
 
 from webauth.admission import AdmissionConfig
 from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
 from webauth.dependencies import current_user_dependency
-from webauth.middleware import install_web_auth_middleware
+from webauth.middleware import ClientAddressMiddleware, install_web_auth_middleware
 from webauth.policies import (
     CsrfPolicy,
     SecurityHeadersPolicy,
@@ -37,7 +38,6 @@ from webauth.sign_in_routes import LogoutPageText, SignInPaths, install_sign_in_
 app = FastAPI()
 config = WebAuthConfig(
     session_secret=SecretStr(Path("/run/secrets/session_secret").read_text().strip()),
-    trusted_proxies=TrustedProxies.parse("10.0.0.0/8"),
     rate_limits=SingleProcessRateLimitBackend(),
     allowed_hosts_exact=frozenset({"app.example.com"}),
     session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
@@ -55,6 +55,8 @@ install_web_auth_middleware(
     ),
     csrf_origin=CsrfPolicy(),
 )
+app.add_middleware(ClientAddressMiddleware, trusted_proxies=TrustedProxies.parse("10.0.0.0/8"))
+app.add_middleware(RequestLineMiddleware)
 install_sign_in_routes(
     app,
     paths=paths,
@@ -91,7 +93,7 @@ A host with one worker and no database keeps its accounts and sessions in memory
 and `on_authenticated` are. `install_web_auth_middleware` derives the policies of the four routes from `paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. `paths.login_redirect` is the one derived value the host passes, to its session gate. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
-The `trusted_proxies` rule is in the [host contract](docs/host-contract.md#trusted-proxies).
+The host adds the `ClientAddressMiddleware` line itself, after the installer and any middleware of its own that can answer by itself (CORS), and immediately inside logline's `RequestLineMiddleware`; `webauth.proxies.client_address(connection)` then reads the address it recorded. The rules and the position are in the [host contract](docs/host-contract.md#trusted-proxies).
 
 ## Documentation
 
