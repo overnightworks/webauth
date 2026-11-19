@@ -17,6 +17,7 @@ from httpx import Response as ClientResponse
 from starlette.requests import Request
 from starlette.responses import Response
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.webauth_arrangement import (
     ALLOWED_HOST,
     SEVEN_DAYS_SECONDS,
@@ -304,6 +305,7 @@ def with_security_headers(app: FastAPI) -> None:
         SecurityHeadersMiddleware,
         policy=SecurityHeadersPolicy(default_content_security_policy([])),
     )
+    add_the_client_address_writer(app)
 
 
 class CookieOverrides(TypedDict, total=False):

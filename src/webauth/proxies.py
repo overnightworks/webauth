@@ -15,17 +15,15 @@ from ipaddress import (
 from itertools import islice
 from typing import TYPE_CHECKING, Final
 
-from webauth.config import web_auth_config
-
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
-    from starlette.requests import HTTPConnection, Request
+    from starlette.requests import HTTPConnection
 
 __all__ = [
     "TrustedProxies",
+    "client_address",
     "request_is_https",
-    "resolve_client_ip",
 ]
 
 _log = logging.getLogger(__name__)
@@ -35,7 +33,9 @@ _IpAddress = IPv4Address | IPv6Address
 _IpNetwork = IPv4Network | IPv6Network
 _FORWARDED_FOR_HEADER: Final[str] = "x-forwarded-for"
 _FORWARDED_PROTO_HEADER: Final[str] = "x-forwarded-proto"
-_HTTPS_SCHEME: Final[str] = "https"
+_HTTPS_SCHEMES: Final[frozenset[str]] = frozenset({"https", "wss"})
+_FORWARDED_HTTPS_PROTO: Final[str] = "https"
+_CLIENT_SCOPE_KEY: Final[str] = "webauth.client"
 
 # The identity used when the connection has no address at all (an ASGI
 # transport without a client, as in tests). It is not an IP, so it is never
@@ -220,26 +220,55 @@ def _peer_host(connection: HTTPConnection) -> str:
     return connection.client.host if connection.client else _UNKNOWN_CLIENT_IP
 
 
-def resolve_client_ip(connection: HTTPConnection) -> str:
-    """The client identity of ``connection`` -- the one owner of that decision."""
-    return _get_client_ip(
-        _peer_host(connection),
-        connection.headers.getlist(_FORWARDED_FOR_HEADER),
-        web_auth_config(connection).trusted_proxies,
-    )
+@dataclass(frozen=True)
+class _RecordedClient:
+    address: str
+    https: bool
 
 
-def request_is_https(request: Request) -> bool:
-    """Whether the client's own connection is HTTPS, forwarding included.
+def _record_client(connection: HTTPConnection, trusted_proxies: TrustedProxies) -> str:
+    """Resolve the client of ``connection`` once, record it on the scope and return its address.
 
-    Like the client address, a forwarded protocol counts only from a trusted
-    peer and only in its rightmost value -- the one the closest proxy appended,
-    cut out the same bounded way. A client that prepends its own
-    ``X-Forwarded-Proto`` cannot outvote it.
+    Only a trusted peer may name another client, and a forwarded protocol counts under the same
+    rule and only in its rightmost value -- the one the closest proxy appended, cut out the same
+    bounded way -- so a client that prepends its own ``X-Forwarded-Proto`` cannot outvote it. The
+    scope's own peer and scheme stay as the server set them.
     """
-    if request.url.scheme == _HTTPS_SCHEME:
-        return True
-    if _peer_host(request) not in web_auth_config(request).trusted_proxies:
-        return False
-    newest = next(_forwarded_entries(request.headers.getlist(_FORWARDED_PROTO_HEADER)), "")
-    return newest.lower() == _HTTPS_SCHEME
+    peer = _peer_host(connection)
+    address = _get_client_ip(
+        peer,
+        connection.headers.getlist(_FORWARDED_FOR_HEADER),
+        trusted_proxies,
+    )
+    https = connection.scope.get("scheme") in _HTTPS_SCHEMES
+    if not https and peer in trusted_proxies:
+        newest = next(_forwarded_entries(connection.headers.getlist(_FORWARDED_PROTO_HEADER)), "")
+        https = newest.lower() == _FORWARDED_HTTPS_PROTO
+    connection.scope[_CLIENT_SCOPE_KEY] = _RecordedClient(address, https)
+    return address
+
+
+def _recorded_client(connection: HTTPConnection) -> _RecordedClient:
+    try:
+        return connection.scope[_CLIENT_SCOPE_KEY]
+    except KeyError:
+        raise RuntimeError(
+            "No client address is recorded for this connection. The host adds "
+            "webauth.middleware.ClientAddressMiddleware(app, trusted_proxies=...) immediately "
+            "inside logline's RequestLineMiddleware, and the library never guesses the peer "
+            "in its place.",
+        ) from None
+
+
+def client_address(connection: HTTPConnection) -> str:
+    """The client identity ``ClientAddressMiddleware`` recorded for ``connection``.
+
+    It only reads: with no writer in front of the app it raises ``RuntimeError`` and never
+    resolves, so the address is decided once per request and by one owner.
+    """
+    return _recorded_client(connection).address
+
+
+def request_is_https(connection: HTTPConnection) -> bool:
+    """Whether the client's own connection is HTTPS, forwarding included, as the writer recorded it."""
+    return _recorded_client(connection).https

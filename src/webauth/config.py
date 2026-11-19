@@ -33,7 +33,6 @@ if TYPE_CHECKING:
         RateLimitBackend,
         WallClock,
     )
-    from webauth.proxies import TrustedProxies
 
 __all__ = [
     "SessionLifetime",
@@ -94,8 +93,8 @@ class WebAuthConfig:
     ``cookie_secure`` alone decides whether the session cookie carries
     ``Secure``, when it is set and when it is cleared, and whether
     ``SecurityHeadersMiddleware`` sends HSTS. The request's scheme does not
-    decide it, so a deployment behind a TLS proxy missing from
-    ``trusted_proxies`` still gets both. A browser does not send a ``Secure``
+    decide it, so a deployment behind a TLS proxy the host's
+    ``ClientAddressMiddleware`` does not trust still gets both. A browser does not send a ``Secure``
     cookie back over plain http, so a host's own session login over plain http
     works only with ``cookie_secure=False``, which drops ``Secure`` and HSTS
     together. Any value that is not a ``bool`` is refused.
@@ -121,7 +120,6 @@ class WebAuthConfig:
     """
 
     session_secret: SecretStr
-    trusted_proxies: TrustedProxies
     rate_limits: RateLimitBackend
     allowed_hosts_exact: frozenset[str]
     session_lifetime: SessionLifetime

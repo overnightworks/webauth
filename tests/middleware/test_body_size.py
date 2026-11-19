@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import (
@@ -115,6 +116,7 @@ def a_body_limited_app(
             rate_limit=RateLimitPolicy(default=RateLimitBudget("api", 100, 60)),
             csrf_origin=CsrfPolicy(),
         )
+        add_the_client_address_writer(app)
     else:
         install_web_auth_middleware(
             app,
@@ -123,6 +125,7 @@ def a_body_limited_app(
             body_size=body_size,
             csrf_origin=CsrfPolicy(),
         )
+        add_the_client_address_writer(app)
     return app
 
 

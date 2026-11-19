@@ -10,6 +10,7 @@ from fastapi import BackgroundTasks, FastAPI, Request
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.webauth_arrangement import API_PATH, a_web_auth_config
 from webauth.config import install_web_auth_config
@@ -109,6 +110,7 @@ def install_full_stack(
     max_requests: int = 100,
     session_gate: SessionGate | None = None,
     bearer_gate: BearerGate | None = None,
+    client_address_writer: bool = True,
 ) -> None:
     install_web_auth_middleware(
         app,
@@ -120,3 +122,5 @@ def install_full_stack(
         bearer_gate=bearer_gate,
         session_gate=session_gate,
     )
+    if client_address_writer:
+        add_the_client_address_writer(app)

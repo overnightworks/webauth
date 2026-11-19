@@ -62,6 +62,7 @@ from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
     BodySizeLimitMiddleware,
+    ClientAddressMiddleware,
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
     MachinePaths,
@@ -128,7 +129,7 @@ from webauth.ports import (
     UserRecord,
     WallClock,
 )
-from webauth.proxies import TrustedProxies
+from webauth.proxies import TrustedProxies, client_address, request_is_https
 from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
 from webauth.session_groups import SessionGroups
 from webauth.sign_in_routes import (
@@ -224,7 +225,6 @@ class HostRateLimits:
 def a_host_configures_without_local_credentials() -> WebAuthConfig:
     return WebAuthConfig(
         session_secret=SecretStr("x" * 32),
-        trusted_proxies=TrustedProxies.parse("127.0.0.1"),
         rate_limits=HostRateLimits(),
         allowed_hosts_exact=frozenset({"host.example"}),
         session_lifetime=SessionLifetime(idle_seconds=3600, absolute_max_age_seconds=86400),
@@ -543,6 +543,7 @@ def a_host_installs_the_middleware(
             public=(PublicRule(PathRules(exact=frozenset({"/login"}))),),
         ),
     )
+    app.add_middleware(ClientAddressMiddleware, trusted_proxies=TrustedProxies.parse("127.0.0.1"))
 
 
 def a_host_session_transaction() -> AbstractContextManager[SessionRecordStore]:
@@ -552,6 +553,10 @@ def a_host_session_transaction() -> AbstractContextManager[SessionRecordStore]:
 def a_host_reads_the_admitted_user(request: Request) -> str | None:
     user = admitted_user(request)
     return None if user is None else user.username
+
+
+def a_host_reads_the_client_it_recorded(connection: HTTPConnection) -> tuple[str, bool]:
+    return client_address(connection), request_is_https(connection)
 
 
 def a_host_reads_the_admitted_admin(request: Request) -> str:

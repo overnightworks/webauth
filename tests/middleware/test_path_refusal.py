@@ -13,6 +13,7 @@ from httpx import Response
 from starlette.responses import JSONResponse
 
 import webauth.middleware
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.rate_limit_arrangement import RecordingRateLimitBackend
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.session_store_arrangement import SessionsRecordingTheirTransaction
@@ -143,6 +144,7 @@ def a_stack_over_every_route() -> Arrangement:
             public=(),
         ),
     )
+    add_the_client_address_writer(app)
     return arrangement
 
 
@@ -237,6 +239,7 @@ class TestARouteWithAControlCharacterInItsPath:
             security_headers=headers_policy,
             csrf_origin=CsrfPolicy(),
         )
+        add_the_client_address_writer(app)
 
         response = TestClient(app, base_url=HTTPS_TEST_SERVER).get("/api/thing%0A")
 

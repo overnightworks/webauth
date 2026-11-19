@@ -6,11 +6,13 @@ import re
 from typing import TYPE_CHECKING, Final
 
 from starlette.datastructures import MutableHeaders
+from starlette.requests import HTTPConnection
 from starlette.responses import PlainTextResponse
 
 from webauth.config import installed_web_auth_config
 from webauth.middleware._route_path import route_path
 from webauth.policies import _OWN_POLICY_HEADER
+from webauth.proxies import client_address
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -60,6 +62,10 @@ class SecurityHeadersMiddleware:
     With ``cookie_secure`` off no HSTS leaves, not even one a route set: a
     browser that pinned https could no longer reach the plain-http host.
 
+    The stack's first middleware, it also fails a request the host's ``ClientAddressMiddleware``
+    did not record a client for: an http request with the 500 below, a WebSocket by raising before
+    the app runs, so a missing writer shows on the first request whatever refuses it.
+
     An exception before the response started is answered with a plain 500
     that carries the policy headers, and the exception still reaches the
     server: a host's 500 handler runs, but the response it returns is not
@@ -86,6 +92,8 @@ class SecurityHeadersMiddleware:
         self._policy = policy
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "websocket":
+            client_address(HTTPConnection(scope))
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
@@ -104,6 +112,7 @@ class SecurityHeadersMiddleware:
 
         try:
             cookie_secure = installed_web_auth_config(scope["app"]).cookie_secure
+            client_address(HTTPConnection(scope))
             await self._app(scope, receive, send_with_policy)
         except Exception as original:
             if not response_started:

@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
@@ -213,6 +214,7 @@ class TestAPathNextToTheRootPathIsNotStripped:
                 **stack_policies,
             },
         )
+        add_the_client_address_writer(app)
 
         @app.api_route(NEXT_TO_THE_ROOT_PATH, methods=["GET", "POST"])
         def route() -> dict[str, bool]:
@@ -303,6 +305,7 @@ class TestACacheControlRuleOfTheParentSelectsThroughAMount:
             security_headers=a_no_store_policy(PathRules(prefixes=("/api/x/",))),
             csrf_origin=CsrfPolicy(),
         )
+        add_the_client_address_writer(parent)
         parent.mount("/api", sub)
         client = TestClient(parent, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
 

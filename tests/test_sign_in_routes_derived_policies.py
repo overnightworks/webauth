@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.responses import Response
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.oidc_arrangement import FakeIssuer, a_relying_party
 from tests.support.oidc_login_host import (
     ADMISSION,
@@ -92,6 +93,7 @@ def _a_gated_host(
         if gated
         else None,
     )
+    add_the_client_address_writer(app)
     install_sign_in_routes(
         app,
         paths=SIGN_IN_PATHS,

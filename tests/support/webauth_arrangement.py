@@ -24,6 +24,7 @@ from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketDisconnect
 
 from tests.support.account_arrangement import FakeUser
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.session_store_arrangement import (
     FakeSessionRecord,
@@ -62,10 +63,8 @@ from webauth.ports import (
     SessionRecordStore,
     SessionTransaction,
 )
-from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
 
-TRUSTED_PROXY_NETWORK = "172.16.0.0/12"
 ALLOWED_HOST = "notes.example"
 ALLOWED_ORIGIN = f"https://{ALLOWED_HOST}"
 SAME_ORIGIN_REQUEST = {"origin": ALLOWED_ORIGIN, "sec-fetch-site": "same-origin"}
@@ -97,7 +96,6 @@ def web_auth_config_arguments() -> dict[str, Any]:
     """Every argument a complete configuration is built from."""
     return {
         "session_secret": SecretStr("s" * MIN_SESSION_SECRET_CHARS),
-        "trusted_proxies": TrustedProxies.parse(TRUSTED_PROXY_NETWORK),
         "rate_limits": SingleProcessRateLimitBackend(),
         "allowed_hosts_exact": frozenset({ALLOWED_HOST}),
         "session_lifetime": SessionLifetime(
@@ -149,6 +147,7 @@ def a_policy_rate_limited_client(
     app = FastAPI()
     install_web_auth_config(app, a_web_auth_config(rate_limits=rate_limits, **config_overrides))
     app.add_middleware(IpRateLimitMiddleware, policy=policy)
+    add_the_client_address_writer(app)
     for path in paths:
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET"])
     return TestClient(app, base_url=HTTPS_TEST_SERVER)

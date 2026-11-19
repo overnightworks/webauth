@@ -10,10 +10,9 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.log_records import fields_of
-from tests.support.webauth_arrangement import a_web_auth_config
 from webauth import proxies
-from webauth.config import install_web_auth_config
 from webauth.proxies import (
     TrustedProxies,
     _budget_address,
@@ -309,13 +308,15 @@ def test_client_ip_of_a_peer_that_is_not_an_address() -> None:
     assert _get_client_ip("testclient", ["203.0.113.7"], trusted) == "testclient"
 
 
-def _client_ip_app() -> FastAPI:
+def _client_ip_app(*, with_writer: bool = True) -> FastAPI:
     app = FastAPI()
 
     @app.get("/client-ip")
     def client_ip(request: Request) -> dict:
-        return {"ip": proxies.resolve_client_ip(request)}
+        return {"ip": proxies.client_address(request)}
 
+    if with_writer:
+        add_the_client_address_writer(app)
     return app
 
 
@@ -326,9 +327,8 @@ def _client_ip_app() -> FastAPI:
         pytest.param("198.51.100.77", "198.51.100.77", id="untrusted-peer-ignores-a-forged-chain"),
     ],
 )
-def test_the_client_identity_of_a_configured_application(peer: str, expected: str) -> None:
+def test_the_client_identity_the_writer_recorded(peer: str, expected: str) -> None:
     app = _client_ip_app()
-    install_web_auth_config(app, a_web_auth_config())
 
     with TestClient(app, client=(peer, 55000)) as client:
         response = client.get("/client-ip", headers={"x-forwarded-for": _CLIENT})
@@ -340,7 +340,6 @@ def test_the_client_identity_keeps_the_full_ipv6_address() -> None:
     """Only the rate-limit budget pools a network; the identity keeps the
     address the client actually used."""
     app = _client_ip_app()
-    install_web_auth_config(app, a_web_auth_config())
 
     with TestClient(app, client=("2001:db8:1:2::1", 55000)) as client:
         response = client.get("/client-ip")
@@ -348,15 +347,15 @@ def test_the_client_identity_keeps_the_full_ipv6_address() -> None:
     assert response.json() == {"ip": "2001:db8:1:2::1"}
 
 
-def test_an_application_without_a_configuration_names_nobody() -> None:
+def test_an_application_without_the_writer_names_nobody() -> None:
     """Guessing here would hand a forged header the identity that buys a
-    rate-limit budget, so a missing configuration has to stop the request
-    instead of falling back to the peer."""
-    app = _client_ip_app()
+    rate-limit budget, so a missing writer has to stop the request instead of
+    falling back to the peer."""
+    app = _client_ip_app(with_writer=False)
 
     with (
         TestClient(app, client=(_TRUSTED_PEER, 55000)) as client,
-        pytest.raises(RuntimeError, match="install_web_auth_config"),
+        pytest.raises(RuntimeError, match="ClientAddressMiddleware"),
     ):
         client.get("/client-ip", headers={"x-forwarded-for": _CLIENT})
 
@@ -404,12 +403,12 @@ def test_visitors_behind_an_unlisted_proxy_share_its_rate_limit_budget() -> None
 
 def _scheme_app() -> FastAPI:
     app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config())
 
     @app.get("/is-https")
     def is_https(request: Request) -> dict:
         return {"https": proxies.request_is_https(request)}
 
+    add_the_client_address_writer(app)
     return app
 
 
@@ -460,7 +459,6 @@ def test_an_rfc_7239_forwarded_header_moves_neither_the_client_address_nor_the_s
     """PROXY-03: a trusted proxy's Forwarded header alone changes nothing."""
     headers = {"forwarded": f"for={_CLIENT};proto=https"}
     app = _client_ip_app()
-    install_web_auth_config(app, a_web_auth_config())
 
     with TestClient(app, base_url="http://testserver", client=(_TRUSTED_PEER, 55000)) as client:
         client_ip = client.get("/client-ip", headers=headers)

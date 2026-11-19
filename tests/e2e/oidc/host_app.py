@@ -45,6 +45,7 @@ from fastapi.responses import HTMLResponse
 from logline import configure
 from pydantic import SecretStr
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
 from webauth.config import WebAuthConfig, install_web_auth_config
 from webauth.dependencies import (
@@ -399,6 +400,7 @@ def _install_stack(
         csrf_origin=CsrfPolicy(),
         **_bearer_policies(settings, world, transaction),
     )
+    add_the_client_address_writer(app)
 
 
 def _bearer_policies(
