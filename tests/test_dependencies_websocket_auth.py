@@ -46,7 +46,6 @@ from webauth.cookies import (
 )
 from webauth.dependencies import ConnectionRefusal, session_id_from_request
 from webauth.ports import AuthenticatedUser
-from webauth.proxies import resolve_client_ip
 
 CONFIG = a_web_auth_config()
 SIGNING_KEY = CONFIG.signing_key
@@ -475,7 +474,6 @@ def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTP
             [sign_session_id(SESSION_ID, SIGNING_KEY)],
             id="cookie_values",
         ),
-        pytest.param(resolve_client_ip, {}, CLIENT_ADDRESS, id="resolve_client_ip"),
         pytest.param(
             session_id_from_request,
             {"config": CONFIG},

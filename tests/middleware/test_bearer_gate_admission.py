@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 from starlette.websockets import WebSocket
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.gate_arrangement import (
     A_TOKEN,
     ADMITTED_ADMIN_PATH,
@@ -264,6 +265,7 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
             if session_gate
             else None,
         )
+        add_the_client_address_writer(inner)
 
     @inner.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
     def machine_route(_caller: BearerCaller = Depends(bearer_caller)) -> dict[str, str]:
@@ -474,6 +476,7 @@ class TestTheGateSitsInsideTheRateLimitAndBodyLimitAndBehindTheHeaders:
             csrf_origin=CsrfPolicy(),
             bearer_gate=a_bearer_gate(),
         )
+        add_the_client_address_writer(app)
         app.add_api_route(EXPORT_PATH, lambda: {"ok": True}, methods=["GET"])
         client = TestClient(app, base_url=HTTPS_TEST_SERVER)
 

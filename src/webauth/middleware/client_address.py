@@ -1,51 +1,44 @@
-"""Resolve the client address once per request and put it on the request line before any refusal."""
+"""Resolve the client address once per request and record it for everything inside."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from logline import set_client_ip
-from starlette.requests import Request
+from starlette.requests import HTTPConnection
 
-from webauth.proxies import resolve_client_ip
+from webauth.proxies import _record_client
 
 if TYPE_CHECKING:
-    from starlette.requests import HTTPConnection
     from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from webauth.proxies import TrustedProxies
 
 __all__ = [
     "ClientAddressMiddleware",
 ]
 
-_CLIENT_ADDRESS_SCOPE_KEY: Final = "webauth.client_address"
-
-
-def _resolved_client_address(connection: HTTPConnection) -> str:
-    """``resolve_client_ip``'s answer, computed once for this request.
-
-    Resolving writes a ``forwarded_for.ignored`` warning for a header it ignores, so a second
-    resolution of one request would write it twice.
-    """
-    address = connection.scope.get(_CLIENT_ADDRESS_SCOPE_KEY)
-    if address is None:
-        address = resolve_client_ip(connection)
-        connection.scope[_CLIENT_ADDRESS_SCOPE_KEY] = address
-    return address
+_RECORDED_SCOPES = frozenset({"http", "websocket"})
 
 
 class ClientAddressMiddleware:
-    """Set the ``ip`` of an http request's line to the request's resolved client address.
+    """Record the client the trusted proxies resolve, and set the ``ip`` of the request line.
 
-    It sits ahead of every refusal, so the path and body-size refusals and a rate-limited
-    request carry the resolved client and not the proxy that relayed it; the rate limit keys
-    its budget on the same answer. It refuses nothing, and ``install_web_auth_middleware`` is
-    the only way to add it.
+    The host adds it itself, as a plain ASGI wrapper around the app it serves, immediately
+    inside logline's ``RequestLineMiddleware``: ``RequestLineMiddleware(ClientAddressMiddleware(
+    app, trusted_proxies=...))``. Everything it wraps -- the library's stack, a CORS layer that
+    answers a preflight itself, a router that answers its own 404 -- then carries the client and
+    not the proxy, and reads it through ``webauth.proxies.client_address``. It records the
+    address and whether the connection is HTTPS for an http or websocket scope, refuses nothing,
+    and passes any other scope through untouched. It rewrites neither the scope's peer nor its
+    scheme. ``trusted_proxies`` is the one place the host names the proxies it believes.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, trusted_proxies: TrustedProxies) -> None:
         self._app = app
+        self._trusted_proxies = trusted_proxies
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
-            set_client_ip(scope, _resolved_client_address(Request(scope)))
+        if scope["type"] in _RECORDED_SCOPES:
+            set_client_ip(scope, _record_client(HTTPConnection(scope), self._trusted_proxies))
         await self._app(scope, receive, send)

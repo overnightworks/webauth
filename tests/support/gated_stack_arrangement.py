@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from webauth.middleware import SessionGate, install_web_auth_middleware
 from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
 from webauth.sign_in_routes import SignInPaths
@@ -28,3 +29,4 @@ def install_the_gated_stack(
         },
         session_gate=session_gate,
     )
+    add_the_client_address_writer(app)

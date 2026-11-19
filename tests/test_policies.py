@@ -13,6 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.webauth_arrangement import a_web_auth_config
 from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware
@@ -369,6 +370,7 @@ class TestSecurityHeadersPolicy:
         app = FastAPI()
         install_web_auth_config(app, a_web_auth_config())
         app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+        add_the_client_address_writer(app)
         app.get("/")(lambda: {})
 
         response = TestClient(app).get("/")

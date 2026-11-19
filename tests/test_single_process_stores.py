@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.oidc_arrangement import (
     FakeClock,
     FakeIssuer,
@@ -547,6 +548,7 @@ class Browser:
             body_size=BodySizePolicy(default_max_bytes=1024),
             csrf_origin=CsrfPolicy(),
         )
+        add_the_client_address_writer(app)
         install_sign_in_routes(
             app,
             paths=SIGN_IN_PATHS,

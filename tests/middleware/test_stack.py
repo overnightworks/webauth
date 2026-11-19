@@ -21,6 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.full_stack_arrangement import (
     BACKGROUND_PATH,
     BODY_LIMIT_BYTES,
@@ -65,7 +66,6 @@ from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
     BodySizeLimitMiddleware,
-    ClientAddressMiddleware,
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
     MachinePaths,
@@ -332,6 +332,7 @@ class TestAnExemptWebhookPrefix:
             security_headers=HEADERS_POLICY,
             csrf_origin=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PREFIX,))),
         )
+        add_the_client_address_writer(app)
         return TestClient(app, base_url=HTTPS_TEST_SERVER)
 
     @pytest.mark.parametrize(
@@ -432,10 +433,14 @@ class TestRefusedInstallation:
 
     def test_a_full_install_with_a_bearer_gate_runs_the_library_in_one_order(self) -> None:
         app = a_fresh_app()
-        install_full_stack(app, session_gate=A_SESSION_GATE, bearer_gate=A_BEARER_GATE)
+        install_full_stack(
+            app,
+            session_gate=A_SESSION_GATE,
+            bearer_gate=A_BEARER_GATE,
+            client_address_writer=False,
+        )
         assert [entry.cls for entry in app.user_middleware] == [
             SecurityHeadersMiddleware,
-            ClientAddressMiddleware,
             PathRefusalMiddleware,
             BodySizeLimitMiddleware,
             IpRateLimitMiddleware,

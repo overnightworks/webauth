@@ -23,6 +23,7 @@ from tests.support.account_arrangement import (
     WriteLockInMemory,
     require_held_lock,
 )
+from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_REFRESH_TOKEN,
@@ -433,6 +434,7 @@ def _install_the_host_middleware(
         else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60)),
         csrf_origin=CsrfPolicy(),
     )
+    add_the_client_address_writer(app)
 
 
 def _add_the_login_routes(

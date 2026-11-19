@@ -14,6 +14,10 @@ from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tests.support.account_arrangement import UsersInMemory, WriteLockInMemory
+from tests.support.client_address_arrangement import (
+    add_the_client_address_writer,
+    behind_the_client_address_writer,
+)
 from tests.support.oidc_arrangement import LogoutPage, a_relying_party
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.session_store_arrangement import SessionRecordsInMemory
@@ -64,6 +68,7 @@ def an_app(
 ) -> FastAPI:
     app = FastAPI(debug=debug)
     app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+    add_the_client_address_writer(app)
     if configured:
         install_web_auth_config(app, a_web_auth_config(cookie_secure=cookie_secure))
     return app
@@ -249,7 +254,10 @@ async def test_a_start_without_headers_gains_them_and_keeps_its_other_fields() -
         await send({"type": "http.response.body", "body": b"x", "more_body": True})
         await send({"type": "http.response.trailers", "headers": [(b"x-trailer", b"1")]})
 
-    sent, raised = await drive(SecurityHeadersMiddleware(bare_app, POLICY), an_http_scope(app))
+    sent, raised = await drive(
+        behind_the_client_address_writer(SecurityHeadersMiddleware(bare_app, POLICY)),
+        an_http_scope(app),
+    )
 
     start, body, trailers = sent
     assert raised is None
@@ -276,7 +284,7 @@ async def test_a_downstream_send_that_fails_on_the_start_is_tried_once_and_propa
         attempts.append(message)
         raise failure
 
-    middleware = SecurityHeadersMiddleware(responding_app, POLICY)
+    middleware = behind_the_client_address_writer(SecurityHeadersMiddleware(responding_app, POLICY))
     scope = an_http_scope(app)
 
     with pytest.raises(ConnectionResetError) as raised:
@@ -302,7 +310,7 @@ async def test_a_500_that_cannot_be_sent_still_raises_the_route_exception_with_a
         if message["type"] == failing_message_type:
             raise send_failure
 
-    middleware = SecurityHeadersMiddleware(failing_app, POLICY)
+    middleware = behind_the_client_address_writer(SecurityHeadersMiddleware(failing_app, POLICY))
     scope = an_http_scope(app)
 
     with pytest.raises(RouteFailure) as raised:
@@ -320,6 +328,7 @@ def test_a_cache_control_rule_applies_to_a_normal_response_and_to_the_library_50
     )
     app = FastAPI()
     app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+    add_the_client_address_writer(app)
     install_web_auth_config(app, a_web_auth_config())
     with_failing_route(app, RouteFailure())
 
@@ -339,20 +348,21 @@ def test_a_cache_control_rule_applies_to_a_normal_response_and_to_the_library_50
 
 
 @pytest.mark.anyio
-async def test_a_websocket_passes_through_untouched() -> None:
-    seen: list[Scope] = []
+async def test_a_websocket_passes_through_without_a_response() -> None:
+    ran: list[str] = []
 
     async def websocket_app(scope: Scope, _receive: Receive, _send: Send) -> None:
-        seen.append(scope)
+        ran.append(scope["path"])
 
     async def no_send(_message: Message) -> None:
         raise AssertionError("the middleware sent on a websocket")
 
-    scope: Scope = {"type": "websocket", "path": "/ws"}
+    scope: Scope = {"type": "websocket", "path": "/ws", "headers": []}
+    middleware = behind_the_client_address_writer(SecurityHeadersMiddleware(websocket_app, POLICY))
 
-    await SecurityHeadersMiddleware(websocket_app, POLICY)(scope, no_receive, no_send)
+    await middleware(scope, no_receive, no_send)
 
-    assert seen == [{"type": "websocket", "path": "/ws"}]
+    assert ran == ["/ws"]
 
 
 def test_a_normal_response_keeps_its_background_task() -> None:
@@ -492,6 +502,7 @@ def the_logout_page(
             security_headers=host_policy,
             csrf_origin=CsrfPolicy(),
         )
+        add_the_client_address_writer(app)
 
     install_sign_in_routes(
         app,
