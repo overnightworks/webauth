@@ -213,8 +213,9 @@ def install_web_auth_middleware(
     With a bearer gate that has machine paths or a resource the installed security-headers policy
     carries their ``no-store`` rule first, so it wins.
 
-    Install once and add no library middleware yourself; an app that already
-    carries one, a subclass included, is refused untouched (``RuntimeError``).
+    Install once and add none of the middleware this call installs yourself, the client-address
+    writer excepted; an app that already carries one of them, a subclass included, is refused
+    untouched (``RuntimeError``).
 
     A route that raises, or an app without an installed ``WebAuthConfig``,
     answers the library 500 with the headers (no HSTS without a config), and
