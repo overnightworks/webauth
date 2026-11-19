@@ -41,6 +41,8 @@ from tests.support.request_line_arrangement import (
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import API_PATH, HTTPS_TEST_SERVER
 from webauth import proxies
+from webauth.middleware import IpRateLimitMiddleware
+from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -244,6 +246,20 @@ def test_the_accessor_only_reads_what_the_writer_recorded(
         client.get("/client", headers=NOT_AN_ADDRESS)
 
     assert caplog.records == []
+
+
+def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -> None:
+    app = a_fresh_app()
+    app.add_api_route("/exempt", lambda: {"ok": True}, methods=["GET"])
+    app.add_middleware(
+        IpRateLimitMiddleware,
+        policy=RateLimitPolicy(
+            default=RateLimitBudget("api", 100, 60), exempt=PathRules(exact=frozenset({"/exempt"}))
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="ClientAddressMiddleware"):
+        TestClient(app, base_url=HTTPS_TEST_SERVER).get("/exempt")
 
 
 def test_a_writer_added_before_the_installer_is_refused_naming_its_position() -> None:
