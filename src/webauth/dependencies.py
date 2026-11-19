@@ -205,7 +205,10 @@ def authenticate_websocket(
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:
         return origin_refusal
-    return _resolve_session(connection, sessions)
+    resolved = _resolve_session(connection, sessions)
+    if not isinstance(resolved, ConnectionRefusal):
+        set_sub(connection.scope, resolved.id)
+    return resolved
 
 
 def _origin_refusal(connection: HTTPConnection) -> ConnectionRefusal | None:
