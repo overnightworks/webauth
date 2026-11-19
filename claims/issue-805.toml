@@ -1,0 +1,7 @@
+claim_id = "9b76d0499b23478b96bbd9854ac7bad9"
+agent = "Claude 028550fd-db9f-4fd7-9852-4f7d21a4c6d0"
+role = "builder"
+base = "93ec7b340241f5cffee48bd45a0aeca44234ce84"
+branch = "claude/issue-805-websocket-line-names-the-person"
+scope = ["docs/host-contract.md", "src/webauth/dependencies.py", "tests/middleware/test_stack_request_line.py"]
+opened_commit = "c1f4a4a9fa7140ae2d2602d56091ca85ecff7d26"
