@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
 
 from tests.support.account_arrangement import FakeUser
 from tests.support.agent_arrangement import an_agent_group_token
@@ -32,6 +34,7 @@ from tests.support.person_paths_arrangement import MEMBER_TOKEN, a_lena, a_perso
 from tests.support.request_line_arrangement import (
     FORWARDED_CLIENT,
     TRUSTED_PEER,
+    WEBSOCKET_EVENT,
     a_client_behind_the_proxy,
     logging_request_lines,
     request_lines_written,
@@ -42,7 +45,14 @@ from tests.support.session_gate_arrangement import (
     ask,
     signed_in,
 )
-from tests.support.webauth_arrangement import ADMITTED_READER_PATH, SESSION_ID, a_session
+from tests.support.webauth_arrangement import (
+    ADMITTED_READER_PATH,
+    ALLOWED_ORIGIN,
+    SESSION_ID,
+    WEBSOCKET_PATH,
+    a_session,
+    an_auth_app,
+)
 from webauth.policies import PathRules, RateLimitPolicy
 
 if TYPE_CHECKING:
@@ -91,6 +101,37 @@ def test_the_request_line_has_the_account_its_session_guard_admitted_as_sub(
 
     (line,) = lines
     assert (response.status_code, line["sub"]) == (status, sub)
+
+
+@pytest.mark.parametrize(
+    ("with_cookie", "origin", "sub"),
+    [
+        pytest.param(True, ALLOWED_ORIGIN, "user-1", id="an-admitted-handshake"),
+        pytest.param(True, None, None, id="a-handshake-refused-for-its-origin"),
+        pytest.param(False, ALLOWED_ORIGIN, None, id="a-handshake-refused-for-a-missing-session"),
+    ],
+)
+def test_the_websocket_line_has_the_account_its_handshake_admitted_as_sub(
+    capsys: pytest.CaptureFixture[str],
+    with_cookie: bool,
+    origin: str | None,
+    sub: str | None,
+) -> None:
+    app = an_auth_app(a_session(user=FakeUser(id="user-1", username="alice")))
+    logging_request_lines(app.app)
+
+    with (
+        request_lines_written(capsys, event=WEBSOCKET_EVENT) as lines,
+        app.client,
+        suppress(WebSocketDisconnect),
+        app.connect(
+            WEBSOCKET_PATH, cookie=app.signed_cookie() if with_cookie else None, origin=origin
+        ),
+    ):
+        pass
+
+    (line,) = lines
+    assert line["sub"] == sub
 
 
 def test_a_token_on_a_person_path_is_the_sub_of_its_request_line(
