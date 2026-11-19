@@ -187,10 +187,9 @@ def install_web_auth_middleware(
     """Install the library's middleware outermost first: security headers, path refusal, body size,
     rate limit, bearer gate, CSRF origin, session gate.
 
-    The client address is not installed here. After this call the host adds
+    The client address is not installed here: after this call the host adds
     ``ClientAddressMiddleware(app, trusted_proxies=...)`` and, outside it, logline's
-    ``RequestLineMiddleware``, so every request line and everything the host answers by itself
-    carries the resolved client; a stack without the writer fails on its first request.
+    ``RequestLineMiddleware``, or the first request fails (``docs/host-contract.md``).
 
     ``sign_in_paths`` is the one description of the sign-in routes. From it the installer puts these
     rules ahead of the host's own, so the first match is the derived one (a path the host exempts
@@ -213,18 +212,13 @@ def install_web_auth_middleware(
     With a bearer gate that has machine paths or a resource the installed security-headers policy
     carries their ``no-store`` rule first, so it wins.
 
-    Install once and add none of the middleware this call installs yourself, the client-address
-    writer excepted; an app that already carries one of them, a subclass included, is refused
-    untouched (``RuntimeError``).
+    Install once and add none of this call's middleware yourself; an app that already carries one,
+    a subclass included, is refused untouched (``RuntimeError``).
 
-    A route that raises, or an app without an installed ``WebAuthConfig``,
-    answers the library 500 with the headers (no HSTS without a config), and
-    the exception still reaches the server. Once the response has started no
-    500 follows, because a second start cannot be sent; the exception reaches
-    the server alone.
-
-    Where a host's own middleware goes is in ``docs/host-contract.md``, "Where the host's own
-    middleware goes".
+    A route that raises, or an app without an installed ``WebAuthConfig``, answers the library 500
+    with the headers (no HSTS without a config), and the exception still reaches the server. Once
+    the response has started no 500 follows, because a second start cannot be sent; the exception
+    reaches the server alone.
     """
     _refuse_an_unsound_stack(app)
     entries = _library_middleware(
