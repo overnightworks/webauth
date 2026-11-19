@@ -279,6 +279,26 @@ async def send_nothing(message: Message) -> None:
     raise NotImplementedError
 
 
+def test_the_writer_rewrites_neither_the_peer_nor_the_scheme() -> None:
+    app = a_fresh_app()
+
+    @app.get("/scope")
+    def scope_of(request: Request) -> JSONResponse:
+        return JSONResponse(
+            {"client": list(request.scope["client"]), "scheme": request.scope["scheme"]}
+        )
+
+    client = TestClient(
+        behind_the_client_address_writer(app),
+        base_url="http://testserver",
+        client=(TRUSTED_PEER, 55000),
+    )
+
+    response = client.get("/scope", headers={**FORWARDED, "x-forwarded-proto": "https"})
+
+    assert response.json() == {"client": [TRUSTED_PEER, 55000], "scheme": "http"}
+
+
 def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -> None:
     app = a_fresh_app()
     app.add_api_route("/exempt", lambda: {"ok": True}, methods=["GET"])
