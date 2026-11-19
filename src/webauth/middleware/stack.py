@@ -155,6 +155,14 @@ def _library_middleware(
 
 def _refuse_an_unsound_stack(app: Starlette) -> None:
     if any(
+        isinstance(entry.cls, type) and issubclass(entry.cls, _LIBRARY_MIDDLEWARE)
+        for entry in app.user_middleware
+    ):
+        raise RuntimeError(
+            "The app already carries library middleware; install the stack once "
+            "and add no library middleware by hand.",
+        )
+    if any(
         isinstance(entry.cls, type) and issubclass(entry.cls, ClientAddressMiddleware)
         for entry in app.user_middleware
     ):
@@ -162,14 +170,6 @@ def _refuse_an_unsound_stack(app: Starlette) -> None:
             "The app already carries ClientAddressMiddleware; a writer added before the call sits "
             "inside the stack. Add it after the call, immediately inside logline's "
             "RequestLineMiddleware.",
-        )
-    if any(
-        isinstance(entry.cls, type) and issubclass(entry.cls, _LIBRARY_MIDDLEWARE)
-        for entry in app.user_middleware
-    ):
-        raise RuntimeError(
-            "The app already carries library middleware; install the stack once "
-            "and add no library middleware by hand.",
         )
 
 
