@@ -1,0 +1,8 @@
+claim_id = "f9ddce1407124bdb933a4f2c797c05d3"
+agent = "Claude 028550fd-db9f-4fd7-9852-4f7d21a4c6d0"
+role = "builder"
+base = "c42e8b5ad2ccf76e0942e20df2be0f647367c4ab"
+branch = "claude/issue-799-webauth-runs-on-logline-1-x-so-hosts-on"
+scope = ["README.md", "docs/host-contract.md", "pyproject.toml", "src/webauth", "tests", "uv.lock"]
+opened_commit = "7a0fda56b0910583aa778e87374a8c2436285c13"
+whole_reason = "A library bump touches every caller of logline in webauth at once."
