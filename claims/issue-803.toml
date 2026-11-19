@@ -1,8 +1,0 @@
-claim_id = "db0ef0d713f94aab8b5dd55b2199a6ef"
-agent = "Claude 028550fd-db9f-4fd7-9852-4f7d21a4c6d0"
-role = "builder"
-base = "9485d6e918ff80e76eb5346e01ec1b21924fdf87"
-branch = "claude/issue-803-a-host-s-cors-preflight-gets-the-forward"
-scope = ["AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth", "tests"]
-opened_commit = "3f1c0209c7066e8ddb391ebbd20477f58f95f1e0"
-whole_reason = "The writer, its accessor and every reader of proxy trust change together, or a host could resolve the address twice."
