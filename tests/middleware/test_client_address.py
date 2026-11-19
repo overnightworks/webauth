@@ -7,6 +7,7 @@ tells a host to wire it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -16,6 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.websockets import WebSocket
@@ -47,7 +49,7 @@ from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from starlette.types import ASGIApp
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 ORIGIN = "https://spa.example"
 SOCKET_PATH = "/ws"
@@ -246,6 +248,35 @@ def test_the_accessor_only_reads_what_the_writer_recorded(
         client.get("/client", headers=NOT_AN_ADDRESS)
 
     assert caplog.records == []
+
+
+def test_a_secure_websocket_counts_as_https() -> None:
+    seen: list[bool] = []
+
+    async def inner(scope: Scope, receive: Receive, send: Send) -> None:
+        seen.append(proxies.request_is_https(HTTPConnection(scope)))
+
+    scope = {
+        "type": "websocket",
+        "scheme": "wss",
+        "headers": [],
+        "client": ("198.51.100.77", 55000),
+        "path": SOCKET_PATH,
+        "query_string": b"",
+        "root_path": "",
+    }
+
+    asyncio.run(behind_the_client_address_writer(inner)(scope, receive_nothing, send_nothing))
+
+    assert seen == [True]
+
+
+async def receive_nothing() -> Message:
+    raise NotImplementedError
+
+
+async def send_nothing(message: Message) -> None:
+    raise NotImplementedError
 
 
 def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -> None:
