@@ -181,7 +181,7 @@ def test_a_lifespan_passes_the_writer_and_the_stack() -> None:
 
 
 class TestAStackWithoutTheWriter:
-    """The stack reads what the writer recorded, so a host that forgot it fails on the first request."""
+    """The stack reads what the writer recorded, so a host without it fails on the first request."""
 
     @staticmethod
     def a_host() -> FastAPI:
@@ -197,7 +197,9 @@ class TestAStackWithoutTheWriter:
             pytest.param(API_PATH, {"content-length": "1000000"}, id="a-body-over-the-limit"),
         ],
     )
-    def test_a_request_fails_loud_naming_the_writer(self, path: str, headers: dict[str, str]) -> None:
+    def test_a_request_fails_loud_naming_the_writer(
+        self, path: str, headers: dict[str, str]
+    ) -> None:
         with (
             TestClient(self.a_host(), base_url=HTTPS_TEST_SERVER) as client,
             pytest.raises(RuntimeError, match="ClientAddressMiddleware"),

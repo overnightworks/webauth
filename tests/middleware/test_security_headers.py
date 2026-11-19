@@ -284,9 +284,7 @@ async def test_a_downstream_send_that_fails_on_the_start_is_tried_once_and_propa
         attempts.append(message)
         raise failure
 
-    middleware = behind_the_client_address_writer(
-        SecurityHeadersMiddleware(responding_app, POLICY)
-    )
+    middleware = behind_the_client_address_writer(SecurityHeadersMiddleware(responding_app, POLICY))
     scope = an_http_scope(app)
 
     with pytest.raises(ConnectionResetError) as raised:

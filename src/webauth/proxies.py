@@ -270,5 +270,5 @@ def client_address(connection: HTTPConnection) -> str:
 
 
 def request_is_https(connection: HTTPConnection) -> bool:
-    """Whether the client's own connection is HTTPS, forwarding included, as the writer recorded it."""
+    """Whether the client's own connection is HTTPS, forwarding included, as the writer recorded."""
     return _recorded_client(connection).https

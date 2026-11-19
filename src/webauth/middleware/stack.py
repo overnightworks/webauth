@@ -202,15 +202,16 @@ def install_web_auth_middleware(
 
     Security headers sit outside everything so the library's own refusals (the 400 for a path, the
     413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500) carry them; the client
-    address the host's writer recorded reaches every refusal's request line; the path refusal answers 400 to a route path with a control character (U+0000
-    to U+001F, U+007F) before a rule or route reads it; the body size limit refuses a body declared
-    too large before it costs a rate-limit budget or a session lookup; the rate limit sits outside
-    CSRF so a refused forgery spends budget; the session gate sits inside all of them, so a request
-    refused before admission never costs a session lookup and a forged state-changing request is
-    refused before it renews a session. The bearer gate sits inside the rate limit, so a machine
-    request spends the same budget, and outside CSRF and the session gate, so neither decides a
-    machine path by a cookie. With a bearer gate that has machine paths or a resource the installed
-    security-headers policy carries their ``no-store`` rule first, so it wins.
+    address the host's writer recorded reaches every refusal's request line; the path refusal
+    answers 400 to a route path with a control character (U+0000 to U+001F, U+007F) before a rule
+    or route reads it; the body size limit refuses a body declared too large before it costs a
+    rate-limit budget or a session lookup; the rate limit sits outside CSRF so a refused forgery
+    spends budget; the session gate sits inside all of them, so a request refused before admission
+    never costs a session lookup and a forged state-changing request is refused before it renews a
+    session. The bearer gate sits inside the rate limit, so a machine request spends the same
+    budget, and outside CSRF and the session gate, so neither decides a machine path by a cookie.
+    With a bearer gate that has machine paths or a resource the installed security-headers policy
+    carries their ``no-store`` rule first, so it wins.
 
     Install once and add no library middleware yourself; an app that already
     carries one, a subclass included, is refused untouched (``RuntimeError``).
