@@ -7,7 +7,6 @@ tells a host to wire it.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -17,7 +16,6 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
-from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.websockets import WebSocket
@@ -49,7 +47,7 @@ from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+    from starlette.types import ASGIApp
 
 ORIGIN = "https://spa.example"
 SOCKET_PATH = "/ws"
@@ -252,31 +250,21 @@ def test_the_accessor_only_reads_what_the_writer_recorded(
 
 def test_a_secure_websocket_counts_as_https() -> None:
     seen: list[bool] = []
+    app = a_fresh_app()
 
-    async def inner(scope: Scope, receive: Receive, send: Send) -> None:
-        seen.append(proxies.request_is_https(HTTPConnection(scope)))
+    @app.websocket(SOCKET_PATH)
+    async def socket(websocket: WebSocket) -> None:
+        seen.append(proxies.request_is_https(websocket))
+        await websocket.accept()
+        await websocket.close()
 
-    scope = {
-        "type": "websocket",
-        "scheme": "wss",
-        "headers": [],
-        "client": ("198.51.100.77", 55000),
-        "path": SOCKET_PATH,
-        "query_string": b"",
-        "root_path": "",
-    }
-
-    asyncio.run(behind_the_client_address_writer(inner)(scope, receive_nothing, send_nothing))
+    with (
+        TestClient(behind_the_client_address_writer(app)) as client,
+        client.websocket_connect("wss://testserver" + SOCKET_PATH),
+    ):
+        pass
 
     assert seen == [True]
-
-
-async def receive_nothing() -> Message:
-    raise NotImplementedError
-
-
-async def send_nothing(message: Message) -> None:
-    raise NotImplementedError
 
 
 def test_the_writer_rewrites_neither_the_peer_nor_the_scheme() -> None:
@@ -309,8 +297,10 @@ def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -
         ),
     )
 
+    client = TestClient(app, base_url=HTTPS_TEST_SERVER)
+
     with pytest.raises(RuntimeError, match="ClientAddressMiddleware"):
-        TestClient(app, base_url=HTTPS_TEST_SERVER).get("/exempt")
+        client.get("/exempt")
 
 
 def test_a_writer_added_before_the_installer_is_refused_naming_its_position() -> None:
