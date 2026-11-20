@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from webauth.cookies import PendingLogin
     from webauth.oidc._client_config import OidcClientConfig
 
-__all__ = ["authorization_url"]
+__all__ = ["CODE_CHALLENGE_METHOD", "authorization_url"]
+
+CODE_CHALLENGE_METHOD = "S256"
 
 
 def authorization_url(
@@ -35,7 +37,7 @@ def authorization_url(
             "state": pending.state,
             "nonce": pending.nonce,
             "code_challenge": _s256_code_challenge(pending.code_verifier),
-            "code_challenge_method": "S256",
+            "code_challenge_method": CODE_CHALLENGE_METHOD,
             **({} if ui_locales is None else {"ui_locales": ui_locales}),
         }
     )

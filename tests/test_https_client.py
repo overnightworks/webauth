@@ -46,9 +46,11 @@ from tests.support.token_request_canaries import (
 from webauth.https_client import (
     ExchangeFailure,
     KeySetFetchError,
+    ProviderMetadataFetchError,
     _HttpsExchangeError,
     _post_form_over_https,
     fetch_key_set_over_https,
+    fetch_provider_metadata_over_https,
 )
 from webauth.oidc import TokenEndpointError
 from webauth.oidc_transport import post_token_request_over_https
@@ -331,10 +333,17 @@ def _fetch_key_set(url: str, **limits: float) -> object:
     return fetch_key_set_over_https(url, **limits)
 
 
+def _fetch_provider_metadata(url: str, **limits: float) -> object:
+    return fetch_provider_metadata_over_https(url, **limits)
+
+
 _EXCHANGES_UNDER_A_DEADLINE = pytest.mark.parametrize(
     ("exchange", "error"),
     [
         pytest.param(_fetch_key_set, KeySetFetchError, id="key-set-fetch"),
+        pytest.param(
+            _fetch_provider_metadata, ProviderMetadataFetchError, id="provider-metadata-fetch"
+        ),
         pytest.param(post_canary_token_form, _HttpsExchangeError, id="token-post"),
     ],
 )
@@ -364,7 +373,7 @@ def _unanswering_tls_handshake(server: LoopbackHttpsServer, stack: contextlib.Ex
 def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     token_server: LoopbackHttpsServer,
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | _HttpsExchangeError],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
     target: _StalledTarget,
 ) -> None:
     with contextlib.ExitStack() as stack:
@@ -385,7 +394,7 @@ _CONNECT_DEADLINE_SECONDS = 5
 @_EXCHANGES_UNDER_A_DEADLINE
 def test_a_connect_nobody_answers_is_cut_off_by_the_connect_timeout_as_timed_out(
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | _HttpsExchangeError],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
 ) -> None:
     with unconnectable_loopback_port() as port:
         url = f"https://127.0.0.1:{port}/certs"
@@ -412,7 +421,7 @@ def test_a_connect_nobody_answers_is_cut_off_by_the_connect_timeout_as_timed_out
 @_EXCHANGES_UNDER_A_DEADLINE
 def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | _HttpsExchangeError],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
     host: str,
 ) -> None:
     with pytest.raises(error) as refused:
@@ -431,7 +440,7 @@ def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
     token_server: LoopbackHttpsServer,
     monkeypatch: pytest.MonkeyPatch,
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | _HttpsExchangeError],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
 ) -> None:
     started = time.monotonic()
 
@@ -456,6 +465,7 @@ def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
     "call",
     [
         pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
+        pytest.param(fetch_provider_metadata_over_https, id="provider-metadata-fetch"),
         pytest.param(_post_form_over_https, id="token-post"),
         pytest.param(post_token_request_over_https, id="token-request"),
     ],
@@ -478,7 +488,9 @@ def test_a_deadline_of_zero_or_less_is_refused_naming_the_parameter(
 
 
 @pytest.mark.parametrize(
-    "exchange", [_fetch_key_set, post_canary_token_form], ids=["key-set-fetch", "token-post"]
+    "exchange",
+    [_fetch_key_set, _fetch_provider_metadata, post_canary_token_form],
+    ids=["key-set-fetch", "provider-metadata-fetch", "token-post"],
 )
 @pytest.mark.parametrize("timeout_seconds", [0, -1])
 def test_a_timeout_of_zero_or_less_is_refused_naming_the_parameter(
@@ -510,8 +522,18 @@ def test_a_key_set_fetch_that_timed_out_says_so_in_its_message(
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
 
 
-def test_a_key_set_fetch_returns_the_served_key_set(token_server: LoopbackHttpsServer) -> None:
-    document = fetch_key_set_over_https(f"{token_server.base_url}/certs")
+@pytest.mark.parametrize(
+    "fetch",
+    [
+        pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
+        pytest.param(fetch_provider_metadata_over_https, id="provider-metadata-fetch"),
+    ],
+)
+def test_a_document_fetch_returns_the_served_document(
+    token_server: LoopbackHttpsServer, fetch: Callable[[str], bytes]
+) -> None:
+    """DISCOVERY-07 for the provider metadata."""
+    document = fetch(f"{token_server.base_url}/certs")
 
     assert json.loads(document)["keys"][0]["kid"] == "current-key"
 
@@ -570,7 +592,7 @@ def test_a_key_set_fetch_that_could_not_connect_or_trust_the_origin_says_only_th
 def test_an_exchange_never_follows_a_redirect(
     token_server: LoopbackHttpsServer,
     exchange: Callable[..., object],
-    error: type[KeySetFetchError | _HttpsExchangeError],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
 ) -> None:
     with pytest.raises(error):
         exchange(f"{token_server.base_url}/moved")
