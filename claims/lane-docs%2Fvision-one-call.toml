@@ -1,0 +1,7 @@
+claim_id = "3971b485dbb54048a3f2b6fce56b08db"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "c8ce45a23e9866a0a1cfff4df21dffeb90f59378"
+branch = "docs/vision-one-call"
+scope = ["docs/VISION.md"]
+opened_commit = "2b8e5ae468afdcf5070bf64a7c06e4aae8351fae"
