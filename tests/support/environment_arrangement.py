@@ -9,6 +9,10 @@ from pathlib import Path
 _PLUMBING = {Path(__file__).name, "os.py", "_collections_abc.py"}
 
 
+def _is_plumbing(filename: str) -> bool:
+    return filename.startswith("<frozen ") or Path(filename).name in _PLUMBING
+
+
 class ForbiddenEnvironment(MutableMapping[str, str]):
     """An `os.environ` that fails the test on any access.
 
@@ -24,7 +28,7 @@ class ForbiddenEnvironment(MutableMapping[str, str]):
         if self._only_from is None:
             return True
         frames = reversed(traceback.extract_stack())
-        reader = next(frame for frame in frames if Path(frame.filename).name not in _PLUMBING)
+        reader = next(frame for frame in frames if not _is_plumbing(frame.filename))
         return Path(reader.filename).is_relative_to(self._only_from)
 
     def __getitem__(self, key: str) -> str:
