@@ -207,6 +207,27 @@ def test_an_endpoint_the_configuration_refuses_is_refused_with_the_configuration
 
 
 @pytest.mark.parametrize(
+    "issuer",
+    [
+        pytest.param(f"{REALM_ISSUER}?q=1", id="query"),
+        pytest.param(f"{REALM_ISSUER}#fragment", id="fragment"),
+        pytest.param(REALM_ISSUER.replace("https:", "http:"), id="not-https"),
+    ],
+)
+def test_a_malformed_issuer_is_refused_with_the_configurations_error_before_any_fetch(
+    issuer: str,
+) -> None:
+    """DISCOVERY-11."""
+    metadata = FakeKeySetEndpoint(a_provider_metadata(issuer))
+
+    with pytest.raises(ValueError, match="^issuer must be an https URL") as refused:
+        _discover(metadata, issuer)
+
+    assert issuer not in str(refused.value)
+    assert metadata.fetched_urls == []
+
+
+@pytest.mark.parametrize(
     "methods",
     [
         pytest.param([], id="empty"),
