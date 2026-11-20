@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
 from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
@@ -27,8 +28,11 @@ from webauth.policies import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from starlette.applications import Starlette
 
+    from webauth.proxies import TrustedProxies
     from webauth.sign_in_routes import SignInPaths
 
 __all__ = [
@@ -173,6 +177,47 @@ def _refuse_an_unsound_stack(app: Starlette) -> None:
         )
 
 
+def _add_outermost_first(app: Starlette, entries: Sequence[Middleware]) -> None:
+    for entry in reversed(entries):
+        app.add_middleware(entry.cls, *entry.args, **entry.kwargs)
+
+
+def _install_slotted_web_auth_middleware(
+    app: Starlette,
+    *,
+    sign_in_paths: SignInPaths,
+    security_headers: SecurityHeadersPolicy,
+    csrf_origin: CsrfPolicy,
+    body_size: BodySizePolicy | None,
+    rate_limit: RateLimitPolicy | None,
+    bearer_gate: BearerGate | None,
+    session_gate: SessionGate | None,
+    front: TrustedProxies,
+    outside: Sequence[Middleware],
+    inside: Sequence[Middleware],
+) -> None:
+    """Install what ``WebAuth.install`` places, outermost first: logline's request line, the
+    client-address writer, the host's ``outside`` entries, the library stack, the host's
+    ``inside`` entries. An app that already carries library middleware is refused untouched."""
+    _refuse_an_unsound_stack(app)
+    entries = [
+        Middleware(RequestLineMiddleware),
+        Middleware(ClientAddressMiddleware, trusted_proxies=front),
+        *outside,
+        *_library_middleware(
+            sign_in_paths=sign_in_paths,
+            security_headers=security_headers,
+            body_size=body_size,
+            rate_limit=rate_limit,
+            bearer_gate=bearer_gate,
+            csrf_origin=csrf_origin,
+            session_gate=session_gate,
+        ),
+        *inside,
+    ]
+    _add_outermost_first(app, entries)
+
+
 def install_web_auth_middleware(
     app: Starlette,
     *,
@@ -230,5 +275,4 @@ def install_web_auth_middleware(
         csrf_origin=csrf_origin,
         session_gate=session_gate,
     )
-    for entry in reversed(entries):
-        app.add_middleware(entry.cls, *entry.args, **entry.kwargs)
+    _add_outermost_first(app, entries)
