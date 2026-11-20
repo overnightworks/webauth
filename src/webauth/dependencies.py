@@ -21,6 +21,7 @@ record holds the account behind the token, and `current_user` returns it.
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
@@ -261,13 +262,12 @@ def authenticate_websocket(
     A host may wrap this function in its own dependency: FastAPI resolves an
     ``HTTPConnection`` parameter on a WebSocket route as well as on an HTTP one.
     """
+    opening = _installed_sessions(connection) if sessions is None else lambda: nullcontext(sessions)
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:
         return origin_refusal
-    if sessions is None:
-        with _installed_sessions(connection)() as opened:
-            return _admitted_websocket(connection, opened)
-    return _admitted_websocket(connection, sessions)
+    with opening() as opened:
+        return _admitted_websocket(connection, opened)
 
 
 def _admitted_websocket(

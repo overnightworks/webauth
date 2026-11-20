@@ -647,3 +647,19 @@ def test_compose_17_a_handle_that_was_never_installed_fails_on_its_first_request
 
     with pytest.raises(RuntimeError, match=r"auth\.install"):
         client.get(ME_PATH, headers=cookie)
+
+
+def test_compose_17_a_socket_of_a_handle_that_was_never_installed_names_the_missing_install() -> (
+    None
+):
+    """COMPOSE-17"""
+    world = a_signed_in_member()
+    host = a_composed_host(world, installed=False)
+    client = a_client_of(host.app, raise_server_exceptions=True)
+    handshake = {**FORWARDED, **world.signed_cookie(), "origin": ALLOWED_ORIGIN}
+
+    with (
+        pytest.raises(RuntimeError, match=r"auth\.install"),
+        client.websocket_connect(WEBSOCKET_PATH, headers=handshake),
+    ):
+        pass
