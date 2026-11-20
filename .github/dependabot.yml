@@ -6,6 +6,11 @@ updates:
       interval: daily
     cooldown:
       default-days: 7
+    # One quality release moves every quality workflow pin together; the pin test needs them equal.
+    groups:
+      quality-workflows:
+        patterns:
+          - "overnightworks/quality*"
   - package-ecosystem: pip
     directory: /.github
     schedule:
