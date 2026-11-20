@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pydantic import SecretStr
 
 from webauth import WebAuthError
+from webauth.oidc._authorization_url import CODE_CHALLENGE_METHOD
 from webauth.oidc._client_config import OPENID_SCOPE, OidcClientConfig
 
 __all__ = ["OidcDiscoveryError", "ProviderMetadataFetch", "discover_oidc_client_config"]
@@ -17,7 +18,6 @@ ProviderMetadataFetch = Callable[[str], bytes]
 answer is the fetch's refusal."""
 
 _WELL_KNOWN_PATH = "/.well-known/openid-configuration"
-_PKCE_METHOD = "S256"
 _ENDPOINT_MEMBERS = {
     "authorization_endpoint": "authorization_endpoint",
     "token_endpoint": "token_endpoint",
@@ -99,5 +99,7 @@ def _require_pkce_method(metadata: dict[str, object]) -> None:
     if member not in metadata:
         return
     methods = metadata[member]
-    if not isinstance(methods, list) or _PKCE_METHOD not in methods:
-        raise OidcDiscoveryError(f"the metadata document's {member} does not list {_PKCE_METHOD}")
+    if not isinstance(methods, list) or CODE_CHALLENGE_METHOD not in methods:
+        raise OidcDiscoveryError(
+            f"the metadata document's {member} does not list {CODE_CHALLENGE_METHOD}"
+        )
