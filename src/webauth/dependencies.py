@@ -405,7 +405,9 @@ def admit_session(
     an unknown id, a session outside its lifetime, or one the store no longer
     holds; a refused session is not renewed. Sets no cookie. A failing store,
     or a ``touch`` that answers anything but a ``bool``, raises. Nothing here
-    commits: the host finishes its transaction right after the call.
+    commits: the host finishes its transaction right after the call. It takes no
+    connection and sets no ``sub`` on the request line: a host calls logline's
+    ``set_sub`` itself, or admits the socket through ``authenticate_websocket``.
 
     The clock is ``config.wall_clock`` read once, as whole seconds. A stored
     session is admitted only when ``created_at <= now + 60 s`` and
