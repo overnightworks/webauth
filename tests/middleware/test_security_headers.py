@@ -34,6 +34,7 @@ from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
 from webauth.policies import (
     CacheControlRule,
+    ContentSecurityPolicyRule,
     CspDirective,
     CsrfPolicy,
     PathRules,
@@ -638,3 +639,92 @@ def test_the_logout_page_keeps_deny_under_a_host_policy_that_allows_a_framer() -
         hsts=True,
         frame_options="DENY",
     )
+
+
+SANDBOX_POLICY = "sandbox allow-scripts"
+SANDBOX_MOUNT_POLICY = SecurityHeadersPolicy(
+    "default-src 'self'",
+    content_security_policy_rules=(
+        ContentSecurityPolicyRule(PathRules(prefixes=("/t/",)), SANDBOX_POLICY),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_policy"),
+    [
+        pytest.param("/t/token/index.html", SANDBOX_POLICY, id="below-the-rule-prefix"),
+        pytest.param("/t", "default-src 'self'", id="near-miss-without-the-trailing-slash"),
+        pytest.param("/tt/token", "default-src 'self'", id="near-miss-sharing-the-letters"),
+        pytest.param("/page", "default-src 'self'", id="other-path-keeps-the-default"),
+    ],
+)
+def test_a_path_with_a_content_security_policy_rule_answers_the_rule_s_policy(
+    path: str,
+    expected_policy: str,
+) -> None:
+    """STACK-15: a rule's path gets its policy, every other path the default."""
+    app = an_app(policy=SANDBOX_MOUNT_POLICY)
+    app.get(path)(lambda: Response("body"))
+
+    response = TestClient(app).get(path)
+
+    assert_carries_policy_headers(
+        response.headers,
+        SecurityHeadersPolicy(expected_policy),
+        hsts=True,
+    )
+
+
+def test_a_rule_policy_without_frame_ancestors_keeps_x_frame_options_deny() -> None:
+    app = an_app(policy=SANDBOX_MOUNT_POLICY)
+    app.get("/t/token")(lambda: Response("body", headers={"X-Frame-Options": "SAMEORIGIN"}))
+
+    response = TestClient(app).get("/t/token")
+
+    assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_a_rule_policy_that_allows_a_framer_leaves_x_frame_options_off() -> None:
+    policy = SecurityHeadersPolicy(
+        "default-src 'self'",
+        content_security_policy_rules=(
+            ContentSecurityPolicyRule(PathRules(prefixes=("/embed/",)), FRAMER_POLICY),
+        ),
+    )
+    app = an_app(policy=policy)
+    app.get("/embed/a")(lambda: Response("body"))
+    app.get("/other")(lambda: Response("body"))
+
+    framed = TestClient(app).get("/embed/a")
+    default = TestClient(app).get("/other")
+
+    assert "x-frame-options" not in framed.headers
+    assert default.headers["x-frame-options"] == "DENY"
+
+
+def test_an_own_policy_answer_keeps_its_policy_on_a_path_with_a_rule() -> None:
+    app = an_app(policy=SANDBOX_MOUNT_POLICY)
+
+    @app.get("/t/token")
+    def page() -> Response:
+        return Response("page", headers=OWN_POLICY_ANSWER_HEADERS)
+
+    response = TestClient(app).get("/t/token")
+
+    assert response.headers["content-security-policy"] == "default-src 'none'"
+    assert "webauth-own-policy" not in response.headers
+
+
+def test_the_logout_page_keeps_its_own_policy_under_a_rule_for_its_path() -> None:
+    host_policy = replace(
+        HOST_POLICY,
+        content_security_policy_rules=(
+            ContentSecurityPolicyRule(PathRules(exact=frozenset({LOGOUT_PATH})), SANDBOX_POLICY),
+        ),
+    )
+
+    page = the_logout_page(host_policy=host_policy)
+
+    assert page.headers["content-security-policy"] == the_logout_policy_of(page)
+    assert "webauth-own-policy" not in page.headers

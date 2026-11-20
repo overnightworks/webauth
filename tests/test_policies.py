@@ -21,6 +21,7 @@ from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
     CacheControlRule,
+    ContentSecurityPolicyRule,
     CspDirective,
     PathRules,
     PathShape,
@@ -318,6 +319,7 @@ RAW_HEADER_VALUE_FIELDS = [
     "content_security_policy",
     "permissions_policy",
     "CacheControlRule.value",
+    "ContentSecurityPolicyRule.value",
 ]
 
 
@@ -419,6 +421,12 @@ def a_policy_with_raw_header_value(field: str, value: str) -> SecurityHeadersPol
     if field == "CacheControlRule.value":
         rule = CacheControlRule(paths=PathRules(prefixes=("/",)), value=value)
         return SecurityHeadersPolicy("default-src 'none'", cache_control_rules=(rule,))
+    if field == "ContentSecurityPolicyRule.value":
+        csp_rule = ContentSecurityPolicyRule(paths=PathRules(prefixes=("/",)), value=value)
+        return SecurityHeadersPolicy(
+            "default-src 'none'",
+            content_security_policy_rules=(csp_rule,),
+        )
     policy = SecurityHeadersPolicy("default-src 'none'", permissions_policy="camera=()")
     return replace(policy, **{field: value})
 
@@ -426,6 +434,8 @@ def a_policy_with_raw_header_value(field: str, value: str) -> SecurityHeadersPol
 def raw_header_value(policy: SecurityHeadersPolicy, field: str) -> str | None:
     if field == "CacheControlRule.value":
         return policy.cache_control("/")
+    if field == "ContentSecurityPolicyRule.value":
+        return policy.content_security_policy_for("/")
     return getattr(policy, field)
 
 

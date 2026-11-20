@@ -27,6 +27,7 @@ __all__ = [
     "BodySizePolicy",
     "BodySizeRule",
     "CacheControlRule",
+    "ContentSecurityPolicyRule",
     "CspDirective",
     "CsrfPolicy",
     "PathRules",
@@ -280,6 +281,17 @@ class CacheControlRule:
         _require_header_field_value("CacheControlRule.value", self.value)
 
 
+@dataclass(frozen=True)
+class ContentSecurityPolicyRule:
+    """The ``Content-Security-Policy`` value the paths it names are answered with."""
+
+    paths: PathRules
+    value: str
+
+    def __post_init__(self) -> None:
+        _require_header_field_value("ContentSecurityPolicyRule.value", self.value)
+
+
 _DEFAULT_PERMISSIONS_POLICY: Final = "camera=(), microphone=(), geolocation=(), display-capture=()"
 
 
@@ -290,16 +302,18 @@ class SecurityHeadersPolicy:
     ``permissions_policy`` replaces the whole header, so a host that records
     audio names every feature it still wants off, for example
     ``"camera=(), microphone=(self), geolocation=()"``. This policy, its
-    ``content_security_policy`` and the ``value`` of a ``CacheControlRule`` may
-    hold visible ASCII, and space and tab only between visible characters;
-    anything else, such as an empty value, a space or tab at either end, CR,
-    LF, NUL, DEL or a non-ASCII character, is refused when the policy or the
-    rule is built.
+    ``content_security_policy`` and the ``value`` of a ``CacheControlRule`` or a
+    ``ContentSecurityPolicyRule`` may hold visible ASCII, and space and tab only
+    between visible characters; anything else, such as an empty value, a space
+    or tab at either end, CR, LF, NUL, DEL or a non-ASCII character, is refused
+    when the policy or the rule is built.
     """
 
     content_security_policy: str
     cache_control_rules: tuple[CacheControlRule, ...] = ()
     permissions_policy: str = _DEFAULT_PERMISSIONS_POLICY
+    content_security_policy_rules: tuple[ContentSecurityPolicyRule, ...] = ()
+    """Paths that answer their own policy instead of ``content_security_policy``."""
 
     def __post_init__(self) -> None:
         _require_header_field_value("content_security_policy", self.content_security_policy)
@@ -311,6 +325,13 @@ class SecurityHeadersPolicy:
             if rule.paths.matches(path):
                 return rule.value
         return None
+
+    def content_security_policy_for(self, path: str) -> str:
+        """The policy this path is answered with; the first matching rule wins."""
+        for rule in self.content_security_policy_rules:
+            if rule.paths.matches(path):
+                return rule.value
+        return self.content_security_policy
 
 
 class CspDirective(StrEnum):

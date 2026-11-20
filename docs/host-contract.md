@@ -212,6 +212,10 @@ What the installer applies when the host passes none:
 - **STACK-06** Without a `body_size`, and in a `BodySizePolicy` that names no default, the body limit is 4 KiB unless the host names another; a larger body gets 413.
 - **STACK-07** Without a `permissions_policy` the header turns off `camera`, `microphone`, `geolocation` and `display-capture`.
 
+What a host adds to the security headers:
+
+- **STACK-15** `SecurityHeadersPolicy.content_security_policy` is the policy of every answer. A host that serves a path with its own policy, for example a sandboxed mount framed on an opaque origin that needs `sandbox allow-scripts`, passes `content_security_policy_rules`, a tuple of `ContentSecurityPolicyRule(paths, value)` shaped like `cache_control_rules`: the first rule whose `PathRules` match the route path wins, and every other path keeps the default. The rule's value is checked as a header field value when it is built. `X-Frame-Options` follows the policy the answer leaves with, and the sign-out page keeps its own policy. Admission of the path stays the host's (`SessionGate`), and webauth sets no `Access-Control-*` header.
+
 ## What webauth logs
 
 Every line webauth writes goes through the standard-library logger of its own module, with a literal `<noun>.<verb_past>` event as the message and its values as scalar fields in `extra=`, as the fleet logging standard of [logline](https://github.com/overnightworks/logline) asks. A host that calls logline's `configure` gets each line as one JSON record. webauth depends on `overnightworks-logline` as a version range by name, so the host pins its git tag and the tag must lie in that range. No line webauth writes carries a traceback, a message, an address, a path, a header, a token or a key; the request line below is logline's own.

@@ -79,6 +79,9 @@ class SecurityHeadersMiddleware:
     not install this middleware the page still carries its own policy and
     ``no-store``, and the marker reaches the browser, which ignores it.
 
+    A path a ``ContentSecurityPolicyRule`` names is answered with that rule's policy
+    instead of the default; the sign-out page keeps its own either way.
+
     ``X-Frame-Options: DENY`` leaves with an answer whose
     ``Content-Security-Policy`` has no ``frame-ancestors`` directive, one with
     no source, or one whose only source is ``'none'``. An answer whose
@@ -133,7 +136,7 @@ class SecurityHeadersMiddleware:
             cache_control = self._policy.cache_control(path)
             if cache_control is not None:
                 headers["Cache-Control"] = cache_control
-            headers["Content-Security-Policy"] = self._policy.content_security_policy
+            headers["Content-Security-Policy"] = self._policy.content_security_policy_for(path)
         headers["X-Content-Type-Options"] = CONTENT_TYPE_OPTIONS
         if _allows_no_framer(headers.get("Content-Security-Policy", "")):
             headers["X-Frame-Options"] = FRAME_OPTIONS
