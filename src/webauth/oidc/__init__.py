@@ -19,6 +19,7 @@ from webauth.oidc._relying_party import (
     VerifiedLogout,
 )
 from webauth.oidc._token_endpoint import (
+    IdpErrorCode,
     OidcRefusal,
     OidcRefusalReason,
     TokenEndpointAnswer,
@@ -31,6 +32,7 @@ __all__ = [
     "PENDING_LOGIN_MAX_AGE_SECONDS",
     "AuthorizationRequest",
     "ExchangedAccess",
+    "IdpErrorCode",
     "OidcClientConfig",
     "OidcDiscoveryError",
     "OidcIdentity",

@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from http import HTTPStatus
-from typing import TypeGuard
+from typing import Final, TypeGuard
 
 from pydantic import SecretStr
 
@@ -22,6 +22,7 @@ from webauth.https_client import ExchangeFailure
 from webauth.jwt_verification import RejectionReason, _json_object
 
 __all__ = [
+    "IdpErrorCode",
     "OidcRefusal",
     "OidcRefusalReason",
     "TokenEndpointAnswer",
@@ -100,6 +101,46 @@ class OidcRefusalReason(StrEnum):
     INSUFFICIENT_SCOPE = "insufficient-scope"
     SUBJECT_MISMATCH = "subject-mismatch"
     STALE_ID_TOKEN = "stale-id-token"  # noqa: S105 - refusal reason not a credential
+
+
+class IdpErrorCode(StrEnum):
+    """The error codes an issuer registers for a refused authorization or token request:
+    RFC 6749 sections 4.1.2.1 and 5.2, OpenID Connect Core section 3.1.2.6 and RFC 8693
+    section 2.2.2. The closed set a log line may carry; any other code logs as
+    `_OTHER`."""
+
+    INVALID_REQUEST = "invalid_request"
+    UNAUTHORIZED_CLIENT = "unauthorized_client"
+    ACCESS_DENIED = "access_denied"
+    UNSUPPORTED_RESPONSE_TYPE = "unsupported_response_type"
+    INVALID_SCOPE = "invalid_scope"
+    SERVER_ERROR = "server_error"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
+    INVALID_CLIENT = "invalid_client"
+    INVALID_GRANT = "invalid_grant"
+    UNSUPPORTED_GRANT_TYPE = "unsupported_grant_type"
+    INVALID_TARGET = "invalid_target"
+    INTERACTION_REQUIRED = "interaction_required"
+    LOGIN_REQUIRED = "login_required"
+    ACCOUNT_SELECTION_REQUIRED = "account_selection_required"
+    CONSENT_REQUIRED = "consent_required"
+    INVALID_REQUEST_URI = "invalid_request_uri"
+    INVALID_REQUEST_OBJECT = "invalid_request_object"
+    REQUEST_NOT_SUPPORTED = "request_not_supported"
+    REQUEST_URI_NOT_SUPPORTED = "request_uri_not_supported"
+    REGISTRATION_NOT_SUPPORTED = "registration_not_supported"
+
+
+_OTHER_IDP_ERROR: Final = "_OTHER"
+
+
+def _logged_idp_error(code: str) -> str:
+    """The registered `code`, or `_OTHER`: a log line never carries an issuer's or a
+    visitor's own value."""
+    try:
+        return IdpErrorCode(code).value
+    except ValueError:
+        return _OTHER_IDP_ERROR
 
 
 @dataclass(frozen=True)
