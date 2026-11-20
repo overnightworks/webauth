@@ -1,4 +1,4 @@
-"""Shared assertion for the headers the security-headers policy puts on a response."""
+"""Shared arrangement and assertion for the security-headers policy and its response headers."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from webauth.middleware.security_headers import (
     REFERRER_POLICY,
     STRICT_TRANSPORT_SECURITY,
 )
-from webauth.policies import SecurityHeadersPolicy
+from webauth.policies import ContentSecurityPolicyRule, PathRules, SecurityHeadersPolicy
 
 
 def assert_carries_policy_headers(
@@ -36,3 +36,15 @@ def assert_carries_policy_headers(
         expected["strict-transport-security"] = STRICT_TRANSPORT_SECURITY
     carried = {name: headers.get(name) for name in (*expected, "strict-transport-security")}
     assert carried == {"strict-transport-security": None, **expected}
+
+
+def a_content_security_policy_rule(
+    value: str, *, prefixes: tuple[str, ...] = (), exact: frozenset[str] = frozenset()
+) -> ContentSecurityPolicyRule:
+    return ContentSecurityPolicyRule(PathRules(prefixes=prefixes, exact=exact), value)
+
+
+def a_policy_with_content_security_policy_rules(
+    *rules: ContentSecurityPolicyRule,
+) -> SecurityHeadersPolicy:
+    return SecurityHeadersPolicy("default-src 'self'", content_security_policy_rules=rules)
