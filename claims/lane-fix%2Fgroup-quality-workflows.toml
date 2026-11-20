@@ -1,0 +1,7 @@
+claim_id = "e3318f615fe848fa80d361e01a93db3f"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "fe6c59b97c77b1c3e570a8be3fa3af67dc9ff6b8"
+branch = "fix/group-quality-workflows"
+scope = [".github/dependabot.yml"]
+opened_commit = "f7208181cf0ab370735554f5d045634ae7b65bc6"
