@@ -1,4 +1,5 @@
-"""Outbound HTTPS to an issuer: the key-set fetch and the token-endpoint form POST.
+"""Outbound HTTPS to an issuer: the key-set and provider-metadata fetches and the
+token-endpoint form POST.
 
 This module is the one owner of urllib3, and every request it sends holds the
 same bounded posture: HTTPS only, under the system's trusted certificates
@@ -21,7 +22,8 @@ quote the URL, and a malformed answer's header text, which the origin can
 fill with what it was sent.
 
 `fetch_key_set_over_https` is the production `KeySetFetch` of
-`webauth.jwt_verification`; `_post_form_over_https` is the transport under the
+`webauth.jwt_verification` and `fetch_provider_metadata_over_https` the production
+`ProviderMetadataFetch` of `webauth.oidc`; `_post_form_over_https` is the transport under the
 production `TokenRequestPost`, which `webauth.oidc_transport` fits to that port.
 """
 
@@ -52,11 +54,14 @@ _KEY_SET_FETCH_TIMEOUT_SECONDS = 5
 _KEY_SET_FETCH_DEADLINE_SECONDS = 10
 _TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
 _MAX_KEY_SET_BYTES = 64 * 1024
+_MAX_PROVIDER_METADATA_BYTES = 64 * 1024
 
 __all__ = [
     "ExchangeFailure",
     "KeySetFetchError",
+    "ProviderMetadataFetchError",
     "fetch_key_set_over_https",
+    "fetch_provider_metadata_over_https",
     "is_https_url",
 ]
 
@@ -67,8 +72,8 @@ _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 
 
-class KeySetFetchError(WebAuthError):
-    """The key set could not be fetched: refused, timed out, redirected, or broken off.
+class _DocumentFetchError(WebAuthError):
+    """A document could not be fetched.
 
     `failure` names why when the exchange itself failed; it is `None` when the
     origin answered with a status other than 200."""
@@ -76,6 +81,15 @@ class KeySetFetchError(WebAuthError):
     def __init__(self, message: str, failure: ExchangeFailure | None = None) -> None:
         super().__init__(message)
         self.failure = failure
+
+
+class KeySetFetchError(_DocumentFetchError):
+    """The key set could not be fetched: refused, timed out, redirected, or broken off."""
+
+
+class ProviderMetadataFetchError(_DocumentFetchError):
+    """The provider metadata could not be fetched: refused, timed out, redirected,
+    broken off, or past its size limit."""
 
 
 class ExchangeFailure(StrEnum):
@@ -141,33 +155,103 @@ def fetch_key_set_over_https(
     which the resolver offers no way to bound, run outside the deadline. Every
     failure fails closed. A `timeout_seconds` or `deadline_seconds` of zero
     or less raises `ValueError`."""
+    return _fetch_document(
+        url,
+        _KEY_SET,
+        timeout_seconds=timeout_seconds,
+        deadline_seconds=deadline_seconds,
+    ).body
+
+
+def fetch_provider_metadata_over_https(
+    url: str,
+    *,
+    timeout_seconds: float = _KEY_SET_FETCH_TIMEOUT_SECONDS,
+    deadline_seconds: float = _KEY_SET_FETCH_DEADLINE_SECONDS,
+) -> bytes:
+    """The production `ProviderMetadataFetch`: the document at `url`, whole, under
+    the bounds of `fetch_key_set_over_https`. A document past
+    `_MAX_PROVIDER_METADATA_BYTES` is refused as `TOO_LARGE`, valid JSON
+    included, since the caller parses what it gets and a bound the caller
+    had to check would be one it could forget. Every failure fails closed,
+    and raises `ProviderMetadataFetchError`."""
+    return _fetch_document(
+        url,
+        _PROVIDER_METADATA,
+        timeout_seconds=timeout_seconds,
+        deadline_seconds=deadline_seconds,
+    ).body
+
+
+@dataclass(frozen=True)
+class _FetchedDocument:
+    """What differs between the documents fetched by GET."""
+
+    name: str
+    event: str
+    error_type: type[_DocumentFetchError]
+    max_body_bytes: int
+    failure_is_handled: bool
+    refuses_oversize: bool
+
+
+_KEY_SET = _FetchedDocument(
+    "key set",
+    "key_set_fetch.ended",
+    KeySetFetchError,
+    _MAX_KEY_SET_BYTES,
+    failure_is_handled=True,
+    refuses_oversize=False,
+)
+_PROVIDER_METADATA = _FetchedDocument(
+    "provider metadata",
+    "provider_metadata_fetch.ended",
+    ProviderMetadataFetchError,
+    _MAX_PROVIDER_METADATA_BYTES,
+    failure_is_handled=False,
+    refuses_oversize=True,
+)
+
+
+def _fetch_document(
+    url: str, document: _FetchedDocument, *, timeout_seconds: float, deadline_seconds: float
+) -> _HttpsAnswer:
     if not is_https_url(url):
-        raise KeySetFetchError(
-            "refusing to fetch the key set: not an https URL naming a host,"
+        raise document.error_type(
+            f"refusing to fetch the {document.name}: not an https URL naming a host,"
             " a valid port if any, and no control character, space or credentials",
             ExchangeFailure.NOT_AN_HTTPS_URL,
         )
     try:
         answer = _exchange(
-            "key_set_fetch.ended",
+            document.event,
             "GET",
             url,
-            failure_is_handled=True,
-            accepts_status=_is_key_set_status,
+            failure_is_handled=document.failure_is_handled,
+            accepts_status=_is_ok_status,
             timeout_seconds=timeout_seconds,
             deadline_seconds=deadline_seconds,
-            max_body_bytes=_MAX_KEY_SET_BYTES,
+            max_body_bytes=document.max_body_bytes,
         )
     except _HttpsExchangeError as refusal:
         if refusal.failure is ExchangeFailure.TIMED_OUT:
             reason = refusal.failure.value
         else:
             reason = "the origin could not be reached, or the TLS handshake or HTTP exchange failed"
-        failed = KeySetFetchError(f"fetching the key set failed: {reason}", refusal.failure)
+        failed = document.error_type(
+            f"fetching the {document.name} failed: {reason}", refusal.failure
+        )
     else:
         if isinstance(answer, _RefusedStatus):
-            raise KeySetFetchError(f"the key set origin answered {answer.status}, not 200")
-        return answer.body
+            raise document.error_type(
+                f"the {document.name} origin answered {answer.status}, not 200"
+            )
+        if document.refuses_oversize and answer.exceeds_limit:
+            raise document.error_type(
+                f"fetching the {document.name} failed: {ExchangeFailure.TOO_LARGE}",
+                ExchangeFailure.TOO_LARGE,
+            )
+        return answer
     # Raised outside the handler so not even the exchange error is its context.
     raise failed
 
@@ -232,7 +316,7 @@ def is_https_url(url: object) -> TypeGuard[str]:
     return origin.scheme == "https" and bool(origin.hostname) and "@" not in origin.netloc
 
 
-def _is_key_set_status(status: int) -> bool:
+def _is_ok_status(status: int) -> bool:
     return status == HTTPStatus.OK
 
 

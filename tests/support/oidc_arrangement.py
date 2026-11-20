@@ -193,7 +193,9 @@ class SignallingClock(FakeClock):
 
 @dataclass
 class FakeKeySetEndpoint:
-    """Answers each fetch with `response`: a document, or the error to raise."""
+    """Answers each fetch with `response`: a document, or the error to raise.
+    It stands in for any injected document fetch, the key set's and the provider
+    metadata's alike."""
 
     response: bytes | Exception
     fetched_urls: list[str] = field(default_factory=list)
@@ -270,6 +272,29 @@ def an_access_token(
         changed(token_claims, claims or {}),
         rs256(rsa_key(key_name)),
     )
+
+
+def a_realm_provider_metadata(**changes: Any) -> bytes:
+    """The discovery document of `REALM_ISSUER` as Keycloak serves it, the members the
+    relying party reads and `code_challenge_methods_supported`; `changes` replace or,
+    with `ABSENT`, remove members."""
+    return provider_metadata_document(
+        changed(
+            {
+                "issuer": REALM_ISSUER,
+                "authorization_endpoint": AUTHORIZATION_ENDPOINT,
+                "token_endpoint": TOKEN_ENDPOINT,
+                "jwks_uri": REALM_JWKS_URL,
+                "end_session_endpoint": END_SESSION_ENDPOINT,
+                "code_challenge_methods_supported": ["plain", "S256"],
+            },
+            changes,
+        )
+    )
+
+
+def provider_metadata_document(members: dict[str, Any]) -> bytes:
+    return json.dumps(members).encode()
 
 
 def a_realm_client_config(**changes: Any) -> OidcClientConfig:
@@ -498,6 +523,13 @@ SERVED_TOKEN_ANSWER = json.dumps(
 ).encode()
 REFUSED_TOKEN_ANSWER = json.dumps({"error": "invalid_grant"}).encode()
 _OVERSIZED_ANSWER_BYTES = 2 * (64 * 1024)
+METADATA_LIMIT_BYTES = 64 * 1024
+
+
+def a_json_object_of_bytes(size: int) -> bytes:
+    """A valid JSON object of exactly `size` bytes."""
+    frame = len(json.dumps({"padding": ""}))
+    return json.dumps({"padding": "a" * (size - frame)}).encode()
 
 
 @dataclass(frozen=True)
@@ -519,7 +551,9 @@ class LoopbackHttpsServer:
     answer whose header block carries the request body as a malformed line,
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
     released, `/missing` a 404,
-    `/oversized` a body past every size limit, `/compressed` the key set
+    `/oversized` a body past every size limit, `/metadata-at-limit` and
+    `/metadata-past-limit` a valid JSON object of `METADATA_LIMIT_BYTES` and
+    one byte more, `/compressed` the key set
     gzipped, `/silent` nothing until released, `/dripping-status`,
     `/dripping-head` and `/dripping-body` a 200 whose status line, header
     block or body arrives one byte every `DRIP_INTERVAL_SECONDS` until
@@ -578,6 +612,10 @@ def loopback_https_server(
                 self._send_head(404, {"Content-Length": "0"})
             elif route == "/oversized":
                 self._answer(200, b" " * _OVERSIZED_ANSWER_BYTES)
+            elif route == "/metadata-at-limit":
+                self._answer(200, a_json_object_of_bytes(METADATA_LIMIT_BYTES))
+            elif route == "/metadata-past-limit":
+                self._answer(200, a_json_object_of_bytes(METADATA_LIMIT_BYTES + 1))
             elif route == "/compressed":
                 self._answer(200, gzip.compress(served_key_set()), content_encoding="gzip")
             elif route == "/token":

@@ -1,7 +1,7 @@
 """The one `.ended` line each HTTPS exchange writes, read from a loopback TLS server.
 
-`post_token_request_over_https` and `fetch_key_set_over_https` run through
-`webauth.https_client`; their scenarios read the line's level, outcome, status
+`post_token_request_over_https`, `fetch_key_set_over_https` and
+`fetch_provider_metadata_over_https` run through `webauth.https_client`; their scenarios read the line's level, outcome, status
 and reason, and that the URL's query secret never reaches the log.
 """
 
@@ -26,9 +26,11 @@ from tests.support.token_request_canaries import (
 from webauth.https_client import (
     ExchangeFailure,
     KeySetFetchError,
+    ProviderMetadataFetchError,
     _HttpsExchangeError,
     _log_reason,
     fetch_key_set_over_https,
+    fetch_provider_metadata_over_https,
 )
 from webauth.oidc_transport import post_token_request_over_https
 
@@ -70,6 +72,18 @@ def test_a_key_set_fetch_writes_one_ended_line_with_the_status(
     assert _fields_besides_the_duration(line) == {"outcome": "ok", "status": 200}
 
 
+def test_a_provider_metadata_fetch_writes_one_ended_line_with_the_status(
+    token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
+) -> None:
+    """LOG-05: the provider metadata fetch's one line carries its duration, outcome and status."""
+    fetch_provider_metadata_over_https(f"{token_server.base_url}/certs?{CANARY_URL_QUERY}")
+
+    [line] = _ended_lines(caplog)
+    assert (line.levelno, line.getMessage()) == (logging.INFO, "provider_metadata_fetch.ended")
+    assert _fields_besides_the_duration(line) == {"outcome": "ok", "status": 200}
+    assert_no_canary_in(caplog.text)
+
+
 def test_a_key_set_answered_with_another_status_ends_refused_with_that_status(
     token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -92,6 +106,12 @@ def test_a_key_set_answered_with_another_status_ends_refused_with_that_status(
             "key_set_fetch.ended", fetch_key_set_over_https, logging.WARNING, id="key-set"
         ),
         pytest.param(
+            "provider_metadata_fetch.ended",
+            fetch_provider_metadata_over_https,
+            logging.ERROR,
+            id="provider-metadata",
+        ),
+        pytest.param(
             "token_request.ended", post_canary_token_form, logging.ERROR, id="token-request"
         ),
     ],
@@ -103,7 +123,7 @@ def test_an_unreachable_origin_ends_failed_with_a_reason_and_the_error_class_onl
     exchange: Callable[..., object],
     level: int,
 ) -> None:
-    with pytest.raises((KeySetFetchError, _HttpsExchangeError)):
+    with pytest.raises((KeySetFetchError, ProviderMetadataFetchError, _HttpsExchangeError)):
         exchange(f"https://127.0.0.1:{closed_port}/path?{CANARY_URL_QUERY}")
 
     [line] = _ended_lines(caplog)
@@ -140,4 +160,35 @@ def test_a_token_answer_past_the_size_limit_ends_failed_as_too_large(
         "outcome": "failed",
         "reason": "too-large",
         "status": 200,
+    }
+
+
+def test_a_provider_metadata_document_past_the_size_limit_ends_failed_as_too_large(
+    token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
+) -> None:
+    """LOG-05: a valid JSON document the fetch then refuses for its size is no `ok` line."""
+    with pytest.raises(ProviderMetadataFetchError):
+        fetch_provider_metadata_over_https(f"{token_server.base_url}/metadata-past-limit")
+
+    [line] = _ended_lines(caplog)
+    assert (line.levelno, line.getMessage()) == (logging.ERROR, "provider_metadata_fetch.ended")
+    assert _fields_besides_the_duration(line) == {
+        "outcome": "failed",
+        "reason": "too-large",
+        "status": 200,
+    }
+
+
+def test_a_provider_metadata_answered_with_another_status_ends_refused_with_that_status(
+    token_server: LoopbackHttpsServer, caplog: pytest.LogCaptureFixture
+) -> None:
+    with pytest.raises(ProviderMetadataFetchError):
+        fetch_provider_metadata_over_https(f"{token_server.base_url}/missing")
+
+    [line] = _ended_lines(caplog)
+    assert (line.levelno, line.getMessage()) == (logging.INFO, "provider_metadata_fetch.ended")
+    assert _fields_besides_the_duration(line) == {
+        "outcome": "refused",
+        "reason": "status-not-accepted",
+        "status": 404,
     }
