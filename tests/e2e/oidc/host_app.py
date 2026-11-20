@@ -40,9 +40,9 @@ from typing import Any, Literal
 import anyio.to_thread
 import httpx
 import uvicorn
+from client_config import client_config
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
-from issuer_discovery import discovered_client_config
 from logline import configure
 from pydantic import SecretStr
 
@@ -67,7 +67,6 @@ from webauth.middleware import (
     resource_person,
 )
 from webauth.oidc import (
-    OidcClientConfig,
     OidcRefusal,
     OidcRelyingParty,
     TokenEndpointAnswer,
@@ -338,32 +337,6 @@ class _Observation:
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
 
-def _client_config(
-    settings: HostSettings, redirect_uri: str, post_logout_redirect_uri: str
-) -> OidcClientConfig:
-    if settings.discovers_client_config:
-        return discovered_client_config(
-            settings,
-            redirect_uri,
-            post_logout_redirect_uri,
-            scopes=SCOPES,
-            leeway_seconds=LEEWAY_SECONDS,
-        )
-    return OidcClientConfig(
-        issuer=settings.issuer,
-        authorization_endpoint=settings.authorization_endpoint,
-        token_endpoint=settings.token_endpoint,
-        jwks_url=settings.jwks_url,
-        end_session_endpoint=settings.end_session_endpoint,
-        client_id=settings.client_id,
-        client_secret=SecretStr(settings.client_secret),
-        redirect_uri=redirect_uri,
-        post_logout_redirect_uri=post_logout_redirect_uri,
-        scopes=SCOPES,
-        leeway_seconds=LEEWAY_SECONDS,
-    )
-
-
 def _relying_party(
     settings: HostSettings,
     redirect_uri: str,
@@ -371,7 +344,13 @@ def _relying_party(
     post_token_request: TokenRequestPost,
 ) -> OidcRelyingParty:
     return OidcRelyingParty(
-        _client_config(settings, redirect_uri, post_logout_redirect_uri),
+        client_config(
+            settings,
+            redirect_uri,
+            post_logout_redirect_uri,
+            scopes=SCOPES,
+            leeway_seconds=LEEWAY_SECONDS,
+        ),
         post_token_request=post_token_request,
         fetch_key_set=fetch_key_set_over_https,
         wall_clock=time.time,

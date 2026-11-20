@@ -1,4 +1,4 @@
-"""The host's client configuration, read from the held issuer's own discovery document."""
+"""The proof host's client configuration: explicit endpoints, or the issuer's discovery document."""
 
 from __future__ import annotations
 
@@ -15,7 +15,38 @@ if TYPE_CHECKING:
     from host_app import HostSettings
 
 
-def discovered_client_config(
+def client_config(
+    settings: HostSettings,
+    redirect_uri: str,
+    post_logout_redirect_uri: str,
+    *,
+    scopes: tuple[str, ...],
+    leeway_seconds: int,
+) -> OidcClientConfig:
+    if settings.discovers_client_config:
+        return _discovered(
+            settings,
+            redirect_uri,
+            post_logout_redirect_uri,
+            scopes=scopes,
+            leeway_seconds=leeway_seconds,
+        )
+    return OidcClientConfig(
+        issuer=settings.issuer,
+        authorization_endpoint=settings.authorization_endpoint,
+        token_endpoint=settings.token_endpoint,
+        jwks_url=settings.jwks_url,
+        end_session_endpoint=settings.end_session_endpoint,
+        client_id=settings.client_id,
+        client_secret=SecretStr(settings.client_secret),
+        redirect_uri=redirect_uri,
+        post_logout_redirect_uri=post_logout_redirect_uri,
+        scopes=scopes,
+        leeway_seconds=leeway_seconds,
+    )
+
+
+def _discovered(
     settings: HostSettings,
     redirect_uri: str,
     post_logout_redirect_uri: str,
