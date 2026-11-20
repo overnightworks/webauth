@@ -1,7 +1,0 @@
-claim_id = "40448f6d2f4e4e8bad958f96399aa0fe"
-agent = "Claude 028550fd-db9f-4fd7-9852-4f7d21a4c6d0"
-role = "builder"
-base = "50a2d2db64d95abf6106cd792dedc27dd227b884"
-branch = "claude/issue-817-public-proof-of-writer-position"
-scope = ["docs/host-contract.md", "src/webauth/dependencies.py"]
-opened_commit = "11101f550d9038eaf4f67ad358bc7b4f8d733d86"
