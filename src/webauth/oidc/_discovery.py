@@ -17,6 +17,7 @@ ProviderMetadataFetch = Callable[[str], bytes]
 """Fetches the document at the URL whole, raising on any failure; an oversized
 answer is the fetch's refusal."""
 
+_ISS_SUPPORT_MEMBER = "authorization_response_iss_parameter_supported"
 _WELL_KNOWN_PATH = "/.well-known/openid-configuration"
 _ENDPOINT_MEMBERS = {
     "authorization_endpoint": "authorization_endpoint",
@@ -49,7 +50,9 @@ def discover_oidc_client_config(
     decides where the client secret, the code and the PKCE verifier are sent, so
     nothing is read at login time and nothing is refreshed. The document is read at
     `issuer` with one trailing `/` removed (section 4.1); its `issuer` must equal
-    `issuer` exactly (section 4.3). If it lists `code_challenge_methods_supported`,
+    `issuer` exactly (section 4.3). It also says whether the issuer sends `iss` in
+    every authorization response (RFC 9207 section 2.3): a missing member means it
+    does not. If it lists `code_challenge_methods_supported`,
     that list must hold `S256`, the one method the library sends.
 
     Raises the `ValueError` of `OidcClientConfig` for an issuer it refuses before any
@@ -76,6 +79,7 @@ def discover_oidc_client_config(
         post_logout_redirect_uri=post_logout_redirect_uri,
         scopes=scopes,
         leeway_seconds=leeway_seconds,
+        authorization_response_iss_parameter_supported=_iss_parameter_supported(metadata),
     )
 
 
@@ -94,6 +98,13 @@ def _string_member(metadata: dict[str, object], member: str) -> str:
     if not isinstance(value, str):
         raise OidcDiscoveryError(f"the metadata document's {member} is missing or not a string")
     return value
+
+
+def _iss_parameter_supported(metadata: dict[str, object]) -> bool:
+    supported = metadata.get(_ISS_SUPPORT_MEMBER, False)
+    if not isinstance(supported, bool):
+        raise OidcDiscoveryError(f"the metadata document's {_ISS_SUPPORT_MEMBER} is not a boolean")
+    return supported
 
 
 def _require_pkce_method(metadata: dict[str, object]) -> None:

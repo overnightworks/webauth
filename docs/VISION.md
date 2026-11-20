@@ -15,7 +15,8 @@ release.
 
 It follows OpenID Connect Core 1.0, Discovery 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0
 (RFC 6749) with bearer tokens (RFC 6750), PKCE (RFC 7636), Token Exchange (RFC 8693) and Protected Resource Metadata
-(RFC 9728), JSON Web Token (RFC 7519) with JWT access tokens (RFC 9068), and Fetch Metadata.
+(RFC 9728), Authorization Server Issuer Identification (RFC 9207), JSON Web Token (RFC 7519) with JWT access
+tokens (RFC 9068), and Fetch Metadata.
 
 It is made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot
 derive from the code, and the code is clean enough that the next agent changes it without fear.

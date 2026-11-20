@@ -115,7 +115,7 @@ webauth never signs, decodes, verifies or logs the hint; Keycloak judges it. [Tr
 ### Admitting an identity
 
 The callback's admission decision and its account write share `AdmissionConfig`; the host store binds to one issuer, whose subject is the account `id`. `app_role` owns the [group decision](host-contract.md#what-every-app-gets), also used by services verifying issuer tokens themselves.
-`OidcRelyingParty` runs authorization-code/PKCE for one client and issuer from an `OidcClientConfig`. A host builds it once at startup with `discover_oidc_client_config`, which reads the issuer's OpenID Connect Discovery 1.0 document, requires its `issuer` to equal the configured one exactly and maps its four endpoints into the configuration, whose own checks stay the one URL check ([host contract](host-contract.md#the-client-configuration)). Nothing is read at login time, and the document is neither cached nor refreshed: a changed document takes effect at the next start.
+`OidcRelyingParty` runs authorization-code/PKCE for one client and issuer from an `OidcClientConfig`. A host builds it once at startup with `discover_oidc_client_config`, which reads the issuer's OpenID Connect Discovery 1.0 document, requires its `issuer` to equal the configured one exactly and maps its four endpoints and whether it sends `iss` (RFC 9207) into the configuration, whose own checks stay the one URL check ([host contract](host-contract.md#the-client-configuration)). Nothing is read at login time, and the document is neither cached nor refreshed: a changed document takes effect at the next start.
 
 ## 4. Deployment View
 

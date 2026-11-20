@@ -52,7 +52,11 @@ class OidcClientConfig:
     differ in whether they keep a `Secure` cookie over http on a loopback host,
     so a stack that must work in each sets `cookie_secure=False` on its
     `WebAuthConfig`. `scopes` includes `openid`. `leeway_seconds`
-    is checked by the `_JwtVerifier` the relying party builds from it."""
+    is checked by the `_JwtVerifier` the relying party builds from it.
+    `authorization_response_iss_parameter_supported` says whether the issuer sends
+    `iss` in every authorization response (RFC 9207); when it does, a callback
+    without `iss` is refused. Its default is the RFC's default for an issuer that
+    does not announce it."""
 
     issuer: str
     authorization_endpoint: str
@@ -65,6 +69,7 @@ class OidcClientConfig:
     post_logout_redirect_uri: str
     scopes: tuple[str, ...] = (OPENID_SCOPE,)
     leeway_seconds: int
+    authorization_response_iss_parameter_supported: bool = False
 
     def __post_init__(self) -> None:
         self._check_urls()
@@ -77,6 +82,8 @@ class OidcClientConfig:
             raise ValueError("client_secret must be a non-empty SecretStr")
         if not _is_scope_list_with_openid(self.scopes):
             raise ValueError("scopes must be a tuple of scope tokens that includes openid")
+        if not isinstance(self.authorization_response_iss_parameter_supported, bool):
+            raise ValueError("authorization_response_iss_parameter_supported must be a bool")
 
     def _check_urls(self) -> None:
         for name in _ENDPOINT_URL_FIELDS:
