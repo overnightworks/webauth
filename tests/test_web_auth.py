@@ -576,6 +576,16 @@ def test_compose_14_a_bearer_that_does_not_fit_is_refused_before_the_app_changes
     the_routes_of(world)(app, auth)
     before = the_app_as_it_stands(app)
     machine_paths = MachinePaths(PathRules(prefixes=("/api/admin/",)), HAL_ONLY)
+    foreign_relying_party = a_relying_party()
+    foreign_admission = replace(ADMISSION, bound_issuer=foreign_relying_party.issuer)
+    other_groups = BearerGate(
+        relying_party=auth.relying_party, admission=ADMISSION, machine_paths=machine_paths
+    )
+    other_relying_party = BearerGate(
+        relying_party=foreign_relying_party,
+        admission=foreign_admission,
+        machine_paths=machine_paths,
+    )
 
     with pytest.raises(ValueError, match="admin_group"):
         BearerGate(
@@ -584,21 +594,9 @@ def test_compose_14_a_bearer_that_does_not_fit_is_refused_before_the_app_changes
     with pytest.raises(ValueError, match="must name"):
         BearerGate(relying_party=auth.relying_party, admission=auth.admission)
     with pytest.raises(WebAuthSettingError, match=r"bearer\.admission"):
-        auth.install(
-            app,
-            bearer=BearerGate(
-                relying_party=auth.relying_party, admission=ADMISSION, machine_paths=machine_paths
-            ),
-        )
+        auth.install(app, bearer=other_groups)
     with pytest.raises(WebAuthSettingError, match=r"bearer\.relying_party"):
-        auth.install(
-            app,
-            bearer=BearerGate(
-                relying_party=a_relying_party(),
-                admission=replace(ADMISSION, bound_issuer=a_relying_party().issuer),
-                machine_paths=machine_paths,
-            ),
-        )
+        auth.install(app, bearer=other_relying_party)
 
     assert the_app_as_it_stands(app) == before
 
@@ -645,6 +643,7 @@ def test_compose_17_a_handle_that_was_never_installed_fails_on_its_first_request
     world = a_signed_in_member()
     host = a_composed_host(world, installed=False)
     client = a_client_of(host.app, raise_server_exceptions=True)
+    cookie = world.signed_cookie()
 
     with pytest.raises(RuntimeError, match=r"auth\.install"):
-        client.get(ME_PATH, headers=world.signed_cookie())
+        client.get(ME_PATH, headers=cookie)
