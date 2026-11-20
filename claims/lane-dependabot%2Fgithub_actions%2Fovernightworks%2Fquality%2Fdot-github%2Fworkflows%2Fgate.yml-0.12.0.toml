@@ -1,0 +1,8 @@
+claim_id = "0b2e5bb87cfc4e12873d6f369b6bf1d0"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "281976e043ef6b6951e4a53a0d14a82f4b23e427"
+branch = "dependabot/github_actions/overnightworks/quality/dot-github/workflows/gate.yml-0.12.0"
+scope = [".github/workflows/ci.yml"]
+opened_commit = "063f64cc569f818e376d42f3942427c9dd970653"
+whole_reason = "One quality release moves four workflow pins that a test requires to stay equal, so they land together."
