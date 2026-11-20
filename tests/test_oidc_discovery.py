@@ -249,8 +249,10 @@ def test_a_fetch_that_fails_fails_the_discovery_with_the_fetchs_own_error() -> N
 
 def test_a_discovery_refusal_is_a_web_auth_error() -> None:
     """DISCOVERY-06."""
+    endpoint = FakeKeySetEndpoint(json.dumps([]).encode())
+
     with pytest.raises(WebAuthError):
-        _discover(FakeKeySetEndpoint(json.dumps([]).encode()))
+        _discover(endpoint)
 
 
 def test_the_production_fetch_reads_the_servers_document_at_its_well_known_path(
@@ -304,9 +306,10 @@ def test_a_provider_metadata_fetch_refuses_any_url_but_a_well_formed_https_one_b
 ) -> None:
     """DISCOVERY-07."""
     authority = token_server.base_url.removeprefix("https://")
+    refused_url = url.format(authority=authority)
 
     with pytest.raises(ProviderMetadataFetchError) as refused:
-        fetch_provider_metadata_over_https(url.format(authority=authority))
+        fetch_provider_metadata_over_https(refused_url)
 
     assert refused.value.failure is ExchangeFailure.NOT_AN_HTTPS_URL
     assert token_server.requested_paths == []
