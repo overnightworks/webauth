@@ -1,0 +1,8 @@
+claim_id = "f7fd2869f9af4c0b9432063aaa3c2cc3"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "c8ce45a23e9866a0a1cfff4df21dffeb90f59378"
+branch = "claude/issue-821-discover-oidc-client-config"
+scope = ["README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/https_client.py", "src/webauth/oidc", "tests/e2e/oidc/host_app.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/oidc_arrangement.py", "tests/test_https_client.py", "tests/test_https_client_log.py", "tests/test_oidc_client_config.py", "tests/test_oidc_discovery.py"]
+opened_commit = "642a2fdf01eed0486e29ecb07400e35add5f895d"
+whole_reason = "One configuration function, its fetch, tests and the documents a host reads to use it, which do not ship apart."
