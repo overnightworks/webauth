@@ -80,8 +80,7 @@ class OidcClientConfig:
 
     def _check_urls(self) -> None:
         for name in _ENDPOINT_URL_FIELDS:
-            if not _is_endpoint_url(getattr(self, name)):
-                raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
+            require_endpoint_url(name, getattr(self, name))
         for name in _APP_URL_FIELDS:
             if not _is_app_url(getattr(self, name)):
                 raise ValueError(
@@ -91,6 +90,12 @@ class OidcClientConfig:
         for name in _FORM_TARGET_FIELDS:
             if not _PLAIN_AUTHORITY.fullmatch(urllib.parse.urlsplit(getattr(self, name)).netloc):
                 raise ValueError(f"{name} must name a plain host and optional port")
+
+
+def require_endpoint_url(name: str, url: object) -> None:
+    """Raises the `ValueError` naming `name`, never `url`, unless `url` is an endpoint URL."""
+    if not _is_endpoint_url(url):
+        raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
 
 
 def _is_endpoint_url(url: object) -> bool:

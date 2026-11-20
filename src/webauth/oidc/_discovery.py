@@ -9,7 +9,7 @@ from pydantic import SecretStr
 
 from webauth import WebAuthError
 from webauth.oidc._authorization_url import CODE_CHALLENGE_METHOD
-from webauth.oidc._client_config import OPENID_SCOPE, OidcClientConfig
+from webauth.oidc._client_config import OPENID_SCOPE, OidcClientConfig, require_endpoint_url
 
 __all__ = ["OidcDiscoveryError", "ProviderMetadataFetch", "discover_oidc_client_config"]
 
@@ -52,9 +52,11 @@ def discover_oidc_client_config(
     `issuer` exactly (section 4.3). If it lists `code_challenge_methods_supported`,
     that list must hold `S256`, the one method the library sends.
 
-    Raises the fetch's own error when the document cannot be fetched,
+    Raises the `ValueError` of `OidcClientConfig` for an issuer it refuses before any
+    fetch, the fetch's own error when the document cannot be fetched,
     `OidcDiscoveryError` when it is not a JSON object or lacks or misstates a
     member, and the `ValueError` of `OidcClientConfig` for a URL or value it refuses."""
+    require_endpoint_url("issuer", issuer)
     metadata = _parsed_object(
         fetch_provider_metadata(f"{issuer.removesuffix('/')}{_WELL_KNOWN_PATH}")
     )

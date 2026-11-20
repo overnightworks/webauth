@@ -967,6 +967,7 @@ No sentence of this section is ruled by the operator.
 - **DISCOVERY-08** A failure of the fetch propagates unchanged from `discover_oidc_client_config`.
 - **DISCOVERY-09** The call reads the document once and keeps nothing: no cache, no refresh, nothing read at login time. `OidcRelyingParty` and the sign-in routes do not know of the document.
 - **DISCOVERY-10** The `OidcClientConfig` constructor with every URL stays for an issuer that publishes no document.
+- **DISCOVERY-11** An `issuer` that `OidcClientConfig` refuses (not an https URL, or with a query or fragment) raises that same `ValueError` naming `issuer`, before any fetch and without repeating the value.
 - **Host duty:** the host calls it once at startup and fails to start when it raises. It cannot start while its issuer is down, and a changed document takes effect at the next start; the host's supervisor restarts it.
 - **Host duty:** `issuer` is the host's own configuration, never a value from a request: the document decides where the client secret, the code and the PKCE verifier are sent, and the library trusts it as it trusts what the issuer signs.
 - **Host duty:** a host's test passes its own `fetch_provider_metadata` that answers the document, beside HOSTTEST-04.
