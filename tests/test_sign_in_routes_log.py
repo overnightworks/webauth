@@ -110,7 +110,7 @@ _REFUSALS = [
         an_oidc_host,
         _denied_with("<not a code>"),
         {"reason": OidcRefusalReason.AUTHORIZATION_DENIED.value},
-        id="no code at all",
+        id="a malformed code is left out",
     ),
     pytest.param(
         an_oidc_host,
