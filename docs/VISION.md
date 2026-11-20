@@ -8,8 +8,8 @@ their own. Around that it guards every app the same way: it turns away requests 
 apply its protections, limits how often one address may try, and records what happened for a later security review. An
 app tells it where to keep what must last, or takes the optional Postgres adapter for the session half, and has nothing else of its own to build.
 
-A host builds its whole auth in one call from one typed settings object; it varies only its pages, its stores, its
-groups and its own middleware, which it hands to webauth in named slots. Every app integrates it the same way, from its
+A host builds its whole auth from one typed settings object and installs it on its app in one call; it varies only its
+pages, its stores, its groups and its own middleware, which it hands to webauth in named slots. Every app integrates it the same way, from its
 documentation alone, without reading its code. A security fix is made once, and every app gets it by taking the next
 release.
 
