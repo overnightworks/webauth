@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from webauth.oidc._client_config import OidcClientConfig
+from webauth.oidc._discovery import (
+    OidcDiscoveryError,
+    ProviderMetadataFetch,
+    discover_oidc_client_config,
+)
 from webauth.oidc._relying_party import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     AuthorizationRequest,
@@ -27,10 +32,12 @@ __all__ = [
     "AuthorizationRequest",
     "ExchangedAccess",
     "OidcClientConfig",
+    "OidcDiscoveryError",
     "OidcIdentity",
     "OidcRefusal",
     "OidcRefusalReason",
     "OidcRelyingParty",
+    "ProviderMetadataFetch",
     "RenewedAccess",
     "TokenEndpointAnswer",
     "TokenEndpointError",
@@ -38,4 +45,5 @@ __all__ = [
     "TokenRequestPost",
     "VerifiedAccessToken",
     "VerifiedLogout",
+    "discover_oidc_client_config",
 ]

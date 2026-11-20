@@ -1,8 +1,9 @@
 """The one `.ended` line each HTTPS exchange writes, read from a loopback TLS server.
 
 `post_token_request_over_https`, `fetch_key_set_over_https` and
-`fetch_provider_metadata_over_https` run through `webauth.https_client`; their scenarios read the line's level, outcome, status
-and reason, and that the URL's query secret never reaches the log.
+`fetch_provider_metadata_over_https` run through `webauth.https_client`; their scenarios
+read the line's level, outcome, status and reason, and that the URL's query secret never
+reaches the log.
 """
 
 from __future__ import annotations

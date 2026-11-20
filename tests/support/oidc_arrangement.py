@@ -227,13 +227,14 @@ class FakeTokenEndpoint:
 
 
 REALM_ISSUER = "https://login.example.org/realms/workshop"
-REALM_JWKS_URL = f"{REALM_ISSUER}/protocol/openid-connect/certs"
+_OPENID_CONNECT_PATH = "/protocol/openid-connect"
+REALM_JWKS_URL = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/certs"
 APP_CLIENT_ID = "notes-app"
 # Canary whose recognisable text is the point
 CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
-AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/auth"
-TOKEN_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/token"
-END_SESSION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/logout"
+AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/auth"
+TOKEN_ENDPOINT = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/token"
+END_SESSION_ENDPOINT = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/logout"
 REDIRECT_URI = "https://notes.example.org/auth/callback"
 POST_LOGOUT_REDIRECT_URI = "https://notes.example.org/"
 OPERATOR_SUBJECT = "operator-account-1"
@@ -274,27 +275,23 @@ def an_access_token(
     )
 
 
-def a_realm_provider_metadata(**changes: Any) -> bytes:
-    """The discovery document of `REALM_ISSUER` as Keycloak serves it, the members the
-    relying party reads and `code_challenge_methods_supported`; `changes` replace or,
+def a_provider_metadata(realm_issuer: str = REALM_ISSUER, **changes: Any) -> bytes:
+    """The discovery document of the realm at `realm_issuer` as Keycloak serves it: the members
+    the relying party reads and `code_challenge_methods_supported`; `changes` replace or,
     with `ABSENT`, remove members."""
-    return provider_metadata_document(
+    return json.dumps(
         changed(
             {
-                "issuer": REALM_ISSUER,
-                "authorization_endpoint": AUTHORIZATION_ENDPOINT,
-                "token_endpoint": TOKEN_ENDPOINT,
-                "jwks_uri": REALM_JWKS_URL,
-                "end_session_endpoint": END_SESSION_ENDPOINT,
+                "issuer": realm_issuer,
+                "authorization_endpoint": f"{realm_issuer}{_OPENID_CONNECT_PATH}/auth",
+                "token_endpoint": f"{realm_issuer}{_OPENID_CONNECT_PATH}/token",
+                "jwks_uri": f"{realm_issuer}{_OPENID_CONNECT_PATH}/certs",
+                "end_session_endpoint": f"{realm_issuer}{_OPENID_CONNECT_PATH}/logout",
                 "code_challenge_methods_supported": ["plain", "S256"],
             },
             changes,
         )
-    )
-
-
-def provider_metadata_document(members: dict[str, Any]) -> bytes:
-    return json.dumps(members).encode()
+    ).encode()
 
 
 def a_realm_client_config(**changes: Any) -> OidcClientConfig:
@@ -551,7 +548,8 @@ class LoopbackHttpsServer:
     answer whose header block carries the request body as a malformed line,
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
     released, `/missing` a 404,
-    `/oversized` a body past every size limit, `/metadata-at-limit` and
+    `/oversized` a body past every size limit, `/.well-known/openid-configuration` the
+    discovery document of this server as its own issuer, `/metadata-at-limit` and
     `/metadata-past-limit` a valid JSON object of `METADATA_LIMIT_BYTES` and
     one byte more, `/compressed` the key set
     gzipped, `/silent` nothing until released, `/dripping-status`,
@@ -612,6 +610,8 @@ def loopback_https_server(
                 self._send_head(404, {"Content-Length": "0"})
             elif route == "/oversized":
                 self._answer(200, b" " * _OVERSIZED_ANSWER_BYTES)
+            elif route == "/.well-known/openid-configuration":
+                self._answer(200, a_provider_metadata(f"https://127.0.0.1:{server.server_port}"))
             elif route == "/metadata-at-limit":
                 self._answer(200, a_json_object_of_bytes(METADATA_LIMIT_BYTES))
             elif route == "/metadata-past-limit":

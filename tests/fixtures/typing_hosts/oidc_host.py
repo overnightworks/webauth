@@ -50,7 +50,9 @@ from webauth.dependencies import (
 from webauth.https_client import (
     ExchangeFailure,
     KeySetFetchError,
+    ProviderMetadataFetchError,
     fetch_key_set_over_https,
+    fetch_provider_metadata_over_https,
     is_https_url,
 )
 from webauth.jwt_verification import (
@@ -85,13 +87,16 @@ from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     ExchangedAccess,
     OidcClientConfig,
+    OidcDiscoveryError,
     OidcIdentity,
     OidcRefusal,
     OidcRelyingParty,
+    ProviderMetadataFetch,
     TokenEndpointError,
     TokenRequestPost,
     VerifiedAccessToken,
     VerifiedLogout,
+    discover_oidc_client_config,
 )
 from webauth.oidc_login import (
     AccessTokenRefusal,
@@ -472,6 +477,20 @@ def a_host_uses_the_production_transports() -> tuple[KeySetFetch, TokenRequestPo
     return key_set_fetch, token_post
 
 
+def a_host_discovers_its_client_configuration(issuer: str, secret: SecretStr) -> OidcClientConfig:
+    provider_metadata_fetch: ProviderMetadataFetch = fetch_provider_metadata_over_https
+    return discover_oidc_client_config(
+        issuer,
+        fetch_provider_metadata=provider_metadata_fetch,
+        client_id="host",
+        client_secret=secret,
+        redirect_uri="https://host.example/auth/callback",
+        post_logout_redirect_uri="https://host.example/",
+        scopes=("openid", "profile"),
+        leeway_seconds=30,
+    )
+
+
 def a_host_gets_a_workload_token(relying_party: OidcRelyingParty) -> SecretStr | OidcRefusal:
     return relying_party.workload_access_token(scopes=("agent-service-audience",))
 
@@ -611,6 +630,7 @@ def _surface_of_the_gates_and_limits() -> tuple[object, ...]:
         IpRateLimitMiddleware,
         KeySetFetchError,
         LoginRedirect,
+        ProviderMetadataFetchError,
         MAX_SESSION_COOKIE_CHARS,
         MonotonicClock,
     )
@@ -619,7 +639,9 @@ def _surface_of_the_gates_and_limits() -> tuple[object, ...]:
 def _surface_of_the_login_and_session_flow() -> tuple[object, ...]:
     return (
         OidcClientConfig,
+        OidcDiscoveryError,
         PENDING_LOGIN_MAX_AGE_SECONDS,
+        discover_oidc_client_config,
         PendingLogin,
         RateLimitBackend,
         RedisRateLimitBackend,

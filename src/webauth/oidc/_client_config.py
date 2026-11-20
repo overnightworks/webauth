@@ -11,9 +11,9 @@ from pydantic import SecretStr
 from webauth._validation import is_scope_token_tuple
 from webauth.https_client import is_https_url
 
-__all__ = ["OidcClientConfig"]
+__all__ = ["OPENID_SCOPE", "OidcClientConfig"]
 
-_OPENID_SCOPE = "openid"
+OPENID_SCOPE = "openid"
 _ENDPOINT_URL_FIELDS = (
     "issuer",
     "authorization_endpoint",
@@ -63,7 +63,7 @@ class OidcClientConfig:
     client_secret: SecretStr
     redirect_uri: str
     post_logout_redirect_uri: str
-    scopes: tuple[str, ...] = (_OPENID_SCOPE,)
+    scopes: tuple[str, ...] = (OPENID_SCOPE,)
     leeway_seconds: int
 
     def __post_init__(self) -> None:
@@ -114,4 +114,4 @@ def _is_app_url(url: object) -> bool:
 
 
 def _is_scope_list_with_openid(scopes: object) -> bool:
-    return is_scope_token_tuple(scopes) and _OPENID_SCOPE in scopes
+    return is_scope_token_tuple(scopes) and OPENID_SCOPE in scopes
