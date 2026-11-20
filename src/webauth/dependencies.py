@@ -171,10 +171,6 @@ def _publish_installed_web_auth(app: FastAPI, handle: WebAuth) -> None:
     setattr(app.state, _INSTALLED_WEB_AUTH_ATTRIBUTE, handle)
 
 
-def _has_installed_web_auth(app: FastAPI) -> bool:
-    return getattr(app.state, _INSTALLED_WEB_AUTH_ATTRIBUTE, None) is not None
-
-
 def _installed_web_auth(connection: HTTPConnection) -> WebAuth:
     """The handle ``WebAuth.install`` put on the application serving ``connection``."""
     handle = getattr(connection.app.state, _INSTALLED_WEB_AUTH_ATTRIBUTE, None)

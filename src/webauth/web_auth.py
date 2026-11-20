@@ -16,7 +16,7 @@ from starlette.middleware import Middleware
 
 from webauth._validation import require_positive_whole_number
 from webauth.config import install_web_auth_config
-from webauth.dependencies import _has_installed_web_auth, _publish_installed_web_auth
+from webauth.dependencies import _publish_installed_web_auth
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.bearer_gate import install_resource_metadata
 from webauth.middleware.stack import _install_slotted_web_auth_middleware
@@ -262,8 +262,6 @@ class WebAuth:
         middleware, raises ``RuntimeError``. Both are refused before the app changes.
         """
         self._require_a_bearer_that_fits(bearer)
-        if _has_installed_web_auth(app):
-            raise RuntimeError("This application has an installed WebAuth already; install once.")
         settings = self._settings
         resource = None if bearer is None else bearer.resource
         gate = self._gate
