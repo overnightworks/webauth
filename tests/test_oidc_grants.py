@@ -38,6 +38,7 @@ from tests.support.oidc_relying_party import (
     a_relying_party_for,
 )
 from webauth.oidc import (
+    IdpErrorCode,
     OidcRefusal,
     OidcRefusalReason,
     OidcRelyingParty,
@@ -194,15 +195,15 @@ def test_a_refresh_token_at_both_ends_of_the_grammar_is_sent_and_received_exactl
 
 _REFUSED_GRANT_ANSWERS = [
     pytest.param(
-        token_endpoint_answer(status, {"error": error}),
+        token_endpoint_answer(status, {"error": error.value}),
         OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=error),
-        id=f"{status}-{error}",
+        id=f"{status}-{error.value}",
     )
     for status, error in [
-        (400, "invalid_grant"),
-        (401, "invalid_client"),
-        (400, "unauthorized_client"),
-        (400, "invalid_scope"),
+        (400, IdpErrorCode.INVALID_GRANT),
+        (401, IdpErrorCode.INVALID_CLIENT),
+        (400, IdpErrorCode.UNAUTHORIZED_CLIENT),
+        (400, IdpErrorCode.INVALID_SCOPE),
     ]
 ] + [
     pytest.param(answer, OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED), id=name)
@@ -227,7 +228,9 @@ def test_a_grant_the_issuer_refuses_or_fails_is_refused_with_its_reason(
 def test_a_refresh_token_the_issuer_never_issued_or_ended_is_invalid_grant() -> None:
     issuer = _an_issuer()
     relying_party = _granting(issuer)
-    invalid_grant = OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_grant")
+    invalid_grant = OidcRefusal(
+        OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=IdpErrorCode.INVALID_GRANT
+    )
 
     assert relying_party.renew_access(SecretStr("never-issued")) == invalid_grant
     issuer.end_sso_session()
@@ -239,7 +242,7 @@ def test_a_workload_token_is_refused_while_the_client_has_no_service_account() -
     issuer.service_accounts_enabled = False
 
     assert _granting(issuer).workload_access_token(scopes=("svc-audience",)) == OidcRefusal(
-        OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="unauthorized_client"
+        OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=IdpErrorCode.UNAUTHORIZED_CLIENT
     )
 
 

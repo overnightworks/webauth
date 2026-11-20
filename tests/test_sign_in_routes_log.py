@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from webauth.sign_in_routes import SignInRefusal
 
 _LOGGER_NAME = "webauth.sign_in_routes"
-_OTHER_IDP_ERROR = "_OTHER"
+_OTHER_IDP_ERROR = IdpErrorCode.OTHER.value
 
 
 type _Line = tuple[str, int, dict[str, object]]

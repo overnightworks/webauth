@@ -79,6 +79,7 @@ from webauth.dependencies import (
 )
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
+    IdpErrorCode,
     OidcRefusal,
     OidcRefusalReason,
 )
@@ -298,8 +299,6 @@ class AccessTokenRefusal:
 
 _SESSION_ENDED: Final = AccessTokenRefusal(AccessTokenRefusalReason.SESSION_ENDED)
 _SIGN_IN_AGAIN: Final = AccessTokenRefusal(AccessTokenRefusalReason.SIGN_IN_AGAIN)
-_INVALID_GRANT: Final = "invalid_grant"
-"""The error code (RFC 6749 section 5.2) of a refresh token the issuer no longer honours."""
 
 
 def fresh_access_token(
@@ -444,7 +443,7 @@ def _evidence_of_standing_session(
 def _refusal_of_grant(refusal: OidcRefusal) -> AccessTokenRefusal:
     if (
         refusal.reason is OidcRefusalReason.TOKEN_REQUEST_REFUSED
-        and refusal.idp_error == _INVALID_GRANT
+        and refusal.idp_error is IdpErrorCode.INVALID_GRANT
     ):
         return _SIGN_IN_AGAIN
     return AccessTokenRefusal(AccessTokenRefusalReason.ISSUER_UNAVAILABLE, refusal)
