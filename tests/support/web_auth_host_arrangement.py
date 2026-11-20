@@ -225,10 +225,6 @@ def the_routes_of(world: HostWorld) -> Callable[[FastAPI, WebAuth], None]:
     return add
 
 
-def no_routes(_app: FastAPI, _auth: WebAuth) -> None:
-    """The host adds no route of its own."""
-
-
 def a_client_of(app: FastAPI, *, raise_server_exceptions: bool = False) -> TestClient:
     """A browser reaching `app` through the trusted proxy over https, following no redirect."""
     return TestClient(
