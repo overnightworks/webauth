@@ -39,6 +39,13 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import RSAAlgorithm
 from pydantic import SecretStr
 
+from tests.support.provider_metadata import (
+    ABSENT,
+    METADATA_LIMIT_BYTES,
+    OPENID_CONNECT_PATH,
+    a_json_object_of_bytes,
+    a_provider_metadata,
+)
 from webauth.jwt_verification import KeySetFetch, MonotonicClock
 from webauth.oidc import (
     OidcClientConfig,
@@ -48,9 +55,6 @@ from webauth.oidc import (
     TokenRequestPost,
 )
 from webauth.ports import WallClock
-
-ABSENT = object()
-"""A claim or header change that removes the member instead of setting it."""
 
 
 @cache
@@ -193,7 +197,9 @@ class SignallingClock(FakeClock):
 
 @dataclass
 class FakeKeySetEndpoint:
-    """Answers each fetch with `response`: a document, or the error to raise."""
+    """Answers each fetch with `response`: a document, or the error to raise.
+    It stands in for any injected document fetch, the key set's and the provider
+    metadata's alike."""
 
     response: bytes | Exception
     fetched_urls: list[str] = field(default_factory=list)
@@ -225,13 +231,13 @@ class FakeTokenEndpoint:
 
 
 REALM_ISSUER = "https://login.example.org/realms/workshop"
-REALM_JWKS_URL = f"{REALM_ISSUER}/protocol/openid-connect/certs"
+REALM_JWKS_URL = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/certs"
 APP_CLIENT_ID = "notes-app"
 # Canary whose recognisable text is the point
 CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
-AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/auth"
-TOKEN_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/token"
-END_SESSION_ENDPOINT = f"{REALM_ISSUER}/protocol/openid-connect/logout"
+AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/auth"
+TOKEN_ENDPOINT = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/token"
+END_SESSION_ENDPOINT = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/logout"
 REDIRECT_URI = "https://notes.example.org/auth/callback"
 POST_LOGOUT_REDIRECT_URI = "https://notes.example.org/"
 OPERATOR_SUBJECT = "operator-account-1"
@@ -499,6 +505,16 @@ SERVED_TOKEN_ANSWER = json.dumps(
 REFUSED_TOKEN_ANSWER = json.dumps({"error": "invalid_grant"}).encode()
 _OVERSIZED_ANSWER_BYTES = 2 * (64 * 1024)
 
+_FIXED_ANSWERS = {
+    "/oversized": (200, b" " * _OVERSIZED_ANSWER_BYTES),
+    "/metadata-at-limit": (200, a_json_object_of_bytes(METADATA_LIMIT_BYTES)),
+    "/metadata-past-limit": (200, a_json_object_of_bytes(METADATA_LIMIT_BYTES + 1)),
+    "/token": (200, SERVED_TOKEN_ANSWER),
+    "/token-refused": (400, REFUSED_TOKEN_ANSWER),
+    "/token-at-limit": (200, b" " * 64 * 1024),
+    "/token-past-limit": (200, b" " * (64 * 1024 + 1)),
+}
+
 
 @dataclass(frozen=True)
 class ReceivedRequest:
@@ -519,7 +535,10 @@ class LoopbackHttpsServer:
     answer whose header block carries the request body as a malformed line,
     `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
     released, `/missing` a 404,
-    `/oversized` a body past every size limit, `/compressed` the key set
+    `/oversized` a body past every size limit, `/.well-known/openid-configuration` the
+    discovery document of this server as its own issuer, `/metadata-at-limit` and
+    `/metadata-past-limit` a valid JSON object of `METADATA_LIMIT_BYTES` and
+    one byte more, `/compressed` the key set
     gzipped, `/silent` nothing until released, `/dripping-status`,
     `/dripping-head` and `/dripping-body` a 200 whose status line, header
     block or body arrives one byte every `DRIP_INTERVAL_SECONDS` until
@@ -560,7 +579,9 @@ def loopback_https_server(
             headers = {name.lower(): value for name, value in self.headers.items()}
             received.append(ReceivedRequest(self.command, self.path, headers, body))
             route = urllib.parse.urlsplit(self.path).path
-            if route == "/silent":
+            if route in _FIXED_ANSWERS:
+                self._answer(*_FIXED_ANSWERS[route])
+            elif route == "/silent":
                 silent_request_arrived.set()
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
             elif route == "/moved":
@@ -576,18 +597,10 @@ def loopback_https_server(
                 self._drip(b"HTTP/1.1 200 OK\r\nContent-Length: 65536\r\n\r\n")
             elif route == "/missing":
                 self._send_head(404, {"Content-Length": "0"})
-            elif route == "/oversized":
-                self._answer(200, b" " * _OVERSIZED_ANSWER_BYTES)
+            elif route == "/.well-known/openid-configuration":
+                self._answer(200, a_provider_metadata(f"https://127.0.0.1:{server.server_port}"))
             elif route == "/compressed":
                 self._answer(200, gzip.compress(served_key_set()), content_encoding="gzip")
-            elif route == "/token":
-                self._answer(200, SERVED_TOKEN_ANSWER)
-            elif route == "/token-refused":
-                self._answer(400, REFUSED_TOKEN_ANSWER)
-            elif route == "/token-at-limit":
-                self._answer(200, b" " * 64 * 1024)
-            elif route == "/token-past-limit":
-                self._answer(200, b" " * (64 * 1024 + 1))
             elif route == "/token-reflecting":
                 self._answer_reflecting_in_a_malformed_header(body)
             else:

@@ -40,6 +40,7 @@ from typing import Any, Literal
 import anyio.to_thread
 import httpx
 import uvicorn
+from client_config import client_config
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from logline import configure
@@ -66,7 +67,6 @@ from webauth.middleware import (
     resource_person,
 )
 from webauth.oidc import (
-    OidcClientConfig,
     OidcRefusal,
     OidcRelyingParty,
     TokenEndpointAnswer,
@@ -203,6 +203,9 @@ class HostSettings:
     userinfo_endpoint: str | None = None
     bearer_authorized_parties: tuple[str, ...] = ()
     """The client ids whose access tokens open the machine routes; none means no such routes."""
+    discovers_client_config: bool = False
+    """Whether the host reads the four endpoints from the issuer's discovery document at start;
+    otherwise it takes the endpoint fields above."""
 
     @property
     def is_bearer_host(self) -> bool:
@@ -341,16 +344,10 @@ def _relying_party(
     post_token_request: TokenRequestPost,
 ) -> OidcRelyingParty:
     return OidcRelyingParty(
-        OidcClientConfig(
-            issuer=settings.issuer,
-            authorization_endpoint=settings.authorization_endpoint,
-            token_endpoint=settings.token_endpoint,
-            jwks_url=settings.jwks_url,
-            end_session_endpoint=settings.end_session_endpoint,
-            client_id=settings.client_id,
-            client_secret=SecretStr(settings.client_secret),
-            redirect_uri=redirect_uri,
-            post_logout_redirect_uri=post_logout_redirect_uri,
+        client_config(
+            settings,
+            redirect_uri,
+            post_logout_redirect_uri,
             scopes=SCOPES,
             leeway_seconds=LEEWAY_SECONDS,
         ),

@@ -1,8 +1,5 @@
 # Measured by `quality check --fix`. Entries only ever go down.
 
-[ccn."tests/support/oidc_arrangement.py"]
-"loopback_https_server.LoopbackHandler._receive" = 16
-
 [ccn."tests/test_webauth_public_api.py"]
 "_names_taken_from_webauth" = 16
 "_surface_of_source" = 20
@@ -17,6 +14,6 @@
 "build_app" = 83
 
 [function_lines."tests/support/oidc_arrangement.py"]
-"loopback_https_server" = 115
+"loopback_https_server" = 109
 
 [clones]

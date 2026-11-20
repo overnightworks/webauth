@@ -60,6 +60,7 @@ def host_settings(
         client_secret=client_secret,
         session_secret=session_secret,
         cookie_samesite=cookie_samesite,
+        discovers_client_config=True,
     )
 
 
