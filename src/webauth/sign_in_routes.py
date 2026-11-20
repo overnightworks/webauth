@@ -6,7 +6,8 @@ and ``SignInPaths`` derives the policies the host's gate, rate limit, body-size,
 cache rules need for exactly those paths, so the host lists them once. The start, callback and
 logout routes are synchronous and run in the threadpool; the back-channel route reads its body
 on the event loop and then makes one worker-thread call. Configuration comes from the installed
-``WebAuthConfig``, and the library adds no middleware and logs nothing.
+``WebAuthConfig``, and the library adds no middleware. The callback writes one line for its
+outcome, ``sign_in.refused`` or ``sign_in.completed``.
 
 The callback exchanges the code and verifies the ID token outside any
 transaction, decides admission without writing, and then enters one
@@ -69,10 +70,11 @@ access proxy). Only the exact path is exempt from the origin check and the rate 
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import anyio.to_thread
 from fastapi import FastAPI, Request  # noqa: TC002  # FastAPI reads the annotation at runtime
@@ -88,6 +90,7 @@ from webauth.dependencies import LoginRedirect, session_id_from_request
 from webauth.languages import is_language_tag
 from webauth.oidc import OidcRefusal, OidcRefusalReason
 from webauth.oidc._relying_party import _callback_state
+from webauth.oidc._token_endpoint import _logged_idp_error
 from webauth.oidc_login import (
     _AdmittedLogin,
     _BackchannelLogoutResult,
@@ -117,6 +120,9 @@ __all__ = [
     "install_sign_in_routes",
 ]
 
+_LOGGER: Final = logging.getLogger(__name__)
+_REFUSED_EVENT: Final = "sign_in.refused"
+_COMPLETED_EVENT: Final = "sign_in.completed"
 _RETURN_PATH_QUERY_NAME = "next"
 _SET_COOKIE = b"set-cookie"
 
@@ -403,6 +409,7 @@ class _SignIn:
         except _UsernameTakenSignal:
             return self._refuse(request, AdmissionRefusal.USERNAME_TAKEN)
         set_sub(request.scope, signed_in.person_id)
+        _LOGGER.info(_COMPLETED_EVENT, extra={"sub": signed_in.person_id})
         answer = RedirectResponse(
             same_app_path(request, pending.return_to) or _app_root(request),
             status_code=303,
@@ -427,7 +434,19 @@ class _SignIn:
             )
 
     def _refuse(self, request: Request, cause: OidcRefusal | AdmissionRefusal) -> Response:
+        _LOGGER.info(_REFUSED_EVENT, extra=_refusal_fields(cause))
         return self.refused(request, SignInRefusal(cause))
+
+
+def _refusal_fields(cause: OidcRefusal | AdmissionRefusal) -> dict[str, str]:
+    if isinstance(cause, AdmissionRefusal):
+        return {"reason": cause.value}
+    fields = {"reason": cause.reason.value}
+    if cause.token_rejection is not None:
+        fields["token_rejection"] = cause.token_rejection.value
+    if cause.idp_error is not None:
+        fields["idp_error"] = _logged_idp_error(cause.idp_error)
+    return fields
 
 
 def _app_root(request: Request) -> str:
