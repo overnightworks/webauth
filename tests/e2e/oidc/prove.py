@@ -487,18 +487,11 @@ class Proof(RunRecord):
 
 def issuer_document_is_canonical(proof: Proof) -> str:
     with proof.browsing() as page:
-        page.goto(f"{ISSUER}/.well-known/openid-configuration")
+        page.goto(url := f"{ISSUER}/.well-known/openid-configuration")
         document = json.loads(page.inner_text("body"))
-        issuer = document["issuer"]
-        assert page.url == f"{ISSUER}/.well-known/openid-configuration", "the URL moved"
-        assert issuer == ISSUER, "the document names another issuer"
-        assert document.get("authorization_response_iss_parameter_supported") is True, (
-            "the document does not announce that it sends iss"
-        )
-    return (
-        f"{ISSUER} answered under its canonical URL, names itself as the issuer"
-        " and announces that it sends iss"
-    )
+        assert (page.url, document["issuer"]) == (url, ISSUER), "the URL moved or another issuer"
+        assert document.get("authorization_response_iss_parameter_supported"), "iss unannounced"
+    return f"{ISSUER} answered under its canonical URL, names itself as the issuer, announces iss"
 
 
 def untrusted_certificate_is_refused(proof: Proof) -> str:
