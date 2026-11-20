@@ -19,7 +19,11 @@ from tests.support.client_address_arrangement import (
     behind_the_client_address_writer,
 )
 from tests.support.oidc_arrangement import LogoutPage, a_relying_party
-from tests.support.security_headers_arrangement import assert_carries_policy_headers
+from tests.support.security_headers_arrangement import (
+    a_content_security_policy_rule,
+    a_policy_with_content_security_policy_rules,
+    assert_carries_policy_headers,
+)
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     RecordingAuditSink,
@@ -34,7 +38,6 @@ from webauth.config import install_web_auth_config
 from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
 from webauth.policies import (
     CacheControlRule,
-    ContentSecurityPolicyRule,
     CspDirective,
     CsrfPolicy,
     PathRules,
@@ -478,14 +481,14 @@ def add_a_pure_asgi_host_middleware(app: FastAPI) -> None:
     app.add_middleware(PureAsgiHostMiddleware)
 
 
-def the_logout_page(
+def the_logout_app(
     *,
     host_policy: SecurityHeadersPolicy = HOST_POLICY,
     cookie_secure: bool = True,
     host_middleware: Callable[[FastAPI], None] | None = None,
     installed: bool = True,
-) -> HttpxResponse:
-    """What a browser gets from a logout route behind this stack."""
+) -> FastAPI:
+    """An app with the logout route behind this stack."""
     config = a_web_auth_config(cookie_secure=cookie_secure)
     lock = WriteLockInMemory()
     users = UsersInMemory(lock=lock)
@@ -522,6 +525,23 @@ def the_logout_page(
         ui_language=lambda _request: None,
     )
 
+    return app
+
+
+def the_logout_page(
+    *,
+    host_policy: SecurityHeadersPolicy = HOST_POLICY,
+    cookie_secure: bool = True,
+    host_middleware: Callable[[FastAPI], None] | None = None,
+    installed: bool = True,
+) -> HttpxResponse:
+    """What a browser gets from a logout route behind this stack."""
+    app = the_logout_app(
+        host_policy=host_policy,
+        cookie_secure=cookie_secure,
+        host_middleware=host_middleware,
+        installed=installed,
+    )
     return TestClient(app).post(LOGOUT_PATH, headers={"sec-fetch-site": "same-origin"})
 
 
@@ -641,34 +661,29 @@ def test_the_logout_page_keeps_deny_under_a_host_policy_that_allows_a_framer() -
     )
 
 
-SANDBOX_POLICY = "sandbox allow-scripts"
-SANDBOX_MOUNT_POLICY = SecurityHeadersPolicy(
-    "default-src 'self'",
-    content_security_policy_rules=(
-        ContentSecurityPolicyRule(PathRules(prefixes=("/t/",)), SANDBOX_POLICY),
-    ),
-)
-
-
 @pytest.mark.parametrize(
-    ("path", "expected_policy"),
+    ("path", "rule_applies"),
     [
-        pytest.param("/t/token/index.html", SANDBOX_POLICY, id="below-the-rule-prefix"),
-        pytest.param("/t", "default-src 'self'", id="near-miss-without-the-trailing-slash"),
-        pytest.param("/tt/token", "default-src 'self'", id="near-miss-sharing-the-letters"),
-        pytest.param("/page", "default-src 'self'", id="other-path-keeps-the-default"),
+        pytest.param("/t/token/index.html", True, id="below-the-rule-prefix"),
+        pytest.param("/t", False, id="near-miss-without-the-trailing-slash"),
+        pytest.param("/tt/token", False, id="near-miss-sharing-the-letters"),
+        pytest.param("/page", False, id="other-path-keeps-the-default"),
     ],
 )
 def test_a_path_with_a_content_security_policy_rule_answers_the_rule_s_policy(
     path: str,
-    expected_policy: str,
+    rule_applies: bool,
 ) -> None:
     """STACK-15: a rule's path gets its policy, every other path the default."""
-    app = an_app(policy=SANDBOX_MOUNT_POLICY)
+    policy = a_policy_with_content_security_policy_rules(
+        a_content_security_policy_rule("sandbox allow-scripts", prefixes=("/t/",))
+    )
+    app = an_app(policy=policy)
     app.get(path)(lambda: Response("body"))
 
     response = TestClient(app).get(path)
 
+    expected_policy = "sandbox allow-scripts" if rule_applies else policy.content_security_policy
     assert_carries_policy_headers(
         response.headers,
         SecurityHeadersPolicy(expected_policy),
@@ -676,8 +691,46 @@ def test_a_path_with_a_content_security_policy_rule_answers_the_rule_s_policy(
     )
 
 
+@pytest.mark.parametrize(
+    ("rules", "expected_policy"),
+    [
+        pytest.param(
+            [("/t/", "first"), ("/t/token/", "second")],
+            "first",
+            id="the-earlier-of-two-overlapping-rules-wins",
+        ),
+        pytest.param(
+            [("/t/token/", "second"), ("/t/", "first")],
+            "second",
+            id="the-order-decides-not-the-longer-prefix",
+        ),
+        pytest.param(
+            [("/other/", "first"), ("/t/", "second")],
+            "second",
+            id="a-rule-that-does-not-match-is-skipped",
+        ),
+    ],
+)
+def test_the_first_matching_content_security_policy_rule_wins_in_the_order_given(
+    rules: list[tuple[str, str]], expected_policy: str
+) -> None:
+    policy = a_policy_with_content_security_policy_rules(
+        *(a_content_security_policy_rule(value, prefixes=(prefix,)) for prefix, value in rules)
+    )
+    app = an_app(policy=policy)
+    app.get("/t/token/page")(lambda: Response("body"))
+
+    response = TestClient(app).get("/t/token/page")
+
+    assert response.headers["content-security-policy"] == expected_policy
+
+
 def test_a_rule_policy_without_frame_ancestors_keeps_x_frame_options_deny() -> None:
-    app = an_app(policy=SANDBOX_MOUNT_POLICY)
+    app = an_app(
+        policy=a_policy_with_content_security_policy_rules(
+            a_content_security_policy_rule("sandbox allow-scripts", prefixes=("/t/",))
+        )
+    )
     app.get("/t/token")(lambda: Response("body", headers={"X-Frame-Options": "SAMEORIGIN"}))
 
     response = TestClient(app).get("/t/token")
@@ -686,11 +739,8 @@ def test_a_rule_policy_without_frame_ancestors_keeps_x_frame_options_deny() -> N
 
 
 def test_a_rule_policy_that_allows_a_framer_leaves_x_frame_options_off() -> None:
-    policy = SecurityHeadersPolicy(
-        "default-src 'self'",
-        content_security_policy_rules=(
-            ContentSecurityPolicyRule(PathRules(prefixes=("/embed/",)), FRAMER_POLICY),
-        ),
+    policy = a_policy_with_content_security_policy_rules(
+        a_content_security_policy_rule(FRAMER_POLICY, prefixes=("/embed/",))
     )
     app = an_app(policy=policy)
     app.get("/embed/a")(lambda: Response("body"))
@@ -703,28 +753,24 @@ def test_a_rule_policy_that_allows_a_framer_leaves_x_frame_options_off() -> None
     assert default.headers["x-frame-options"] == "DENY"
 
 
-def test_an_own_policy_answer_keeps_its_policy_on_a_path_with_a_rule() -> None:
-    app = an_app(policy=SANDBOX_MOUNT_POLICY)
-
-    @app.get("/t/token")
-    def page() -> Response:
-        return Response("page", headers=OWN_POLICY_ANSWER_HEADERS)
-
-    response = TestClient(app).get("/t/token")
-
-    assert response.headers["content-security-policy"] == "default-src 'none'"
-    assert "webauth-own-policy" not in response.headers
-
-
 def test_the_logout_page_keeps_its_own_policy_under_a_rule_for_its_path() -> None:
+    rule_policy = "sandbox allow-scripts"
     host_policy = replace(
         HOST_POLICY,
         content_security_policy_rules=(
-            ContentSecurityPolicyRule(PathRules(exact=frozenset({LOGOUT_PATH})), SANDBOX_POLICY),
+            a_content_security_policy_rule(rule_policy, prefixes=(LOGOUT_PATH,)),
         ),
     )
 
-    page = the_logout_page(host_policy=host_policy)
+    def add_a_notes_page(app: FastAPI) -> None:
+        app.get(f"{LOGOUT_PATH}/notes")(lambda: Response("body"))
+
+    app = the_logout_app(host_policy=host_policy, host_middleware=add_a_notes_page)
+    client = TestClient(app)
+
+    page = client.post(LOGOUT_PATH, headers={"sec-fetch-site": "same-origin"})
+    notes = client.get(f"{LOGOUT_PATH}/notes")
 
     assert page.headers["content-security-policy"] == the_logout_policy_of(page)
     assert "webauth-own-policy" not in page.headers
+    assert notes.headers["content-security-policy"] == rule_policy
