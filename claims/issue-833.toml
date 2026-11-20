@@ -1,8 +1,0 @@
-claim_id = "7651949b2de7458daaf38a31092df307"
-agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
-role = "builder"
-base = "2da862a34a7ee974af2a1fc3e765a1f859c7554f"
-branch = "claude/issue-833-the-relying-party-requires-iss"
-scope = ["docs/ARCHITECTURE.md", "docs/VISION.md", "docs/host-contract.md", "src/webauth/oidc/_client_config.py", "src/webauth/oidc/_discovery.py", "src/webauth/oidc/_relying_party.py", "tests/e2e/oidc/prove.py", "tests/support/provider_metadata.py", "tests/test_oidc_callback.py", "tests/test_oidc_client_config.py", "tests/test_oidc_discovery.py"]
-opened_commit = "a519fd3c56f9b5cb68d250fa626222468df18e8b"
-whole_reason = "One configuration field, discovery reading it, the callback check that uses it, their contract rows and tests."
