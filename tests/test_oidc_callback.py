@@ -213,9 +213,7 @@ _REFUSALS_WHERE_THE_ISSUER_SENDS_ISS = [
         id="forged-state-without-iss",
     ),
     pytest.param(
-        Attempt(
-            callback={"iss": ABSENT}, elapsed_seconds=PENDING_LOGIN_MAX_AGE_SECONDS + 1
-        ),
+        Attempt(callback={"iss": ABSENT}, elapsed_seconds=PENDING_LOGIN_MAX_AGE_SECONDS + 1),
         OidcRefusal(OidcRefusalReason.PENDING_LOGIN_EXPIRED),
         id="expired-pending-login-without-iss",
     ),

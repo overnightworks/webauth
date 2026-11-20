@@ -268,8 +268,8 @@ class OidcRelyingParty:
         `_MAX_AUTHORIZATION_CODE_CHARS` is `MALFORMED_CALLBACK`. The ID token must
         name this client as its `azp` when it is for several audiences, and any `azp`
         it names must be this client. A refresh token in the answer that is `null` or
-        outside `1*VSCHAR` is `TOKEN_ENDPOINT_FAILED`. A token answer that names a member twice keeps
-        its last value."""
+        outside `1*VSCHAR` is `TOKEN_ENDPOINT_FAILED`. A token answer that names a member
+        twice keeps its last value."""
         try:
             return self._identity(pending, callback_query)
         except _RefusalError as refusal:
