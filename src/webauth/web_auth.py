@@ -23,7 +23,10 @@ from webauth.middleware.stack import _install_slotted_web_auth_middleware
 from webauth.oidc import OidcRelyingParty
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.proxies import TrustedProxies
-from webauth.sign_in_routes import install_sign_in_routes
+from webauth.sign_in_routes import (
+    _require_logout_path_with_page_text,
+    install_sign_in_routes,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -143,11 +146,13 @@ def _require_early_values(
             ) from None
     if not isinstance(settings.keeps_id_token, bool):
         raise _refuse("settings.keeps_id_token", "must be True or False")
-    if (settings.sign_in_paths.logout is None) != (pages.logout_page_text is None):
+    try:
+        _require_logout_path_with_page_text(settings.sign_in_paths, pages.logout_page_text)
+    except ValueError:
         raise _refuse(
             "pages.logout_page_text",
             "must be given exactly when settings.sign_in_paths.logout is",
-        )
+        ) from None
     if not isinstance(front, TrustedProxies):
         raise _refuse("front", "must be TrustedProxies")
     _require_middleware_slot("outside", outside)
