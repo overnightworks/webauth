@@ -90,7 +90,6 @@ from webauth.dependencies import LoginRedirect, session_id_from_request
 from webauth.languages import is_language_tag
 from webauth.oidc import OidcRefusal, OidcRefusalReason
 from webauth.oidc._relying_party import _callback_state
-from webauth.oidc._token_endpoint import _logged_idp_error
 from webauth.oidc_login import (
     _AdmittedLogin,
     _BackchannelLogoutResult,
@@ -445,7 +444,7 @@ def _refusal_fields(cause: OidcRefusal | AdmissionRefusal) -> dict[str, str]:
     if cause.token_rejection is not None:
         fields["token_rejection"] = cause.token_rejection.value
     if cause.idp_error is not None:
-        fields["idp_error"] = _logged_idp_error(cause.idp_error)
+        fields["idp_error"] = cause.idp_error.value
     return fields
 
 

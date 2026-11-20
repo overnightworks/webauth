@@ -37,6 +37,7 @@ from tests.support.oidc_arrangement import (
 from webauth.middleware import exchanged_access_token
 from webauth.oidc import (
     ExchangedAccess,
+    IdpErrorCode,
     OidcRefusal,
     OidcRefusalReason,
     TokenEndpointError,
@@ -46,7 +47,7 @@ DEADLINE_SECONDS = 10
 FAILED = OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED)
 
 
-def refused(code: str) -> OidcRefusal:
+def refused(code: IdpErrorCode) -> OidcRefusal:
     return OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=code)
 
 
@@ -300,14 +301,18 @@ def test_an_answer_that_does_not_hold_is_refused_as_token_endpoint_failed(
 
 @pytest.mark.parametrize(
     ("status", "code"),
-    [(400, "invalid_request"), (401, "invalid_client"), (403, "access_denied")],
+    [
+        (400, IdpErrorCode.INVALID_REQUEST),
+        (401, IdpErrorCode.INVALID_CLIENT),
+        (403, IdpErrorCode.ACCESS_DENIED),
+    ],
 )
-def test_an_issuer_error_is_refused_with_its_code(status: int, code: str) -> None:
+def test_an_issuer_error_is_refused_with_its_code(status: int, code: IdpErrorCode) -> None:
     """EXCHANGE-10, EXCHANGE-13: an `error` answered 400, 401 or, for this grant, 403 is
     `TOKEN_REQUEST_REFUSED` carrying that code and no free text; the admitted request is no proof
     the issuer accepts the token now."""
     exchange = an_exchange_app(
-        token_endpoint_answer(status, {"error": code, "error_description": "free text"})
+        token_endpoint_answer(status, {"error": code.value, "error_description": "free text"})
     )
 
     exchange.exchange()

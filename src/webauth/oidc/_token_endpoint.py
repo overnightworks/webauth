@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from http import HTTPStatus
-from typing import Final, TypeGuard
+from typing import TypeGuard
 
 from pydantic import SecretStr
 
@@ -106,8 +106,8 @@ class OidcRefusalReason(StrEnum):
 class IdpErrorCode(StrEnum):
     """The error codes an issuer registers for a refused authorization or token request:
     RFC 6749 sections 4.1.2.1 and 5.2, OpenID Connect Core section 3.1.2.6 and RFC 8693
-    section 2.2.2. The closed set a log line may carry; any other code logs as
-    `_OTHER`."""
+    section 2.2.2, and `_OTHER` for any other well-formed code: the closed set a refusal
+    and a log line carry, since the callback's query is the visitor's."""
 
     INVALID_REQUEST = "invalid_request"
     UNAUTHORIZED_CLIENT = "unauthorized_client"
@@ -129,28 +129,18 @@ class IdpErrorCode(StrEnum):
     REQUEST_NOT_SUPPORTED = "request_not_supported"
     REQUEST_URI_NOT_SUPPORTED = "request_uri_not_supported"
     REGISTRATION_NOT_SUPPORTED = "registration_not_supported"
-
-
-_OTHER_IDP_ERROR: Final = "_OTHER"
-
-
-def _logged_idp_error(code: str) -> str:
-    """The registered `code`, or `_OTHER`: a log line never carries an issuer's or a
-    visitor's own value."""
-    try:
-        return IdpErrorCode(code).value
-    except ValueError:
-        return _OTHER_IDP_ERROR
+    OTHER = "_OTHER"
 
 
 @dataclass(frozen=True)
 class OidcRefusal:
-    """Why a login or logout token does not stand. `idp_error` is the IdP's
-    error code when it named a well-formed one; `token_rejection` is the
-    verifier's reason when the ID token or logout token was rejected."""
+    """Why a login or logout token does not stand. `idp_error` is the IdP's error code
+    when it named a well-formed one, `IdpErrorCode.OTHER` when it is not registered;
+    `token_rejection` is the verifier's reason when the ID token or logout token was
+    rejected."""
 
     reason: OidcRefusalReason
-    idp_error: str | None = None
+    idp_error: IdpErrorCode | None = None
     token_rejection: RejectionReason | None = None
 
 
@@ -160,8 +150,13 @@ class _RefusalError(Exception):
         self.refusal = refusal
 
 
-def _idp_error_code(error: str) -> str | None:
-    return error if _IDP_ERROR_CODE.fullmatch(error) else None
+def _idp_error_code(error: str) -> IdpErrorCode | None:
+    if not _IDP_ERROR_CODE.fullmatch(error):
+        return None
+    try:
+        return IdpErrorCode(error)
+    except ValueError:
+        return IdpErrorCode.OTHER
 
 
 def _token_answer_document(body: bytes) -> Mapping[str, object]:

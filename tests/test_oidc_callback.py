@@ -54,6 +54,7 @@ from webauth.cookies import PendingLogin
 from webauth.jwt_verification import RejectionReason
 from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
+    IdpErrorCode,
     OidcIdentity,
     OidcRefusal,
     OidcRefusalReason,
@@ -269,8 +270,13 @@ _CALLBACK_REFUSALS = [
     ),
     pytest.param(
         Attempt(callback={"code": ABSENT, "error": "access_denied", "error_description": _MARKUP}),
-        OidcRefusal(OidcRefusalReason.AUTHORIZATION_DENIED, idp_error="access_denied"),
+        OidcRefusal(OidcRefusalReason.AUTHORIZATION_DENIED, idp_error=IdpErrorCode.ACCESS_DENIED),
         id="idp-denied",
+    ),
+    pytest.param(
+        Attempt(callback={"code": ABSENT, "error": "an_extension_code"}),
+        OidcRefusal(OidcRefusalReason.AUTHORIZATION_DENIED, idp_error=IdpErrorCode.OTHER),
+        id="idp-error-that-is-no-registered-code",
     ),
     pytest.param(
         Attempt(callback={"code": ABSENT, "error": _MARKUP}),
@@ -287,13 +293,18 @@ _EXCHANGE_REFUSALS = [
                 400, {"error": "invalid_grant", "error_description": "Code not valid"}
             )
         ),
-        OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_grant"),
+        OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=IdpErrorCode.INVALID_GRANT),
         id="wrong-verifier-or-replayed-code",
     ),
     pytest.param(
         Attempt(token_answer=_answered(401, {"error": "invalid_client"})),
-        OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_client"),
+        OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=IdpErrorCode.INVALID_CLIENT),
         id="wrong-client-secret",
+    ),
+    pytest.param(
+        Attempt(token_answer=_answered(400, {"error": "an_extension_code"})),
+        OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=IdpErrorCode.OTHER),
+        id="token-error-that-is-no-registered-code",
     ),
     pytest.param(
         Attempt(token_answer=_answered(400, {"error": _MARKUP})),

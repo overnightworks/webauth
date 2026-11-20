@@ -60,7 +60,7 @@ from tests.support.webauth_arrangement import (
 )
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.cookies import sign_session_id
-from webauth.oidc import OidcIdentity, OidcRefusal, OidcRefusalReason
+from webauth.oidc import IdpErrorCode, OidcIdentity, OidcRefusal, OidcRefusalReason
 from webauth.ports import AccountEventKind, AccountKind
 from webauth.sign_in_routes import (
     LogoutPageText,
@@ -292,7 +292,9 @@ def _without_a_state(query: str) -> str:
         pytest.param(
             an_oidc_host,
             _with_another_code,
-            OidcRefusal(OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error="invalid_grant"),
+            OidcRefusal(
+                OidcRefusalReason.TOKEN_REQUEST_REFUSED, idp_error=IdpErrorCode.INVALID_GRANT
+            ),
             RefusalPage.LOGIN_FAILED,
             id="an issuer that refuses the code",
         ),
