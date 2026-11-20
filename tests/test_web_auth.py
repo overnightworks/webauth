@@ -6,7 +6,6 @@ Each test names the COMPOSE rule of `docs/host-contract.md` it proves.
 from __future__ import annotations
 
 import os
-import traceback
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from contextvars import ContextVar
@@ -23,6 +22,7 @@ from starlette.websockets import WebSocketDisconnect
 
 import webauth
 from tests.support.account_arrangement import FakeUser
+from tests.support.environment_arrangement import ForbiddenEnvironment
 from tests.support.full_stack_arrangement import HEADERS_POLICY, install_full_stack
 from tests.support.gate_arrangement import HAL_ONLY, PERSON_PATHS, a_resource, bearing
 from tests.support.oidc_arrangement import (
@@ -86,7 +86,6 @@ if TYPE_CHECKING:
 
     from tests.support.web_auth_host_arrangement import HostWorld
 
-WEBAUTH_SOURCE = str(Path(webauth.__file__).parent)
 FORWARDED = {"x-forwarded-for": FORWARDED_CLIENT}
 A_MEMBER = FakeUser(id=SUBJECT, username="lena")
 THE_MARK: ContextVar[str] = ContextVar("the_mark", default="unset")
@@ -254,42 +253,15 @@ def test_compose_06_build_and_install_make_no_outbound_call_and_the_login_uses_t
     composition = a_composition(world)
     app = FastAPI()
 
-    environment = _EnvironmentWatch()
     with monkeypatch.context() as patch:
-        patch.setattr(os, "environ", environment)
+        patch.setattr(os, "environ", ForbiddenEnvironment(only_from=Path(webauth.__file__).parent))
         composition.build().install(app, bearer=None)
 
-    assert environment.reads_from_webauth == []
     assert (world.issuer.requests, world.key_set.fetched_urls) == ([], [])
     host = a_composed_host(world)
     host.sign_in(FORWARDED)
     assert world.issuer.requests
     assert world.key_set.fetched_urls
-
-
-class _EnvironmentWatch:
-    """An empty environment that notes each read whose caller is webauth's own source."""
-
-    def __init__(self) -> None:
-        self.reads_from_webauth: list[str] = []
-
-    def _note(self, key: str) -> None:
-        callers = reversed(traceback.extract_stack()[:-2])
-        reader = next(frame for frame in callers if Path(frame.filename).name != "os.py")
-        if reader.filename.startswith(WEBAUTH_SOURCE):
-            self.reads_from_webauth.append(key)
-
-    def __getitem__(self, key: str) -> str:
-        self._note(key)
-        raise KeyError(key)
-
-    def __contains__(self, key: object) -> bool:
-        self._note(str(key))
-        return False
-
-    def get(self, key: str, default: object = None) -> object:
-        self._note(key)
-        return default
 
 
 def test_compose_07_the_pages_are_the_hosts(capsys: pytest.CaptureFixture[str]) -> None:

@@ -7,12 +7,13 @@ where the rule names both.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator, Mapping, MutableMapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Any
 
 import pytest
 
+from tests.support.environment_arrangement import ForbiddenEnvironment
 from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_LIFETIME_SECONDS,
@@ -53,25 +54,6 @@ from webauth.service_callers import (
 )
 
 SIDES = pytest.mark.parametrize("side", ["workload", "person"])
-
-
-class ForbiddenEnvironment(MutableMapping[str, str]):
-    """An `os.environ` that fails the test on any access."""
-
-    def __getitem__(self, key: str) -> str:
-        raise AssertionError(f"the environment was read for {key}")
-
-    def __setitem__(self, key: str, value: str) -> None:
-        raise AssertionError(f"the environment was written for {key}")
-
-    def __delitem__(self, key: str) -> None:
-        raise AssertionError(f"the environment was changed for {key}")
-
-    def __iter__(self) -> Iterator[str]:
-        raise AssertionError("the environment was listed")
-
-    def __len__(self) -> int:
-        raise AssertionError("the environment was counted")
 
 
 def a_registry_of(admission: AdmissionConfig) -> dict[str, RegisteredApp]:
