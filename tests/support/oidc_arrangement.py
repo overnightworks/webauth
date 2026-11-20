@@ -39,6 +39,13 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import RSAAlgorithm
 from pydantic import SecretStr
 
+from tests.support.provider_metadata import (
+    ABSENT,
+    METADATA_LIMIT_BYTES,
+    OPENID_CONNECT_PATH,
+    a_json_object_of_bytes,
+    a_provider_metadata,
+)
 from webauth.jwt_verification import KeySetFetch, MonotonicClock
 from webauth.oidc import (
     OidcClientConfig,
@@ -48,9 +55,6 @@ from webauth.oidc import (
     TokenRequestPost,
 )
 from webauth.ports import WallClock
-
-ABSENT = object()
-"""A claim or header change that removes the member instead of setting it."""
 
 
 @cache
@@ -227,14 +231,13 @@ class FakeTokenEndpoint:
 
 
 REALM_ISSUER = "https://login.example.org/realms/workshop"
-_OPENID_CONNECT_PATH = "/protocol/openid-connect"
-REALM_JWKS_URL = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/certs"
+REALM_JWKS_URL = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/certs"
 APP_CLIENT_ID = "notes-app"
 # Canary whose recognisable text is the point
 CLIENT_SECRET = "client-s3cr3t-value"  # noqa: S105
-AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/auth"
-TOKEN_ENDPOINT = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/token"
-END_SESSION_ENDPOINT = f"{REALM_ISSUER}{_OPENID_CONNECT_PATH}/logout"
+AUTHORIZATION_ENDPOINT = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/auth"
+TOKEN_ENDPOINT = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/token"
+END_SESSION_ENDPOINT = f"{REALM_ISSUER}{OPENID_CONNECT_PATH}/logout"
 REDIRECT_URI = "https://notes.example.org/auth/callback"
 POST_LOGOUT_REDIRECT_URI = "https://notes.example.org/"
 OPERATOR_SUBJECT = "operator-account-1"
@@ -273,25 +276,6 @@ def an_access_token(
         changed(token_claims, claims or {}),
         rs256(rsa_key(key_name)),
     )
-
-
-def a_provider_metadata(realm_issuer: str = REALM_ISSUER, **changes: Any) -> bytes:
-    """The discovery document of the realm at `realm_issuer` as Keycloak serves it: the members
-    the relying party reads and `code_challenge_methods_supported`; `changes` replace or,
-    with `ABSENT`, remove members."""
-    return json.dumps(
-        changed(
-            {
-                "issuer": realm_issuer,
-                "authorization_endpoint": f"{realm_issuer}{_OPENID_CONNECT_PATH}/auth",
-                "token_endpoint": f"{realm_issuer}{_OPENID_CONNECT_PATH}/token",
-                "jwks_uri": f"{realm_issuer}{_OPENID_CONNECT_PATH}/certs",
-                "end_session_endpoint": f"{realm_issuer}{_OPENID_CONNECT_PATH}/logout",
-                "code_challenge_methods_supported": ["plain", "S256"],
-            },
-            changes,
-        )
-    ).encode()
 
 
 def a_realm_client_config(**changes: Any) -> OidcClientConfig:
@@ -520,13 +504,16 @@ SERVED_TOKEN_ANSWER = json.dumps(
 ).encode()
 REFUSED_TOKEN_ANSWER = json.dumps({"error": "invalid_grant"}).encode()
 _OVERSIZED_ANSWER_BYTES = 2 * (64 * 1024)
-METADATA_LIMIT_BYTES = 64 * 1024
 
-
-def a_json_object_of_bytes(size: int) -> bytes:
-    """A valid JSON object of exactly `size` bytes."""
-    frame = len(json.dumps({"padding": ""}))
-    return json.dumps({"padding": "a" * (size - frame)}).encode()
+_FIXED_ANSWERS = {
+    "/oversized": (200, b" " * _OVERSIZED_ANSWER_BYTES),
+    "/metadata-at-limit": (200, a_json_object_of_bytes(METADATA_LIMIT_BYTES)),
+    "/metadata-past-limit": (200, a_json_object_of_bytes(METADATA_LIMIT_BYTES + 1)),
+    "/token": (200, SERVED_TOKEN_ANSWER),
+    "/token-refused": (400, REFUSED_TOKEN_ANSWER),
+    "/token-at-limit": (200, b" " * 64 * 1024),
+    "/token-past-limit": (200, b" " * (64 * 1024 + 1)),
+}
 
 
 @dataclass(frozen=True)
@@ -592,7 +579,9 @@ def loopback_https_server(
             headers = {name.lower(): value for name, value in self.headers.items()}
             received.append(ReceivedRequest(self.command, self.path, headers, body))
             route = urllib.parse.urlsplit(self.path).path
-            if route == "/silent":
+            if route in _FIXED_ANSWERS:
+                self._answer(*_FIXED_ANSWERS[route])
+            elif route == "/silent":
                 silent_request_arrived.set()
                 release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
             elif route == "/moved":
@@ -608,24 +597,10 @@ def loopback_https_server(
                 self._drip(b"HTTP/1.1 200 OK\r\nContent-Length: 65536\r\n\r\n")
             elif route == "/missing":
                 self._send_head(404, {"Content-Length": "0"})
-            elif route == "/oversized":
-                self._answer(200, b" " * _OVERSIZED_ANSWER_BYTES)
             elif route == "/.well-known/openid-configuration":
                 self._answer(200, a_provider_metadata(f"https://127.0.0.1:{server.server_port}"))
-            elif route == "/metadata-at-limit":
-                self._answer(200, a_json_object_of_bytes(METADATA_LIMIT_BYTES))
-            elif route == "/metadata-past-limit":
-                self._answer(200, a_json_object_of_bytes(METADATA_LIMIT_BYTES + 1))
             elif route == "/compressed":
                 self._answer(200, gzip.compress(served_key_set()), content_encoding="gzip")
-            elif route == "/token":
-                self._answer(200, SERVED_TOKEN_ANSWER)
-            elif route == "/token-refused":
-                self._answer(400, REFUSED_TOKEN_ANSWER)
-            elif route == "/token-at-limit":
-                self._answer(200, b" " * 64 * 1024)
-            elif route == "/token-past-limit":
-                self._answer(200, b" " * (64 * 1024 + 1))
             elif route == "/token-reflecting":
                 self._answer_reflecting_in_a_malformed_header(body)
             else:

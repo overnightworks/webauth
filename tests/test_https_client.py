@@ -27,7 +27,6 @@ import urllib3
 import webauth.https_client
 from tests.support.oidc_arrangement import (
     DRIP_INTERVAL_SECONDS,
-    METADATA_LIMIT_BYTES,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
@@ -523,8 +522,18 @@ def test_a_key_set_fetch_that_timed_out_says_so_in_its_message(
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
 
 
-def test_a_key_set_fetch_returns_the_served_key_set(token_server: LoopbackHttpsServer) -> None:
-    document = fetch_key_set_over_https(f"{token_server.base_url}/certs")
+@pytest.mark.parametrize(
+    "fetch",
+    [
+        pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
+        pytest.param(fetch_provider_metadata_over_https, id="provider-metadata-fetch"),
+    ],
+)
+def test_a_document_fetch_returns_the_served_document(
+    token_server: LoopbackHttpsServer, fetch: Callable[[str], bytes]
+) -> None:
+    """DISCOVERY-07 for the provider metadata."""
+    document = fetch(f"{token_server.base_url}/certs")
 
     assert json.loads(document)["keys"][0]["kid"] == "current-key"
 
@@ -577,89 +586,6 @@ def test_a_key_set_fetch_that_could_not_connect_or_trust_the_origin_says_only_th
         fetch_key_set_over_https(url)
 
     assert refused.value.failure is failure
-
-
-def test_a_provider_metadata_fetch_returns_the_served_document(
-    token_server: LoopbackHttpsServer,
-) -> None:
-    document = fetch_provider_metadata_over_https(f"{token_server.base_url}/certs")
-
-    assert json.loads(document)["keys"][0]["kid"] == "current-key"
-
-
-def test_a_provider_metadata_document_of_exactly_the_size_limit_comes_back_whole(
-    token_server: LoopbackHttpsServer,
-) -> None:
-    document = fetch_provider_metadata_over_https(f"{token_server.base_url}/metadata-at-limit")
-
-    assert len(document) == METADATA_LIMIT_BYTES
-
-
-@pytest.mark.parametrize("path", ["/metadata-past-limit", "/oversized"], ids=["valid-json", "far"])
-def test_a_provider_metadata_document_past_the_size_limit_is_refused_as_too_large(
-    token_server: LoopbackHttpsServer, path: str
-) -> None:
-    with pytest.raises(ProviderMetadataFetchError) as refused:
-        fetch_provider_metadata_over_https(f"{token_server.base_url}{path}")
-
-    assert refused.value.failure is ExchangeFailure.TOO_LARGE
-
-
-@pytest.mark.parametrize("path", ["/missing", "/moved"], ids=["not-found", "redirect"])
-def test_a_provider_metadata_origin_answering_another_status_is_refused_naming_it(
-    token_server: LoopbackHttpsServer, path: str
-) -> None:
-    with pytest.raises(ProviderMetadataFetchError) as refused:
-        fetch_provider_metadata_over_https(f"{token_server.base_url}{path}")
-
-    assert str(refused.value).startswith("the provider metadata origin answered ")
-    assert refused.value.failure is None
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        pytest.param(_plain_http, id="plain-http"),
-        pytest.param(lambda server, monkeypatch: "https://[", id="unparseable-host"),
-    ],
-)
-def test_a_provider_metadata_fetch_refuses_a_url_but_a_well_formed_https_one_before_any_request(
-    token_server: LoopbackHttpsServer,
-    monkeypatch: pytest.MonkeyPatch,
-    target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch], str],
-) -> None:
-    with pytest.raises(ProviderMetadataFetchError) as refused:
-        fetch_provider_metadata_over_https(target(token_server, monkeypatch))
-
-    assert refused.value.failure is ExchangeFailure.NOT_AN_HTTPS_URL
-    assert token_server.requested_paths == []
-
-
-def test_a_provider_metadata_fetch_that_could_not_trust_the_origin_says_only_that_it_failed(
-    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with pytest.raises(
-        ProviderMetadataFetchError,
-        match="^fetching the provider metadata failed: the origin could not be reached,"
-        " or the TLS handshake or HTTP exchange failed$",
-    ) as refused:
-        fetch_provider_metadata_over_https(_untrusted(token_server, monkeypatch))
-
-    assert refused.value.failure is ExchangeFailure.TLS_FAILED
-    assert refused.value.__cause__ is None
-    assert refused.value.__context__ is None
-
-
-def test_a_failed_provider_metadata_fetch_never_repeats_a_secret_its_url_carries(
-    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("SSL_CERT_FILE")
-    authority = token_server.base_url.removeprefix("https://")
-
-    with pytest.raises(ProviderMetadataFetchError) as refusal:
-        fetch_provider_metadata_over_https(f"https://{authority}/doc?signature={_URL_SECRET}")
-
-    assert _URL_SECRET not in "".join(traceback.format_exception(refusal.value))
 
 
 @_EXCHANGES_UNDER_A_DEADLINE

@@ -36,11 +36,11 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 - `single_process_stores` implements the account, session and sign-in transaction ports in process memory for a one-worker host; no other module imports it.
 - `postgres` is the optional `[postgres]` extra: the session table, the session store and the sign-in shell over a connection the host opened, on the host's side of the ports; no other module imports it, and it alone imports SQLAlchemy.
 - `ports` defines host Protocols, `AuthenticatedUser` and `BearerCaller`; `jwt_verification` verifies RS256 against cached issuer keys.
-- `oidc` owns authorization URLs, PKCE, callback/code/ID-token checks, access-token verification, refresh, client-credentials and token-exchange grants.
+- `oidc` owns authorization URLs, PKCE, callback/code/ID-token checks, access-token verification, refresh, client-credentials and token-exchange grants, and the client configuration read from the issuer's discovery document.
 - `service_callers` is how a service proves the caller of its API ([host contract](host-contract.md#a-services-callers)); it holds no policy and logs nothing.
 - `session_groups` reads a session's current groups for an async host on a worker thread.
 - `languages` resolves a person's language from the account's tag, the `Accept-Language` header and the app's languages with no I/O, and owns the shape of a language tag ([host contract](host-contract.md#a-persons-language)).
-- `https_client` owns outbound HTTPS; `oidc_transport.post_token_request_over_https` implements the injected `TokenRequestPost`.
+- `https_client` owns outbound HTTPS, the key-set and provider-metadata fetches among it; `oidc_transport.post_token_request_over_https` implements the injected `TokenRequestPost`.
 
 The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
@@ -115,7 +115,7 @@ webauth never signs, decodes, verifies or logs the hint; Keycloak judges it. [Tr
 ### Admitting an identity
 
 The callback's admission decision and its account write share `AdmissionConfig`; the host store binds to one issuer, whose subject is the account `id`. `app_role` owns the [group decision](host-contract.md#what-every-app-gets), also used by services verifying issuer tokens themselves.
-`OidcRelyingParty` runs authorization-code/PKCE for one client and issuer from host-built `OidcClientConfig`; the host names every URL, and there is no discovery.
+`OidcRelyingParty` runs authorization-code/PKCE for one client and issuer from an `OidcClientConfig`. A host builds it once at startup with `discover_oidc_client_config`, which reads the issuer's OpenID Connect Discovery 1.0 document, requires its `issuer` to equal the configured one exactly and maps its four endpoints into the configuration, whose own checks stay the one URL check ([host contract](host-contract.md#the-client-configuration)). Nothing is read at login time, and the document is neither cached nor refreshed: a changed document takes effect at the next start.
 
 ## 4. Deployment View
 
@@ -151,6 +151,7 @@ The host contract names the test that proves each rule.
 2. **Library to issuer:** the configured issuer is trusted for what it signs and serves over TLS, and gets no defence beyond the JOSE and OpenID Connect specifications and PyJWT.
    - In scope: anyone presenting a token that lacks the issuer's signature or carries the wrong `alg`, `aud`, `iss`, type or time.
    - In scope: a network attacker against TLS. The library speaks https only, verifies the issuer's certificate against the system's trusted CAs and follows no redirect.
+   - The issuer's metadata document is trusted like what the issuer signs: it decides where the client secret, the authorization code and the PKCE verifier are sent. The library reads it once at startup, over https, bounded in size, from the issuer the host configured, and requires its `issuer` to equal that issuer exactly.
    - The realm alone decides which clients can mint a token for an app's MCP audience; a protected resource's agent group lets a token of any such client past the party check, and the token's own claims (`agent_owner`, `agent_name`) then decide only who the agent says it is, not whether it is admitted.
    - A resource that admits the app's client beside its `url` (`admits_client_audience`) accepts a token the app's sign-in client can also exchange; the flag governs the local admission, and the realm alone decides which tokens name both and which scopes that client may ask for.
 3. **Host configuration to library:** the host developer and the operator are trusted but fallible. The library checks the values whose mistake would silently weaken security or stick: secret length, the bools behind `Secure` and HSTS, a single string where a collection belongs, https URLs, group paths, ranges, and structure-breaking characters. It does not re-check a type that pyright proves unless the wrong type would pass construction silently, nor a grammar the browser already parses fail-closed. An answer that carries the private marker header `webauth-own-policy` keeps its own Content-Security-Policy and `Cache-Control`, and the security-headers middleware removes the marker: only the logout route's page sets it, host code is trusted, and no library path copies a request header into an answer, so no browser can set it. A host that relays another server's response headers would relay that server's marker too; without the middleware the page still carries its own policy and the marker reaches the browser, which ignores it.
@@ -182,9 +183,12 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 - A local flag that locks an account: disabling a person happens at the issuer, and a flag no one writes after the cutover decides nothing. It reopens when the issuer can no longer disable a person.
 - A fake issuer shipped for hosts' tests: one that mints tokens does not belong in every production install ([Testing a host](host-contract.md#testing-a-host)). It reopens when one can ship apart from the production install. The store contract kit ships ([Constraints](#6-constraints-and-reasons)) because it mints no token and adds no dependency.
 - A CSRF token layer, or reading `Referer`: the token protects only script calls, and every supported browser sends `Origin` and, to an HTTPS app, `Sec-Fetch-Site` on a state-changing request ([CSRF origin](host-contract.md#csrf-origin)). It reopens when a supported browser sends neither on such a request.
+- A constructor that derives the endpoints from Keycloak's path layout (`{issuer}/protocol/openid-connect/...`): it ties the library to one vendor's URL scheme that the issuer's own document already states, and a realm behind a front-end hostname or a path change would break it silently. It reopens when an issuer must be supported that publishes no discovery document.
+- Lazy or refreshing discovery (reading the document at the first login, or re-reading it on a schedule): it puts a network call and a decision about where credentials go inside the login, and needs a cache with a failure policy. It reopens when a host must start or serve while its issuer is down.
 
 ## 8. Risks and Technical Debt
 
+- A host that builds its client configuration by discovery cannot start while its issuer is down, and keeps the endpoints it read until its next start; the host's supervisor restarts it.
 - The single-process stores serve one worker only, a restart forgets every account and session, and each sign-in entry copies both tables, so its cost grows with their size.
 - An admin token opens every machine route; there is no sender constraint (no DPoP or mTLS).
 - A person's token is the person until its `exp` plus leeway, and a sign-out does not end it; the [host contract](host-contract.md#the-persons-token-on-the-apps-api) owns the person-path residues. Every token request there, and every request at a resource's entry point or marked route whose token holds the groups, enters the host's serialized transaction.

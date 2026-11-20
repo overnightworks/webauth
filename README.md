@@ -2,7 +2,7 @@
 
 OpenID Connect login and session authentication for FastAPI applications. It is
 built for [Keycloak](https://www.keycloak.org/); any OpenID Connect issuer that
-signs ID tokens with RS256 and publishes static endpoints works. webauth serves
+signs ID tokens with RS256 and publishes an OpenID Connect Discovery document works. webauth serves
 the start, callback, logout and back-channel logout routes, runs the flow, then keeps the session:
 sessions the store decides on every request, HMAC-signed cookies, CSRF
 origin checks, admin checks, per-address rate limits, and the audit events they
@@ -15,6 +15,7 @@ pins it.
 ## Quick start
 
 ```python
+import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -24,7 +25,10 @@ from pydantic import SecretStr
 from webauth.admission import AdmissionConfig
 from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
 from webauth.dependencies import current_user_dependency
+from webauth.https_client import fetch_key_set_over_https, fetch_provider_metadata_over_https
 from webauth.middleware import ClientAddressMiddleware, install_web_auth_middleware
+from webauth.oidc import OidcRelyingParty, discover_oidc_client_config
+from webauth.oidc_transport import post_token_request_over_https
 from webauth.policies import (
     CsrfPolicy,
     SecurityHeadersPolicy,
@@ -57,10 +61,26 @@ install_web_auth_middleware(
 )
 app.add_middleware(ClientAddressMiddleware, trusted_proxies=TrustedProxies.parse("10.0.0.0/8"))
 app.add_middleware(RequestLineMiddleware)
+relying_party = OidcRelyingParty(
+    discover_oidc_client_config(
+        "https://keycloak.example/realms/notes",
+        fetch_provider_metadata=fetch_provider_metadata_over_https,
+        client_id="notes",
+        client_secret=SecretStr(Path("/run/secrets/client_secret").read_text().strip()),
+        redirect_uri="https://app.example.com/auth/callback",
+        post_logout_redirect_uri="https://app.example.com/",
+        scopes=("openid", "profile"),
+        leeway_seconds=30,
+    ),
+    post_token_request=post_token_request_over_https,
+    fetch_key_set=fetch_key_set_over_https,
+    wall_clock=time.time,
+    monotonic_clock=time.monotonic,
+)
 install_sign_in_routes(
     app,
     paths=paths,
-    relying_party=the_hosts_relying_party,
+    relying_party=relying_party,
     admission=AdmissionConfig(
         bound_issuer="https://keycloak.example/realms/notes",
         login_group="/apps/notes",
@@ -84,7 +104,7 @@ def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUse
     return user
 ```
 
-`ui_language` names the person's language to the issuer as `ui_locales`: a host passes `resolve_language`'s answer for the request, or `lambda request: None` to name none ([a person's language](docs/host-contract.md#a-persons-language)).
+`discover_oidc_client_config` reads the issuer's discovery document once, at startup, and the host does not start when it raises ([the client configuration](docs/host-contract.md#the-client-configuration)). `ui_language` names the person's language to the issuer as `ui_locales`: a host passes `resolve_language`'s answer for the request, or `lambda request: None` to name none ([a person's language](docs/host-contract.md#a-persons-language)).
 
 A host with one worker and no database keeps its accounts and sessions in memory with `SingleProcessStores(audit=the_hosts_audit_sink)` from `webauth.single_process_stores`: pass its `transaction` to `install_sign_in_routes` and `session_store=lambda: stores.sessions` to `current_user_dependency`. A restart forgets every account and session ([the single-process stores](docs/host-contract.md#the-single-process-stores)).
 

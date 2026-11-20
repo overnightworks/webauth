@@ -3,12 +3,15 @@
 `discover_oidc_client_config` runs once at host startup. Its fetch is injected, so
 the document's content is served by `FakeKeySetEndpoint`; one scenario runs it on
 the production fetch against a loopback TLS server. Every refusal is loud and names
-the field it concerns, never the document's value.
+the field it concerns, never the document's value. The production fetch,
+`fetch_provider_metadata_over_https`, has the transport scenarios of its own at the end,
+beside the shared ones of `test_https_client`.
 """
 
 from __future__ import annotations
 
 import json
+import traceback
 from collections.abc import Callable
 from typing import Any
 
@@ -16,7 +19,6 @@ import pytest
 from pydantic import SecretStr
 
 from tests.support.oidc_arrangement import (
-    ABSENT,
     ACCESS_TOKEN_LEEWAY_SECONDS,
     APP_CLIENT_ID,
     CLIENT_SECRET,
@@ -25,8 +27,12 @@ from tests.support.oidc_arrangement import (
     REDIRECT_URI,
     FakeKeySetEndpoint,
     LoopbackHttpsServer,
-    a_provider_metadata,
     a_realm_client_config,
+)
+from tests.support.provider_metadata import (
+    ABSENT,
+    METADATA_LIMIT_BYTES,
+    a_provider_metadata,
 )
 from webauth import WebAuthError
 from webauth.https_client import (
@@ -55,19 +61,19 @@ def _discover(
     return discover_oidc_client_config(issuer, **{**arguments, **changes})
 
 
-def test_the_issuers_four_endpoints_and_the_hosts_own_values_make_the_client_configuration() -> (
-    None
-):
-    metadata = FakeKeySetEndpoint(a_provider_metadata())
+def test_the_documents_four_endpoints_and_the_hosts_own_values_make_the_configuration() -> None:
+    """DISCOVERY-01."""
+    metadata = FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER))
 
     assert _discover(metadata) == a_realm_client_config()
     assert metadata.fetched_urls == [_WELL_KNOWN_URL]
 
 
 def test_a_host_that_names_no_scopes_gets_the_one_scope_a_configuration_defaults_to() -> None:
+    """DISCOVERY-01: scopes default to openid."""
     config = discover_oidc_client_config(
         REALM_ISSUER,
-        fetch_provider_metadata=FakeKeySetEndpoint(a_provider_metadata()),
+        fetch_provider_metadata=FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER)),
         client_id=APP_CLIENT_ID,
         client_secret=SecretStr(CLIENT_SECRET),
         redirect_uri=REDIRECT_URI,
@@ -79,6 +85,7 @@ def test_a_host_that_names_no_scopes_gets_the_one_scope_a_configuration_defaults
 
 
 def test_one_trailing_slash_of_the_issuer_is_dropped_from_the_document_url_only() -> None:
+    """DISCOVERY-01: one trailing slash leaves the document URL, not the issuer."""
     issuer = f"{REALM_ISSUER}/"
     metadata = FakeKeySetEndpoint(a_provider_metadata(issuer))
 
@@ -102,6 +109,7 @@ def test_one_trailing_slash_of_the_issuer_is_dropped_from_the_document_url_only(
 def test_a_document_whose_issuer_is_not_exactly_the_configured_one_is_refused(
     issuer: str, claimed: object
 ) -> None:
+    """DISCOVERY-02, DISCOVERY-06."""
     metadata = FakeKeySetEndpoint(a_provider_metadata(issuer, issuer=claimed))
 
     with pytest.raises(OidcDiscoveryError, match="issuer"):
@@ -109,8 +117,9 @@ def test_a_document_whose_issuer_is_not_exactly_the_configured_one_is_refused(
 
 
 def test_a_refused_issuer_does_not_repeat_what_the_document_claims() -> None:
+    """DISCOVERY-06: the message never repeats the document's value."""
     claimed = "https://evil.example.net/realms/workshop"
-    metadata = FakeKeySetEndpoint(a_provider_metadata(issuer=claimed))
+    metadata = FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER, issuer=claimed))
 
     with pytest.raises(OidcDiscoveryError) as refused:
         _discover(metadata)
@@ -131,6 +140,7 @@ def test_a_refused_issuer_does_not_repeat_what_the_document_claims() -> None:
     ],
 )
 def test_a_body_that_is_not_a_json_object_is_refused(body: bytes) -> None:
+    """DISCOVERY-06."""
     with pytest.raises(OidcDiscoveryError, match="JSON object"):
         _discover(FakeKeySetEndpoint(body))
 
@@ -151,7 +161,8 @@ def test_a_body_that_is_not_a_json_object_is_refused(body: bytes) -> None:
 def test_an_endpoint_missing_or_not_a_string_is_refused_naming_the_field(
     field_name: str, value: object
 ) -> None:
-    metadata = FakeKeySetEndpoint(a_provider_metadata(**{field_name: value}))
+    """DISCOVERY-04."""
+    metadata = FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER, **{field_name: value}))
 
     with pytest.raises(OidcDiscoveryError, match=field_name):
         _discover(metadata)
@@ -186,7 +197,8 @@ def test_an_endpoint_missing_or_not_a_string_is_refused_naming_the_field(
 def test_an_endpoint_the_configuration_refuses_is_refused_with_the_configurations_error(
     field_name: str, refused_field: str, url: str
 ) -> None:
-    metadata = FakeKeySetEndpoint(a_provider_metadata(**{field_name: url}))
+    """DISCOVERY-05."""
+    metadata = FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER, **{field_name: url}))
 
     with pytest.raises(ValueError, match=f"^{refused_field} must be an https URL") as refused:
         _discover(metadata)
@@ -207,19 +219,26 @@ def test_an_endpoint_the_configuration_refuses_is_refused_with_the_configuration
 def test_a_document_advertising_code_challenge_methods_without_s256_is_refused(
     methods: object,
 ) -> None:
-    metadata = FakeKeySetEndpoint(a_provider_metadata(code_challenge_methods_supported=methods))
+    """DISCOVERY-03, DISCOVERY-06."""
+    metadata = FakeKeySetEndpoint(
+        a_provider_metadata(REALM_ISSUER, code_challenge_methods_supported=methods)
+    )
 
     with pytest.raises(OidcDiscoveryError, match="code_challenge_methods_supported"):
         _discover(metadata)
 
 
 def test_a_document_advertising_no_code_challenge_methods_is_accepted() -> None:
-    metadata = FakeKeySetEndpoint(a_provider_metadata(code_challenge_methods_supported=ABSENT))
+    """DISCOVERY-03."""
+    metadata = FakeKeySetEndpoint(
+        a_provider_metadata(REALM_ISSUER, code_challenge_methods_supported=ABSENT)
+    )
 
     assert _discover(metadata) == a_realm_client_config()
 
 
 def test_a_fetch_that_fails_fails_the_discovery_with_the_fetchs_own_error() -> None:
+    """DISCOVERY-08."""
     failure = ProviderMetadataFetchError("fetching failed", ExchangeFailure.TIMED_OUT)
 
     with pytest.raises(ProviderMetadataFetchError) as refused:
@@ -229,6 +248,7 @@ def test_a_fetch_that_fails_fails_the_discovery_with_the_fetchs_own_error() -> N
 
 
 def test_a_discovery_refusal_is_a_web_auth_error() -> None:
+    """DISCOVERY-06."""
     with pytest.raises(WebAuthError):
         _discover(FakeKeySetEndpoint(json.dumps([]).encode()))
 
@@ -236,7 +256,73 @@ def test_a_discovery_refusal_is_a_web_auth_error() -> None:
 def test_the_production_fetch_reads_the_servers_document_at_its_well_known_path(
     token_server: LoopbackHttpsServer,
 ) -> None:
+    """DISCOVERY-01, DISCOVERY-07: through the production fetch."""
     config = _discover(fetch_provider_metadata_over_https, token_server.base_url)
 
     assert token_server.requested_paths == ["/.well-known/openid-configuration"]
     assert config.token_endpoint == f"{token_server.base_url}/protocol/openid-connect/token"
+
+
+def test_a_provider_metadata_document_of_exactly_the_size_limit_comes_back_whole(
+    token_server: LoopbackHttpsServer,
+) -> None:
+    """DISCOVERY-07."""
+    document = fetch_provider_metadata_over_https(f"{token_server.base_url}/metadata-at-limit")
+
+    assert len(document) == METADATA_LIMIT_BYTES
+
+
+@pytest.mark.parametrize("path", ["/metadata-past-limit", "/oversized"], ids=["valid-json", "far"])
+def test_a_provider_metadata_document_past_the_size_limit_is_refused_as_too_large(
+    token_server: LoopbackHttpsServer, path: str
+) -> None:
+    """DISCOVERY-07."""
+    with pytest.raises(ProviderMetadataFetchError) as refused:
+        fetch_provider_metadata_over_https(f"{token_server.base_url}{path}")
+
+    assert refused.value.failure is ExchangeFailure.TOO_LARGE
+
+
+@pytest.mark.parametrize("path", ["/missing", "/moved"], ids=["not-found", "redirect"])
+def test_a_provider_metadata_origin_answering_another_status_is_refused_naming_it(
+    token_server: LoopbackHttpsServer, path: str
+) -> None:
+    """DISCOVERY-07."""
+    with pytest.raises(ProviderMetadataFetchError) as refused:
+        fetch_provider_metadata_over_https(f"{token_server.base_url}{path}")
+
+    assert str(refused.value).startswith("the provider metadata origin answered ")
+    assert refused.value.failure is None
+    assert token_server.requested_paths == [path]
+
+
+@pytest.mark.parametrize(
+    "url", ["http://{authority}/doc", "https://["], ids=["http", "unparseable"]
+)
+def test_a_provider_metadata_fetch_refuses_any_url_but_a_well_formed_https_one_before_a_request(
+    token_server: LoopbackHttpsServer, url: str
+) -> None:
+    """DISCOVERY-07."""
+    authority = token_server.base_url.removeprefix("https://")
+
+    with pytest.raises(ProviderMetadataFetchError) as refused:
+        fetch_provider_metadata_over_https(url.format(authority=authority))
+
+    assert refused.value.failure is ExchangeFailure.NOT_AN_HTTPS_URL
+    assert token_server.requested_paths == []
+
+
+def test_a_provider_metadata_origin_the_system_does_not_trust_is_refused_without_the_url(
+    token_server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DISCOVERY-07."""
+    monkeypatch.delenv("SSL_CERT_FILE")
+    secret = "s3cr3t-in-the-query"  # noqa: S105
+
+    with pytest.raises(ProviderMetadataFetchError) as refused:
+        fetch_provider_metadata_over_https(f"{token_server.base_url}/doc?signature={secret}")
+
+    assert refused.value.failure is ExchangeFailure.TLS_FAILED
+    assert secret not in "".join(traceback.format_exception(refused.value))
+    assert refused.value.__cause__ is None
+    assert refused.value.__context__ is None
