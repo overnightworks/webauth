@@ -43,7 +43,7 @@ from webauth.cookies import (
     _cookie_values,
     _verify_session_cookie,
 )
-from webauth.ports import SessionRecordStore
+from webauth.ports import SessionRecordStore, SessionTransaction
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,7 +51,6 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from webauth.oidc import ExchangedAccess, OidcRefusal
-    from webauth.web_auth import WebAuth
 
 __all__ = [
     "AuthDependencies",
@@ -74,7 +73,7 @@ _ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
 _PERSON_PATH_CHALLENGE: Final = 'Bearer realm="api"'
 _PERSON_PATH_INSUFFICIENT_SCOPE: Final = 'Bearer error="insufficient_scope"'
 _EXPIRY_TOLERANCE: Final = timedelta(seconds=60)
-_INSTALLED_WEB_AUTH_ATTRIBUTE: Final = "web_auth_handle"
+_INSTALLED_SESSIONS_ATTRIBUTE: Final = "web_auth_sessions"
 
 
 @dataclass(frozen=True)
@@ -167,19 +166,19 @@ def current_user_dependency(
     )
 
 
-def _publish_installed_web_auth(app: FastAPI, handle: WebAuth) -> None:
-    setattr(app.state, _INSTALLED_WEB_AUTH_ATTRIBUTE, handle)
+def _publish_installed_sessions(app: FastAPI, sessions: SessionTransaction) -> None:
+    setattr(app.state, _INSTALLED_SESSIONS_ATTRIBUTE, sessions)
 
 
-def _installed_web_auth(connection: HTTPConnection) -> WebAuth:
-    """The handle ``WebAuth.install`` put on the application serving ``connection``."""
-    handle = getattr(connection.app.state, _INSTALLED_WEB_AUTH_ATTRIBUTE, None)
-    if handle is None:
+def _installed_sessions(connection: HTTPConnection) -> SessionTransaction:
+    """The ``stores.sessions`` ``WebAuth.install`` put on the application serving ``connection``."""
+    sessions = getattr(connection.app.state, _INSTALLED_SESSIONS_ATTRIBUTE, None)
+    if sessions is None:
         raise RuntimeError(
             "This application serves auth-protected requests without an installed WebAuth: "
             "call auth.install(app, bearer=...) after the last route.",
         )
-    return handle
+    return sessions
 
 
 def current_user(request: Request) -> ports.AuthenticatedUser:
@@ -197,7 +196,7 @@ def current_user(request: Request) -> ports.AuthenticatedUser:
     replaces the identity behind it and behind ``admin_user``. A direct call, as a stream
     makes before it opens its own store, bypasses the overrides.
     """
-    with _installed_web_auth(request).stores.sessions() as sessions:
+    with _installed_sessions(request)() as sessions:
         user = _gate_or_own_admission(request, sessions)
     if isinstance(user, ConnectionRefusal):
         raise _http_refusal(request, user, None)
@@ -266,7 +265,7 @@ def authenticate_websocket(
     if origin_refusal is not None:
         return origin_refusal
     if sessions is None:
-        with _installed_web_auth(connection).stores.sessions() as opened:
+        with _installed_sessions(connection)() as opened:
             return _admitted_websocket(connection, opened)
     return _admitted_websocket(connection, sessions)
 

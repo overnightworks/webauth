@@ -559,7 +559,7 @@ def _app_for(settings: HostSettings, world: World, origin: str) -> FastAPI:
     def admin(user: AuthenticatedUser = Depends(admin_user)) -> dict[str, str]:
         return {"username": user.username}
 
-    sign_in = auth.stores.sign_in
+    sign_in = _sign_in_transaction(world)
     if settings.is_bearer_host:
         _add_bearer_routes(app, settings, sign_in)
     auth.install(app, bearer=_bearer_of(settings, auth, sign_in))

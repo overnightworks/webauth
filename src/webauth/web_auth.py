@@ -16,7 +16,7 @@ from starlette.middleware import Middleware
 
 from webauth._validation import require_positive_whole_number
 from webauth.config import install_web_auth_config
-from webauth.dependencies import _publish_installed_web_auth
+from webauth.dependencies import _publish_installed_sessions
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.bearer_gate import install_resource_metadata
 from webauth.middleware.stack import _install_slotted_web_auth_middleware
@@ -249,10 +249,6 @@ class WebAuth:
     def admission(self) -> AdmissionConfig:
         return self._groups
 
-    @property
-    def stores(self) -> WebAuthStores:
-        return self._stores
-
     def install(self, app: FastAPI, *, bearer: BearerGate | None) -> None:
         """Place the stack, the sign-in routes and this handle on ``app``, after its last route.
 
@@ -281,7 +277,7 @@ class WebAuth:
             inside=self._inside,
         )
         install_web_auth_config(app, settings.config)
-        _publish_installed_web_auth(app, self)
+        _publish_installed_sessions(app, self._stores.sessions)
         install_sign_in_routes(
             app,
             paths=settings.sign_in_paths,
