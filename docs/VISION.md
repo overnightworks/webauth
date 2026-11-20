@@ -13,8 +13,9 @@ groups and its own middleware, which it hands to webauth in named slots. Every a
 documentation alone, without reading its code. A security fix is made once, and every app gets it by taking the next
 release.
 
-It follows OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0 (RFC 6749) with
-bearer tokens (RFC 6750), OAuth 2.0 Token Exchange (RFC 8693), JSON Web Token (RFC 7519) and Fetch Metadata.
+It follows OpenID Connect Core 1.0, Discovery 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0
+(RFC 6749) with bearer tokens (RFC 6750), PKCE (RFC 7636), Token Exchange (RFC 8693) and Protected Resource Metadata
+(RFC 9728), JSON Web Token (RFC 7519) with JWT access tokens (RFC 9068), and Fetch Metadata.
 
 It is made by and for agents: every rule a machine can check is in the checks, the documents say what an agent cannot
 derive from the code, and the code is clean enough that the next agent changes it without fear.
@@ -26,7 +27,7 @@ that build and integrate them. One app's need shapes webauth for every app, so e
 
 ## Deliberate non-goals
 
-- No storage of its own beyond the session half: each app keeps its accounts, its audit and what else must last, and webauth stores only sessions, only as an optional adapter over the app's own database connection.
+- No durable storage of its own: each app keeps its accounts, its audit and what else must last in its own database. The `postgres` extra is an optional adapter over the app's own database connection that covers the session half only; the single-process adapters (`webauth.single_process_stores`) keep accounts, sessions and the sign-in transaction in memory for a host that runs one worker and loses them on restart.
 - No deployment of its own: each app chooses the release it runs.
 - No identity provider and no password login: it relies on an OpenID Connect provider to say who someone is.
 - No compatibility layers: a change that breaks its callers breaks cleanly, says so, and leaves nothing of the old form
