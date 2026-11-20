@@ -1,0 +1,8 @@
+claim_id = "9a47ea78cf0149c48dea177619731d64"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "c672471c7121d3829c2a879252c449c0581602da"
+branch = "claude/issue-822-sign-in-outcome-lines"
+scope = ["docs/host-contract.md", "src/webauth/oidc/__init__.py", "src/webauth/oidc/_token_endpoint.py", "src/webauth/sign_in_routes.py", "tests/test_sign_in_routes_log.py"]
+opened_commit = "2b1d9018ba58c0ec687fc13632efb500fe9a53b9"
+whole_reason = "One event, its contract row and its test, which do not ship apart."
