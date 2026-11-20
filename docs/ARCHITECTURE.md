@@ -27,7 +27,7 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 
 Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout and fresh tokens.
 
-- `web_auth` is the composition call ([host contract](host-contract.md#the-composition-call)): `WebAuth.build` checks the host's settings and builds the relying party, and `install` composes the request line, the client-address writer, the host's `outside` and `inside` middleware, the stack and the sign-in routes in one order; `dependencies` reads the installed handle.
+- `web_auth` is the composition call ([host contract](host-contract.md#the-composition-call)): `WebAuth.build` checks the host's settings and builds the relying party, and `install` composes the request line, the client-address writer, the host's `outside` and `inside` middleware, the stack and the sign-in routes in one order; `dependencies` reads the sessions entry the install publishes on the app.
 - `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes, selects `SignInPaths` policies and answers failures.
 - `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `oidc_login` and the bearer gate apply it and services call `app_role`.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
