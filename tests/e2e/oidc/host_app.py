@@ -30,12 +30,13 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
 from types import SimpleNamespace
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import anyio.to_thread
 import httpx
@@ -52,7 +53,7 @@ from webauth.dependencies import (
     current_user_dependency,
     session_id_from_request,
 )
-from webauth.https_client import fetch_key_set_over_https
+from webauth.https_client import fetch_key_set_over_https, fetch_provider_metadata_over_https
 from webauth.middleware import (
     BearerGate,
     MachinePaths,
@@ -72,6 +73,7 @@ from webauth.oidc import (
     TokenEndpointAnswer,
     TokenRequest,
     TokenRequestPost,
+    discover_oidc_client_config,
 )
 from webauth.oidc_login import AccessTokenRefusal, current_groups, fresh_access_token
 from webauth.oidc_transport import post_token_request_over_https
@@ -341,23 +343,43 @@ def _relying_party(
     post_token_request: TokenRequestPost,
 ) -> OidcRelyingParty:
     return OidcRelyingParty(
-        OidcClientConfig(
-            issuer=settings.issuer,
-            authorization_endpoint=settings.authorization_endpoint,
-            token_endpoint=settings.token_endpoint,
-            jwks_url=settings.jwks_url,
-            end_session_endpoint=settings.end_session_endpoint,
-            client_id=settings.client_id,
-            client_secret=SecretStr(settings.client_secret),
-            redirect_uri=redirect_uri,
-            post_logout_redirect_uri=post_logout_redirect_uri,
-            scopes=SCOPES,
-            leeway_seconds=LEEWAY_SECONDS,
-        ),
+        _discovered_client_config(settings, redirect_uri, post_logout_redirect_uri),
         post_token_request=post_token_request,
         fetch_key_set=fetch_key_set_over_https,
         wall_clock=time.time,
         monotonic_clock=time.monotonic,
+    )
+
+
+def _discovered_client_config(
+    settings: HostSettings, redirect_uri: str, post_logout_redirect_uri: str
+) -> OidcClientConfig:
+    """The four endpoints are the issuer's own document's. This process cannot resolve the
+    issuer's public name, so it reads the document and calls the token and key-set endpoints
+    at the origin of ``settings.token_endpoint``, a shim that forwards under the public host."""
+    reached_at = urlsplit(settings.token_endpoint)
+
+    def reached_through_the_shim(url: str) -> str:
+        return urlunsplit(
+            urlsplit(url)._replace(scheme=reached_at.scheme, netloc=reached_at.netloc)
+        )
+
+    discovered = discover_oidc_client_config(
+        settings.issuer,
+        fetch_provider_metadata=lambda url: fetch_provider_metadata_over_https(
+            reached_through_the_shim(url)
+        ),
+        client_id=settings.client_id,
+        client_secret=SecretStr(settings.client_secret),
+        redirect_uri=redirect_uri,
+        post_logout_redirect_uri=post_logout_redirect_uri,
+        scopes=SCOPES,
+        leeway_seconds=LEEWAY_SECONDS,
+    )
+    return replace(
+        discovered,
+        token_endpoint=reached_through_the_shim(discovered.token_endpoint),
+        jwks_url=reached_through_the_shim(discovered.jwks_url),
     )
 
 
