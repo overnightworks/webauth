@@ -65,7 +65,9 @@ def test_the_documents_four_endpoints_and_the_hosts_own_values_make_the_configur
     """DISCOVERY-01, DISCOVERY-09: the document is read once."""
     metadata = FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER))
 
-    assert _discover(metadata) == a_realm_client_config()
+    assert _discover(metadata) == a_realm_client_config(
+        authorization_response_iss_parameter_supported=True
+    )
     assert metadata.fetched_urls == [_WELL_KNOWN_URL]
 
 
@@ -249,13 +251,57 @@ def test_a_document_advertising_code_challenge_methods_without_s256_is_refused(
         _discover(metadata)
 
 
+@pytest.mark.parametrize(
+    ("member", "supported"),
+    [
+        pytest.param(True, True, id="announced"),
+        pytest.param(False, False, id="denied"),
+        pytest.param(ABSENT, False, id="absent-defaults-to-false"),
+    ],
+)
+def test_the_document_says_whether_the_issuer_sends_iss_and_silence_means_it_does_not(
+    member: object, supported: bool
+) -> None:
+    """DISCOVERY-12."""
+    metadata = FakeKeySetEndpoint(
+        a_provider_metadata(REALM_ISSUER, authorization_response_iss_parameter_supported=member)
+    )
+
+    config = _discover(metadata)
+
+    assert config.authorization_response_iss_parameter_supported is supported
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        pytest.param("true", id="text"),
+        pytest.param(1, id="number"),
+        pytest.param(None, id="null"),
+        pytest.param(["true"], id="list"),
+    ],
+)
+def test_a_document_whose_iss_support_member_is_not_a_boolean_is_refused_naming_it(
+    member: object,
+) -> None:
+    """DISCOVERY-12, DISCOVERY-06."""
+    metadata = FakeKeySetEndpoint(
+        a_provider_metadata(REALM_ISSUER, authorization_response_iss_parameter_supported=member)
+    )
+
+    with pytest.raises(OidcDiscoveryError, match="authorization_response_iss_parameter_supported"):
+        _discover(metadata)
+
+
 def test_a_document_advertising_no_code_challenge_methods_is_accepted() -> None:
     """DISCOVERY-03."""
     metadata = FakeKeySetEndpoint(
         a_provider_metadata(REALM_ISSUER, code_challenge_methods_supported=ABSENT)
     )
 
-    assert _discover(metadata) == a_realm_client_config()
+    assert _discover(metadata) == a_realm_client_config(
+        authorization_response_iss_parameter_supported=True
+    )
 
 
 def test_a_fetch_that_fails_fails_the_discovery_with_the_fetchs_own_error() -> None:

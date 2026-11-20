@@ -92,6 +92,14 @@ def login() -> LoginScenario:
     return LoginScenario(FakeTokenEndpoint())
 
 
+@pytest.fixture
+def login_at_an_issuer_sending_iss() -> LoginScenario:
+    return LoginScenario(
+        FakeTokenEndpoint(),
+        config=a_realm_client_config(authorization_response_iss_parameter_supported=True),
+    )
+
+
 def test_a_login_from_its_begin_through_the_callback_yields_the_verified_identity(
     login: LoginScenario,
 ) -> None:
@@ -168,6 +176,70 @@ def test_a_login_the_issuer_vouched_for_yields_its_identity(
     _pending, outcome = login.attempt(attempt)
 
     assert outcome == login.identity_with_the_minted_token(identity)
+
+
+def test_a_callback_with_the_issuer_is_accepted_where_the_issuer_sends_iss(
+    login_at_an_issuer_sending_iss: LoginScenario,
+) -> None:
+    _pending, outcome = login_at_an_issuer_sending_iss.attempt(Attempt())
+
+    assert outcome == login_at_an_issuer_sending_iss.identity_with_the_minted_token(_IDENTITY)
+
+
+_REFUSALS_WHERE_THE_ISSUER_SENDS_ISS = [
+    pytest.param(
+        Attempt(callback={"iss": ABSENT}),
+        OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH),
+        id="callback-without-iss",
+    ),
+    pytest.param(
+        Attempt(callback={"iss": ""}),
+        OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH),
+        id="callback-with-an-empty-iss",
+    ),
+    pytest.param(
+        Attempt(callback={"iss": OTHER_REALM}),
+        OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH),
+        id="callback-iss-of-another-realm",
+    ),
+    pytest.param(
+        Attempt(callback={"iss": ABSENT, "code": ABSENT, "error": "access_denied"}),
+        OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH),
+        id="idp-error-without-iss",
+    ),
+    pytest.param(
+        Attempt(callback={"iss": ABSENT, "state": "a-forged-state"}),
+        OidcRefusal(OidcRefusalReason.STATE_MISMATCH),
+        id="forged-state-without-iss",
+    ),
+    pytest.param(
+        Attempt(
+            callback={"iss": ABSENT}, elapsed_seconds=PENDING_LOGIN_MAX_AGE_SECONDS + 1
+        ),
+        OidcRefusal(OidcRefusalReason.PENDING_LOGIN_EXPIRED),
+        id="expired-pending-login-without-iss",
+    ),
+]
+
+
+@pytest.mark.parametrize(("attempt", "refusal"), _REFUSALS_WHERE_THE_ISSUER_SENDS_ISS)
+def test_a_callback_the_issuer_cannot_be_credited_with_is_refused_and_exchanges_no_code(
+    login_at_an_issuer_sending_iss: LoginScenario, attempt: Attempt, refusal: OidcRefusal
+) -> None:
+    _pending, outcome = login_at_an_issuer_sending_iss.attempt(attempt)
+
+    assert outcome == refusal
+    assert login_at_an_issuer_sending_iss.token_endpoint.requests == []
+
+
+def test_the_issuer_sending_iss_keeps_the_error_code_out_of_a_callback_without_iss(
+    login_at_an_issuer_sending_iss: LoginScenario,
+) -> None:
+    _pending, outcome = login_at_an_issuer_sending_iss.attempt(
+        Attempt(callback={"iss": ABSENT, "code": ABSENT, "error": "access_denied"})
+    )
+
+    assert outcome == OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH, idp_error=None)
 
 
 def test_the_issued_refresh_token_is_in_no_repr_and_the_access_token_is_nowhere(

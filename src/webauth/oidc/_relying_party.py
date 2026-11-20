@@ -6,8 +6,9 @@ come back with it; `complete_login` answers a verified `OidcIdentity` or an
 
 The callback is judged in a fixed order. Its state comes first, so a forged
 callback is refused as such even when it also reports an error; then the
-pending login's age; then the RFC 9207 `iss` parameter, when the issuer sends
-one; only then the IdP's own `error`, of which nothing but a short error code
+pending login's age; then the RFC 9207 `iss` parameter, which must equal the
+issuer when present and be present when the configuration says the issuer
+sends it; only then the IdP's own `error`, of which nothing but a short error code
 is carried — never its `error_description`, which is text the IdP's caller
 controls. The code is exchanged with the PKCE verifier over the injected
 `TokenRequestPost`, the client authenticating with HTTP Basic. The ID token
@@ -262,11 +263,12 @@ class OidcRelyingParty:
         """The identity the callback `callback_query` (its raw query string)
         proves for `pending`, or the refusal naming why it does not.
 
-        A `code` longer than `_MAX_AUTHORIZATION_CODE_CHARS` is
-        `MALFORMED_CALLBACK`. The ID token must name this client as its `azp` when it is for several
-        audiences, and any `azp` it names must be this client. A refresh token
-        in the answer that is `null` or outside `1*VSCHAR` is
-        `TOKEN_ENDPOINT_FAILED`. A token answer that names a member twice keeps
+        A callback without `iss` is `ISSUER_MISMATCH` when the configuration says the
+        issuer sends it, an error response included. A `code` longer than
+        `_MAX_AUTHORIZATION_CODE_CHARS` is `MALFORMED_CALLBACK`. The ID token must
+        name this client as its `azp` when it is for several audiences, and any `azp`
+        it names must be this client. A refresh token in the answer that is `null` or
+        outside `1*VSCHAR` is `TOKEN_ENDPOINT_FAILED`. A token answer that names a member twice keeps
         its last value."""
         try:
             return self._identity(pending, callback_query)
@@ -288,7 +290,7 @@ class OidcRelyingParty:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.STATE_MISMATCH))
         if not self._is_unexpired(pending):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.PENDING_LOGIN_EXPIRED))
-        if callback.get("iss", self._config.issuer) != self._config.issuer:
+        if not self._is_from_the_issuer(callback):
             raise _RefusalError(OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH))
         if "error" in callback:
             raise _RefusalError(
@@ -301,6 +303,11 @@ class OidcRelyingParty:
         if not code or len(code) > _MAX_AUTHORIZATION_CODE_CHARS:
             raise _RefusalError(OidcRefusal(OidcRefusalReason.MALFORMED_CALLBACK))
         return code
+
+    def _is_from_the_issuer(self, callback: Mapping[str, str]) -> bool:
+        if "iss" not in callback:
+            return not self._config.authorization_response_iss_parameter_supported
+        return callback["iss"] == self._config.issuer
 
     def _is_unexpired(self, pending: PendingLogin) -> bool:
         age_seconds = self._wall_clock() - pending.issued_at

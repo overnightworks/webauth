@@ -14,7 +14,8 @@ METADATA_LIMIT_BYTES = 64 * 1024
 
 def a_provider_metadata(realm_issuer: str, /, **changes: Any) -> bytes:
     """The discovery document of the realm at `realm_issuer` as Keycloak serves it: the members
-    the relying party reads and `code_challenge_methods_supported`; `changes` replace or,
+    the relying party reads, `code_challenge_methods_supported` and
+    `authorization_response_iss_parameter_supported`; `changes` replace or,
     with `ABSENT`, remove members."""
     members = {
         "issuer": realm_issuer,
@@ -23,6 +24,7 @@ def a_provider_metadata(realm_issuer: str, /, **changes: Any) -> bytes:
         "jwks_uri": f"{realm_issuer}{OPENID_CONNECT_PATH}/certs",
         "end_session_endpoint": f"{realm_issuer}{OPENID_CONNECT_PATH}/logout",
         "code_challenge_methods_supported": ["plain", "S256"],
+        "authorization_response_iss_parameter_supported": True,
         **changes,
     }
     return json.dumps(

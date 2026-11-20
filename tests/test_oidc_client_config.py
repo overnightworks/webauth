@@ -97,6 +97,10 @@ def _text_of(value: object) -> str:
         pytest.param("scopes", ("profile", "email"), id="scopes-without-openid"),
         pytest.param("scopes", "openid profile", id="scopes-as-one-string"),
         pytest.param("scopes", ("openid", "two words"), id="scope-with-a-space"),
+        pytest.param("authorization_response_iss_parameter_supported", 0, id="iss-support-as-int"),
+        pytest.param(
+            "authorization_response_iss_parameter_supported", "yes", id="iss-support-as-text"
+        ),
     ],
 )
 def test_a_client_configuration_is_refused_by_the_field_it_breaks_never_its_value(
@@ -107,6 +111,10 @@ def test_a_client_configuration_is_refused_by_the_field_it_breaks_never_its_valu
 
     text = _text_of(value)
     assert not text or text not in str(refusal.value)
+
+
+def test_a_configuration_that_says_nothing_about_iss_does_not_require_it() -> None:
+    assert a_realm_client_config().authorization_response_iss_parameter_supported is False
 
 
 @pytest.mark.parametrize("field_name", ["end_session_endpoint", "post_logout_redirect_uri"])
