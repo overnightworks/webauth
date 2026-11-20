@@ -8,8 +8,10 @@ their own. Around that it guards every app the same way: it turns away requests 
 apply its protections, limits how often one address may try, and records what happened for a later security review. An
 app tells it where to keep what must last, or takes the optional Postgres adapter for the session half, and has nothing else of its own to build.
 
-Every app integrates it the same way, from its documentation alone, without reading its code. A security fix is made
-once, and every app gets it by taking the next release.
+A host builds its whole auth in one call from one typed settings object; it varies only its pages, its stores, its
+groups and its own middleware, which it hands to webauth in named slots. Every app integrates it the same way, from its
+documentation alone, without reading its code. A security fix is made once, and every app gets it by taking the next
+release.
 
 It follows OpenID Connect Core 1.0, RP-Initiated Logout 1.0 and Back-Channel Logout 1.0, OAuth 2.0 (RFC 6749) with
 bearer tokens (RFC 6750), OAuth 2.0 Token Exchange (RFC 8693), JSON Web Token (RFC 7519) and Fetch Metadata.
