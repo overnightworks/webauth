@@ -214,7 +214,7 @@ What the installer applies when the host passes none:
 
 What a host adds to the security headers:
 
-- **STACK-15** `SecurityHeadersPolicy.content_security_policy` is the policy of every answer. A host that serves a path with its own policy, for example a sandboxed mount framed on an opaque origin that needs `sandbox allow-scripts`, passes `content_security_policy_rules`, a tuple of `ContentSecurityPolicyRule(paths, value)` shaped like `cache_control_rules`: the first rule whose `PathRules` match the route path wins, and every other path keeps the default. The rule's value is checked as a header field value when it is built. `X-Frame-Options` follows the policy the answer leaves with, and the sign-out page keeps its own policy. Admission of the path stays the host's (`SessionGate`), and webauth sets no `Access-Control-*` header.
+- **STACK-15** `SecurityHeadersPolicy.content_security_policy` is the policy of every answer. A host that serves a path with its own policy, for example a sandboxed mount framed by the same host on an opaque origin that needs `sandbox allow-scripts; frame-ancestors 'self'`, passes `content_security_policy_rules`, a tuple of `ContentSecurityPolicyRule(paths, value)` shaped like `cache_control_rules`: the first rule whose `PathRules` match the route path wins, and every other path keeps the default. The rule's value is checked as a header field value when it is built. `X-Frame-Options` follows the policy the answer leaves with (a rule without `frame-ancestors` keeps `X-Frame-Options: DENY`), and the sign-out page keeps its own policy. Admission of the path stays the host's (`SessionGate`), and webauth sets no `Access-Control-*` header.
 
 ## What webauth logs
 

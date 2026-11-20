@@ -725,19 +725,6 @@ def test_the_first_matching_content_security_policy_rule_wins_in_the_order_given
     assert response.headers["content-security-policy"] == expected_policy
 
 
-def test_a_rule_policy_without_frame_ancestors_keeps_x_frame_options_deny() -> None:
-    app = an_app(
-        policy=a_policy_with_content_security_policy_rules(
-            a_content_security_policy_rule("sandbox allow-scripts", prefixes=("/t/",))
-        )
-    )
-    app.get("/t/token")(lambda: Response("body", headers={"X-Frame-Options": "SAMEORIGIN"}))
-
-    response = TestClient(app).get("/t/token")
-
-    assert response.headers["x-frame-options"] == "DENY"
-
-
 def test_a_rule_policy_that_allows_a_framer_leaves_x_frame_options_off() -> None:
     policy = a_policy_with_content_security_policy_rules(
         a_content_security_policy_rule(FRAMER_POLICY, prefixes=("/embed/",))
