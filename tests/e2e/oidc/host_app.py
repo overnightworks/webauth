@@ -67,6 +67,7 @@ from webauth.middleware import (
     resource_person,
 )
 from webauth.oidc import (
+    OidcClientConfig,
     OidcRefusal,
     OidcRelyingParty,
     TokenEndpointAnswer,
@@ -203,6 +204,9 @@ class HostSettings:
     userinfo_endpoint: str | None = None
     bearer_authorized_parties: tuple[str, ...] = ()
     """The client ids whose access tokens open the machine routes; none means no such routes."""
+    discovers_client_config: bool = False
+    """Whether the host reads the four endpoints from the issuer's discovery document at start;
+    otherwise it takes the endpoint fields above."""
 
     @property
     def is_bearer_host(self) -> bool:
@@ -334,6 +338,32 @@ class _Observation:
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
 
+def _client_config(
+    settings: HostSettings, redirect_uri: str, post_logout_redirect_uri: str
+) -> OidcClientConfig:
+    if settings.discovers_client_config:
+        return discovered_client_config(
+            settings,
+            redirect_uri,
+            post_logout_redirect_uri,
+            scopes=SCOPES,
+            leeway_seconds=LEEWAY_SECONDS,
+        )
+    return OidcClientConfig(
+        issuer=settings.issuer,
+        authorization_endpoint=settings.authorization_endpoint,
+        token_endpoint=settings.token_endpoint,
+        jwks_url=settings.jwks_url,
+        end_session_endpoint=settings.end_session_endpoint,
+        client_id=settings.client_id,
+        client_secret=SecretStr(settings.client_secret),
+        redirect_uri=redirect_uri,
+        post_logout_redirect_uri=post_logout_redirect_uri,
+        scopes=SCOPES,
+        leeway_seconds=LEEWAY_SECONDS,
+    )
+
+
 def _relying_party(
     settings: HostSettings,
     redirect_uri: str,
@@ -341,13 +371,7 @@ def _relying_party(
     post_token_request: TokenRequestPost,
 ) -> OidcRelyingParty:
     return OidcRelyingParty(
-        discovered_client_config(
-            settings,
-            redirect_uri,
-            post_logout_redirect_uri,
-            scopes=SCOPES,
-            leeway_seconds=LEEWAY_SECONDS,
-        ),
+        _client_config(settings, redirect_uri, post_logout_redirect_uri),
         post_token_request=post_token_request,
         fetch_key_set=fetch_key_set_over_https,
         wall_clock=time.time,
