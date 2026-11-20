@@ -1,0 +1,7 @@
+claim_id = "cf1a5aef140f45b388a3351a3ac61c39"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "36f7f7f30fe0c06d00ceb62b10ef4c39de589171"
+branch = "docs/vision-standards"
+scope = ["docs/VISION.md"]
+opened_commit = "09dff3763aed542063b24eb66855b102867587fc"
