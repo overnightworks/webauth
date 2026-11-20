@@ -461,6 +461,31 @@ def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> 
     assert (person.status_code, person.json()) == (200, {"username": "lena"})
 
 
+def test_compose_11_the_install_serves_its_routes_ahead_of_a_catch_all_of_the_host() -> None:
+    """COMPOSE-11"""
+    world = a_host_world()
+
+    def routes(app: FastAPI, auth: WebAuth) -> None:
+        the_routes_of(world)(app, auth)
+
+        @app.get("/{path:path}")
+        def catch_all(path: str) -> dict[str, str]:
+            return {"answered_by": "catch-all"}
+
+    host = a_composed_host(world, routes=routes, bearer_of=a_resource_and_person_paths(world))
+    resource = a_resource(transaction=world.sign_in)
+
+    start = host.client.get(START_PATH, headers=FORWARDED)
+    metadata = host.client.get(
+        f"/.well-known/oauth-protected-resource{resource.entry_point}", headers=FORWARDED
+    )
+    unknown = host.client.get("/nothing-here", headers=FORWARDED)
+
+    assert start.status_code == 303
+    assert metadata.json()["authorization_servers"] == [BOUND_ISSUER]
+    assert unknown.json() == {"answered_by": "catch-all"}
+
+
 def _settings_with(world: HostWorld, **changes: object) -> Composition:
     base = a_composition(world)
     return replace(base, settings=replace(base.settings, **changes))

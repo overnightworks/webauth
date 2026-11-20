@@ -159,6 +159,19 @@ def _require_early_values(
     _require_middleware_slot("inside", inside)
 
 
+def _answer_ahead_of_the_routes_of_the_host(app: FastAPI, routes_of_the_host: int) -> None:
+    """Move the routes added after the host's first ``routes_of_the_host`` to the front.
+
+    The router answers with the first route that matches, so a host's catch-all registered
+    before the install would otherwise take the sign-in start, the callback and the resource
+    metadata.
+    """
+    routes = app.router.routes
+    own = routes[routes_of_the_host:]
+    del routes[routes_of_the_host:]
+    routes[:0] = own
+
+
 class WebAuth:
     """The built auth of one app: ``build`` it before the routes, ``install`` it after the last.
 
@@ -255,7 +268,9 @@ class WebAuth:
         Outermost first: logline's request line, the client-address writer, ``outside``, the
         library's stack, ``inside``. A ``bearer`` that does not fit the early values raises a
         ``WebAuthSettingError``; a second install, or an app that already carries library
-        middleware, raises ``RuntimeError``. Both are refused before the app changes.
+        middleware, raises ``RuntimeError``. Both are refused before the app changes. The
+        sign-in routes and the resource metadata route answer ahead of every route the host
+        added before.
         """
         self._require_a_bearer_that_fits(bearer)
         settings = self._settings
@@ -278,6 +293,7 @@ class WebAuth:
         )
         install_web_auth_config(app, settings.config)
         _publish_installed_sessions(app, self._stores.sessions)
+        routes_of_the_host = len(app.router.routes)
         install_sign_in_routes(
             app,
             paths=settings.sign_in_paths,
@@ -292,6 +308,7 @@ class WebAuth:
         )
         if resource is not None:
             install_resource_metadata(app, resource, issuer=settings.client.issuer)
+        _answer_ahead_of_the_routes_of_the_host(app, routes_of_the_host)
 
     def _require_a_bearer_that_fits(self, bearer: BearerGate | None) -> None:
         if bearer is None:
