@@ -32,9 +32,6 @@ if TYPE_CHECKING:
 
 _LOGGER_NAME = "webauth.sign_in_routes"
 _OTHER_IDP_ERROR = "_OTHER"
-_VISITOR_CHOSEN_CODE = "visitor_chosen_code"
-_RETURN_PATH = "/albums/secret-return-path"
-_USERNAME = "lena"
 
 
 type _Line = tuple[str, int, dict[str, object]]
@@ -102,7 +99,7 @@ _REFUSALS = [
     ),
     pytest.param(
         an_oidc_host,
-        _denied_with(_VISITOR_CHOSEN_CODE),
+        _denied_with("unregistered_code"),
         {
             "reason": OidcRefusalReason.AUTHORIZATION_DENIED.value,
             "idp_error": _OTHER_IDP_ERROR,
@@ -137,7 +134,7 @@ _REFUSALS = [
         id="a foreign issuer",
     ),
     pytest.param(
-        lambda: an_oidc_host(FakeUser(id="user-7", username=_USERNAME)),
+        lambda: an_oidc_host(FakeUser(id="user-7", username="lena")),
         _unchanged,
         {"reason": AdmissionRefusal.USERNAME_TAKEN.value},
         id="a taken username in the transaction",
@@ -180,18 +177,24 @@ def test_a_refused_line_holds_no_value_a_visitor_or_the_person_supplied(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """REFUSE-27: the identity, the username, the tokens and the return path stay out."""
+    visitor_chosen_code = "visitor_chosen_code"
+    return_path = "/albums/secret-return-path"
     host = an_oidc_host(groups_claim=())
-    query = host.sign_in_at_issuer(return_to=_RETURN_PATH)
-    visitor_query = _denied_with(_VISITOR_CHOSEN_CODE)(host, query)
+    visitor_query = _denied_with(visitor_chosen_code)(host, host.sign_in_at_issuer())
+    member_query = host.sign_in_at_issuer(return_to=return_path)
     caplog.set_level(logging.DEBUG)
 
     host.callback(visitor_query)
-    host.callback(query)
+    host.callback(member_query)
 
-    logged = str(_lines(caplog))
-    assert [name for name, _, _ in _lines(caplog)] == ["sign_in.refused"] * 2
-    for value in (SUBJECT, _USERNAME, _RETURN_PATH, _VISITOR_CHOSEN_CODE, *host.issued_id_tokens):
-        assert value not in logged
+    lines = _lines(caplog)
+    assert [fields["reason"] for _, _, fields in lines] == [
+        OidcRefusalReason.AUTHORIZATION_DENIED.value,
+        AdmissionRefusal.NOT_A_MEMBER.value,
+    ]
+    assert host.issued_id_tokens
+    for value in (SUBJECT, "lena", return_path, visitor_chosen_code, *host.issued_id_tokens):
+        assert value not in str(lines)
 
 
 def test_the_refused_line_is_written_before_the_hook_runs(
@@ -234,7 +237,7 @@ def test_a_hook_that_raises_leaves_one_refused_line_and_the_500(
     "users",
     [
         pytest.param((), id="a first sign-in"),
-        pytest.param((FakeUser(id=SUBJECT, username=_USERNAME),), id="a returning sign-in"),
+        pytest.param((FakeUser(id=SUBJECT, username="lena"),), id="a returning sign-in"),
     ],
 )
 def test_a_completed_sign_in_writes_one_line_at_info_with_the_sub_alone(
@@ -242,7 +245,7 @@ def test_a_completed_sign_in_writes_one_line_at_info_with_the_sub_alone(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     host = an_oidc_host(*users)
-    query = host.sign_in_at_issuer(return_to=_RETURN_PATH)
+    query = host.sign_in_at_issuer(return_to="/albums/secret-return-path")
     caplog.set_level(logging.DEBUG)
 
     response = host.callback(query)
