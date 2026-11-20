@@ -112,6 +112,7 @@ def test_a_client_configuration_is_refused_by_the_field_it_breaks_never_its_valu
 @pytest.mark.parametrize("field_name", ["end_session_endpoint", "post_logout_redirect_uri"])
 @pytest.mark.parametrize("port", ["", ":8443"])
 def test_a_plain_host_with_or_without_a_port_is_a_form_target(field_name: str, port: str) -> None:
+    """DISCOVERY-10: the constructor with every URL stays."""
     url = f"https://keycloak.example.org{port}/realms/r/protocol/openid-connect/logout"
 
     assert getattr(a_realm_client_config(**{field_name: url}), field_name) == url

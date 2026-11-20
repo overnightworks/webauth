@@ -50,8 +50,8 @@ from urllib3.util import create_urllib3_context
 
 from webauth import WebAuthError
 
-_KEY_SET_FETCH_TIMEOUT_SECONDS = 5
-_KEY_SET_FETCH_DEADLINE_SECONDS = 10
+_DOCUMENT_FETCH_TIMEOUT_SECONDS = 5
+_DOCUMENT_FETCH_DEADLINE_SECONDS = 10
 _TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
 _MAX_KEY_SET_BYTES = 64 * 1024
 _MAX_PROVIDER_METADATA_BYTES = 64 * 1024
@@ -139,8 +139,8 @@ class _RefusedStatus:
 def fetch_key_set_over_https(
     url: str,
     *,
-    timeout_seconds: float = _KEY_SET_FETCH_TIMEOUT_SECONDS,
-    deadline_seconds: float = _KEY_SET_FETCH_DEADLINE_SECONDS,
+    timeout_seconds: float = _DOCUMENT_FETCH_TIMEOUT_SECONDS,
+    deadline_seconds: float = _DOCUMENT_FETCH_DEADLINE_SECONDS,
 ) -> bytes:
     """The production `KeySetFetch`. At most one byte past `_MAX_KEY_SET_BYTES`
     is read, so the verifier refuses an oversized answer without buffering it.
@@ -166,8 +166,8 @@ def fetch_key_set_over_https(
 def fetch_provider_metadata_over_https(
     url: str,
     *,
-    timeout_seconds: float = _KEY_SET_FETCH_TIMEOUT_SECONDS,
-    deadline_seconds: float = _KEY_SET_FETCH_DEADLINE_SECONDS,
+    timeout_seconds: float = _DOCUMENT_FETCH_TIMEOUT_SECONDS,
+    deadline_seconds: float = _DOCUMENT_FETCH_DEADLINE_SECONDS,
 ) -> bytes:
     """The production `ProviderMetadataFetch`: the document at `url`, whole, under
     the bounds of `fetch_key_set_over_https`. A document past

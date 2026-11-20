@@ -62,7 +62,7 @@ def _discover(
 
 
 def test_the_documents_four_endpoints_and_the_hosts_own_values_make_the_configuration() -> None:
-    """DISCOVERY-01."""
+    """DISCOVERY-01, DISCOVERY-09: the document is read once."""
     metadata = FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER))
 
     assert _discover(metadata) == a_realm_client_config()

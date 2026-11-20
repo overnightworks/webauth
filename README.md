@@ -2,9 +2,9 @@
 
 OpenID Connect login and session authentication for FastAPI applications. It is
 built for [Keycloak](https://www.keycloak.org/); any OpenID Connect issuer that
-signs ID tokens with RS256 and publishes an OpenID Connect Discovery document works. webauth serves
-the start, callback, logout and back-channel logout routes, runs the flow, then keeps the session:
-sessions the store decides on every request, HMAC-signed cookies, CSRF
+signs ID tokens with RS256 works; it is configured from its OpenID Connect Discovery document by
+default, or by hand when it publishes none. webauth serves the start, callback, logout and
+back-channel logout routes, runs the flow, then keeps the session: sessions the store decides on every request, HMAC-signed cookies, CSRF
 origin checks, admin checks, per-address rate limits, and the audit events they
 raise. The client is a confidential client: it authenticates at the token
 endpoint with HTTP Basic and sends PKCE with the `S256` method.
