@@ -1,0 +1,8 @@
+claim_id = "765c1ee7fcec4973be25252b2ee8ba5a"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "3a994c3a3aa98c707629934c1b663f0edcf391e4"
+branch = "claude/issue-832-discovery-refuses-a-malformed-issuer"
+scope = ["docs/host-contract.md", "src/webauth/oidc/_client_config.py", "src/webauth/oidc/_discovery.py", "tests/test_oidc_discovery.py"]
+opened_commit = "7a443d8117c9d7c9b918331aeef12ce289ca59e3"
+whole_reason = "One issuer rule moves before the fetch, with its test and contract row."
