@@ -259,41 +259,45 @@ def a_host_refuses_a_sign_in(request: Request, refusal: SignInRefusal) -> Respon
     return Response(status_code=403 if refusal.page is RefusalPage.NO_ACCESS else 400)
 
 
+def a_host_settings(client: OidcClientConfig, config: WebAuthConfig) -> WebAuthSettings:
+    return WebAuthSettings(
+        config=config,
+        client=client,
+        sign_in_paths=SignInPaths(
+            start="/login/oidc",
+            callback="/auth/callback",
+            logout="/logout",
+            backchannel_logout="/auth/backchannel-logout",
+        ),
+        keeps_id_token=True,
+        max_sessions=None,
+        security_headers=SecurityHeadersPolicy(
+            content_security_policy=default_content_security_policy(
+                added_sources={
+                    CspDirective.STYLE_SRC: ["'unsafe-inline'"],
+                    CspDirective.FORM_ACTION: ["https://issuer.example.test"],
+                },
+            ),
+        ),
+        csrf_origin=CsrfPolicy(),
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget(name="default", max_requests=60, window_seconds=60),
+            rules=(
+                RateLimitRule(
+                    paths=PathRules(exact=frozenset({"/login"})),
+                    budget=RateLimitBudget(name="login", max_requests=10, window_seconds=60),
+                ),
+            ),
+        ),
+    )
+
+
 def a_host_composes_its_auth(client: OidcClientConfig, config: WebAuthConfig) -> WebAuth:
     sign_in: SignInTransaction = a_host_sign_in_transaction
     sessions: SessionTransaction = a_host_session_transaction
     key_set_fetch, token_post = a_host_uses_the_production_transports()
     return WebAuth.build(
-        WebAuthSettings(
-            config=config,
-            client=client,
-            sign_in_paths=SignInPaths(
-                start="/login/oidc",
-                callback="/auth/callback",
-                logout="/logout",
-                backchannel_logout="/auth/backchannel-logout",
-            ),
-            keeps_id_token=True,
-            max_sessions=None,
-            security_headers=SecurityHeadersPolicy(
-                content_security_policy=default_content_security_policy(
-                    added_sources={
-                        CspDirective.STYLE_SRC: ["'unsafe-inline'"],
-                        CspDirective.FORM_ACTION: ["https://issuer.example.test"],
-                    },
-                ),
-            ),
-            csrf_origin=CsrfPolicy(),
-            rate_limit=RateLimitPolicy(
-                default=RateLimitBudget(name="default", max_requests=60, window_seconds=60),
-                rules=(
-                    RateLimitRule(
-                        paths=PathRules(exact=frozenset({"/login"})),
-                        budget=RateLimitBudget(name="login", max_requests=10, window_seconds=60),
-                    ),
-                ),
-            ),
-        ),
+        a_host_settings(client, config),
         stores=WebAuthStores(sign_in=sign_in, sessions=sessions),
         groups=AdmissionConfig(
             bound_issuer=client.issuer,

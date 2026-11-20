@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 
     from webauth.admission import AdmissionConfig
     from webauth.config import WebAuthConfig
-    from webauth.jwt_verification import KeySetFetch, MonotonicClock
     from webauth.middleware import BearerGate, SessionGate
     from webauth.oidc import OidcClientConfig, TokenRequestPost
     from webauth.policies import BodySizePolicy, CsrfPolicy, RateLimitPolicy, SecurityHeadersPolicy
@@ -112,8 +111,8 @@ class IssuerCalls:
     """The relying party's three outbound dependencies; the defaults are the HTTPS ones."""
 
     post_token_request: TokenRequestPost = post_token_request_over_https
-    fetch_key_set: KeySetFetch = fetch_key_set_over_https
-    monotonic_clock: MonotonicClock = time.monotonic
+    fetch_key_set: Callable[[str], bytes] = fetch_key_set_over_https
+    monotonic_clock: Callable[[], float] = time.monotonic
 
 
 def _require_middleware_slot(field: str, entries: Sequence[Middleware]) -> None:
