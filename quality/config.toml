@@ -17,3 +17,9 @@ what = 'import contract "webauth persists nothing itself" removed'
 item = "#779"
 date = 2026-11-16
 reason = "the optional Postgres module is the one place that reaches SQLAlchemy, so the contract is replaced by one that allows only webauth.postgres to import it"
+
+[[gate.loosened]]
+what = 'import contract "webauth.https_client is imported only by jwt_verification, oidc_transport and oidc" removed'
+item = "#838"
+date = 2026-11-21
+reason = "webauth.web_auth names the HTTPS fetch and post as the defaults of IssuerCalls, so the contract is renamed and allows webauth.web_auth"
