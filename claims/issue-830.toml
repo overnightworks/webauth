@@ -3,6 +3,6 @@ agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
 role = "builder"
 base = "f5fdc7a3dbd8e387f8264c4b42fa38398eb5514b"
 branch = "claude/issue-830-a-host-sets-the-content-security-policy"
-scope = ["docs/host-contract.md", "src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "tests/middleware/test_security_headers.py"]
+scope = ["docs/host-contract.md", "src/webauth/middleware/security_headers.py", "src/webauth/policies.py", "tests/middleware/test_security_headers.py", "tests/support/security_headers_arrangement.py", "tests/test_policies.py", "tests/test_policies_default_content_security_policy.py"]
 opened_commit = "bccf7b1bde4d23d9ab9ed1ec50a6675a89b48763"
 whole_reason = "One policy field, the middleware that applies it, its contract row and its tests, which do not ship apart."
