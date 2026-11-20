@@ -273,5 +273,12 @@ def a_composed_host(
 
 
 def the_app_as_it_stands(app: FastAPI) -> tuple[object, object, object]:
-    """Routes, middleware and state, to prove a refused call left the app as it was."""
-    return list(app.router.routes), list(app.user_middleware), dict(vars(app.state))
+    """Routes, middleware and state, to prove a refused call left the app as it was.
+
+    Starlette's `State` keeps every key in one inner dict, so the state is copied one level down.
+    """
+    state = {
+        name: dict(value) if isinstance(value, dict) else value
+        for name, value in vars(app.state).items()
+    }
+    return list(app.router.routes), list(app.user_middleware), state
