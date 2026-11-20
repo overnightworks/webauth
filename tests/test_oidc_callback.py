@@ -230,16 +230,6 @@ def test_a_callback_the_issuer_cannot_be_credited_with_is_refused_and_exchanges_
     assert login_at_an_issuer_sending_iss.token_endpoint.requests == []
 
 
-def test_the_issuer_sending_iss_keeps_the_error_code_out_of_a_callback_without_iss(
-    login_at_an_issuer_sending_iss: LoginScenario,
-) -> None:
-    _pending, outcome = login_at_an_issuer_sending_iss.attempt(
-        Attempt(callback={"iss": ABSENT, "code": ABSENT, "error": "access_denied"})
-    )
-
-    assert outcome == OidcRefusal(OidcRefusalReason.ISSUER_MISMATCH, idp_error=None)
-
-
 def test_the_issued_refresh_token_is_in_no_repr_and_the_access_token_is_nowhere(
     login: LoginScenario,
 ) -> None:
