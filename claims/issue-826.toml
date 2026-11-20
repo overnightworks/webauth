@@ -1,0 +1,8 @@
+claim_id = "4ec4f3cbcf6144139b720a860cfccfb1"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "27f2d30986f685818a199da9691ce263028af0f5"
+branch = "claude/issue-826-oidcrefusal-idp-error-carries-the-closed"
+scope = ["docs/host-contract.md", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc/_token_endpoint.py", "src/webauth/oidc_login.py", "src/webauth/sign_in_routes.py", "tests/e2e/oidc/host_app.py", "tests/middleware/test_bearer_gate_exchange.py", "tests/test_oidc_callback.py", "tests/test_oidc_grants.py", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_log.py"]
+opened_commit = "6c4fade5cf73de252e513423e69f72482a478856"
+whole_reason = "One field type, its contract text and the tests that pin it, which do not ship apart."
