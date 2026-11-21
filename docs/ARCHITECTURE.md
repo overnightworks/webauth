@@ -80,7 +80,7 @@ Successful-login ownership for the changing engineer, from [`oidc_login`](../src
 
 ### The store decides every request
 
-Every authenticated request reads `SessionRecordStore`, never a cache ([`ports`](../src/webauth/ports.py) owns the duties); the library judges validity.
+Every authenticated request reads `SessionRenewalStore`, never a cache ([`ports`](../src/webauth/ports.py) owns the duties); the library judges validity.
 
 ### The bearer gate
 
@@ -167,7 +167,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 ## 6. Constraints and reasons
 
 - The library never commits: durability belongs to the host, so each host decides what a failure keeps ([host contract](host-contract.md#the-sign-in-routes)).
-- It caches no session: the store decides every request, so a session the host ended is refused on its next request ([`SessionRecordStore`](../src/webauth/ports.py)).
+- It caches no session: the store decides every request, so a session the host ended is refused on its next request ([`SessionRenewalStore`](../src/webauth/ports.py)).
 - One install order: the gates sit in a fixed order, each placed for what it must see first, and the install puts the rules derived from the host's `SignInPaths` and the bearer gate's resource ahead of the host's own; an app that already holds another handle's stack is refused untouched. No host reaches the installers or the stack classes: `WebAuth.build` and `auth.install` are the only way in, so the order is one the library owns ([`stack`](../src/webauth/middleware/stack.py)).
 - The store is bound to one issuer: an account's `id` is the issuer's subject, so moving issuers is a migration of the host's accounts ([`oidc_login`](../src/webauth/oidc_login.py)).
 - The pending login lives in its own signed cookie, one per login, so two tabs never overwrite each other and the library keeps no server-side store ([`oidc_login`](../src/webauth/oidc_login.py)).
