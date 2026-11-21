@@ -375,8 +375,8 @@ def member_token_creates_the_account(run: BearerRun) -> str:
     assert (held["accounts"], held["account_events"], held["sessions"]) == (1, 1, 0), held
     assert held["session_transactions"] == 1, held
     return (
-        f"{USER_NAME}'s token on /api/me: 200, named by its subject; 1 account, 1 event, 0 sessions, "
-        "1 session transaction (current_user's own)"
+        f"{USER_NAME}'s token on /api/me: 200, named by its subject; "
+        "1 account, 1 event, 0 sessions, 1 session transaction (current_user's own)"
     )
 
 
