@@ -129,7 +129,8 @@ def test_a_path_outside_the_person_paths_is_refused_with_its_session_answer_and_
         (401, "Authentication required", None),
         (401, "Invalid session", None),
     ]
-    assert (navigation.status_code, the_challenge(navigation)) == navigation_answer
+    navigation_outcome = (navigation.status_code, the_challenge(navigation))
+    assert navigation_outcome == navigation_answer
 
 
 def test_the_admitted_admin_401_of_a_person_path_without_a_gate_admission_challenges() -> None:
@@ -168,7 +169,8 @@ def test_a_person_path_without_a_bearer_credential_is_refused_as_the_session_ref
         (401, "Authentication required", PERSON_REALM),
         (401, "Invalid session", PERSON_REALM),
     ]
-    assert (navigation.status_code, the_challenge(navigation)) == navigation_answer
+    navigation_outcome = (navigation.status_code, the_challenge(navigation))
+    assert navigation_outcome == navigation_answer
 
 
 def test_a_navigation_to_a_person_path_still_gets_its_login_redirect() -> None:
