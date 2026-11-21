@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from redis import Redis
 
 __all__ = [
@@ -109,14 +111,15 @@ class SingleProcessRateLimitBackend:
     currently active rather than by every address ever seen.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, monotonic_clock: Callable[[], float] = time.monotonic) -> None:
+        self._monotonic_clock = monotonic_clock
         self._events: dict[str, _WindowedEvents] = {}
         self._lock = threading.Lock()
         self._next_prune_at = 0.0
 
     def is_allowed(self, key: str, *, limit: int, window_seconds: int) -> bool:
         with self._lock:
-            now = time.monotonic()
+            now = self._monotonic_clock()
             self._sweep_expired_when_due(now)
             entry = self._events.get(key)
             if entry is None:

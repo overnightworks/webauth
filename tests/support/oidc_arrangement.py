@@ -184,18 +184,6 @@ class FakeClock:
 
 
 @dataclass
-class SignallingClock(FakeClock):
-    """A clock whose every read releases `reads`, so a test knows a caller has reached the
-    clock without sleeping."""
-
-    reads: threading.Semaphore = field(default_factory=lambda: threading.Semaphore(0))
-
-    def __call__(self) -> float:
-        self.reads.release()
-        return super().__call__()
-
-
-@dataclass
 class FakeKeySetEndpoint:
     """Answers each fetch with `response`: a document, or the error to raise.
     It stands in for any injected document fetch, the key set's and the provider

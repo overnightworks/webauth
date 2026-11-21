@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import webauth.rate_limit
+from tests.support.oidc_arrangement import FakeClock
 from tests.support.webauth_arrangement import (
     API_PATH,
     BULK_BUDGET_NAME,
@@ -30,22 +30,20 @@ PRUNE_INTERVAL_SECONDS = 60
 
 class TestCountingAndExpiry:
     def test_counts_events_sharing_a_timestamp(self) -> None:
-        backend = SingleProcessRateLimitBackend()
-        with patch("webauth.rate_limit.time.monotonic", return_value=500.0):
-            assert backend.is_allowed("addr", limit=2, window_seconds=60) is True
-            assert backend.is_allowed("addr", limit=2, window_seconds=60) is True
+        backend = SingleProcessRateLimitBackend(monotonic_clock=FakeClock(500.0))
+        assert backend.is_allowed("addr", limit=2, window_seconds=60) is True
+        assert backend.is_allowed("addr", limit=2, window_seconds=60) is True
+        assert backend.is_allowed("addr", limit=2, window_seconds=60) is False
+        for _ in range(1_000):
             assert backend.is_allowed("addr", limit=2, window_seconds=60) is False
-            for _ in range(1_000):
-                assert backend.is_allowed("addr", limit=2, window_seconds=60) is False
 
     def test_window_slides_so_budget_returns(self) -> None:
-        backend = SingleProcessRateLimitBackend()
-        with patch("webauth.rate_limit.time.monotonic") as monotonic:
-            monotonic.return_value = 100.0
-            assert backend.is_allowed("addr", limit=1, window_seconds=10) is True
-            assert backend.is_allowed("addr", limit=1, window_seconds=10) is False
-            monotonic.return_value = 111.0
-            assert backend.is_allowed("addr", limit=1, window_seconds=10) is True
+        clock = FakeClock(100.0)
+        backend = SingleProcessRateLimitBackend(monotonic_clock=clock)
+        assert backend.is_allowed("addr", limit=1, window_seconds=10) is True
+        assert backend.is_allowed("addr", limit=1, window_seconds=10) is False
+        clock.now = 111.0
+        assert backend.is_allowed("addr", limit=1, window_seconds=10) is True
 
     def test_reusing_a_key_with_a_different_window_raises(self) -> None:
         backend = SingleProcessRateLimitBackend()
@@ -63,40 +61,37 @@ class TestIsolationAndBounds:
         assert one.is_allowed("addr", limit=1, window_seconds=60) is False
 
     def test_a_key_past_its_window_is_dropped(self) -> None:
-        backend = SingleProcessRateLimitBackend()
-        with patch("webauth.rate_limit.time.monotonic") as monotonic:
-            monotonic.return_value = 1_000.0
-            backend.is_allowed("stale-addr", limit=5, window_seconds=60)
-            monotonic.return_value = 1_000.0 + 61
-            backend.is_allowed("active-addr", limit=5, window_seconds=60)
-            assert backend.is_allowed("stale-addr", limit=5, window_seconds=30) is True
-            with pytest.raises(ValueError, match="active-addr"):
-                backend.is_allowed("active-addr", limit=5, window_seconds=30)
+        clock = FakeClock(1_000.0)
+        backend = SingleProcessRateLimitBackend(monotonic_clock=clock)
+        backend.is_allowed("stale-addr", limit=5, window_seconds=60)
+        clock.now = 1_000.0 + 61
+        backend.is_allowed("active-addr", limit=5, window_seconds=60)
+        assert backend.is_allowed("stale-addr", limit=5, window_seconds=30) is True
+        with pytest.raises(ValueError, match="active-addr"):
+            backend.is_allowed("active-addr", limit=5, window_seconds=30)
 
     def test_the_full_sweep_clears_stale_keys_once_the_interval_elapses(self) -> None:
-        backend = SingleProcessRateLimitBackend()
-        with patch("webauth.rate_limit.time.monotonic") as monotonic:
-            monotonic.return_value = 1_000.0
-            for n in range(5):
-                backend.is_allowed(f"addr-{n}", limit=1, window_seconds=10)
-            for n in range(5):
-                with pytest.raises(ValueError, match=f"addr-{n}"):
-                    backend.is_allowed(f"addr-{n}", limit=1, window_seconds=20)
-            monotonic.return_value = 1_000.0 + PRUNE_INTERVAL_SECONDS + 1
-            backend.is_allowed("fresh", limit=1, window_seconds=10)
-            for n in range(5):
-                assert backend.is_allowed(f"addr-{n}", limit=1, window_seconds=20) is True
-            with pytest.raises(ValueError, match="fresh"):
-                backend.is_allowed("fresh", limit=1, window_seconds=20)
+        clock = FakeClock(1_000.0)
+        backend = SingleProcessRateLimitBackend(monotonic_clock=clock)
+        for n in range(5):
+            backend.is_allowed(f"addr-{n}", limit=1, window_seconds=10)
+        for n in range(5):
+            with pytest.raises(ValueError, match=f"addr-{n}"):
+                backend.is_allowed(f"addr-{n}", limit=1, window_seconds=20)
+        clock.now = 1_000.0 + PRUNE_INTERVAL_SECONDS + 1
+        backend.is_allowed("fresh", limit=1, window_seconds=10)
+        for n in range(5):
+            assert backend.is_allowed(f"addr-{n}", limit=1, window_seconds=20) is True
+        with pytest.raises(ValueError, match="fresh"):
+            backend.is_allowed("fresh", limit=1, window_seconds=20)
 
     def test_a_sweep_respects_each_keys_own_window(self) -> None:
-        backend = SingleProcessRateLimitBackend()
-        with patch("webauth.rate_limit.time.monotonic") as monotonic:
-            monotonic.return_value = 1_000.0
-            assert backend.is_allowed("long-lived", limit=1, window_seconds=3_600) is True
-            monotonic.return_value = 1_000.0 + PRUNE_INTERVAL_SECONDS + 1
-            backend.is_allowed("noise", limit=5, window_seconds=30)
-            assert backend.is_allowed("long-lived", limit=1, window_seconds=3_600) is False
+        clock = FakeClock(1_000.0)
+        backend = SingleProcessRateLimitBackend(monotonic_clock=clock)
+        assert backend.is_allowed("long-lived", limit=1, window_seconds=3_600) is True
+        clock.now = 1_000.0 + PRUNE_INTERVAL_SECONDS + 1
+        backend.is_allowed("noise", limit=5, window_seconds=30)
+        assert backend.is_allowed("long-lived", limit=1, window_seconds=3_600) is False
 
 
 class _LockThatSignalsContention:
@@ -152,7 +147,7 @@ class TestThreadSafety:
             Lock=lambda: _LockThatSignalsContention(second_is_settled.set),
         )
         with patch.object(webauth.rate_limit, "threading", contention_signalling_threading):
-            backend = SingleProcessRateLimitBackend()
+            backend = SingleProcessRateLimitBackend(monotonic_clock=scripted_monotonic)
 
         def check() -> None:
             backend.is_allowed("addr", limit=2, window_seconds=100)
@@ -161,23 +156,18 @@ class TestThreadSafety:
             check()
             second_is_settled.set()
 
-        with patch.object(
-            webauth.rate_limit,
-            "time",
-            SimpleNamespace(monotonic=scripted_monotonic),
-        ):
-            first = threading.Thread(target=check)
-            first.start()
-            assert first_has_read_clock.wait(timeout=5)
-            second = threading.Thread(target=second_check)
-            second.start()
-            first.join(timeout=5)
-            second.join(timeout=5)
-            backend.is_allowed("other", limit=1, window_seconds=100)
+        first = threading.Thread(target=check)
+        first.start()
+        assert first_has_read_clock.wait(timeout=5)
+        second = threading.Thread(target=second_check)
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+        backend.is_allowed("other", limit=1, window_seconds=100)
 
-            for key in ("addr", "other"):
-                with pytest.raises(ValueError, match=key):
-                    backend.is_allowed(key, limit=1, window_seconds=200)
+        for key in ("addr", "other"):
+            with pytest.raises(ValueError, match=key):
+                backend.is_allowed(key, limit=1, window_seconds=200)
 
 
 OTHER_PATH = "/other/thing"
@@ -286,22 +276,22 @@ class TestMiddlewareOverSingleProcessBackend:
         assert [client.get(BULK_PATH).status_code for _ in range(2)] == [200, 429]
 
     def test_each_budget_expires_after_its_own_window(self) -> None:
+        clock = FakeClock(100.0)
         client = a_policy_rate_limited_client(
-            SingleProcessRateLimitBackend(),
+            SingleProcessRateLimitBackend(monotonic_clock=clock),
             _a_budget_pair_policy(),
             paths=(API_PATH, BULK_PATH),
         )
-        with _monotonic_clock_at(100.0) as clock:
-            for _ in range(3):
-                client.get(API_PATH)
-            client.get(BULK_PATH)
+        for _ in range(3):
+            client.get(API_PATH)
+        client.get(BULK_PATH)
 
-            clock.now = 100.0 + SHORT_WINDOW_SECONDS + 1
-            assert client.get(BULK_PATH).status_code == 200
-            assert client.get(API_PATH).status_code == 429
+        clock.now = 100.0 + SHORT_WINDOW_SECONDS + 1
+        assert client.get(BULK_PATH).status_code == 200
+        assert client.get(API_PATH).status_code == 429
 
-            clock.now = 100.0 + LONG_WINDOW_SECONDS + 1
-            assert client.get(API_PATH).status_code == 200
+        clock.now = 100.0 + LONG_WINDOW_SECONDS + 1
+        assert client.get(API_PATH).status_code == 200
 
 
 SHORT_WINDOW_SECONDS = 30
@@ -318,15 +308,6 @@ def _a_budget_pair_policy() -> RateLimitPolicy:
             ),
         ),
     )
-
-
-@contextmanager
-def _monotonic_clock_at(start: float):
-    """The limiter's clock alone, steered by the yielded object's ``now``."""
-    clock = SimpleNamespace(now=start)
-    steered_time = SimpleNamespace(monotonic=lambda: clock.now)
-    with patch.object(webauth.rate_limit, "time", steered_time):
-        yield clock
 
 
 def _from_peer(client: TestClient, address: str) -> TestClient:

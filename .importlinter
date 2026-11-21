@@ -26,6 +26,16 @@ protected_modules =
 allowed_importers =
     webauth.postgres
 
+# The composition call is a leaf the host imports: no webauth module reaches back
+# into the handle it builds.
+[importlinter:contract:no-webauth-module-imports-the-composition-call]
+name = webauth.web_auth is imported by no other webauth module
+type = protected
+protected_modules =
+    webauth.web_auth
+allowed_importers =
+    webauth.web_auth
+
 # The JWT verifier is reached only through the OpenID Connect relying party
 # and the service caller check, the cryptographic stack only through the
 # verifier, and urllib3 only through the one HTTPS client, so each of them has

@@ -6,8 +6,9 @@ Each yields its access token or a refusal with its reason, and no repr shows a t
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -24,7 +25,6 @@ from tests.support.oidc_arrangement import (
     FakeIssuer,
     FakeTokenEndpoint,
     GrantHeldUntilReleased,
-    SignallingClock,
     a_fake_id_token,
     a_realm_client_config,
     a_relying_party,
@@ -498,8 +498,8 @@ def test_a_refused_workload_grant_is_not_reused_once_the_issuer_answers_a_token(
 def _concurrent_workload_calls(
     relying_party: OidcRelyingParty,
     held: GrantHeldUntilReleased,
-    clock: SignallingClock,
     waiters: int,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> list[object]:
     """The outcomes of one call that reaches the issuer and `waiters` calls that join it
     while it is held; a raised error is an outcome."""
@@ -510,12 +510,25 @@ def _concurrent_workload_calls(
         except Exception as error:  # noqa: BLE001 - the error is the outcome under test
             return error
 
-    with ThreadPoolExecutor(max_workers=waiters + 1) as pool:
+    waiting = threading.Semaphore(0)
+    wait_for_result = Future.result
+
+    def signal_then_wait(self: Future[object], timeout: float | None = None) -> object:
+        # A call that holds the grant's future and waits on it has joined the grant;
+        # the pool futures below are read only after the release.
+        waiting.release()
+        return wait_for_result(self, timeout)
+
+    with (
+        monkeypatch.context() as patched,
+        ThreadPoolExecutor(max_workers=waiters + 1) as pool,
+    ):
+        patched.setattr(Future, "result", signal_then_wait)
         leader = pool.submit(call)
         held.wait_until_reached()
         joined = [pool.submit(call) for _ in range(waiters)]
-        for _ in range(1 + waiters):
-            assert clock.reads.acquire(timeout=GRANT_DEADLINE_SECONDS)
+        for _ in range(waiters):
+            assert waiting.acquire(timeout=GRANT_DEADLINE_SECONDS)
         held.release()
         return [
             leader.result(GRANT_DEADLINE_SECONDS),
@@ -536,7 +549,7 @@ def _concurrent_workload_calls(
     ],
 )
 def test_concurrent_workload_calls_for_one_key_post_once_and_share_the_answer(
-    configure_issuer: Callable[[FakeIssuer], object], kept: bool
+    configure_issuer: Callable[[FakeIssuer], object], kept: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """WORKLOAD-03, WORKLOAD-04: waiters share the one grant's answer; only a token is kept."""
 
@@ -544,10 +557,9 @@ def test_concurrent_workload_calls_for_one_key_post_once_and_share_the_answer(
     issuer = _a_reusing_issuer()
     configure_issuer(issuer)
     issuer.before_exchange = held
-    clock = SignallingClock(5_000.0)
-    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
+    relying_party = _a_relying_party_at(issuer, monotonic_clock=FakeClock(5_000.0))
 
-    outcomes = _concurrent_workload_calls(relying_party, held, clock, waiters=2)
+    outcomes = _concurrent_workload_calls(relying_party, held, waiters=2, monkeypatch=monkeypatch)
     posts_while_shared = len(issuer.requests)
     _workload_access_token(relying_party)
 
@@ -556,7 +568,9 @@ def test_concurrent_workload_calls_for_one_key_post_once_and_share_the_answer(
     assert len(issuer.requests) == (1 if kept else 2)
 
 
-def test_concurrent_workload_calls_share_a_raised_error_and_the_next_call_posts_again() -> None:
+def test_concurrent_workload_calls_share_a_raised_error_and_the_next_call_posts_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """WORKLOAD-03, WORKLOAD-04: waiters share a raised error, which is not kept."""
 
     held = GrantHeldUntilReleased(GRANT_DEADLINE_SECONDS)
@@ -569,10 +583,9 @@ def test_concurrent_workload_calls_share_a_raised_error_and_the_next_call_posts_
             raise error
 
     issuer.before_exchange = hold_and_break_the_first_post
-    clock = SignallingClock(5_000.0)
-    relying_party = _a_relying_party_at(issuer, monotonic_clock=clock)
+    relying_party = _a_relying_party_at(issuer, monotonic_clock=FakeClock(5_000.0))
 
-    outcomes = _concurrent_workload_calls(relying_party, held, clock, waiters=2)
+    outcomes = _concurrent_workload_calls(relying_party, held, waiters=2, monkeypatch=monkeypatch)
     posts_while_shared = len(issuer.requests)
     next_call = _workload_access_token(relying_party)
 
