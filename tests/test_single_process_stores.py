@@ -292,6 +292,17 @@ class TestSessions:
         assert stores.sessions.load(alive) is not None
         assert stores.sessions.load(due_now) is not None
 
+    def test_a_row_expiring_within_the_current_second_survives_the_sweep(
+        self, stores: SingleProcessStores
+    ) -> None:
+        """MEMSTORE-12: the sweep reads its time in whole seconds, as the session gate does."""
+        with_account(stores)
+        session_id = open_session(stores, expires_at=START)
+
+        assert stores.sessions.delete_expired(START + timedelta(milliseconds=500)) == 0
+
+        assert stores.sessions.load(session_id) is not None
+
     def test_create_drops_the_rows_expired_at_its_time(self, stores: SingleProcessStores) -> None:
         """MEMSTORE-12: create prunes the rows expired at its time."""
         with_account(stores)

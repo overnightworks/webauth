@@ -111,7 +111,12 @@ class _Tables:
             self.rows = dict(snapshot.rows)
 
     def drop_expired(self, now: datetime) -> int:
-        expired = [session_id for session_id, row in self.rows.items() if row.expires_at < now]
+        whole_seconds_now = now.replace(microsecond=0)
+        expired = [
+            session_id
+            for session_id, row in self.rows.items()
+            if row.expires_at < whole_seconds_now
+        ]
         for session_id in expired:
             del self.rows[session_id]
         return len(expired)
@@ -369,8 +374,9 @@ class _SignInEntry:
 class SingleProcessStores:
     """The account store, the session store and the sign-in transaction over one set of tables.
 
-    The host passes its own `AuditSink`; webauth ships none. Hand `transaction`
-    to the sign-in routes and `sessions` to the session gate.
+    The host passes its own `AuditSink`; webauth ships none. Pass
+    `transaction` to `WebAuth.build` as `stores.sign_in` and `lambda: nullcontext(sessions)` as
+    `stores.sessions`.
     """
 
     def __init__(self, *, audit: AuditSink) -> None:
