@@ -244,7 +244,7 @@ class TestAMachinePrefixTheSessionGateAlsoOpens:
         assert_answers_no_store(response)
 
 
-def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> FastAPI:
+def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: SessionGate | None = None) -> FastAPI:
     inner = FastAPI()
     install_the_gated_stack(
         inner,
@@ -252,7 +252,7 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
         sessions=auth.auth.sessions.in_transaction,
         security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
         csrf_origin=CsrfPolicy() if csrf else CsrfPolicy(exempt=PathRules(prefixes=("/",))),
-        session_gate=SessionGate(login_redirect=None, public=()) if session_gate else None,
+        session_gate=session_gate,
     )
 
     @inner.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
@@ -280,7 +280,7 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
 
 
 class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
-    def a_mounted_app(self, *, csrf: bool, session_gate: bool = False) -> BearerApp:
+    def a_mounted_app(self, *, csrf: bool, session_gate: SessionGate | None = None) -> BearerApp:
         app = a_bearer_app(paths=PathRules(prefixes=("/sub/",)))
         app.auth.app.mount("/sub", a_sub_app(app, csrf=csrf, session_gate=session_gate))
         return app
@@ -299,7 +299,9 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
 
     def test_its_own_session_gate_still_applies(self) -> None:
         """MACHINE-29: a sub-app mounted below a gated path keeps its own session gate."""
-        app = self.a_mounted_app(csrf=False, session_gate=True)
+        app = self.a_mounted_app(
+            csrf=False, session_gate=SessionGate(login_redirect=None, public=())
+        )
 
         response = app.ask(f"/sub{EXPORT_PATH}", authorization=bearing(A_TOKEN))
 
@@ -324,6 +326,26 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
         """MACHINE-30: the `bearer_caller` and the session readers of a route in a mounted
         sub-app raise."""
         app = self.a_mounted_app(csrf=False)
+
+        response = app.ask(f"/sub{path}", method="DELETE", authorization=bearing(A_TOKEN))
+
+        assert response.status_code == 500
+        assert_answers_no_store(response)
+
+    @pytest.mark.parametrize(
+        "path",
+        [ADMITTED_USER_PATH, ADMITTED_ADMIN_ROUTE_PATH],
+        ids=["admitted_user", "admitted_admin"],
+    )
+    def test_its_admitted_readers_raise_where_its_own_session_gate_decided(self, path: str) -> None:
+        """MACHINE-30: where the sub-app's own session gate decided the request, `admitted_user`
+        and `admitted_admin` still raise for the admission that does not hold."""
+        app = self.a_mounted_app(
+            csrf=False,
+            session_gate=SessionGate(
+                login_redirect=None, public=(), optional=PathRules(prefixes=("/",))
+            ),
+        )
 
         response = app.ask(f"/sub{path}", method="DELETE", authorization=bearing(A_TOKEN))
 
