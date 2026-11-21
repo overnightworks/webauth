@@ -1,8 +1,0 @@
-claim_id = "0532782a10124e7e9e75fbd9acb902b6"
-agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
-role = "builder"
-base = "e45ccd981f45140d48b07501470e201d84623990"
-branch = "claude/issue-854-the-request-path-takes-a-narrow-session"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/dependencies.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/postgres.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/postgres_arrangement.py", "tests/test_dependencies.py", "tests/test_dependencies_websocket_auth.py", "tests/test_postgres_sessions.py"]
-opened_commit = "f261eaadc5ab8e29fbd0c6970fb21c7069d9ed13"
-whole_reason = "One port split and its consequences: the Protocol, the functions that take its yield, the adapter that stops faking create, the typing pin, the error texts and the two contract rows move together or the type check fails."
