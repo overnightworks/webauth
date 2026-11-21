@@ -448,15 +448,14 @@ def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
     assert host.audit.account_events == []
 
 
+MEMBER, ADMIN = [str(LOGIN_GROUP)], [str(ADMIN_GROUP)]
+
+
 @pytest.mark.parametrize(
     ("before", "after", "status_before", "status_after"),
     [
-        pytest.param(
-            [str(LOGIN_GROUP)], [str(ADMIN_GROUP)], 403, 200, id="put into the admin group"
-        ),
-        pytest.param(
-            [str(ADMIN_GROUP)], [str(LOGIN_GROUP)], 200, 403, id="taken out of the admin group"
-        ),
+        pytest.param(*(MEMBER, ADMIN), 403, 200, id="put into the admin group"),
+        pytest.param(*(ADMIN, MEMBER), 200, 403, id="taken out of the admin group"),
     ],
 )
 def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
