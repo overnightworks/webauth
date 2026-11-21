@@ -58,9 +58,9 @@ from tests.support.webauth_arrangement import (
     LOGIN_REDIRECT,
     session_cookie_header,
 )
-from webauth.dependencies import current_user
+from webauth.dependencies import admin_user, current_user
 from webauth.middleware import SessionGate, bearer_caller
-from webauth.middleware.session_gate import admitted_user
+from webauth.middleware.session_gate import admitted_admin, admitted_user
 from webauth.policies import (
     BodySizePolicy,
     CacheControlRule,
@@ -83,6 +83,8 @@ HEALTH_PATH = "/health"
 CALLER_PATH = "/api/admin/caller"
 SOCKET_PATH = "/api/admin/socket"
 ADMITTED_USER_PATH = "/api/admin/admitted-user"
+ADMIN_USER_PATH = "/api/admin/admin-user"
+ADMITTED_ADMIN_ROUTE_PATH = "/api/admin/admitted-admin"
 NOT_ADMIN = a_token(groups=["/apps/x"])
 SESSION_PATHS = ("/me", "/admin", *ADMITTED_ADMIN_PATHS)
 FOREIGN_PAGE = {
@@ -266,6 +268,14 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
         user = admitted_user(request)
         return {"ran": None if user is None else user.username}
 
+    @inner.api_route(ADMIN_USER_PATH, methods=["DELETE"])
+    def admin_user_route(user: Any = Depends(admin_user)) -> dict[str, str]:
+        return {"ran": user.username}
+
+    @inner.api_route(ADMITTED_ADMIN_ROUTE_PATH, methods=["DELETE"])
+    def admitted_admin_route(request: Request) -> dict[str, str]:
+        return {"ran": admitted_admin(request).username}
+
     return inner
 
 
@@ -301,8 +311,14 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
 
     @pytest.mark.parametrize(
         "path",
-        [EXPORT_PATH, ALL_DEPENDENCIES_PATH, ADMITTED_USER_PATH],
-        ids=["bearer_caller", "current_user", "admitted_user"],
+        [
+            EXPORT_PATH,
+            ALL_DEPENDENCIES_PATH,
+            ADMIN_USER_PATH,
+            ADMITTED_USER_PATH,
+            ADMITTED_ADMIN_ROUTE_PATH,
+        ],
+        ids=["bearer_caller", "current_user", "admin_user", "admitted_user", "admitted_admin"],
     )
     def test_its_routes_raise_when_they_ask_for_the_admission(self, path: str) -> None:
         """MACHINE-30: the `bearer_caller` and the session readers of a route in a mounted
@@ -385,6 +401,16 @@ class TestAnAdmissionBelongsToItsPathAppAndHeader:
         assert app.auth.route_runs == []
 
 
+def a_bearer_app_reading_the_admitted_user(**keywords: Any) -> BearerApp:
+    app = a_bearer_app(**keywords)
+
+    @app.auth.app.get(ADMITTED_USER_PATH)
+    def reading_admitted_user(request: Request) -> None:
+        admitted_user(request)
+
+    return app
+
+
 class Rewriting:
     """A host middleware inside the stack that rewrites the request's header lines."""
 
@@ -417,15 +443,13 @@ def without_authorization(headers: list[tuple[bytes, bytes]]) -> list[tuple[byte
         ),
     ],
 )
-def test_a_header_changed_after_admission_voids_the_caller(
+def test_a_header_changed_after_admission_voids_the_admission(
     path: str,
     rewrite: Callable[[list[tuple[bytes, bytes]]], list[Any]],
 ) -> None:
-    app = a_bearer_app(inner_middleware=(Middleware(Rewriting, rewrite=rewrite),))
-
-    @app.auth.app.get(ADMITTED_USER_PATH)
-    def reading_admitted_user(request: Request) -> None:
-        admitted_user(request)
+    app = a_bearer_app_reading_the_admitted_user(
+        inner_middleware=(Middleware(Rewriting, rewrite=rewrite),)
+    )
 
     response = app.ask(path, authorization=bearing(A_TOKEN))
 
