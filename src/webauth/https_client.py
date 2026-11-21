@@ -11,7 +11,8 @@ the operation's size limit read from the answer. The deadline counts from the
 start of the call; connecting, which urllib3 bounds by the connect timeout once
 per resolved address, and the host name lookup, which the resolver offers no way
 to bound, run outside it, and the time they take comes off the handshake's and
-the answer's share.
+the answer's share. Each request also carries what OpenTelemetry's global propagator
+writes for the current context, beneath the headers this module fixes.
 
 No error this module raises carries any part of the URL, the request or
 urllib3's error, and none chains urllib3's error, since its message may quote
@@ -45,6 +46,7 @@ from typing import TypeGuard
 
 import urllib3
 from logline import StepTimer
+from opentelemetry.propagate import inject
 from pydantic import SecretStr
 from urllib3.util import create_urllib3_context
 
@@ -362,6 +364,28 @@ def _read_answer(
         response.close()
 
 
+def _with_trace_context(fixed_headers: Mapping[str, str] | None) -> dict[str, str]:
+    """`fixed_headers` joined by what OpenTelemetry's global propagator writes for the current
+    context. A fixed header wins over a propagator's of the same name in any case. This module
+    sets no propagator (a host's `logline.configure` sets W3C trace context alone) and creates
+    no span.
+
+    A propagator's error never fails the call and is neither logged nor chained, since its
+    message may hold what the host's context holds; the call then goes out without trace
+    context."""
+    fixed = dict(fixed_headers or {})
+    carrier: dict[str, str] = {}
+    try:
+        inject(carrier)
+    except Exception:  # noqa: BLE001 - any propagator, any error; the call carries on without it
+        carrier = {}
+    fixed_names = {name.lower() for name in fixed}
+    return {
+        **{name: value for name, value in carrier.items() if name.lower() not in fixed_names},
+        **fixed,
+    }
+
+
 def _exchange(
     event: str,
     method: str,
@@ -408,7 +432,7 @@ def _exchange(
                     response = pool.request(
                         method,
                         url,
-                        headers=headers,
+                        headers=_with_trace_context(headers),
                         body=body,
                         redirect=False,
                         preload_content=False,
