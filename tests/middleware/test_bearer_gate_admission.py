@@ -10,7 +10,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 from starlette.websockets import WebSocket
@@ -60,6 +60,7 @@ from tests.support.webauth_arrangement import (
 )
 from webauth.dependencies import current_user
 from webauth.middleware import SessionGate, bearer_caller
+from webauth.middleware.session_gate import admitted_user
 from webauth.policies import (
     BodySizePolicy,
     CacheControlRule,
@@ -81,6 +82,7 @@ EXPIRY = ACCESS_TOKEN_NOW + ACCESS_TOKEN_LIFETIME_SECONDS
 HEALTH_PATH = "/health"
 CALLER_PATH = "/api/admin/caller"
 SOCKET_PATH = "/api/admin/socket"
+ADMITTED_USER_PATH = "/api/admin/admitted-user"
 NOT_ADMIN = a_token(groups=["/apps/x"])
 SESSION_PATHS = ("/me", "/admin", *ADMITTED_ADMIN_PATHS)
 FOREIGN_PAGE = {
@@ -259,6 +261,11 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
     def session_route(user: Any = Depends(current_user)) -> dict[str, str]:
         return {"ran": user.username}
 
+    @inner.api_route(ADMITTED_USER_PATH, methods=["DELETE"])
+    def admitted_user_route(request: Request) -> dict[str, str | None]:
+        user = admitted_user(request)
+        return {"ran": None if user is None else user.username}
+
     return inner
 
 
@@ -294,11 +301,12 @@ class TestASubAppBelowAGatedPathDoesNotOwnTheAdmission:
 
     @pytest.mark.parametrize(
         "path",
-        [EXPORT_PATH, ALL_DEPENDENCIES_PATH],
-        ids=["bearer_caller", "current_user"],
+        [EXPORT_PATH, ALL_DEPENDENCIES_PATH, ADMITTED_USER_PATH],
+        ids=["bearer_caller", "current_user", "admitted_user"],
     )
     def test_its_routes_raise_when_they_ask_for_the_admission(self, path: str) -> None:
-        """MACHINE-30: the `bearer_caller` of a route in a mounted sub-app raises."""
+        """MACHINE-30: the `bearer_caller` and the session readers of a route in a mounted
+        sub-app raise."""
         app = self.a_mounted_app(csrf=False)
 
         response = app.ask(f"/sub{path}", method="DELETE", authorization=bearing(A_TOKEN))
@@ -394,6 +402,7 @@ def without_authorization(headers: list[tuple[bytes, bytes]]) -> list[tuple[byte
     return [(name, value) for name, value in headers if name != b"authorization"]
 
 
+@pytest.mark.parametrize("path", [EXPORT_PATH, ADMITTED_USER_PATH], ids=["caller", "admitted_user"])
 @pytest.mark.parametrize(
     "rewrite",
     [
@@ -409,11 +418,16 @@ def without_authorization(headers: list[tuple[bytes, bytes]]) -> list[tuple[byte
     ],
 )
 def test_a_header_changed_after_admission_voids_the_caller(
+    path: str,
     rewrite: Callable[[list[tuple[bytes, bytes]]], list[Any]],
 ) -> None:
     app = a_bearer_app(inner_middleware=(Middleware(Rewriting, rewrite=rewrite),))
 
-    response = app.ask(authorization=bearing(A_TOKEN))
+    @app.auth.app.get(ADMITTED_USER_PATH)
+    def reading_admitted_user(request: Request) -> None:
+        admitted_user(request)
+
+    response = app.ask(path, authorization=bearing(A_TOKEN))
 
     assert response.status_code == 500
     assert_answers_no_store(response)
