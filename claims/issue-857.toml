@@ -1,0 +1,7 @@
+claim_id = "4bf6c9777dd44c8db8b9b520562639d6"
+agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
+role = "builder"
+base = "55a1d3b547e19a20b00ec37c13d01268534e09d2"
+branch = "claude/issue-857-proxy-08-in-process-replay"
+scope = ["docs/host-contract.md"]
+opened_commit = "75965673b9d1d6e0f7e5adaad3c8e2d6d8847ed4"
