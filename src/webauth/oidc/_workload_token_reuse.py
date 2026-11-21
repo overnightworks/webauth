@@ -69,7 +69,7 @@ class WorkloadTokenReuse:
     ) -> SecretStr | Future[SecretStr | OidcRefusal] | _GrantLead:
         """The held token, the grant in flight to wait on, or the grant this caller now leads.
 
-        The clock is read under the guard once the grant in flight exists or is found."""
+        A leader reads the clock under the guard once its grant in flight exists."""
         with self._guard:
             in_flight = self._grants_in_flight.get(scopes)
             if in_flight is None:
@@ -80,9 +80,6 @@ class WorkloadTokenReuse:
                     return _GrantLead(in_flight, started_at)
                 del self._grants_in_flight[scopes]
                 return held.token
-            # The value is unused: this read marks the moment a waiter has joined the grant,
-            # so a test can release the held grant only after every caller waits on it.
-            self._monotonic_clock()
             return in_flight
 
     def _lead(self, scopes: tuple[str, ...], lead: _GrantLead) -> SecretStr | OidcRefusal:
