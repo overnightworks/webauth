@@ -12,7 +12,6 @@ import hashlib
 import logging
 import threading
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -60,14 +59,9 @@ from tests.support.webauth_arrangement import (
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import BearerGate, MachinePaths, PersonPaths, ProtectedResource
 from webauth.policies import PathRules, PathShape, PublicRule
-from webauth.ports import SignInStores
 
 HEALTH_PATH = "/health"
 GATE_LOGGER = "webauth.middleware.bearer_gate"
-
-
-def a_transaction_never_entered() -> AbstractContextManager[SignInStores]:
-    raise AssertionError("the sign-in transaction was entered")
 
 
 @dataclass(frozen=True)
