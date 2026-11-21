@@ -1,10 +1,8 @@
 """Turning a signed session cookie into the account that made the request.
 
-The application binds these dependencies once, over the stores it supplies,
-and every protected route asks for them. Nothing here commits. Without the
-session gate, the session renewal is durable when the store applies it, or,
-for a store that writes into the transaction the application's
-`session_store` dependency opens, when the host commits that transaction.
+Every protected route asks for these dependencies; they read the ``stores.sessions`` that
+``WebAuth.install`` put on the application. Nothing here commits: the session renewal is
+durable when the entry of ``stores.sessions`` exits.
 Behind the gate, on a gated or optional path, `current_user` returns the
 gate's admission when it was made for the request's own session cookie, and
 on a public path it admits by itself; the gate committed its renewal through
@@ -21,7 +19,6 @@ record holds the account behind the token, and `current_user` returns it.
 from __future__ import annotations
 
 import hashlib
-from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
@@ -54,7 +51,6 @@ if TYPE_CHECKING:
     from webauth.oidc import ExchangedAccess, OidcRefusal
 
 __all__ = [
-    "AuthDependencies",
     "LoginRedirect",
     "ConnectionRefusal",
     "account_language_of_session",
@@ -62,7 +58,6 @@ __all__ = [
     "admit_session",
     "authenticate_websocket",
     "current_user",
-    "current_user_dependency",
     "session_id_from_request",
 ]
 
@@ -103,68 +98,6 @@ class LoginRedirect:
                 "login_redirect.path must be a same-origin absolute path: "
                 "one leading '/', never '//' or a backslash form of it, and no scheme",
             )
-
-
-@dataclass(frozen=True)
-class AuthDependencies:
-    """The route dependencies built from one set of stores.
-
-    ``admin_user`` resolves ``current_user`` itself, so an application that
-    replaces one in a test replaces the identity behind both.
-    """
-
-    current_user: Callable[[Request, ports.SessionRecordStore], ports.AuthenticatedUser]
-    admin_user: Callable[[Request, ports.AuthenticatedUser], ports.AuthenticatedUser]
-
-
-def current_user_dependency(
-    *,
-    session_store: Callable[..., SessionRecordStore],
-    on_authenticated: Callable[[ports.AuthenticatedUser], None],
-    login_redirect: LoginRedirect | None = None,
-) -> AuthDependencies:
-    """Bind the auth dependencies to one application's stores.
-
-    ``session_store`` is the application's own dependency. When
-    ``current_user`` admits a request itself, the session renewal is written
-    into whatever transaction that dependency puts the store on. Behind the
-    session gate it returns the gate's admission instead, when that was made
-    for this request's own session cookie under this application's
-    ``WebAuthConfig``; the gate committed the renewal before the route ran, and
-    the store ``session_store`` builds is not asked.
-    ``on_authenticated`` is handed the account once the request's identity is
-    established, so the application can bind it into its own log context.
-    The account's ``id`` is also the ``sub`` of the request line, as it is
-    behind the gates, so an application that guards by this dependency alone
-    needs no code of its own for it; a refused request sets none.
-    ``login_redirect`` is unset by default: a missing or dead session then
-    keeps answering 401, byte-identically to a host that never names one.
-    A dependency can only raise ``HTTPException``, so the 302 still carries
-    FastAPI's default JSON body (``{"detail":"Found"}``) beside its
-    ``Location`` header.
-    """
-
-    def current_user(
-        request: Request,
-        sessions: SessionRecordStore = Depends(session_store),
-    ) -> ports.AuthenticatedUser:
-        user = _gate_or_own_admission(request, sessions)
-        if isinstance(user, ConnectionRefusal):
-            raise _http_refusal(request, user, login_redirect)
-        set_sub(request.scope, user.id)
-        on_authenticated(user)
-        return user
-
-    def admin_user(
-        request: Request,
-        user: ports.AuthenticatedUser = Depends(current_user),
-    ) -> ports.AuthenticatedUser:
-        return _require_admin(request, user)
-
-    return AuthDependencies(
-        current_user=current_user,
-        admin_user=admin_user,
-    )
 
 
 def _publish_installed_sessions(app: FastAPI, sessions: SessionTransaction) -> None:
@@ -219,8 +152,6 @@ def admin_user(
 
 def authenticate_websocket(
     connection: HTTPConnection,
-    *,
-    sessions: SessionRecordStore | None = None,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The account behind a WebSocket handshake, or why the handshake is refused.
 
@@ -255,14 +186,13 @@ def authenticate_websocket(
     like a request, up to the absolute cap of ``SessionLifetime``, which bounds
     a socket's life.
 
-    Without ``sessions`` the session is read in exactly one ``stores.sessions()`` entry of the
-    handle installed on the serving application, opened after the Origin check and closed
-    before this function returns.
+    The session is read in exactly one ``stores.sessions()`` entry of the handle installed on the
+    serving application, opened after the Origin check and closed before this function returns.
 
     A host may wrap this function in its own dependency: FastAPI resolves an
     ``HTTPConnection`` parameter on a WebSocket route as well as on an HTTP one.
     """
-    opening = _installed_sessions(connection) if sessions is None else lambda: nullcontext(sessions)
+    opening = _installed_sessions(connection)
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:
         return origin_refusal

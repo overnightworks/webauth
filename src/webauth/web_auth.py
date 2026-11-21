@@ -18,6 +18,7 @@ from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
 from webauth._validation import require_positive_whole_number
+from webauth.admission import NoAdmins
 from webauth.config import _install_web_auth_config
 from webauth.dependencies import _publish_installed_sessions
 from webauth.https_client import fetch_key_set_over_https
@@ -338,6 +339,10 @@ class WebAuth:
             trusted_proxies=self._front if isinstance(self._front, TrustedProxies) else None,
             outside=self._outside,
             inside=self._inside,
+            relying_party=self._relying_party,
+            admission=self._groups,
+            sign_in=self._stores.sign_in,
+            sessions=self._stores.sessions,
         )
         self._installed = True
         _install_web_auth_config(app, settings.config)
@@ -364,7 +369,8 @@ class WebAuth:
             return
         if not isinstance(bearer, BearerGate):
             raise _refuse("bearer", "must be a BearerGate or None")
-        if bearer.relying_party is not self._relying_party:
-            raise _refuse("bearer.relying_party", "must be the relying_party of this WebAuth")
-        if bearer.admission != self._groups:
-            raise _refuse("bearer.admission", "must be the groups this WebAuth was built with")
+        if bearer.machine_paths is not None and isinstance(self._groups.admin_group, NoAdmins):
+            raise _refuse(
+                "bearer.machine_paths",
+                "needs groups with an admin group: no token could pass there",
+            )

@@ -35,20 +35,13 @@ if TYPE_CHECKING:
 
     from starlette.applications import Starlette
 
+    from webauth.admission import AdmissionConfig
+    from webauth.oidc import OidcRelyingParty
+    from webauth.ports import SessionTransaction, SignInTransaction
     from webauth.proxies import TrustedProxies
     from webauth.sign_in_routes import SignInPaths
 
 __all__: list[str] = []
-
-_LIBRARY_MIDDLEWARE = (
-    _SecurityHeadersMiddleware,
-    _PathRefusalMiddleware,
-    _BodySizeLimitMiddleware,
-    _IpRateLimitMiddleware,
-    _BearerGateMiddleware,
-    _CsrfOriginMiddleware,
-    _SessionGateMiddleware,
-)
 
 _BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
 
@@ -147,9 +140,14 @@ def _library_middleware(
     bearer_gate: BearerGate | None,
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
+    relying_party: OidcRelyingParty,
+    admission: AdmissionConfig,
+    sign_in: SignInTransaction,
+    sessions: SessionTransaction,
 ) -> list[Middleware]:
-    """The middleware to install, outermost first, for the policies the host named;
-    ``security_headers`` is the effective policy ``_effective_security_headers`` derives."""
+    """The middleware to install, outermost first, for the policies the host named, bound to the
+    relying party, the admission and the transactions of its ``WebAuth``; ``security_headers`` is
+    the effective policy ``_effective_security_headers`` derives."""
     body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
         sign_in_paths,
         body_size=body_size or BodySizePolicy(),
@@ -165,29 +163,30 @@ def _library_middleware(
         Middleware(_IpRateLimitMiddleware, policy=rate_limit),
     ]
     if bearer_gate is not None:
-        entries.append(Middleware(_BearerGateMiddleware, policy=bearer_gate))
+        entries.append(
+            Middleware(
+                _BearerGateMiddleware,
+                policy=bearer_gate,
+                relying_party=relying_party,
+                admission=admission,
+                sign_in=sign_in,
+            )
+        )
     entries.append(Middleware(_CsrfOriginMiddleware, policy=csrf_origin))
     if session_gate is not None:
-        entries.append(Middleware(_SessionGateMiddleware, policy=session_gate))
+        entries.append(
+            Middleware(_SessionGateMiddleware, policy=session_gate, session_transaction=sessions)
+        )
     return entries
 
 
-def _refuse_an_unsound_stack(app: Starlette) -> None:
-    if any(
-        isinstance(entry.cls, type) and issubclass(entry.cls, _LIBRARY_MIDDLEWARE)
-        for entry in app.user_middleware
-    ):
+def _refuse_an_app_that_has_a_stack(app: Starlette) -> None:
+    """Every stack this module installs begins with security headers, so a second handle on the
+    same app, which the one install of each handle cannot see, finds the first one's."""
+    if any(entry.cls is _SecurityHeadersMiddleware for entry in app.user_middleware):
         raise RuntimeError(
-            "The app already carries library middleware; install the stack once "
-            "and add no library middleware by hand.",
-        )
-    if any(
-        isinstance(entry.cls, type) and issubclass(entry.cls, _ClientAddressMiddleware)
-        for entry in app.user_middleware
-    ):
-        raise RuntimeError(
-            "The app already carries a client-address writer; a writer added by hand sits inside "
-            "the stack. The composition call places it, and web_auth_front wraps several apps.",
+            "The app already carries the stack of another WebAuth; install one WebAuth "
+            "on each app.",
         )
 
 
@@ -222,12 +221,16 @@ def _install_web_auth_middleware(
     trusted_proxies: TrustedProxies | None,
     outside: Sequence[Middleware],
     inside: Sequence[Middleware],
+    relying_party: OidcRelyingParty,
+    admission: AdmissionConfig,
+    sign_in: SignInTransaction,
+    sessions: SessionTransaction,
 ) -> None:
     """Install what ``WebAuth.install`` places, outermost first: logline's request line and the
     client-address writer, only with ``trusted_proxies`` (``None`` for an app a shared front
     serves: a guard refuses a request without that front instead), the host's ``outside`` entries,
-    the library stack, the host's ``inside`` entries. An app that already carries library
-    middleware is refused untouched.
+    the library stack, the host's ``inside`` entries. An app that already carries a library stack,
+    installed by another handle, is refused untouched.
 
     The library stack is security headers, path refusal, body size, rate limit, bearer gate, CSRF
     origin, session gate. Security headers sit outside everything so the library's own refusals
@@ -242,7 +245,7 @@ def _install_web_auth_middleware(
     The rules the sign-in paths and the bearer gate's resource derive are put ahead of the host's
     own, so the first match is the derived one.
     """
-    _refuse_an_unsound_stack(app)
+    _refuse_an_app_that_has_a_stack(app)
     effective_security_headers = _effective_security_headers(
         sign_in_paths, security_headers, bearer_gate
     )
@@ -257,6 +260,10 @@ def _install_web_auth_middleware(
             bearer_gate=bearer_gate,
             csrf_origin=csrf_origin,
             session_gate=session_gate,
+            relying_party=relying_party,
+            admission=admission,
+            sign_in=sign_in,
+            sessions=sessions,
         ),
         *inside,
     ]
