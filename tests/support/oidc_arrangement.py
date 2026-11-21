@@ -513,28 +513,28 @@ _FIXED_ANSWERS = {
     "/token-refused": (400, REFUSED_TOKEN_ANSWER),
     "/token-at-limit": (200, b" " * 64 * 1024),
     "/token-past-limit": (200, b" " * (64 * 1024 + 1)),
+    "/missing": (404, b""),
 }
 
 
 @dataclass(frozen=True)
 class ReceivedRequest:
-    """One request as the server read it; `headers` are keyed in lower case."""
+    """One request as the server read it: `headers` lower-cased, `header_lines` as they arrived."""
 
     method: str
     path: str
     headers: Mapping[str, str]
     body: bytes
+    header_lines: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
 class LoopbackHttpsServer:
     """Answers by path, whatever the method or query: `/token` a token answer,
-    `/token-refused` a 400 `invalid_grant`, `/token-at-limit` and
-    `/token-past-limit` a body of `64 * 1024` and one byte
-    more, `/token-reflecting` a token
-    answer whose header block carries the request body as a malformed line,
-    `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
-    released, `/missing` a 404,
+    `/token-refused` a 400 `invalid_grant`, `/token-at-limit` and `/token-past-limit` a body
+    of `64 * 1024` and one byte more, `/token-reflecting` a token answer whose header block
+    carries the request body as a malformed line, `/moved` a 302, `/moved-stalling` a 302
+    whose body never arrives until released, `/missing` a 404,
     `/oversized` a body past every size limit, `/.well-known/openid-configuration` the
     discovery document of this server as its own issuer, `/metadata-at-limit` and
     `/metadata-past-limit` a valid JSON object of `METADATA_LIMIT_BYTES` and
@@ -577,7 +577,8 @@ def loopback_https_server(
 
         def _receive(self, body: bytes) -> None:
             headers = {name.lower(): value for name, value in self.headers.items()}
-            received.append(ReceivedRequest(self.command, self.path, headers, body))
+            header_lines = tuple((name, value) for name, value in self.headers.items())
+            received.append(ReceivedRequest(self.command, self.path, headers, body, header_lines))
             route = urllib.parse.urlsplit(self.path).path
             if route in _FIXED_ANSWERS:
                 self._answer(*_FIXED_ANSWERS[route])
@@ -595,8 +596,6 @@ def loopback_https_server(
                 self._drip(b"HTTP/1.1 200 OK\r\nX-Dripping: ")
             elif route == "/dripping-body":
                 self._drip(b"HTTP/1.1 200 OK\r\nContent-Length: 65536\r\n\r\n")
-            elif route == "/missing":
-                self._send_head(404, {"Content-Length": "0"})
             elif route == "/.well-known/openid-configuration":
                 self._answer(200, a_provider_metadata(f"https://127.0.0.1:{server.server_port}"))
             elif route == "/compressed":
