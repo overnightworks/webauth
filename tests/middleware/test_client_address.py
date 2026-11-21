@@ -172,7 +172,7 @@ def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -
         client.get("/exempt")
 
 
-def test_a_writer_added_before_the_installer_is_refused_naming_its_position() -> None:
+def test_a_writer_added_by_hand_is_refused_untouched() -> None:
     app = a_fresh_app()
     add_the_client_address_writer(app)
     before = list(app.user_middleware)
