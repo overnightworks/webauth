@@ -14,6 +14,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from tests.support.client_address_arrangement import TRUSTED_PROXIES
 from tests.support.full_stack_arrangement import HEADERS_POLICY
+from tests.support.oidc_login_host import SIGN_IN_PATHS
 from tests.support.request_line_arrangement import (
     FORWARDED_CLIENT,
     WEBSOCKET_EVENT,
@@ -174,6 +175,18 @@ def test_proxy_09_an_http_request_to_a_child_without_its_front_answers_the_libra
 
     assert response.status_code == 500
     assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
+
+
+def test_proxy_09_the_refusal_of_a_sign_in_path_without_its_front_is_not_stored() -> None:
+    """PROXY-09"""
+    host = a_composed_host(
+        a_host_world(), a_composition(a_host_world(), front=ServedBehind.SHARED_FRONT)
+    )
+
+    response = host.client.get(SIGN_IN_PATHS.start)
+
+    assert response.status_code == 500
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_proxy_09_a_preflight_to_a_child_without_its_front_answers_the_library_500() -> None:
