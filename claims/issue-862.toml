@@ -1,8 +1,0 @@
-claim_id = "2ec716f34cd8454fbe76b20fcccd955f"
-agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
-role = "builder"
-base = "e98d33282645437d3a743478f27cfc995db1bdfd"
-branch = "claude/issue-862-signing-out-keeps-the-account"
-scope = ["docs/host-contract.md", "src/webauth/ports.py", "src/webauth/single_process_stores.py", "src/webauth/store_contract.py", "tests/support/store_contract_arrangement.py", "tests/test_single_process_stores.py"]
-opened_commit = "946c30bfd4424236d3d990d1bf839436f808698a"
-whole_reason = "One duty: the port's wording, the in-memory adapter, the store check that pins it and their tests change together."
