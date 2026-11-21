@@ -274,7 +274,7 @@ def test_a_touch_answering_anything_but_a_bool_is_refused(answer: object) -> Non
     app = an_auth_app(None, sessions=sessions)
     cookie = app.signed_cookie()
 
-    with pytest.raises(TypeError, match="SessionRecordStore.touch"):
+    with pytest.raises(TypeError, match="SessionRenewalStore.touch"):
         app.get("/me", cookie=cookie)
 
 
