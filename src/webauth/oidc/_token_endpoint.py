@@ -106,7 +106,7 @@ class OidcRefusalReason(StrEnum):
 class IdpErrorCode(StrEnum):
     """The error codes an issuer registers for a refused authorization or token request:
     RFC 6749 sections 4.1.2.1 and 5.2, OpenID Connect Core section 3.1.2.6 and RFC 8693
-    section 2.2.2, and `_OTHER` for any other well-formed code: the closed set a refusal
+    section 2.2.2, and `IdpErrorCode.OTHER` for any other well-formed code: the closed set a refusal
     and a log line carry, since the callback's query is the visitor's."""
 
     INVALID_REQUEST = "invalid_request"
