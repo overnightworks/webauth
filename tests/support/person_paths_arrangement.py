@@ -8,13 +8,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from fastapi import Response as AppResponse
 from httpx import Response
 
 from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
 from tests.support.gate_arrangement import (
     A_TOKEN,
-    ADMISSION,
     PERSON_ADMIN_ME_PATH,
     PERSON_ADMITTED_ADMIN_PATH,
     PERSON_PATHS,
@@ -24,20 +22,13 @@ from tests.support.gate_arrangement import (
 )
 from tests.support.oidc_arrangement import (
     OPERATOR_SUBJECT,
-    FakeClock,
-    a_key_set_endpoint,
-    a_relying_party,
 )
 from tests.support.oidc_login_host import (
-    LOGOUT_PAGE_TEXT,
-    NOW,
     SIGN_IN_PATHS,
     StoreDown,
     TransactionKind,
-    a_client_config,
 )
 from webauth.ports import SignInStores
-from webauth.sign_in_routes import install_sign_in_routes
 
 ADMIN_TOKEN = A_TOKEN
 MEMBER_TOKEN = a_token(groups=["/apps/x"])
@@ -89,29 +80,8 @@ def a_person_app(**keywords: Any) -> BearerApp:
 
 
 def a_person_app_serving_back_channel_logout() -> BearerApp:
-    """A person-path app that also serves the library's logout and back-channel logout routes."""
-    app = a_person_app(
-        policies={"sign_in_paths": SIGN_IN_PATHS},
-    )
-    assert app.transaction is not None
-    relying_party = a_relying_party(
-        config=a_client_config(),
-        fetch_key_set=a_key_set_endpoint("issuer"),
-        wall_clock=FakeClock(float(NOW)),
-    )
-    install_sign_in_routes(
-        app.auth.app,
-        paths=SIGN_IN_PATHS,
-        relying_party=lambda _request: relying_party,
-        admission=ADMISSION,
-        transaction=app.transaction,
-        refused=lambda _request, _refusal: AppResponse(status_code=403),
-        keeps_id_token=True,
-        max_sessions=None,
-        logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
-        ui_language=lambda _request: None,
-    )
-    return app
+    """A person-path app whose composition call also serves the logout routes."""
+    return a_person_app(policies={"sign_in_paths": SIGN_IN_PATHS})
 
 
 def the_account(app: BearerApp) -> Any:

@@ -4,7 +4,7 @@
 it as a ``no-store`` page that submits itself, and as a button when a script
 cannot run, under a policy of its own that admits exactly that one script and
 posts to the end-session and post-logout origins. The answer carries the
-own-policy marker, so ``SecurityHeadersMiddleware`` leaves that policy and
+own-policy marker, so the security-headers middleware leaves that policy and
 ``Cache-Control`` in place. The ID token hint is a ``SecretStr`` until it is
 written into the page.
 """

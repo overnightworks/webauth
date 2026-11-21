@@ -1,7 +1,7 @@
 """The start, callback, logout and back-channel logout routes of signing in through an
 OpenID Connect issuer.
 
-``install_sign_in_routes`` registers the routes on the host's ``FastAPI`` app,
+``WebAuth.install`` registers the routes on the host's ``FastAPI`` app,
 and ``SignInPaths`` derives the policies the host's gate, rate limit, body-size, CSRF and
 cache rules need for exactly those paths, so the host lists them once. The start, callback and
 logout routes are synchronous and run in the threadpool; the back-channel route reads its body
@@ -55,13 +55,12 @@ at the issuer ends. The route answers in this order:
    with ``actor_id=None`` is recorded when at least one session ended. A subject without an
    account is accepted and provisions nothing. The route clears no cookie and calls no
    issuer endpoint beyond the key fetch of verification.
-5. Any exception in ``relying_party``, the verification, a store, the audit sink or the exit
-   gets an empty 400 and is then re-raised.
+5. Any exception in the verification, a store, the audit sink or the exit gets an empty 400 and
+   is then re-raised.
 
 The host's transaction rolls back when the block raises, also when the audit sink fails after
 the deletion, and commits only for an accepted token. A per-call host keeps the sessions
-ended before the failure and emits no event again. ``relying_party`` receives the back-channel
-request with the Host the issuer posted to, often an internal alias.
+ended before the failure and emits no event again.
 
 The route is open to anyone who can reach it, and the token is its only control: the host lets
 the issuer reach it over an internal network alone, never the public route (tunnel, CDN,
@@ -82,7 +81,6 @@ from logline import set_sub
 from starlette.responses import RedirectResponse, Response
 
 from webauth._paths import _has_dot_segment, reads_as_another_host, same_app_path
-from webauth._validation import require_positive_whole_number
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import _take_pending_login, issue_session_cookies
@@ -116,7 +114,6 @@ __all__ = [
     "RefusalPage",
     "SignInPaths",
     "SignInRefusal",
-    "install_sign_in_routes",
 ]
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -173,7 +170,7 @@ class SignInPaths:
     construction, before any route is registered, names the first that is not.
     ``logout`` is ``None`` for a host that serves no logout route, and
     ``backchannel_logout`` for one that serves no back-channel logout route.
-    ``install_web_auth_middleware`` derives the policies for exactly these paths.
+    ``WebAuth.install`` derives the policies for exactly these paths.
     """
 
     start: str
@@ -225,11 +222,11 @@ def _problem_with(path: object) -> str | None:
     return None
 
 
-def install_sign_in_routes(
+def _install_sign_in_routes(
     app: FastAPI,
     *,
     paths: SignInPaths,
-    relying_party: Callable[[Request], OidcRelyingParty],
+    relying_party: OidcRelyingParty,
     admission: AdmissionConfig,
     transaction: SignInTransaction,
     refused: Callable[[Request, SignInRefusal], Response],
@@ -267,17 +264,13 @@ def install_sign_in_routes(
 
     The module docstring holds the back-channel's answers.
 
-    ``relying_party`` is read per request. ``ui_language`` is called once per start request and
+    ``ui_language`` is called once per start request and
     its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
     ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
-    ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``
-    is raised before a route is registered. ``paths.logout`` and ``logout_page_text`` come
-    together: a host without a logout route passes ``None`` for both, and exactly one of them
-    raises ``ValueError`` before a route is registered.
+    ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number. ``paths.logout`` and
+    ``logout_page_text`` come together: a host without a logout route passes ``None`` for both.
+    ``WebAuth.build`` has refused a value that breaks either.
     """
-    if max_sessions is not None:
-        require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
-    _require_logout_path_with_page_text(paths, logout_page_text)
     routes = _SignIn(
         relying_party, admission, transaction, refused, keeps_id_token, max_sessions, ui_language
     )
@@ -330,7 +323,7 @@ def _register_routes(
 
 @dataclass(frozen=True)
 class _SignIn:
-    relying_party: Callable[[Request], OidcRelyingParty]
+    relying_party: OidcRelyingParty
     admission: AdmissionConfig
     transaction: SignInTransaction
     refused: Callable[[Request, SignInRefusal], Response]
@@ -341,7 +334,7 @@ class _SignIn:
     def start(self, request: Request, return_to: str | None) -> Response:
         answer = Response(status_code=303)
         answer.headers["location"] = _start_login(
-            self.relying_party(request),
+            self.relying_party,
             request,
             answer,
             web_auth_config(request),
@@ -354,7 +347,7 @@ class _SignIn:
         try:
             text = page_text(request)
             return _log_out(
-                self.relying_party(request),
+                self.relying_party,
                 request,
                 web_auth_config(request),
                 transaction=self.transaction,
@@ -367,11 +360,10 @@ class _SignIn:
     async def backchannel_logout(self, request: Request) -> Response:
         form_body = await request.body()
         try:
-            relying_party = self.relying_party(request)
             result = await anyio.to_thread.run_sync(
                 partial(
                     _receive_backchannel_logout,
-                    relying_party,
+                    self.relying_party,
                     form_body,
                     request.headers.get("content-type"),
                     transaction=self.transaction,
@@ -404,7 +396,7 @@ class _SignIn:
     ) -> Response:
         if pending is None:
             return self._refuse(request, OidcRefusal(OidcRefusalReason.STATE_MISMATCH))
-        identity = self.relying_party(request).complete_login(pending, request.url.query)
+        identity = self.relying_party.complete_login(pending, request.url.query)
         if isinstance(identity, OidcRefusal):
             return self._refuse(request, identity)
         admitted = _decide_admission(identity, admission=self.admission)

@@ -1,4 +1,4 @@
-"""install_web_auth_middleware: one order, so the library's refusals carry the headers."""
+"""The stack WebAuth.install places: one order, so the library's refusals carry the headers."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
+from logline import RequestLineMiddleware
 from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.full_stack_arrangement import (
     BACKGROUND_PATH,
     BODY_LIMIT_BYTES,
@@ -36,11 +36,10 @@ from tests.support.full_stack_arrangement import (
     WEBHOOK_PATH,
     WEBHOOK_PREFIX,
     a_fresh_app,
-    an_app_without_config,
     install_full_stack,
 )
-from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
-from tests.support.oidc_arrangement import a_relying_party
+from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS, install_the_gated_stack
+from tests.support.oidc_arrangement import a_realm_client_config
 from tests.support.rate_limit_arrangement import AlwaysFailingRateLimitBackend
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.session_store_arrangement import SessionRecordsInMemory
@@ -59,22 +58,15 @@ from tests.support.webauth_arrangement import (
     drive,
     starts,
 )
-from webauth.admission import AdmissionConfig
-from webauth.config import install_web_auth_config
 from webauth.dependencies import LoginRedirect
-from webauth.middleware import (
-    BearerGate,
-    BearerGateMiddleware,
-    BodySizeLimitMiddleware,
-    CsrfOriginMiddleware,
-    IpRateLimitMiddleware,
-    MachinePaths,
-    PathRefusalMiddleware,
-    SecurityHeadersMiddleware,
-    SessionGate,
-    SessionGateMiddleware,
-    install_web_auth_middleware,
-)
+from webauth.middleware import BearerGate, MachinePaths, SessionGate
+from webauth.middleware.bearer_gate import _BearerGateMiddleware
+from webauth.middleware.body_size import _BodySizeLimitMiddleware
+from webauth.middleware.csrf import _CsrfOriginMiddleware
+from webauth.middleware.path_refusal import _PathRefusalMiddleware
+from webauth.middleware.rate_limit import _IpRateLimitMiddleware
+from webauth.middleware.security_headers import _SecurityHeadersMiddleware
+from webauth.middleware.session_gate import _SessionGateMiddleware
 from webauth.policies import (
     AuthorizedParties,
     CsrfPolicy,
@@ -86,6 +78,7 @@ from webauth.policies import (
     RateLimitRule,
 )
 from webauth.ports import RateLimitBackend
+from webauth.web_auth import ServedBehind, WebAuth, WebAuthSettings
 
 FOREIGN_ORIGIN = "https://evil.test"
 A_SESSION_GATE = SessionGate(
@@ -93,18 +86,19 @@ A_SESSION_GATE = SessionGate(
     login_redirect=None,
     public=(),
 )
-A_BEARER_GATE = BearerGate(
-    relying_party=a_relying_party(),
-    admission=AdmissionConfig(
-        bound_issuer=a_relying_party().issuer,
-        login_group="/apps/x",
-        admin_group="/apps/x/admin",
-    ),
-    machine_paths=MachinePaths(
-        PathRules(prefixes=("/api/admin/",)),
-        AuthorizedParties(frozenset({"hal"})),
-    ),
-)
+
+
+def a_bearer_gate_of(auth: WebAuth) -> BearerGate:
+    return BearerGate(
+        relying_party=auth.relying_party,
+        admission=auth.admission,
+        machine_paths=MachinePaths(
+            PathRules(prefixes=("/api/admin/",)),
+            AuthorizedParties(frozenset({"hal"})),
+        ),
+    )
+
+
 FOREIGN = {"origin": FOREIGN_ORIGIN}
 FORM = "application/x-www-form-urlencoded"
 JSON = "application/json"
@@ -131,8 +125,10 @@ def a_full_stack_client(
     rate_limits: RateLimitBackend | None = None,
     cookie_secure: bool = True,
 ) -> TestClient:
-    app = a_fresh_app(rate_limits=rate_limits, cookie_secure=cookie_secure)
-    install_full_stack(app, max_requests=max_requests)
+    app = a_fresh_app()
+    install_full_stack(
+        app, max_requests=max_requests, rate_limits=rate_limits, cookie_secure=cookie_secure
+    )
     return TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
 
 
@@ -170,7 +166,7 @@ def a_client_between_host_middlewares(
     session_gate: SessionGate | None = None,
     cookie_secure: bool = True,
 ) -> tuple[TestClient, HostSightings]:
-    app = a_fresh_app(rate_limits=rate_limits, cookie_secure=cookie_secure)
+    app = a_fresh_app()
     sightings = HostSightings(reached_inside=[], seen_outside=[])
 
     @app.middleware("http")
@@ -178,7 +174,13 @@ def a_client_between_host_middlewares(
         sightings.reached_inside.append(request.url.path)
         return await call_next(request)
 
-    install_full_stack(app, max_requests=max_requests, session_gate=session_gate)
+    install_full_stack(
+        app,
+        max_requests=max_requests,
+        rate_limits=rate_limits,
+        cookie_secure=cookie_secure,
+        session_gate=session_gate,
+    )
 
     @app.middleware("http")
     async def outside(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -326,13 +328,13 @@ class TestAnExemptWebhookPrefix:
     @staticmethod
     def a_client() -> TestClient:
         app = a_fresh_app()
-        install_web_auth_middleware(
+        install_the_gated_stack(
             app,
-            sign_in_paths=GATED_SIGN_IN_PATHS,
+            config=A_CONFIG,
+            sessions=SessionRecordsInMemory().in_transaction,
             security_headers=HEADERS_POLICY,
             csrf_origin=CsrfPolicy(exempt=PathRules(prefixes=(WEBHOOK_PREFIX,))),
         )
-        add_the_client_address_writer(app)
         return TestClient(app, base_url=HTTPS_TEST_SERVER)
 
     @pytest.mark.parametrize(
@@ -359,34 +361,34 @@ class TestAnExemptWebhookPrefix:
 
 
 class TestRefusedInstallation:
-    def test_an_install_without_csrf_origin_is_refused_before_touching_the_app(self) -> None:
-        """CSRF-01, CSRF-02: the install raises and leaves the app untouched."""
-        app = a_fresh_app()
+    def test_settings_without_csrf_origin_are_refused(self) -> None:
+        """CSRF-01, CSRF-02: the settings of the composition call require `csrf_origin`."""
         with pytest.raises(TypeError, match="csrf_origin"):
-            install_web_auth_middleware(  # type: ignore[call-arg]
-                app, sign_in_paths=GATED_SIGN_IN_PATHS, security_headers=HEADERS_POLICY
+            WebAuthSettings(  # type: ignore[call-arg]
+                config=A_CONFIG,
+                client=a_realm_client_config(),
+                sign_in_paths=GATED_SIGN_IN_PATHS,
+                keeps_id_token=False,
+                max_sessions=None,
+                security_headers=HEADERS_POLICY,
             )
-        assert app.user_middleware == []
 
     @pytest.mark.parametrize(
         "arrange",
         [
-            pytest.param(install_full_stack, id="second-installer-call"),
             pytest.param(
-                lambda app: install_full_stack(app, bearer_gate=A_BEARER_GATE),
-                id="second-installer-call-with-a-bearer-gate",
-            ),
-            pytest.param(
-                lambda app: app.add_middleware(BearerGateMiddleware, policy=A_BEARER_GATE),
+                lambda app: app.add_middleware(_BearerGateMiddleware, policy=HEADERS_POLICY),
                 id="hand-added-bearer-gate",
             ),
             pytest.param(
-                lambda app: app.add_middleware(SecurityHeadersMiddleware, policy=HEADERS_POLICY),
+                lambda app: app.add_middleware(_SecurityHeadersMiddleware, policy=HEADERS_POLICY),
                 id="hand-added-library-middleware",
             ),
         ],
     )
-    def test_repeated_installation_is_refused(self, arrange: Callable[[FastAPI], None]) -> None:
+    def test_a_hand_added_library_middleware_is_refused_and_leaves_the_app_alone(
+        self, arrange: Callable[[FastAPI], None]
+    ) -> None:
         app = a_fresh_app()
         arrange(app)
         before = list(app.user_middleware)
@@ -397,11 +399,11 @@ class TestRefusedInstallation:
     @pytest.mark.parametrize(
         "subclass",
         [
-            pytest.param(type("OwnHeaders", (SecurityHeadersMiddleware,), {}), id="headers"),
-            pytest.param(type("OwnLimiter", (IpRateLimitMiddleware,), {}), id="rate-limit"),
-            pytest.param(type("OwnOriginCheck", (CsrfOriginMiddleware,), {}), id="csrf-origin"),
-            pytest.param(type("OwnGate", (SessionGateMiddleware,), {}), id="session-gate"),
-            pytest.param(type("OwnBearerGate", (BearerGateMiddleware,), {}), id="bearer-gate"),
+            pytest.param(type("OwnHeaders", (_SecurityHeadersMiddleware,), {}), id="headers"),
+            pytest.param(type("OwnLimiter", (_IpRateLimitMiddleware,), {}), id="rate-limit"),
+            pytest.param(type("OwnOriginCheck", (_CsrfOriginMiddleware,), {}), id="csrf-origin"),
+            pytest.param(type("OwnGate", (_SessionGateMiddleware,), {}), id="session-gate"),
+            pytest.param(type("OwnBearerGate", (_BearerGateMiddleware,), {}), id="bearer-gate"),
         ],
     )
     def test_hand_added_subclass_of_library_middleware_is_refused_and_leaves_the_app_alone(
@@ -419,9 +421,11 @@ class TestRefusedInstallation:
         self,
     ) -> None:
         installed = a_fresh_app()
-        install_full_stack(installed, session_gate=A_SESSION_GATE, bearer_gate=A_BEARER_GATE)
+        install_full_stack(installed, session_gate=A_SESSION_GATE, bearer_of=a_bearer_gate_of)
         accepted = []
         for entry in installed.user_middleware:
+            if entry.cls is RequestLineMiddleware:
+                continue
             carrier = a_fresh_app()
             carrier.add_middleware(entry.cls, *entry.args, **entry.kwargs)
             try:
@@ -436,17 +440,17 @@ class TestRefusedInstallation:
         install_full_stack(
             app,
             session_gate=A_SESSION_GATE,
-            bearer_gate=A_BEARER_GATE,
-            client_address_writer=False,
+            bearer_of=a_bearer_gate_of,
+            front=ServedBehind.SHARED_FRONT,
         )
-        assert [entry.cls for entry in app.user_middleware] == [
-            SecurityHeadersMiddleware,
-            PathRefusalMiddleware,
-            BodySizeLimitMiddleware,
-            IpRateLimitMiddleware,
-            BearerGateMiddleware,
-            CsrfOriginMiddleware,
-            SessionGateMiddleware,
+        assert [entry.cls for entry in app.user_middleware][1:] == [
+            _SecurityHeadersMiddleware,
+            _PathRefusalMiddleware,
+            _BodySizeLimitMiddleware,
+            _IpRateLimitMiddleware,
+            _BearerGateMiddleware,
+            _CsrfOriginMiddleware,
+            _SessionGateMiddleware,
         ]
 
     def test_refused_repeat_leaves_the_budget_charged_once(self) -> None:
@@ -481,16 +485,6 @@ class TestBudgetSemantics:
         client = a_full_stack_client(max_requests=1)
         assert refused_request(client).status_code == refusal_status
         assert get_api(client).status_code == next_status
-
-    def test_a_request_before_the_config_is_installed_answers_500_and_the_next_one_is_served(
-        self,
-    ) -> None:
-        app = an_app_without_config()
-        install_full_stack(app, max_requests=1)
-        client = TestClient(app, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
-        assert get_api(client).status_code == 500
-        install_web_auth_config(app, a_web_auth_config())
-        assert get_api(client).status_code == 200
 
 
 class TestARateLimitRuleIsChosenByThePathTheRouterRoutes:
@@ -541,8 +535,8 @@ class BarrierRateLimitBackend:
 class TestASlowRateLimiterDoesNotStallTheEventLoop:
     @pytest.mark.anyio
     async def test_two_concurrent_requests_are_checked_side_by_side(self) -> None:
-        app = a_fresh_app(rate_limits=BarrierRateLimitBackend())
-        install_full_stack(app)
+        app = a_fresh_app()
+        install_full_stack(app, rate_limits=BarrierRateLimitBackend())
         transport = httpx.ASGITransport(app=app)
 
         async with httpx.AsyncClient(transport=transport, base_url=HTTPS_TEST_SERVER) as client:
@@ -574,7 +568,7 @@ class TestARequestCancelledDuringItsRateLimitCheck:
         self, fails_after_release: bool
     ) -> None:
         backend = HeldRateLimitBackend(fails_after_release=fails_after_release)
-        app = a_fresh_app(rate_limits=backend)
+        app = a_fresh_app()
         route_runs: list[str] = []
 
         async def cancelled_route() -> dict[str, bool]:
@@ -582,7 +576,7 @@ class TestARequestCancelledDuringItsRateLimitCheck:
             return {"ok": True}
 
         app.add_api_route("/cancelled", cancelled_route, methods=["GET"])
-        install_full_stack(app)
+        install_full_stack(app, rate_limits=backend)
         sent: list[str] = []
         request_scope = anyio.CancelScope()
 

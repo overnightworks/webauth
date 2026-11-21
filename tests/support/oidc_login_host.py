@@ -23,7 +23,7 @@ from tests.support.account_arrangement import (
     WriteLockInMemory,
     require_held_lock,
 )
-from tests.support.client_address_arrangement import add_the_client_address_writer
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_REFRESH_TOKEN,
@@ -33,7 +33,6 @@ from tests.support.oidc_arrangement import (
     LogoutPage,
     a_key_set_endpoint,
     a_realm_client_config,
-    a_relying_party,
     an_id_token_claims,
     jws,
     rs256,
@@ -49,13 +48,12 @@ from tests.support.webauth_arrangement import (
     drive,
 )
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
-from webauth.config import WebAuthConfig, install_web_auth_config, web_auth_config
+from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import (
     _pending_login_cookie_name,
     _pending_login_cookie_prefix,
 )
 from webauth.dependencies import account_language_of_session, current_user_dependency
-from webauth.middleware import install_web_auth_middleware
 from webauth.oidc import (
     OidcClientConfig,
     OidcRefusal,
@@ -63,10 +61,8 @@ from webauth.oidc import (
 )
 from webauth.policies import (
     BodySizePolicy,
-    CsrfPolicy,
     RateLimitBudget,
     RateLimitPolicy,
-    SecurityHeadersPolicy,
 )
 from webauth.ports import (
     AccountKind,
@@ -78,8 +74,8 @@ from webauth.sign_in_routes import (
     LogoutPageText,
     SignInPaths,
     SignInRefusal,
-    install_sign_in_routes,
 )
+from webauth.web_auth import IssuerCalls, SignInPages, WebAuth
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
@@ -339,18 +335,11 @@ class OidcHost:
     refusals: list[SignInRefusal]
     answer_refusals: Callable[[Request, SignInRefusal], Response] = _the_refusal_as_json
     """What the host's refusal hook answers; a test replaces it."""
-    relying_party_of: Callable[[Request], OidcRelyingParty] | None = None
-    """What the host's relying-party callable answers; a test replaces it."""
 
     @property
     def app(self) -> FastAPI:
         """The host application behind `client`."""
         return cast("FastAPI", self.client.app)
-
-    def read_relying_party(self, request: Request) -> OidcRelyingParty:
-        if self.relying_party_of is None:
-            return self.relying_party
-        return self.relying_party_of(request)
 
     def start(self, *, return_to: str | None = None) -> str:
         """Visit the start route; answer the authorization URL it redirects the browser to."""
@@ -395,14 +384,14 @@ class OidcHost:
 
 def an_id_token(
     nonce: str,
-    wall_clock: FakeClock,
+    wall_clock: Callable[[], float],
     groups_claim: object,
     padding: str = "",
     *,
     locale_claim: object = ABSENT,
 ) -> str:
     claims = an_id_token_claims(
-        int(wall_clock.now),
+        int(wall_clock()),
         issuer=BOUND_ISSUER,
         audience=CLIENT_ID,
         subject=SUBJECT,
@@ -416,55 +405,6 @@ def an_id_token(
     if padding:
         header["padding"] = padding
     return jws(header, claims, rs256(rsa_key("issuer")))
-
-
-def _install_the_host_middleware(
-    app: FastAPI,
-    config: WebAuthConfig,
-    address_budget: int | None,
-) -> None:
-    install_web_auth_config(app, config)
-    install_web_auth_middleware(
-        app,
-        sign_in_paths=SIGN_IN_PATHS,
-        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
-        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
-        rate_limit=None
-        if address_budget is None
-        else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60)),
-        csrf_origin=CsrfPolicy(),
-    )
-    add_the_client_address_writer(app)
-
-
-def _add_the_login_routes(
-    app: FastAPI,
-    *,
-    host: Callable[[], OidcHost],
-    transaction: RecordingSignInTransaction,
-    max_sessions: int | None,
-    keeps_id_token: bool,
-    admission: AdmissionConfig,
-    logout_page_text: Callable[[Request], LogoutPageText],
-    ui_language: Callable[[Request], str | None],
-) -> None:
-    def refused(request: Request, refusal: SignInRefusal) -> Response:
-        current = host()
-        current.refusals.append(refusal)
-        return current.answer_refusals(request, refusal)
-
-    install_sign_in_routes(
-        app,
-        paths=SIGN_IN_PATHS,
-        relying_party=lambda request: host().read_relying_party(request),
-        admission=admission,
-        transaction=transaction,
-        refused=refused,
-        keeps_id_token=keeps_id_token,
-        max_sessions=max_sessions,
-        logout_page_text=logout_page_text,
-        ui_language=ui_language,
-    )
 
 
 def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) -> None:
@@ -491,10 +431,10 @@ def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) ->
 
 
 def _an_issuer_side(
-    wall_clock: FakeClock,
+    wall_clock: Callable[[], float],
     groups_claim: object,
     locale_claim: object,
-) -> tuple[FakeIssuer, FakeKeySetEndpoint, OidcRelyingParty, list[str]]:
+) -> tuple[FakeIssuer, FakeKeySetEndpoint, list[str]]:
     issued_id_tokens: list[str] = []
 
     def mint_id_token(nonce: str) -> str:
@@ -503,15 +443,7 @@ def _an_issuer_side(
         )
         return issued_id_tokens[-1]
 
-    issuer = FakeIssuer(mint_id_token=mint_id_token)
-    key_set = a_key_set_endpoint("issuer")
-    relying_party = a_relying_party(
-        config=a_client_config(),
-        post_token_request=issuer,
-        fetch_key_set=key_set,
-        wall_clock=wall_clock,
-    )
-    return issuer, key_set, relying_party, issued_id_tokens
+    return FakeIssuer(mint_id_token=mint_id_token), a_key_set_endpoint("issuer"), issued_id_tokens
 
 
 @dataclass(frozen=True)
@@ -547,16 +479,6 @@ def _the_stores_of_a_host(
     return _HostStores(lock, accounts, sessions, audit, transaction)
 
 
-def _a_host_app(
-    config: WebAuthConfig, address_budget: int | None, behind_base_http_middleware: bool
-) -> FastAPI:
-    app = FastAPI()
-    _install_the_host_middleware(app, config, address_budget)
-    if behind_base_http_middleware:
-        app.middleware("http")(_pass_through)
-    return app
-
-
 def _a_client_of(app: FastAPI, root_path: str) -> TestClient:
     return TestClient(
         app,
@@ -565,6 +487,64 @@ def _a_client_of(app: FastAPI, root_path: str) -> TestClient:
         root_path=root_path,
         follow_redirects=False,
         raise_server_exceptions=False,
+    )
+
+
+def _a_host_app(sessions: SessionRecordsInMemory) -> FastAPI:
+    app = FastAPI()
+    _add_the_signed_in_routes(app, sessions)
+    return app
+
+
+def _the_rate_limit_of_a_host(address_budget: int | None) -> RateLimitPolicy | None:
+    return (
+        None
+        if address_budget is None
+        else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60))
+    )
+
+
+def _an_oidc_host_over(
+    client: TestClient,
+    auth: WebAuth,
+    stores: _HostStores,
+    config: WebAuthConfig,
+    wall_clock: FakeClock,
+    issuer_side: tuple[FakeIssuer, FakeKeySetEndpoint, list[str]],
+) -> OidcHost:
+    issuer, key_set, issued_id_tokens = issuer_side
+    return OidcHost(
+        client=client,
+        issuer=issuer,
+        key_set=key_set,
+        wall_clock=wall_clock,
+        accounts=stores.accounts,
+        sessions=stores.sessions,
+        audit=stores.audit,
+        config=config,
+        lock=stores.lock,
+        relying_party=auth.relying_party,
+        transaction=stores.transaction,
+        issued_id_tokens=issued_id_tokens,
+        refusals=[],
+    )
+
+
+def _pages_recording_refusals(
+    holder: list[OidcHost],
+    logout_page_text: Callable[[Request], LogoutPageText],
+    ui_language: Callable[[Request], str | None],
+) -> SignInPages:
+    def refused(request: Request, refusal: SignInRefusal) -> Response:
+        holder[0].refusals.append(refusal)
+        return holder[0].answer_refusals(request, refusal)
+
+    return SignInPages(refused=refused, logout_page_text=logout_page_text, ui_language=ui_language)
+
+
+def _the_issuer_calls_of(issuer: FakeIssuer, key_set: FakeKeySetEndpoint) -> IssuerCalls:
+    return IssuerCalls(
+        post_token_request=issuer, fetch_key_set=key_set, monotonic_clock=FakeClock(5_000.0)
     )
 
 
@@ -586,42 +566,41 @@ def an_oidc_host(
     ui_language: Callable[[Request], str | None] = lambda _request: None,
     **config_overrides: object,
 ) -> OidcHost:
-    config = a_web_auth_config(**config_overrides)
+    wall_clock = FakeClock(float(NOW))
+    config = a_web_auth_config(**{"wall_clock": wall_clock, **config_overrides})
     stores = _the_stores_of_a_host(
         users, stored_session, transaction_kind, strict_records, account_store
     )
-    wall_clock = FakeClock(float(NOW))
-    issuer, key_set, relying_party, issued_id_tokens = _an_issuer_side(
-        wall_clock, groups_claim, locale_claim
+    issuer, key_set, issued_id_tokens = _an_issuer_side(
+        config.wall_clock, groups_claim, locale_claim
     )
-    app = _a_host_app(config, address_budget, behind_base_http_middleware)
+    app = _a_host_app(stores.sessions)
     holder: list[OidcHost] = []
-    _add_the_login_routes(
+    auth = install_the_gated_stack(
         app,
-        host=lambda: holder[0],
-        transaction=stores.transaction,
-        max_sessions=max_sessions,
+        config=config,
+        sessions=stores.sessions.in_transaction,
+        sign_in=stores.transaction,
+        sign_in_paths=SIGN_IN_PATHS,
         keeps_id_token=keeps_id_token,
-        admission=admission,
-        logout_page_text=logout_page_text,
-        ui_language=ui_language,
+        max_sessions=max_sessions,
+        client=a_client_config(),
+        groups=admission,
+        pages=_pages_recording_refusals(holder, logout_page_text, ui_language),
+        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+        rate_limit=_the_rate_limit_of_a_host(address_budget),
+        issuer_calls=_the_issuer_calls_of(issuer, key_set),
     )
-    _add_the_signed_in_routes(app, stores.sessions)
+    if behind_base_http_middleware:
+        app.middleware("http")(_pass_through)
     holder.append(
-        OidcHost(
-            client=_a_client_of(app, root_path),
-            issuer=issuer,
-            key_set=key_set,
-            wall_clock=wall_clock,
-            accounts=stores.accounts,
-            sessions=stores.sessions,
-            audit=stores.audit,
-            config=config,
-            lock=stores.lock,
-            relying_party=relying_party,
-            transaction=stores.transaction,
-            issued_id_tokens=issued_id_tokens,
-            refusals=[],
+        _an_oidc_host_over(
+            _a_client_of(app, root_path),
+            auth,
+            stores,
+            config,
+            wall_clock,
+            (issuer, key_set, issued_id_tokens),
         )
     )
     return holder[0]

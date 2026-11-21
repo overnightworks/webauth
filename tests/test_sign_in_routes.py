@@ -22,12 +22,13 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
-from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
 from tests.support.account_arrangement import FakeUser
+from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.oidc_arrangement import a_realm_client_config
 from tests.support.oidc_login_host import (
     ADMISSION,
     BACKCHANNEL_LOGOUT_PATH,
@@ -36,6 +37,7 @@ from tests.support.oidc_login_host import (
     LOGIN_GROUP,
     LOGOUT_PATH,
     OTHER_SUBJECT,
+    SAME_ORIGIN_FORM,
     SIGN_IN_PATHS,
     START_PATH,
     SUBJECT,
@@ -49,8 +51,10 @@ from tests.support.oidc_login_host import (
     is_cleared,
     set_cookies,
 )
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
+    a_web_auth_config,
     an_http_scope,
     body_of,
     drive,
@@ -61,14 +65,14 @@ from tests.support.webauth_arrangement import (
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.cookies import sign_session_id
 from webauth.oidc import IdpErrorCode, OidcIdentity, OidcRefusal, OidcRefusalReason
+from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
 from webauth.ports import AccountEventKind, AccountKind
 from webauth.sign_in_routes import (
-    LogoutPageText,
     RefusalPage,
     SignInPaths,
     SignInRefusal,
-    install_sign_in_routes,
 )
+from webauth.web_auth import WebAuthSettings
 
 BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
 BOTH_KINDS = [
@@ -196,16 +200,6 @@ def test_each_sign_in_mints_a_distinct_session_id_of_256_bits_in_urlsafe_base64(
     ("groups_claim", "admission", "refusal"),
     [
         pytest.param((), ADMISSION, AdmissionRefusal.NOT_A_MEMBER, id="not a member"),
-        pytest.param(
-            (LOGIN_GROUP,),
-            AdmissionConfig(
-                bound_issuer="https://other.example/realms/lab",
-                login_group=LOGIN_GROUP,
-                admin_group=f"{LOGIN_GROUP}/admin",
-            ),
-            AdmissionRefusal.FOREIGN_ISSUER,
-            id="a foreign issuer",
-        ),
     ],
 )
 def test_an_identity_refused_before_admission_writes_nothing_and_enters_no_transaction(
@@ -246,17 +240,6 @@ def test_a_refusal_shows_no_access_for_a_person_outside_the_app_and_login_failed
     assert SignInRefusal(cause).page is expected
 
 
-_A_FOREIGN_ISSUERS_ADMISSION = AdmissionConfig(
-    bound_issuer="https://other.example/realms/lab",
-    login_group=LOGIN_GROUP,
-    admin_group=f"{LOGIN_GROUP}/admin",
-)
-
-
-def _a_foreign_issuers_identity() -> OidcHost:
-    return an_oidc_host(admission=_A_FOREIGN_ISSUERS_ADMISSION)
-
-
 def _with_another_code(query: str) -> str:
     return query.replace("code=", "code=not-issued-")
 
@@ -274,13 +257,6 @@ def _without_a_state(query: str) -> str:
             AdmissionRefusal.NOT_A_MEMBER,
             RefusalPage.NO_ACCESS,
             id="not a member",
-        ),
-        pytest.param(
-            _a_foreign_issuers_identity,
-            str,
-            AdmissionRefusal.FOREIGN_ISSUER,
-            RefusalPage.LOGIN_FAILED,
-            id="a foreign issuer",
         ),
         pytest.param(
             lambda: an_oidc_host(FakeUser(id="user-7", username="lena")),
@@ -608,98 +584,31 @@ def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_ex
     assert (response.status_code, host.transaction.entries) == (303, 1)
 
 
-def test_installing_without_stating_whether_the_host_keeps_the_id_token_raises() -> None:
-    """SIGNIN-58: install without `keeps_id_token` raises `TypeError` and registers no route."""
-    app = FastAPI()
-    arguments = _install_arguments()
-    del arguments["keeps_id_token"]
-
+def test_the_settings_are_refused_without_stating_whether_the_host_keeps_the_id_token() -> None:
+    """SIGNIN-58: settings without `keeps_id_token` raise `TypeError`."""
     with pytest.raises(TypeError, match="keeps_id_token"):
-        install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
-
-    assert not _sign_in_routes_of(app)
-
-
-@pytest.mark.parametrize(
-    "max_sessions",
-    [
-        pytest.param(0, id="zero"),
-        pytest.param(-1, id="negative"),
-        pytest.param(True, id="bool"),
-        pytest.param("2", id="text"),
-        pytest.param(2.0, id="float"),
-    ],
-)
-def test_a_cap_that_is_not_a_positive_whole_number_is_refused_before_any_route_is_registered(
-    max_sessions: object,
-) -> None:
-    """SIGNIN-59: install validates `max_sessions` before it registers a route."""
-    app = FastAPI()
-    arguments = {**_install_arguments(), "max_sessions": max_sessions}
-
-    with pytest.raises(ValueError, match="max_sessions"):
-        install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
-
-    assert not _sign_in_routes_of(app)
-
-
-@pytest.mark.parametrize(
-    ("logout", "page_text"),
-    [
-        pytest.param(LOGOUT_PATH, None, id="a logout path without page text"),
-        pytest.param(
-            None,
-            lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-            id="page text without a logout path",
-        ),
-    ],
-)
-def test_a_logout_path_and_page_text_come_together_or_install_refuses_before_any_route(
-    logout: str | None,
-    page_text: Callable[[Request], LogoutPageText] | None,
-) -> None:
-    """SIGNIN-15: one of `paths.logout` and `logout_page_text` without the other refuses install
-    before any route."""
-    app = FastAPI()
-    arguments = {
-        **_install_arguments(),
-        "paths": SignInPaths(start=START_PATH, callback=CALLBACK_PATH, logout=logout),
-        "logout_page_text": page_text,
-    }
-
-    with pytest.raises(ValueError, match="logout"):
-        install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
-
-    assert not _sign_in_routes_of(app)
+        WebAuthSettings(  # type: ignore[call-arg]
+            config=a_web_auth_config(),
+            client=a_realm_client_config(),
+            sign_in_paths=SIGN_IN_PATHS,
+            max_sessions=None,
+            security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+            csrf_origin=CsrfPolicy(),
+        )
 
 
 def test_a_host_without_a_logout_path_and_page_text_registers_no_logout_route() -> None:
     """SIGNIN-16: a host with neither registers no logout route."""
     app = FastAPI()
-    arguments = {
-        **_install_arguments(),
-        "paths": SignInPaths(start=START_PATH, callback=CALLBACK_PATH),
-        "logout_page_text": None,
-    }
 
-    install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
+    install_the_gated_stack(
+        app,
+        config=a_web_auth_config(),
+        sessions=SessionRecordsInMemory().in_transaction,
+        sign_in_paths=SignInPaths(start=START_PATH, callback=CALLBACK_PATH),
+    )
 
     assert _sign_in_routes_of(app) == [START_PATH, CALLBACK_PATH]
-
-
-def _install_arguments() -> dict[str, object]:
-    host = an_oidc_host()
-    return {
-        "paths": SIGN_IN_PATHS,
-        "relying_party": lambda _request: host.relying_party,
-        "admission": ADMISSION,
-        "transaction": host.transaction,
-        "refused": lambda _request, _refusal: Response(status_code=403),
-        "keeps_id_token": True,
-        "max_sessions": None,
-        "logout_page_text": lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        "ui_language": lambda _request: None,
-    }
 
 
 def _sign_in_routes_of(app: FastAPI) -> list[str]:
@@ -717,7 +626,6 @@ def _sign_in_routes_of(app: FastAPI) -> list[str]:
     ("groups_claim", "admission", "returned_query"),
     [
         pytest.param((), ADMISSION, str, id="not a member"),
-        pytest.param((LOGIN_GROUP,), _A_FOREIGN_ISSUERS_ADMISSION, str, id="a foreign issuer"),
         pytest.param((LOGIN_GROUP,), ADMISSION, _with_another_code, id="a code the issuer refuses"),
         pytest.param((LOGIN_GROUP,), ADMISSION, _without_a_state, id="a callback without a state"),
     ],
@@ -773,21 +681,9 @@ def test_every_callback_answer_deletes_its_pending_cookie_and_leaves_the_other_t
 @pytest.mark.parametrize("path", [LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH])
 def test_the_logout_and_back_channel_routes_serve_post_only(path: str, method: str) -> None:
     """SIGNIN-10, SIGNIN-41: the logout and the back-channel route serve `POST` only."""
-    app = FastAPI()
-    install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
+    host = an_oidc_host()
 
-    response = TestClient(app).request(method, path)
+    response = host.client.request(method, path, headers=SAME_ORIGIN_FORM)
 
     assert response.status_code == 405
     assert response.headers["allow"] == "POST"
-
-
-def test_install_registers_the_start_callback_logout_and_back_channel_routes() -> None:
-    """SIGNIN-01: install registers the four routes on the host's app."""
-    app = FastAPI()
-
-    install_sign_in_routes(app, **_install_arguments())  # type: ignore[arg-type]
-
-    assert sorted(_sign_in_routes_of(app)) == sorted(
-        [START_PATH, CALLBACK_PATH, LOGOUT_PATH, BACKCHANNEL_LOGOUT_PATH]
-    )

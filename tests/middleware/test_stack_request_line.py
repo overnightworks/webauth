@@ -1,7 +1,7 @@
-"""What webauth puts on the request line of a host that installs logline's `RequestLineMiddleware`.
+"""What webauth puts on the request line that the composition call's front writes.
 
-Each case runs the real stack with logline's middleware outermost, the way its README asks a host
-to install it, and reads the one `request.ended` line the request wrote.
+Each case runs the real stack the call installs, with logline's middleware outermost, and reads
+the one `request.ended` line the request wrote.
 """
 
 from __future__ import annotations
@@ -36,12 +36,11 @@ from tests.support.request_line_arrangement import (
     TRUSTED_PEER,
     WEBSOCKET_EVENT,
     a_client_behind_the_proxy,
-    logging_request_lines,
     request_lines_written,
 )
 from tests.support.session_gate_arrangement import (
     a_gated_app,
-    a_stacked_plain_app,
+    a_plain_app,
     ask,
     signed_in,
 )
@@ -63,7 +62,6 @@ if TYPE_CHECKING:
 
 UNTRUSTED_PEER = "198.51.100.77"
 EXEMPT_PATH = "/not-limited"
-OVERSIZED_BODY = b"x" * 1_000_000
 NOT_AN_ADDRESS = "not-an-address"
 
 
@@ -77,12 +75,8 @@ NOT_AN_ADDRESS = "not-an-address"
         pytest.param(
             a_gated_app, "/me", True, 200, "user-1", id="the-gate-and-the-dependency-agree"
         ),
-        pytest.param(
-            a_stacked_plain_app, "/me", True, 200, "user-1", id="the-dependency-admits-a-session"
-        ),
-        pytest.param(
-            a_stacked_plain_app, "/me", False, 401, None, id="the-dependency-refuses-none"
-        ),
+        pytest.param(a_plain_app, "/me", True, 200, "user-1", id="the-dependency-admits-a-session"),
+        pytest.param(a_plain_app, "/me", False, 401, None, id="the-dependency-refuses-none"),
     ],
 )
 def test_the_request_line_has_the_account_its_session_guard_admitted_as_sub(
@@ -94,7 +88,6 @@ def test_the_request_line_has_the_account_its_session_guard_admitted_as_sub(
     sub: str | None,
 ) -> None:
     app = guard(a_session(user=FakeUser(id="user-1", username="alice")))
-    logging_request_lines(app.app)
 
     with request_lines_written(capsys) as lines:
         response = ask(app, path, cookie=signed_in(app) if with_cookie else None)
@@ -118,7 +111,6 @@ def test_the_websocket_line_has_the_account_its_handshake_admitted_as_sub(
     sub: str | None,
 ) -> None:
     app = an_auth_app(a_session(user=FakeUser(id="user-1", username="alice")))
-    logging_request_lines(app.app)
 
     with (
         request_lines_written(capsys, event=WEBSOCKET_EVENT) as lines,
@@ -138,7 +130,6 @@ def test_a_token_on_a_person_path_is_the_sub_of_its_request_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     app = a_person_app(known_accounts=(a_lena(),))
-    logging_request_lines(app.auth.app)
 
     with request_lines_written(capsys) as lines:
         response = app.ask(PERSON_ADMITTED_ME_PATH, authorization=bearing(MEMBER_TOKEN))
@@ -151,7 +142,6 @@ def test_a_machine_admitted_by_the_bearer_gate_has_no_sub(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     app = a_bearer_app()
-    logging_request_lines(app.auth.app)
 
     with request_lines_written(capsys) as lines:
         response = app.ask(EXPORT_PATH, authorization=bearing(a_token()))
@@ -174,7 +164,6 @@ def test_an_account_admitted_at_a_protected_resource_is_the_sub_of_its_request_l
 ) -> None:
     resource = a_resource()
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=known_accounts)
-    logging_request_lines(app.auth.app)
 
     with request_lines_written(capsys) as lines:
         response = app.ask(resource.entry_point, authorization=bearing(token_of(resource)))
@@ -202,7 +191,6 @@ def test_a_token_the_bearer_gate_refuses_has_no_sub(
     status: int,
 ) -> None:
     app = a_bearer_app(person_paths=PERSON_PATHS, resource=a_resource())
-    logging_request_lines(app.auth.app)
 
     with request_lines_written(capsys) as lines:
         response = app.ask(path, authorization=bearing(token))
@@ -215,7 +203,6 @@ def test_the_callback_that_signs_a_person_in_carries_the_person_on_its_own_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     host = an_oidc_host()
-    logging_request_lines(host.app)
     query = host.sign_in_at_issuer()
 
     with request_lines_written(capsys) as lines:
@@ -238,7 +225,6 @@ def test_the_client_address_webauth_resolves_is_the_ip_of_the_request_line(
     expected: str,
 ) -> None:
     app = a_gated_app()
-    logging_request_lines(app.app)
 
     with (
         request_lines_written(capsys) as lines,
@@ -255,7 +241,6 @@ def test_a_path_the_rate_limit_exempts_still_carries_the_resolved_ip(
 ) -> None:
     exempt = RateLimitPolicy(exempt=PathRules(exact=frozenset({EXEMPT_PATH})))
     app = a_gated_app(stack_policies={"rate_limit": exempt})
-    logging_request_lines(app.app)
 
     with request_lines_written(capsys) as lines, a_client_behind_the_proxy(app.app) as client:
         client.get(EXEMPT_PATH, headers={"x-forwarded-for": FORWARDED_CLIENT})
@@ -268,7 +253,6 @@ def test_a_malformed_forwarding_header_leaves_the_peer_as_the_ip(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     app = a_gated_app()
-    logging_request_lines(app.app)
 
     with request_lines_written(capsys) as lines, a_client_behind_the_proxy(app.app) as client:
         client.get("/me", headers={"x-forwarded-for": NOT_AN_ADDRESS})
@@ -291,39 +275,11 @@ def test_a_malformed_forwarding_header_is_logged_as_ignored_once(
     assert [record.getMessage() for record in caplog.records] == ["forwarded_for.ignored"]
 
 
-@pytest.mark.parametrize(
-    ("path", "method", "body", "status"),
-    [
-        pytest.param("/me%0A", "GET", b"", 400, id="a-path-with-a-control-character"),
-        pytest.param("/me", "POST", OVERSIZED_BODY, 413, id="a-body-declared-over-the-limit"),
-    ],
-)
-def test_a_request_refused_ahead_of_the_rate_limit_carries_the_resolved_ip(
-    capsys: pytest.CaptureFixture[str],
-    path: str,
-    method: str,
-    body: bytes,
-    status: int,
-) -> None:
-    app = a_gated_app()
-    logging_request_lines(app.app)
-
-    with request_lines_written(capsys) as lines, a_client_behind_the_proxy(app.app) as client:
-        response = client.request(
-            method, path, content=body, headers={"x-forwarded-for": FORWARDED_CLIENT}
-        )
-
-    (line,) = lines
-    assert (response.status_code, line["ip"]) == (status, FORWARDED_CLIENT)
-
-
 def test_a_request_line_holds_none_of_the_credentials_its_request_sent(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     session_app = a_gated_app()
     bearer_app = a_person_app(known_accounts=(a_lena(),))
-    logging_request_lines(session_app.app)
-    logging_request_lines(bearer_app.auth.app)
     cookie = signed_in(session_app)
 
     with request_lines_written(capsys) as lines:

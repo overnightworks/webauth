@@ -13,10 +13,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
+from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import a_web_auth_config
-from webauth.config import install_web_auth_config
-from webauth.middleware import SecurityHeadersMiddleware
 from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
@@ -368,10 +367,13 @@ class TestSecurityHeadersPolicy:
     ) -> None:
         """STACK-07: the default header turns off display-capture with the other features."""
         app = FastAPI()
-        install_web_auth_config(app, a_web_auth_config())
-        app.add_middleware(SecurityHeadersMiddleware, policy=policy)
-        add_the_client_address_writer(app)
         app.get("/")(lambda: {})
+        install_the_gated_stack(
+            app,
+            config=a_web_auth_config(),
+            sessions=SessionRecordsInMemory().in_transaction,
+            security_headers=policy,
+        )
 
         response = TestClient(app).get("/")
 

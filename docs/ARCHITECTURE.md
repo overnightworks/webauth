@@ -46,7 +46,7 @@ Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout
 The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
 The sign-in callback, the logout route and the back-channel logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores. Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
-The host owns its routes except the four `install_sign_in_routes` registers; [the library's responses](host-contract.md#signed-out-and-refused) are in the host contract.
+The host owns its routes except the four `auth.install` registers for the sign-in paths; [the library's responses](host-contract.md#signed-out-and-refused) are in the host contract.
 
 ## 3. Runtime View
 
@@ -111,7 +111,7 @@ webauth never signs, decodes, verifies or logs the hint; Keycloak judges it. [Tr
 
 ### Back-channel logout
 
-`install_sign_in_routes` registers the issuer's route for `POST` only; it verifies the form's `logout_token` before it enters one `SignInTransaction` that deletes the subject's sessions. [The host contract](host-contract.md#the-sign-in-routes) owns the answers.
+`auth.install` registers the issuer's route for `POST` only; it verifies the form's `logout_token` before it enters one `SignInTransaction` that deletes the subject's sessions. [The host contract](host-contract.md#the-sign-in-routes) owns the answers.
 
 ### Admitting an identity
 
@@ -168,7 +168,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 
 - The library never commits: durability belongs to the host, so each host decides what a failure keeps ([host contract](host-contract.md#the-sign-in-routes)).
 - It caches no session: the store decides every request, so a session the host ended is refused on its next request ([`SessionRecordStore`](../src/webauth/ports.py)).
-- One install order: the gates sit in a fixed order, each placed for what it must see first, and the installer puts the rules derived from the host's `SignInPaths` ahead of the host's own; a stack that already holds library middleware is refused untouched ([`install_web_auth_middleware`](../src/webauth/middleware/stack.py)).
+- One install order: the gates sit in a fixed order, each placed for what it must see first, and the install puts the rules derived from the host's `SignInPaths` and the bearer gate's resource ahead of the host's own; a stack that already holds library middleware is refused untouched. No host reaches the installers or the stack classes: `WebAuth.build` and `auth.install` are the only way in, so the order is one the library owns ([`stack`](../src/webauth/middleware/stack.py)).
 - The store is bound to one issuer: an account's `id` is the issuer's subject, so moving issuers is a migration of the host's accounts ([`oidc_login`](../src/webauth/oidc_login.py)).
 - The pending login lives in its own signed cookie, one per login, so two tabs never overwrite each other and the library keeps no server-side store ([`oidc_login`](../src/webauth/oidc_login.py)).
 - ASGI owns HTTP framing (h11 and httptools may legally differ), so the body-size limit counts streamed bytes and never re-parses framing.
@@ -186,6 +186,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 - A CSRF token layer, or reading `Referer`: the token protects only script calls, and every supported browser sends `Origin` and, to an HTTPS app, `Sec-Fetch-Site` on a state-changing request ([CSRF origin](host-contract.md#csrf-origin)). It reopens when a supported browser sends neither on such a request.
 - A constructor that derives the endpoints from Keycloak's path layout (`{issuer}/protocol/openid-connect/...`): it ties the library to one vendor's URL scheme that the issuer's own document already states, and a realm behind a front-end hostname or a path change would break it silently. It reopens when an issuer must be supported that publishes no discovery document.
 - Lazy or refreshing discovery (reading the document at the first login, or re-reading it on a schedule): it puts a network call and a decision about where credentials go inside the login, and needs a cache with a failure policy. It reopens when a host must start or serve while its issuer is down.
+- A factory that owns the app (`WebAuth.create_app(...)` returning the `FastAPI`): the host's routes, lifespan, exception handlers and middleware are its own, and the library would have to take each as an argument or a hook. The call a host makes (build before its routes, install after the last) places the library's parts and leaves the app the host's. It reopens when a host has no routes of its own to order.
 
 ## 8. Risks and Technical Debt
 

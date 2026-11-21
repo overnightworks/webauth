@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import pytest
@@ -14,11 +15,10 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
 from tests.support.account_arrangement import MEMBER_ROLE, FakeUser, WriteLockInMemory
-from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.gated_stack_arrangement import an_issuer_nobody_calls
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
-    REALM_ISSUER,
     FakeClock,
     FakeKeySetEndpoint,
     a_relying_party,
@@ -36,6 +36,7 @@ from tests.support.webauth_arrangement import (
     AuthApp,
     RecordingAuditSink,
     a_session,
+    a_web_auth_config,
     an_auth_app,
     session_cookie_header,
 )
@@ -49,7 +50,6 @@ from webauth.dependencies import (
 )
 from webauth.middleware import (
     BearerGate,
-    BearerGateMiddleware,
     MachinePaths,
     MarkedRoute,
     PersonPaths,
@@ -57,16 +57,20 @@ from webauth.middleware import (
     admitted_admin,
     admitted_user,
     bearer_caller,
-    install_resource_metadata,
     resource_person,
 )
+from webauth.middleware.bearer_gate import _BearerGateMiddleware
 from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PublicRule
 from webauth.ports import AuthenticatedUser, BearerCaller
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from starlette.types import ASGIApp, Receive, Scope, Send
 
+    from webauth.oidc import OidcRelyingParty
     from webauth.ports import SignInTransaction
+    from webauth.web_auth import WebAuth
 
 MACHINE_PREFIX = "/api/admin/"
 PERSON_PREFIX = "/api/"
@@ -196,10 +200,12 @@ def a_bearer_gate(
     admission: AdmissionConfig = ADMISSION,
     machine_parties: AuthorizedParties = HAL_ONLY,
     resource: ProtectedResource | None = None,
+    relying_party: OidcRelyingParty | None = None,
 ) -> BearerGate:
-    """A gate whose machine paths are `paths` (none when empty), admitting `machine_parties`."""
+    """A gate whose machine paths are `paths` (none when empty), admitting `machine_parties`;
+    its relying party is `relying_party`, else one over `key_sets` and `clock`."""
     return BearerGate(
-        relying_party=a_relying_party(fetch_key_set=key_sets, wall_clock=clock),
+        relying_party=relying_party or a_relying_party(fetch_key_set=key_sets, wall_clock=clock),
         admission=admission,
         machine_paths=(None if paths == PathRules() else MachinePaths(paths, machine_parties)),
         person_paths=person_paths,
@@ -298,7 +304,6 @@ def add_resource_routes(auth: AuthApp, resource: ProtectedResource) -> None:
     `DELETE` reads `admin_user`, so a request a middleware turns into one of them is judged by
     the reader it reaches. The resource's marked routes are served by `add_marked_routes`.
     """
-    install_resource_metadata(auth.app, resource, issuer=REALM_ISSUER)
     dependencies = current_user_dependency(
         session_store=lambda: auth.sessions,
         on_authenticated=auth.authenticated.append,
@@ -465,7 +470,7 @@ def _a_sign_in_side(
     sessions: SessionRecordsInMemory | None,
 ) -> _SignInSide:
     cookie_person = FakeUser(role=cookie_role)
-    record = a_session(user=cookie_person)
+    record = a_session(user=cookie_person, now=datetime.fromtimestamp(ACCESS_TOKEN_NOW, UTC))
     lock = WriteLockInMemory()
     accounts = UsersWithSnapshots(cookie_person, *known_accounts, lock=lock)
     sessions = sessions or SessionRecordsInMemory(record, users=accounts, lock=lock)
@@ -482,11 +487,11 @@ def _a_sign_in_side(
 
 
 def _stack_policies(
-    gate: BearerGate | None,
+    bearer_of: Callable[[WebAuth], BearerGate] | None,
     with_person_paths: bool,
     policies: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    stack: dict[str, Any] = {} if gate is None else {"bearer_gate": gate}
+    stack: dict[str, Any] = {} if bearer_of is None else {"bearer_of": bearer_of}
     if with_person_paths:
         stack["csrf_origin"] = CsrfPolicy(exempt=FOREIGN_SECRET_PATHS)
     return {**stack, **(policies or {})}
@@ -494,26 +499,30 @@ def _stack_policies(
 
 def _a_gate_over(
     paths: PathRules,
+    machine_parties: AuthorizedParties,
+    person: PersonPaths | None,
+    resource: ProtectedResource | None,
+    host_marked_routes: frozenset[MarkedRoute],
+    admission: AdmissionConfig,
     key_sets: FakeKeySetEndpoint,
     clock: FakeClock,
-    machine_parties: AuthorizedParties,
-    person_paths: PathRules | None,
-    person_parties: AuthorizedParties,
-    transaction: SignInTransaction,
-    resource: ProtectedResource | None,
-    admission: AdmissionConfig,
-) -> tuple[PersonPaths | None, BearerGate]:
-    person = PersonPaths(person_paths, person_parties, transaction) if person_paths else None
-    gate = a_bearer_gate(
-        paths=paths,
-        key_sets=key_sets,
-        clock=clock,
-        person_paths=person,
-        admission=admission,
-        machine_parties=machine_parties,
-        resource=_bound_to(resource, transaction),
-    )
-    return person, gate
+) -> Callable[[WebAuth], BearerGate]:
+    if resource is not None:
+        resource = replace(resource, marked_routes=resource.marked_routes | host_marked_routes)
+
+    def gate_of(auth: WebAuth) -> BearerGate:
+        return a_bearer_gate(
+            paths=paths,
+            key_sets=key_sets,
+            clock=clock,
+            person_paths=person,
+            admission=admission,
+            machine_parties=machine_parties,
+            resource=resource,
+            relying_party=auth.relying_party,
+        )
+
+    return gate_of
 
 
 def _add_routes(
@@ -529,16 +538,6 @@ def _add_routes(
         add_resource_routes(auth, resource)
 
 
-def _public_rules(
-    given: tuple[PublicRule, ...],
-    person: PersonPaths | None,
-    resource: ProtectedResource | None,
-) -> tuple[PublicRule, ...]:
-    webhook = [FOREIGN_SECRET_PUBLIC] if person else []
-    metadata = [resource.public_rule] if resource else []
-    return (*given, *webhook, *metadata)
-
-
 def _bound_to(
     resource: ProtectedResource | None,
     transaction: SignInTransaction,
@@ -551,24 +550,25 @@ def _bound_to(
 def _an_auth_app_behind_the_stack(
     side: _SignInSide,
     session_gate: bool,
-    public: tuple[PublicRule, ...],
+    with_person_paths: bool,
     stack_policies: dict[str, Any],
-    inner_middleware: tuple[Middleware, ...],
+    issuer_side: tuple[FakeKeySetEndpoint, FakeClock],
     auth_app_keywords: dict[str, Any],
 ) -> AuthApp:
-    auth = an_auth_app(
+    key_sets, clock = issuer_side
+    public = (
+        *auth_app_keywords.pop("public", ()),
+        *([FOREIGN_SECRET_PUBLIC] if with_person_paths else []),
+    )
+    return an_auth_app(
         side.record,
         gate=session_gate,
         raise_server_exceptions=False,
         sessions=side.sessions,
         public=public,
-        stack_policies=stack_policies,
-        **auth_app_keywords,
+        stack_policies={"issuer_calls": an_issuer_nobody_calls(key_sets), **stack_policies},
+        **{"config": a_web_auth_config(wall_clock=clock), **auth_app_keywords},
     )
-    if not session_gate:
-        install_the_gated_stack(auth.app, **stack_policies)
-    auth.app.user_middleware.extend(inner_middleware)
-    return auth
 
 
 def a_bearer_app(
@@ -588,6 +588,7 @@ def a_bearer_app(
     policies: dict[str, Any] | None = None,
     inner_middleware: tuple[Middleware, ...] = (),
     resource: ProtectedResource | None = None,
+    host_marked_routes: frozenset[MarkedRoute] = frozenset(),
     admission: AdmissionConfig = ADMISSION,
     **auth_app_keywords: Any,
 ) -> BearerApp:
@@ -601,7 +602,8 @@ def a_bearer_app(
     on the app's accounts), held, injected or not, by `BearerApp.transaction`, and the routes
     of `add_person_routes`; `session_gate` false installs the stack without the session gate.
     `admission` is the gate's admission.
-    `resource` adds a protected resource, its public metadata and a host route at its entry point.
+    `resource` adds a protected resource, its public metadata and a host route at its entry point;
+    `host_marked_routes` are marked routes of the gate's resource whose routes the caller serves.
     """
     key_sets, clock = key_sets or a_key_set_answering(), FakeClock(float(ACCESS_TOKEN_NOW))
     stored_sessions = auth_app_keywords.pop("sessions", None)
@@ -609,21 +611,19 @@ def a_bearer_app(
         transaction_kind, strict_records, cookie_role, known_accounts, stored_sessions
     )
     sign_in = transaction or side.transaction
-    person, gate = _a_gate_over(
-        paths,
-        key_sets,
-        clock,
-        machine_parties,
-        person_paths,
-        person_parties,
-        sign_in,
-        resource,
-        admission,
+    person = PersonPaths(person_paths, person_parties, sign_in) if person_paths else None
+    resource = _bound_to(resource, sign_in)
+    gate_of = _a_gate_over(
+        paths, machine_parties, person, resource, host_marked_routes, admission, key_sets, clock
     )
-    public = _public_rules(auth_app_keywords.pop("public", ()), person, resource)
-    stack_policies = _stack_policies(gate if gated else None, person is not None, policies)
+    stack_policies = _stack_policies(gate_of if gated else None, person is not None, policies)
     auth = _an_auth_app_behind_the_stack(
-        side, session_gate, public, stack_policies, inner_middleware, auth_app_keywords
+        side,
+        session_gate,
+        person is not None,
+        {"sign_in": sign_in, "groups": admission, "inside": inner_middleware, **stack_policies},
+        (key_sets, clock),
+        auth_app_keywords,
     )
     _add_routes(auth, person, resource, auth_app_keywords.get("login_redirect"))
     return _a_bearer_app_over(auth, side, key_sets, clock, sign_in)
@@ -795,5 +795,5 @@ def answering_a_runtime_error_with_418(app: BearerApp) -> None:
 
 def between_the_bearer_gate_and_csrf(app: BearerApp, rewriting: Middleware) -> None:
     stack = app.auth.app.user_middleware
-    gate = next(at for at, entry in enumerate(stack) if entry.cls is BearerGateMiddleware)
+    gate = next(at for at, entry in enumerate(stack) if entry.cls is _BearerGateMiddleware)
     stack.insert(gate + 1, rewriting)

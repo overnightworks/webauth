@@ -39,15 +39,14 @@ from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
     ACCESS_TOKEN_NOW,
+    APP_CLIENT_ID,
     OPERATOR_SUBJECT,
+    REALM_ISSUER,
     REALM_JWKS_URL,
     a_logout_token,
 )
 from tests.support.oidc_login_host import (
-    BOUND_ISSUER,
-    CLIENT_ID,
     LOGOUT_PATH,
-    NOW,
     SAME_ORIGIN_FORM,
     SIGN_IN_PATHS,
     RecordingSignInTransaction,
@@ -549,12 +548,10 @@ def signing_out_of_the_browser(app: BearerApp) -> Response:
 
 def the_issuer_logging_the_person_out_by_back_channel(app: BearerApp) -> Response:
     logout_token = a_logout_token(
-        issuer=BOUND_ISSUER,
-        audience=CLIENT_ID,
+        issuer=REALM_ISSUER,
+        audience=APP_CLIENT_ID,
         subject=app.auth.sessions.stored_record.user.id,
-        now=NOW,
-        key_id="issuer-key",
-        key_name="issuer",
+        now=ACCESS_TOKEN_NOW,
     )
     return app.auth.client.post(
         SIGN_IN_PATHS.backchannel_logout, data={"logout_token": logout_token}

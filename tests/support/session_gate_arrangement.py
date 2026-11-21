@@ -6,7 +6,6 @@ from typing import Any
 
 from httpx import Response
 
-from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.session_store_arrangement import SessionsRecordingTheirTransaction
 from tests.support.webauth_arrangement import (
     ADMITTED_READER_PATH,
@@ -45,13 +44,6 @@ def a_gated_app(
 def a_plain_app(record: Any, **keywords: Any) -> AuthApp:
     """The same application guarded by the route dependency alone."""
     return an_auth_app(record, login_redirect=LOGIN_REDIRECT, **keywords)
-
-
-def a_stacked_plain_app(record: Any, **keywords: Any) -> AuthApp:
-    """The dependency-guarded application behind the gated stack's middleware, with no gate."""
-    app = a_plain_app(record, **keywords)
-    install_the_gated_stack(app.app)
-    return app
 
 
 def ask(

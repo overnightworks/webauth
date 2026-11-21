@@ -77,7 +77,7 @@ from webauth.middleware import BearerGate, MachinePaths, PersonPaths, SessionGat
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 from webauth.ports import AuthenticatedUser
 from webauth.sign_in_routes import LogoutPageText, RefusalPage, SignInPaths
-from webauth.web_auth import WebAuth, WebAuthSettingError
+from webauth.web_auth import ServedBehind, WebAuth, WebAuthSettingError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -595,7 +595,7 @@ def test_compose_13_an_app_that_carries_library_middleware_is_refused_untouched(
     """COMPOSE-13"""
     world = a_host_world()
     app = FastAPI()
-    install_full_stack(app, client_address_writer=False)
+    install_full_stack(app, front=ServedBehind.SHARED_FRONT)
     before = the_app_as_it_stands(app)
     auth = a_composition(world).build()
 
@@ -718,3 +718,32 @@ def test_compose_17_a_socket_of_a_handle_that_was_never_installed_names_the_miss
         client.websocket_connect(WEBSOCKET_PATH, headers=handshake),
     ):
         pass
+
+
+@pytest.mark.parametrize(
+    "positional",
+    [
+        pytest.param((), id="without a positional"),
+        pytest.param((object(),), id="with a positional"),
+    ],
+)
+def test_compose_18_the_class_called_with_every_argument_of_a_build_is_refused(
+    positional: tuple[object, ...],
+) -> None:
+    """COMPOSE-18"""
+    composition = a_composition(a_host_world())
+    built = composition.build()
+
+    with pytest.raises(TypeError):
+        WebAuth(  # type: ignore[call-arg]
+            *positional,  # type: ignore[arg-type]
+            settings=composition.settings,
+            stores=composition.stores,
+            groups=composition.groups,
+            pages=composition.pages,
+            front=composition.front,
+            gate=None,
+            outside=(),
+            inside=(),
+            relying_party=built.relying_party,
+        )

@@ -7,6 +7,7 @@ import threading
 import urllib.parse
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from itertools import chain
 
@@ -15,13 +16,12 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     FakeClock,
     FakeIssuer,
     a_key_set_endpoint,
     a_logout_token,
-    a_relying_party,
 )
 from tests.support.oidc_login_host import (
     ADMISSION,
@@ -45,10 +45,8 @@ from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     a_web_auth_config,
 )
-from webauth.config import install_web_auth_config
 from webauth.dependencies import current_user_dependency
-from webauth.middleware import install_web_auth_middleware
-from webauth.policies import BodySizePolicy, CsrfPolicy, SecurityHeadersPolicy
+from webauth.policies import BodySizePolicy
 from webauth.ports import (
     AccountEvent,
     AccountEventKind,
@@ -57,7 +55,7 @@ from webauth.ports import (
     SessionRecord,
     UserRecord,
 )
-from webauth.sign_in_routes import LogoutPageText, install_sign_in_routes
+from webauth.sign_in_routes import LogoutPageText
 from webauth.single_process_stores import (
     SingleProcessAccountStore,
     SingleProcessSessionStore,
@@ -65,6 +63,7 @@ from webauth.single_process_stores import (
     SingleProcessStores,
     _Tables,
 )
+from webauth.web_auth import IssuerCalls, SignInPages
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 LATER = START + timedelta(hours=1)
@@ -533,34 +532,7 @@ class Browser:
         self.issuer = FakeIssuer(
             mint_id_token=lambda nonce: an_id_token(nonce, clock, (LOGIN_GROUP,))
         )
-        relying_party = a_relying_party(
-            config=a_client_config(),
-            post_token_request=self.issuer,
-            fetch_key_set=a_key_set_endpoint("issuer"),
-            wall_clock=clock,
-        )
         app = FastAPI()
-        install_web_auth_config(app, self.config)
-        install_web_auth_middleware(
-            app,
-            sign_in_paths=SIGN_IN_PATHS,
-            security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
-            body_size=BodySizePolicy(default_max_bytes=1024),
-            csrf_origin=CsrfPolicy(),
-        )
-        add_the_client_address_writer(app)
-        install_sign_in_routes(
-            app,
-            paths=SIGN_IN_PATHS,
-            relying_party=lambda _request: relying_party,
-            admission=ADMISSION,
-            transaction=stores.transaction,
-            refused=lambda _request, _refusal: pytest.fail("the sign-in was refused"),
-            keeps_id_token=True,
-            max_sessions=None,
-            logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
-            ui_language=lambda _request: None,
-        )
         dependencies = current_user_dependency(
             session_store=lambda: stores.sessions, on_authenticated=lambda _user: None
         )
@@ -569,6 +541,27 @@ class Browser:
         def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
             return {"username": user.username}
 
+        install_the_gated_stack(
+            app,
+            config=dataclasses.replace(self.config, wall_clock=clock),
+            sessions=lambda: nullcontext(stores.sessions),
+            sign_in=stores.transaction,
+            sign_in_paths=SIGN_IN_PATHS,
+            keeps_id_token=True,
+            client=a_client_config(),
+            groups=ADMISSION,
+            pages=SignInPages(
+                refused=lambda _request, _refusal: pytest.fail("the sign-in was refused"),
+                logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
+                ui_language=lambda _request: None,
+            ),
+            body_size=BodySizePolicy(default_max_bytes=1024),
+            issuer_calls=IssuerCalls(
+                post_token_request=self.issuer,
+                fetch_key_set=a_key_set_endpoint("issuer"),
+                monotonic_clock=FakeClock(5_000.0),
+            ),
+        )
         self.client = TestClient(
             app,
             base_url=HTTPS_TEST_SERVER,

@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SessionGate",
-    "SessionGateMiddleware",
     "admitted_admin",
     "admitted_user",
 ]
@@ -79,7 +78,7 @@ class SessionGate:
     optional: PathRules = PathRules()
 
 
-class SessionGateMiddleware(RefusalMiddleware[SessionGate]):
+class _SessionGateMiddleware(RefusalMiddleware[SessionGate]):
     """Refuse a request without a live session, and record who the others are.
 
     The decision is recorded for the request, so ``current_user`` and its
@@ -159,7 +158,7 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
     if decided is None:
         raise RuntimeError(
             "The session gate made no decision for this request: install it with "
-            "install_web_auth_middleware(session_gate=...) on the app that serves the route.",
+            "WebAuth.install on the app that serves the route, built with a session gate.",
         )
     return None if isinstance(decided.admission, ConnectionRefusal | None) else decided.admission
 

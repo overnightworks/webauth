@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 from starlette.websockets import WebSocket
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.gate_arrangement import (
     A_TOKEN,
     ADMITTED_ADMIN_PATH,
@@ -31,7 +30,6 @@ from tests.support.gate_arrangement import (
     UNGATED_EXPORT_PATH,
     BearerApp,
     a_bearer_app,
-    a_bearer_gate,
     a_token,
     assert_answers_no_store,
     bearing,
@@ -40,7 +38,7 @@ from tests.support.gate_arrangement import (
     the_transaction,
     with_admitted_admin_routes,
 )
-from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
@@ -58,12 +56,10 @@ from tests.support.webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
     HTTPS_TEST_SERVER,
     LOGIN_REDIRECT,
-    a_web_auth_config,
     session_cookie_header,
 )
-from webauth.config import install_web_auth_config
 from webauth.dependencies import current_user_dependency
-from webauth.middleware import SessionGate, bearer_caller, install_web_auth_middleware
+from webauth.middleware import SessionGate, bearer_caller
 from webauth.policies import (
     BodySizePolicy,
     CacheControlRule,
@@ -246,26 +242,24 @@ class TestAMachinePrefixTheSessionGateAlsoOpens:
 
 def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> FastAPI:
     inner = FastAPI()
-    install_web_auth_config(inner, auth.auth.config)
     sessions = current_user_dependency(
         session_store=lambda: auth.auth.sessions,
         on_authenticated=lambda user: None,
     )
-    if csrf or session_gate:
-        install_web_auth_middleware(
-            inner,
-            sign_in_paths=GATED_SIGN_IN_PATHS,
-            security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
-            csrf_origin=CsrfPolicy(),
-            session_gate=SessionGate(
-                session_transaction=auth.auth.sessions.in_transaction,
-                login_redirect=None,
-                public=(),
-            )
-            if session_gate
-            else None,
+    install_the_gated_stack(
+        inner,
+        config=auth.auth.config,
+        sessions=auth.auth.sessions.in_transaction,
+        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+        csrf_origin=CsrfPolicy() if csrf else CsrfPolicy(exempt=PathRules(prefixes=("/",))),
+        session_gate=SessionGate(
+            session_transaction=auth.auth.sessions.in_transaction,
+            login_redirect=None,
+            public=(),
         )
-        add_the_client_address_writer(inner)
+        if session_gate
+        else None,
+    )
 
     @inner.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
     def machine_route(_caller: BearerCaller = Depends(bearer_caller)) -> dict[str, str]:
@@ -464,23 +458,16 @@ class TestTheGateSitsInsideTheRateLimitAndBodyLimitAndBehindTheHeaders:
         assert_answers_no_store(response)
 
     def test_a_host_cache_rule_on_the_machine_prefix_loses_to_no_store(self) -> None:
-        app = FastAPI()
-        install_web_auth_config(app, a_web_auth_config())
-        install_web_auth_middleware(
-            app,
-            sign_in_paths=GATED_SIGN_IN_PATHS,
-            security_headers=SecurityHeadersPolicy(
-                content_security_policy="default-src 'self'",
-                cache_control_rules=(CacheControlRule(MACHINE_PATHS, "public, max-age=60"),),
-            ),
-            csrf_origin=CsrfPolicy(),
-            bearer_gate=a_bearer_gate(),
+        app = a_bearer_app(
+            policies={
+                "security_headers": SecurityHeadersPolicy(
+                    content_security_policy="default-src 'self'",
+                    cache_control_rules=(CacheControlRule(MACHINE_PATHS, "public, max-age=60"),),
+                )
+            }
         )
-        add_the_client_address_writer(app)
-        app.add_api_route(EXPORT_PATH, lambda: {"ok": True}, methods=["GET"])
-        client = TestClient(app, base_url=HTTPS_TEST_SERVER)
 
-        response = client.get(EXPORT_PATH, headers={"authorization": f"Bearer {A_TOKEN}"})
+        response = app.ask(EXPORT_PATH, authorization=bearing(A_TOKEN))
 
         assert (response.status_code, response.headers["cache-control"]) == (200, "no-store")
         assert "set-cookie" not in response.headers

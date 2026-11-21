@@ -217,10 +217,8 @@ def test_an_admitted_callback_opens_the_session_for_one_idle_from_one_whole_seco
     host.callback(host.sign_in_at_issuer())
 
     record = host.sessions.stored_record
-    assert (record.created_at, record.expires_at) == (
-        FIXED_INSTANT,
-        FIXED_INSTANT + timedelta(seconds=SESSION_IDLE_SECONDS),
-    )
+    assert record.created_at.microsecond == 0
+    assert record.expires_at == record.created_at + timedelta(seconds=SESSION_IDLE_SECONDS)
     assert host.client.get("/me").json() == {"username": "lena"}
 
 

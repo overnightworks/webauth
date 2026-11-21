@@ -11,9 +11,9 @@ from fastapi import FastAPI, Request
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse, StreamingResponse
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
-from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     SPEC_WITH_CONCURRENT_READER,
     SPEC_WITHOUT_CONCURRENT_READER,
@@ -27,15 +27,12 @@ from tests.support.webauth_arrangement import (
     starts,
 )
 from webauth import WebAuthError
-from webauth.config import install_web_auth_config
 from webauth.middleware import (
-    BodySizeLimitMiddleware,
     RequestBodyTooLarge,
-    install_web_auth_middleware,
 )
+from webauth.middleware.body_size import _BodySizeLimitMiddleware
 from webauth.policies import (
     BodySizePolicy,
-    CsrfPolicy,
     RateLimitBudget,
     RateLimitPolicy,
     SecurityHeadersPolicy,
@@ -104,28 +101,15 @@ def a_body_limited_app(
     *, full_stack: bool = False, policy: BodySizePolicy | None = None
 ) -> FastAPI:
     app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config())
     _add_the_body_reading_routes(app)
-    body_size = policy or BodySizePolicy(default_max_bytes=LIMIT)
-    if full_stack:
-        install_web_auth_middleware(
-            app,
-            sign_in_paths=GATED_SIGN_IN_PATHS,
-            security_headers=HEADERS_POLICY,
-            body_size=body_size,
-            rate_limit=RateLimitPolicy(default=RateLimitBudget("api", 100, 60)),
-            csrf_origin=CsrfPolicy(),
-        )
-        add_the_client_address_writer(app)
-    else:
-        install_web_auth_middleware(
-            app,
-            sign_in_paths=GATED_SIGN_IN_PATHS,
-            security_headers=HEADERS_POLICY,
-            body_size=body_size,
-            csrf_origin=CsrfPolicy(),
-        )
-        add_the_client_address_writer(app)
+    install_the_gated_stack(
+        app,
+        config=a_web_auth_config(),
+        sessions=SessionRecordsInMemory().in_transaction,
+        security_headers=HEADERS_POLICY,
+        body_size=policy or BodySizePolicy(default_max_bytes=LIMIT),
+        rate_limit=RateLimitPolicy(default=RateLimitBudget("api", 100, 60)) if full_stack else None,
+    )
     return app
 
 
@@ -331,7 +315,7 @@ async def test_a_scope_that_is_not_http_reaches_the_app_untouched(scope_type: st
         received_scopes.append(scope)
 
     scope: Scope = {"type": scope_type}
-    middleware = BodySizeLimitMiddleware(recording_app, BodySizePolicy(default_max_bytes=LIMIT))
+    middleware = _BodySizeLimitMiddleware(recording_app, BodySizePolicy(default_max_bytes=LIMIT))
 
     _, raised = await drive(middleware, scope)
 

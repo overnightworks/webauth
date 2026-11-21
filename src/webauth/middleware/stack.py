@@ -1,4 +1,4 @@
-"""The one order the library's middleware runs in, installed in one call."""
+"""The one order the library's middleware runs in, installed by ``WebAuth.install``."""
 
 from __future__ import annotations
 
@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING
 from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
-from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
-from webauth.middleware.body_size import BodySizeLimitMiddleware
+from webauth.middleware.bearer_gate import BearerGate, _BearerGateMiddleware
+from webauth.middleware.body_size import _BodySizeLimitMiddleware
 from webauth.middleware.client_address import (
     _ClientAddressMiddleware,
     _FrontRequiredMiddleware,
 )
-from webauth.middleware.csrf import CsrfOriginMiddleware
-from webauth.middleware.path_refusal import PathRefusalMiddleware
-from webauth.middleware.rate_limit import IpRateLimitMiddleware
-from webauth.middleware.security_headers import SecurityHeadersMiddleware
-from webauth.middleware.session_gate import SessionGate, SessionGateMiddleware
+from webauth.middleware.csrf import _CsrfOriginMiddleware
+from webauth.middleware.path_refusal import _PathRefusalMiddleware
+from webauth.middleware.rate_limit import _IpRateLimitMiddleware
+from webauth.middleware.security_headers import _SecurityHeadersMiddleware
+from webauth.middleware.session_gate import SessionGate, _SessionGateMiddleware
 from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
@@ -38,18 +38,16 @@ if TYPE_CHECKING:
     from webauth.proxies import TrustedProxies
     from webauth.sign_in_routes import SignInPaths
 
-__all__ = [
-    "install_web_auth_middleware",
-]
+__all__: list[str] = []
 
 _LIBRARY_MIDDLEWARE = (
-    SecurityHeadersMiddleware,
-    PathRefusalMiddleware,
-    BodySizeLimitMiddleware,
-    IpRateLimitMiddleware,
-    BearerGateMiddleware,
-    CsrfOriginMiddleware,
-    SessionGateMiddleware,
+    _SecurityHeadersMiddleware,
+    _PathRefusalMiddleware,
+    _BodySizeLimitMiddleware,
+    _IpRateLimitMiddleware,
+    _BearerGateMiddleware,
+    _CsrfOriginMiddleware,
+    _SessionGateMiddleware,
 )
 
 _BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
@@ -62,8 +60,10 @@ def _with_sign_in_rules(
     rate_limit: RateLimitPolicy,
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
+    bearer_gate: BearerGate | None,
 ) -> tuple[BodySizePolicy, RateLimitPolicy, CsrfPolicy, SessionGate | None]:
-    """The host's policies with the rules the sign-in paths derive put ahead of the host's own."""
+    """The host's policies with the rules the sign-in paths derive put ahead of the host's own,
+    and the public rule of the bearer gate's resource behind them."""
     paths = sign_in_paths
     sign_in_page = PathRules(exact=frozenset({paths.start, paths.callback}))
     browser = PathRules(
@@ -79,7 +79,11 @@ def _with_sign_in_rules(
         public = (PublicRule(sign_in_page, methods=frozenset({"GET"})),)
         if posted:
             public += (PublicRule(PathRules(exact=posted), methods=frozenset({"POST"})),)
-        session_gate = replace(session_gate, public=(*public, *session_gate.public))
+        resource = None if bearer_gate is None else bearer_gate.resource
+        resource_public = () if resource is None else (resource.public_rule,)
+        session_gate = replace(
+            session_gate, public=(*public, *session_gate.public, *resource_public)
+        )
     return (
         replace(
             body_size,
@@ -152,18 +156,19 @@ def _library_middleware(
         rate_limit=rate_limit or RateLimitPolicy(),
         csrf_origin=csrf_origin,
         session_gate=session_gate,
+        bearer_gate=bearer_gate,
     )
     entries = [
-        Middleware(SecurityHeadersMiddleware, policy=security_headers),
-        Middleware(PathRefusalMiddleware),
-        Middleware(BodySizeLimitMiddleware, policy=body_size),
-        Middleware(IpRateLimitMiddleware, policy=rate_limit),
+        Middleware(_SecurityHeadersMiddleware, policy=security_headers),
+        Middleware(_PathRefusalMiddleware),
+        Middleware(_BodySizeLimitMiddleware, policy=body_size),
+        Middleware(_IpRateLimitMiddleware, policy=rate_limit),
     ]
     if bearer_gate is not None:
-        entries.append(Middleware(BearerGateMiddleware, policy=bearer_gate))
-    entries.append(Middleware(CsrfOriginMiddleware, policy=csrf_origin))
+        entries.append(Middleware(_BearerGateMiddleware, policy=bearer_gate))
+    entries.append(Middleware(_CsrfOriginMiddleware, policy=csrf_origin))
     if session_gate is not None:
-        entries.append(Middleware(SessionGateMiddleware, policy=session_gate))
+        entries.append(Middleware(_SessionGateMiddleware, policy=session_gate))
     return entries
 
 
@@ -191,7 +196,20 @@ def _add_outermost_first(app: Starlette, entries: Sequence[Middleware]) -> None:
         app.add_middleware(entry.cls, *entry.args, **entry.kwargs)
 
 
-def _install_slotted_web_auth_middleware(
+def _front_middleware(
+    trusted_proxies: TrustedProxies | None, security_headers: SecurityHeadersPolicy
+) -> list[Middleware]:
+    """The outermost entries: the request line and the writer for ``trusted_proxies``, or, for an
+    app a shared front serves (``None``), the guard that refuses a request without that front."""
+    if trusted_proxies is None:
+        return [Middleware(_FrontRequiredMiddleware, policy=security_headers)]
+    return [
+        Middleware(RequestLineMiddleware),
+        Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
+    ]
+
+
+def _install_web_auth_middleware(
     app: Starlette,
     *,
     sign_in_paths: SignInPaths,
@@ -208,22 +226,28 @@ def _install_slotted_web_auth_middleware(
     """Install what ``WebAuth.install`` places, outermost first: logline's request line and the
     client-address writer, only with ``trusted_proxies`` (``None`` for an app a shared front
     serves: a guard refuses a request without that front instead), the host's ``outside`` entries,
-    the library stack, the host's ``inside`` entries.
-    An app that already carries library middleware is refused untouched."""
+    the library stack, the host's ``inside`` entries. An app that already carries library
+    middleware is refused untouched.
+
+    The library stack is security headers, path refusal, body size, rate limit, bearer gate, CSRF
+    origin, session gate. Security headers sit outside everything so the library's own refusals
+    carry them; the path refusal answers 400 to a control character before a rule or route reads
+    the path; the body size limit refuses a body declared too large before it costs a rate-limit
+    budget or a session lookup; the rate limit sits outside CSRF so a refused forgery spends
+    budget; the bearer gate sits inside the rate limit, so a machine request spends the same
+    budget, and outside CSRF and the session gate, so neither decides a machine path by a cookie;
+    the session gate sits inside all of them, so a request refused before admission never costs a
+    session lookup and a forged state-changing request is refused before it renews a session.
+
+    The rules the sign-in paths and the bearer gate's resource derive are put ahead of the host's
+    own, so the first match is the derived one.
+    """
     _refuse_an_unsound_stack(app)
     effective_security_headers = _effective_security_headers(
         sign_in_paths, security_headers, bearer_gate
     )
-    front = (
-        [Middleware(_FrontRequiredMiddleware, policy=effective_security_headers)]
-        if trusted_proxies is None
-        else [
-            Middleware(RequestLineMiddleware),
-            Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
-        ]
-    )
     entries = [
-        *front,
+        *_front_middleware(trusted_proxies, effective_security_headers),
         *outside,
         *_library_middleware(
             sign_in_paths=sign_in_paths,
@@ -236,65 +260,4 @@ def _install_slotted_web_auth_middleware(
         ),
         *inside,
     ]
-    _add_outermost_first(app, entries)
-
-
-def install_web_auth_middleware(
-    app: Starlette,
-    *,
-    sign_in_paths: SignInPaths,
-    security_headers: SecurityHeadersPolicy,
-    csrf_origin: CsrfPolicy,
-    body_size: BodySizePolicy | None = None,
-    rate_limit: RateLimitPolicy | None = None,
-    bearer_gate: BearerGate | None = None,
-    session_gate: SessionGate | None = None,
-) -> None:
-    """Install the library's middleware outermost first: security headers, path refusal, body size,
-    rate limit, bearer gate, CSRF origin, session gate.
-
-    The client address is not installed here: a host that calls this directly serves the app
-    through ``web_auth_front(app, trusted_proxies=...)``, which places the writer and logline's
-    ``RequestLineMiddleware`` around it, and without one the first request fails
-    (``docs/host-contract.md``).
-
-    ``sign_in_paths`` is the one description of the sign-in routes. From it the installer puts these
-    rules ahead of the host's own, so the first match is the derived one (a path the host exempts
-    stays exempt): ``no-store`` on every sign-in path; the back-channel path's exemption from CSRF
-    and from the rate limit and its 32 KiB ``POST`` body rule; with a session gate, the public rules
-    of the routes; and the policy's ``sign_in`` budget on start, callback and logout. A host adds
-    none of them. Without a ``rate_limit`` the default is 600 requests per 60 seconds per address,
-    without a ``body_size`` it is 4 KiB.
-
-    Security headers sit outside everything so the library's own refusals (the 400 for a path, the
-    413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500) carry them; the client
-    address the writer recorded reaches every refusal's request line; the path refusal
-    answers 400 to a route path with a control character (U+0000 to U+001F, U+007F) before a rule
-    or route reads it; the body size limit refuses a body declared too large before it costs a
-    rate-limit budget or a session lookup; the rate limit sits outside CSRF so a refused forgery
-    spends budget; the session gate sits inside all of them, so a request refused before admission
-    never costs a session lookup and a forged state-changing request is refused before it renews a
-    session. The bearer gate sits inside the rate limit, so a machine request spends the same
-    budget, and outside CSRF and the session gate, so neither decides a machine path by a cookie.
-    With a bearer gate that has machine paths or a resource the installed security-headers policy
-    carries their ``no-store`` rule first, so it wins.
-
-    Install once and add none of this call's middleware yourself; an app that already carries one,
-    a subclass included, is refused untouched (``RuntimeError``).
-
-    A route that raises, or an app without an installed ``WebAuthConfig``, answers the library 500
-    with the headers (no HSTS without a config), and the exception still reaches the server. Once
-    the response has started no 500 follows, because a second start cannot be sent; the exception
-    reaches the server alone.
-    """
-    _refuse_an_unsound_stack(app)
-    entries = _library_middleware(
-        sign_in_paths=sign_in_paths,
-        security_headers=_effective_security_headers(sign_in_paths, security_headers, bearer_gate),
-        body_size=body_size,
-        rate_limit=rate_limit,
-        bearer_gate=bearer_gate,
-        csrf_origin=csrf_origin,
-        session_gate=session_gate,
-    )
     _add_outermost_first(app, entries)

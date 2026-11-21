@@ -67,14 +67,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BearerGate",
-    "BearerGateMiddleware",
     "MachinePaths",
     "MarkedRoute",
     "PersonPaths",
     "ProtectedResource",
     "bearer_caller",
     "exchanged_access_token",
-    "install_resource_metadata",
     "is_resource_admission",
     "resource_person",
 ]
@@ -284,7 +282,7 @@ class ProtectedResource:
 
     @property
     def public_rule(self) -> PublicRule:
-        """``GET`` of the metadata path, for ``SessionGate.public``."""
+        """``GET`` of the metadata path, which a client without a session reads."""
         return PublicRule(
             PathRules(exact=frozenset({self.metadata_path})),
             methods=frozenset({"GET"}),
@@ -397,7 +395,7 @@ _REFUSAL_OF_ADMISSION: Final = {
 }
 
 
-class BearerGateMiddleware(RefusalMiddleware[BearerGate]):
+class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     """Admit a request on a gated path only with a valid access token.
 
     Every request the paths select is verified from its own ``Authorization``
@@ -612,7 +610,7 @@ def bearer_caller(connection: HTTPConnection) -> BearerCaller:
     if admission is None or not isinstance(admission.principal, BearerCaller):
         raise RuntimeError(
             "The bearer gate admitted no caller for this request: install it with "
-            "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
+            "WebAuth.install(bearer=...) on the app that serves the "
             "route, and select the route's path as a machine path.",
         )
     return admission.principal
@@ -643,7 +641,7 @@ def resource_person(connection: HTTPConnection) -> AuthenticatedUser:
     if person is None:
         raise RuntimeError(
             "The bearer gate admitted no resource person for this request: install it with "
-            "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
+            "WebAuth.install(bearer=...) on the app that serves the "
             "route, and read the person on the resource's entry point or marked route itself.",
         )
     return person
@@ -672,7 +670,7 @@ async def exchanged_access_token(
     ):
         raise RuntimeError(
             "The bearer gate admitted no resource token for this request: install it with "
-            "install_web_auth_middleware(bearer_gate=...) on the app that serves the "
+            "WebAuth.install(bearer=...) on the app that serves the "
             "route, and exchange on the resource's entry point or marked route itself.",
         )
     return await on_worker(partial(admission.token_exchange, credential, scopes))
@@ -695,12 +693,12 @@ def is_resource_admission(connection: HTTPConnection) -> bool:
     return _resource_person_admitted(connection) is not None
 
 
-def install_resource_metadata(app: FastAPI, resource: ProtectedResource, *, issuer: str) -> None:
+def _install_resource_metadata(app: FastAPI, resource: ProtectedResource, *, issuer: str) -> None:
     """Register ``GET`` of the resource's metadata path (RFC 9728) on ``app``: the resource,
     its one authorization server ``issuer`` and its one scope.
 
-    Install it ahead of any catch-all route, and list ``resource.public_rule`` in
-    ``SessionGate.public`` so a client without a session reads it.
+    Install it ahead of any catch-all route. ``WebAuth.install`` lists ``resource.public_rule`` in
+    the session gate's public rules so a client without a session reads it.
     """
     document = {
         "resource": resource.url,

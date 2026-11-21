@@ -1,4 +1,4 @@
-"""The request line of a host that installs logline's middleware outside webauth's stack."""
+"""Reading the request line the composition call's front writes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
-from logline import REQUEST_EVENT, RequestLineMiddleware
+from logline import REQUEST_EVENT
 from logline.testing import configured
 
 from tests.support.webauth_arrangement import HTTPS_TEST_SERVER
@@ -21,11 +21,6 @@ if TYPE_CHECKING:
 WEBSOCKET_EVENT = "websocket.ended"
 TRUSTED_PEER = "172.16.0.9"
 FORWARDED_CLIENT = "203.0.113.7"
-
-
-def logging_request_lines(app: FastAPI) -> None:
-    """Install logline's middleware as its README asks a host: after every other, so outermost."""
-    app.add_middleware(RequestLineMiddleware)
 
 
 @contextmanager

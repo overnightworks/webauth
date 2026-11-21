@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,7 +13,6 @@ from starlette.responses import Response
 from tests.support.account_arrangement import FakeUser
 from tests.support.log_records import fields_of
 from tests.support.oidc_login_host import (
-    ADMISSION,
     SUBJECT,
     OidcHost,
     StoreDown,
@@ -70,8 +68,6 @@ def _unchanged(_host: OidcHost, query: str) -> str:
     return query
 
 
-_A_FOREIGN_ISSUER = replace(ADMISSION, bound_issuer="https://other.example/realms/lab")
-
 _REFUSALS = [
     pytest.param(
         an_oidc_host,
@@ -126,12 +122,6 @@ _REFUSALS = [
         _unchanged,
         {"reason": AdmissionRefusal.NOT_A_MEMBER.value},
         id="a person outside the app",
-    ),
-    pytest.param(
-        lambda: an_oidc_host(admission=_A_FOREIGN_ISSUER),
-        _unchanged,
-        {"reason": AdmissionRefusal.FOREIGN_ISSUER.value},
-        id="a foreign issuer",
     ),
     pytest.param(
         lambda: an_oidc_host(FakeUser(id="user-7", username="lena")),

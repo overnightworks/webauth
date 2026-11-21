@@ -17,7 +17,8 @@ from httpx import Response as ClientResponse
 from starlette.requests import Request
 from starlette.responses import Response
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
+from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     ALLOWED_HOST,
     SEVEN_DAYS_SECONDS,
@@ -26,7 +27,7 @@ from tests.support.webauth_arrangement import (
     session_cookie_header,
     signed_without_bound,
 )
-from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
+from webauth.config import SessionLifetime, WebAuthConfig
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     PendingLogin,
@@ -40,8 +41,12 @@ from webauth.cookies import (
     sign_session_id,
 )
 from webauth.dependencies import session_id_from_request
-from webauth.middleware import SecurityHeadersMiddleware
-from webauth.policies import SecurityHeadersPolicy, default_content_security_policy
+from webauth.policies import (
+    CsrfPolicy,
+    PathRules,
+    SecurityHeadersPolicy,
+    default_content_security_policy,
+)
 
 _TEST_SECRET = b"a" * 64
 MAX_PENDING_LOGIN_COOKIE_CHARS = 896
@@ -300,14 +305,6 @@ class CookieApp:
         )
 
 
-def with_security_headers(app: FastAPI) -> None:
-    app.add_middleware(
-        SecurityHeadersMiddleware,
-        policy=SecurityHeadersPolicy(default_content_security_policy([])),
-    )
-    add_the_client_address_writer(app)
-
-
 class CookieOverrides(TypedDict, total=False):
     cookie_secure: bool
 
@@ -325,8 +322,6 @@ def a_cookie_app(
     """
     config = a_web_auth_config(**config_overrides)
     app = FastAPI()
-    install_web_auth_config(app, config)
-    with_security_headers(app)
 
     @app.post("/issue")
     def issue(response: Response) -> dict[str, str]:
@@ -343,6 +338,13 @@ def a_cookie_app(
         _clear_session_cookies(response, config)
         return {"status": "ok"}
 
+    install_the_gated_stack(
+        app,
+        config=config,
+        sessions=SessionRecordsInMemory().in_transaction,
+        security_headers=SecurityHeadersPolicy(default_content_security_policy([])),
+        csrf_origin=CsrfPolicy(exempt=PathRules(exact=frozenset({"/issue", "/session"}))),
+    )
     return CookieApp(client=TestClient(app, base_url=base_url, client=(peer, 50000)), config=config)
 
 

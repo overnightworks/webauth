@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 __all__ = [
     "SessionLifetime",
     "WebAuthConfig",
-    "install_web_auth_config",
     "installed_web_auth_config",
     "web_auth_config",
 ]
@@ -92,7 +91,7 @@ class WebAuthConfig:
 
     ``cookie_secure`` alone decides whether the session cookie carries
     ``Secure``, when it is set and when it is cleared, and whether
-    ``SecurityHeadersMiddleware`` sends HSTS. The request's scheme does not
+    the security-headers middleware sends HSTS. The request's scheme does not
     decide it, so a deployment behind a TLS proxy the host's
     ``TrustedProxies`` does not list still gets both. A browser does not send a ``Secure``
     cookie back over plain http, so a host's own session login over plain http
@@ -168,7 +167,7 @@ class WebAuthConfig:
         return self.session_secret.get_secret_value().encode()
 
 
-def install_web_auth_config(app: Starlette, config: WebAuthConfig) -> None:
+def _install_web_auth_config(app: Starlette, config: WebAuthConfig) -> None:
     """Publish ``config`` on ``app`` so every request can reach it."""
     setattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, config)
 
@@ -183,7 +182,7 @@ def installed_web_auth_config(app: Starlette) -> WebAuthConfig:
     if config is None:
         raise RuntimeError(
             "This application serves auth-protected requests without a "
-            "WebAuthConfig: call install_web_auth_config() while it starts up.",
+            "WebAuthConfig: build the app's WebAuth and call its install().",
         )
     return config
 

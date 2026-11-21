@@ -6,11 +6,10 @@ import urllib.parse
 from collections.abc import Callable, Iterator
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
 
 import anyio
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from httpx import Response as HttpxResponse
 from pydantic import SecretStr
 
@@ -57,7 +56,6 @@ from tests.support.webauth_arrangement import (
 from webauth.cookies import (
     sign_session_id,
 )
-from webauth.oidc import OidcRelyingParty
 from webauth.ports import (
     AccountEventKind,
 )
@@ -121,7 +119,7 @@ def a_host_with_sessions(
 
 
 def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
-    first_created_at = datetime.now(UTC) - timedelta(minutes=30)
+    first_created_at = datetime.fromtimestamp(host.config.wall_clock(), UTC) - timedelta(minutes=30)
     for minute in range(count):
         created_at = first_created_at + timedelta(minutes=minute)
         seeded_session(
@@ -539,25 +537,6 @@ def test_a_declared_oversized_body_gets_413_before_the_body_is_read() -> None:
     assert (response.status_code, chunks_read, sessions_of(host, SUBJECT)) == (413, [], 1)
 
 
-def _a_relying_party_that_raises(_request: Request) -> NoReturn:
-    raise StoreDown
-
-
-def test_a_relying_party_that_raises_answers_400_and_enters_no_transaction() -> None:
-    host = a_host_with_sessions(subject_sessions=1)
-
-    host.relying_party_of = _a_relying_party_that_raises
-
-    response = post_logout_token(host, a_logout_token_of_the_issuer())
-
-    assert (response.status_code, response.content) == (400, b"")
-    assert (host.transaction.entries, sessions_of(host, SUBJECT)) == (0, 1)
-
-
-def _the_relying_party_raises(host: OidcHost, _monkeypatch: pytest.MonkeyPatch) -> None:
-    host.relying_party_of = _a_relying_party_that_raises
-
-
 def _the_verification_raises(host: OidcHost, monkeypatch: pytest.MonkeyPatch) -> None:
     failing(host.relying_party, "verify_logout_token", monkeypatch)
 
@@ -565,7 +544,6 @@ def _the_verification_raises(host: OidcHost, monkeypatch: pytest.MonkeyPatch) ->
 @pytest.mark.parametrize(
     ("fail", "raised_type"),
     [
-        pytest.param(_the_relying_party_raises, StoreDown, id="relying-party"),
         pytest.param(_the_verification_raises, StoreDown, id="verification"),
         pytest.param(_the_deletion_fails, StoreDown, id="store"),
         pytest.param(_the_audit_sink_fails, StoreDown, id="audit-sink"),
@@ -577,7 +555,7 @@ def test_a_back_channel_failure_is_raised_once_the_400_is_sent(
     raised_type: type[Exception],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SIGNIN-50: an exception in the relying party, verification, store, audit sink or exit gets an
+    """SIGNIN-50: an exception in the verification, store, audit sink or exit gets an
     empty 400, then is raised."""
     host = a_host_with_sessions(subject_sessions=1)
     fail(host, monkeypatch)
@@ -669,29 +647,6 @@ def test_no_answer_of_the_back_channel_sets_or_clears_a_cookie(
     response = post_backchannel_logout(host, content)
 
     assert (response.status_code, set_cookies(response)) == (status, {})
-
-
-def test_the_relying_party_receives_the_back_channel_request_with_the_host_it_was_posted_to() -> (
-    None
-):
-    """SIGNIN-56: the relying party receives the request with the Host it was posted to."""
-    host = a_host_with_sessions(subject_sessions=1)
-    hosts_seen: set[str] = set()
-
-    def a_relying_party_noting_the_host(request: Request) -> OidcRelyingParty:
-        hosts_seen.add(request.headers["host"])
-        return host.relying_party
-
-    host.relying_party_of = a_relying_party_noting_the_host
-    internal_alias = "idp-callback.internal"
-
-    response = post_backchannel_logout(
-        host,
-        a_form_of(a_logout_token_of_the_issuer()),
-        {**FORM, "host": internal_alias},
-    )
-
-    assert (response.status_code, hosts_seen) == (200, {internal_alias})
 
 
 def test_after_an_audit_failure_a_per_call_host_keeps_the_ended_sessions_and_a_retry_audits_nothing(

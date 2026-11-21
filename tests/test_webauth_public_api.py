@@ -361,6 +361,35 @@ def test_a_public_module_defines_only_underscored_names_outside_all(module_name:
     assert offences == []
 
 
+THE_INSTALLERS_AND_STACK_CLASSES = frozenset(
+    {
+        "install_web_auth_config",
+        "install_web_auth_middleware",
+        "install_sign_in_routes",
+        "install_resource_metadata",
+        "SecurityHeadersMiddleware",
+        "PathRefusalMiddleware",
+        "BodySizeLimitMiddleware",
+        "IpRateLimitMiddleware",
+        "BearerGateMiddleware",
+        "CsrfOriginMiddleware",
+        "SessionGateMiddleware",
+    }
+)
+
+
+def test_no_public_module_carries_an_installer_or_a_stack_class() -> None:
+    """The composition call is the one way in: its installers and middleware classes are private."""
+    carried = {
+        f"{module_name}.{name}"
+        for module_name in PUBLIC_MODULES
+        for name in THE_INSTALLERS_AND_STACK_CLASSES
+        if hasattr(importlib.import_module(module_name), name)
+    }
+
+    assert carried == set()
+
+
 @dataclass(frozen=True)
 class NameTaken:
     path: Path

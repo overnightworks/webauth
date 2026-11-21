@@ -11,21 +11,19 @@ import logging
 import urllib.parse
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.routing import APIRoute
+from fastapi import Request
 from starlette.responses import Response
 
 from tests.support.oidc_arrangement import a_relying_party
 from tests.support.oidc_login_host import (
-    ADMISSION,
-    SIGN_IN_PATHS,
     START_PATH,
     OidcHost,
     an_oidc_host,
 )
 from webauth.languages import AppLanguages, resolve_language
 from webauth.oidc import OidcRelyingParty
-from webauth.sign_in_routes import LogoutPageText, install_sign_in_routes
+from webauth.sign_in_routes import LogoutPageText
+from webauth.web_auth import SignInPages
 
 LANGUAGE_PARAMETER = "ui_locales"
 MALFORMED_TAGS = [
@@ -153,22 +151,10 @@ def test_begin_login_refuses_a_malformed_tag_with_value_error(tag: str) -> None:
         relying_party.begin_login(ui_locales=tag)
 
 
-def test_installing_without_naming_the_language_raises_and_registers_no_route() -> None:
-    """LANGUAGE-21: `ui_language` has no default: install without it raises `TypeError`."""
-    app = FastAPI()
-    host = an_oidc_host()
-    arguments: dict[str, object] = {
-        "paths": SIGN_IN_PATHS,
-        "relying_party": lambda _request: host.relying_party,
-        "admission": ADMISSION,
-        "transaction": host.transaction,
-        "refused": lambda _request, _refusal: Response(status_code=403),
-        "keeps_id_token": True,
-        "max_sessions": None,
-        "logout_page_text": lambda _request: LogoutPageText(language="en", button_label="Out"),
-    }
-
+def test_the_pages_are_refused_without_naming_the_language() -> None:
+    """LANGUAGE-21: `ui_language` has no default: the pages without it raise `TypeError`."""
     with pytest.raises(TypeError, match="ui_language"):
-        install_sign_in_routes(app, **arguments)  # type: ignore[arg-type]
-
-    assert not [route for route in app.routes if isinstance(route, APIRoute)]
+        SignInPages(  # type: ignore[call-arg]
+            refused=lambda _request, _refusal: Response(status_code=403),
+            logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
+        )

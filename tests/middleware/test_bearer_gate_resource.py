@@ -39,6 +39,7 @@ from tests.support.gate_arrangement import (
     relayed,
     the_accounts,
 )
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_NOW,
@@ -47,9 +48,10 @@ from tests.support.oidc_arrangement import (
     REALM_ISSUER,
     an_access_token,
 )
+from tests.support.session_store_arrangement import SessionRecordsInMemory
+from tests.support.webauth_arrangement import a_web_auth_config
 from webauth.middleware import (
     ProtectedResource,
-    install_resource_metadata,
 )
 from webauth.policies import AuthorizedParties, PathRules
 
@@ -627,7 +629,14 @@ def test_the_metadata_route_runs_the_hosts_app_level_dependencies(
         raise HTTPException(status_code=418)
 
     host = FastAPI(dependencies=[Depends(refuse)])
-    install_resource_metadata(host, resource, issuer=REALM_ISSUER)
+    install_the_gated_stack(
+        host,
+        config=a_web_auth_config(),
+        sessions=SessionRecordsInMemory().in_transaction,
+        bearer_of=lambda auth: a_bearer_gate(
+            relying_party=auth.relying_party, admission=auth.admission, resource=resource
+        ),
+    )
 
     assert TestClient(host).get(resource.metadata_path).status_code == 418
 
