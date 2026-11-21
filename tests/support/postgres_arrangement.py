@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
 
     from webauth.config import WebAuthConfig
-    from webauth.ports import AuditSink, SessionRecordStore
+    from webauth.ports import AuditSink, SessionRecordStore, SessionRenewalStore
 
 POSTGRES_URL_VARIABLE: Final = "WEBAUTH_TEST_POSTGRES_URL"
 BLOCKED_BACKEND_DEADLINE_SECONDS: Final = 30
@@ -195,11 +195,11 @@ class HostStoredKeyTransaction:
     engine: Engine
     tables: HostTables
 
-    def __call__(self) -> AbstractContextManager[SessionRecordStore]:
+    def __call__(self) -> AbstractContextManager[SessionRenewalStore]:
         return self._entry()
 
     @contextmanager
-    def _entry(self) -> Iterator[SessionRecordStore]:
+    def _entry(self) -> Iterator[SessionRenewalStore]:
         with database_errors_as_store_errors(), self.engine.begin() as connection:
             yield a_stored_key_view(connection, self.tables)
 

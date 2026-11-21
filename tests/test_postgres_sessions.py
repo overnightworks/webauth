@@ -665,33 +665,6 @@ def test_the_stored_key_view_reads_and_changes_the_row_under_its_stored_key(
     assert (touched, replaced) == (True, True)
     assert after is not None
     assert (after.expires_at, after.refresh_token) == (later, SecretStr("replacement"))
-    with host.engine.begin() as connection:
-        a_stored_key_view(connection, host.tables).delete(key)
-    assert host.sessions.load(session_id) is None
-
-
-def test_the_stored_key_view_refuses_to_create_a_session_so_a_hash_never_becomes_a_cookie(
-    host: PostgresHost, scenario: ExpirySweepScenario
-) -> None:
-    """PGSTORE-11."""
-    subject = an_account(host)
-    now = scenario.instant
-    expires_at = now + timedelta(hours=1)
-
-    with host.engine.begin() as connection:
-        view = a_stored_key_view(connection, host.tables)
-        with pytest.raises(TypeError):
-            view.create(
-                subject,
-                session_id=ABC_DIGEST,
-                now=now,
-                expires_at=expires_at,
-                refresh_token=None,
-                id_token=None,
-                account_language=None,
-            )
-
-    assert host.count_rows(host.tables.sessions) == 0
 
 
 @pytest.fixture

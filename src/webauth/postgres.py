@@ -235,29 +235,6 @@ class _SessionRows(ABC):
     def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
         return self._updated(session_id, refresh_token=refresh_token.get_secret_value())
 
-    def delete(self, session_id: str) -> None:
-        with database_errors_as_store_errors():
-            self._connection.execute(
-                delete(self._table).where(self._table.c.id_hash == self._key_of(session_id))
-            )
-
-    def delete_for_user(self, user_id: str) -> int:
-        """End every session of the account and keep the account."""
-        with database_errors_as_store_errors():
-            return self._connection.execute(
-                delete(self._table).where(self._table.c.account_id == user_id)
-            ).rowcount
-
-    def prune_overflow(self, user_id: str, keep_newest: int) -> None:
-        overflow = (
-            select(self._table.c.id_hash)
-            .where(self._table.c.account_id == user_id)
-            .order_by(self._table.c.created_at.desc(), self._table.c.id_hash)
-            .offset(keep_newest)
-        )
-        with database_errors_as_store_errors():
-            self._connection.execute(delete(self._table).where(self._table.c.id_hash.in_(overflow)))
-
     def _updated(self, session_id: str, **values: object) -> bool:
         with database_errors_as_store_errors():
             result = self._connection.execute(
@@ -316,6 +293,29 @@ class PostgresSessionStore(_SessionRows):
             ).one()
         return _stored_session(session_id, row, user)
 
+    def delete(self, session_id: str) -> None:
+        with database_errors_as_store_errors():
+            self._connection.execute(
+                delete(self._table).where(self._table.c.id_hash == self._key_of(session_id))
+            )
+
+    def delete_for_user(self, user_id: str) -> int:
+        """End every session of the account and keep the account."""
+        with database_errors_as_store_errors():
+            return self._connection.execute(
+                delete(self._table).where(self._table.c.account_id == user_id)
+            ).rowcount
+
+    def prune_overflow(self, user_id: str, keep_newest: int) -> None:
+        overflow = (
+            select(self._table.c.id_hash)
+            .where(self._table.c.account_id == user_id)
+            .order_by(self._table.c.created_at.desc(), self._table.c.id_hash)
+            .offset(keep_newest)
+        )
+        with database_errors_as_store_errors():
+            self._connection.execute(delete(self._table).where(self._table.c.id_hash.in_(overflow)))
+
 
 class PostgresStoredKeySessions(_SessionRows):
     """The same rows as `PostgresSessionStore`, found by the stored key, for the host's background
@@ -324,21 +324,8 @@ class PostgresStoredKeySessions(_SessionRows):
 
     A call takes the stored key where the raw-keyed store takes the id, and a record's `id` is the
     stored key it was given, so a raw id finds nothing here, as a stored key finds nothing in the
-    raw-keyed store. `create` refuses, so a stored key never becomes a session id.
+    raw-keyed store.
     """
 
     def _key_of(self, session_id: str) -> str:
         return session_id
-
-    def create(
-        self,
-        user_id: str,
-        *,
-        session_id: str,
-        now: datetime,
-        expires_at: datetime,
-        refresh_token: SecretStr | None,
-        id_token: SecretStr | None,
-        account_language: str | None,
-    ) -> SessionRecord:
-        raise TypeError("A stored key names a session and cannot start one")
