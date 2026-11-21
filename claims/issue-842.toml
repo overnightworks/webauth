@@ -1,8 +1,0 @@
-claim_id = "e8a111b09b5e46809da5c70623fafc01"
-agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
-role = "builder"
-base = "1e93cc204709effeaaf464a9a82d640f10a4300d"
-branch = "claude/issue-842-s2-shared-front"
-scope = ["AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/config.py", "src/webauth/middleware/__init__.py", "src/webauth/middleware/client_address.py", "src/webauth/middleware/security_headers.py", "src/webauth/middleware/stack.py", "src/webauth/proxies.py", "src/webauth/web_auth.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/middleware/test_client_address.py", "tests/support/client_address_arrangement.py", "tests/support/request_line_arrangement.py", "tests/support/web_auth_host_arrangement.py", "tests/test_proxies.py", "tests/test_web_auth.py", "tests/test_web_auth_front.py"]
-opened_commit = "c2f8f3d63d500555f2ce3fe91b58a854efe50dc2"
-whole_reason = "One placement change: the shared front, the now private writer, their tests and the five documents that state where the writer sits; split further it would leave a public writer and a shared front side by side."
