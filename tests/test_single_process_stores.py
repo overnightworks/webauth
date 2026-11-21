@@ -628,7 +628,7 @@ class TestSignInRoutesOverTheStores:
         assert browser.gate_status() == 401
         assert stores.sessions.records_of(SUBJECT).sessions == ()
 
-    def test_back_channel_logout_ends_every_session__and_the_next_sign_in_finds_the_account(
+    def test_back_channel_logout_ends_every_session_and_the_next_sign_in_adds_no_second_account(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
         """MEMSTORE-20: back-channel logout ends every session and keeps the account."""

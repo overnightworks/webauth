@@ -374,8 +374,8 @@ class SingleProcessStores:
     """The account store, the session store and the sign-in transaction over one set of tables.
 
     The host passes its own `AuditSink`; webauth ships none. Pass
-    `transaction` to `WebAuth.build` as `stores.sign_in` and `lambda: nullcontext(sessions)` as
-    `stores.sessions`.
+    `transaction` to `WebAuth.build` as `stores.sign_in` and
+    `lambda: nullcontext(stores.sessions)` as `stores.sessions`.
     """
 
     def __init__(self, *, audit: AuditSink) -> None:
