@@ -12,12 +12,14 @@ from fastapi.responses import JSONResponse
 from starlette.middleware import Middleware
 
 from tests.support.gate_arrangement import (
+    ADMISSION,
     MACHINE_PREFIX,
     PERSON_PATHS,
     PERSON_PREFIX,
     BearerApp,
     ScopeRelay,
     a_bearer_app,
+    a_key_set_answering,
     a_known_person,
     a_resource,
     an_interactive_agent_token,
@@ -26,19 +28,17 @@ from tests.support.gate_arrangement import (
 from tests.support.oidc_arrangement import (
     APP_CLIENT_ID,
     REALM_ISSUER,
+    FakeClock,
     FakeTokenEndpoint,
     a_realm_client_config,
-    a_relying_party,
     changed,
     token_endpoint_answer,
 )
 from webauth.middleware import (
-    BearerGate,
     MarkedRoute,
     ProtectedResource,
     exchanged_access_token,
 )
-from webauth.middleware.bearer_gate import _BearerGateMiddleware
 from webauth.oidc import (
     ExchangedAccess,
     OidcRefusal,
@@ -46,6 +46,7 @@ from webauth.oidc import (
     TokenEndpointAnswer,
     TokenRequest,
 )
+from webauth.web_auth import IssuerCalls
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -183,29 +184,6 @@ def _token_endpoint_of(issuer_url: str) -> str:
     return f"{issuer_url}/protocol/openid-connect/token"
 
 
-def _posting_to(app: BearerApp, issuer: ExchangeIssuer, issuer_url: str) -> OidcRelyingParty:
-    """Replaces the app's gate by one over `issuer_url` whose relying party posts to `issuer`
-    and whose resource marks the scenario's route, which `a_bearer_app` leaves to the host."""
-    entry = next(m for m in app.auth.app.user_middleware if m.cls is _BearerGateMiddleware)
-    gate = entry.kwargs["policy"]
-    assert isinstance(gate, BearerGate)
-    assert gate.resource is not None
-    party = a_relying_party(
-        config=a_realm_client_config(
-            issuer=issuer_url, token_endpoint=_token_endpoint_of(issuer_url)
-        ),
-        post_token_request=issuer,
-        fetch_key_set=app.key_sets,
-        wall_clock=app.clock,
-    )
-    admission = replace(gate.admission, bound_issuer=issuer_url)
-    resource = replace(gate.resource, marked_routes=frozenset({MarkedRoute("GET", SCENARIO.path)}))
-    entry.kwargs["policy"] = replace(
-        gate, relying_party=party, admission=admission, resource=resource
-    )
-    return party
-
-
 def an_exchange_app(
     answer: TokenEndpointAnswer | Exception | None = None,
     *,
@@ -222,13 +200,27 @@ def an_exchange_app(
     """
     resource = replace(a_resource(), admits_client_audience=True)
     issuer = ExchangeIssuer(answer or an_exchange_answer())
+    key_sets = a_key_set_answering()
     app = a_bearer_app(
         resource=resource,
+        host_marked_routes=frozenset({MarkedRoute("GET", SCENARIO.path)}),
         person_paths=PERSON_PATHS,
         known_accounts=(a_known_person(),),
         inner_middleware=inner_middleware,
+        key_sets=key_sets,
+        admission=replace(ADMISSION, bound_issuer=issuer_url),
+        policies={
+            "client": a_realm_client_config(
+                issuer=issuer_url, token_endpoint=_token_endpoint_of(issuer_url)
+            ),
+            "issuer_calls": IssuerCalls(
+                post_token_request=issuer,
+                fetch_key_set=key_sets,
+                monotonic_clock=FakeClock(5_000.0),
+            ),
+        },
     )
-    relying_party = _posting_to(app, issuer, issuer_url)
+    relying_party = app.auth.web_auth.relying_party
     exchange = ExchangeApp(
         app, issuer, resource, relying_party, relayed(app.auth), issuer_url=issuer_url
     )

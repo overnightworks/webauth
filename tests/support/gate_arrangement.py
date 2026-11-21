@@ -534,6 +534,10 @@ def _add_routes(
         add_resource_routes(auth, resource)
 
 
+def _marking(resource: ProtectedResource, routes: frozenset[MarkedRoute]) -> ProtectedResource:
+    return replace(resource, marked_routes=resource.marked_routes | routes)
+
+
 def _bound_to(
     resource: ProtectedResource | None,
     transaction: SignInTransaction,
@@ -578,6 +582,7 @@ def a_bearer_app(
     policies: dict[str, Any] | None = None,
     inner_middleware: tuple[Middleware, ...] = (),
     resource: ProtectedResource | None = None,
+    host_marked_routes: frozenset[MarkedRoute] = frozenset(),
     admission: AdmissionConfig = ADMISSION,
     **auth_app_keywords: Any,
 ) -> BearerApp:
@@ -591,7 +596,8 @@ def a_bearer_app(
     on the app's accounts), held, injected or not, by `BearerApp.transaction`, and the routes
     of `add_person_routes`; `session_gate` false installs the stack without the session gate.
     `admission` is the gate's admission.
-    `resource` adds a protected resource, its public metadata and a host route at its entry point.
+    `resource` adds a protected resource, its public metadata and a host route at its entry point;
+    `host_marked_routes` are marked routes of the gate's resource whose routes the caller serves.
     """
     key_sets, clock = key_sets or a_key_set_answering(), FakeClock(float(ACCESS_TOKEN_NOW))
     stored_sessions = auth_app_keywords.pop("sessions", None)
@@ -601,7 +607,10 @@ def a_bearer_app(
     sign_in = transaction or side.transaction
     person = PersonPaths(person_paths, person_parties, sign_in) if person_paths else None
     resource = _bound_to(resource, sign_in)
-    gate_of = _a_gate_over(paths, machine_parties, person, resource, admission, key_sets, clock)
+    gated_resource = None if resource is None else _marking(resource, host_marked_routes)
+    gate_of = _a_gate_over(
+        paths, machine_parties, person, gated_resource, admission, key_sets, clock
+    )
     public = (*auth_app_keywords.pop("public", ()), *([FOREIGN_SECRET_PUBLIC] if person else []))
     stack_policies = _stack_policies(gate_of if gated else None, person is not None, policies)
     auth = _an_auth_app_behind_the_stack(

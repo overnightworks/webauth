@@ -86,6 +86,8 @@ if TYPE_CHECKING:
     from starlette.testclient import WebSocketTestSession
     from starlette.types import ASGIApp, Message, Scope
 
+    from webauth.web_auth import WebAuth
+
 DRIVE_DEADLINE_SECONDS: Final = 5
 
 
@@ -198,6 +200,7 @@ class AuthApp:
     config: WebAuthConfig
     route_runs: list[str]
     route_threads: list[int]
+    web_auth: WebAuth
     resource_persons: list[AuthenticatedUser] = field(default_factory=list)
 
     def get(
@@ -369,6 +372,7 @@ def _an_auth_app_over(
     app: FastAPI,
     sessions: SessionRecordsInMemory,
     config: WebAuthConfig,
+    web_auth: WebAuth,
     raise_server_exceptions: bool,
 ) -> AuthApp:
     return AuthApp(
@@ -386,6 +390,7 @@ def _an_auth_app_over(
         config=config,
         route_runs=[],
         route_threads=[],
+        web_auth=web_auth,
     )
 
 
@@ -427,14 +432,14 @@ def an_auth_app(
         if gate
         else None
     )
-    install_the_gated_stack(
+    web_auth = install_the_gated_stack(
         app,
         config=config,
         sessions=sessions.in_transaction,
         session_gate=session_gate,
         **(stack_policies or {}),
     )
-    auth = _an_auth_app_over(app, sessions, config, raise_server_exceptions)
+    auth = _an_auth_app_over(app, sessions, config, web_auth, raise_server_exceptions)
     _add_session_routes(auth, login_redirect)
     _add_websocket_routes(app, sessions, auth.websocket_outcomes)
     return auth
