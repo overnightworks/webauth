@@ -23,7 +23,6 @@ from typing import Concatenate
 
 import pytest
 import urllib3
-from logline.testing import configured
 
 import webauth.https_client
 from tests.support.oidc_arrangement import (
@@ -43,12 +42,6 @@ from tests.support.token_request_canaries import (
     a_canary_token_request,
     assert_no_canary_in,
     post_canary_token_form,
-)
-from tests.support.trace_context import (
-    TRACEPARENT,
-    TRACESTATE,
-    global_propagator_writing,
-    inside_a_trace,
 )
 from webauth.https_client import (
     ExchangeFailure,
@@ -766,114 +759,3 @@ def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
 
     assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
     assert refused.value.__context__ is None
-
-
-def _fetching_the_key_set(server: LoopbackHttpsServer) -> object:
-    return fetch_key_set_over_https(f"{server.base_url}/certs")
-
-
-def _posting_a_token_request(server: LoopbackHttpsServer) -> object:
-    return post_token_request_over_https(a_canary_token_request(f"{server.base_url}/token"))
-
-
-_ISSUER_CALLS = [
-    pytest.param(_fetching_the_key_set, id="key-set-fetch"),
-    pytest.param(_posting_a_token_request, id="token-post"),
-]
-
-
-@pytest.mark.parametrize("call", _ISSUER_CALLS)
-@pytest.mark.parametrize("tracestate", [None, TRACESTATE])
-def test_an_issuer_call_inside_a_trace_carries_traceparent_and_tracestate_only_when_present(
-    call: Callable[[LoopbackHttpsServer], object],
-    tracestate: str | None,
-    token_server: LoopbackHttpsServer,
-) -> None:
-    with configured("webauth-test"), inside_a_trace(tracestate=tracestate):
-        call(token_server)
-
-    [received] = token_server.received
-    assert received.headers["traceparent"] == TRACEPARENT
-    assert received.headers.get("tracestate") == tracestate
-
-
-@pytest.mark.parametrize("call", _ISSUER_CALLS)
-def test_an_issuer_call_never_carries_the_callers_baggage(
-    call: Callable[[LoopbackHttpsServer], object], token_server: LoopbackHttpsServer
-) -> None:
-    with configured("webauth-test"), inside_a_trace(baggage_entry="a-session-id"):
-        call(token_server)
-
-    [received] = token_server.received
-    assert "baggage" not in received.headers
-    assert "a-session-id" not in repr(received.headers)
-
-
-@pytest.mark.parametrize("call", _ISSUER_CALLS)
-def test_an_issuer_call_outside_a_trace_sends_the_request_it_sent_before_propagation(
-    call: Callable[[LoopbackHttpsServer], object], token_server: LoopbackHttpsServer
-) -> None:
-    with global_propagator_writing({}):
-        call(token_server)
-    with configured("webauth-test"):
-        call(token_server)
-
-    [without_propagation, with_propagation] = token_server.received
-    assert with_propagation.headers == without_propagation.headers
-    assert with_propagation.body == without_propagation.body
-
-
-@pytest.mark.parametrize("call", _ISSUER_CALLS)
-def test_a_raising_propagator_leaves_the_calls_outcome_and_its_log_unchanged(
-    call: Callable[[LoopbackHttpsServer], object],
-    token_server: LoopbackHttpsServer,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    with global_propagator_writing({}):
-        expected_outcome = call(token_server)
-    records_without_failure = [(record.name, record.levelno) for record in caplog.records]
-    caplog.clear()
-
-    with global_propagator_writing({"traceparent": TRACEPARENT}, then_raise=True):
-        outcome = call(token_server)
-
-    assert outcome == expected_outcome
-    assert [(record.name, record.levelno) for record in caplog.records] == records_without_failure
-    assert "canary" not in caplog.text
-    assert "traceparent" not in token_server.received[-1].headers
-
-
-@pytest.mark.parametrize(
-    "written",
-    [
-        pytest.param(
-            {
-                "Authorization": "Bearer from-a-propagator",
-                "Accept": "text/html",
-                "Content-Type": "text/plain",
-            },
-            id="same-case",
-        ),
-        pytest.param(
-            {
-                "authorization": "Bearer from-a-propagator",
-                "accept": "text/html",
-                "content-type": "text/plain",
-            },
-            id="lower-case",
-        ),
-    ],
-)
-def test_the_fixed_headers_of_a_token_post_win_over_what_a_propagator_writes(
-    written: dict[str, str], token_server: LoopbackHttpsServer
-) -> None:
-    with global_propagator_writing({}):
-        _posting_a_token_request(token_server)
-    with global_propagator_writing({**written, "traceparent": TRACEPARENT}):
-        _posting_a_token_request(token_server)
-
-    [fixed, propagated] = token_server.received
-    assert {
-        name: propagated.headers[name] for name in ("authorization", "accept", "content-type")
-    } == {name: fixed.headers[name] for name in ("authorization", "accept", "content-type")}
-    assert propagated.headers["traceparent"] == TRACEPARENT

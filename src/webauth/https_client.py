@@ -70,6 +70,7 @@ __all__ = [
 _log = logging.getLogger(__name__)
 
 _REFUSED_STATUS_REASON = "status-not-accepted"
+_URL_HOST_HEADER = "host"
 _URL_CONTROL_OR_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f]")
 _exchanging: ContextVar[bool] = ContextVar("webauth_https_exchanging", default=False)
 
@@ -366,9 +367,9 @@ def _read_answer(
 
 def _with_trace_context(fixed_headers: Mapping[str, str] | None) -> dict[str, str]:
     """`fixed_headers` joined by what OpenTelemetry's global propagator writes for the current
-    context. A fixed header wins over a propagator's of the same name in any case. This module
-    sets no propagator (a host's `logline.configure` sets W3C trace context alone) and creates
-    no span.
+    context. A fixed header, and `Host`, which urllib3 derives from the URL, win over a
+    propagator's of the same name in any case. This module sets no propagator (a host's
+    `logline.configure` sets W3C trace context alone) and creates no span.
 
     A propagator's error never fails the call and is neither logged nor chained, since its
     message may hold what the host's context holds; the call then goes out without trace
@@ -377,11 +378,12 @@ def _with_trace_context(fixed_headers: Mapping[str, str] | None) -> dict[str, st
     carrier: dict[str, str] = {}
     try:
         inject(carrier)
-    except Exception:  # noqa: BLE001 - any propagator, any error; the call carries on without it
+    except Exception:
+        # Any propagator, any error: the call carries on without trace context.
         carrier = {}
-    fixed_names = {name.lower() for name in fixed}
+    owned_names = {name.lower() for name in fixed} | {_URL_HOST_HEADER}
     return {
-        **{name: value for name, value in carrier.items() if name.lower() not in fixed_names},
+        **{name: value for name, value in carrier.items() if name.lower() not in owned_names},
         **fixed,
     }
 

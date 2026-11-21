@@ -518,12 +518,14 @@ _FIXED_ANSWERS = {
 
 @dataclass(frozen=True)
 class ReceivedRequest:
-    """One request as the server read it; `headers` are keyed in lower case."""
+    """One request as the server read it; `headers` are keyed in lower case, and `header_lines`
+    holds every header line as it arrived, a repeated name once per line."""
 
     method: str
     path: str
     headers: Mapping[str, str]
     body: bytes
+    header_lines: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -577,7 +579,8 @@ def loopback_https_server(
 
         def _receive(self, body: bytes) -> None:
             headers = {name.lower(): value for name, value in self.headers.items()}
-            received.append(ReceivedRequest(self.command, self.path, headers, body))
+            header_lines = tuple((name, value) for name, value in self.headers.items())
+            received.append(ReceivedRequest(self.command, self.path, headers, body, header_lines))
             route = urllib.parse.urlsplit(self.path).path
             if route in _FIXED_ANSWERS:
                 self._answer(*_FIXED_ANSWERS[route])
