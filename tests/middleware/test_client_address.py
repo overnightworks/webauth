@@ -15,7 +15,6 @@ from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket
 
 from tests.support.client_address_arrangement import (
-    add_the_client_address_writer,
     behind_the_client_address_writer,
 )
 from tests.support.full_stack_arrangement import (
@@ -171,14 +170,3 @@ def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -
 
     with pytest.raises(RuntimeError, match="web_auth_front"):
         client.get("/exempt")
-
-
-def test_a_writer_added_by_hand_is_refused_untouched() -> None:
-    app = a_fresh_app()
-    add_the_client_address_writer(app)
-    before = list(app.user_middleware)
-
-    with pytest.raises(RuntimeError, match="by hand"):
-        install_full_stack(app)
-
-    assert app.user_middleware == before

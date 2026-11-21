@@ -140,7 +140,6 @@ def a_stack_over_every_route() -> Arrangement:
         sign_in_paths=sign_in_paths,
         security_headers=headers_policy,
         session_gate=SessionGate(
-            session_transaction=sessions.in_transaction,
             login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
             public=(),
         ),

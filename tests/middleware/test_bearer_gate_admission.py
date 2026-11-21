@@ -58,7 +58,7 @@ from tests.support.webauth_arrangement import (
     LOGIN_REDIRECT,
     session_cookie_header,
 )
-from webauth.dependencies import current_user_dependency
+from webauth.dependencies import current_user
 from webauth.middleware import SessionGate, bearer_caller
 from webauth.policies import (
     BodySizePolicy,
@@ -242,23 +242,13 @@ class TestAMachinePrefixTheSessionGateAlsoOpens:
 
 def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> FastAPI:
     inner = FastAPI()
-    sessions = current_user_dependency(
-        session_store=lambda: auth.auth.sessions,
-        on_authenticated=lambda user: None,
-    )
     install_the_gated_stack(
         inner,
         config=auth.auth.config,
         sessions=auth.auth.sessions.in_transaction,
         security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
         csrf_origin=CsrfPolicy() if csrf else CsrfPolicy(exempt=PathRules(prefixes=("/",))),
-        session_gate=SessionGate(
-            session_transaction=auth.auth.sessions.in_transaction,
-            login_redirect=None,
-            public=(),
-        )
-        if session_gate
-        else None,
+        session_gate=SessionGate(login_redirect=None, public=()) if session_gate else None,
     )
 
     @inner.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
@@ -266,7 +256,7 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
         return {"ran": "the sub-app's machine route"}
 
     @inner.api_route(ALL_DEPENDENCIES_PATH, methods=["DELETE"])
-    def session_route(user: Any = Depends(sessions.current_user)) -> dict[str, str]:
+    def session_route(user: Any = Depends(current_user)) -> dict[str, str]:
         return {"ran": user.username}
 
     return inner

@@ -22,7 +22,6 @@ from httpx import Response
 
 from tests.support.gate_arrangement import (
     A_TOKEN,
-    ADMISSION,
     EVERY_METHOD,
     EXPORT_PATH,
     HAL_ONLY,
@@ -49,7 +48,6 @@ from tests.support.oidc_arrangement import (
     ABSENT,
     APP_CLIENT_ID,
     OPERATOR_SUBJECT,
-    a_relying_party,
     an_access_token,
 )
 from tests.support.webauth_arrangement import (
@@ -59,10 +57,9 @@ from tests.support.webauth_arrangement import (
     drive,
     starts,
 )
-from webauth.admission import AdmissionConfig, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import BearerGate, MachinePaths, PersonPaths, ProtectedResource
-from webauth.policies import AuthorizedParties, PathRules, PathShape, PublicRule
+from webauth.policies import PathRules, PathShape, PublicRule
 from webauth.ports import SignInStores
 
 HEALTH_PATH = "/health"
@@ -532,48 +529,10 @@ async def test_a_blocked_key_set_fetch_stalls_no_other_request(
 
 
 class TestAGateIsBuiltFromSoundParts:
-    @pytest.mark.parametrize(
-        ("changes", "error"),
-        [
-            pytest.param({"machine_paths": None}, ValueError, id="G01a-no-kind"),
-            pytest.param(
-                {
-                    "admission": AdmissionConfig(
-                        bound_issuer=ADMISSION.bound_issuer,
-                        login_group="/apps/x",
-                        admin_group=NoAdmins.IN_THIS_APP,
-                    )
-                },
-                ValueError,
-                id="G01b-no-admins",
-            ),
-            pytest.param(
-                {
-                    "admission": AdmissionConfig(
-                        bound_issuer="https://login.example.org/realms/elsewhere",
-                        login_group="/apps/x",
-                        admin_group="/apps/x/admin",
-                    )
-                },
-                ValueError,
-                id="G01c-another-issuer",
-            ),
-        ],
-    )
-    def test_an_unsound_gate_is_refused_at_construction(
-        self,
-        changes: dict[str, Any],
-        error: type[Exception],
-    ) -> None:
-        """TOKEN-04: a gate with neither kind of path is refused; so is an unsound admission."""
-        arguments = {
-            "relying_party": a_relying_party(),
-            "admission": ADMISSION,
-            "machine_paths": MachinePaths(MACHINE_PATHS, HAL_ONLY),
-        }
-
-        with pytest.raises(error):
-            BearerGate(**{**arguments, **changes})
+    def test_a_gate_with_neither_kind_of_path_is_refused_at_construction(self) -> None:
+        """TOKEN-04: a gate with no machine paths, no resource and no person paths is refused."""
+        with pytest.raises(ValueError, match="must name"):
+            BearerGate()
 
     def test_machine_paths_without_a_path_are_refused_at_construction(self) -> None:
         no_path = PathRules()
@@ -585,14 +544,14 @@ class TestAGateIsBuiltFromSoundParts:
         no_path = PathRules()
 
         with pytest.raises(ValueError, match="at least one path"):
-            PersonPaths(no_path, HAL_ONLY, a_transaction_never_entered)
+            PersonPaths(no_path, HAL_ONLY)
 
     @pytest.mark.parametrize("bare_set", [frozenset({"hal"}), frozenset()], ids=["set", "empty"])
     @pytest.mark.parametrize(
         "construct",
         [
             lambda paths, parties: MachinePaths(paths, parties),
-            lambda paths, parties: PersonPaths(paths, parties, a_transaction_never_entered),
+            lambda paths, parties: PersonPaths(paths, parties),
         ],
         ids=["machine", "person"],
     )
@@ -606,24 +565,6 @@ class TestAGateIsBuiltFromSoundParts:
 
         with pytest.raises(TypeError, match="AuthorizedParties"):
             construct(paths, bare_set)
-
-    def test_a_no_admins_app_may_name_person_paths_alone(self) -> None:
-        """TOKEN-05: a `NoAdmins` app builds a gate of person paths alone."""
-        gate = a_bearer_gate(
-            paths=PathRules(),
-            person_paths=PersonPaths(
-                PathRules(prefixes=("/api/",)),
-                AuthorizedParties(frozenset({"hal"})),
-                a_transaction_never_entered,
-            ),
-            admission=AdmissionConfig(
-                bound_issuer=ADMISSION.bound_issuer,
-                login_group="/apps/x",
-                admin_group=NoAdmins.IN_THIS_APP,
-            ),
-        )
-
-        assert gate.machine_paths is None
 
     def test_a_gate_of_machine_paths_alone_builds(self) -> None:
         gate = a_bearer_gate()

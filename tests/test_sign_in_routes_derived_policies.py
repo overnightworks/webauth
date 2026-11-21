@@ -88,11 +88,7 @@ def _a_gated_host(
         security_headers=security_headers,
         body_size=body_size,
         rate_limit=rate_limit,
-        session_gate=SessionGate(
-            session_transaction=sessions.in_transaction,
-            login_redirect=sign_in_paths.login_redirect,
-            public=(),
-        )
+        session_gate=SessionGate(login_redirect=sign_in_paths.login_redirect, public=())
         if gated
         else None,
         issuer_calls=IssuerCalls(

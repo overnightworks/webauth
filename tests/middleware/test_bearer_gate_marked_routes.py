@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
+from fastapi import FastAPI
 from starlette.middleware import Middleware
 
 from tests.support.account_arrangement import MEMBER_ROLE
@@ -579,7 +580,7 @@ def test_a_marked_route_at_the_entry_point_is_decided_as_the_entry_point() -> No
         pytest.param(MARKED_NEW_NOTE.template, {"method": "GET"}, id="current-user-method"),
         pytest.param(MARKED_RESOURCE_PERSON.template, {"method": "GET"}, id="resource-person"),
         pytest.param(MARKED_ADMITTED_USER.template, {"method": "GET"}, id="admitted-user"),
-        pytest.param(MARKED_NEW_NOTE.template, {"app": object()}, id="current-user-app"),
+        pytest.param(MARKED_NEW_NOTE.template, {"app": FastAPI()}, id="current-user-app"),
         pytest.param(MARKED_RESOURCE_PERSON.template, {"app": object()}, id="resource-person-app"),
         pytest.param(MARKED_ADMITTED_USER.template, {"app": object()}, id="admitted-user-app"),
         pytest.param(

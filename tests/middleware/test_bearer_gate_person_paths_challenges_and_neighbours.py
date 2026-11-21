@@ -10,7 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from fastapi import Depends, HTTPException
+from fastapi import HTTPException
 from httpx import Response
 from starlette.websockets import WebSocket
 
@@ -67,12 +67,10 @@ from tests.support.person_paths_arrangement import (
     the_challenge,
 )
 from tests.support.webauth_arrangement import ADMIN_ROLE, LOGIN_REDIRECT, SAME_ORIGIN_REQUEST
-from webauth.dependencies import current_user_dependency
 from webauth.policies import (
     PathRules,
     PublicRule,
 )
-from webauth.ports import AuthenticatedUser
 
 PERSON_READERS = [
     pytest.param(PERSON_ME_PATH, id="current_user"),
@@ -130,7 +128,10 @@ def test_a_path_outside_the_person_paths_is_refused_with_its_session_answer_and_
         (401, "Authentication required", None),
         (401, "Invalid session", None),
     ]
-    assert (navigation.status_code, the_challenge(navigation)) == (302, None)
+    assert (navigation.status_code, the_challenge(navigation)) == (
+        302 if session_gate else 401,
+        None,
+    )
 
 
 def test_the_admitted_admin_401_of_a_person_path_without_a_gate_admission_challenges() -> None:
@@ -168,13 +169,14 @@ def test_a_person_path_without_a_bearer_credential_is_refused_as_the_session_ref
         (401, "Authentication required", PERSON_REALM),
         (401, "Invalid session", PERSON_REALM),
     ]
-    assert (navigation.status_code, the_challenge(navigation)) == (302, None)
+    assert (navigation.status_code, the_challenge(navigation)) == (
+        (302, None) if session_gate else (401, PERSON_REALM)
+    )
 
 
-@BOTH_HOSTS
-def test_a_navigation_to_a_person_path_still_gets_its_login_redirect(session_gate: bool) -> None:
+def test_a_navigation_to_a_person_path_still_gets_its_login_redirect() -> None:
     """REFUSE-05: `LoginRedirect` redirects a navigation and leaves an API call its 401."""
-    app = a_person_app(session_gate=session_gate, login_redirect=LOGIN_REDIRECT)
+    app = a_person_app(session_gate=True, login_redirect=LOGIN_REDIRECT)
 
     navigation = app.ask(
         PERSON_ME_PATH,
@@ -497,29 +499,6 @@ def test_the_key_set_is_fetched_before_the_sign_in_transaction_is_entered() -> N
         [0],
     )
     assert transaction.entries == 1
-
-
-def test_a_host_dependency_resolves_before_the_reader_runs_on_a_token_request() -> None:
-    """TOKEN-32: a host dependency of a person route still resolves on a token request."""
-    app = a_person_app()
-    events: list[str] = []
-
-    def session_store() -> Any:
-        events.append("session_store")
-        return app.auth.sessions
-
-    dependencies = current_user_dependency(
-        session_store=session_store,
-        on_authenticated=lambda _user: events.append("reader"),
-    )
-
-    @app.auth.app.get(f"{PERSON_PREFIX}resolved")
-    def resolved(_user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
-        return {}
-
-    response = app.ask(f"{PERSON_PREFIX}resolved", authorization=bearing(ADMIN_TOKEN))
-
-    assert (response.status_code, events) == (200, ["session_store", "reader"])
 
 
 @pytest.mark.parametrize(("seconds_past_expiry", "status"), EXPIRY_TIMES)

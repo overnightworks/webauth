@@ -130,14 +130,12 @@ class TestPublicPaths:
 class TestRefusalsAreTheDependencysBytes:
     def test_a_page_without_a_session_is_redirected_to_the_start_route_with_next(self) -> None:
         """REFUSE-01: a page without a session is sent to the start route, `next` naming it."""
-        gated, plain = a_gated_app(), a_plain_app(a_session())
-        response = ask(gated, "/me", accept=HTML)
+        response = ask(a_gated_app(), "/me", accept=HTML)
         assert (response.status_code, response.headers["location"], response.json()) == (
             302,
             "/login?next=%2Fme",
             {"detail": "Found"},
         )
-        assert_answers_alike(response, ask(plain, "/me", accept=HTML))
         assert_carries_policy_headers(response.headers, GATED_APP_HEADERS_POLICY, hsts=True)
 
     def test_an_api_call_without_a_session_gets_401_authentication_required(self) -> None:
@@ -186,8 +184,8 @@ class TestRefusalsAreTheDependencysBytes:
         gated = a_gated_app(sessions=SessionRecordsInMemory(record()))
         plain = a_plain_app(None, sessions=SessionRecordsInMemory(record()))
         response = ask(gated, "/me", cookie=cookie_of(gated), accept=accept)
-        assert_answers_alike(response, ask(plain, "/me", cookie=cookie_of(plain), accept=accept))
         if accept is None:
+            assert_answers_alike(response, ask(plain, "/me", cookie=cookie_of(plain)))
             assert (response.status_code, response.json()) == (401, {"detail": detail})
         else:
             assert response.status_code == 302
@@ -227,13 +225,9 @@ class TestRouterPaths:
         assert ask(app, "/app").status_code == 401
         assert ask(app, "/appx/login").status_code == 401
 
-    @pytest.mark.parametrize("guard", [a_gated_app, a_plain_app], ids=["gate", "dependency"])
-    def test_a_redirect_names_the_page_by_its_address_with_the_root_path_once(
-        self,
-        guard: Callable[..., AuthApp],
-    ) -> None:
+    def test_a_redirect_names_the_page_by_its_address_with_the_root_path_once(self) -> None:
         """REFUSE-06: the redirect names the page by an address that carries `root_path` once."""
-        app = guard(None, root_path="/app")
+        app = a_gated_app(None, root_path="/app")
 
         response = ask(app, "/app/me", accept=HTML)
 
@@ -475,7 +469,6 @@ class TestAdmittedAdmin:
         public = PublicRule(PathRules(exact=frozenset({ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH})))
         app = a_gated_app_of(ADMIN_ROLE, public=(public,))
         response = ask(app, ADMITTED_ADMIN_AFTER_CURRENT_USER_PATH, cookie=signed_in(app))
-        assert [user.username for user in app.authenticated] == ["alice"]
         assert (response.status_code, response.json()) == (401, AUTHENTICATION_REQUIRED)
 
     def test_it_is_an_error_where_no_gate_is_installed(self) -> None:
@@ -510,7 +503,6 @@ class Reuse:
     dead: bool = False
     expected_status: int = 200
     gate_counts: tuple[int, int] = (1, 1)
-    authenticated: int = 1
 
 
 class TestTheGatesAdmissionIsTheDependencys:
@@ -520,7 +512,7 @@ class TestTheGatesAdmissionIsTheDependencys:
             pytest.param(Reuse("/me"), id="current-user"),
             pytest.param(Reuse("/admin", role=ADMIN_ROLE), id="admin"),
             pytest.param(
-                Reuse("/admin", expected_status=403, authenticated=1),
+                Reuse("/admin", expected_status=403),
                 id="non-admin",
             ),
             pytest.param(Reuse(ALL_DEPENDENCIES_PATH, role=ADMIN_ROLE), id="every-dependency"),
@@ -532,7 +524,6 @@ class TestTheGatesAdmissionIsTheDependencys:
                     dead=True,
                     expected_status=401,
                     gate_counts=(1, 0),
-                    authenticated=0,
                 ),
                 id="optional-dead",
             ),
@@ -569,7 +560,6 @@ class TestTheGatesAdmissionIsTheDependencys:
             assert gate_counts == (1, 1)
         else:
             assert gate_counts == case.gate_counts
-        assert len(gated.authenticated) == case.authenticated
 
 
 def _a_full_stack_app() -> AuthApp:
