@@ -1,8 +1,0 @@
-claim_id = "f042adfe89834fa7a5e6e7023587c853"
-agent = "Claude e340585b-ade9-4414-85eb-b95ca5b3d42d"
-role = "builder"
-base = "22911dbc3dc7a3c6588f89bbac3bbb51db0bfa12"
-branch = "claude/issue-848-s4-records-lose-fields"
-scope = ["README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth", "tests"]
-opened_commit = "ad41372d8df76d67a3e6b5e4e083de6f96d6870b"
-whole_reason = "One removal set: the record fields the handle fills, the reader keywords and the old dependency factory go together with every test and document that names them, or a host would see half the binding."
