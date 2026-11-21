@@ -518,8 +518,7 @@ _FIXED_ANSWERS = {
 
 @dataclass(frozen=True)
 class ReceivedRequest:
-    """One request as the server read it; `headers` are keyed in lower case, and `header_lines`
-    holds every header line as it arrived, a repeated name once per line."""
+    """One request as the server read it: `headers` lower-cased, `header_lines` as they arrived."""
 
     method: str
     path: str
@@ -531,12 +530,10 @@ class ReceivedRequest:
 @dataclass
 class LoopbackHttpsServer:
     """Answers by path, whatever the method or query: `/token` a token answer,
-    `/token-refused` a 400 `invalid_grant`, `/token-at-limit` and
-    `/token-past-limit` a body of `64 * 1024` and one byte
-    more, `/token-reflecting` a token
-    answer whose header block carries the request body as a malformed line,
-    `/moved` a 302, `/moved-stalling` a 302 whose body never arrives until
-    released, `/missing` a 404,
+    `/token-refused` a 400 `invalid_grant`, `/token-at-limit` and `/token-past-limit` a body
+    of `64 * 1024` and one byte more, `/token-reflecting` a token answer whose header block
+    carries the request body as a malformed line, `/moved` a 302, `/moved-stalling` a 302
+    whose body never arrives until released, `/missing` a 404,
     `/oversized` a body past every size limit, `/.well-known/openid-configuration` the
     discovery document of this server as its own issuer, `/metadata-at-limit` and
     `/metadata-past-limit` a valid JSON object of `METADATA_LIMIT_BYTES` and
