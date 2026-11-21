@@ -15,6 +15,15 @@ from logline import set_sub
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
+from webauth._bearer_admission import (
+    ADMIN_REQUIRED_DETAIL,
+    AUTHENTICATION_REQUIRED_DETAIL,
+    PERSON_PATH_INSUFFICIENT_SCOPE,
+    bearer_admission,
+    mark_person_path,
+    raise_for_bearer_admission,
+    record_bearer_admission,
+)
 from webauth._validation import is_scope_token_tuple
 from webauth._worker import on_worker
 from webauth.admission import (
@@ -22,15 +31,6 @@ from webauth.admission import (
     AppRole,
     _require_group_path,
     app_role,
-)
-from webauth.dependencies import (
-    _ADMIN_REQUIRED_DETAIL,
-    _AUTHENTICATION_REQUIRED_DETAIL,
-    _PERSON_PATH_INSUFFICIENT_SCOPE,
-    _bearer_admission,
-    _mark_person_path,
-    _raise_for_bearer_admission,
-    _record_bearer_admission,
 )
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
@@ -339,10 +339,10 @@ class _Refusal(Enum):
     carries no challenge a client would answer with one.
     """
 
-    NO_CREDENTIALS = (401, None, _AUTHENTICATION_REQUIRED_DETAIL)
+    NO_CREDENTIALS = (401, None, AUTHENTICATION_REQUIRED_DETAIL)
     INVALID_REQUEST = (401, "invalid_request", "Invalid request")
     INVALID_TOKEN = (401, "invalid_token", "Invalid token")
-    INSUFFICIENT_SCOPE = (403, "insufficient_scope", _ADMIN_REQUIRED_DETAIL)
+    INSUFFICIENT_SCOPE = (403, "insufficient_scope", ADMIN_REQUIRED_DETAIL)
     RESOURCE_INSUFFICIENT_SCOPE = (403, "insufficient_scope", "Insufficient scope")
     RESOURCE_NOT_ADMITTED = (403, None, "Access denied")
     NOT_A_MEMBER = (403, None, "No access")
@@ -359,7 +359,7 @@ class _Refusal(Enum):
 
     def challenge(self, kind_parameters: tuple[str, ...]) -> str | None:
         if self is _Refusal.NOT_A_MEMBER:
-            return _PERSON_PATH_INSUFFICIENT_SCOPE
+            return PERSON_PATH_INSUFFICIENT_SCOPE
         parameters = list(kind_parameters)
         if self.error is not None:
             parameters.append(f'error="{self.error}"')
@@ -449,7 +449,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
                 if decided is not _Continue.AS_UNMARKED:
                     return decided
         if person_paths is not None and person_paths.paths.matches(path):
-            _mark_person_path(request)
+            mark_person_path(request)
             return await self._person_refusal(request, person_paths)
         return None
 
@@ -466,7 +466,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             return self._refused(_Refusal.INVALID_TOKEN, verified, challenge=_MACHINE_CHALLENGE)
         if app_role(verified.groups, self._admission) is not AppRole.ADMIN:
             return self._refused(_Refusal.INSUFFICIENT_SCOPE, challenge=_MACHINE_CHALLENGE)
-        _record_bearer_admission(request, BearerCaller(subject=verified.subject))
+        record_bearer_admission(request, BearerCaller(subject=verified.subject))
         return None
 
     async def _resource_refusal(
@@ -506,7 +506,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             return self._refused(_REFUSAL_OF_ADMISSION[person])
         if person is None:
             return self._refused(_Refusal.RESOURCE_NOT_ADMITTED)
-        _record_bearer_admission(
+        record_bearer_admission(
             request,
             person,
             resource_method=request.method,
@@ -538,7 +538,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         )
         if isinstance(person, AdmissionRefusal):
             return self._refused(_REFUSAL_OF_ADMISSION[person])
-        _record_bearer_admission(request, person)
+        record_bearer_admission(request, person)
         set_sub(request.scope, person.id)
         return None
 
@@ -608,7 +608,7 @@ def bearer_caller(connection: HTTPConnection) -> BearerCaller:
     changed the ``Authorization`` header after admission. A forgotten gate never
     reads as a caller.
     """
-    admission = _bearer_admission(connection)
+    admission = bearer_admission(connection)
     if admission is None or not isinstance(admission.principal, BearerCaller):
         raise RuntimeError(
             "The bearer gate admitted no caller for this request: install it with "
@@ -620,7 +620,7 @@ def bearer_caller(connection: HTTPConnection) -> BearerCaller:
 
 def _resource_person_admitted(connection: HTTPConnection) -> AuthenticatedUser | None:
     """The capped person this request's resource admission holds, or ``None``."""
-    admission = _bearer_admission(connection)
+    admission = bearer_admission(connection)
     if (
         admission is None
         or not admission.is_resource_admission
@@ -662,7 +662,7 @@ async def exchanged_access_token(
     Nothing is posted in either case.
     """
     admitted = _resource_person_admitted(connection) is not None
-    admission = _bearer_admission(connection)
+    admission = bearer_admission(connection)
     credential = None if admission is None else _credential_of(connection)
     if (
         not admitted
@@ -689,8 +689,8 @@ def is_resource_admission(connection: HTTPConnection) -> bool:
     request: in a sub-app, and after the ``Authorization`` header or the method changed. It
     never raises to answer no.
     """
-    if _bearer_admission(connection) is None:
-        _raise_for_bearer_admission(connection)
+    if bearer_admission(connection) is None:
+        raise_for_bearer_admission(connection)
         return False
     return _resource_person_admitted(connection) is not None
 

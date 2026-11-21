@@ -9,17 +9,14 @@ on a public path it admits by itself; the gate committed its renewal through
 the host's `SessionTransaction` before the route ran, and a route that fails
 afterwards does not undo it.
 
-A request the bearer gate admitted carries no session: the records below let
-the CSRF origin check and the session gate step aside for it. On a machine path
-`current_user` raises, because a machine route asks for `bearer_caller` instead;
-on a person path, and at a resource's entry point or marked route for its own method, the
-record holds the account behind the token, and `current_user` returns it.
+On a request the bearer gate admitted, `current_user` returns the account behind the
+token of a person path, or of a resource's entry point or marked route for its own method,
+and raises on a machine path, where a route asks for `bearer_caller` instead.
 """
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Final
@@ -31,10 +28,16 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse, Response
 
 from webauth import ports
+from webauth._bearer_admission import (
+    AUTHENTICATION_REQUIRED_DETAIL,
+    admitted_token_person,
+    is_bearer_admitted,
+    require_admin,
+    unauthenticated_without_redirect,
+)
 from webauth._media_types import prefers_html
 from webauth._origins import OriginVerdict, origin_verdict
 from webauth._paths import reads_as_another_host, requested_address, same_app_path
-from webauth.admission import AppRole
 from webauth.config import SessionLifetime, WebAuthConfig, web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
@@ -44,11 +47,8 @@ from webauth.cookies import (
 from webauth.ports import SessionRenewalStore, SessionTransaction
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from fastapi import FastAPI
 
-    from webauth.oidc import ExchangedAccess, OidcRefusal
 
 __all__ = [
     "LoginRedirect",
@@ -62,12 +62,8 @@ __all__ = [
 ]
 
 
-_AUTHENTICATION_REQUIRED_DETAIL: Final = "Authentication required"
 _INVALID_SESSION_DETAIL: Final = "Invalid session"
 _SESSION_EXPIRED_DETAIL: Final = "Session expired"
-_ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
-_PERSON_PATH_CHALLENGE: Final = 'Bearer realm="api"'
-_PERSON_PATH_INSUFFICIENT_SCOPE: Final = 'Bearer error="insufficient_scope"'
 _EXPIRY_TOLERANCE: Final = timedelta(seconds=60)
 _INSTALLED_SESSIONS_ATTRIBUTE: Final = "web_auth_sessions"
 
@@ -147,7 +143,7 @@ def admin_user(
     Opens no store: it checks the identity ``current_user`` gives, so an override of
     ``current_user`` decides both.
     """
-    return _require_admin(request, user)
+    return require_admin(request, user)
 
 
 def authenticate_websocket(
@@ -235,16 +231,7 @@ def _unauthenticated(
     if login_redirect is not None and prefers_html(request):
         query = urlencode({login_redirect.redirect_query_param: _asked_for_address(request)})
         return HTTPException(302, headers={"Location": f"{login_redirect.path}?{query}"})
-    return _unauthenticated_without_redirect(request, detail)
-
-
-def _unauthenticated_without_redirect(connection: HTTPConnection, detail: str) -> HTTPException:
-    challenge = _PERSON_PATH_CHALLENGE if _is_person_path(connection) else None
-    return HTTPException(
-        401,
-        detail,
-        headers=None if challenge is None else {"WWW-Authenticate": challenge},
-    )
+    return unauthenticated_without_redirect(request, detail)
 
 
 def _asked_for_address(request: Request) -> str:
@@ -298,7 +285,7 @@ def session_id_from_request(connection: HTTPConnection, config: WebAuthConfig) -
     there and the cookie names no session. A host that reads the session cookie itself
     calls this instead of ``request.cookies``.
     """
-    if _is_bearer_admitted(connection):
+    if is_bearer_admitted(connection):
         return None
     reading = _read_session_cookie(connection, config)
     return None if isinstance(reading, ConnectionRefusal) else reading
@@ -340,7 +327,7 @@ def _refusal_response(
 
 
 _HTTP_DETAIL_OF_SESSION_REFUSAL: Final = {
-    ConnectionRefusal.NO_SESSION: _AUTHENTICATION_REQUIRED_DETAIL,
+    ConnectionRefusal.NO_SESSION: AUTHENTICATION_REQUIRED_DETAIL,
     ConnectionRefusal.INVALID_SESSION: _INVALID_SESSION_DETAIL,
     ConnectionRefusal.SESSION_ENDED_OR_EXPIRED: _SESSION_EXPIRED_DETAIL,
 }
@@ -524,169 +511,13 @@ def _gate_admission(connection: HTTPConnection) -> _GateAdmission | None:
     return record
 
 
-_BEARER_ADMISSION_SCOPE_KEY: Final = "webauth.bearer_gate"
-
-
-@dataclass(frozen=True)
-class _BearerAdmission:
-    """What the bearer gate admitted: this app's gate, this path, this one header.
-
-    ``principal`` is the machine's ``BearerCaller`` on a machine path and the
-    account behind the token on a person path. ``resource_method`` is the request method of
-    a resource admission, at its entry point or on a marked route, which holds for that method
-    alone; a person path's record leaves it unset. ``token_exchange`` is set only at a resource
-    admission: the admitting relying party's grant, which is no token.
-
-    Only a SHA-256 digest of the `Authorization` value is kept, in request
-    memory, so the record does not store the token. It says the gate admitted
-    the request; it is not a freshness proof, and the gate verifies the header
-    again on every request it selects.
-    """
-
-    app: object
-    path: str
-    authorization_digest: bytes
-    principal: ports.BearerCaller | ports.AuthenticatedUser
-    resource_method: str | None = None
-    token_exchange: Callable[[str, tuple[str, ...]], ExchangedAccess | OidcRefusal] | None = field(
-        default=None, repr=False, compare=False
-    )
-
-    @property
-    def is_resource_admission(self) -> bool:
-        return self.resource_method is not None
-
-
-def _authorization_digest(authorization: str) -> bytes:
-    return hashlib.sha256(authorization.encode("latin-1")).digest()
-
-
-def _record_bearer_admission(
-    connection: HTTPConnection,
-    principal: ports.BearerCaller | ports.AuthenticatedUser,
-    *,
-    resource_method: str | None = None,
-    token_exchange: Callable[[str, tuple[str, ...]], ExchangedAccess | OidcRefusal] | None = None,
-) -> None:
-    (authorization,) = connection.headers.getlist("authorization")
-    connection.scope[_BEARER_ADMISSION_SCOPE_KEY] = _BearerAdmission(
-        app=connection.scope["app"],
-        path=connection.scope["path"],
-        authorization_digest=_authorization_digest(authorization),
-        principal=principal,
-        resource_method=resource_method,
-        token_exchange=token_exchange,
-    )
-
-
-def _bearer_admission(connection: HTTPConnection) -> _BearerAdmission | None:
-    """The bearer gate's admission, only when it was made for this very request.
-
-    The strict reader: the same app, the same decoded path and exactly one
-    `Authorization` line with the digest admitted, and for a resource admission the
-    method it was made for. Anything else, a value other code wrote included, is no
-    admission.
-    """
-    record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
-    if type(record) is not _BearerAdmission:
-        return None
-    authorizations = connection.headers.getlist("authorization")
-    if (
-        record.app is not connection.scope.get("app")
-        or record.path != connection.scope["path"]
-        or (
-            record.is_resource_admission
-            and record.resource_method != connection.scope.get("method")
-        )
-        or len(authorizations) != 1
-        or record.authorization_digest != _authorization_digest(authorizations[0])
-    ):
-        return None
-    return record
-
-
-def _is_bearer_admitted(connection: HTTPConnection) -> bool:
-    """The loose reader: any admission in the scope. Refusing more can only fail closed."""
-    return type(connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)) is _BearerAdmission
-
-
-def _is_person_admitted(connection: HTTPConnection) -> bool:
-    """The loose reader for a person path's or a resource's record, whatever request carries it."""
-    record = connection.scope.get(_BEARER_ADMISSION_SCOPE_KEY)
-    return type(record) is _BearerAdmission and isinstance(
-        record.principal,
-        ports.AuthenticatedUser,
-    )
-
-
-def _admitted_token_person(connection: HTTPConnection) -> ports.AuthenticatedUser | None:
-    """The account the bearer gate admitted for this very request on a person path, at a
-    resource's entry point or on its marked route."""
-    admission = _bearer_admission(connection)
-    if admission is None or not isinstance(admission.principal, ports.AuthenticatedUser):
-        return None
-    return admission.principal
-
-
-def _raise_for_bearer_admission(connection: HTTPConnection) -> None:
-    if _is_bearer_admitted(connection):
-        raise RuntimeError(
-            "A bearer-admitted request has no session reader here: a machine route takes "
-            "Depends(bearer_caller), and a person path's or a resource's account is read only "
-            "on the request the gate admitted it for, not in a sub-app or after the "
-            "Authorization header or, at a resource, the method changed.",
-        )
-
-
-_PERSON_PATH_SCOPE_KEY: Final = "webauth.person_path"
-
-
-def _mark_person_path(connection: HTTPConnection) -> None:
-    """Note that the bearer gate selected this path as a person path.
-
-    The mark carries no authority: it only lets the library's own refusals on the
-    path answer with a ``Bearer`` challenge.
-    """
-    connection.scope[_PERSON_PATH_SCOPE_KEY] = True
-
-
-def _is_person_path(connection: HTTPConnection) -> bool:
-    return connection.scope.get(_PERSON_PATH_SCOPE_KEY) is True
-
-
-def _require_admin(
-    connection: HTTPConnection,
-    user: ports.AuthenticatedUser,
-) -> ports.AuthenticatedUser:
-    """The account itself when its role is ``AppRole.ADMIN``; else the 403.
-
-    The 403 of a person a person path admitted carries ``insufficient_scope``; a resource's
-    admission is capped for good, so a new sign-in cannot help and its 403 carries no challenge.
-    """
-    if user.role != AppRole.ADMIN:
-        admission = _bearer_admission(connection)
-        is_person_path_token = (
-            admission is not None
-            and not admission.is_resource_admission
-            and isinstance(admission.principal, ports.AuthenticatedUser)
-        )
-        challenge = _PERSON_PATH_INSUFFICIENT_SCOPE if is_person_path_token else None
-        raise HTTPException(
-            403,
-            _ADMIN_REQUIRED_DETAIL,
-            headers=None if challenge is None else {"WWW-Authenticate": challenge},
-        )
-    return user
-
-
 def _gate_or_own_admission(
     connection: HTTPConnection,
     sessions: SessionRenewalStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
-    person = _admitted_token_person(connection)
+    person = admitted_token_person(connection)
     if person is not None:
         return person
-    _raise_for_bearer_admission(connection)
     decided = _gate_admission(connection)
     if decided is None or decided.admission is None:
         return _resolve_session(connection, sessions)
