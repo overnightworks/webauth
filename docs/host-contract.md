@@ -66,6 +66,31 @@ carries none.
 
   Remaining risk: an answering layer the host's test never drives stays unseen.
 
+## The composition call
+
+`WebAuth.build(settings, stores=, groups=, pages=, front=, gate=, outside=, inside=, issuer_calls=)` runs before the host's routes and `auth.install(app, bearer=)` after the last one; `auth.relying_party`, `auth.config` and `auth.admission` serve the host's routes. The readers `current_user`, `admin_user` and `authenticate_websocket` are module functions in `webauth.dependencies` over the installed handle. The host fills `WebAuthSettings` from its environment; webauth reads none. `front` is the `TrustedProxies` the client-address writer believes, and `outside` and `inside` are tuples of Starlette `Middleware`, outermost first.
+
+The operator ruled the form of the call as this paragraph states it (option A: build, then install), COMPOSE-05, COMPOSE-06, COMPOSE-08, COMPOSE-12, COMPOSE-14, COMPOSE-15, COMPOSE-16 and COMPOSE-17 (the wording of COMPOSE-17 as ruled on #838 line 1); no other sentence of this section is ruled.
+
+- **COMPOSE-01** The install places logline's `RequestLineMiddleware` outermost and `ClientAddressMiddleware(trusted_proxies=front)` immediately inside it. A request the stack refuses (the 400 for a path, the CSRF 403, the 429) writes exactly one request line whose `ip` is the forwarded client, and carries the security headers.
+- **COMPOSE-02** The `outside` entries sit between the writer and the library stack. A request an `outside` layer answers itself, such as a CORS preflight, writes one line with the forwarded `ip` and never reaches the stack.
+- **COMPOSE-03** The `inside` entries sit inside the stack, so they see only admitted requests, and a `ContextVar` they set is visible to an `outside` layer after the call returns (STACK-04).
+- **COMPOSE-04** A WebSocket handshake through the proxy with a live session writes one line with the forwarded `ip` and the person as `sub`.
+- **COMPOSE-05** The install registers the start, callback, logout and back-channel logout routes of `settings.sign_in_paths` with the policies SIGNIN-03 to SIGNIN-08 derive.
+- **COMPOSE-06** `build` and `install` read no environment and make no outbound call. The relying party reaches the issuer through `issuer_calls` (default: the HTTPS ones), and the clock through `settings.config.wall_clock`.
+- **COMPOSE-07** `pages` is the host's: its `refused` answers a callback that ended without a session, its `logout_page_text` gives the logout page its words and language, and its `ui_language` is sent to the issuer as `ui_locales`. `logout_page_text` is `None` exactly when `sign_in_paths.logout` is.
+- **COMPOSE-08** `current_user` opens and closes exactly one `stores.sessions()` entry. The session renewal is durable when the entry's exit returns, before the endpoint runs; a failing exit means no endpoint runs, and an endpoint that fails afterwards keeps the renewal. A stream's entry is closed before its first byte. A direct call `current_user(request)` does the same and bypasses `dependency_overrides`.
+- **COMPOSE-09** `groups` decides who is admitted and who is admin: a member passes `current_user`, a non-member is refused with `RefusalPage.NO_ACCESS`, and only an admin passes `admin_user`.
+- **COMPOSE-10** The host's `outside` and `inside` entries keep the order given, outermost first.
+- **COMPOSE-11** A `bearer` given to `install` after the last route has its resource-metadata route served and its public rule added to `gate.public`, and a token on a person path is admitted. The routes the install adds, the sign-in routes of COMPOSE-05 and the resource metadata, answer ahead of every route the host registered before, a catch-all included.
+- **COMPOSE-12** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `build` for the early values (a `WebAuthSettingError`): `groups.bound_issuer` differing from `settings.client.issuer`, `settings.max_sessions`, `settings.keeps_id_token`, `pages.logout_page_text`, `front`, `outside` and `inside`.
+- **COMPOSE-13** A second `install`, or an app that already carries library middleware, raises `RuntimeError` and leaves the app's routes, middleware and state as they were.
+- **COMPOSE-14** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `install` for the late bearer, before `install` changes the app: a `bearer` that does not fit the early values raises a `WebAuthSettingError` naming `bearer.relying_party` or `bearer.admission`: it must hold `auth.relying_party` and `auth.admission`. `BearerGate` still refuses `NoAdmins` with machine paths and a gate that names no kind when it is constructed.
+- **COMPOSE-15** `admin_user` opens no entry and checks the identity it is given, so `app.dependency_overrides[current_user]` decides both.
+- **COMPOSE-16** `authenticate_websocket(connection)` without `sessions` refuses a missing or foreign `Origin` before it opens any `stores.sessions()` entry (CSRF-15), then opens one.
+- **COMPOSE-17** A host that builds and never installs gets a `RuntimeError` naming the missing `auth.install` on its first request that reads it (`current_user`, `admin_user`, or `authenticate_websocket` without `sessions`), an HTTP request or a WebSocket handshake. A request that reads none of them is served without the library's stack, and the sign-in routes do not exist.
+- **Host duty:** `stores.sessions` and `stores.sign_in` address the same session data, and the sign-in transaction is passed again in `PersonPaths` and `ProtectedResource`, and the session transaction again in `SessionGate.session_transaction`.
+
 ## What every app gets
 
 The operator ruled APP-20, APP-21, APP-22, APP-34, APP-35, APP-36 and APP-37; no other sentence of this section is ruled.

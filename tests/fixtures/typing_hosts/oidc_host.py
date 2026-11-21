@@ -7,14 +7,15 @@ export a host cannot import fails the build instead of the host's next upgrade.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import time
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
-from typing import assert_never
+from typing import TYPE_CHECKING, assert_never
 
 from fastapi import Depends, FastAPI, Request, Response, WebSocket
 from pydantic import SecretStr
+from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
 
 from webauth import WebAuthError
@@ -42,8 +43,10 @@ from webauth.dependencies import (
     ConnectionRefusal,
     LoginRedirect,
     account_language_of_session,
+    admin_user,
     admit_session,
     authenticate_websocket,
+    current_user,
     current_user_dependency,
     session_id_from_request,
 )
@@ -144,6 +147,17 @@ from webauth.sign_in_routes import (
     SignInRefusal,
     install_sign_in_routes,
 )
+from webauth.web_auth import (
+    IssuerCalls,
+    SignInPages,
+    WebAuth,
+    WebAuthSettingError,
+    WebAuthSettings,
+    WebAuthStores,
+)
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp
 
 
 @dataclass(frozen=True)
@@ -245,29 +259,84 @@ def a_host_refuses_a_sign_in(request: Request, refusal: SignInRefusal) -> Respon
     return Response(status_code=403 if refusal.page is RefusalPage.NO_ACCESS else 400)
 
 
-def a_host_installs_the_sign_in_routes(app: FastAPI, relying_party: OidcRelyingParty) -> None:
-    transaction: SignInTransaction = a_host_sign_in_transaction
-    install_sign_in_routes(
-        app,
-        paths=SignInPaths(
+def a_host_settings(client: OidcClientConfig, config: WebAuthConfig) -> WebAuthSettings:
+    return WebAuthSettings(
+        config=config,
+        client=client,
+        sign_in_paths=SignInPaths(
             start="/login/oidc",
             callback="/auth/callback",
             logout="/logout",
             backchannel_logout="/auth/backchannel-logout",
         ),
-        relying_party=lambda _request: relying_party,
-        admission=AdmissionConfig(
-            bound_issuer="https://keycloak.example/realms/host",
+        keeps_id_token=True,
+        max_sessions=None,
+        security_headers=SecurityHeadersPolicy(
+            content_security_policy=default_content_security_policy(
+                added_sources={
+                    CspDirective.STYLE_SRC: ["'unsafe-inline'"],
+                    CspDirective.FORM_ACTION: ["https://issuer.example.test"],
+                },
+            ),
+        ),
+        csrf_origin=CsrfPolicy(),
+        rate_limit=RateLimitPolicy(
+            default=RateLimitBudget(name="default", max_requests=60, window_seconds=60),
+            rules=(
+                RateLimitRule(
+                    paths=PathRules(exact=frozenset({"/login"})),
+                    budget=RateLimitBudget(name="login", max_requests=10, window_seconds=60),
+                ),
+            ),
+        ),
+    )
+
+
+def a_host_composes_its_auth(client: OidcClientConfig, config: WebAuthConfig) -> WebAuth:
+    sign_in: SignInTransaction = a_host_sign_in_transaction
+    sessions: SessionTransaction = a_host_session_transaction
+    key_set_fetch, token_post = a_host_uses_the_production_transports()
+    return WebAuth.build(
+        a_host_settings(client, config),
+        stores=WebAuthStores(sign_in=sign_in, sessions=sessions),
+        groups=AdmissionConfig(
+            bound_issuer=client.issuer,
             login_group="/apps/host",
             admin_group="/apps/host/admin",
         ),
-        transaction=transaction,
-        refused=a_host_refuses_a_sign_in,
-        keeps_id_token=True,
-        max_sessions=None,
-        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        ui_language=a_host_names_the_language_of_a_request,
+        pages=SignInPages(
+            refused=a_host_refuses_a_sign_in,
+            logout_page_text=lambda _request: LogoutPageText(
+                language="en", button_label="Sign out"
+            ),
+            ui_language=a_host_names_the_language_of_a_request,
+        ),
+        front=TrustedProxies.parse("127.0.0.1"),
+        gate=SessionGate(
+            session_transaction=a_host_session_transaction,
+            login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
+            public=(PublicRule(PathRules(exact=frozenset({"/login"}))),),
+        ),
+        outside=(Middleware(a_host_middleware_that_sees_every_request),),
+        inside=(Middleware(a_host_middleware_that_sees_admitted_requests),),
+        issuer_calls=IssuerCalls(
+            post_token_request=token_post,
+            fetch_key_set=key_set_fetch,
+            monotonic_clock=time.monotonic,
+        ),
     )
+
+
+def a_host_middleware_that_sees_every_request(app: ASGIApp) -> ASGIApp:
+    return app
+
+
+def a_host_middleware_that_sees_admitted_requests(app: ASGIApp) -> ASGIApp:
+    return app
+
+
+def a_host_installs_its_auth(app: FastAPI, auth: WebAuth, bearer: BearerGate | None) -> None:
+    auth.install(app, bearer=bearer)
 
 
 def a_host_names_the_language_of_a_request(request: Request) -> str | None:
@@ -438,19 +507,21 @@ def a_host_exchanges_the_admitted_token(app: FastAPI) -> None:
         return f"{exchanged.access_token.get_secret_value()} until {exchanged.expires_at}"
 
 
-def a_host_reads_whether_the_resource_admitted_the_request(
-    app: FastAPI, dependencies: AuthDependencies
-) -> None:
+def a_host_reads_whether_the_resource_admitted_the_request(app: FastAPI) -> None:
     @app.post("/share")
-    def share(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user)
-    ) -> bool:
+    def share(request: Request, user: AuthenticatedUser = Depends(current_user)) -> bool:
         return is_resource_admission(request) and user.agent is None
 
 
-def a_host_reads_the_token_person(app: FastAPI, dependencies: AuthDependencies) -> None:
+def a_host_reads_the_token_person(app: FastAPI) -> None:
     @app.get("/api/me")
-    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> str:
+    def me(user: AuthenticatedUser = Depends(current_user)) -> str:
+        return user.username
+
+
+def a_host_reads_the_admin(app: FastAPI) -> None:
+    @app.get("/admin")
+    def admin(user: AuthenticatedUser = Depends(admin_user)) -> str:
         return user.username
 
 
@@ -495,19 +566,10 @@ def a_host_gets_a_workload_token(relying_party: OidcRelyingParty) -> SecretStr |
     return relying_party.workload_access_token(scopes=("agent-service-audience",))
 
 
-def a_host_resolves_the_current_user(
-    on_authenticated: Callable[[AuthenticatedUser], None],
-) -> AuthDependencies:
-    return current_user_dependency(
-        session_store=HostSessions,
-        on_authenticated=on_authenticated,
-    )
-
-
 async def a_host_accepts_a_websocket_only_for_a_signed_in_account(
     websocket: WebSocket,
 ) -> AuthenticatedUser | None:
-    outcome = authenticate_websocket(websocket, sessions=HostSessions())
+    outcome = authenticate_websocket(websocket)
     if isinstance(outcome, ConnectionRefusal):
         await websocket.close(code=1008)
         return None
@@ -527,42 +589,6 @@ def a_host_reads_the_account_language(
     config: WebAuthConfig,
 ) -> str | None:
     return account_language_of_session(connection, sessions=HostSessions(), config=config)
-
-
-def a_host_installs_the_middleware(
-    app: FastAPI,
-    bearer_gate: BearerGate,
-    sign_in_paths: SignInPaths,
-) -> None:
-    install_web_auth_middleware(
-        app,
-        sign_in_paths=sign_in_paths,
-        bearer_gate=bearer_gate,
-        security_headers=SecurityHeadersPolicy(
-            content_security_policy=default_content_security_policy(
-                added_sources={
-                    CspDirective.STYLE_SRC: ["'unsafe-inline'"],
-                    CspDirective.FORM_ACTION: ["https://issuer.example.test"],
-                },
-            ),
-        ),
-        rate_limit=RateLimitPolicy(
-            default=RateLimitBudget(name="default", max_requests=60, window_seconds=60),
-            rules=(
-                RateLimitRule(
-                    paths=PathRules(exact=frozenset({"/login"})),
-                    budget=RateLimitBudget(name="login", max_requests=10, window_seconds=60),
-                ),
-            ),
-        ),
-        csrf_origin=CsrfPolicy(),
-        session_gate=SessionGate(
-            session_transaction=a_host_session_transaction,
-            login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
-            public=(PublicRule(PathRules(exact=frozenset({"/login"}))),),
-        ),
-    )
-    app.add_middleware(ClientAddressMiddleware, trusted_proxies=TrustedProxies.parse("127.0.0.1"))
 
 
 def a_host_session_transaction() -> AbstractContextManager[SessionRecordStore]:
@@ -605,9 +631,15 @@ def _surface_of_the_errors_and_the_verified_records() -> tuple[object, ...]:
         VerifiedAccessToken,
         VerifiedLogout,
         WallClock,
+        WebAuthSettingError,
+        AuthDependencies,
+        ClientAddressMiddleware,
         admit_session,
         bearer_caller,
+        current_user_dependency,
+        install_sign_in_routes,
         install_web_auth_config,
+        install_web_auth_middleware,
         is_https_url,
         session_id_from_request,
     )

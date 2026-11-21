@@ -15,105 +15,87 @@ pins it.
 ## Quick start
 
 ```python
-import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
-from logline import RequestLineMiddleware
 from pydantic import SecretStr
 
 from webauth.admission import AdmissionConfig
-from webauth.config import SessionLifetime, WebAuthConfig, install_web_auth_config
-from webauth.dependencies import current_user_dependency
-from webauth.https_client import fetch_key_set_over_https, fetch_provider_metadata_over_https
-from webauth.middleware import ClientAddressMiddleware, install_web_auth_middleware
-from webauth.oidc import OidcRelyingParty, discover_oidc_client_config
-from webauth.oidc_transport import post_token_request_over_https
-from webauth.policies import (
-    CsrfPolicy,
-    SecurityHeadersPolicy,
-    default_content_security_policy,
-)
+from webauth.config import SessionLifetime, WebAuthConfig
+from webauth.dependencies import current_user
+from webauth.https_client import fetch_provider_metadata_over_https
+from webauth.oidc import discover_oidc_client_config
+from webauth.policies import CsrfPolicy, SecurityHeadersPolicy, default_content_security_policy
 from webauth.ports import AuthenticatedUser
 from webauth.proxies import TrustedProxies
 from webauth.rate_limit import SingleProcessRateLimitBackend
-from webauth.sign_in_routes import LogoutPageText, SignInPaths, install_sign_in_routes
+from webauth.sign_in_routes import LogoutPageText, SignInPaths
+from webauth.web_auth import SignInPages, WebAuth, WebAuthSettings, WebAuthStores
 
-app = FastAPI()
-config = WebAuthConfig(
-    session_secret=SecretStr(Path("/run/secrets/session_secret").read_text().strip()),
-    rate_limits=SingleProcessRateLimitBackend(),
-    allowed_hosts_exact=frozenset({"app.example.com"}),
-    session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
+client = discover_oidc_client_config(
+    "https://keycloak.example/realms/notes",
+    fetch_provider_metadata=fetch_provider_metadata_over_https,
+    client_id="notes",
+    client_secret=SecretStr(Path("/run/secrets/client_secret").read_text().strip()),
+    redirect_uri="https://app.example.com/auth/callback",
+    post_logout_redirect_uri="https://app.example.com/",
+    scopes=("openid", "profile"),
+    leeway_seconds=30,
 )
-install_web_auth_config(app, config)
-paths = SignInPaths(
-    start="/login/oidc", callback="/auth/callback", logout="/logout",
-    backchannel_logout="/auth/backchannel-logout",
-)
-install_web_auth_middleware(
-    app,
-    sign_in_paths=paths,
-    security_headers=SecurityHeadersPolicy(
-        content_security_policy=default_content_security_policy(),
+auth = WebAuth.build(
+    WebAuthSettings(
+        config=WebAuthConfig(
+            session_secret=SecretStr(Path("/run/secrets/session_secret").read_text().strip()),
+            rate_limits=SingleProcessRateLimitBackend(),
+            allowed_hosts_exact=frozenset({"app.example.com"}),
+            session_lifetime=SessionLifetime(idle_seconds=43200, absolute_max_age_seconds=43200),
+        ),
+        client=client,
+        sign_in_paths=SignInPaths(
+            start="/login/oidc", callback="/auth/callback", logout="/logout",
+            backchannel_logout="/auth/backchannel-logout",
+        ),
+        keeps_id_token=True,
+        max_sessions=None,
+        security_headers=SecurityHeadersPolicy(
+            content_security_policy=default_content_security_policy(),
+        ),
+        csrf_origin=CsrfPolicy(),
     ),
-    csrf_origin=CsrfPolicy(),
-)
-app.add_middleware(ClientAddressMiddleware, trusted_proxies=TrustedProxies.parse("10.0.0.0/8"))
-app.add_middleware(RequestLineMiddleware)
-relying_party = OidcRelyingParty(
-    discover_oidc_client_config(
-        "https://keycloak.example/realms/notes",
-        fetch_provider_metadata=fetch_provider_metadata_over_https,
-        client_id="notes",
-        client_secret=SecretStr(Path("/run/secrets/client_secret").read_text().strip()),
-        redirect_uri="https://app.example.com/auth/callback",
-        post_logout_redirect_uri="https://app.example.com/",
-        scopes=("openid", "profile"),
-        leeway_seconds=30,
+    stores=WebAuthStores(
+        sign_in=the_hosts_sign_in_transaction,
+        sessions=the_hosts_session_transaction,
     ),
-    post_token_request=post_token_request_over_https,
-    fetch_key_set=fetch_key_set_over_https,
-    wall_clock=time.time,
-    monotonic_clock=time.monotonic,
-)
-install_sign_in_routes(
-    app,
-    paths=paths,
-    relying_party=relying_party,
-    admission=AdmissionConfig(
-        bound_issuer="https://keycloak.example/realms/notes",
+    groups=AdmissionConfig(
+        bound_issuer=client.issuer,
         login_group="/apps/notes",
         admin_group="/apps/notes/admin",
     ),
-    transaction=the_hosts_sign_in_transaction,
-    refused=the_hosts_refusal_page,
-    keeps_id_token=True,
-    max_sessions=None,
-    logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Log out"),
-    ui_language=lambda _request: None,
+    pages=SignInPages(
+        refused=the_hosts_refusal_page,
+        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Log out"),
+        ui_language=lambda _request: None,
+    ),
+    front=TrustedProxies.parse("10.0.0.0/8"),
 )
-auth = current_user_dependency(
-    session_store=the_hosts_session_store,
-    on_authenticated=bind_the_hosts_log_context,
-)
+
+app = FastAPI()
 
 
 @app.get("/me")
-def me(user: AuthenticatedUser = Depends(auth.current_user)) -> AuthenticatedUser:
+def me(user: AuthenticatedUser = Depends(current_user)) -> AuthenticatedUser:
     return user
+
+
+auth.install(app, bearer=None)
 ```
 
-`discover_oidc_client_config` reads the issuer's discovery document once, at startup, and the host does not start when it raises ([the client configuration](docs/host-contract.md#the-client-configuration)). `ui_language` names the person's language to the issuer as `ui_locales`: a host passes `resolve_language`'s answer for the request, or `lambda request: None` to name none ([a person's language](docs/host-contract.md#a-persons-language)).
+`WebAuth.build` runs before the host's routes, which take `auth.relying_party`, `auth.config` and `auth.admission`; `auth.install(app, bearer=...)` runs after the last route, with the host's `BearerGate` or `None`. Neither reads the environment or calls the issuer. `discover_oidc_client_config` reads the issuer's discovery document once, at startup, and the host does not start when it raises ([the client configuration](docs/host-contract.md#the-client-configuration)). `ui_language` names the person's language to the issuer as `ui_locales`: a host passes `resolve_language`'s answer for the request, or `lambda request: None` to name none ([a person's language](docs/host-contract.md#a-persons-language)). `front` names the proxies whose forwarding headers are believed; the host's own middleware goes in the `outside` and `inside` slots of `build` ([the composition call](docs/host-contract.md#the-composition-call)).
 
-A host with one worker and no database keeps its accounts and sessions in memory with `SingleProcessStores(audit=the_hosts_audit_sink)` from `webauth.single_process_stores`: pass its `transaction` to `install_sign_in_routes` and `session_store=lambda: stores.sessions` to `current_user_dependency`. A restart forgets every account and session ([the single-process stores](docs/host-contract.md#the-single-process-stores)).
+A host with one worker and no database keeps its accounts and sessions in memory with `SingleProcessStores(audit=the_hosts_audit_sink)` from `webauth.single_process_stores`: pass its `transaction` as `stores.sign_in` and `lambda: nullcontext(stores.sessions)` as `stores.sessions`. A restart forgets every account and session ([the single-process stores](docs/host-contract.md#the-single-process-stores)).
 
-`current_user_dependency` returns an `AuthDependencies` (`current_user`,
-`admin_user`) and its docstring says what `session_store`
-and `on_authenticated` are. `install_web_auth_middleware` derives the policies of the four routes from `paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. `paths.login_redirect` is the one derived value the host passes, to its session gate. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
+`install` derives the policies of the four sign-in routes from `sign_in_paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
-
-The host adds the `ClientAddressMiddleware` line itself, after the installer and any middleware of its own that can answer by itself (CORS), and immediately inside logline's `RequestLineMiddleware`; `webauth.proxies.client_address(connection)` then reads the address it recorded. The rules and the position are in the [host contract](docs/host-contract.md#trusted-proxies).
 
 ## Documentation
 

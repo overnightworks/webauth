@@ -21,6 +21,7 @@ record holds the account behind the token, and `current_user` returns it.
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
@@ -43,10 +44,12 @@ from webauth.cookies import (
     _cookie_values,
     _verify_session_cookie,
 )
-from webauth.ports import SessionRecordStore
+from webauth.ports import SessionRecordStore, SessionTransaction
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from fastapi import FastAPI
 
     from webauth.oidc import ExchangedAccess, OidcRefusal
 
@@ -55,8 +58,10 @@ __all__ = [
     "LoginRedirect",
     "ConnectionRefusal",
     "account_language_of_session",
+    "admin_user",
     "admit_session",
     "authenticate_websocket",
+    "current_user",
     "current_user_dependency",
     "session_id_from_request",
 ]
@@ -69,6 +74,7 @@ _ADMIN_REQUIRED_DETAIL: Final = "Admin access required"
 _PERSON_PATH_CHALLENGE: Final = 'Bearer realm="api"'
 _PERSON_PATH_INSUFFICIENT_SCOPE: Final = 'Bearer error="insufficient_scope"'
 _EXPIRY_TOLERANCE: Final = timedelta(seconds=60)
+_INSTALLED_SESSIONS_ATTRIBUTE: Final = "web_auth_sessions"
 
 
 @dataclass(frozen=True)
@@ -161,10 +167,60 @@ def current_user_dependency(
     )
 
 
+def _publish_installed_sessions(app: FastAPI, sessions: SessionTransaction) -> None:
+    setattr(app.state, _INSTALLED_SESSIONS_ATTRIBUTE, sessions)
+
+
+def _installed_sessions(connection: HTTPConnection) -> SessionTransaction:
+    """The ``stores.sessions`` ``WebAuth.install`` put on the application serving ``connection``."""
+    sessions = getattr(connection.app.state, _INSTALLED_SESSIONS_ATTRIBUTE, None)
+    if sessions is None:
+        raise RuntimeError(
+            "This application serves auth-protected requests without an installed WebAuth: "
+            "call auth.install(app, bearer=...) after the last route.",
+        )
+    return sessions
+
+
+def current_user(request: Request) -> ports.AuthenticatedUser:
+    """The account behind the request, from the handle installed on the serving application.
+
+    Opens and closes exactly one ``stores.sessions()`` entry of that handle and answers 401
+    when no live session speaks for the request. The session renewal is durable when the
+    entry's exit returns, before the endpoint runs: a failing exit means no endpoint runs, and
+    an endpoint that fails afterwards keeps the renewal. Behind the session gate the gate's
+    admission is returned when it was made for this request's own session cookie, and on a
+    person path or at a resource the account behind the token. The account's ``id`` is also
+    the ``sub`` of the request line.
+
+    The function is a stable ``Depends`` key, so ``app.dependency_overrides[current_user]``
+    replaces the identity behind it and behind ``admin_user``. A direct call, as a stream
+    makes before it opens its own store, bypasses the overrides.
+    """
+    with _installed_sessions(request)() as sessions:
+        user = _gate_or_own_admission(request, sessions)
+    if isinstance(user, ConnectionRefusal):
+        raise _http_refusal(request, user, None)
+    set_sub(request.scope, user.id)
+    return user
+
+
+def admin_user(
+    request: Request,
+    user: ports.AuthenticatedUser = Depends(current_user),
+) -> ports.AuthenticatedUser:
+    """The account itself when its role is ``AppRole.ADMIN``; else the 403.
+
+    Opens no store: it checks the identity ``current_user`` gives, so an override of
+    ``current_user`` decides both.
+    """
+    return _require_admin(request, user)
+
+
 def authenticate_websocket(
     connection: HTTPConnection,
     *,
-    sessions: SessionRecordStore,
+    sessions: SessionRecordStore | None = None,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The account behind a WebSocket handshake, or why the handshake is refused.
 
@@ -199,12 +255,25 @@ def authenticate_websocket(
     like a request, up to the absolute cap of ``SessionLifetime``, which bounds
     a socket's life.
 
+    Without ``sessions`` the session is read in exactly one ``stores.sessions()`` entry of the
+    handle installed on the serving application, opened after the Origin check and closed
+    before this function returns.
+
     A host may wrap this function in its own dependency: FastAPI resolves an
     ``HTTPConnection`` parameter on a WebSocket route as well as on an HTTP one.
     """
+    opening = _installed_sessions(connection) if sessions is None else lambda: nullcontext(sessions)
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:
         return origin_refusal
+    with opening() as opened:
+        return _admitted_websocket(connection, opened)
+
+
+def _admitted_websocket(
+    connection: HTTPConnection,
+    sessions: SessionRecordStore,
+) -> ports.AuthenticatedUser | ConnectionRefusal:
     resolved = _resolve_session(connection, sessions)
     if not isinstance(resolved, ConnectionRefusal):
         set_sub(connection.scope, resolved.id)

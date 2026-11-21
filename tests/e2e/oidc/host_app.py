@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from string import Template
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import anyio.to_thread
 import httpx
@@ -45,11 +45,14 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from logline import configure
 from pydantic import SecretStr
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
-from webauth.config import WebAuthConfig, install_web_auth_config
+from webauth.config import WebAuthConfig
 from webauth.dependencies import (
-    AuthDependencies,
+    admin_user,
+    current_user,
     current_user_dependency,
     session_id_from_request,
 )
@@ -62,8 +65,6 @@ from webauth.middleware import (
     ProtectedResource,
     SessionGate,
     bearer_caller,
-    install_resource_metadata,
-    install_web_auth_middleware,
     resource_person,
 )
 from webauth.oidc import (
@@ -93,12 +94,17 @@ from webauth.ports import (
     SignInStores,
     SignInTransaction,
 )
-from webauth.sign_in_routes import (
-    LogoutPageText,
-    SignInPaths,
-    SignInRefusal,
-    install_sign_in_routes,
+from webauth.sign_in_routes import LogoutPageText, SignInPaths, SignInRefusal
+from webauth.web_auth import (
+    IssuerCalls,
+    SignInPages,
+    WebAuth,
+    WebAuthSettings,
+    WebAuthStores,
 )
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -254,17 +260,11 @@ class AccessTokenKept:
 
 
 class World:
-    """The host's stores, relying parties and counters; a new ``World`` starts them all again."""
+    """The host's stores and counters; a new ``World`` starts them all again."""
 
     def __init__(self, settings: HostSettings) -> None:
         arrangement = _arrangement()
         self.token_requests = AccessTokenKept(post_token_request_over_https)
-        self.relying_parties = {
-            origin: _relying_party(
-                settings, f"{origin}{CALLBACK_PATH}", f"{origin}/", self.token_requests
-            )
-            for origin in settings.app_origins
-        }
         self.lock = arrangement.accounts.WriteLockInMemory()
         self.accounts = arrangement.accounts.UsersInMemory(lock=self.lock)
         self.sessions = arrangement.sessions.SessionRecordsInMemory(
@@ -312,15 +312,13 @@ class World:
 class _Observation:
     """The counts-only listener the scenarios read and reset through."""
 
-    def __init__(self, port: int, world: dict[str, World], new_world: Callable[[], World]) -> None:
-        holder = world
-
+    def __init__(self, port: int, served: _Served) -> None:
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format: str, *args: object) -> None:
                 """Nothing is logged."""
 
             def do_GET(self) -> None:
-                payload = json.dumps(holder["world"].counts()).encode()
+                payload = json.dumps(served.world.counts()).encode()
                 self.send_response(200 if self.path == "/state" else 404)
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
@@ -328,34 +326,13 @@ class _Observation:
 
             def do_POST(self) -> None:
                 if self.path == "/reset":
-                    holder["world"] = new_world()
+                    served.reset()
                 self.send_response(204 if self.path == "/reset" else 404)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
         self._server = ThreadingHTTPServer((LOOPBACK, port), Handler)
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
-
-
-def _relying_party(
-    settings: HostSettings,
-    redirect_uri: str,
-    post_logout_redirect_uri: str,
-    post_token_request: TokenRequestPost,
-) -> OidcRelyingParty:
-    return OidcRelyingParty(
-        client_config(
-            settings,
-            redirect_uri,
-            post_logout_redirect_uri,
-            scopes=SCOPES,
-            leeway_seconds=LEEWAY_SECONDS,
-        ),
-        post_token_request=post_token_request,
-        fetch_key_set=fetch_key_set_over_https,
-        wall_clock=time.time,
-        monotonic_clock=time.monotonic,
-    )
 
 
 def call_userinfo(settings: HostSettings, current: World) -> None:
@@ -377,80 +354,55 @@ def call_userinfo(settings: HostSettings, current: World) -> None:
     current.userinfo_answered += 1
 
 
-def _sign_in_transaction(world: dict[str, World]) -> SignInTransaction:
+def _sign_in_transaction(world: World) -> SignInTransaction:
     @contextmanager
     def transaction() -> Iterator[SignInStores]:
-        current = world["world"]  # `/reset` replaces the world, so it is read at call time
-        with current.lock.hold(), current.sessions.transaction():
-            yield SignInStores(current.accounts, current.sessions, current.audit)
+        with world.lock.hold(), world.sessions.transaction():
+            yield SignInStores(world.accounts, world.sessions, world.audit)
 
     return transaction
 
 
-def _install_stack(
-    app: FastAPI,
-    settings: HostSettings,
-    world: dict[str, World],
-    transaction: SignInTransaction,
-) -> None:
-    install_web_auth_middleware(
-        app,
-        sign_in_paths=SIGN_IN_PATHS,
-        security_headers=SecurityHeadersPolicy(default_content_security_policy()),
-        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
-        rate_limit=PROOF_HOST_RATE_LIMIT,
-        csrf_origin=CsrfPolicy(),
-        **_bearer_policies(settings, world, transaction),
-    )
-    _arrangement().client_address.add_the_client_address_writer(app)
-
-
-def _bearer_policies(
-    settings: HostSettings,
-    world: dict[str, World],
-    transaction: SignInTransaction,
-) -> dict[str, Any]:
-    """The policies only the bearer host installs; the host without the setting has none."""
-    if not settings.is_bearer_host:
-        return {}
+def _gate_of(world: World) -> SessionGate:
+    """The session gate only the bearer host installs; the host without the setting has none."""
 
     def counted_session_transaction() -> AbstractContextManager[SessionRecordStore]:
-        current = world["world"]  # `/reset` replaces the world, so it is read at call time
-        current.session_transactions += 1
-        return current.sessions.in_transaction()
+        world.session_transactions += 1
+        return world.sessions.in_transaction()
 
-    (origin,) = settings.app_origins
+    return SessionGate(
+        session_transaction=counted_session_transaction,
+        login_redirect=None,
+        # The gate would answer a dead cookie with 401 before the route runs; the call
+        # answers `session-ended` itself. The install adds the resource's metadata rule.
+        public=(
+            PublicRule(
+                PathRules(exact=frozenset({CURRENT_GROUPS_PATH})),
+                methods=frozenset({"GET"}),
+            ),
+        ),
+        optional=PathRules(exact=frozenset({"/"})),
+    )
+
+
+def _bearer_of(
+    settings: HostSettings, auth: WebAuth, transaction: SignInTransaction
+) -> BearerGate | None:
+    """The bearer gate only the bearer host installs; the host without the setting has none."""
+    if not settings.is_bearer_host:
+        return None
     parties = AuthorizedParties(frozenset(settings.bearer_authorized_parties))
-    resource = _resource_of(settings, transaction)
-    return {
-        "session_gate": SessionGate(
-            session_transaction=counted_session_transaction,
-            login_redirect=None,
-            # The gate would answer a dead cookie with 401 before the route runs; the call
-            # answers `session-ended` itself.
-            public=(
-                resource.public_rule,
-                PublicRule(
-                    PathRules(exact=frozenset({CURRENT_GROUPS_PATH})),
-                    methods=frozenset({"GET"}),
-                ),
-            ),
-            optional=PathRules(exact=frozenset({"/"})),
+    return BearerGate(
+        resource=_resource_of(settings, transaction),
+        machine_paths=MachinePaths(PathRules(prefixes=(MACHINE_ROUTES_PREFIX,)), parties),
+        relying_party=auth.relying_party,
+        admission=auth.admission,
+        person_paths=PersonPaths(
+            PathRules(prefixes=(PERSON_ROUTES_PREFIX,)),
+            parties,
+            transaction,
         ),
-        "bearer_gate": BearerGate(
-            resource=resource,
-            machine_paths=MachinePaths(PathRules(prefixes=(MACHINE_ROUTES_PREFIX,)), parties),
-            relying_party=_relying_party(
-                settings, f"{origin}{CALLBACK_PATH}", f"{origin}/", post_token_request_over_https
-            ),
-            admission=_admission_of(settings),
-            person_paths=PersonPaths(
-                PathRules(prefixes=(PERSON_ROUTES_PREFIX,)),
-                parties,
-                transaction,
-            ),
-        ),
-    }
+    )
 
 
 def _resource_of(settings: HostSettings, transaction: SignInTransaction) -> ProtectedResource:
@@ -490,33 +442,33 @@ def _admitted(answer: Response, config: WebAuthConfig) -> bool:
     )
 
 
-def _install_counters(
-    app: FastAPI, settings: HostSettings, world: dict[str, World], config: WebAuthConfig
-) -> None:
-    @app.middleware("http")
+def _counting_callbacks_and_back_channel_answers(
+    settings: HostSettings, world: World, config: WebAuthConfig
+) -> Middleware:
     async def count_callbacks_and_back_channel_answers(
         request: Request,
         call_next: Any,
     ) -> Response:
-        current = world["world"]
         if request.url.path == BACKCHANNEL_LOGOUT_PATH:
             answer = await call_next(request)
             if answer.status_code == 200:
-                current.backchannel_accepted += 1
+                world.backchannel_accepted += 1
             else:
-                current.backchannel_refused += 1
+                world.backchannel_refused += 1
             return answer
         if request.url.path != CALLBACK_PATH:
             return await call_next(request)
-        current.callbacks_received += 1
+        world.callbacks_received += 1
         answer = await call_next(request)
         if _admitted(answer, config):
-            current.logins_admitted += 1
-            await anyio.to_thread.run_sync(call_userinfo, settings, current)
+            world.logins_admitted += 1
+            await anyio.to_thread.run_sync(call_userinfo, settings, world)
         return answer
 
+    return Middleware(BaseHTTPMiddleware, dispatch=count_callbacks_and_back_channel_answers)
 
-def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
+
+def _web_auth_for(settings: HostSettings, world: World, origin: str) -> WebAuth:
     arrangement = _arrangement()
     config: WebAuthConfig = arrangement.webauth.a_web_auth_config(
         session_secret=SecretStr(settings.session_secret),
@@ -525,34 +477,58 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
             origin.removeprefix("https://") for origin in settings.app_origins
         ),
     )
-
-    def relying_party_of(request: Request) -> OidcRelyingParty:
-        relying_parties = world["world"].relying_parties
-        # The issuer posts the back-channel to the bridge's own Host, which names no app origin.
-        return relying_parties.get(
-            f"https://{request.headers['host']}",
-            next(iter(relying_parties.values())),
-        )
-
-    dependencies = current_user_dependency(
-        session_store=lambda: world["world"].sessions,
-        on_authenticated=lambda user: None,
+    return WebAuth.build(
+        WebAuthSettings(
+            config=config,
+            client=client_config(
+                settings,
+                f"{origin}{CALLBACK_PATH}",
+                f"{origin}/",
+                scopes=SCOPES,
+                leeway_seconds=LEEWAY_SECONDS,
+            ),
+            sign_in_paths=SIGN_IN_PATHS,
+            keeps_id_token=True,
+            max_sessions=None,
+            security_headers=SecurityHeadersPolicy(default_content_security_policy()),
+            csrf_origin=CsrfPolicy(),
+            body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+            rate_limit=PROOF_HOST_RATE_LIMIT,
+        ),
+        stores=WebAuthStores(
+            sign_in=_sign_in_transaction(world), sessions=world.sessions.in_transaction
+        ),
+        groups=_admission_of(settings),
+        pages=SignInPages(
+            refused=_remembering_refusal(world),
+            logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
+            ui_language=lambda _request: None,
+        ),
+        front=arrangement.client_address.TRUSTED_PROXIES,
+        gate=_gate_of(world) if settings.is_bearer_host else None,
+        outside=(_counting_callbacks_and_back_channel_answers(settings, world, config),),
+        issuer_calls=IssuerCalls(
+            post_token_request=world.token_requests,
+            fetch_key_set=fetch_key_set_over_https,
+            monotonic_clock=time.monotonic,
+        ),
     )
+
+
+def _app_for(settings: HostSettings, world: World, origin: str) -> FastAPI:
+    auth = _web_auth_for(settings, world, origin)
+    # The call's `current_user` carries no login redirect, so the redirecting route keeps the
+    # dependency that does.
     redirecting_dependencies = current_user_dependency(
-        session_store=lambda: world["world"].sessions,
+        session_store=lambda: world.sessions,
         on_authenticated=lambda user: None,
         login_redirect=SIGN_IN_PATHS.login_redirect,
     )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    install_web_auth_config(app, config)
-    sign_in_transaction = _sign_in_transaction(world)
-    _install_stack(app, settings, world, sign_in_transaction)
-
-    _install_counters(app, settings, world, config)
 
     def signed_in_user(request: Request) -> AuthenticatedUser | None:
         try:
-            return dependencies.current_user(request, world["world"].sessions)
+            return current_user(request)
         except HTTPException:
             return None
 
@@ -573,44 +549,73 @@ def build_app(settings: HostSettings, world: dict[str, World]) -> FastAPI:
     ) -> str:
         return PAGE.substitute(headline=f"Album {html.escape(album_id)}", body=LOGOUT_BUTTON)
 
-    install_sign_in_routes(
-        app,
-        paths=SIGN_IN_PATHS,
-        relying_party=relying_party_of,
-        admission=_admission_of(settings),
-        transaction=sign_in_transaction,
-        refused=_remembering_refusal(world),
-        keeps_id_token=True,
-        max_sessions=None,
-        logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
-        ui_language=lambda _request: None,
-    )
-
     @app.get("/me")
-    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
+    def me(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
         return {"username": user.username}
 
-    _add_token_routes(app, relying_party_of, world, config)
+    _add_token_routes(app, auth.relying_party, world, auth.config)
 
     @app.get("/admin")
-    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
+    def admin(user: AuthenticatedUser = Depends(admin_user)) -> dict[str, str]:
         return {"username": user.username}
 
+    sign_in = _sign_in_transaction(world)
     if settings.is_bearer_host:
-        _add_bearer_routes(app, dependencies, settings, sign_in_transaction)
+        _add_bearer_routes(app, settings, sign_in)
+    auth.install(app, bearer=_bearer_of(settings, auth, sign_in))
     return app
 
 
-def _remembering_refusal(world: dict[str, World]) -> Callable[[Request, SignInRefusal], Response]:
+class _ByHost:
+    """Hands each request to the app of the origin it was addressed to.
+
+    The issuer posts the back-channel to the bridge's own Host, which names no app origin, so
+    an unknown Host gets the first app. The lifespan goes to the first app too.
+    """
+
+    def __init__(self, apps: dict[str, FastAPI]) -> None:
+        self._apps = apps
+        self._first = next(iter(apps.values()))
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "lifespan":
+            await self._first(scope, receive, send)
+            return
+        host = dict(scope["headers"]).get(b"host", b"").decode()
+        await self._apps.get(f"https://{host}", self._first)(scope, receive, send)
+
+
+def build_app(settings: HostSettings, world: World) -> ASGIApp:
+    apps = {origin: _app_for(settings, world, origin) for origin in settings.app_origins}
+    return next(iter(apps.values())) if len(apps) == 1 else _ByHost(apps)
+
+
+class _Served:
+    """The app uvicorn serves, over a world that ``/reset`` replaces with every app built on it."""
+
+    def __init__(self, settings: HostSettings) -> None:
+        self._settings = settings
+        self.world = World(settings)
+        self._app = build_app(settings, self.world)
+
+    def reset(self) -> None:
+        world = World(self._settings)
+        self._app = build_app(self._settings, world)
+        self.world = world
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await self._app(scope, receive, send)
+
+
+def _remembering_refusal(world: World) -> Callable[[Request, SignInRefusal], Response]:
     """The refusal page, which also records the refusal's reason for the observer."""
 
     def refused(request: Request, refusal: SignInRefusal) -> Response:
-        current = world["world"]
         cause = refusal.cause
         reason = cause.reason.value if isinstance(cause, OidcRefusal) else cause.value
-        current.last_refusal = reason
+        world.last_refusal = reason
         rejection = cause.token_rejection if isinstance(cause, OidcRefusal) else None
-        current.last_token_rejection = rejection.value if rejection else None
+        world.last_token_rejection = rejection.value if rejection else None
         return HTMLResponse(
             PAGE.substitute(headline="Sign-in refused", body=html.escape(reason)), status_code=403
         )
@@ -620,8 +625,8 @@ def _remembering_refusal(world: dict[str, World]) -> Callable[[Request, SignInRe
 
 def _add_token_routes(
     app: FastAPI,
-    relying_party_of: Callable[[Request], OidcRelyingParty],
-    world: dict[str, World],
+    relying_party: OidcRelyingParty,
+    world: World,
     config: WebAuthConfig,
 ) -> None:
     """The routes that answer an outcome of a grant, never a token."""
@@ -635,10 +640,10 @@ def _add_token_routes(
     @app.get(ACCESS_TOKEN_PATH)
     def access_token(request: Request) -> dict[str, object]:
         """The outcome of ``fresh_access_token`` for the request's session, never the token."""
-        current = world["world"]
+        current = world
         session_id = session_of(request)
         outcome = fresh_access_token(
-            relying_party_of(request),
+            relying_party,
             session_id,
             session_transaction=current.sessions.in_transaction,
             config=config,
@@ -652,10 +657,10 @@ def _add_token_routes(
     @app.get(CURRENT_GROUPS_PATH)
     def groups(request: Request) -> dict[str, object]:
         """The outcome of ``current_groups`` for the request's session, never a token."""
-        current = world["world"]
+        current = world
         session_id = session_of(request)
         outcome = current_groups(
-            relying_party_of(request),
+            relying_party,
             session_id,
             session_transaction=current.sessions.in_transaction,
             config=config,
@@ -669,7 +674,7 @@ def _add_token_routes(
     @app.get(WORKLOAD_TOKEN_PATH)
     def workload_token(request: Request) -> dict[str, str | None]:
         """The outcome of the client's own grant, never the token."""
-        outcome = relying_party_of(request).workload_access_token(scopes=("profile",))
+        outcome = relying_party.workload_access_token(scopes=("profile",))
         if isinstance(outcome, OidcRefusal):
             return {"outcome": outcome.reason.value, "issuer_error": outcome.idp_error}
         return {"outcome": "token", "issuer_error": None}
@@ -688,7 +693,7 @@ def _groups_outcome(
     }
 
 
-def _add_machine_routes(app: FastAPI, current_user: Callable[..., AuthenticatedUser]) -> None:
+def _add_machine_routes(app: FastAPI) -> None:
     """The routes under the bearer gate; they echo the caller and change nothing."""
 
     @app.get(f"{MACHINE_ROUTES_PREFIX}people/{{subject}}/export")
@@ -708,7 +713,7 @@ def _add_machine_routes(app: FastAPI, current_user: Callable[..., AuthenticatedU
         return {"username": user.username}
 
 
-def _add_person_routes(app: FastAPI, current_user: Callable[..., AuthenticatedUser]) -> None:
+def _add_person_routes(app: FastAPI) -> None:
     """The routes under the bearer gate's person paths; they echo the account behind the request."""
 
     @app.api_route(f"{PERSON_ROUTES_PREFIX}me", methods=["GET", "POST"])
@@ -716,11 +721,7 @@ def _add_person_routes(app: FastAPI, current_user: Callable[..., AuthenticatedUs
         return {"id": user.id, "username": user.username, "role": user.role}
 
 
-def _add_marked_routes(
-    app: FastAPI,
-    current_user: Callable[..., AuthenticatedUser],
-    admin_user: Callable[..., AuthenticatedUser],
-) -> None:
+def _add_marked_routes(app: FastAPI) -> None:
     """One route per marked route; only ``/notes-admin`` reads ``admin_user``."""
 
     def echo(user: AuthenticatedUser) -> dict[str, str]:
@@ -737,19 +738,15 @@ def _add_marked_routes(
 
 def _add_bearer_routes(
     app: FastAPI,
-    dependencies: AuthDependencies,
     settings: HostSettings,
     transaction: SignInTransaction,
 ) -> None:
     """The routes of each kind of path the bearer gate selects."""
-    current_user = dependencies.current_user
-    _add_machine_routes(app, current_user)
-    _add_person_routes(app, current_user)
-    resource = _resource_of(settings, transaction)
-    install_resource_metadata(app, resource, issuer=settings.issuer)
-    _add_marked_routes(app, current_user, dependencies.admin_user)
+    _add_machine_routes(app)
+    _add_person_routes(app)
+    _add_marked_routes(app)
 
-    @app.api_route(resource.entry_point, methods=["GET", "POST"])
+    @app.api_route(_resource_of(settings, transaction).entry_point, methods=["GET", "POST"])
     def entry_point(request: Request) -> dict[str, str]:
         person = resource_person(request)
         return {"id": person.id, "username": person.username, "role": person.role}
@@ -772,10 +769,10 @@ def main() -> None:
     die_with_parent(arguments.parent_pid)
     settings = HostSettings.read(arguments.settings)
     configure("webauth-e2e-host")
-    world = {"world": World(settings)}
-    _Observation(settings.observe_port, world, lambda: World(settings))
+    served = _Served(settings)
+    _Observation(settings.observe_port, served)
     uvicorn.run(
-        build_app(settings, world),
+        served,
         host=LOOPBACK,
         port=settings.port,
         ssl_certfile=settings.tls_certificate,

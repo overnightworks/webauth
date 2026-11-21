@@ -277,13 +277,21 @@ def install_sign_in_routes(
     """
     if max_sessions is not None:
         require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
-    if (paths.logout is None) != (logout_page_text is None):
-        raise ValueError("paths.logout and logout_page_text must both be given or both be None")
+    _require_logout_path_with_page_text(paths, logout_page_text)
     routes = _SignIn(
         relying_party, admission, transaction, refused, keeps_id_token, max_sessions, ui_language
     )
 
     _register_routes(app, paths, routes, logout_page_text)
+
+
+def _require_logout_path_with_page_text(
+    paths: SignInPaths,
+    logout_page_text: Callable[[Request], LogoutPageText] | None,
+) -> None:
+    """Refuse a logout path without its page text and a page text without its logout path."""
+    if (paths.logout is None) != (logout_page_text is None):
+        raise ValueError("paths.logout and logout_page_text must both be given or both be None")
 
 
 def _register_routes(
