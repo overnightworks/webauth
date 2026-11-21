@@ -34,7 +34,7 @@ from webauth.sign_in_routes import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     from fastapi import FastAPI, Request, Response
     from starlette.types import ASGIApp
@@ -150,7 +150,7 @@ class IssuerCalls:
     monotonic_clock: Callable[[], float] = time.monotonic
 
 
-def _require_middleware_slot(field: str, entries: Sequence[Middleware]) -> None:
+def _require_middleware_slot(field: str, entries: tuple[Middleware, ...]) -> None:
     if not isinstance(entries, tuple) or not all(
         isinstance(entry, Middleware) for entry in entries
     ):
@@ -163,8 +163,8 @@ def _require_early_values(
     groups: AdmissionConfig,
     pages: SignInPages,
     front: TrustedProxies | ServedBehind,
-    outside: Sequence[Middleware],
-    inside: Sequence[Middleware],
+    outside: tuple[Middleware, ...],
+    inside: tuple[Middleware, ...],
 ) -> None:
     if groups.bound_issuer != settings.client.issuer:
         raise _refuse("groups.bound_issuer", "must be the issuer of settings.client")
@@ -230,8 +230,8 @@ class WebAuth:
         pages: SignInPages,
         front: TrustedProxies | ServedBehind,
         gate: SessionGate | None,
-        outside: Sequence[Middleware],
-        inside: Sequence[Middleware],
+        outside: tuple[Middleware, ...],
+        inside: tuple[Middleware, ...],
         relying_party: OidcRelyingParty,
     ) -> None:
         if permit is not _PERMIT:
@@ -257,8 +257,8 @@ class WebAuth:
         pages: SignInPages,
         front: TrustedProxies | ServedBehind,
         gate: SessionGate | None = None,
-        outside: Sequence[Middleware] = (),
-        inside: Sequence[Middleware] = (),
+        outside: tuple[Middleware, ...] = (),
+        inside: tuple[Middleware, ...] = (),
         issuer_calls: IssuerCalls | None = None,
     ) -> WebAuth:
         """Check every early value and build the relying party; no outbound call, no environment.
