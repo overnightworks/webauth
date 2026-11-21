@@ -3,15 +3,18 @@
 ``WebAuth.build`` checks every early value and builds the relying party, the configuration and
 the admission the host's routes take; ``auth.install(app, bearer=...)`` composes the library's
 middleware in its one order, the sign-in routes and the readers' handle on the app. Neither reads
-the environment or calls the issuer.
+the environment or calls the issuer. ``web_auth_front`` serves several built apps behind one
+client-address writer and one request line.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import TYPE_CHECKING
 
+from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
 from webauth._validation import require_positive_whole_number
@@ -19,6 +22,7 @@ from webauth.config import install_web_auth_config
 from webauth.dependencies import _publish_installed_sessions
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.bearer_gate import BearerGate, install_resource_metadata
+from webauth.middleware.client_address import _ClientAddressMiddleware
 from webauth.middleware.stack import _install_slotted_web_auth_middleware
 from webauth.oidc import OidcRelyingParty
 from webauth.oidc_transport import post_token_request_over_https
@@ -32,6 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from fastapi import FastAPI, Request, Response
+    from starlette.types import ASGIApp
 
     from webauth.admission import AdmissionConfig
     from webauth.config import WebAuthConfig
@@ -43,11 +48,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "IssuerCalls",
+    "ServedBehind",
     "SignInPages",
     "WebAuth",
     "WebAuthSettingError",
     "WebAuthSettings",
     "WebAuthStores",
+    "web_auth_front",
 ]
 
 
@@ -60,6 +67,30 @@ class WebAuthSettingError(ValueError):
 
 def _refuse(field: str, problem: str) -> WebAuthSettingError:
     return WebAuthSettingError(f"{field} {problem}")
+
+
+class ServedBehind(Enum):
+    """The front an app is built for when it has none of its own.
+
+    ``SHARED_FRONT``: one ``web_auth_front`` stands outside this app and every other app behind
+    the same router, so the install places neither the client-address writer nor the request
+    line.
+    """
+
+    SHARED_FRONT = "shared-front"
+
+
+def web_auth_front(app: ASGIApp, *, trusted_proxies: TrustedProxies) -> ASGIApp:
+    """Wrap ``app``, usually a router of several apps built with ``SHARED_FRONT``, in its front.
+
+    The request line of logline is outermost and the client-address writer sits inside it, so the
+    router's own answers and every child's lines carry the client ``trusted_proxies`` resolve.
+    Serve every app built with ``SHARED_FRONT`` only through one such front; an app without it
+    fails on its first request.
+    """
+    if not isinstance(trusted_proxies, TrustedProxies):
+        raise _refuse("trusted_proxies", "must be TrustedProxies")
+    return RequestLineMiddleware(_ClientAddressMiddleware(app, trusted_proxies=trusted_proxies))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -130,7 +161,7 @@ def _require_early_values(
     *,
     groups: AdmissionConfig,
     pages: SignInPages,
-    front: TrustedProxies,
+    front: TrustedProxies | ServedBehind,
     outside: Sequence[Middleware],
     inside: Sequence[Middleware],
 ) -> None:
@@ -153,8 +184,8 @@ def _require_early_values(
             "pages.logout_page_text",
             "must be given exactly when settings.sign_in_paths.logout is",
         ) from None
-    if not isinstance(front, TrustedProxies):
-        raise _refuse("front", "must be TrustedProxies")
+    if not isinstance(front, TrustedProxies | ServedBehind):
+        raise _refuse("front", "must be TrustedProxies or ServedBehind.SHARED_FRONT")
     _require_middleware_slot("outside", outside)
     _require_middleware_slot("inside", inside)
 
@@ -177,7 +208,8 @@ class WebAuth:
 
     The handle exposes ``relying_party``, ``config`` and ``admission`` for the host's routes.
     Until ``install`` has put it on the app, the first request that asks a reader for it raises
-    ``RuntimeError``.
+    ``RuntimeError``. A handle installs on one app, once: several apps behind one router are
+    each built and installed once.
     """
 
     def __init__(
@@ -187,7 +219,7 @@ class WebAuth:
         stores: WebAuthStores,
         groups: AdmissionConfig,
         pages: SignInPages,
-        front: TrustedProxies,
+        front: TrustedProxies | ServedBehind,
         gate: SessionGate | None,
         outside: Sequence[Middleware],
         inside: Sequence[Middleware],
@@ -202,6 +234,7 @@ class WebAuth:
         self._outside = tuple(outside)
         self._inside = tuple(inside)
         self._relying_party = relying_party
+        self._installed = False
 
     @classmethod
     def build(
@@ -211,7 +244,7 @@ class WebAuth:
         stores: WebAuthStores,
         groups: AdmissionConfig,
         pages: SignInPages,
-        front: TrustedProxies,
+        front: TrustedProxies | ServedBehind,
         gate: SessionGate | None = None,
         outside: Sequence[Middleware] = (),
         inside: Sequence[Middleware] = (),
@@ -267,13 +300,18 @@ class WebAuth:
 
         Call it after the last route of the host.
 
-        Outermost first: logline's request line, the client-address writer, ``outside``, the
-        library's stack, ``inside``. A ``bearer`` that is no ``BearerGate`` or does not fit the
-        early values raises a ``WebAuthSettingError``; a second install, or an app that already
-        carries library middleware, raises ``RuntimeError``. Both are refused before the app
-        changes. The sign-in routes and the resource metadata route answer ahead of every route
-        the host added before.
+        Outermost first: logline's request line and the client-address writer, both only when
+        ``front`` is ``TrustedProxies`` (``SHARED_FRONT`` leaves them to ``web_auth_front``),
+        ``outside``, the library's stack, ``inside``. A ``bearer`` that is no ``BearerGate`` or
+        does not fit the early values raises a ``WebAuthSettingError``; a second install of the
+        handle, on any app, or an app that already carries library middleware, raises
+        ``RuntimeError``. Both are refused before the app changes. The sign-in routes and the
+        resource metadata route answer ahead of every route the host added before.
         """
+        if self._installed:
+            raise RuntimeError(
+                "This WebAuth is installed on an app already; build one WebAuth for each app.",
+            )
         self._require_a_bearer_that_fits(bearer)
         settings = self._settings
         resource = None if bearer is None else bearer.resource
@@ -289,10 +327,11 @@ class WebAuth:
             rate_limit=settings.rate_limit,
             bearer_gate=bearer,
             session_gate=gate,
-            front=self._front,
+            trusted_proxies=self._front if isinstance(self._front, TrustedProxies) else None,
             outside=self._outside,
             inside=self._inside,
         )
+        self._installed = True
         install_web_auth_config(app, settings.config)
         _publish_installed_sessions(app, self._stores.sessions)
         routes_of_the_host = len(app.router.routes)

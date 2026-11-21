@@ -253,17 +253,21 @@ def _recorded_client(connection: HTTPConnection) -> _RecordedClient:
         return connection.scope[_CLIENT_SCOPE_KEY]
     except KeyError:
         raise RuntimeError(
-            "No client address is recorded for this connection. The host adds "
-            "webauth.middleware.ClientAddressMiddleware(app, trusted_proxies=...) immediately "
-            "inside logline's RequestLineMiddleware, and the library never guesses the peer "
-            "in its place.",
+            "No client address is recorded for this connection. An app built with "
+            "ServedBehind.SHARED_FRONT is served through webauth.web_auth.web_auth_front(app, "
+            "trusted_proxies=...), and the library never guesses the peer in its place.",
         ) from None
 
 
-def client_address(connection: HTTPConnection) -> str:
-    """The client identity ``ClientAddressMiddleware`` recorded for ``connection``.
+def _client_is_recorded(connection: HTTPConnection) -> bool:
+    return _CLIENT_SCOPE_KEY in connection.scope
 
-    It only reads: with no writer in front of the app it raises ``RuntimeError`` and never
+
+def client_address(connection: HTTPConnection) -> str:
+    """The client identity the client-address writer recorded for ``connection``.
+
+    The composition call or ``web_auth_front`` places the writer. It only reads: with no writer
+    in front of the app it raises ``RuntimeError`` and never
     resolves, so the address is decided once per request and by one owner.
     """
     return _recorded_client(connection).address

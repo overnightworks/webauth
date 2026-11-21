@@ -579,6 +579,18 @@ def test_compose_13_a_second_install_is_refused_and_leaves_the_app_as_it_was() -
     assert the_app_as_it_stands(host.app) == before
 
 
+def test_compose_13_a_handle_installed_on_one_app_is_refused_on_a_second_app() -> None:
+    """COMPOSE-13"""
+    host = a_composed_host(a_host_world())
+    second_app = FastAPI()
+    before = the_app_as_it_stands(second_app)
+
+    with pytest.raises(RuntimeError, match="installed on an app"):
+        host.auth.install(second_app, bearer=None)
+
+    assert the_app_as_it_stands(second_app) == before
+
+
 def test_compose_13_an_app_that_carries_library_middleware_is_refused_untouched() -> None:
     """COMPOSE-13"""
     world = a_host_world()

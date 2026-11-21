@@ -67,7 +67,6 @@ from webauth.middleware import (
     BearerGate,
     BearerGateMiddleware,
     BodySizeLimitMiddleware,
-    ClientAddressMiddleware,
     CsrfOriginMiddleware,
     IpRateLimitMiddleware,
     MachinePaths,
@@ -149,11 +148,13 @@ from webauth.sign_in_routes import (
 )
 from webauth.web_auth import (
     IssuerCalls,
+    ServedBehind,
     SignInPages,
     WebAuth,
     WebAuthSettingError,
     WebAuthSettings,
     WebAuthStores,
+    web_auth_front,
 )
 
 if TYPE_CHECKING:
@@ -292,7 +293,9 @@ def a_host_settings(client: OidcClientConfig, config: WebAuthConfig) -> WebAuthS
     )
 
 
-def a_host_composes_its_auth(client: OidcClientConfig, config: WebAuthConfig) -> WebAuth:
+def a_host_composes_its_auth(
+    client: OidcClientConfig, config: WebAuthConfig, front: TrustedProxies | ServedBehind
+) -> WebAuth:
     sign_in: SignInTransaction = a_host_sign_in_transaction
     sessions: SessionTransaction = a_host_session_transaction
     key_set_fetch, token_post = a_host_uses_the_production_transports()
@@ -311,7 +314,7 @@ def a_host_composes_its_auth(client: OidcClientConfig, config: WebAuthConfig) ->
             ),
             ui_language=a_host_names_the_language_of_a_request,
         ),
-        front=TrustedProxies.parse("127.0.0.1"),
+        front=front,
         gate=SessionGate(
             session_transaction=a_host_session_transaction,
             login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
@@ -325,6 +328,10 @@ def a_host_composes_its_auth(client: OidcClientConfig, config: WebAuthConfig) ->
             monotonic_clock=time.monotonic,
         ),
     )
+
+
+def a_host_serves_its_apps_behind_one_front(router: ASGIApp) -> ASGIApp:
+    return web_auth_front(router, trusted_proxies=TrustedProxies.parse("127.0.0.1"))
 
 
 def a_host_middleware_that_sees_every_request(app: ASGIApp) -> ASGIApp:
@@ -633,7 +640,6 @@ def _surface_of_the_errors_and_the_verified_records() -> tuple[object, ...]:
         WallClock,
         WebAuthSettingError,
         AuthDependencies,
-        ClientAddressMiddleware,
         admit_session,
         bearer_caller,
         current_user_dependency,

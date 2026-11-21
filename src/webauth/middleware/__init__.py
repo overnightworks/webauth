@@ -16,7 +16,6 @@ from webauth.middleware.bearer_gate import (
     resource_person,
 )
 from webauth.middleware.body_size import BodySizeLimitMiddleware, RequestBodyTooLarge
-from webauth.middleware.client_address import ClientAddressMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware
 from webauth.middleware.path_refusal import PathRefusalMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
@@ -33,7 +32,6 @@ __all__ = [
     "BearerGate",
     "BearerGateMiddleware",
     "BodySizeLimitMiddleware",
-    "ClientAddressMiddleware",
     "CsrfOriginMiddleware",
     "IpRateLimitMiddleware",
     "MachinePaths",

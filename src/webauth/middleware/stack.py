@@ -10,7 +10,10 @@ from starlette.middleware import Middleware
 
 from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
 from webauth.middleware.body_size import BodySizeLimitMiddleware
-from webauth.middleware.client_address import ClientAddressMiddleware
+from webauth.middleware.client_address import (
+    _ClientAddressMiddleware,
+    _FrontRequiredMiddleware,
+)
 from webauth.middleware.csrf import CsrfOriginMiddleware
 from webauth.middleware.path_refusal import PathRefusalMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
@@ -55,12 +58,11 @@ _BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
 def _with_sign_in_rules(
     sign_in_paths: SignInPaths,
     *,
-    security_headers: SecurityHeadersPolicy,
     body_size: BodySizePolicy,
     rate_limit: RateLimitPolicy,
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
-) -> tuple[SecurityHeadersPolicy, BodySizePolicy, RateLimitPolicy, CsrfPolicy, SessionGate | None]:
+) -> tuple[BodySizePolicy, RateLimitPolicy, CsrfPolicy, SessionGate | None]:
     """The host's policies with the rules the sign-in paths derive put ahead of the host's own."""
     paths = sign_in_paths
     sign_in_page = PathRules(exact=frozenset({paths.start, paths.callback}))
@@ -73,20 +75,12 @@ def _with_sign_in_rules(
         if paths.backchannel_logout is None
         else frozenset({paths.backchannel_logout})
     )
-    every_route = PathRules(exact=browser.exact | backchannel.exact)
     if session_gate is not None:
         public = (PublicRule(sign_in_page, methods=frozenset({"GET"})),)
         if posted:
             public += (PublicRule(PathRules(exact=posted), methods=frozenset({"POST"})),)
         session_gate = replace(session_gate, public=(*public, *session_gate.public))
     return (
-        replace(
-            security_headers,
-            cache_control_rules=(
-                CacheControlRule(every_route, "no-store"),
-                *security_headers.cache_control_rules,
-            ),
-        ),
         replace(
             body_size,
             rules=(
@@ -107,13 +101,37 @@ def _with_sign_in_rules(
     )
 
 
-def _no_store_paths(bearer_gate: BearerGate) -> list[PathRules]:
-    paths = []
-    if bearer_gate.machine_paths is not None:
-        paths.append(bearer_gate.machine_paths.paths)
-    if bearer_gate.resource is not None:
-        paths.append(bearer_gate.resource.entry_point_rule)
-    return paths
+def _effective_security_headers(
+    sign_in_paths: SignInPaths,
+    security_headers: SecurityHeadersPolicy,
+    bearer_gate: BearerGate | None,
+) -> SecurityHeadersPolicy:
+    """The host's policy with the ``no-store`` rules the paths derive put ahead of the host's own:
+    the machine paths' and the resource's first, then every sign-in route's."""
+    paths = sign_in_paths
+    no_store_paths = []
+    if bearer_gate is not None and bearer_gate.machine_paths is not None:
+        no_store_paths.append(bearer_gate.machine_paths.paths)
+    if bearer_gate is not None and bearer_gate.resource is not None:
+        no_store_paths.append(bearer_gate.resource.entry_point_rule)
+    no_store_paths.append(
+        PathRules(
+            exact=frozenset(
+                path
+                for path in (paths.start, paths.callback, paths.logout, paths.backchannel_logout)
+                if path
+            )
+        )
+    )
+    return SecurityHeadersPolicy(
+        content_security_policy=security_headers.content_security_policy,
+        cache_control_rules=(
+            *(CacheControlRule(rules, "no-store") for rules in no_store_paths),
+            *security_headers.cache_control_rules,
+        ),
+        permissions_policy=security_headers.permissions_policy,
+        content_security_policy_rules=security_headers.content_security_policy_rules,
+    )
 
 
 def _library_middleware(
@@ -126,23 +144,15 @@ def _library_middleware(
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
 ) -> list[Middleware]:
-    """The middleware to install, outermost first, for the policies the host named."""
-    security_headers, body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
+    """The middleware to install, outermost first, for the policies the host named;
+    ``security_headers`` is the effective policy ``_effective_security_headers`` derives."""
+    body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
         sign_in_paths,
-        security_headers=security_headers,
         body_size=body_size or BodySizePolicy(),
         rate_limit=rate_limit or RateLimitPolicy(),
         csrf_origin=csrf_origin,
         session_gate=session_gate,
     )
-    if bearer_gate is not None:
-        no_store = tuple(
-            CacheControlRule(paths, "no-store") for paths in _no_store_paths(bearer_gate)
-        )
-        security_headers = replace(
-            security_headers,
-            cache_control_rules=(*no_store, *security_headers.cache_control_rules),
-        )
     entries = [
         Middleware(SecurityHeadersMiddleware, policy=security_headers),
         Middleware(PathRefusalMiddleware),
@@ -167,13 +177,12 @@ def _refuse_an_unsound_stack(app: Starlette) -> None:
             "and add no library middleware by hand.",
         )
     if any(
-        isinstance(entry.cls, type) and issubclass(entry.cls, ClientAddressMiddleware)
+        isinstance(entry.cls, type) and issubclass(entry.cls, _ClientAddressMiddleware)
         for entry in app.user_middleware
     ):
         raise RuntimeError(
-            "The app already carries ClientAddressMiddleware; a writer added before the call sits "
-            "inside the stack. Add it after the call, immediately inside logline's "
-            "RequestLineMiddleware.",
+            "The app already carries a client-address writer; a writer added by hand sits inside "
+            "the stack. The composition call places it, and web_auth_front wraps several apps.",
         )
 
 
@@ -192,21 +201,33 @@ def _install_slotted_web_auth_middleware(
     rate_limit: RateLimitPolicy | None,
     bearer_gate: BearerGate | None,
     session_gate: SessionGate | None,
-    front: TrustedProxies,
+    trusted_proxies: TrustedProxies | None,
     outside: Sequence[Middleware],
     inside: Sequence[Middleware],
 ) -> None:
-    """Install what ``WebAuth.install`` places, outermost first: logline's request line, the
-    client-address writer, the host's ``outside`` entries, the library stack, the host's
-    ``inside`` entries. An app that already carries library middleware is refused untouched."""
+    """Install what ``WebAuth.install`` places, outermost first: logline's request line and the
+    client-address writer, only with ``trusted_proxies`` (``None`` for an app a shared front
+    serves: a guard refuses a request without that front instead), the host's ``outside`` entries,
+    the library stack, the host's ``inside`` entries.
+    An app that already carries library middleware is refused untouched."""
     _refuse_an_unsound_stack(app)
+    effective_security_headers = _effective_security_headers(
+        sign_in_paths, security_headers, bearer_gate
+    )
+    front = (
+        [Middleware(_FrontRequiredMiddleware, policy=effective_security_headers)]
+        if trusted_proxies is None
+        else [
+            Middleware(RequestLineMiddleware),
+            Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
+        ]
+    )
     entries = [
-        Middleware(RequestLineMiddleware),
-        Middleware(ClientAddressMiddleware, trusted_proxies=front),
+        *front,
         *outside,
         *_library_middleware(
             sign_in_paths=sign_in_paths,
-            security_headers=security_headers,
+            security_headers=effective_security_headers,
             body_size=body_size,
             rate_limit=rate_limit,
             bearer_gate=bearer_gate,
@@ -232,9 +253,10 @@ def install_web_auth_middleware(
     """Install the library's middleware outermost first: security headers, path refusal, body size,
     rate limit, bearer gate, CSRF origin, session gate.
 
-    The client address is not installed here: after this call the host adds
-    ``ClientAddressMiddleware(app, trusted_proxies=...)`` and, outside it, logline's
-    ``RequestLineMiddleware``, or the first request fails (``docs/host-contract.md``).
+    The client address is not installed here: a host that calls this directly serves the app
+    through ``web_auth_front(app, trusted_proxies=...)``, which places the writer and logline's
+    ``RequestLineMiddleware`` around it, and without one the first request fails
+    (``docs/host-contract.md``).
 
     ``sign_in_paths`` is the one description of the sign-in routes. From it the installer puts these
     rules ahead of the host's own, so the first match is the derived one (a path the host exempts
@@ -246,7 +268,7 @@ def install_web_auth_middleware(
 
     Security headers sit outside everything so the library's own refusals (the 400 for a path, the
     413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500) carry them; the client
-    address the host's writer recorded reaches every refusal's request line; the path refusal
+    address the writer recorded reaches every refusal's request line; the path refusal
     answers 400 to a route path with a control character (U+0000 to U+001F, U+007F) before a rule
     or route reads it; the body size limit refuses a body declared too large before it costs a
     rate-limit budget or a session lookup; the rate limit sits outside CSRF so a refused forgery
@@ -268,7 +290,7 @@ def install_web_auth_middleware(
     _refuse_an_unsound_stack(app)
     entries = _library_middleware(
         sign_in_paths=sign_in_paths,
-        security_headers=security_headers,
+        security_headers=_effective_security_headers(sign_in_paths, security_headers, bearer_gate),
         body_size=body_size,
         rate_limit=rate_limit,
         bearer_gate=bearer_gate,
