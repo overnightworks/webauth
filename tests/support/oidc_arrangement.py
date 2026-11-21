@@ -513,6 +513,7 @@ _FIXED_ANSWERS = {
     "/token-refused": (400, REFUSED_TOKEN_ANSWER),
     "/token-at-limit": (200, b" " * 64 * 1024),
     "/token-past-limit": (200, b" " * (64 * 1024 + 1)),
+    "/missing": (404, b""),
 }
 
 
@@ -595,8 +596,6 @@ def loopback_https_server(
                 self._drip(b"HTTP/1.1 200 OK\r\nX-Dripping: ")
             elif route == "/dripping-body":
                 self._drip(b"HTTP/1.1 200 OK\r\nContent-Length: 65536\r\n\r\n")
-            elif route == "/missing":
-                self._send_head(404, {"Content-Length": "0"})
             elif route == "/.well-known/openid-configuration":
                 self._answer(200, a_provider_metadata(f"https://127.0.0.1:{server.server_port}"))
             elif route == "/compressed":
