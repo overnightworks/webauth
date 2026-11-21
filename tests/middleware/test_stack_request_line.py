@@ -12,6 +12,7 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import pytest
+from logline import WEBSOCKET_EVENT
 from starlette.websockets import WebSocketDisconnect
 
 from tests.support.account_arrangement import FakeUser
@@ -34,7 +35,6 @@ from tests.support.person_paths_arrangement import MEMBER_TOKEN, a_lena, a_perso
 from tests.support.request_line_arrangement import (
     FORWARDED_CLIENT,
     TRUSTED_PEER,
-    WEBSOCKET_EVENT,
     a_client_behind_the_proxy,
     request_lines_written,
 )

@@ -51,7 +51,7 @@ e2e = [
 ]
 
 [tool.uv.sources]
-overnightworks-logline = { git = "https://github.com/overnightworks/logline", tag = "v1.7.0", group = "dev" }
+overnightworks-logline = { git = "https://github.com/overnightworks/logline", tag = "v1.8.0", group = "dev" }
 
 [project.urls]
 Repository = "https://github.com/overnightworks/webauth"
