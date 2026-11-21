@@ -39,9 +39,10 @@ host configures them; `WebAuthConfig` carries none.
   first, when `front` is `TrustedProxies`. A host that serves several apps behind one router builds
   each with `front=ServedBehind.SHARED_FRONT`, for which `install` places neither, and serves
   `web_auth_front(app, trusted_proxies=...)` outside all of them: the request line outermost, the
-  writer inside it, around the router of the apps. Everything inside, a preflight, the router's own
-  404 and 405, a lifespan and a WebSocket of any child, then carries the resolved client as the
-  `ip` of its line (LOG-06), and a child's stack sets the `sub` of that app's account.
+  writer inside it, around the router of the apps. Every http and WebSocket request inside, a
+  preflight, the router's own 404 and 405 and a child's WebSocket, then carries the resolved client
+  as the `ip` of its line (LOG-06), and a child's stack sets the `sub` of that app's account. A
+  lifespan passes through the front untouched and writes no client.
   `trusted_proxies` is a required keyword with no default, and a value that is no `TrustedProxies`
   raises a `WebAuthSettingError` naming it.
 - **PROXY-08** The writer resolves each http and websocket scope once, records the address and
@@ -52,11 +53,11 @@ host configures them; `WebAuthConfig` carries none.
   time, and `forwarded_for.ignored` (LOG-04) is written at most once per request. One writer in
   front of several apps that each carry a stack resolves once for all of them.
 - **PROXY-09** An app built with `SHARED_FRONT` and served without `web_auth_front` fails loud on
-  its first request: an http request answers the library 500 with the security headers and its
-  exception reaches the server, a WebSocket raises before the app runs, and `client_address`
-  raises `RuntimeError` naming `web_auth_front`. webauth never falls back to the socket peer. The
-  installer refuses an app that already carries a writer, since one added by hand sits inside
-  the stack.
+  its first request, before any `outside` entry can answer (a CORS preflight included): an http
+  request answers the library 500 with the security headers and its exception reaches the server,
+  a WebSocket raises before the app runs, and `client_address` raises `RuntimeError` naming
+  `web_auth_front`. webauth never falls back to the socket peer. The installer refuses an app that
+  already carries a writer, since one added by hand sits inside the stack.
 - **Host duty:** serve every app built with `SHARED_FRONT` through one `web_auth_front` that stands
   outside all of them, and an app built with `TrustedProxies` never inside one, which would write
   a second request line. No library check catches an app served bare; the 500 of PROXY-09 shows
