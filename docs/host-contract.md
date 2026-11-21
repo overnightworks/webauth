@@ -103,9 +103,20 @@ two values below. The details are in the sections that follow.
 
 - **APP-01** An app that configures `EverySubject` requires no login group.
 - **APP-02** An app that configures `NoAdmins` grants no admin role.
-- **APP-03** Only members of the app's `login_group`, such as `/apps/notes`, get in.
-- **APP-04** Members of its `admin_group`, a path below it such as
-  `/apps/notes/admin`, are admins.
+- **APP-03** Only members of the app's `login_group`, a `GroupPath` such as `GroupPath("/apps/notes")`, get in.
+- **APP-04** Members of its `admin_group`, a `GroupPath` below it such as
+  `GroupPath("/apps/notes/admin")`, are admins. An `admin_group` at, beside or outside the
+  `login_group` is a `ValueError`.
+- **APP-38** `webauth.admission.GroupPath` is the one value for a group path, so a host
+  checks its realm keys where it reads its settings. It starts with `/` and has no empty
+  segment, no whitespace around a segment and no control, format or line-separator
+  character, else `ValueError` naming the rule and never the value; a non-`str` is a `TypeError`.
+  It is equal by value, never equal to a `str`, and `str(path)` is the text. `a.lies_below(b)`
+  is true only for a path strictly below `b`, by segment, so `/apps/lab2` does not lie
+  below `/apps/lab`. `login_group` and `admin_group` of an `AdmissionConfig` take only a
+  `GroupPath` (or `EverySubject` / `NoAdmins`), else `TypeError`. A group a token's `groups`
+  claim holds stays a `str`. A pydantic-settings field typed `GroupPath` carries `NoDecode`,
+  because settings JSON-decode a dataclass field before any validator runs.
 - **APP-05** An `AdmissionConfig` binds the issuer whose groups count, and only that
   issuer's groups decide the role.
 - **APP-06** Membership and role are decided again at every login, so a change in
@@ -556,7 +567,7 @@ budget, is judged against groups that are fresh and verified, not those of the l
 - **GROUPS-11** A failed transaction exit raises, and no groups are handed out then.
 
 **GROUPS-12** A subgroup-aware check passes the tuple, or the `frozenset` the async reader answers, to `app_role` as it is, with `AdmissionConfig(bound_issuer=...,
-login_group=..., admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
+login_group=GroupPath(...), admin_group=NoAdmins.IN_THIS_APP)`: a member of the group or of a subgroup of it is admitted.
 
 - **The source.** Only the new ID token counts:
   - **GROUPS-13** `iss` is the configured issuer.
@@ -720,7 +731,7 @@ it as `BearerGate(resource=...)`.
   being `.` or `..`, with no trailing slash; its path is the entry point. Any other `url` is a `ValueError`.
 - **RESOURCE-03** `scope` is one scope token, else `ValueError`.
 - **RESOURCE-04** `authorized_parties` is an `AuthorizedParties`, else `TypeError`.
-- **RESOURCE-05** `required_group` and `agent_group` are group paths, else `ValueError`.
+- **RESOURCE-05** `required_group` and `agent_group` are a `GroupPath`, else `TypeError`.
 - `scope` is the scope the challenge asks for and a token must hold. `authorized_parties` are the clients whose token
   the resource takes, apart from the parties of the machine and person paths. `required_group` is the group a person
   must hold in the token, or one below it, besides the admission's login group. `agent_group` is the group an autonomous
@@ -745,7 +756,7 @@ At the entry point, on every method and the exact path only:
 - **RESOURCE-13** The gate decides before CSRF and the session gate.
 - **RESOURCE-14** No credential: 401 `WWW-Authenticate: Bearer resource_metadata="<metadata url>", scope="<scope>"`. No route runs.
 - **RESOURCE-15** A token the resource's check refuses: 401 with `error="invalid_token"` and the same two
-  parameters, and no route runs. The check is `OidcRelyingParty.resource_token_verifier`:
+  parameters, and no route runs. The check is `OidcRelyingParty.resource_token_verifier`, whose `agent_group` is a `GroupPath`, else `TypeError`:
   - **RESOURCE-16** an RS256 `at+jwt`,
   - **RESOURCE-17** of the relying party's issuer,
   - **RESOURCE-18** whose only audience is the resource's `url` (not the app's client ID,

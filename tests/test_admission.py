@@ -87,10 +87,14 @@ MALFORMED_GROUP_PATHS = [
 
 
 def test_a_group_path_reads_back_as_the_text_it_was_built_from() -> None:
+    """APP-38: `str()` of a group path is the text it was built from."""
+
     assert str(GroupPath("/apps/lab")) == "/apps/lab"
 
 
 def test_group_paths_are_equal_by_value_and_never_equal_to_a_str() -> None:
+    """APP-38: a group path is equal by value and never equal to a `str`."""
+
     twin = GroupPath("/apps/lab")
 
     assert twin == GroupPath("/apps/lab")
@@ -102,6 +106,8 @@ def test_group_paths_are_equal_by_value_and_never_equal_to_a_str() -> None:
 
 @pytest.mark.parametrize(("path", "message"), MALFORMED_GROUP_PATHS)
 def test_a_malformed_group_path_is_refused_with_its_rule(path: str, message: str) -> None:
+    """APP-38: a malformed path is a `ValueError` naming the rule."""
+
     with pytest.raises(ValueError) as refused:
         GroupPath(path)
 
@@ -117,6 +123,8 @@ def test_a_malformed_group_path_is_refused_with_its_rule(path: str, message: str
     ],
 )
 def test_a_refused_group_path_is_not_echoed(path: str) -> None:
+    """APP-38: the refusal never carries the value."""
+
     with pytest.raises(ValueError) as refused:
         GroupPath(path)
 
@@ -133,6 +141,8 @@ def test_a_refused_group_path_is_not_echoed(path: str) -> None:
     ],
 )
 def test_a_group_path_built_from_anything_but_a_str_is_a_type_error(path: object) -> None:
+    """APP-38: a non-`str` is a `TypeError`."""
+
     with pytest.raises(TypeError, match="a group path is a str"):
         GroupPath(path)  # pyright: ignore[reportArgumentType] -- not a str on purpose
 
@@ -151,6 +161,7 @@ def test_a_group_path_built_from_anything_but_a_str_is_a_type_error(path: object
 def test_a_group_path_lies_below_another_only_strictly_and_by_segment(
     path: str, other: str, lies_below: bool
 ) -> None:
+    """APP-38: `lies_below` is true only strictly below, by segment."""
     assert GroupPath(path).lies_below(GroupPath(other)) is lies_below
 
 

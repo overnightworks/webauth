@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from pydantic import SecretStr
 
-from webauth.admission import AdmissionConfig
+from webauth.admission import AdmissionConfig, GroupPath
 from webauth.config import SessionLifetime, WebAuthConfig
 from webauth.dependencies import current_user
 from webauth.https_client import fetch_provider_metadata_over_https
@@ -68,8 +68,8 @@ auth = WebAuth.build(
     ),
     groups=AdmissionConfig(
         bound_issuer=client.issuer,
-        login_group="/apps/notes",
-        admin_group="/apps/notes/admin",
+        login_group=GroupPath("/apps/notes"),
+        admin_group=GroupPath("/apps/notes/admin"),
     ),
     pages=SignInPages(
         refused=the_hosts_refusal_page,
