@@ -104,17 +104,18 @@ def test_a_person_path_refused_for_want_of_a_session_challenges_with_bearer(
 
 
 OUTSIDE_READERS = [
-    pytest.param(True, UNGATED_ME_PATH, id="SG-current_user"),
-    pytest.param(False, UNGATED_ME_PATH, id="NG-current_user"),
-    pytest.param(True, UNGATED_ADMIN_PATH, id="SG-admin_user"),
-    pytest.param(False, UNGATED_ADMIN_PATH, id="NG-admin_user"),
+    pytest.param(True, UNGATED_ME_PATH, (302, None), id="SG-current_user"),
+    pytest.param(False, UNGATED_ME_PATH, (401, None), id="NG-current_user"),
+    pytest.param(True, UNGATED_ADMIN_PATH, (302, None), id="SG-admin_user"),
+    pytest.param(False, UNGATED_ADMIN_PATH, (401, None), id="NG-admin_user"),
 ]
 
 
-@pytest.mark.parametrize(("session_gate", "path"), OUTSIDE_READERS)
+@pytest.mark.parametrize(("session_gate", "path", "navigation_answer"), OUTSIDE_READERS)
 def test_a_path_outside_the_person_paths_is_refused_with_its_session_answer_and_no_challenge(
     session_gate: bool,
     path: str,
+    navigation_answer: tuple[int, str | None],
 ) -> None:
     """REFUSE-20: a path outside the person paths keeps its answers."""
     app = a_person_app(session_gate=session_gate, login_redirect=LOGIN_REDIRECT)
@@ -128,10 +129,7 @@ def test_a_path_outside_the_person_paths_is_refused_with_its_session_answer_and_
         (401, "Authentication required", None),
         (401, "Invalid session", None),
     ]
-    assert (navigation.status_code, the_challenge(navigation)) == (
-        302 if session_gate else 401,
-        None,
-    )
+    assert (navigation.status_code, the_challenge(navigation)) == navigation_answer
 
 
 def test_the_admitted_admin_401_of_a_person_path_without_a_gate_admission_challenges() -> None:
@@ -144,18 +142,19 @@ def test_the_admitted_admin_401_of_a_person_path_without_a_gate_admission_challe
 
 
 SESSION_READERS = [
-    pytest.param(True, PERSON_ME_PATH, id="SG-current_user"),
-    pytest.param(False, PERSON_ME_PATH, id="NG-current_user"),
-    pytest.param(True, PERSON_ADMIN_ME_PATH, id="SG-admin_user"),
-    pytest.param(False, PERSON_ADMIN_ME_PATH, id="NG-admin_user"),
-    pytest.param(True, PERSON_ADMITTED_ADMIN_PATH, id="SG-admitted_admin"),
+    pytest.param(True, PERSON_ME_PATH, (302, None), id="SG-current_user"),
+    pytest.param(False, PERSON_ME_PATH, (401, PERSON_REALM), id="NG-current_user"),
+    pytest.param(True, PERSON_ADMIN_ME_PATH, (302, None), id="SG-admin_user"),
+    pytest.param(False, PERSON_ADMIN_ME_PATH, (401, PERSON_REALM), id="NG-admin_user"),
+    pytest.param(True, PERSON_ADMITTED_ADMIN_PATH, (302, None), id="SG-admitted_admin"),
 ]
 
 
-@pytest.mark.parametrize(("session_gate", "path"), SESSION_READERS)
+@pytest.mark.parametrize(("session_gate", "path", "navigation_answer"), SESSION_READERS)
 def test_a_person_path_without_a_bearer_credential_is_refused_as_the_session_refuses_it(
     session_gate: bool,
     path: str,
+    navigation_answer: tuple[int, str | None],
 ) -> None:
     """REFUSE-13: without a bearer credential the session refuses, as the row says."""
     app = a_person_app(session_gate=session_gate, login_redirect=LOGIN_REDIRECT)
@@ -169,9 +168,7 @@ def test_a_person_path_without_a_bearer_credential_is_refused_as_the_session_ref
         (401, "Authentication required", PERSON_REALM),
         (401, "Invalid session", PERSON_REALM),
     ]
-    assert (navigation.status_code, the_challenge(navigation)) == (
-        (302, None) if session_gate else (401, PERSON_REALM)
-    )
+    assert (navigation.status_code, the_challenge(navigation)) == navigation_answer
 
 
 def test_a_navigation_to_a_person_path_still_gets_its_login_redirect() -> None:
