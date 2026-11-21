@@ -45,7 +45,7 @@ from tests.support.webauth_arrangement import (
     RecordingAuditSink,
     a_web_auth_config,
 )
-from webauth.dependencies import current_user_dependency
+from webauth.dependencies import current_user
 from webauth.policies import BodySizePolicy
 from webauth.ports import (
     AccountEvent,
@@ -533,12 +533,9 @@ class Browser:
             mint_id_token=lambda nonce: an_id_token(nonce, clock, (LOGIN_GROUP,))
         )
         app = FastAPI()
-        dependencies = current_user_dependency(
-            session_store=lambda: stores.sessions, on_authenticated=lambda _user: None
-        )
 
         @app.get("/me")
-        def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
+        def me(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
             return {"username": user.username}
 
         install_the_gated_stack(

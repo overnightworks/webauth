@@ -18,10 +18,8 @@ from starlette.responses import JSONResponse
 from webauth._validation import is_scope_token_tuple
 from webauth._worker import on_worker
 from webauth.admission import (
-    AdmissionConfig,
     AdmissionRefusal,
     AppRole,
-    NoAdmins,
     _require_group_path,
     app_role,
 )
@@ -40,7 +38,6 @@ from webauth.oidc import (
     ExchangedAccess,
     OidcRefusal,
     OidcRefusalReason,
-    OidcRelyingParty,
     VerifiedAccessToken,
 )
 from webauth.oidc._client_config import _PLAIN_AUTHORITY, _is_endpoint_url
@@ -63,6 +60,8 @@ if TYPE_CHECKING:
     from starlette.responses import Response
     from starlette.types import ASGIApp
 
+    from webauth.admission import AdmissionConfig
+    from webauth.oidc import OidcRelyingParty
     from webauth.ports import SignInTransaction
 
 __all__ = [
@@ -117,14 +116,13 @@ class PersonPaths:
 
     ``paths`` are written as ``PathRules`` says. A token passes there only with an
     ``azp`` among ``authorized_parties``; a client listed here is not thereby admitted
-    on the machine paths. Each token request enters ``transaction`` once, as a sign-in
-    does, to find or create the account. ``ValueError`` for no paths; ``TypeError`` for
-    ``authorized_parties`` that is not an ``AuthorizedParties``.
+    on the machine paths. Each token request enters the ``stores.sign_in`` of the ``WebAuth`` the
+    gate is installed with once, as a sign-in does, to find or create the account. ``ValueError``
+    for no paths; ``TypeError`` for ``authorized_parties`` that is not an ``AuthorizedParties``.
     """
 
     paths: PathRules
     authorized_parties: AuthorizedParties
-    transaction: SignInTransaction
 
     def __post_init__(self) -> None:
         _require_authorized_parties(self.authorized_parties)
@@ -206,7 +204,7 @@ class ProtectedResource:
     besides the admission's login group; a token whose groups hold ``agent_group`` as an exact
     element passes from any ``azp`` when it carries ``agent_owner`` and ``agent_name``, the realm
     alone deciding which clients can mint the resource's audience. The gate then looks the
-    token's subject up in one entry of ``transaction``: for a token without the agent group a
+    token's subject up in one entry of ``stores.sign_in``: for a token without the agent group a
     read, a person must have signed in once, admitted with the role ``"user"`` whatever role is
     stored; for one with it the account is created on its first admission and set to the kind
     ``AGENT``, and the agent is admitted with the role ``"user"`` and its ``AgentFacts``.
@@ -237,7 +235,6 @@ class ProtectedResource:
     required_group: str
     agent_group: str
     authorized_parties: AuthorizedParties
-    transaction: SignInTransaction
     marked_routes: frozenset[MarkedRoute] = frozenset()
     admits_client_audience: bool = False
 
@@ -307,19 +304,17 @@ class BearerGate:
     capped person, recorded for ``resource_person`` and for this request's method alone. A
     marked route without a bearer credential, or with a token whose audience is not the
     resource, is decided as an unmarked path. On the other paths
-    the token must come from ``relying_party``'s issuer, name its client as the only
-    audience and carry an ``azp`` among the parties of the path's kind. At the entry point
-    the only audience is the resource's URL or, with ``admits_client_audience``, exactly the URL
-    and the relying party's client ID, and the parties are the resource's. A machine
-    path also needs ``admission.admin_group`` or a group below it. On a person path
-    the token is the account behind its subject, admitted as a sign-in admits it.
-    ``ValueError`` when the gate has no kind, for ``NoAdmins`` with machine
-    paths (no token could pass there) and for an ``admission`` bound to another
-    issuer.
+    the token must come from the issuer of the ``WebAuth`` the gate is installed with, name its
+    client as the only audience and carry an ``azp`` among the parties of the path's kind. At the
+    entry point the only audience is the resource's URL or, with ``admits_client_audience``,
+    exactly the URL and the relying party's client ID, and the parties are the resource's. A
+    machine path also needs the admin group of the ``WebAuth``'s ``groups`` or a group below it.
+    On a person path the token is the account behind its subject, admitted as a sign-in admits it.
+    The relying party, the admission and the sign-in transaction are those of the ``WebAuth`` the
+    gate is installed with. ``ValueError`` when the gate has no kind; ``WebAuth.install`` refuses
+    machine paths for groups with ``NoAdmins`` (no token could pass there).
     """
 
-    relying_party: OidcRelyingParty
-    admission: AdmissionConfig
     machine_paths: MachinePaths | None = None
     person_paths: PersonPaths | None = None
     resource: ProtectedResource | None = None
@@ -329,10 +324,6 @@ class BearerGate:
             raise ValueError(
                 "the gate must name machine paths, a protected resource or person paths",
             )
-        if isinstance(self.admission.admin_group, NoAdmins) and self.machine_paths is not None:
-            raise ValueError("admission.admin_group is NoAdmins: no token could pass the gate")
-        if self.admission.bound_issuer != self.relying_party.issuer:
-            raise ValueError("admission.bound_issuer must be the relying party's issuer")
 
 
 class _Refusal(Enum):
@@ -410,14 +401,25 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     method is gated, HEAD and OPTIONS included.
     """
 
-    def __init__(self, app: ASGIApp, policy: BearerGate) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        policy: BearerGate,
+        *,
+        relying_party: OidcRelyingParty,
+        admission: AdmissionConfig,
+        sign_in: SignInTransaction,
+    ) -> None:
         super().__init__(app, policy)
+        self._relying_party = relying_party
+        self._admission = admission
+        self._sign_in = sign_in
         resource = policy.resource
         self._resource_verifier = (
             None
             if resource is None
             else (
-                policy.relying_party.resource_token_verifier(
+                relying_party.resource_token_verifier(
                     resource_url=resource.url,
                     scope=resource.scope,
                     authorized_parties=resource.authorized_parties,
@@ -462,7 +464,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         verified = await self._verified(credential, machine_paths.authorized_parties)
         if isinstance(verified, OidcRefusal):
             return self._refused(_Refusal.INVALID_TOKEN, verified, challenge=_MACHINE_CHALLENGE)
-        if app_role(verified.groups, self._policy.admission) is not AppRole.ADMIN:
+        if app_role(verified.groups, self._admission) is not AppRole.ADMIN:
             return self._refused(_Refusal.INSUFFICIENT_SCOPE, challenge=_MACHINE_CHALLENGE)
         _record_bearer_admission(request, BearerCaller(subject=verified.subject))
         return None
@@ -494,10 +496,10 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         person = await on_worker(
             partial(
                 _admit_resource_holder,
-                resource.transaction,
+                self._sign_in,
                 verified,
                 required_group=resource.required_group,
-                admission=self._policy.admission,
+                admission=self._admission,
             ),
         )
         if isinstance(person, AdmissionRefusal):
@@ -508,7 +510,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             request,
             person,
             resource_method=request.method,
-            token_exchange=self._policy.relying_party._token_exchange,
+            token_exchange=self._relying_party._token_exchange,
         )
         set_sub(request.scope, person.id)
         return None
@@ -529,9 +531,9 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
         person = await on_worker(
             partial(
                 _admit_token_holder,
-                person_paths.transaction,
+                self._sign_in,
                 verified,
-                admission=self._policy.admission,
+                admission=self._admission,
             ),
         )
         if isinstance(person, AdmissionRefusal):
@@ -547,7 +549,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
     ) -> VerifiedAccessToken | OidcRefusal:
         return await on_worker(
             partial(
-                self._policy.relying_party.verify_access_token,
+                self._relying_party.verify_access_token,
                 credential,
                 authorized_parties=authorized_parties,
             ),

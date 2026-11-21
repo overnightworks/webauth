@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
@@ -15,7 +14,6 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
-from logline import RequestLineMiddleware
 from starlette.background import BackgroundTask
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -81,17 +79,11 @@ from webauth.ports import RateLimitBackend
 from webauth.web_auth import ServedBehind, WebAuth, WebAuthSettings
 
 FOREIGN_ORIGIN = "https://evil.test"
-A_SESSION_GATE = SessionGate(
-    session_transaction=lambda: nullcontext(SessionRecordsInMemory()),
-    login_redirect=None,
-    public=(),
-)
+A_SESSION_GATE = SessionGate(login_redirect=None, public=())
 
 
-def a_bearer_gate_of(auth: WebAuth) -> BearerGate:
+def a_bearer_gate_of(_auth: WebAuth) -> BearerGate:
     return BearerGate(
-        relying_party=auth.relying_party,
-        admission=auth.admission,
         machine_paths=MachinePaths(
             PathRules(prefixes=("/api/admin/",)),
             AuthorizedParties(frozenset({"hal"})),
@@ -372,68 +364,6 @@ class TestRefusedInstallation:
                 max_sessions=None,
                 security_headers=HEADERS_POLICY,
             )
-
-    @pytest.mark.parametrize(
-        "arrange",
-        [
-            pytest.param(
-                lambda app: app.add_middleware(_BearerGateMiddleware, policy=HEADERS_POLICY),
-                id="hand-added-bearer-gate",
-            ),
-            pytest.param(
-                lambda app: app.add_middleware(_SecurityHeadersMiddleware, policy=HEADERS_POLICY),
-                id="hand-added-library-middleware",
-            ),
-        ],
-    )
-    def test_a_hand_added_library_middleware_is_refused_and_leaves_the_app_alone(
-        self, arrange: Callable[[FastAPI], None]
-    ) -> None:
-        app = a_fresh_app()
-        arrange(app)
-        before = list(app.user_middleware)
-        with pytest.raises(RuntimeError, match="already carries"):
-            install_full_stack(app)
-        assert app.user_middleware == before
-
-    @pytest.mark.parametrize(
-        "subclass",
-        [
-            pytest.param(type("OwnHeaders", (_SecurityHeadersMiddleware,), {}), id="headers"),
-            pytest.param(type("OwnLimiter", (_IpRateLimitMiddleware,), {}), id="rate-limit"),
-            pytest.param(type("OwnOriginCheck", (_CsrfOriginMiddleware,), {}), id="csrf-origin"),
-            pytest.param(type("OwnGate", (_SessionGateMiddleware,), {}), id="session-gate"),
-            pytest.param(type("OwnBearerGate", (_BearerGateMiddleware,), {}), id="bearer-gate"),
-        ],
-    )
-    def test_hand_added_subclass_of_library_middleware_is_refused_and_leaves_the_app_alone(
-        self,
-        subclass: type,
-    ) -> None:
-        app = a_fresh_app()
-        app.add_middleware(subclass, policy=HEADERS_POLICY)
-        before = list(app.user_middleware)
-        with pytest.raises(RuntimeError, match="already carries"):
-            install_full_stack(app)
-        assert app.user_middleware == before
-
-    def test_every_middleware_a_full_install_adds_is_one_the_installer_refuses_to_find_present(
-        self,
-    ) -> None:
-        installed = a_fresh_app()
-        install_full_stack(installed, session_gate=A_SESSION_GATE, bearer_of=a_bearer_gate_of)
-        accepted = []
-        for entry in installed.user_middleware:
-            if entry.cls is RequestLineMiddleware:
-                continue
-            carrier = a_fresh_app()
-            carrier.add_middleware(entry.cls, *entry.args, **entry.kwargs)
-            try:
-                install_full_stack(carrier)
-            except RuntimeError:
-                continue
-            accepted.append(repr(entry.cls))
-        assert accepted == []
 
     def test_a_full_install_with_a_bearer_gate_runs_the_library_in_one_order(self) -> None:
         app = a_fresh_app()

@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from threading import get_ident
@@ -39,8 +39,9 @@ from webauth.cookies import sign_session_id
 from webauth.dependencies import (
     ConnectionRefusal,
     LoginRedirect,
+    admin_user,
     authenticate_websocket,
-    current_user_dependency,
+    current_user,
     session_id_from_request,
 )
 from webauth.middleware import (
@@ -57,8 +58,6 @@ from webauth.ports import (
     AccountEvent,
     AuthenticatedUser,
     RateLimitBackend,
-    SessionRecordStore,
-    SessionTransaction,
 )
 from webauth.rate_limit import SingleProcessRateLimitBackend
 
@@ -86,6 +85,7 @@ if TYPE_CHECKING:
     from starlette.testclient import WebSocketTestSession
     from starlette.types import ASGIApp, Message, Scope
 
+    from webauth.ports import SessionTransaction
     from webauth.web_auth import WebAuth
 
 DRIVE_DEADLINE_SECONDS: Final = 5
@@ -193,7 +193,6 @@ class AuthApp:
 
     client: TestClient
     sessions: SessionRecordsInMemory
-    authenticated: list[AuthenticatedUser]
     websocket_outcomes: list[AuthenticatedUser | ConnectionRefusal]
     signing_key: bytes
     app: FastAPI
@@ -272,7 +271,6 @@ def a_session(
 
 def _add_websocket_routes(
     app: FastAPI,
-    sessions: SessionRecordStore,
     outcomes: list[AuthenticatedUser | ConnectionRefusal],
 ) -> None:
     """The host recipe: authenticate in a worker and a finished transaction, then accept.
@@ -280,13 +278,9 @@ def _add_websocket_routes(
     ``WEBSOCKET_PATH`` answers every message by authenticating again;
     ``WEBSOCKET_DEPENDENCY_PATH`` wraps the helper in a dependency.
     """
-    transaction = (
-        sessions.transaction if isinstance(sessions, SessionRecordsInMemory) else nullcontext
-    )
 
     def authenticate(connection: HTTPConnection) -> AuthenticatedUser | ConnectionRefusal:
-        with transaction():
-            outcome = authenticate_websocket(connection, sessions=sessions)
+        outcome = authenticate_websocket(connection)
         outcomes.append(outcome)
         return outcome
 
@@ -329,26 +323,19 @@ def _add_websocket_routes(
         await websocket.close()
 
 
-def _add_session_routes(auth: AuthApp, login_redirect: LoginRedirect | None) -> None:
+def _add_session_routes(auth: AuthApp) -> None:
     app, sessions = auth.app, auth.sessions
     route_runs, route_threads = auth.route_runs, auth.route_threads
-    dependencies = current_user_dependency(
-        session_store=lambda: sessions,
-        on_authenticated=auth.authenticated.append,
-        login_redirect=login_redirect,
-    )
 
     @app.get("/me")
-    def me(
-        request: Request, user: AuthenticatedUser = Depends(dependencies.current_user)
-    ) -> dict[str, str]:
+    def me(request: Request, user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
         route_runs.append(request.url.path)
         return {"username": user.username, "role": user.role}
 
     @app.get(ALL_DEPENDENCIES_PATH)
     def all_dependencies(
-        user: AuthenticatedUser = Depends(dependencies.current_user),
-        admin: AuthenticatedUser = Depends(dependencies.admin_user),
+        user: AuthenticatedUser = Depends(current_user),
+        admin: AuthenticatedUser = Depends(admin_user),
     ) -> dict[str, str]:
         return {"username": user.username, "admin": admin.username}
 
@@ -364,7 +351,7 @@ def _add_session_routes(auth: AuthApp, login_redirect: LoginRedirect | None) -> 
         app.add_api_route(path, reading_admission, methods=["GET", "POST", "HEAD", "OPTIONS"])
 
     @app.get("/admin")
-    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
+    def admin(user: AuthenticatedUser = Depends(admin_user)) -> dict[str, str]:
         return {"username": user.username}
 
 
@@ -383,7 +370,6 @@ def _an_auth_app_over(
             raise_server_exceptions=raise_server_exceptions,
         ),
         sessions=sessions,
-        authenticated=[],
         websocket_outcomes=[],
         signing_key=config.signing_key,
         app=app,
@@ -414,9 +400,10 @@ def an_auth_app(
     It also serves the WebSocket routes of ``_add_websocket_routes`` and, at ``OPEN_PATHS``, a
     route that reads ``admitted_user``. A keyword replaces the configuration field it names;
     ``config`` is an existing instance instead (no overrides then). The composition call installs
-    the library's stack; ``gate`` adds a ``SessionGate`` over ``public`` and ``optional``, its
-    transaction ``session_transaction`` or else the store's ``in_transaction``; ``stack_policies``
-    names the other arguments of ``install_the_gated_stack``.
+    the library's stack with ``stores.sessions`` as ``session_transaction`` or else the store's
+    ``in_transaction``; ``gate`` adds a ``SessionGate`` over
+    ``public`` and ``optional``; ``stack_policies`` names the other arguments of
+    ``install_the_gated_stack``.
     """
     config = config or a_web_auth_config(**config_overrides)
     if sessions is None:
@@ -424,7 +411,6 @@ def an_auth_app(
     app = FastAPI(root_path=root_path)
     session_gate = (
         SessionGate(
-            session_transaction=session_transaction or sessions.in_transaction,
             login_redirect=login_redirect,
             public=public,
             optional=optional or PathRules(),
@@ -435,13 +421,13 @@ def an_auth_app(
     web_auth = install_the_gated_stack(
         app,
         config=config,
-        sessions=sessions.in_transaction,
+        sessions=session_transaction or sessions.in_transaction,
         session_gate=session_gate,
         **(stack_policies or {}),
     )
     auth = _an_auth_app_over(app, sessions, config, web_auth, raise_server_exceptions)
-    _add_session_routes(auth, login_redirect)
-    _add_websocket_routes(app, sessions, auth.websocket_outcomes)
+    _add_session_routes(auth)
+    _add_websocket_routes(app, auth.websocket_outcomes)
     return auth
 
 

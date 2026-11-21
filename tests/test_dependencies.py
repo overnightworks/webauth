@@ -7,7 +7,7 @@ from datetime import timedelta
 from urllib.parse import urlencode
 
 import pytest
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.types import Message
 
@@ -34,10 +34,9 @@ from webauth.cookies import (
 )
 from webauth.dependencies import (
     LoginRedirect,
-    current_user_dependency,
     session_id_from_request,
 )
-from webauth.ports import AuthenticatedUser
+from webauth.middleware import SessionGate
 
 ADMIN_REQUIRED_DETAIL = "Admin access required"
 AUTHENTICATION_REQUIRED_DETAIL = "Authentication required"
@@ -77,14 +76,6 @@ def test_a_signed_cookie_names_the_account_behind_the_request(auth_app: AuthApp)
 
     assert response.status_code == 200
     assert response.json() == {"username": "alice", "role": MEMBER_ROLE}
-
-
-def test_the_application_is_told_which_account_authenticated(auth_app: AuthApp) -> None:
-    auth_app.get("/me", cookie=auth_app.signed_cookie())
-
-    assert auth_app.authenticated == [
-        AuthenticatedUser(id="user-1", username="alice", role=MEMBER_ROLE, agent=None),
-    ]
 
 
 @pytest.mark.parametrize(
@@ -296,7 +287,6 @@ def test_a_touch_reporting_no_row_refuses_the_request_and_writes_nothing() -> No
 
     assert response.status_code == 401
     assert record.expires_at == stored_expiry
-    assert app.authenticated == []
 
 
 def test_the_admin_route_admits_a_stored_admin() -> None:
@@ -377,44 +367,6 @@ def test_an_expired_session_401_stays_byte_identical_without_a_login_redirect() 
     assert response.content == b'{"detail":"Session expired"}'
 
 
-def test_a_browser_with_no_cookie_at_all_is_sent_to_the_login_page() -> None:
-    """REFUSE-01: the redirect's own status, ``Location``, and body — pinned once here.
-
-    A dependency cannot answer with anything but an ``HTTPException``, so the
-    302 still carries FastAPI's JSON body; every other redirect test below
-    checks only the status and ``Location`` this one already proves the body of.
-    """
-    app = an_auth_app(a_session(), login_redirect=A_LOGIN_REDIRECT)
-
-    response = app.get("/me", accept="text/html")
-
-    assert response.status_code == 302
-    assert response.headers["location"] == "/login?next=%2Fme"
-    assert response.headers["content-type"] == "application/json"
-    assert response.content == b'{"detail":"Found"}'
-
-
-def test_a_browser_with_an_invalid_signature_is_sent_to_the_login_page() -> None:
-    app = an_auth_app(a_session(), login_redirect=A_LOGIN_REDIRECT)
-
-    response = app.get("/me", cookie="unsigned", accept="text/html")
-
-    assert response.status_code == 302
-    assert response.headers["location"] == "/login?next=%2Fme"
-
-
-def test_a_browser_whose_session_expired_is_sent_to_the_login_page() -> None:
-    app = an_auth_app(
-        a_session(remaining=-timedelta(seconds=1)),
-        login_redirect=A_LOGIN_REDIRECT,
-    )
-
-    response = app.get("/me", cookie=app.signed_cookie(), accept="text/html")
-
-    assert response.status_code == 302
-    assert response.headers["location"] == "/login?next=%2Fme"
-
-
 @pytest.mark.parametrize(
     ("login_redirect", "expected_location"),
     [
@@ -426,7 +378,7 @@ def test_the_redirect_keeps_the_asked_for_query_string_under_the_configured_key(
     login_redirect: LoginRedirect,
     expected_location: str,
 ) -> None:
-    app = an_auth_app(None, login_redirect=login_redirect)
+    app = an_auth_app(None, gate=True, login_redirect=login_redirect)
 
     response = app.get("/me?tab=overview", accept="text/html")
 
@@ -436,15 +388,16 @@ def test_the_redirect_keeps_the_asked_for_query_string_under_the_configured_key(
 
 def a_guarded_catch_all_app() -> FastAPI:
     app = FastAPI()
-    install_the_gated_stack(app, config=a_web_auth_config())
-    guard = current_user_dependency(
-        session_store=lambda: SessionRecordsInMemory(None),
-        on_authenticated=lambda user: None,
-        login_redirect=A_LOGIN_REDIRECT,
-    ).current_user
 
-    @app.get("/{anything:path}", dependencies=[Depends(guard)])
+    @app.get("/{anything:path}")
     def any_guarded_path() -> None: ...
+
+    install_the_gated_stack(
+        app,
+        config=a_web_auth_config(),
+        sessions=SessionRecordsInMemory(None).in_transaction,
+        session_gate=SessionGate(login_redirect=A_LOGIN_REDIRECT, public=()),
+    )
 
     return app
 
@@ -652,7 +605,7 @@ def test_the_redirect_of_a_mounted_app_carries_the_mount_prefix() -> None:
     ],
 )
 def test_the_redirect_follows_accept_quality_negotiation(accept: str, status: int) -> None:
-    app = an_auth_app(None, login_redirect=A_LOGIN_REDIRECT)
+    app = an_auth_app(None, gate=True, login_redirect=A_LOGIN_REDIRECT)
 
     response = app.get("/me", accept=accept)
 
@@ -660,7 +613,7 @@ def test_the_redirect_follows_accept_quality_negotiation(accept: str, status: in
 
 
 def test_a_request_that_does_not_prefer_html_stays_401_with_a_login_redirect() -> None:
-    app = an_auth_app(None, login_redirect=A_LOGIN_REDIRECT)
+    app = an_auth_app(None, gate=True, login_redirect=A_LOGIN_REDIRECT)
 
     response = app.get("/me", accept="application/json")
 
@@ -669,7 +622,7 @@ def test_a_request_that_does_not_prefer_html_stays_401_with_a_login_redirect() -
 
 
 def test_a_live_session_authenticates_regardless_of_a_configured_login_redirect() -> None:
-    app = an_auth_app(a_session(), login_redirect=A_LOGIN_REDIRECT)
+    app = an_auth_app(a_session(), gate=True, login_redirect=A_LOGIN_REDIRECT)
 
     response = app.get("/me", cookie=app.signed_cookie(), accept="text/html")
 

@@ -42,8 +42,8 @@ def a_gated_app(
 
 
 def a_plain_app(record: Any, **keywords: Any) -> AuthApp:
-    """The same application guarded by the route dependency alone."""
-    return an_auth_app(record, login_redirect=LOGIN_REDIRECT, **keywords)
+    """The same application guarded by the route dependency alone, which never redirects."""
+    return an_auth_app(record, **keywords)
 
 
 def ask(

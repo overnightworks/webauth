@@ -38,6 +38,7 @@ from webauth.ports import AuthenticatedUser
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
+    from starlette.types import ASGIApp
 
     from webauth.ports import SessionTransaction
 
@@ -56,11 +57,11 @@ class SessionGate:
     an ``optional`` path admits a live session and lets every other request
     through. Its paths are written as ``PathRules`` says. A request the bearer gate
     admitted passes untouched: the gate reads no cookie and opens no
-    ``session_transaction`` for it. A path with a ``.`` or ``..`` segment is never
+    ``stores.sessions`` entry for it. A path with a ``.`` or ``..`` segment is never
     public or optional. WebSocket and lifespan scopes pass; ``authenticate_websocket``
     decides a handshake.
 
-    The gate calls ``session_transaction`` once per request that carries a
+    The gate enters the ``stores.sessions`` of its ``WebAuth`` once per request that carries a
     validly signed session cookie on a gated or optional path, never on a public
     path and never without such a cookie. The admission (``load``, then
     ``touch``) runs inside it, and the block is left before the route runs, so
@@ -72,7 +73,6 @@ class SessionGate:
     the library does not defend against it.
     """
 
-    session_transaction: SessionTransaction
     login_redirect: LoginRedirect | None
     public: tuple[PublicRule, ...]
     optional: PathRules = PathRules()
@@ -85,6 +85,16 @@ class _SessionGateMiddleware(RefusalMiddleware[SessionGate]):
     dependants return it instead of admitting the session a second time. The admitted
     account's ``id`` goes on the request line as its ``sub``.
     """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        policy: SessionGate,
+        *,
+        session_transaction: SessionTransaction,
+    ) -> None:
+        super().__init__(app, policy)
+        self._session_transaction = session_transaction
 
     async def _refusal(self, request: Request) -> Response | None:
         if _bearer_admission(request) is not None:
@@ -121,7 +131,7 @@ class _SessionGateMiddleware(RefusalMiddleware[SessionGate]):
         session_id: str,
         config: WebAuthConfig,
     ) -> AuthenticatedUser | ConnectionRefusal:
-        with self._policy.session_transaction() as sessions:
+        with self._session_transaction() as sessions:
             return admit_session(session_id, sessions=sessions, config=config)
 
     def _is_public(self, routed_path: str, method: str) -> bool:

@@ -101,7 +101,6 @@ def same_origin() -> dict[str, str]:
 
 def assert_untouched(app: BearerApp, expires_at: object) -> None:
     assert app.auth.route_runs == []
-    assert app.auth.authenticated == []
     assert app.auth.sessions.stored_record.expires_at == expires_at
 
 
@@ -178,7 +177,6 @@ def test_a_cookie_decides_nothing_at_the_entry_point_and_opens_no_session_transa
 
     assert response.status_code == status
     assert app.auth.route_runs == ([resource.entry_point] if status == 200 else [])
-    assert app.auth.authenticated == []
     assert app.auth.sessions.stored_record.expires_at == expires_at
 
 
@@ -633,9 +631,7 @@ def test_the_metadata_route_runs_the_hosts_app_level_dependencies(
         host,
         config=a_web_auth_config(),
         sessions=SessionRecordsInMemory().in_transaction,
-        bearer_of=lambda auth: a_bearer_gate(
-            relying_party=auth.relying_party, admission=auth.admission, resource=resource
-        ),
+        bearer_of=lambda _auth: a_bearer_gate(resource=resource),
     )
 
     assert TestClient(host).get(resource.metadata_path).status_code == 418

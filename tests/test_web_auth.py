@@ -28,7 +28,6 @@ from tests.support.gate_arrangement import HAL_ONLY, PERSON_PATHS, a_resource, b
 from tests.support.oidc_arrangement import (
     LogoutPage,
     a_logout_token,
-    a_relying_party,
     an_access_token,
 )
 from tests.support.oidc_login_host import (
@@ -410,24 +409,31 @@ def test_compose_10_the_hosts_order_of_its_slots_is_kept_outermost_first() -> No
     assert [entry.split(" /")[0] for entry in order] == [*names[:2], *names]
 
 
-def a_resource_and_person_paths(world: HostWorld) -> Callable[[WebAuth], BearerGate]:
-    def bearer_of(auth: WebAuth) -> BearerGate:
+def a_resource_and_person_paths() -> Callable[[WebAuth], BearerGate]:
+    def bearer_of(_auth: WebAuth) -> BearerGate:
         return BearerGate(
-            relying_party=auth.relying_party,
-            admission=auth.admission,
-            person_paths=PersonPaths(PERSON_PATHS, HAL_ONLY, world.sign_in),
-            resource=a_resource(transaction=world.sign_in),
+            person_paths=PersonPaths(PERSON_PATHS, HAL_ONLY),
+            resource=a_resource(),
         )
 
     return bearer_of
 
 
+def a_member_token() -> str:
+    return an_access_token(
+        issuer=BOUND_ISSUER,
+        client_id=CLIENT_ID,
+        key_id="issuer-key",
+        key_name="issuer",
+        subject=SUBJECT,
+        claims={"groups": [LOGIN_GROUP]},
+    )
+
+
 def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> None:
     """COMPOSE-11"""
     world = a_host_world(A_MEMBER)
-    gate = SessionGate(
-        session_transaction=world.sessions.in_transaction, login_redirect=None, public=()
-    )
+    gate = SessionGate(login_redirect=None, public=())
 
     def routes(app: FastAPI, auth: WebAuth) -> None:
         the_routes_of(world)(app, auth)
@@ -440,17 +446,10 @@ def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> 
         world,
         a_composition(world, gate=gate),
         routes=routes,
-        bearer_of=a_resource_and_person_paths(world),
+        bearer_of=a_resource_and_person_paths(),
     )
-    resource = a_resource(transaction=world.sign_in)
-    token = an_access_token(
-        issuer=BOUND_ISSUER,
-        client_id=CLIENT_ID,
-        key_id="issuer-key",
-        key_name="issuer",
-        subject=SUBJECT,
-        claims={"groups": [LOGIN_GROUP]},
-    )
+    resource = a_resource()
+    token = a_member_token()
 
     metadata = host.client.get(
         f"/.well-known/oauth-protected-resource{resource.entry_point}", headers=FORWARDED
@@ -459,6 +458,37 @@ def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> 
 
     assert (metadata.status_code, metadata.json()["authorization_servers"]) == (200, [BOUND_ISSUER])
     assert (person.status_code, person.json()) == (200, {"username": "lena"})
+
+
+def test_compose_19_the_stores_given_once_serve_the_gate_and_the_person_paths() -> None:
+    """COMPOSE-19"""
+    world = a_host_world(A_MEMBER, stored_session=a_stored_session(A_MEMBER))
+    gate = SessionGate(login_redirect=None, public=())
+
+    def routes(app: FastAPI, auth: WebAuth) -> None:
+        the_routes_of(world)(app, auth)
+
+        @app.get("/api/me")
+        def person_me(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
+            return {"username": user.username}
+
+    host = a_composed_host(
+        world,
+        a_composition(world, gate=gate),
+        routes=routes,
+        bearer_of=a_resource_and_person_paths(),
+    )
+
+    by_session = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    entries_before_the_token = world.sign_in.entries
+    by_token = host.client.get(
+        "/api/me", headers={**FORWARDED, "authorization": bearing(a_member_token())[0]}
+    )
+
+    assert (by_session.status_code, by_session.json()) == (200, {"username": "lena"})
+    assert "load" in world.sessions.event_names
+    assert (by_token.status_code, by_token.json()) == (200, {"username": "lena"})
+    assert world.sign_in.entries == entries_before_the_token + 1
 
 
 def test_compose_11_the_install_serves_its_routes_ahead_of_a_catch_all_of_the_host() -> None:
@@ -472,8 +502,8 @@ def test_compose_11_the_install_serves_its_routes_ahead_of_a_catch_all_of_the_ho
         def catch_all(path: str) -> dict[str, str]:
             return {"answered_by": "catch-all"}
 
-    host = a_composed_host(world, routes=routes, bearer_of=a_resource_and_person_paths(world))
-    resource = a_resource(transaction=world.sign_in)
+    host = a_composed_host(world, routes=routes, bearer_of=a_resource_and_person_paths())
+    resource = a_resource()
 
     start = host.client.get(START_PATH, headers=FORWARDED)
     metadata = host.client.get(
@@ -591,7 +621,7 @@ def test_compose_13_a_handle_installed_on_one_app_is_refused_on_a_second_app() -
     assert the_app_as_it_stands(second_app) == before
 
 
-def test_compose_13_an_app_that_carries_library_middleware_is_refused_untouched() -> None:
+def test_compose_13_an_app_that_carries_the_stack_of_another_handle_is_refused_untouched() -> None:
     """COMPOSE-13"""
     world = a_host_world()
     app = FastAPI()
@@ -599,7 +629,7 @@ def test_compose_13_an_app_that_carries_library_middleware_is_refused_untouched(
     before = the_app_as_it_stands(app)
     auth = a_composition(world).build()
 
-    with pytest.raises(RuntimeError, match="library middleware"):
+    with pytest.raises(RuntimeError, match="another WebAuth"):
         auth.install(app, bearer=None)
 
     assert the_app_as_it_stands(app) == before
@@ -623,7 +653,7 @@ def test_compose_14_a_bearer_that_is_no_bearer_gate_is_refused_before_the_app_ch
     assert the_app_as_it_stands(app) == before
 
 
-def test_compose_14_a_bearer_that_does_not_fit_is_refused_before_the_app_changes() -> None:
+def test_compose_14_machine_paths_without_admins_are_refused_before_the_app_changes() -> None:
     """COMPOSE-14"""
     world = a_host_world()
     auth = a_composition(world, groups=NO_ADMINS).build()
@@ -631,27 +661,9 @@ def test_compose_14_a_bearer_that_does_not_fit_is_refused_before_the_app_changes
     the_routes_of(world)(app, auth)
     before = the_app_as_it_stands(app)
     machine_paths = MachinePaths(PathRules(prefixes=("/api/admin/",)), HAL_ONLY)
-    foreign_relying_party = a_relying_party()
-    foreign_admission = replace(ADMISSION, bound_issuer=foreign_relying_party.issuer)
-    other_groups = BearerGate(
-        relying_party=auth.relying_party, admission=ADMISSION, machine_paths=machine_paths
-    )
-    other_relying_party = BearerGate(
-        relying_party=foreign_relying_party,
-        admission=foreign_admission,
-        machine_paths=machine_paths,
-    )
 
-    with pytest.raises(ValueError, match="admin_group"):
-        BearerGate(
-            relying_party=auth.relying_party, admission=auth.admission, machine_paths=machine_paths
-        )
-    with pytest.raises(ValueError, match="must name"):
-        BearerGate(relying_party=auth.relying_party, admission=auth.admission)
-    with pytest.raises(WebAuthSettingError, match=r"bearer\.admission"):
-        auth.install(app, bearer=other_groups)
-    with pytest.raises(WebAuthSettingError, match=r"bearer\.relying_party"):
-        auth.install(app, bearer=other_relying_party)
+    with pytest.raises(WebAuthSettingError, match=r"bearer\.machine_paths"):
+        auth.install(app, bearer=BearerGate(machine_paths=machine_paths))
 
     assert the_app_as_it_stands(app) == before
 

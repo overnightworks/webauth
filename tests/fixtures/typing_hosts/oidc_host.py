@@ -38,7 +38,6 @@ from webauth.cookies import (
     issue_session_cookies,
 )
 from webauth.dependencies import (
-    AuthDependencies,
     ConnectionRefusal,
     LoginRedirect,
     account_language_of_session,
@@ -46,7 +45,6 @@ from webauth.dependencies import (
     admit_session,
     authenticate_websocket,
     current_user,
-    current_user_dependency,
     session_id_from_request,
 )
 from webauth.https_client import (
@@ -306,7 +304,6 @@ def a_host_composes_its_auth(
         ),
         front=front,
         gate=SessionGate(
-            session_transaction=a_host_session_transaction,
             login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
             public=(PublicRule(PathRules(exact=frozenset({"/login"}))),),
         ),
@@ -437,13 +434,8 @@ def a_host_verifies_a_resource_token(
     return verify(access_token)
 
 
-def a_host_declares_its_machine_paths(
-    relying_party: OidcRelyingParty,
-    config: AdmissionConfig,
-) -> BearerGate:
+def a_host_declares_its_machine_paths() -> BearerGate:
     return BearerGate(
-        relying_party=relying_party,
-        admission=config,
         machine_paths=MachinePaths(
             PathRules(prefixes=("/api/admin/",)),
             AuthorizedParties(frozenset({"hal"})),
@@ -451,37 +443,23 @@ def a_host_declares_its_machine_paths(
     )
 
 
-def a_host_declares_its_person_paths(
-    relying_party: OidcRelyingParty,
-    config: AdmissionConfig,
-    transaction: SignInTransaction,
-) -> BearerGate:
+def a_host_declares_its_person_paths() -> BearerGate:
     return BearerGate(
-        relying_party=relying_party,
-        admission=config,
         person_paths=PersonPaths(
             PathRules(prefixes=("/api/",)),
             AuthorizedParties(frozenset({"hal"})),
-            transaction,
         ),
     )
 
 
-def a_host_declares_its_resource(
-    relying_party: OidcRelyingParty,
-    config: AdmissionConfig,
-    transaction: SignInTransaction,
-) -> BearerGate:
+def a_host_declares_its_resource() -> BearerGate:
     return BearerGate(
-        relying_party=relying_party,
-        admission=config,
         resource=ProtectedResource(
             "https://app.example/mcp",
             "mcp:tools",
             "/apps/host/mcp",
             "/agents",
             AuthorizedParties(frozenset({"agent"})),
-            transaction,
             marked_routes=frozenset({MarkedRoute("GET", "/notes/{note}")}),
         ),
     )
@@ -629,10 +607,8 @@ def _surface_of_the_errors_and_the_verified_records() -> tuple[object, ...]:
         VerifiedLogout,
         WallClock,
         WebAuthSettingError,
-        AuthDependencies,
         admit_session,
         bearer_caller,
-        current_user_dependency,
         is_https_url,
         session_id_from_request,
     )

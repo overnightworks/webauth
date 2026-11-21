@@ -67,7 +67,7 @@ from tests.support.person_paths_arrangement import (
 )
 from tests.support.webauth_arrangement import ADMIN_ROLE
 from webauth.admission import NoAdmins
-from webauth.dependencies import current_user_dependency
+from webauth.dependencies import current_user
 from webauth.https_client import KeySetFetchError
 from webauth.middleware import admitted_user
 from webauth.policies import (
@@ -89,9 +89,6 @@ def test_a_token_on_a_person_path_is_the_account_behind_its_subject(session_gate
         200,
         {"id": OPERATOR_SUBJECT, "username": "lena", "role": MEMBER_ROLE, "session": None},
     )
-    assert app.auth.authenticated == [
-        AuthenticatedUser(OPERATOR_SUBJECT, "lena", MEMBER_ROLE, None)
-    ]
 
 
 @BOTH_TRANSACTIONS
@@ -772,14 +769,10 @@ class TestAPersonAdmissionIsNotHonouredByAnotherApplication:
         app = a_person_app()
         inner = FastAPI()
         app.auth.app.mount(f"{PERSON_PREFIX}sub", inner)
-        dependencies = current_user_dependency(
-            session_store=lambda: app.auth.sessions,
-            on_authenticated=lambda user: None,
-        )
 
         @inner.get("/current")
         def current(
-            _user: AuthenticatedUser = Depends(dependencies.current_user),
+            _user: AuthenticatedUser = Depends(current_user),
         ) -> dict[str, str]:
             return {"ran": "current_user"}
 

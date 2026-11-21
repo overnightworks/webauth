@@ -53,7 +53,6 @@ from webauth.config import WebAuthConfig
 from webauth.dependencies import (
     admin_user,
     current_user,
-    current_user_dependency,
     session_id_from_request,
 )
 from webauth.https_client import fetch_key_set_over_https
@@ -91,6 +90,7 @@ from webauth.ports import (
     AuthenticatedUser,
     BearerCaller,
     SessionRecordStore,
+    SessionTransaction,
     SignInStores,
     SignInTransaction,
 )
@@ -363,15 +363,30 @@ def _sign_in_transaction(world: World) -> SignInTransaction:
     return transaction
 
 
-def _gate_of(world: World) -> SessionGate:
-    """The session gate only the bearer host installs; the host without the setting has none."""
+def _counted_session_transaction(world: World) -> SessionTransaction:
+    """``stores.sessions``: every entry of the session store counts as a session transaction."""
 
-    def counted_session_transaction() -> AbstractContextManager[SessionRecordStore]:
+    def counted() -> AbstractContextManager[SessionRecordStore]:
         world.session_transactions += 1
         return world.sessions.in_transaction()
 
+    return counted
+
+
+# The host without the bearer setting gates only the deep link's album pages, so a browser
+# asking for one without a session is sent to the sign-in start with the page as `next`.
+_EVERY_PATH_BUT_ALBUMS = PathRules(patterns=(re.compile(r"/(?!albums/)"),))
+
+
+def _gate_of(settings: HostSettings) -> SessionGate:
+    """The session gate: the bearer host's, or the album-page gate of the host without the
+    setting."""
+    if not settings.is_bearer_host:
+        return SessionGate(
+            login_redirect=SIGN_IN_PATHS.login_redirect,
+            public=(PublicRule(_EVERY_PATH_BUT_ALBUMS),),
+        )
     return SessionGate(
-        session_transaction=counted_session_transaction,
         login_redirect=None,
         # The gate would answer a dead cookie with 401 before the route runs; the call
         # answers `session-ended` itself. The install adds the resource's metadata rule.
@@ -385,27 +400,19 @@ def _gate_of(world: World) -> SessionGate:
     )
 
 
-def _bearer_of(
-    settings: HostSettings, auth: WebAuth, transaction: SignInTransaction
-) -> BearerGate | None:
+def _bearer_of(settings: HostSettings) -> BearerGate | None:
     """The bearer gate only the bearer host installs; the host without the setting has none."""
     if not settings.is_bearer_host:
         return None
     parties = AuthorizedParties(frozenset(settings.bearer_authorized_parties))
     return BearerGate(
-        resource=_resource_of(settings, transaction),
+        resource=_resource_of(settings),
         machine_paths=MachinePaths(PathRules(prefixes=(MACHINE_ROUTES_PREFIX,)), parties),
-        relying_party=auth.relying_party,
-        admission=auth.admission,
-        person_paths=PersonPaths(
-            PathRules(prefixes=(PERSON_ROUTES_PREFIX,)),
-            parties,
-            transaction,
-        ),
+        person_paths=PersonPaths(PathRules(prefixes=(PERSON_ROUTES_PREFIX,)), parties),
     )
 
 
-def _resource_of(settings: HostSettings, transaction: SignInTransaction) -> ProtectedResource:
+def _resource_of(settings: HostSettings) -> ProtectedResource:
     (origin,) = settings.app_origins
     return ProtectedResource(
         f"{origin}{RESOURCE_PATH}",
@@ -413,7 +420,6 @@ def _resource_of(settings: HostSettings, transaction: SignInTransaction) -> Prot
         f"{settings.login_group}/{RESOURCE_GROUP_NAME}",
         AGENT_GROUP,
         AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
-        transaction,
         frozenset(MARKED_ROUTES),
     )
 
@@ -496,7 +502,7 @@ def _web_auth_for(settings: HostSettings, world: World, origin: str) -> WebAuth:
             rate_limit=PROOF_HOST_RATE_LIMIT,
         ),
         stores=WebAuthStores(
-            sign_in=_sign_in_transaction(world), sessions=world.sessions.in_transaction
+            sign_in=_sign_in_transaction(world), sessions=_counted_session_transaction(world)
         ),
         groups=_admission_of(settings),
         pages=SignInPages(
@@ -505,7 +511,7 @@ def _web_auth_for(settings: HostSettings, world: World, origin: str) -> WebAuth:
             ui_language=lambda _request: None,
         ),
         front=arrangement.client_address.TRUSTED_PROXIES,
-        gate=_gate_of(world) if settings.is_bearer_host else None,
+        gate=_gate_of(settings),
         outside=(_counting_callbacks_and_back_channel_answers(settings, world, config),),
         issuer_calls=IssuerCalls(
             post_token_request=world.token_requests,
@@ -517,13 +523,6 @@ def _web_auth_for(settings: HostSettings, world: World, origin: str) -> WebAuth:
 
 def _app_for(settings: HostSettings, world: World, origin: str) -> FastAPI:
     auth = _web_auth_for(settings, world, origin)
-    # The call's `current_user` carries no login redirect, so the redirecting route keeps the
-    # dependency that does.
-    redirecting_dependencies = current_user_dependency(
-        session_store=lambda: world.sessions,
-        on_authenticated=lambda user: None,
-        login_redirect=SIGN_IN_PATHS.login_redirect,
-    )
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     def signed_in_user(request: Request) -> AuthenticatedUser | None:
@@ -545,7 +544,7 @@ def _app_for(settings: HostSettings, world: World, origin: str) -> FastAPI:
     @app.get("/albums/{album_id}", response_class=HTMLResponse)
     def album(
         album_id: str,
-        user: AuthenticatedUser = Depends(redirecting_dependencies.current_user),
+        user: AuthenticatedUser = Depends(current_user),
     ) -> str:
         return PAGE.substitute(headline=f"Album {html.escape(album_id)}", body=LOGOUT_BUTTON)
 
@@ -559,10 +558,9 @@ def _app_for(settings: HostSettings, world: World, origin: str) -> FastAPI:
     def admin(user: AuthenticatedUser = Depends(admin_user)) -> dict[str, str]:
         return {"username": user.username}
 
-    sign_in = _sign_in_transaction(world)
     if settings.is_bearer_host:
-        _add_bearer_routes(app, settings, sign_in)
-    auth.install(app, bearer=_bearer_of(settings, auth, sign_in))
+        _add_bearer_routes(app, settings)
+    auth.install(app, bearer=_bearer_of(settings))
     return app
 
 
@@ -739,14 +737,13 @@ def _add_marked_routes(app: FastAPI) -> None:
 def _add_bearer_routes(
     app: FastAPI,
     settings: HostSettings,
-    transaction: SignInTransaction,
 ) -> None:
     """The routes of each kind of path the bearer gate selects."""
     _add_machine_routes(app)
     _add_person_routes(app)
     _add_marked_routes(app)
 
-    @app.api_route(_resource_of(settings, transaction).entry_point, methods=["GET", "POST"])
+    @app.api_route(_resource_of(settings).entry_point, methods=["GET", "POST"])
     def entry_point(request: Request) -> dict[str, str]:
         person = resource_person(request)
         return {"id": person.id, "username": person.username, "role": person.role}
