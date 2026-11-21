@@ -1,8 +1,0 @@
-claim_id = "26d23c1a1fac456f838eb428839d1667"
-agent = "Claude e340585b-ade9-4414-85eb-b95ca5b3d42d"
-role = "builder"
-base = "93e7f6288994d8d3df743443b9ad48651934340f"
-branch = "claude/issue-852-hygiene-bundle-from-the-standing-audit"
-scope = [".importlinter", "AGENTS.md", "docs/host-contract.md", "src/webauth/oidc/_token_endpoint.py", "src/webauth/oidc/_workload_token_reuse.py", "src/webauth/rate_limit.py", "src/webauth/single_process_stores.py", "src/webauth/web_auth.py", "tests"]
-opened_commit = "9efde3bdd595f4801c86e4f4a9aec4c78f3a3fa2"
-whole_reason = "One audit bundle of seven small internal lines, each a few lines in its own file, with the tests that pin them; split it and every lane pays its own review and CI for a one-line change."
