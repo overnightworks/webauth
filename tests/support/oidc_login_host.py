@@ -530,6 +530,24 @@ def _an_oidc_host_over(
     )
 
 
+def _pages_recording_refusals(
+    holder: list[OidcHost],
+    logout_page_text: Callable[[Request], LogoutPageText],
+    ui_language: Callable[[Request], str | None],
+) -> SignInPages:
+    def refused(request: Request, refusal: SignInRefusal) -> Response:
+        holder[0].refusals.append(refusal)
+        return holder[0].answer_refusals(request, refusal)
+
+    return SignInPages(refused=refused, logout_page_text=logout_page_text, ui_language=ui_language)
+
+
+def _the_issuer_calls_of(issuer: FakeIssuer, key_set: FakeKeySetEndpoint) -> IssuerCalls:
+    return IssuerCalls(
+        post_token_request=issuer, fetch_key_set=key_set, monotonic_clock=FakeClock(5_000.0)
+    )
+
+
 def an_oidc_host(
     *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
@@ -558,11 +576,6 @@ def an_oidc_host(
     )
     app = _a_host_app(stores.sessions)
     holder: list[OidcHost] = []
-
-    def refused(request: Request, refusal: SignInRefusal) -> Response:
-        holder[0].refusals.append(refusal)
-        return holder[0].answer_refusals(request, refusal)
-
     auth = install_the_gated_stack(
         app,
         config=config,
@@ -573,14 +586,10 @@ def an_oidc_host(
         max_sessions=max_sessions,
         client=a_client_config(),
         groups=admission,
-        pages=SignInPages(
-            refused=refused, logout_page_text=logout_page_text, ui_language=ui_language
-        ),
+        pages=_pages_recording_refusals(holder, logout_page_text, ui_language),
         body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
         rate_limit=_the_rate_limit_of_a_host(address_budget),
-        issuer_calls=IssuerCalls(
-            post_token_request=issuer, fetch_key_set=key_set, monotonic_clock=FakeClock(5_000.0)
-        ),
+        issuer_calls=_the_issuer_calls_of(issuer, key_set),
     )
     if behind_base_http_middleware:
         app.middleware("http")(_pass_through)

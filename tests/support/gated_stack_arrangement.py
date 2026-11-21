@@ -63,6 +63,22 @@ def an_issuer_nobody_calls(fetch_key_set: KeySetFetch | None = None) -> IssuerCa
     )
 
 
+def _the_admission_of(client: OidcClientConfig) -> AdmissionConfig:
+    return AdmissionConfig(
+        bound_issuer=client.issuer, login_group="/apps/x", admin_group="/apps/x/admin"
+    )
+
+
+def _the_refusing_pages_of(sign_in_paths: SignInPaths) -> SignInPages:
+    return SignInPages(
+        refused=lambda _request, _refusal: Response(status_code=403),
+        logout_page_text=(
+            None if sign_in_paths.logout is None else lambda _request: GATED_APP_LOGOUT_TEXT
+        ),
+        ui_language=lambda _request: None,
+    )
+
+
 def install_the_gated_stack(
     app: FastAPI,
     *,
@@ -108,18 +124,8 @@ def install_the_gated_stack(
         stores=WebAuthStores(
             sign_in=sign_in, sessions=sessions or SessionRecordsInMemory(None).in_transaction
         ),
-        groups=groups
-        or AdmissionConfig(
-            bound_issuer=client.issuer, login_group="/apps/x", admin_group="/apps/x/admin"
-        ),
-        pages=pages
-        or SignInPages(
-            refused=lambda _request, _refusal: Response(status_code=403),
-            logout_page_text=(
-                None if sign_in_paths.logout is None else lambda _request: GATED_APP_LOGOUT_TEXT
-            ),
-            ui_language=lambda _request: None,
-        ),
+        groups=groups or _the_admission_of(client),
+        pages=pages or _the_refusing_pages_of(sign_in_paths),
         front=front,
         gate=session_gate,
         outside=tuple(outside),
