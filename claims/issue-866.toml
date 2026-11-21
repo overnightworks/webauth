@@ -1,0 +1,8 @@
+claim_id = "e40edce9556044ee828226bee9a1aac3"
+agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
+role = "builder"
+base = "9be544ff0a111775385d7423876cc992f5c06b51"
+branch = "claude/issue-866-group-path-type"
+scope = ["README.md", "docs/host-contract.md", "src/webauth/admission.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc_login.py", "tests"]
+opened_commit = "6e34996bcf1afb07fce5cd130a81055b6bb2bb3c"
+whole_reason = "One public type replaces str in five public signatures; every config build in the tests, the typing hosts and the e2e host changes with it, or pyright and the suite break."
