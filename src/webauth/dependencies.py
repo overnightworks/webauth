@@ -41,7 +41,7 @@ from webauth.cookies import (
     _cookie_values,
     _verify_session_cookie,
 )
-from webauth.ports import SessionRecordStore, SessionTransaction
+from webauth.ports import SessionRenewalStore, SessionTransaction
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -202,7 +202,7 @@ def authenticate_websocket(
 
 def _admitted_websocket(
     connection: HTTPConnection,
-    sessions: SessionRecordStore,
+    sessions: SessionRenewalStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     resolved = _resolve_session(connection, sessions)
     if not isinstance(resolved, ConnectionRefusal):
@@ -392,7 +392,7 @@ def _is_admitted(
 def admit_session(
     session_id: str,
     *,
-    sessions: SessionRecordStore,
+    sessions: SessionRenewalStore,
     config: WebAuthConfig,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """Decide whether a session id speaks for an account, and renew it if so.
@@ -431,7 +431,7 @@ def admit_session(
     )
     if type(renewed) is not bool:
         raise TypeError(
-            f"SessionRecordStore.touch must return a bool, not {type(renewed).__name__}",
+            f"SessionRenewalStore.touch must return a bool, not {type(renewed).__name__}",
         )
     if not renewed:
         return ConnectionRefusal.SESSION_ENDED_OR_EXPIRED
@@ -447,7 +447,7 @@ def admit_session(
 def account_language_of_session(
     connection: HTTPConnection,
     *,
-    sessions: SessionRecordStore,
+    sessions: SessionRenewalStore,
     config: WebAuthConfig,
 ) -> str | None:
     """The account's language tag of the session the connection's cookie names, as the issuer
@@ -472,7 +472,7 @@ def account_language_of_session(
 
 def _resolve_session(
     connection: HTTPConnection,
-    sessions: SessionRecordStore,
+    sessions: SessionRenewalStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     """The one decision whom a connection's session cookie speaks for.
 
@@ -681,7 +681,7 @@ def _require_admin(
 
 def _gate_or_own_admission(
     connection: HTTPConnection,
-    sessions: SessionRecordStore,
+    sessions: SessionRenewalStore,
 ) -> ports.AuthenticatedUser | ConnectionRefusal:
     person = _admitted_token_person(connection)
     if person is not None:

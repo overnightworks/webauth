@@ -118,6 +118,7 @@ from webauth.ports import (
     RateLimitBackend,
     SessionRecord,
     SessionRecordStore,
+    SessionRenewalStore,
     SessionTransaction,
     SignInStores,
     SignInTransaction,
@@ -220,6 +221,19 @@ class HostSessions:
         return None
 
 
+class HostRenewals:
+    """A request-path view of the sessions: it finds, touches and rotates, and ends nothing."""
+
+    def load(self, session_id: str) -> HostSession | None:
+        return None
+
+    def touch(self, session_id: str, *, expires_at: datetime) -> bool:
+        return True
+
+    def replace_refresh_token(self, session_id: str, *, refresh_token: SecretStr) -> bool:
+        return True
+
+
 class HostAudit:
     def account_event(self, event: AccountEvent) -> None:
         _ = event.kind
@@ -285,7 +299,7 @@ def a_host_composes_its_auth(
     client: OidcClientConfig, config: WebAuthConfig, front: TrustedProxies | ServedBehind
 ) -> WebAuth:
     sign_in: SignInTransaction = a_host_sign_in_transaction
-    sessions: SessionTransaction = a_host_session_transaction
+    sessions: SessionTransaction = a_host_renewal_transaction
     key_set_fetch, token_post = a_host_uses_the_production_transports()
     return WebAuth.build(
         a_host_settings(client, config),
@@ -556,18 +570,18 @@ def a_host_admits_a_session_without_a_request(
     session_id: str,
     config: WebAuthConfig,
 ) -> AuthenticatedUser | ConnectionRefusal:
-    return admit_session(session_id, sessions=HostSessions(), config=config)
+    return admit_session(session_id, sessions=HostRenewals(), config=config)
 
 
 def a_host_reads_the_account_language(
     connection: HTTPConnection,
     config: WebAuthConfig,
 ) -> str | None:
-    return account_language_of_session(connection, sessions=HostSessions(), config=config)
+    return account_language_of_session(connection, sessions=HostRenewals(), config=config)
 
 
-def a_host_session_transaction() -> AbstractContextManager[SessionRecordStore]:
-    return nullcontext(HostSessions())
+def a_host_renewal_transaction() -> AbstractContextManager[HostRenewals]:
+    return nullcontext(HostRenewals())
 
 
 def a_host_reads_the_admitted_user(request: Request) -> str | None:
@@ -644,6 +658,7 @@ def _surface_of_the_login_and_session_flow() -> tuple[object, ...]:
         SessionLifetime,
         SessionGate,
         SessionRecordStore,
+        SessionRenewalStore,
         SessionTransaction,
         PublicRule,
         admitted_admin,

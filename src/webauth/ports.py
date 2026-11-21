@@ -43,6 +43,7 @@ __all__ = [
     "RateLimitBackend",
     "SessionRecord",
     "SessionRecordStore",
+    "SessionRenewalStore",
     "SessionTransaction",
     "SignInStores",
     "SignInTransaction",
@@ -217,48 +218,14 @@ class UsernameTakenError(WebAuthError):
     """The store could not create an account because its username is taken."""
 
 
-class SessionRecordStore(Protocol):
-    """The host's sessions, which the library asks on every request.
+class SessionRenewalStore(Protocol):
+    """The host's sessions as a request reads and renews them.
 
     The library caches no sessions: every admission costs one ``load`` and one
     ``touch``, so a session the host ended is refused on its next request. A
     request is admitted once, or twice when the session gate admitted it and a
     mounted application under another ``WebAuthConfig`` admits it again.
-
-    The library ends a session in three places only, by calling ``delete``,
-    ``delete_for_user`` or ``prune_overflow``: the logout route, the callback route (the
-    session an incoming cookie replaced, and all but the newest ones under the
-    cap) and the back-channel logout route.
     """
-
-    def create(
-        self,
-        user_id: str,
-        *,
-        session_id: str,
-        now: datetime,
-        expires_at: datetime,
-        refresh_token: SecretStr | None,
-        id_token: SecretStr | None,
-        account_language: str | None,
-    ) -> SessionRecord:
-        """Create the session under ``session_id`` and return it.
-
-        The refresh token is part of the session row: whatever ends the row
-        ends it, and no other row or table holds it. The host writes it with
-        ``get_secret_value()``; the library bounds the value only by the 64 KiB
-        token response, so the column takes no smaller length. The ID token is
-        part of the row the same way, as ``SessionRecord.id_token`` says, and
-        ``None`` when the host keeps none. ``account_language`` is part of the row as
-        ``SessionRecord.account_language`` says, written here and by no other call.
-
-        ``session_id`` is an opaque, cookie-safe string the library mints and the
-        store keeps as given. The cookie signs the id alone, so a store that
-        accepted an id it already holds would give every old signed cookie for
-        that id the new session: the call raises when a session is stored under
-        ``session_id`` and leaves that row unchanged.
-        """
-        ...
 
     def load(self, session_id: str) -> SessionRecord | None:
         """The stored session, or ``None`` when the store holds none under this id.
@@ -312,6 +279,45 @@ class SessionRecordStore(Protocol):
         """
         ...
 
+
+class SessionRecordStore(SessionRenewalStore, Protocol):
+    """The host's sessions, which the library creates and ends as well as renews.
+
+    The library ends a session in three places only, by calling ``delete``,
+    ``delete_for_user`` or ``prune_overflow``: the logout route, the callback route (the
+    session an incoming cookie replaced, and all but the newest ones under the
+    cap) and the back-channel logout route.
+    """
+
+    def create(
+        self,
+        user_id: str,
+        *,
+        session_id: str,
+        now: datetime,
+        expires_at: datetime,
+        refresh_token: SecretStr | None,
+        id_token: SecretStr | None,
+        account_language: str | None,
+    ) -> SessionRecord:
+        """Create the session under ``session_id`` and return it.
+
+        The refresh token is part of the session row: whatever ends the row
+        ends it, and no other row or table holds it. The host writes it with
+        ``get_secret_value()``; the library bounds the value only by the 64 KiB
+        token response, so the column takes no smaller length. The ID token is
+        part of the row the same way, as ``SessionRecord.id_token`` says, and
+        ``None`` when the host keeps none. ``account_language`` is part of the row as
+        ``SessionRecord.account_language`` says, written here and by no other call.
+
+        ``session_id`` is an opaque, cookie-safe string the library mints and the
+        store keeps as given. The cookie signs the id alone, so a store that
+        accepted an id it already holds would give every old signed cookie for
+        that id the new session: the call raises when a session is stored under
+        ``session_id`` and leaves that row unchanged.
+        """
+        ...
+
     def delete(self, session_id: str) -> None:
         """Drop the session. An id the store does not hold is a no-op, never an
         error: a logout names whatever the browser's cookie says."""
@@ -342,13 +348,16 @@ class SessionTransaction(Protocol):
     durable. A store that commits each of its own calls meets this with
     ``lambda: nullcontext(store)``.
 
+    The block yields the renewal half of the sessions, ``SessionRenewalStore``:
+    a request reads and renews a session and never creates or ends one.
+
     An exception raised inside the block, by the store or by the library,
     passes through the context manager's exit, and what that exit rolls back is
     the host's decision: the library promises no rollback. That exception, like
     one the exit raises itself (a failing commit), reaches the caller.
     """
 
-    def __call__(self) -> AbstractContextManager[SessionRecordStore]: ...
+    def __call__(self) -> AbstractContextManager[SessionRenewalStore]: ...
 
 
 @dataclass(frozen=True)

@@ -339,7 +339,7 @@ def test_a_touch_answering_anything_but_a_bool_is_never_accepted(answer: object)
     app = an_auth_app(None, sessions=SessionsAnsweringTouch(a_session(), answer))
 
     with (
-        pytest.raises(TypeError, match="SessionRecordStore.touch"),
+        pytest.raises(TypeError, match="SessionRenewalStore.touch"),
         app.connect(cookie=app.signed_cookie()),
     ):
         pass

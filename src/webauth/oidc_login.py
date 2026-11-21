@@ -101,6 +101,7 @@ if TYPE_CHECKING:
     from webauth.ports import (
         AuditSink,
         SessionRecordStore,
+        SessionRenewalStore,
         SessionTransaction,
         SignInStores,
         SignInTransaction,
@@ -449,11 +450,11 @@ def _refusal_of_grant(refusal: OidcRefusal) -> AccessTokenRefusal:
     return AccessTokenRefusal(AccessTokenRefusalReason.ISSUER_UNAVAILABLE, refusal)
 
 
-def _stored(sessions: SessionRecordStore, session_id: str, refresh_token: SecretStr) -> bool:
+def _stored(sessions: SessionRenewalStore, session_id: str, refresh_token: SecretStr) -> bool:
     stored = sessions.replace_refresh_token(session_id, refresh_token=refresh_token)
     if type(stored) is not bool:
         raise TypeError(
-            "SessionRecordStore.replace_refresh_token must return a bool, "
+            "SessionRenewalStore.replace_refresh_token must return a bool, "
             f"not {type(stored).__name__}",
         )
     return stored
