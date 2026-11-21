@@ -70,6 +70,15 @@ def ledger(run: BearerRun) -> tuple[Any, ...]:
     return tuple(run.state()[key] for key in LEDGER)
 
 
+def ledger_after_route_entries(before: tuple[Any, ...], requests: int) -> tuple[Any, ...]:
+    """The ledger after ``requests`` admitted requests of a route behind ``current_user``: that
+    dependency enters ``stores.sessions`` once per request, and the gate enters it never, so the
+    entry count moves by exactly the requests and nothing else moves."""
+    moved = list(before)
+    moved[LEDGER.index("session_transactions")] += requests
+    return tuple(moved)
+
+
 def agent_post(run: BearerRun, name: str, status: int) -> Any:
     answer = run.send(Call("POST", RESOURCE_PATH, run.tokens[name]))
     assert_person_answer(answer, status, None, "Access denied" if status == 403 else None)
@@ -168,7 +177,7 @@ def marked_route_admits_the_agent_capped(run: BearerRun) -> str:
         answer = run.send(Call(method, path, run.tokens["agent_user"]))
         assert_person_answer(answer, 200)
         assert answer.json() == {**person, "role": "user"}, answer.json()
-    assert ledger(run) == before, (before, ledger(run))
+    assert ledger(run) == ledger_after_route_entries(before, 2), (before, ledger(run))
     return f"{USER_NAME}'s agent token, GET and POST on marked routes, no cookie: 200 user"
 
 
@@ -178,7 +187,9 @@ def marked_route_admin_reader_is_the_plain_403(run: BearerRun) -> str:
     before = ledger(run)
     answer = run.send(Call("GET", ADMIN_ONLY, run.tokens["agent_admin"]))
     assert_person_answer(answer, 403, None, "Admin access required")
-    assert ledger(run) == before, "the admission changed the stored admin or recorded an event"
+    assert ledger(run) == ledger_after_route_entries(before, 1), (
+        "the admission changed the stored admin or recorded an event"
+    )
     return f"{ADMIN_NAME}, a stored admin, on the admin_user route: 403 without a challenge"
 
 
