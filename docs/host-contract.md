@@ -233,8 +233,8 @@ Every line webauth writes goes through the standard-library logger of its own mo
 The key-set fetch, the provider-metadata fetch and every token-endpoint POST carry the caller's trace context, so the issuer's side of a sign-in, a refresh or a workload grant joins the trace.
 
 - **TRACE-01** Each call is sent after `opentelemetry.propagate.inject` wrote into its headers, so what the process's global propagator writes for the current context goes out. Inside a trace that is `traceparent`, and `tracestate` when the context has one; outside a trace nothing is added and the request is the one it was before.
-- **TRACE-02** webauth sets no propagator, creates no span and needs no SDK. `logline.configure` (from logline 1.7) sets W3C trace context as the global propagator while `OTEL_PROPAGATORS` is unset, so `baggage` is not sent; without it, or with `OTEL_PROPAGATORS` set, the host's propagators decide what the call sends.
-- **TRACE-03** The headers webauth fixes (`Authorization`, `Accept`, `Content-Type`) win over a propagator's header of the same name, in any case.
+- **TRACE-02** webauth sets no propagator, creates no span and needs no SDK. `logline.configure` (from logline 1.7) sets W3C trace context as the global propagator while `OTEL_PROPAGATORS` is unset, so `baggage` is not sent; a host that never calls it, with `OTEL_PROPAGATORS` unset, gets OpenTelemetry's default global (`tracecontext` and `baggage`), so the caller's baggage reaches the issuer, and with `OTEL_PROPAGATORS` set the host's propagators decide what the call sends.
+- **TRACE-03** The headers webauth fixes (`Authorization`, `Accept`, `Content-Type`) and `Host`, which urllib3 derives from the URL, win over a propagator's header of the same name, in any case.
 - **TRACE-04** A propagator that raises never fails the call: the call goes out without trace context, and nothing about the error is logged.
 
 ## CSRF origin
