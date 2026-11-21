@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     import pytest
     from fastapi import FastAPI
 
-WEBSOCKET_EVENT = "websocket.ended"
 TRUSTED_PEER = "172.16.0.9"
 FORWARDED_CLIENT = "203.0.113.7"
 

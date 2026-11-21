@@ -652,8 +652,8 @@ wheels = [
 
 [[package]]
 name = "overnightworks-logline"
-version = "1.7.0"
-source = { git = "https://github.com/overnightworks/logline?tag=v1.7.0#4cbc68c011a696650f9d49cff8388041322d08b7" }
+version = "1.8.0"
+source = { git = "https://github.com/overnightworks/logline?tag=v1.8.0#9b3647ec41c0fab46f17171777f0bc1fd4a24093" }
 dependencies = [
     { name = "opentelemetry-api" },
     { name = "structlog" },
@@ -723,7 +723,7 @@ dev = [
     { name = "deptry", specifier = "==0.25.1" },
     { name = "fakeredis", extras = ["lua"], specifier = ">=2.20,<3" },
     { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?tag=v1.7.0" },
+    { name = "overnightworks-logline", git = "https://github.com/overnightworks/logline?tag=v1.8.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pyright", specifier = ">=1.1.414,<2" },
     { name = "pytest", specifier = ">=7.4,<10" },
