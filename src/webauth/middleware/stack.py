@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from logline import RequestLineMiddleware
@@ -44,6 +44,17 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 _BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
+
+
+@dataclass(frozen=True, kw_only=True)
+class _HandleBinding:
+    """What one ``WebAuth`` binds its middleware to: its relying party, its admission and the two
+    transactions."""
+
+    relying_party: OidcRelyingParty
+    admission: AdmissionConfig
+    sign_in: SignInTransaction
+    sessions: SessionTransaction
 
 
 def _with_sign_in_rules(
@@ -140,10 +151,7 @@ def _library_middleware(
     bearer_gate: BearerGate | None,
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
-    relying_party: OidcRelyingParty,
-    admission: AdmissionConfig,
-    sign_in: SignInTransaction,
-    sessions: SessionTransaction,
+    binding: _HandleBinding,
 ) -> list[Middleware]:
     """The middleware to install, outermost first, for the policies the host named, bound to the
     relying party, the admission and the transactions of its ``WebAuth``; ``security_headers`` is
@@ -167,15 +175,19 @@ def _library_middleware(
             Middleware(
                 _BearerGateMiddleware,
                 policy=bearer_gate,
-                relying_party=relying_party,
-                admission=admission,
-                sign_in=sign_in,
+                relying_party=binding.relying_party,
+                admission=binding.admission,
+                sign_in=binding.sign_in,
             )
         )
     entries.append(Middleware(_CsrfOriginMiddleware, policy=csrf_origin))
     if session_gate is not None:
         entries.append(
-            Middleware(_SessionGateMiddleware, policy=session_gate, session_transaction=sessions)
+            Middleware(
+                _SessionGateMiddleware,
+                policy=session_gate,
+                session_transaction=binding.sessions,
+            )
         )
     return entries
 
@@ -221,10 +233,7 @@ def _install_web_auth_middleware(
     trusted_proxies: TrustedProxies | None,
     outside: Sequence[Middleware],
     inside: Sequence[Middleware],
-    relying_party: OidcRelyingParty,
-    admission: AdmissionConfig,
-    sign_in: SignInTransaction,
-    sessions: SessionTransaction,
+    binding: _HandleBinding,
 ) -> None:
     """Install what ``WebAuth.install`` places, outermost first: logline's request line and the
     client-address writer, only with ``trusted_proxies`` (``None`` for an app a shared front
@@ -260,10 +269,7 @@ def _install_web_auth_middleware(
             bearer_gate=bearer_gate,
             csrf_origin=csrf_origin,
             session_gate=session_gate,
-            relying_party=relying_party,
-            admission=admission,
-            sign_in=sign_in,
-            sessions=sessions,
+            binding=binding,
         ),
         *inside,
     ]

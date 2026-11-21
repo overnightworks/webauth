@@ -24,7 +24,7 @@ from webauth.dependencies import _publish_installed_sessions
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.bearer_gate import BearerGate, _install_resource_metadata
 from webauth.middleware.client_address import _ClientAddressMiddleware
-from webauth.middleware.stack import _install_web_auth_middleware
+from webauth.middleware.stack import _HandleBinding, _install_web_auth_middleware
 from webauth.oidc import OidcRelyingParty
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.proxies import TrustedProxies
@@ -339,10 +339,12 @@ class WebAuth:
             trusted_proxies=self._front if isinstance(self._front, TrustedProxies) else None,
             outside=self._outside,
             inside=self._inside,
-            relying_party=self._relying_party,
-            admission=self._groups,
-            sign_in=self._stores.sign_in,
-            sessions=self._stores.sessions,
+            binding=_HandleBinding(
+                relying_party=self._relying_party,
+                admission=self._groups,
+                sign_in=self._stores.sign_in,
+                sessions=self._stores.sessions,
+            ),
         )
         self._installed = True
         _install_web_auth_config(app, settings.config)
