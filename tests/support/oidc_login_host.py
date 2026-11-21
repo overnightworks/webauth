@@ -53,7 +53,7 @@ from webauth.cookies import (
     _pending_login_cookie_name,
     _pending_login_cookie_prefix,
 )
-from webauth.dependencies import account_language_of_session, current_user_dependency
+from webauth.dependencies import account_language_of_session, admin_user, current_user
 from webauth.oidc import (
     OidcClientConfig,
     OidcRefusal,
@@ -408,17 +408,12 @@ def an_id_token(
 
 
 def _add_the_signed_in_routes(app: FastAPI, sessions: SessionRecordsInMemory) -> None:
-    dependencies = current_user_dependency(
-        session_store=lambda: sessions,
-        on_authenticated=lambda _user: None,
-    )
-
     @app.get("/admin")
-    def admin(user: AuthenticatedUser = Depends(dependencies.admin_user)) -> dict[str, str]:
+    def admin(user: AuthenticatedUser = Depends(admin_user)) -> dict[str, str]:
         return {"username": user.username}
 
     @app.get("/me")
-    def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
+    def me(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
         return {"username": user.username}
 
     @app.get(LANGUAGE_PATH)
