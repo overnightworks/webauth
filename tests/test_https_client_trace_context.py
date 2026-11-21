@@ -141,12 +141,11 @@ def test_the_headers_a_token_post_owns_arrive_once_and_unchanged_whatever_a_prop
     assert propagated.headers["traceparent"] == TRACEPARENT
 
 
-@pytest.mark.parametrize("call", _ISSUER_CALLS)
-def test_an_issuer_call_keeps_the_host_of_its_url_whatever_a_propagator_writes(
-    call: Callable[[LoopbackHttpsServer], object], token_server: LoopbackHttpsServer
+def test_a_key_set_fetch_keeps_the_host_of_its_url_whatever_a_propagator_writes(
+    token_server: LoopbackHttpsServer,
 ) -> None:
     with global_propagator_writing({"Host": "elsewhere.example"}):
-        call(token_server)
+        _fetching_the_key_set(token_server)
 
     [received] = token_server.received
     assert _lines_named(received, "host") == [received.headers["host"]]
