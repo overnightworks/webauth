@@ -31,13 +31,14 @@ from tests.support.oidc_login_host import (
     NOW,
     SIGN_IN_PATHS,
     START_PATH,
+    SUBJECT,
     RecordingSignInTransaction,
     TransactionKind,
     UsersWithSnapshots,
     a_client_config,
     an_id_token,
 )
-from tests.support.request_line_arrangement import TRUSTED_PEER
+from tests.support.request_line_arrangement import FORWARDED_CLIENT, TRUSTED_PEER
 from tests.support.session_store_arrangement import (
     FakeSessionRecord,
     SessionsRecordingTheirTransaction,
@@ -287,6 +288,40 @@ def a_second_world(*users: FakeUser, stored_session: FakeSessionRecord | None = 
     world = a_host_world(*users, stored_session=stored_session)
     world.config = replace(world.config, allowed_hosts_exact=frozenset({SECOND_HOST}))
     return world
+
+
+SECOND_ORIGIN = f"https://{SECOND_HOST}"
+
+
+@dataclass(frozen=True)
+class SignedInWorlds:
+    """Two host worlds, each with a stored session of its own member, made fresh per scenario."""
+
+    first: HostWorld
+    second: HostWorld
+    first_member: FakeUser
+    second_member: FakeUser
+
+
+def two_signed_in_worlds() -> SignedInWorlds:
+    first_member = FakeUser(id=SUBJECT, username="lena")
+    second_member = FakeUser(id="a-subject-of-the-second-app", username="mara")
+    return SignedInWorlds(
+        first=a_host_world(first_member, stored_session=a_stored_session(first_member)),
+        second=a_second_world(second_member, stored_session=a_stored_session(second_member)),
+        first_member=first_member,
+        second_member=second_member,
+    )
+
+
+def forwarded_by_the_proxy() -> dict[str, str]:
+    """The header a trusted proxy adds, naming the client."""
+    return {"x-forwarded-for": FORWARDED_CLIENT}
+
+
+def an_unparseable_forward() -> dict[str, str]:
+    """A forwarding header the writer ignores."""
+    return {"x-forwarded-for": "not-an-address"}
 
 
 @dataclass
