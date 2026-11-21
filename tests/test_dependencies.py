@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from starlette.types import Message
 
 from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
+from tests.support.gated_stack_arrangement import put_only_the_config_on
 from tests.support.session_store_arrangement import SessionRecordsInMemory, SessionsAnsweringTouch
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
@@ -27,7 +28,6 @@ from tests.support.webauth_arrangement import (
     session_cookie_header,
     signed_without_bound,
 )
-from webauth.config import install_web_auth_config
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     sign_session_id,
@@ -436,7 +436,7 @@ def test_the_redirect_keeps_the_asked_for_query_string_under_the_configured_key(
 
 def a_guarded_catch_all_app() -> FastAPI:
     app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config())
+    put_only_the_config_on(app, a_web_auth_config())
     guard = current_user_dependency(
         session_store=lambda: SessionRecordsInMemory(None),
         on_authenticated=lambda user: None,

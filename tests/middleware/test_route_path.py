@@ -12,8 +12,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
-from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS
+from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     SAME_ORIGIN_REQUEST,
@@ -22,8 +22,6 @@ from tests.support.webauth_arrangement import (
     an_auth_app,
     an_http_scope,
 )
-from webauth.config import install_web_auth_config
-from webauth.middleware import install_web_auth_middleware
 from webauth.middleware._route_path import route_path
 from webauth.policies import (
     BodySizePolicy,
@@ -204,22 +202,18 @@ class TestAPathNextToTheRootPathIsNotStripped:
     ) -> tuple[TestClient, list[str]]:
         route_runs: list[str] = []
         app = FastAPI()
-        install_web_auth_config(app, a_web_auth_config())
-        install_web_auth_middleware(
-            app,
-            sign_in_paths=GATED_SIGN_IN_PATHS,
-            **{
-                "security_headers": a_no_store_policy(PathRules()),
-                "csrf_origin": CsrfPolicy(),
-                **stack_policies,
-            },
-        )
-        add_the_client_address_writer(app)
 
         @app.api_route(NEXT_TO_THE_ROOT_PATH, methods=["GET", "POST"])
         def route() -> dict[str, bool]:
             route_runs.append(NEXT_TO_THE_ROOT_PATH)
             return {"ok": True}
+
+        install_the_gated_stack(
+            app,
+            config=a_web_auth_config(),
+            sessions=SessionRecordsInMemory().in_transaction,
+            **{"security_headers": a_no_store_policy(PathRules()), **stack_policies},
+        )
 
         client = TestClient(app, base_url=HTTPS_TEST_SERVER, cookies={}, root_path="/app")
         return client, route_runs
@@ -298,15 +292,13 @@ class TestACacheControlRuleOfTheParentSelectsThroughAMount:
             ]
         )
         parent = FastAPI()
-        install_web_auth_config(parent, a_web_auth_config())
-        install_web_auth_middleware(
-            parent,
-            sign_in_paths=GATED_SIGN_IN_PATHS,
-            security_headers=a_no_store_policy(PathRules(prefixes=("/api/x/",))),
-            csrf_origin=CsrfPolicy(),
-        )
-        add_the_client_address_writer(parent)
         parent.mount("/api", sub)
+        install_the_gated_stack(
+            parent,
+            config=a_web_auth_config(),
+            sessions=SessionRecordsInMemory().in_transaction,
+            security_headers=a_no_store_policy(PathRules(prefixes=("/api/x/",))),
+        )
         client = TestClient(parent, base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False)
 
         response = client.get(asked_for)

@@ -24,7 +24,6 @@ from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketDisconnect
 
 from tests.support.account_arrangement import FakeUser
-from tests.support.client_address_arrangement import add_the_client_address_writer
 from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.session_store_arrangement import (
     FakeSessionRecord,
@@ -34,7 +33,6 @@ from tests.support.session_store_arrangement import (
 from webauth.config import (
     SessionLifetime,
     WebAuthConfig,
-    install_web_auth_config,
     web_auth_config,
 )
 from webauth.cookies import sign_session_id
@@ -46,7 +44,6 @@ from webauth.dependencies import (
     session_id_from_request,
 )
 from webauth.middleware import (
-    IpRateLimitMiddleware,
     SessionGate,
     admitted_user,
 )
@@ -145,11 +142,14 @@ def a_policy_rate_limited_client(
     keyword replaces the configuration field it names.
     """
     app = FastAPI()
-    install_web_auth_config(app, a_web_auth_config(rate_limits=rate_limits, **config_overrides))
-    app.add_middleware(IpRateLimitMiddleware, policy=policy)
-    add_the_client_address_writer(app)
     for path in paths:
         app.add_api_route(path, lambda: {"status": "ok"}, methods=["GET"])
+    install_the_gated_stack(
+        app,
+        config=a_web_auth_config(rate_limits=rate_limits, **config_overrides),
+        sessions=SessionRecordsInMemory().in_transaction,
+        rate_limit=policy,
+    )
     return TestClient(app, base_url=HTTPS_TEST_SERVER)
 
 
@@ -384,24 +384,32 @@ def an_auth_app(
 
     It also serves the WebSocket routes of ``_add_websocket_routes`` and, at ``OPEN_PATHS``, a
     route that reads ``admitted_user``. A keyword replaces the configuration field it names;
-    ``config`` is an existing instance instead (no overrides then). ``gate`` installs the library
-    middleware with a ``SessionGate`` over ``public`` and ``optional``, its transaction
-    ``session_transaction`` or else the store's ``in_transaction``; ``stack_policies`` adds the
-    other policies the installer takes, or replaces the headers.
+    ``config`` is an existing instance instead (no overrides then). The composition call installs
+    the library's stack; ``gate`` adds a ``SessionGate`` over ``public`` and ``optional``, its
+    transaction ``session_transaction`` or else the store's ``in_transaction``; ``stack_policies``
+    names the other arguments of ``install_the_gated_stack``.
     """
     config = config or a_web_auth_config(**config_overrides)
     if sessions is None:
         sessions = SessionRecordsInMemory(record)
     app = FastAPI(root_path=root_path)
-    install_web_auth_config(app, config)
-    if gate:
-        session_gate = SessionGate(
+    session_gate = (
+        SessionGate(
             session_transaction=session_transaction or sessions.in_transaction,
             login_redirect=login_redirect,
             public=public,
             optional=optional or PathRules(),
         )
-        install_the_gated_stack(app, session_gate=session_gate, **(stack_policies or {}))
+        if gate
+        else None
+    )
+    install_the_gated_stack(
+        app,
+        config=config,
+        sessions=sessions.in_transaction,
+        session_gate=session_gate,
+        **(stack_policies or {}),
+    )
     auth = AuthApp(
         client=TestClient(
             app,

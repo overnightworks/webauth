@@ -34,11 +34,11 @@ from tests.support.oidc_arrangement import (
 )
 from webauth.middleware import (
     BearerGate,
-    BearerGateMiddleware,
     MarkedRoute,
     ProtectedResource,
     exchanged_access_token,
 )
+from webauth.middleware.bearer_gate import _BearerGateMiddleware
 from webauth.oidc import (
     ExchangedAccess,
     OidcRefusal,
@@ -186,7 +186,7 @@ def _token_endpoint_of(issuer_url: str) -> str:
 def _posting_to(app: BearerApp, issuer: ExchangeIssuer, issuer_url: str) -> OidcRelyingParty:
     """Replaces the app's gate by one over `issuer_url` whose relying party posts to `issuer`
     and whose resource marks the scenario's route, which `a_bearer_app` leaves to the host."""
-    entry = next(m for m in app.auth.app.user_middleware if m.cls is BearerGateMiddleware)
+    entry = next(m for m in app.auth.app.user_middleware if m.cls is _BearerGateMiddleware)
     gate = entry.kwargs["policy"]
     assert isinstance(gate, BearerGate)
     assert gate.resource is not None

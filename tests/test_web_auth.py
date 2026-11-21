@@ -77,7 +77,7 @@ from webauth.middleware import BearerGate, MachinePaths, PersonPaths, SessionGat
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 from webauth.ports import AuthenticatedUser
 from webauth.sign_in_routes import LogoutPageText, RefusalPage, SignInPaths
-from webauth.web_auth import WebAuth, WebAuthSettingError
+from webauth.web_auth import ServedBehind, WebAuth, WebAuthSettingError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -595,7 +595,7 @@ def test_compose_13_an_app_that_carries_library_middleware_is_refused_untouched(
     """COMPOSE-13"""
     world = a_host_world()
     app = FastAPI()
-    install_full_stack(app, client_address_writer=False)
+    install_full_stack(app, front=ServedBehind.SHARED_FRONT)
     before = the_app_as_it_stands(app)
     auth = a_composition(world).build()
 

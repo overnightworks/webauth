@@ -12,6 +12,7 @@ from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from tests.support.account_arrangement import MEMBER_ROLE
+from tests.support.gated_stack_arrangement import put_only_the_config_on
 from tests.support.session_store_arrangement import (
     SessionsAnsweringTouch,
     SessionsThatMustNotBeAsked,
@@ -35,7 +36,6 @@ from tests.support.webauth_arrangement import (
     session_cookie_header,
 )
 from webauth.config import (
-    install_web_auth_config,
     web_auth_config,
 )
 from webauth.cookies import (
@@ -440,7 +440,7 @@ async def discard_message(message: Message) -> None:
 
 def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTPConnection:
     app = FastAPI()
-    install_web_auth_config(app, CONFIG)
+    put_only_the_config_on(app, CONFIG)
     cookie = f"{SESSION_COOKIE_NAME}={sign_session_id(SESSION_ID, SIGNING_KEY)}"
     scope = {
         "type": scope_type,

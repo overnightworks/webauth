@@ -5,7 +5,6 @@ from __future__ import annotations
 import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
 
 import pytest
 from fastapi import HTTPException, Request
@@ -18,7 +17,6 @@ from tests.support.oidc_arrangement import (
     a_fake_id_token,
 )
 from tests.support.oidc_login_host import (
-    BACKCHANNEL_LOGOUT_PATH,
     CLIENT_ID,
     END_SESSION_ENDPOINT,
     LOGOUT_BUTTON_LABEL,
@@ -26,7 +24,6 @@ from tests.support.oidc_login_host import (
     LOGOUT_PATH,
     NOW,
     SAME_ORIGIN_FORM,
-    START_PATH,
     SUBJECT,
     OidcHost,
     StoreDown,
@@ -46,7 +43,6 @@ from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     SESSION_IDLE_SECONDS,
 )
-from webauth.oidc import OidcRelyingParty
 from webauth.oidc_login import (
     fresh_access_token,
 )
@@ -428,26 +424,19 @@ def _a_page_text(_request: Request) -> LogoutPageText:
     return LogoutPageText(language=LOGOUT_LANGUAGE, button_label=LOGOUT_BUTTON_LABEL)
 
 
-def _a_relying_party_that_raises(_request: Request) -> OidcRelyingParty:
-    raise StoreDown
-
-
 @pytest.mark.parametrize(
-    ("page_text", "relying_party_of"),
+    "page_text",
     [
-        pytest.param(_a_page_text_that_raises, None, id="page-text"),
-        pytest.param(_a_page_text_that_raises_an_http_exception, None, id="http-exception"),
-        pytest.param(_a_page_text_with_a_malformed_language, None, id="malformed-language"),
-        pytest.param(_a_page_text, _a_relying_party_that_raises, id="relying-party"),
+        pytest.param(_a_page_text_that_raises, id="page-text"),
+        pytest.param(_a_page_text_that_raises_an_http_exception, id="http-exception"),
+        pytest.param(_a_page_text_with_a_malformed_language, id="malformed-language"),
     ],
 )
-def test_a_page_text_or_relying_party_that_raises_answers_500_and_ends_nothing(
+def test_a_page_text_that_raises_answers_500_and_ends_nothing(
     page_text: Callable[[Request], LogoutPageText],
-    relying_party_of: Callable[[Request], OidcRelyingParty] | None,
 ) -> None:
     """SIGNIN-38: an exception in a host callable answers a plain 500 and ends nothing."""
     host = after_signing_in(an_oidc_host(logout_page_text=page_text))
-    host.relying_party_of = relying_party_of
     entries_before = host.transaction.entries
 
     response = post_logout(host, SAME_ORIGIN_FORM)
@@ -524,53 +513,3 @@ def test_a_language_tag_of_another_shape_is_refused_when_the_record_is_built(
     """SIGNIN-14: any other shape raises `ValueError` when the record is built."""
     with pytest.raises(ValueError, match="language"):
         LogoutPageText(language=language, button_label="Out")  # type: ignore[arg-type]
-
-
-def _a_start(host: OidcHost) -> Callable[[], HttpxResponse]:
-    return lambda: host.client.get(START_PATH)
-
-
-def _a_callback(host: OidcHost) -> Callable[[], HttpxResponse]:
-    query = host.sign_in_at_issuer()
-    return lambda: host.callback(query)
-
-
-def _a_logout(host: OidcHost) -> Callable[[], HttpxResponse]:
-    after_signing_in(host)
-    return lambda: post_logout(host, SAME_ORIGIN_FORM)
-
-
-def _a_back_channel_logout(host: OidcHost) -> Callable[[], HttpxResponse]:
-    return lambda: host.client.post(
-        BACKCHANNEL_LOGOUT_PATH,
-        content=b"logout_token=x",
-        headers={"content-type": SAME_ORIGIN_FORM["content-type"]},
-    )
-
-
-@pytest.mark.parametrize(
-    ("request_to", "status"),
-    [
-        pytest.param(_a_start, 500, id="start"),
-        pytest.param(_a_callback, 500, id="callback"),
-        pytest.param(_a_logout, 500, id="logout"),
-        pytest.param(_a_back_channel_logout, 400, id="back-channel logout"),
-    ],
-)
-def test_every_route_reads_the_relying_party_again_for_each_request(
-    request_to: Callable[[OidcHost], Callable[[], HttpxResponse]],
-    status: int,
-) -> None:
-    """SIGNIN-02: each route reads `relying_party` for each request."""
-    host = an_oidc_host()
-    send = request_to(host)
-    read: list[Request] = []
-
-    def a_relying_party_that_raises(request: Request) -> NoReturn:
-        read.append(request)
-        raise StoreDown
-
-    host.relying_party_of = a_relying_party_that_raises
-
-    assert send().status_code == status
-    assert read

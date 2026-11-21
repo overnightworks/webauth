@@ -12,21 +12,22 @@ from fastapi.testclient import TestClient
 from httpx import Response
 from starlette.responses import JSONResponse
 
-import webauth.middleware
-from tests.support.client_address_arrangement import add_the_client_address_writer
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.rate_limit_arrangement import RecordingRateLimitBackend
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
-from tests.support.session_store_arrangement import SessionsRecordingTheirTransaction
+from tests.support.session_store_arrangement import (
+    SessionRecordsInMemory,
+    SessionsRecordingTheirTransaction,
+)
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     a_session,
     a_signed_in_same_origin_request,
     a_web_auth_config,
 )
-from webauth.config import install_web_auth_config
 from webauth.dependencies import LoginRedirect
-from webauth.middleware import SessionGate, install_web_auth_middleware
-from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
+from webauth.middleware import SessionGate
+from webauth.policies import SecurityHeadersPolicy
 from webauth.sign_in_routes import SignInPaths
 
 
@@ -112,7 +113,6 @@ def a_stack_over_every_route() -> Arrangement:
         routes,
         lifespan_events=lifespan_events,
     )
-    install_web_auth_config(app, config)
 
     def run(request: Request) -> JSONResponse:
         arrangement.route_runs.append(request.scope["path"])
@@ -133,18 +133,18 @@ def a_stack_over_every_route() -> Arrangement:
         arrangement.host_middleware_runs.append(request.scope["path"])
         return await call_next(request)
 
-    install_web_auth_middleware(
+    install_the_gated_stack(
         app,
+        config=config,
+        sessions=sessions.in_transaction,
         sign_in_paths=sign_in_paths,
         security_headers=headers_policy,
-        csrf_origin=CsrfPolicy(),
         session_gate=SessionGate(
             session_transaction=sessions.in_transaction,
             login_redirect=LoginRedirect(path="/login", redirect_query_param="next"),
             public=(),
         ),
     )
-    add_the_client_address_writer(app)
     return arrangement
 
 
@@ -225,28 +225,24 @@ class TestARouteWithAControlCharacterInItsPath:
             assert response.status_code == 200
             assert arrangement.route_runs != []
 
-    def test_a_minimal_install_refuses_and_carries_the_class_the_package_exports(
+    def test_a_minimal_install_refuses_a_path_with_a_control_character(
         self,
     ) -> None:
-        """STACK-11: always installed, no policy and no option, exported by the package."""
+        """STACK-11: always installed, no policy and no option."""
         app = FastAPI()
         headers_policy = a_headers_policy()
-        install_web_auth_config(app, a_web_auth_config())
         app.add_api_route("/api/thing", lambda: {"status": "ok"})
-        install_web_auth_middleware(
+        install_the_gated_stack(
             app,
+            config=a_web_auth_config(),
+            sessions=SessionRecordsInMemory().in_transaction,
             sign_in_paths=some_sign_in_paths(),
             security_headers=headers_policy,
-            csrf_origin=CsrfPolicy(),
         )
-        add_the_client_address_writer(app)
 
         response = TestClient(app, base_url=HTTPS_TEST_SERVER).get("/api/thing%0A")
 
         a_malformed_path_is_refused(response, headers_policy)
-        assert webauth.middleware.PathRefusalMiddleware in [
-            entry.cls for entry in app.user_middleware
-        ]
 
     def test_a_websocket_handshake_and_the_lifespan_pass_the_stack(self) -> None:
         """STACK-12: the lifespan scope and a WebSocket scope pass the stack."""

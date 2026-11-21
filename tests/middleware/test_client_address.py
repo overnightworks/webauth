@@ -31,8 +31,9 @@ from tests.support.request_line_arrangement import (
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import API_PATH, HTTPS_TEST_SERVER
 from webauth import proxies
-from webauth.middleware import IpRateLimitMiddleware
+from webauth.middleware.rate_limit import _IpRateLimitMiddleware
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
+from webauth.web_auth import ServedBehind
 
 SOCKET_PATH = "/ws"
 FORWARDED = {"x-forwarded-for": FORWARDED_CLIENT}
@@ -57,7 +58,7 @@ class TestAStackWithoutTheWriter:
     @staticmethod
     def a_host() -> FastAPI:
         app = a_host_serving_a_socket()
-        install_full_stack(app, client_address_writer=False)
+        install_full_stack(app, front=ServedBehind.SHARED_FRONT)
         return app
 
     @pytest.mark.parametrize(
@@ -160,7 +161,7 @@ def test_the_rate_limiter_alone_reads_the_address_before_its_exemption_check() -
     app = a_fresh_app()
     app.add_api_route("/exempt", lambda: {"ok": True}, methods=["GET"])
     app.add_middleware(
-        IpRateLimitMiddleware,
+        _IpRateLimitMiddleware,
         policy=RateLimitPolicy(
             default=RateLimitBudget("api", 100, 60), exempt=PathRules(exact=frozenset({"/exempt"}))
         ),
@@ -178,6 +179,6 @@ def test_a_writer_added_by_hand_is_refused_untouched() -> None:
     before = list(app.user_middleware)
 
     with pytest.raises(RuntimeError, match="by hand"):
-        install_full_stack(app, client_address_writer=False)
+        install_full_stack(app)
 
     assert app.user_middleware == before

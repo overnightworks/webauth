@@ -11,12 +11,10 @@ from dataclasses import dataclass
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.responses import Response
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
-from tests.support.oidc_arrangement import FakeIssuer, a_relying_party
+from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.oidc_arrangement import FakeIssuer, a_key_set_endpoint, a_realm_client_config
 from tests.support.oidc_login_host import (
-    ADMISSION,
     BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
     BACKCHANNEL_LOGOUT_PATH,
     CALLBACK_PATH,
@@ -28,8 +26,7 @@ from tests.support.oidc_login_host import (
 from tests.support.rate_limit_arrangement import CheckedBudget, RecordingRateLimitBackend
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import HTTPS_TEST_SERVER, a_web_auth_config
-from webauth.config import install_web_auth_config
-from webauth.middleware import SessionGate, install_web_auth_middleware
+from webauth.middleware import SessionGate
 from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
@@ -43,10 +40,9 @@ from webauth.policies import (
 )
 from webauth.ports import RateLimitBackend, SignInStores
 from webauth.sign_in_routes import (
-    LogoutPageText,
     SignInPaths,
-    install_sign_in_routes,
 )
+from webauth.web_auth import IssuerCalls, WebAuthSettings
 
 FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
 HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
@@ -75,37 +71,7 @@ def _a_gated_host(
     )
     sessions = SessionRecordsInMemory()
     issuer = FakeIssuer(mint_id_token=lambda _nonce: "unused")
-    relying_party = a_relying_party(post_token_request=issuer)
     app = FastAPI()
-    install_web_auth_config(app, config)
-    install_web_auth_middleware(
-        app,
-        sign_in_paths=sign_in_paths,
-        security_headers=security_headers,
-        body_size=body_size,
-        rate_limit=rate_limit,
-        csrf_origin=CsrfPolicy(),
-        session_gate=SessionGate(
-            session_transaction=sessions.in_transaction,
-            login_redirect=sign_in_paths.login_redirect,
-            public=(),
-        )
-        if gated
-        else None,
-    )
-    add_the_client_address_writer(app)
-    install_sign_in_routes(
-        app,
-        paths=SIGN_IN_PATHS,
-        relying_party=lambda _request: relying_party,
-        admission=ADMISSION,
-        transaction=_a_transaction_nobody_enters,
-        refused=lambda _request, _refusal: Response(status_code=403),
-        keeps_id_token=True,
-        max_sessions=None,
-        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        ui_language=lambda _request: None,
-    )
 
     @app.get("/albums/{album_id}")
     def album(album_id: str) -> str:
@@ -115,6 +81,26 @@ def _a_gated_host(
     def post_album(album_id: str) -> str:
         return album_id
 
+    install_the_gated_stack(
+        app,
+        config=config,
+        sessions=sessions.in_transaction,
+        sign_in=_a_transaction_nobody_enters,
+        sign_in_paths=sign_in_paths,
+        security_headers=security_headers,
+        body_size=body_size,
+        rate_limit=rate_limit,
+        session_gate=SessionGate(
+            session_transaction=sessions.in_transaction,
+            login_redirect=sign_in_paths.login_redirect,
+            public=(),
+        )
+        if gated
+        else None,
+        issuer_calls=IssuerCalls(
+            post_token_request=issuer, fetch_key_set=a_key_set_endpoint("issuer")
+        ),
+    )
     return GatedHost(
         TestClient(app, base_url=HTTPS_TEST_SERVER, follow_redirects=False),
         issuer,
@@ -134,16 +120,16 @@ def _backchannel_post(host: GatedHost, size: int = 0) -> int:
     return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=body, headers=FORM_HEADER).status_code
 
 
-def test_the_installer_is_refused_without_sign_in_paths() -> None:
-    """SIGNIN-64: the installer requires `sign_in_paths`."""
-    app = FastAPI()
-    csrf_origin = CsrfPolicy()
-
+def test_the_settings_are_refused_without_sign_in_paths() -> None:
+    """SIGNIN-64: the settings of the composition call require `sign_in_paths`."""
     with pytest.raises(TypeError, match="sign_in_paths"):
-        install_web_auth_middleware(  # type: ignore[call-arg]
-            app,
+        WebAuthSettings(  # type: ignore[call-arg]
+            config=a_web_auth_config(),
+            client=a_realm_client_config(),
+            keeps_id_token=True,
+            max_sessions=None,
             security_headers=HEADERS_POLICY,
-            csrf_origin=csrf_origin,
+            csrf_origin=CsrfPolicy(),
         )
 
 

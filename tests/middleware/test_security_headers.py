@@ -18,7 +18,8 @@ from tests.support.client_address_arrangement import (
     add_the_client_address_writer,
     behind_the_client_address_writer,
 )
-from tests.support.oidc_arrangement import LogoutPage, a_relying_party
+from tests.support.gated_stack_arrangement import install_the_gated_stack, put_only_the_config_on
+from tests.support.oidc_arrangement import LogoutPage
 from tests.support.security_headers_arrangement import (
     a_content_security_policy_rule,
     a_policy_with_content_security_policy_rules,
@@ -33,19 +34,16 @@ from tests.support.webauth_arrangement import (
     no_receive,
     starts,
 )
-from webauth.admission import AdmissionConfig
-from webauth.config import install_web_auth_config
-from webauth.middleware import SecurityHeadersMiddleware, install_web_auth_middleware
+from webauth.middleware.security_headers import _SecurityHeadersMiddleware
 from webauth.policies import (
     CacheControlRule,
     CspDirective,
-    CsrfPolicy,
     PathRules,
     SecurityHeadersPolicy,
     default_content_security_policy,
 )
 from webauth.ports import SignInStores
-from webauth.sign_in_routes import LogoutPageText, SignInPaths, install_sign_in_routes
+from webauth.sign_in_routes import SignInPaths
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -71,10 +69,10 @@ def an_app(
     policy: SecurityHeadersPolicy = POLICY,
 ) -> FastAPI:
     app = FastAPI(debug=debug)
-    app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+    app.add_middleware(_SecurityHeadersMiddleware, policy=policy)
     add_the_client_address_writer(app)
     if configured:
-        install_web_auth_config(app, a_web_auth_config(cookie_secure=cookie_secure))
+        put_only_the_config_on(app, a_web_auth_config(cookie_secure=cookie_secure))
     return app
 
 
@@ -180,7 +178,7 @@ def test_a_missing_configuration_answers_a_500_without_hsts_before_the_route_run
     assert route_ran == []
     client = TestClient(app)
 
-    with pytest.raises(RuntimeError, match="install_web_auth_config"):
+    with pytest.raises(RuntimeError, match="WebAuth"):
         client.get("/side-effect")
 
 
@@ -259,7 +257,7 @@ async def test_a_start_without_headers_gains_them_and_keeps_its_other_fields() -
         await send({"type": "http.response.trailers", "headers": [(b"x-trailer", b"1")]})
 
     sent, raised = await drive(
-        behind_the_client_address_writer(SecurityHeadersMiddleware(bare_app, POLICY)),
+        behind_the_client_address_writer(_SecurityHeadersMiddleware(bare_app, POLICY)),
         an_http_scope(app),
     )
 
@@ -288,7 +286,9 @@ async def test_a_downstream_send_that_fails_on_the_start_is_tried_once_and_propa
         attempts.append(message)
         raise failure
 
-    middleware = behind_the_client_address_writer(SecurityHeadersMiddleware(responding_app, POLICY))
+    middleware = behind_the_client_address_writer(
+        _SecurityHeadersMiddleware(responding_app, POLICY)
+    )
     scope = an_http_scope(app)
 
     with pytest.raises(ConnectionResetError) as raised:
@@ -314,7 +314,7 @@ async def test_a_500_that_cannot_be_sent_still_raises_the_route_exception_with_a
         if message["type"] == failing_message_type:
             raise send_failure
 
-    middleware = behind_the_client_address_writer(SecurityHeadersMiddleware(failing_app, POLICY))
+    middleware = behind_the_client_address_writer(_SecurityHeadersMiddleware(failing_app, POLICY))
     scope = an_http_scope(app)
 
     with pytest.raises(RouteFailure) as raised:
@@ -331,9 +331,9 @@ def test_a_cache_control_rule_applies_to_a_normal_response_and_to_the_library_50
         cache_control_rules=(CacheControlRule(PathRules(prefixes=("/boom", "/ok")), cacheable),),
     )
     app = FastAPI()
-    app.add_middleware(SecurityHeadersMiddleware, policy=policy)
+    app.add_middleware(_SecurityHeadersMiddleware, policy=policy)
     add_the_client_address_writer(app)
-    install_web_auth_config(app, a_web_auth_config())
+    put_only_the_config_on(app, a_web_auth_config())
     with_failing_route(app, RouteFailure())
 
     @app.get("/ok")
@@ -362,7 +362,7 @@ async def test_a_websocket_passes_through_without_a_response() -> None:
         raise AssertionError("the middleware sent on a websocket")
 
     scope: Scope = {"type": "websocket", "path": "/ws", "headers": []}
-    middleware = behind_the_client_address_writer(SecurityHeadersMiddleware(websocket_app, POLICY))
+    middleware = behind_the_client_address_writer(_SecurityHeadersMiddleware(websocket_app, POLICY))
 
     await middleware(scope, no_receive, no_send)
 
@@ -486,45 +486,23 @@ def the_logout_app(
     host_policy: SecurityHeadersPolicy = HOST_POLICY,
     cookie_secure: bool = True,
     host_middleware: Callable[[FastAPI], None] | None = None,
-    installed: bool = True,
 ) -> FastAPI:
     """An app with the logout route behind this stack."""
-    config = a_web_auth_config(cookie_secure=cookie_secure)
     lock = WriteLockInMemory()
     users = UsersInMemory(lock=lock)
     sessions = SessionRecordsInMemory(users=users, lock=lock)
     stores = SignInStores(users, sessions, RecordingAuditSink())
-    relying_party = a_relying_party()
     app = FastAPI()
     if host_middleware is not None:
         host_middleware(app)
-    install_web_auth_config(app, config)
-    if installed:
-        install_web_auth_middleware(
-            app,
-            sign_in_paths=SignInPaths(start="/login", callback="/callback", logout=LOGOUT_PATH),
-            security_headers=host_policy,
-            csrf_origin=CsrfPolicy(),
-        )
-        add_the_client_address_writer(app)
-
-    install_sign_in_routes(
+    install_the_gated_stack(
         app,
-        paths=SignInPaths(start="/login", callback="/callback", logout=LOGOUT_PATH),
-        relying_party=lambda _request: relying_party,
-        admission=AdmissionConfig(
-            bound_issuer="https://login.example.org",
-            login_group="/apps/notes",
-            admin_group="/apps/notes/admin",
-        ),
-        transaction=lambda: nullcontext(stores),
-        refused=lambda _request, _refusal: Response(status_code=403),
-        keeps_id_token=True,
-        max_sessions=None,
-        logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Sign out"),
-        ui_language=lambda _request: None,
+        config=a_web_auth_config(cookie_secure=cookie_secure),
+        sessions=sessions.in_transaction,
+        sign_in=lambda: nullcontext(stores),
+        sign_in_paths=SignInPaths(start="/login", callback="/callback", logout=LOGOUT_PATH),
+        security_headers=host_policy,
     )
-
     return app
 
 
@@ -533,14 +511,12 @@ def the_logout_page(
     host_policy: SecurityHeadersPolicy = HOST_POLICY,
     cookie_secure: bool = True,
     host_middleware: Callable[[FastAPI], None] | None = None,
-    installed: bool = True,
 ) -> HttpxResponse:
     """What a browser gets from a logout route behind this stack."""
     app = the_logout_app(
         host_policy=host_policy,
         cookie_secure=cookie_secure,
         host_middleware=host_middleware,
-        installed=installed,
     )
     return TestClient(app).post(LOGOUT_PATH, headers={"sec-fetch-site": "same-origin"})
 
@@ -588,15 +564,6 @@ def test_a_host_middleware_inside_the_stack_does_not_cost_the_page_its_policy(
     assert page.headers["content-security-policy"] == the_logout_policy_of(page)
     assert page.headers["cache-control"] == "no-store"
     assert "webauth-own-policy" not in page.headers
-
-
-def test_without_the_middleware_the_page_carries_its_policy_no_store_and_the_marker() -> None:
-    page = the_logout_page(installed=False)
-
-    assert page.headers["content-security-policy"] == the_logout_policy_of(page)
-    assert page.headers["cache-control"] == "no-store"
-    assert page.headers["webauth-own-policy"] == "1"
-    assert "strict-transport-security" not in page.headers
 
 
 FRAMER_POLICY = default_content_security_policy(
