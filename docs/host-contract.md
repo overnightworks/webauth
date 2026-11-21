@@ -1155,7 +1155,7 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **MEMSTORE-06** `touch` writes the `expires_at` it is given and keeps both tokens; `replace_refresh_token` keeps the ID token.
 - **MEMSTORE-07** `delete` of an unknown id is a no-op.
 - **MEMSTORE-08** `prune_overflow` keeps the newest sessions by `created_at`; `0` keeps none.
-- **MEMSTORE-09** `delete_for_user` ends every session of the account, returns how many ended, and removes the account too: an account that outlives its sign-out serves nothing in memory, and the next sign-in creates it again, so its `USER_CREATED` event is true.
+- **MEMSTORE-09** `delete_for_user` ends every session of the account, returns how many ended, and keeps the account, as PGSTORE-06 does: a host's export or erasure after a sign-out needs it, and the next sign-in finds it and writes no `USER_CREATED`.
 - **MEMSTORE-10** `create_for_subject` never raises `UsernameTakenError` and has no flag: the username is for display and the issuer decides who a subject is, so a raise would lock a re-created person out until a restart.
 - **MEMSTORE-11** `load` returns an expired row, as the port says; the gate decides expiry.
 - **MEMSTORE-12** `delete_expired(now)` removes the expired sessions and returns how many; `create` prunes the sessions expired at its `now`, once it has accepted its id.
@@ -1211,6 +1211,7 @@ webauth runs the store contract kit against the extra over a real Postgres, the 
   - `load` of an unknown or deleted id answers `None`.
   - `prune_overflow` keeps the newest sessions by `created_at`, and `0` keeps none.
   - `delete_for_user` returns how many sessions ended.
+  - `get` still finds the account after `delete_for_user`.
   - `touch` and `replace_refresh_token` answer `True` or `False` as `bool`, and write no row for a missing session.
   - `get` compares the subject exactly, with no case, accent, trailing-space or Unicode-normalization folding.
   - `set_role`, `set_kind` and a session `create` for a missing account raise.
