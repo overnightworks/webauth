@@ -15,7 +15,7 @@ from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
 from tests.support.account_arrangement import MEMBER_ROLE, FakeUser, WriteLockInMemory
-from tests.support.gated_stack_arrangement import a_token_post_nobody_makes
+from tests.support.gated_stack_arrangement import an_issuer_nobody_calls
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_NOW,
     OPERATOR_SUBJECT,
@@ -62,7 +62,6 @@ from webauth.middleware import (
 from webauth.middleware.bearer_gate import _BearerGateMiddleware
 from webauth.policies import AuthorizedParties, CsrfPolicy, PathRules, PublicRule
 from webauth.ports import AuthenticatedUser, BearerCaller
-from webauth.web_auth import IssuerCalls
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -500,17 +499,13 @@ def _stack_policies(
 
 def _a_gate_over(
     paths: PathRules,
-    key_sets: FakeKeySetEndpoint,
-    clock: FakeClock,
     machine_parties: AuthorizedParties,
-    person_paths: PathRules | None,
-    person_parties: AuthorizedParties,
-    transaction: SignInTransaction,
+    person: PersonPaths | None,
     resource: ProtectedResource | None,
     admission: AdmissionConfig,
-) -> tuple[PersonPaths | None, Callable[[WebAuth], BearerGate]]:
-    person = PersonPaths(person_paths, person_parties, transaction) if person_paths else None
-
+    key_sets: FakeKeySetEndpoint,
+    clock: FakeClock,
+) -> Callable[[WebAuth], BearerGate]:
     def gate_of(auth: WebAuth) -> BearerGate:
         return a_bearer_gate(
             paths=paths,
@@ -519,11 +514,11 @@ def _a_gate_over(
             person_paths=person,
             admission=admission,
             machine_parties=machine_parties,
-            resource=_bound_to(resource, transaction),
+            resource=resource,
             relying_party=auth.relying_party,
         )
 
-    return person, gate_of
+    return gate_of
 
 
 def _add_routes(
@@ -539,14 +534,6 @@ def _add_routes(
         add_resource_routes(auth, resource)
 
 
-def _public_rules(
-    given: tuple[PublicRule, ...],
-    person: PersonPaths | None,
-) -> tuple[PublicRule, ...]:
-    webhook = [FOREIGN_SECRET_PUBLIC] if person else []
-    return (*given, *webhook)
-
-
 def _bound_to(
     resource: ProtectedResource | None,
     transaction: SignInTransaction,
@@ -554,6 +541,24 @@ def _bound_to(
     if resource is None or resource.transaction is not an_unbound_transaction:
         return resource
     return replace(resource, transaction=transaction)
+
+
+def _an_auth_app_behind_the_stack(
+    side: _SignInSide,
+    session_gate: bool,
+    public: tuple[PublicRule, ...],
+    stack_policies: dict[str, Any],
+    auth_app_keywords: dict[str, Any],
+) -> AuthApp:
+    return an_auth_app(
+        side.record,
+        gate=session_gate,
+        raise_server_exceptions=False,
+        sessions=side.sessions,
+        public=public,
+        stack_policies=stack_policies,
+        **auth_app_keywords,
+    )
 
 
 def a_bearer_app(
@@ -594,38 +599,23 @@ def a_bearer_app(
         transaction_kind, strict_records, cookie_role, known_accounts, stored_sessions
     )
     sign_in = transaction or side.transaction
-    person, gate_of = _a_gate_over(
-        paths,
-        key_sets,
-        clock,
-        machine_parties,
-        person_paths,
-        person_parties,
-        sign_in,
-        resource,
-        admission,
-    )
-    public = _public_rules(auth_app_keywords.pop("public", ()), person)
+    person = PersonPaths(person_paths, person_parties, sign_in) if person_paths else None
+    resource = _bound_to(resource, sign_in)
+    gate_of = _a_gate_over(paths, machine_parties, person, resource, admission, key_sets, clock)
+    public = (*auth_app_keywords.pop("public", ()), *([FOREIGN_SECRET_PUBLIC] if person else []))
     stack_policies = _stack_policies(gate_of if gated else None, person is not None, policies)
-    auth_app_keywords.setdefault("config", a_web_auth_config(wall_clock=clock))
-    auth = an_auth_app(
-        side.record,
-        gate=session_gate,
-        raise_server_exceptions=False,
-        sessions=side.sessions,
-        public=public,
-        stack_policies={
+    auth = _an_auth_app_behind_the_stack(
+        side,
+        session_gate,
+        public,
+        {
             "sign_in": sign_in,
             "groups": admission,
             "inside": inner_middleware,
-            "issuer_calls": IssuerCalls(
-                post_token_request=a_token_post_nobody_makes,
-                fetch_key_set=key_sets,
-                monotonic_clock=FakeClock(5_000.0),
-            ),
+            "issuer_calls": an_issuer_nobody_calls(key_sets),
             **stack_policies,
         },
-        **auth_app_keywords,
+        {"config": a_web_auth_config(wall_clock=clock), **auth_app_keywords},
     )
     _add_routes(auth, person, resource, auth_app_keywords.get("login_redirect"))
     return _a_bearer_app_over(auth, side, key_sets, clock, sign_in)

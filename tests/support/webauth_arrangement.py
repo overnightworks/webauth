@@ -365,6 +365,30 @@ def _add_session_routes(auth: AuthApp, login_redirect: LoginRedirect | None) -> 
         return {"username": user.username}
 
 
+def _an_auth_app_over(
+    app: FastAPI,
+    sessions: SessionRecordsInMemory,
+    config: WebAuthConfig,
+    raise_server_exceptions: bool,
+) -> AuthApp:
+    return AuthApp(
+        client=TestClient(
+            app,
+            base_url=HTTPS_TEST_SERVER,
+            cookies={},
+            raise_server_exceptions=raise_server_exceptions,
+        ),
+        sessions=sessions,
+        authenticated=[],
+        websocket_outcomes=[],
+        signing_key=config.signing_key,
+        app=app,
+        config=config,
+        route_runs=[],
+        route_threads=[],
+    )
+
+
 def an_auth_app(
     record: FakeSessionRecord | None,
     *,
@@ -410,22 +434,7 @@ def an_auth_app(
         session_gate=session_gate,
         **(stack_policies or {}),
     )
-    auth = AuthApp(
-        client=TestClient(
-            app,
-            base_url=HTTPS_TEST_SERVER,
-            cookies={},
-            raise_server_exceptions=raise_server_exceptions,
-        ),
-        sessions=sessions,
-        authenticated=[],
-        websocket_outcomes=[],
-        signing_key=config.signing_key,
-        app=app,
-        config=config,
-        route_runs=[],
-        route_threads=[],
-    )
+    auth = _an_auth_app_over(app, sessions, config, raise_server_exceptions)
     _add_session_routes(auth, login_redirect)
     _add_websocket_routes(app, sessions, auth.websocket_outcomes)
     return auth

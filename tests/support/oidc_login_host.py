@@ -492,6 +492,59 @@ def _a_client_of(app: FastAPI, root_path: str) -> TestClient:
     )
 
 
+def _a_host_app(sessions: SessionRecordsInMemory) -> FastAPI:
+    app = FastAPI()
+    _add_the_signed_in_routes(app, sessions)
+    return app
+
+
+def _the_settings_of_a_host(
+    config: WebAuthConfig,
+    keeps_id_token: bool,
+    max_sessions: int | None,
+    address_budget: int | None,
+) -> WebAuthSettings:
+    return WebAuthSettings(
+        config=config,
+        client=a_client_config(),
+        sign_in_paths=SIGN_IN_PATHS,
+        keeps_id_token=keeps_id_token,
+        max_sessions=max_sessions,
+        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+        csrf_origin=CsrfPolicy(),
+        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+        rate_limit=None
+        if address_budget is None
+        else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60)),
+    )
+
+
+def _an_oidc_host_over(
+    client: TestClient,
+    auth: WebAuth,
+    stores: _HostStores,
+    config: WebAuthConfig,
+    wall_clock: FakeClock,
+    issuer_side: tuple[FakeIssuer, FakeKeySetEndpoint, list[str]],
+) -> OidcHost:
+    issuer, key_set, issued_id_tokens = issuer_side
+    return OidcHost(
+        client=client,
+        issuer=issuer,
+        key_set=key_set,
+        wall_clock=wall_clock,
+        accounts=stores.accounts,
+        sessions=stores.sessions,
+        audit=stores.audit,
+        config=config,
+        lock=stores.lock,
+        relying_party=auth.relying_party,
+        transaction=stores.transaction,
+        issued_id_tokens=issued_id_tokens,
+        refusals=[],
+    )
+
+
 def an_oidc_host(
     *users: FakeUser,
     groups_claim: object = (LOGIN_GROUP,),
@@ -518,8 +571,7 @@ def an_oidc_host(
     issuer, key_set, issued_id_tokens = _an_issuer_side(
         config.wall_clock, groups_claim, locale_claim
     )
-    app = FastAPI()
-    _add_the_signed_in_routes(app, stores.sessions)
+    app = _a_host_app(stores.sessions)
     holder: list[OidcHost] = []
 
     def refused(request: Request, refusal: SignInRefusal) -> Response:
@@ -527,19 +579,7 @@ def an_oidc_host(
         return holder[0].answer_refusals(request, refusal)
 
     auth = WebAuth.build(
-        WebAuthSettings(
-            config=config,
-            client=a_client_config(),
-            sign_in_paths=SIGN_IN_PATHS,
-            keeps_id_token=keeps_id_token,
-            max_sessions=max_sessions,
-            security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
-            csrf_origin=CsrfPolicy(),
-            body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
-            rate_limit=None
-            if address_budget is None
-            else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60)),
-        ),
+        _the_settings_of_a_host(config, keeps_id_token, max_sessions, address_budget),
         stores=WebAuthStores(sign_in=stores.transaction, sessions=stores.sessions.in_transaction),
         groups=admission,
         pages=SignInPages(
@@ -547,29 +587,20 @@ def an_oidc_host(
         ),
         front=TRUSTED_PROXIES,
         issuer_calls=IssuerCalls(
-            post_token_request=issuer,
-            fetch_key_set=key_set,
-            monotonic_clock=FakeClock(5_000.0),
+            post_token_request=issuer, fetch_key_set=key_set, monotonic_clock=FakeClock(5_000.0)
         ),
     )
     auth.install(app, bearer=None)
     if behind_base_http_middleware:
         app.middleware("http")(_pass_through)
     holder.append(
-        OidcHost(
-            client=_a_client_of(app, root_path),
-            issuer=issuer,
-            key_set=key_set,
-            wall_clock=wall_clock,
-            accounts=stores.accounts,
-            sessions=stores.sessions,
-            audit=stores.audit,
-            config=config,
-            lock=stores.lock,
-            relying_party=auth.relying_party,
-            transaction=stores.transaction,
-            issued_id_tokens=issued_id_tokens,
-            refusals=[],
+        _an_oidc_host_over(
+            _a_client_of(app, root_path),
+            auth,
+            stores,
+            config,
+            wall_clock,
+            (issuer, key_set, issued_id_tokens),
         )
     )
     return holder[0]

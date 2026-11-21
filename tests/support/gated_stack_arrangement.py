@@ -8,6 +8,7 @@ from fastapi import FastAPI, Response
 
 from tests.support.client_address_arrangement import TRUSTED_PROXIES
 from tests.support.oidc_arrangement import (
+    FakeClock,
     a_key_set_endpoint,
     a_realm_client_config,
 )
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from starlette.middleware import Middleware
 
     from webauth.config import WebAuthConfig
+    from webauth.jwt_verification import KeySetFetch
     from webauth.middleware import BearerGate, SessionGate
     from webauth.oidc import OidcClientConfig, TokenRequest
     from webauth.policies import BodySizePolicy, RateLimitPolicy
@@ -57,11 +59,13 @@ def a_token_post_nobody_makes(request: TokenRequest) -> NoReturn:
     raise AssertionError(f"a token request was posted to {request.url}")
 
 
-def an_issuer_nobody_calls() -> IssuerCalls:
-    """The relying party's calls of an app whose scenario signs nobody in."""
+def an_issuer_nobody_calls(fetch_key_set: KeySetFetch | None = None) -> IssuerCalls:
+    """The relying party's calls of an app whose scenario signs nobody in; its key set is
+    `fetch_key_set`, else one publishing the "issuer" key."""
     return IssuerCalls(
         post_token_request=a_token_post_nobody_makes,
-        fetch_key_set=a_key_set_endpoint("issuer"),
+        fetch_key_set=fetch_key_set or a_key_set_endpoint("issuer"),
+        monotonic_clock=FakeClock(5_000.0),
     )
 
 

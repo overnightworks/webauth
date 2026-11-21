@@ -196,6 +196,19 @@ def _add_outermost_first(app: Starlette, entries: Sequence[Middleware]) -> None:
         app.add_middleware(entry.cls, *entry.args, **entry.kwargs)
 
 
+def _front_middleware(
+    trusted_proxies: TrustedProxies | None, security_headers: SecurityHeadersPolicy
+) -> list[Middleware]:
+    """The outermost entries: the request line and the writer for ``trusted_proxies``, or, for an
+    app a shared front serves (``None``), the guard that refuses a request without that front."""
+    if trusted_proxies is None:
+        return [Middleware(_FrontRequiredMiddleware, policy=security_headers)]
+    return [
+        Middleware(RequestLineMiddleware),
+        Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
+    ]
+
+
 def _install_web_auth_middleware(
     app: Starlette,
     *,
@@ -233,16 +246,8 @@ def _install_web_auth_middleware(
     effective_security_headers = _effective_security_headers(
         sign_in_paths, security_headers, bearer_gate
     )
-    front = (
-        [Middleware(_FrontRequiredMiddleware, policy=effective_security_headers)]
-        if trusted_proxies is None
-        else [
-            Middleware(RequestLineMiddleware),
-            Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
-        ]
-    )
     entries = [
-        *front,
+        *_front_middleware(trusted_proxies, effective_security_headers),
         *outside,
         *_library_middleware(
             sign_in_paths=sign_in_paths,
