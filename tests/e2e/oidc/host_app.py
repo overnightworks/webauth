@@ -378,7 +378,7 @@ def _counted_session_transaction(world: World) -> SessionTransaction:
 _EVERY_PATH_BUT_ALBUMS = PathRules(patterns=(re.compile(r"/(?!albums/)"),))
 
 
-def _gate_of(settings: HostSettings, world: World) -> SessionGate:
+def _gate_of(settings: HostSettings) -> SessionGate:
     """The session gate: the bearer host's, or the album-page gate of the host without the
     setting."""
     if not settings.is_bearer_host:
@@ -511,7 +511,7 @@ def _web_auth_for(settings: HostSettings, world: World, origin: str) -> WebAuth:
             ui_language=lambda _request: None,
         ),
         front=arrangement.client_address.TRUSTED_PROXIES,
-        gate=_gate_of(settings, world),
+        gate=_gate_of(settings),
         outside=(_counting_callbacks_and_back_channel_answers(settings, world, config),),
         issuer_calls=IssuerCalls(
             post_token_request=world.token_requests,

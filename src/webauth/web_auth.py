@@ -316,7 +316,7 @@ class WebAuth:
         ``front`` is ``TrustedProxies`` (``SHARED_FRONT`` leaves them to ``web_auth_front``),
         ``outside``, the library's stack, ``inside``. A ``bearer`` that is no ``BearerGate`` or
         does not fit the early values raises a ``WebAuthSettingError``; a second install of the
-        handle, on any app, or an app that already carries library middleware, raises
+        handle, on any app, or an app that already carries another ``WebAuth``'s stack, raises
         ``RuntimeError``. Both are refused before the app changes. The sign-in routes and the
         resource metadata route answer ahead of every route the host added before.
         """

@@ -265,9 +265,9 @@ class ConnectionRefusal(Enum):
     by ``authenticate_websocket`` alone. ``admit_session`` returns only
     ``SESSION_ENDED_OR_EXPIRED``.
 
-    The HTTP dependencies answer a navigation with the 302 to ``login_redirect``
+    The session gate answers a navigation with the 302 to ``SessionGate.login_redirect``
     when the host named one, and every other request with the 401 each session
-    member names.
+    member names; ``current_user`` and ``admin_user`` answer the 401 alone.
     """
 
     NO_SESSION = "no-session"
