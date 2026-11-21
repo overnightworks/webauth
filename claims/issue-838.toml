@@ -1,8 +1,0 @@
-claim_id = "7752c0fa03a24993b2f563f07bc660a1"
-agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
-role = "builder"
-base = "029f9a0ac0667e66c1178357e67b97ab456c5a59"
-branch = "claude/issue-838-s1-composition-call"
-scope = [".importlinter", "README.md", "docs/ARCHITECTURE.md", "docs/VISION.md", "docs/host-contract.md", "quality/baseline.toml", "quality/config.toml", "src/webauth/dependencies.py", "src/webauth/middleware/stack.py", "src/webauth/sign_in_routes.py", "src/webauth/web_auth.py", "tests/e2e/oidc/host_app.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/support/environment_arrangement.py", "tests/support/web_auth_host_arrangement.py", "tests/test_service_callers_rules.py", "tests/test_web_auth.py"]
-opened_commit = "68d762e01b9747f84cfb497d5a9a0bb06b65db99"
-whole_reason = "One composition call with its tests, the two hosts that use it and the four documents that state it; split further it would land a call no host or document uses."
