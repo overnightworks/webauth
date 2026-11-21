@@ -1,0 +1,7 @@
+claim_id = "cfdc6bc4c8ac401da4960f5bb82ba65a"
+agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
+role = "builder"
+base = "e98d33282645437d3a743478f27cfc995db1bdfd"
+branch = "claude/issue-861-quality-v0-23-0-pins"
+scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", ".github/workflows/release.yml"]
+opened_commit = "c08b0bb1c31dbc9a92b00c9c17520ac6f4255e9d"
