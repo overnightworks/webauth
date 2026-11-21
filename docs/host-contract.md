@@ -51,7 +51,10 @@ host configures them; `WebAuthConfig` carries none.
   reads the record through `webauth.proxies.client_address(connection)` and
   `webauth.proxies.request_is_https(connection)`, which only read: no host resolves a second
   time, and `forwarded_for.ignored` (LOG-04) is written at most once per request. One writer in
-  front of several apps that each carry a stack resolves once for all of them.
+  front of several apps that each carry a stack resolves once for all of them. An in-process
+  request a host builds as a fresh scope, such as agents' `route_tools` replaying a tool call, is
+  a request of its own: the one front it enters resolves it once and gives it its own request
+  line, and webauth carries no client record from one scope into another.
 - **PROXY-09** An app built with `SHARED_FRONT` and served without `web_auth_front` fails loud on
   its first request, before any `outside` entry can answer (a CORS preflight included): an http
   request answers the library 500 with the security headers and its exception reaches the server,
