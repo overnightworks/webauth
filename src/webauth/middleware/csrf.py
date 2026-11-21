@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Final
 
 from starlette.responses import JSONResponse
 
+from webauth._bearer_admission import bearer_admission
 from webauth._origins import OriginVerdict, origin_verdict
 from webauth.config import web_auth_config
-from webauth.dependencies import _bearer_admission
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.policies import CsrfPolicy
@@ -71,7 +71,7 @@ class _CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
         if (
             request.method in _MUTATING_METHODS
             and self._policy.requires_same_origin(route_path(request.scope))
-            and _bearer_admission(request) is None
+            and bearer_admission(request) is None
         ):
             return _origin_check_refusal(request)
         return None

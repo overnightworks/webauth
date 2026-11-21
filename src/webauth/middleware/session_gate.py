@@ -9,31 +9,30 @@ from typing import TYPE_CHECKING
 from logline import set_sub
 from starlette.requests import HTTPConnection
 
+from webauth._bearer_admission import (
+    AUTHENTICATION_REQUIRED_DETAIL,
+    admitted_token_person,
+    bearer_admission,
+    require_admin,
+    unauthenticated_without_redirect,
+)
 from webauth._paths import _has_dot_segment
 from webauth._worker import on_worker
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.dependencies import (
-    _AUTHENTICATION_REQUIRED_DETAIL,
     ConnectionRefusal,
     LoginRedirect,
-    _admitted_token_person,
-    _bearer_admission,
     _gate_admission,
     _GateAdmission,
-    _is_bearer_admitted,
-    _is_person_admitted,
-    _raise_for_bearer_admission,
     _read_session_cookie,
     _record_gate_admission,
     _refusal_response,
-    _require_admin,
-    _unauthenticated_without_redirect,
     admit_session,
 )
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.policies import PathRules, PublicRule
-from webauth.ports import AuthenticatedUser
+from webauth.ports import AuthenticatedUser, BearerCaller
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -97,7 +96,7 @@ class _SessionGateMiddleware(RefusalMiddleware[SessionGate]):
         self._session_transaction = session_transaction
 
     async def _refusal(self, request: Request) -> Response | None:
-        if _bearer_admission(request) is not None:
+        if bearer_admission(request) is not None:
             return None
         config = web_auth_config(request)
         reading = _read_session_cookie(request, config)
@@ -157,13 +156,12 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
     signed out. For the session id use ``session_id_from_request``. The account is
     this request's own: a host must not hand it to another request.
     """
-    person = _admitted_token_person(connection)
+    admission = bearer_admission(connection)
+    if admission is not None and isinstance(admission.principal, BearerCaller):
+        return None
+    person = admitted_token_person(connection)
     if person is not None:
         return person
-    if _is_person_admitted(connection):
-        _raise_for_bearer_admission(connection)
-    if _is_bearer_admitted(connection):
-        return None
     decided = _gate_admission(connection)
     if decided is None:
         raise RuntimeError(
@@ -189,11 +187,10 @@ def admitted_admin(connection: HTTPConnection) -> AuthenticatedUser:
     and on a machine admission: a machine route takes ``Depends(bearer_caller)``.
     Usable as ``Depends(admitted_admin)``.
     """
-    person = _admitted_token_person(connection)
+    person = admitted_token_person(connection)
     if person is not None:
-        return _require_admin(connection, person)
-    _raise_for_bearer_admission(connection)
+        return require_admin(connection, person)
     user = admitted_user(connection)
     if user is None:
-        raise _unauthenticated_without_redirect(connection, _AUTHENTICATION_REQUIRED_DETAIL)
-    return _require_admin(connection, user)
+        raise unauthenticated_without_redirect(connection, AUTHENTICATION_REQUIRED_DETAIL)
+    return require_admin(connection, user)

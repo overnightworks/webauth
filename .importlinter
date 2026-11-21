@@ -107,6 +107,19 @@ forbidden_modules =
     pydantic
     anyio
 
+# webauth._bearer_admission is the leaf below every reader of the bearer gate's record (the
+# session readers, both gates and the CSRF check), so it reaches none of them: importing
+# webauth.middleware runs the bearer gate, which imports webauth.dependencies.
+[importlinter:contract:the-bearer-admission-leaf-imports-no-reader]
+name = webauth._bearer_admission imports no reader of its record
+type = forbidden
+source_modules =
+    webauth._bearer_admission
+forbidden_modules =
+    webauth.dependencies
+    webauth.middleware
+    webauth.oidc_login
+
 # The single-process stores are a host's choice for one worker. No webauth
 # module imports them, so the library never falls back to them.
 [importlinter:contract:no-webauth-module-imports-the-single-process-stores]

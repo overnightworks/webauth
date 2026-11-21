@@ -438,7 +438,7 @@ decides the admin role by the handle's `groups` (COMPOSE-19).
   - **Host duty:** Install the gate on the app that serves the machine routes.
   - **MACHINE-28** A sub-app mounted below a gated path keeps its own CSRF check.
   - **MACHINE-29** A sub-app mounted below a gated path keeps its own session gate.
-  - **MACHINE-30** The `bearer_caller` of a route in such a sub-app raises.
+  - **MACHINE-30** The `bearer_caller` of a route in such a sub-app raises, and so do the session readers there (`current_user`, `admin_user`, `admitted_user`, `admitted_admin`).
   - **MACHINE-31** WebSocket scopes are not gated.
 
 ## The person's token on the app's API
