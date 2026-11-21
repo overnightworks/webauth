@@ -3,6 +3,6 @@ agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
 role = "builder"
 base = "029f9a0ac0667e66c1178357e67b97ab456c5a59"
 branch = "claude/issue-772-issuer-calls-trace-context"
-scope = ["docs/host-contract.md", "pyproject.toml", "src/webauth/config.py", "src/webauth/https_client.py", "tests/support/trace_context.py", "tests/test_https_client.py", "uv.lock"]
+scope = ["docs/host-contract.md", "pyproject.toml", "quality/baseline.toml", "src/webauth/config.py", "src/webauth/https_client.py", "tests/support/oidc_arrangement.py", "tests/support/trace_context.py", "tests/test_https_client.py", "tests/test_https_client_trace_context.py", "uv.lock"]
 opened_commit = "1e79737efe05dce0f64f70fdc260c5c23439a575"
 whole_reason = "One owner change: the outbound header set of the issuer transports, its OpenTelemetry dependency, the logline pin it needs (#840) and its host-contract row."
