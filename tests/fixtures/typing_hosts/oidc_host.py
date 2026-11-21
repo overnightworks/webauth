@@ -30,7 +30,6 @@ from webauth.admission import (
 from webauth.config import (
     SessionLifetime,
     WebAuthConfig,
-    install_web_auth_config,
 )
 from webauth.cookies import (
     DEFAULT_SESSION_COOKIE_NAME,
@@ -65,23 +64,15 @@ from webauth.jwt_verification import (
 from webauth.languages import AppLanguages, resolve_language
 from webauth.middleware import (
     BearerGate,
-    BearerGateMiddleware,
-    BodySizeLimitMiddleware,
-    CsrfOriginMiddleware,
-    IpRateLimitMiddleware,
     MachinePaths,
     MarkedRoute,
     PersonPaths,
     ProtectedResource,
-    SecurityHeadersMiddleware,
     SessionGate,
-    SessionGateMiddleware,
     admitted_admin,
     admitted_user,
     bearer_caller,
     exchanged_access_token,
-    install_resource_metadata,
-    install_web_auth_middleware,
     is_resource_admission,
     resource_person,
 )
@@ -144,7 +135,6 @@ from webauth.sign_in_routes import (
     RefusalPage,
     SignInPaths,
     SignInRefusal,
-    install_sign_in_routes,
 )
 from webauth.web_auth import (
     IssuerCalls,
@@ -643,9 +633,6 @@ def _surface_of_the_errors_and_the_verified_records() -> tuple[object, ...]:
         admit_session,
         bearer_caller,
         current_user_dependency,
-        install_sign_in_routes,
-        install_web_auth_config,
-        install_web_auth_middleware,
         is_https_url,
         session_id_from_request,
     )
@@ -655,17 +642,12 @@ def _surface_of_the_gates_and_limits() -> tuple[object, ...]:
     return (
         AuthorizedParties,
         BearerCaller,
-        BearerGateMiddleware,
-        BodySizeLimitMiddleware,
         MachinePaths,
         PersonPaths,
         ProtectedResource,
-        install_resource_metadata,
         BodySizePolicy,
-        CsrfOriginMiddleware,
         DEFAULT_SESSION_COOKIE_NAME,
         ExchangeFailure,
-        IpRateLimitMiddleware,
         KeySetFetchError,
         LoginRedirect,
         ProviderMetadataFetchError,
@@ -683,10 +665,8 @@ def _surface_of_the_login_and_session_flow() -> tuple[object, ...]:
         PendingLogin,
         RateLimitBackend,
         RedisRateLimitBackend,
-        SecurityHeadersMiddleware,
         SessionLifetime,
         SessionGate,
-        SessionGateMiddleware,
         SessionRecordStore,
         SessionTransaction,
         PublicRule,

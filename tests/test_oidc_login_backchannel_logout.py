@@ -119,7 +119,7 @@ def a_host_with_sessions(
 
 
 def open_sessions(host: OidcHost, user_id: str, count: int) -> None:
-    first_created_at = datetime.now(UTC) - timedelta(minutes=30)
+    first_created_at = datetime.fromtimestamp(host.config.wall_clock(), UTC) - timedelta(minutes=30)
     for minute in range(count):
         created_at = first_created_at + timedelta(minutes=minute)
         seeded_session(
