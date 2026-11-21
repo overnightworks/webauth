@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import Depends, FastAPI, Request
+from logline import WEBSOCKET_EVENT
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
@@ -48,7 +49,6 @@ from tests.support.oidc_login_host import (
 )
 from tests.support.request_line_arrangement import (
     FORWARDED_CLIENT,
-    WEBSOCKET_EVENT,
     request_lines_written,
 )
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
