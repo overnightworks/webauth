@@ -1,5 +1,5 @@
 claim_id = "0532782a10124e7e9e75fbd9acb902b6"
-agent = "Claude e340585b-ade9-4414-85eb-b95ca5b3d42d"
+agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
 role = "builder"
 base = "e45ccd981f45140d48b07501470e201d84623990"
 branch = "claude/issue-854-the-request-path-takes-a-narrow-session"
