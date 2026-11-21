@@ -10,7 +10,10 @@ from starlette.middleware import Middleware
 
 from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
 from webauth.middleware.body_size import BodySizeLimitMiddleware
-from webauth.middleware.client_address import _ClientAddressMiddleware
+from webauth.middleware.client_address import (
+    _ClientAddressMiddleware,
+    _FrontRequiredMiddleware,
+)
 from webauth.middleware.csrf import CsrfOriginMiddleware
 from webauth.middleware.path_refusal import PathRefusalMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
@@ -197,11 +200,12 @@ def _install_slotted_web_auth_middleware(
 ) -> None:
     """Install what ``WebAuth.install`` places, outermost first: logline's request line and the
     client-address writer, only with ``trusted_proxies`` (``None`` for an app a shared front
-    serves), the host's ``outside`` entries, the library stack, the host's ``inside`` entries.
+    serves: a guard refuses a request without that front instead), the host's ``outside`` entries,
+    the library stack, the host's ``inside`` entries.
     An app that already carries library middleware is refused untouched."""
     _refuse_an_unsound_stack(app)
     front = (
-        []
+        [Middleware(_FrontRequiredMiddleware, policy=security_headers)]
         if trusted_proxies is None
         else [
             Middleware(RequestLineMiddleware),
@@ -239,9 +243,10 @@ def install_web_auth_middleware(
     """Install the library's middleware outermost first: security headers, path refusal, body size,
     rate limit, bearer gate, CSRF origin, session gate.
 
-    The client address is not installed here: the composition call places the writer and
-    logline's ``RequestLineMiddleware`` around this stack, and without one the first request
-    fails (``docs/host-contract.md``).
+    The client address is not installed here: a host that calls this directly serves the app
+    through ``web_auth_front(app, trusted_proxies=...)``, which places the writer and logline's
+    ``RequestLineMiddleware`` around it, and without one the first request fails
+    (``docs/host-contract.md``).
 
     ``sign_in_paths`` is the one description of the sign-in routes. From it the installer puts these
     rules ahead of the host's own, so the first match is the derived one (a path the host exempts

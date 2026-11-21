@@ -176,6 +176,22 @@ def test_proxy_09_an_http_request_to_a_child_without_its_front_answers_the_libra
     assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
 
 
+def test_proxy_09_a_preflight_to_a_child_without_its_front_answers_the_library_500() -> None:
+    """PROXY-09"""
+    world = a_host_world()
+    cors = Middleware(CORSMiddleware, allow_origins=[ALLOWED_ORIGIN], allow_methods=["GET"])
+    host = a_composed_host(
+        world, a_composition(world, front=ServedBehind.SHARED_FRONT, outside=(cors,))
+    )
+    preflight = {"origin": ALLOWED_ORIGIN, "access-control-request-method": "GET"}
+
+    response = host.client.options(API_PATH, headers=preflight)
+
+    assert response.status_code == 500
+    assert "access-control-allow-origin" not in response.headers
+    assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
+
+
 def test_proxy_09_a_websocket_to_a_child_without_its_front_raises_before_the_app_runs() -> None:
     """PROXY-09"""
     world = a_host_world()

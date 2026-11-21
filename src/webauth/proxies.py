@@ -259,6 +259,10 @@ def _recorded_client(connection: HTTPConnection) -> _RecordedClient:
         ) from None
 
 
+def _client_is_recorded(connection: HTTPConnection) -> bool:
+    return _CLIENT_SCOPE_KEY in connection.scope
+
+
 def client_address(connection: HTTPConnection) -> str:
     """The client identity the client-address writer recorded for ``connection``.
 
