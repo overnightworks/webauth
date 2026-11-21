@@ -736,7 +736,7 @@ def test_compose_18_the_class_called_with_every_argument_of_a_build_is_refused(
 
     with pytest.raises(TypeError):
         WebAuth(  # type: ignore[call-arg]
-            *positional,
+            *positional,  # type: ignore[arg-type]
             settings=composition.settings,
             stores=composition.stores,
             groups=composition.groups,
