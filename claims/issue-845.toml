@@ -1,0 +1,8 @@
+claim_id = "3b2c5b854b3a44579fd4e802c40b695a"
+agent = "Claude f53ca93a-5f18-4bdc-b773-a6155e0a4b0b"
+role = "builder"
+base = "0e05553554aa54221676632f8e6cb352c69eceaf"
+branch = "claude/issue-845-s3-installers-private"
+scope = ["AGENTS.md", "README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth", "tests"]
+opened_commit = "5529e627196db861c2eab155fb0229743bafc3d0"
+whole_reason = "One rename set: the four installers and seven stack classes go private together, and every test and builder that calls them moves onto the composition call in the same change, or the suite would test names no host can reach."
