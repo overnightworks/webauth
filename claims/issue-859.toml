@@ -1,8 +1,0 @@
-claim_id = "0394ed21a6ae4158968223cd9c6d1d4e"
-agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
-role = "builder"
-base = "55a1d3b547e19a20b00ec37c13d01268534e09d2"
-branch = "claude/issue-859-take-logline-v1-8-0-websocket-event-for"
-scope = ["pyproject.toml", "tests/middleware/test_stack_request_line.py", "tests/support/request_line_arrangement.py", "tests/test_web_auth.py", "tests/test_web_auth_front.py", "uv.lock"]
-opened_commit = "9c2f27633fd586b3d104bf61dae2a2ce4e60ea63"
-whole_reason = "One pin raise and the one name it lets every test import from its owner."
