@@ -88,7 +88,7 @@ The operator ruled the form of the call as this paragraph states it (option A: b
 - **COMPOSE-14** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `install` for the late bearer, before `install` changes the app: a `bearer` that does not fit the early values raises a `WebAuthSettingError` naming `bearer.relying_party` or `bearer.admission`: it must hold `auth.relying_party` and `auth.admission`. `BearerGate` still refuses `NoAdmins` with machine paths and a gate that names no kind when it is constructed.
 - **COMPOSE-15** `admin_user` opens no entry and checks the identity it is given, so `app.dependency_overrides[current_user]` decides both.
 - **COMPOSE-16** `authenticate_websocket(connection)` without `sessions` refuses a missing or foreign `Origin` before it opens any `stores.sessions()` entry (CSRF-15), then opens one.
-- **COMPOSE-17** A host that builds and never installs gets a `RuntimeError` naming the missing `auth.install` on its first request that reads it, an HTTP request or a WebSocket handshake.
+- **COMPOSE-17** A host that builds and never installs gets a `RuntimeError` naming the missing `auth.install` on its first request that reads it (`current_user`, `admin_user`, or `authenticate_websocket` without `sessions`), an HTTP request or a WebSocket handshake. A request that reads none of them is served without the library's stack, and the sign-in routes do not exist.
 - **Host duty:** `stores.sessions` and `stores.sign_in` address the same session data, and the sign-in transaction is passed again in `PersonPaths` and `ProtectedResource`, and the session transaction again in `SessionGate.session_transaction`.
 
 ## What every app gets
