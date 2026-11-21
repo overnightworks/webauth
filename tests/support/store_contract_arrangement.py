@@ -183,6 +183,13 @@ class CountsOneSessionTooMany(SingleProcessSessionStore):
         return super().delete_for_user(user_id) + 1
 
 
+class RemovesTheAccountOnDeleteForUser(SingleProcessSessionStore):
+    def delete_for_user(self, user_id: str) -> int:
+        ended = super().delete_for_user(user_id)
+        self._tables.accounts.pop(user_id, None)
+        return ended
+
+
 class AnswersWithRowCounts(SingleProcessSessionStore):
     def touch(self, session_id: str, *, expires_at: datetime) -> bool:
         return cast("bool", int(super().touch(session_id, expires_at=expires_at)))
@@ -442,6 +449,7 @@ BROKEN_ADAPTERS: dict[str, Callable[[], StoreAdapter]] = {
     "load_answers_none_for_unknown_and_deleted_ids": _with_sessions(LoadsDeletedSessions),
     "prune_overflow_keeps_the_newest": _with_sessions(PrunesTheNewest),
     "delete_for_user_returns_how_many_ended": _with_sessions(CountsOneSessionTooMany),
+    "delete_for_user_keeps_the_account": _with_sessions(RemovesTheAccountOnDeleteForUser),
     "touch_and_replace_refresh_token_answer_a_bool": _with_sessions(AnswersWithRowCounts),
     "get_compares_the_subject_exactly": _with_accounts(FoldsSubjects),
     "a_write_on_a_missing_account_raises": _with_accounts(CreatesAMissingAccountOnWrite),

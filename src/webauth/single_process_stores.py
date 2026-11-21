@@ -251,7 +251,7 @@ class SingleProcessSessionStore:
             self._tables.rows.pop(session_id, None)
 
     def delete_for_user(self, user_id: str) -> int:
-        """End every session of the account, remove the account too, and return how many ended."""
+        """End every session of the account, keep the account, and return how many ended."""
         with self._tables.guard:
             ended = [
                 session_id
@@ -260,7 +260,6 @@ class SingleProcessSessionStore:
             ]
             for session_id in ended:
                 del self._tables.rows[session_id]
-            self._tables.accounts.pop(user_id, None)
         return len(ended)
 
     def prune_overflow(self, user_id: str, keep_newest: int) -> None:

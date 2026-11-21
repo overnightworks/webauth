@@ -242,10 +242,10 @@ class TestSessions:
 
         assert stores.sessions.load(session_id) is not None
 
-    def test_delete_for_user_ends_every_session_counts_them_and_removes_the_account(
+    def test_delete_for_user_ends_every_session_counts_them_and_keeps_the_account(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-09: delete_for_user ends every session, counts them and removes the account."""
+        """MEMSTORE-09: delete_for_user ends every session, counts them and keeps the account."""
         with_account(stores)
         with_account(stores, SUBJECT_TWO)
         mine = [open_session(stores) for _ in range(3)]
@@ -254,17 +254,17 @@ class TestSessions:
         assert stores.sessions.delete_for_user(SUBJECT_ONE) == 3
 
         assert held_ids(stores, mine) == []
-        assert stores.accounts.get(SUBJECT_ONE) is None
+        assert stores.accounts.get(SUBJECT_ONE) is not None
         assert stores.sessions.load(theirs) is not None
 
-    def test_delete_for_user_without_sessions_still_removes_the_account(
+    def test_delete_for_user_without_sessions_still_keeps_the_account(
         self, stores: SingleProcessStores
     ) -> None:
-        """MEMSTORE-09: delete_for_user removes the account when no session is left."""
+        """MEMSTORE-09: delete_for_user keeps the account when no session is left."""
         with_account(stores)
 
         assert stores.sessions.delete_for_user(SUBJECT_ONE) == 0
-        assert stores.accounts.get(SUBJECT_ONE) is None
+        assert stores.accounts.get(SUBJECT_ONE) is not None
 
     def test_load_returns_an_expired_row(self, stores: SingleProcessStores) -> None:
         """MEMSTORE-11: load returns an expired row."""
@@ -628,18 +628,18 @@ class TestSignInRoutesOverTheStores:
         assert browser.gate_status() == 401
         assert stores.sessions.records_of(SUBJECT).sessions == ()
 
-    def test_back_channel_logout_ends_every_session_and_the_next_sign_in_creates_the_account_again(
+    def test_back_channel_logout_ends_every_session__and_the_next_sign_in_finds_the_account(
         self, stores: SingleProcessStores, audit: RecordingAuditSink
     ) -> None:
-        """MEMSTORE-20: back-channel logout ends every session and the account."""
+        """MEMSTORE-20: back-channel logout ends every session and keeps the account."""
         browser = Browser(stores)
         browser.sign_in()
 
         assert browser.issuer_logs_out() == 200
 
         assert browser.gate_status() == 401
-        assert stores.accounts.get(SUBJECT) is None
+        assert stores.accounts.get(SUBJECT) is not None
         assert browser.sign_in() == 303
         assert browser.gate_status() == 200
         created = [e for e in audit.account_events if e.kind is AccountEventKind.USER_CREATED]
-        assert len(created) == 2
+        assert len(created) == 1
