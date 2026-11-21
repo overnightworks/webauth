@@ -84,16 +84,16 @@ Every authenticated request reads `SessionRecordStore`, never a cache ([`ports`]
 
 ### The bearer gate
 
-The gate verifies the bearer with `OidcRelyingParty` off-loop and admits by the kind of path (machine, person, protected resource), each with its own `AuthorizedParties`; the resource's agent group admits an agent's own client beyond them.
+The gate verifies the bearer with the handle's `OidcRelyingParty` off-loop, decides roles by the handle's `AdmissionConfig`, enters the handle's `stores.sign_in` for a person or an agent, and admits by the kind of path (machine, person, protected resource), each with its own `AuthorizedParties`; the resource's agent group admits an agent's own client beyond them.
 [The host contract](host-contract.md#the-hosts-machine-routes) owns the outcomes; `no-store` and the selection order are in [the person paths](host-contract.md#the-persons-token-on-the-apps-api) and [the protected resource](host-contract.md#the-protected-resource).
 
 ### Reading the session
 
-`current_user_dependency` binds the store to `current_user`, `admin_user`; `admit_session` judges a host-read id. `session_id_from_request` reads the signed cookie; [the host contract](host-contract.md#signed-out-and-refused) owns `LoginRedirect`/401 outcomes.
+`current_user` and `admin_user` read the session in one `stores.sessions` entry of the installed handle; `admit_session` judges a host-read id. `session_id_from_request` reads the signed cookie; [the host contract](host-contract.md#signed-out-and-refused) owns `LoginRedirect`/401 outcomes.
 
 ### The session gate
 
-`SessionGate` enforces [the host contract](host-contract.md#signed-out-and-refused) without route dependencies; `admitted_user` reads admission, `admitted_admin` checks admin too.
+`SessionGate` enforces [the host contract](host-contract.md#signed-out-and-refused) without route dependencies, in the `stores.sessions` entry the composition call binds to it; `admitted_user` reads admission, `admitted_admin` checks admin too.
 
 ### WebSocket handshakes
 
@@ -168,7 +168,7 @@ To report a vulnerability, see [SECURITY.md](../.github/SECURITY.md).
 
 - The library never commits: durability belongs to the host, so each host decides what a failure keeps ([host contract](host-contract.md#the-sign-in-routes)).
 - It caches no session: the store decides every request, so a session the host ended is refused on its next request ([`SessionRecordStore`](../src/webauth/ports.py)).
-- One install order: the gates sit in a fixed order, each placed for what it must see first, and the install puts the rules derived from the host's `SignInPaths` and the bearer gate's resource ahead of the host's own; a stack that already holds library middleware is refused untouched. No host reaches the installers or the stack classes: `WebAuth.build` and `auth.install` are the only way in, so the order is one the library owns ([`stack`](../src/webauth/middleware/stack.py)).
+- One install order: the gates sit in a fixed order, each placed for what it must see first, and the install puts the rules derived from the host's `SignInPaths` and the bearer gate's resource ahead of the host's own; an app that already holds another handle's stack is refused untouched. No host reaches the installers or the stack classes: `WebAuth.build` and `auth.install` are the only way in, so the order is one the library owns ([`stack`](../src/webauth/middleware/stack.py)).
 - The store is bound to one issuer: an account's `id` is the issuer's subject, so moving issuers is a migration of the host's accounts ([`oidc_login`](../src/webauth/oidc_login.py)).
 - The pending login lives in its own signed cookie, one per login, so two tabs never overwrite each other and the library keeps no server-side store ([`oidc_login`](../src/webauth/oidc_login.py)).
 - ASGI owns HTTP framing (h11 and httptools may legally differ), so the body-size limit counts streamed bytes and never re-parses framing.

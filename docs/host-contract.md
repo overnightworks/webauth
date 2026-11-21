@@ -56,8 +56,7 @@ host configures them; `WebAuthConfig` carries none.
   its first request, before any `outside` entry can answer (a CORS preflight included): an http
   request answers the library 500 with the security headers and its exception reaches the server,
   a WebSocket raises before the app runs, and `client_address` raises `RuntimeError` naming
-  `web_auth_front`. webauth never falls back to the socket peer. The installer refuses an app that
-  already carries a writer, since one added by hand sits inside the stack.
+  `web_auth_front`. webauth never falls back to the socket peer.
 - **Host duty:** serve every app built with `SHARED_FRONT` through one `web_auth_front` that stands
   outside all of them, and an app built with `TrustedProxies` never inside one, which would write
   a second request line. No library check catches an app served bare; the 500 of PROXY-09 shows
@@ -83,13 +82,14 @@ The operator ruled the form of the call as this paragraph states it (option A: b
 - **COMPOSE-10** The host's `outside` and `inside` entries keep the order given, outermost first.
 - **COMPOSE-11** A `bearer` given to `install` after the last route has its resource-metadata route served and its public rule added to `gate.public`, and a token on a person path is admitted. The routes the install adds, the sign-in routes of COMPOSE-05 and the resource metadata, answer ahead of every route the host registered before, a catch-all included.
 - **COMPOSE-12** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `build` for the early values (a `WebAuthSettingError`): `groups.bound_issuer` differing from `settings.client.issuer`, `settings.max_sessions`, `settings.keeps_id_token`, `pages.logout_page_text`, `front` (that is no `TrustedProxies` and no `ServedBehind`), `outside` and `inside`.
-- **COMPOSE-13** A second `install` of one handle, on the same app or on another, or an app that already carries library middleware, raises `RuntimeError` and leaves the app's routes, middleware and state as they were. Each app of a shared front is built and installed once.
-- **COMPOSE-14** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `install` for the late bearer, before `install` changes the app: a `bearer` that does not fit the early values raises a `WebAuthSettingError` naming `bearer.relying_party` or `bearer.admission`: it must hold `auth.relying_party` and `auth.admission`. `BearerGate` still refuses `NoAdmins` with machine paths and a gate that names no kind when it is constructed.
+- **COMPOSE-13** A second `install` of one handle, on the same app or on another, or an app that already carries the stack of another handle, raises `RuntimeError` and leaves the app's routes, middleware and state as they were. Each app of a shared front is built and installed once. The handle's own flag cannot see a second handle on the app, so the check for another handle's stack stays; no host can name the stack classes or the client-address writer, so no check looks for one added by hand.
+- **COMPOSE-14** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `install` for the late bearer, before `install` changes the app: a `bearer` with machine paths for `groups` whose `admin_group` is `NoAdmins` (no token could pass there) raises a `WebAuthSettingError` naming `bearer.machine_paths`. `BearerGate` refuses a gate that names no kind when it is constructed.
 - **COMPOSE-15** `admin_user` opens no entry and checks the identity it is given, so `app.dependency_overrides[current_user]` decides both.
-- **COMPOSE-16** `authenticate_websocket(connection)` without `sessions` refuses a missing or foreign `Origin` before it opens any `stores.sessions()` entry (CSRF-15), then opens one.
-- **COMPOSE-17** A host that builds and never installs gets a `RuntimeError` naming the missing `auth.install` on its first request that reads it (`current_user`, `admin_user`, or `authenticate_websocket` without `sessions`), an HTTP request or a WebSocket handshake. A request that reads none of them is served without the library's stack, and the sign-in routes do not exist.
+- **COMPOSE-16** `authenticate_websocket(connection)` refuses a missing or foreign `Origin` before it opens any `stores.sessions()` entry (CSRF-15), then opens one.
+- **COMPOSE-17** A host that builds and never installs gets a `RuntimeError` naming the missing `auth.install` on its first request that reads it (`current_user`, `admin_user`, or `authenticate_websocket`), an HTTP request or a WebSocket handshake. A request that reads none of them is served without the library's stack, and the sign-in routes do not exist.
 - **COMPOSE-18** `WebAuth.build` is the only way to make a `WebAuth`: calling the class raises `TypeError`.
-- **Host duty:** `stores.sessions` and `stores.sign_in` address the same session data, and the sign-in transaction is passed again in `PersonPaths` and `ProtectedResource`, and the session transaction again in `SessionGate.session_transaction`.
+- **COMPOSE-19** The host passes each transaction once, in `stores`, and the call binds it: the session gate and `current_user` enter `stores.sessions`, the sign-in routes, the person paths and the protected resource enter `stores.sign_in`, and the bearer gate verifies with `auth.relying_party` and decides roles by `groups`. `SessionGate`, `PersonPaths`, `ProtectedResource` and `BearerGate` carry no transaction, relying party or admission of their own.
+- **Host duty:** `stores.sessions` and `stores.sign_in` address the same session data.
 
 ## What every app gets
 
@@ -225,7 +225,7 @@ What the installer refuses before any rule or route:
 - **STACK-08** A request whose route path, the path below `root_path`, carries a control character (U+0000 to U+001F or U+007F) gets 400 with the JSON body `{"detail": "Malformed request path"}` and the security headers. Starlette's route patterns end in `$`, which also matches before a final line feed, so without the refusal a path with a trailing newline reaches a route that the path rules, which compare exactly, do not know.
 - **STACK-09** The refusal sits directly inside the security headers and ahead of every other library middleware: a refused request spends no rate budget, opens no session lookup, and reaches neither a host middleware added before the call nor a route.
 - **STACK-10** The refusal reads the path below `root_path`; a control character in `root_path` itself refuses nothing.
-- **STACK-11** The install always places it. It has no policy and no option, and no host names the class: `auth.install` is the only way to add it, and an app that already carries it is refused like any library middleware (COMPOSE-13).
+- **STACK-11** The install always places it. It has no policy and no option, and no host names the class: `auth.install` is the only way to add it, and an app that already carries it, which only another handle installed, is refused (COMPOSE-13).
 - **STACK-12** The lifespan scope passes, and a WebSocket scope passes once the security headers have read the recorded client (PROXY-09): no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
 - **STACK-13** A path with a space, a `;`, a trailing slash or a non-ASCII character keeps the answer it has without the refusal.
 - **Host duty:** a route takes no control character in its path; free text goes in the query or the body.
@@ -251,7 +251,7 @@ Every line webauth writes goes through the standard-library logger of its own mo
 - **LOG-03** `key_set_refresh.failed` (WARNING) carries `reason`, the code of why the fetched key set was refused (for example `not-json`, `duplicate-key-id`, `key-too-short`), and no error class. A refresh that failed because the fetch failed writes no such line: the fetch's own `key_set_fetch.ended` line (LOG-05) already records that failure.
 - **LOG-04** `forwarded_for.ignored` (WARNING) carries `reason`: `not-an-address` when the nearest entry of the chain is no address, `too-many-trusted-hops` when more trusted hops follow in a row than the bound. Behind uvicorn's own proxy-header handling (its default `--proxy-headers` with `forwarded-allow-ips`), uvicorn rewrites the peer from `X-Forwarded-For` before webauth sees it, so `TrustedProxies` and this line apply only when the host turns uvicorn's handling off.
 - **LOG-05** The calls to the issuer each write one `.ended` line through logline's `StepTimer`: `key_set_fetch.ended`, `provider_metadata_fetch.ended` and `token_request.ended` carry `duration_ms`, `outcome`, `status` once the origin answered, a `reason` code when the call failed (`unreachable`, `tls-failed`, `timed-out`, `broken-off` or `too-large`) or the origin answered a status it does not accept (`status-not-accepted`, outcome `refused`, at INFO), and `error_type`, the class name of the transport error, when the call failed on one (an answer past the size limit fails as `too-large` with no error). A failed key-set fetch is a WARNING, since the verifier goes on with the key set it holds; a failed provider-metadata fetch is an ERROR, since the host cannot start without it, and so is a failed token request. No line carries the URL, the document or a secret.
-- **LOG-06** The request line, `request.ended`, is written by logline's `RequestLineMiddleware`, which the install or `web_auth_front` places outermost (PROXY-07) and whose `configure` the host still calls; the host adds no request line and no writer. The writer gives the line its `ip`, so the host sets it with no `set_client_ip`; webauth's stack gives it `sub`, so the host sets that with no `set_sub`. `ip` is the client address `TrustedProxies` resolves (the rightmost hop no entry vouches for), set for every http request and every WebSocket the writer wraps, so a proxied preflight, an outer router's own 404 and 405, every refusal of the stack and an exempt path carry it; a WebSocket's line carries it on logline 1.0 and later, since below that a WebSocket has no line. `sub` is the `id` of the account `admitted_user` returns: the session gate sets it for a live session on a gated or optional path, the bearer gate for the account behind a token on a person path or at a protected resource, and the sign-in callback sets it once it has signed a person in, so the callback's own line carries the new person, and `current_user` sets it for the account it resolves, so a route guarded by `current_user_dependency` alone, with no `SessionGate`, carries it too. `authenticate_websocket` sets it for the account it admits, so a WebSocket's line carries the person, and a refused handshake's line has `sub` `null`. `admit_session` takes no connection and sets no `sub`: a host that admits a socket through it calls logline's `set_sub` itself, or uses `authenticate_websocket`. A request with no admitted account, and a machine admitted on a machine path (a `BearerCaller`, no account), has `sub` `null`.
+- **LOG-06** The request line, `request.ended`, is written by logline's `RequestLineMiddleware`, which the install or `web_auth_front` places outermost (PROXY-07) and whose `configure` the host still calls; the host adds no request line and no writer. The writer gives the line its `ip`, so the host sets it with no `set_client_ip`; webauth's stack gives it `sub`, so the host sets that with no `set_sub`. `ip` is the client address `TrustedProxies` resolves (the rightmost hop no entry vouches for), set for every http request and every WebSocket the writer wraps, so a proxied preflight, an outer router's own 404 and 405, every refusal of the stack and an exempt path carry it; a WebSocket's line carries it on logline 1.0 and later, since below that a WebSocket has no line. `sub` is the `id` of the account `admitted_user` returns: the session gate sets it for a live session on a gated or optional path, the bearer gate for the account behind a token on a person path or at a protected resource, and the sign-in callback sets it once it has signed a person in, so the callback's own line carries the new person, and `current_user` sets it for the account it resolves, so a route guarded by `current_user` alone, with no `SessionGate`, carries it too. `authenticate_websocket` sets it for the account it admits, so a WebSocket's line carries the person, and a refused handshake's line has `sub` `null`. `admit_session` takes no connection and sets no `sub`: a host that admits a socket through it calls logline's `set_sub` itself, or uses `authenticate_websocket`. A request with no admitted account, and a machine admitted on a machine path (a `BearerCaller`, no account), has `sub` `null`.
 - **LOG-07** The sign-in callback writes one line for its outcome through the logger `webauth.sign_in_routes`, both at INFO. `sign_in.refused` carries `reason`, the value of the refusal's `OidcRefusalReason` or `AdmissionRefusal`; `token_rejection` when the verifier rejected a token; and `idp_error` when the issuer named a well-formed one, as the value of the refusal's `idp_error` (REFUSE-29). It carries no identity, token, username or return path (REFUSE-27). `sign_in.completed` carries `sub`, the value `set_sub` gets, and nothing else. Every refusal writes its line once, before the host's `refused` hook runs, also when the hook raises; a failure that becomes the plain 500 writes no sign-in line. Renaming a value of either refusal enum is Breaking through this line too. Logout and back-channel logout write no line of their own.
 
 ## What an issuer call carries
@@ -314,8 +314,9 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
   path must pass, [The return path](ARCHITECTURE.md#the-return-path).
 - **REFUSE-04** An API call without a session gets 401.
 - **Host duty:** the app's UI navigates to its start route when an API call gets 401.
-- **REFUSE-05** For a server-rendered host, `LoginRedirect` makes the redirect-or-401
-  split; see [Reading the session](ARCHITECTURE.md#reading-the-session).
+- **REFUSE-05** For a server-rendered host, `SessionGate.login_redirect` makes the
+  redirect-or-401 split; `current_user` alone never redirects. See
+  [The session gate](ARCHITECTURE.md#the-session-gate).
 - **REFUSE-06** To keep the deep link, only request-address construction may prepend
   `root_path`.
 - **REFUSE-07** The start route never prepends `root_path` to an explicit `next`.
@@ -338,7 +339,7 @@ every app follows; [the session gate](ARCHITECTURE.md#the-session-gate) enforces
 
   | ID | Case | Status | `WWW-Authenticate` | `detail` |
   |---|---|---|---|---|
-  | **REFUSE-13** | no bearer credential, refused by the library for want of a session (`current_user`, `admin_user`, the session gate, `admitted_admin`) | 401, or the 302 a navigation gets under `login_redirect` | `Bearer realm="api"` on the 401 | the session refusal's own |
+  | **REFUSE-13** | no bearer credential, refused by the library for want of a session (`current_user`, `admin_user`, the session gate, `admitted_admin`) | 401, or the 302 a navigation gets under the session gate's `login_redirect` | `Bearer realm="api"` on the 401 | the session refusal's own |
   | **REFUSE-14** | malformed (as above) | 401 | `Bearer error="invalid_request"` | `Invalid request` |
   | **REFUSE-15** | invalid token (any verification failure, a foreign audience and an unavailable key set included) | 401 | `Bearer error="invalid_token"` | `Invalid token` |
   | **REFUSE-16** | valid token, not a member of the app | 403 | `Bearer error="insufficient_scope"` | `No access` |
@@ -391,10 +392,10 @@ hal is the operator's CLI for calling an app's machine routes with a bearer
 token. It calls them with the access token Keycloak issued it in `Authorization: Bearer`.
 
 **Host duty:** A host declares its machine (admin) paths once. `BearerGate` is passed to
-`auth.install(app, bearer=...)`; it holds the app's own
-`OidcRelyingParty`, the app's `AdmissionConfig` and `MachinePaths(paths, authorized_parties)`:
-the paths (`PathRules`) and `AuthorizedParties`, the `azp` values (hal's client ids) the host
-admits on them, read from configuration.
+`auth.install(app, bearer=...)`; it holds `MachinePaths(paths, authorized_parties)`: the paths
+(`PathRules`) and `AuthorizedParties`, the `azp` values (hal's client ids) the host admits on
+them, read from configuration. The install verifies tokens with the handle's relying party and
+decides the admin role by the handle's `groups` (COMPOSE-19).
 
 - **MACHINE-01** A route reads the admitted caller with `Depends(bearer_caller)`;
   `BearerCaller.subject` is the token's `sub`.
@@ -449,7 +450,7 @@ the person behind it, deletion included.
 
 **TOKEN-02** No layer sits on top of the person's rights.
 
-**Host duty:** Name the API paths in `PersonPaths(paths, authorized_parties, transaction)` and pass
+**Host duty:** Name the API paths in `PersonPaths(paths, authorized_parties)` and pass
 it as `BearerGate(person_paths=...)`.
 
 **TOKEN-03** `machine_paths` may then be left out.
@@ -509,8 +510,6 @@ checks the browser.
   - **TOKEN-31** The session is not renewed.
   - **Host duty:** A host route that binds work to the session answers its own refusal when it
     gets `None`.
-  - **TOKEN-32** Host dependencies such as `current_user`'s `session_store` still resolve before
-    the reader runs.
 - **Refusals.** See the person-path table under
   [Signed out and refused](#signed-out-and-refused).
 - **Residues.**
@@ -709,7 +708,7 @@ a host that names no language (`lambda request: None`).
 
 ## The protected resource
 
-A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, agent_group, authorized_parties, transaction, marked_routes, admits_client_audience)` and passes
+A host that serves an MCP-style resource names it in `ProtectedResource(url, scope, required_group, agent_group, authorized_parties, marked_routes, admits_client_audience)` and passes
 it as `BearerGate(resource=...)`.
 
 - **RESOURCE-01** A gate needs one kind of path, and the resource counts as one.
@@ -724,7 +723,7 @@ it as `BearerGate(resource=...)`.
   must hold in the token, or one below it, besides the admission's login group. `agent_group` is the group an autonomous
   agent's own client holds in its token, as an exact element: the realm alone decides which clients can mint a token for
   `url`, and the group lets them through the party check at this resource only.
-- `transaction` is the host's `SignInTransaction`, the same port the person paths use.
+- The resource enters `stores.sign_in`, the same port the person paths use (COMPOSE-19).
 - Everything else derives from `url`:
   - **RESOURCE-06** the metadata path is `/.well-known/oauth-protected-resource` plus the entry
     point (RFC 9728 section 3.1);
@@ -760,7 +759,7 @@ At the entry point, on every method and the exact path only:
 - **RESOURCE-73** With the agent group, `agent_owner` must be a non-empty string and `agent_name` a printable string
   (`str.isprintable`) of 1 to 64 characters, else 401 `invalid_token` as RESOURCE-15. The claims are checked inside the
   token check, so this refusal comes before the scope (RESOURCE-20), before the group refusals (RESOURCE-21,
-  RESOURCE-22) and before any `transaction` entry, also when the `azp` is among the resource's parties.
+  RESOURCE-22) and before any `stores.sign_in` entry, also when the `azp` is among the resource's parties.
 - **RESOURCE-74** Without the agent group both claims are ignored and the token is a person's, with `agent` `None`.
 - **RESOURCE-84** `admits_client_audience` is `False` by default, and anything but a `bool` is a `TypeError`.
 - **RESOURCE-85** It exists for an app that exchanges the admitted token at the issuer, which exchanges only a token that
@@ -786,7 +785,7 @@ At the entry point, on every method and the exact path only:
 - A token that holds, whose person is admitted:
   - **RESOURCE-24** the request passes with no cookie and no `Origin`, the session gate reading the admission as it reads a person path's;
   - **RESOURCE-25** CSRF reads the admission as it reads a person path's;
-  - **RESOURCE-26** for a token without the agent group, the lookup is one `accounts.get` in one entry of `transaction`, so a person must have signed in once;
+  - **RESOURCE-26** for a token without the agent group, the lookup is one `accounts.get` in one entry of `stores.sign_in`, so a person must have signed in once;
   - **RESOURCE-27** the person is `AuthenticatedUser(id, username, role, agent)` with the role `"user"` whatever role is stored: a stored admin is admitted as a plain user, and `agent` is `None` without the agent group;
   - **RESOURCE-77** with the agent group the admitted agent is `AuthenticatedUser(id, username, "user", agent=AgentFacts(owner, name))` whatever role is stored and whatever kind the account stores, its `kind` derived from `agent`; CSRF and the session gate step aside as RESOURCE-24 and RESOURCE-25 say, `current_user`, `admitted_user` and `resource_person` return it with its `AgentFacts` (RESOURCE-62, RESOURCE-63, RESOURCE-65), and a changed method or `Authorization` header still ends the admission (RESOURCE-67 to RESOURCE-69);
   - **RESOURCE-28** `admin_user` answers that person 403 without `WWW-Authenticate` (a person path's 403 keeps its `insufficient_scope` challenge);

@@ -419,6 +419,17 @@ def a_resource_and_person_paths() -> Callable[[WebAuth], BearerGate]:
     return bearer_of
 
 
+def a_member_token() -> str:
+    return an_access_token(
+        issuer=BOUND_ISSUER,
+        client_id=CLIENT_ID,
+        key_id="issuer-key",
+        key_name="issuer",
+        subject=SUBJECT,
+        claims={"groups": [LOGIN_GROUP]},
+    )
+
+
 def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> None:
     """COMPOSE-11"""
     world = a_host_world(A_MEMBER)
@@ -438,14 +449,7 @@ def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> 
         bearer_of=a_resource_and_person_paths(),
     )
     resource = a_resource()
-    token = an_access_token(
-        issuer=BOUND_ISSUER,
-        client_id=CLIENT_ID,
-        key_id="issuer-key",
-        key_name="issuer",
-        subject=SUBJECT,
-        claims={"groups": [LOGIN_GROUP]},
-    )
+    token = a_member_token()
 
     metadata = host.client.get(
         f"/.well-known/oauth-protected-resource{resource.entry_point}", headers=FORWARDED
@@ -454,6 +458,37 @@ def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> 
 
     assert (metadata.status_code, metadata.json()["authorization_servers"]) == (200, [BOUND_ISSUER])
     assert (person.status_code, person.json()) == (200, {"username": "lena"})
+
+
+def test_compose_19_the_stores_given_once_serve_the_gate_and_the_person_paths() -> None:
+    """COMPOSE-19"""
+    world = a_host_world(A_MEMBER, stored_session=a_stored_session(A_MEMBER))
+    gate = SessionGate(login_redirect=None, public=())
+
+    def routes(app: FastAPI, auth: WebAuth) -> None:
+        the_routes_of(world)(app, auth)
+
+        @app.get("/api/me")
+        def person_me(user: AuthenticatedUser = Depends(current_user)) -> dict[str, str]:
+            return {"username": user.username}
+
+    host = a_composed_host(
+        world,
+        a_composition(world, gate=gate),
+        routes=routes,
+        bearer_of=a_resource_and_person_paths(),
+    )
+
+    by_session = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    entries_before_the_token = world.sign_in.entries
+    by_token = host.client.get(
+        "/api/me", headers={**FORWARDED, "authorization": bearing(a_member_token())[0]}
+    )
+
+    assert (by_session.status_code, by_session.json()) == (200, {"username": "lena"})
+    assert "load" in world.sessions.event_names
+    assert (by_token.status_code, by_token.json()) == (200, {"username": "lena"})
+    assert world.sign_in.entries == entries_before_the_token + 1
 
 
 def test_compose_11_the_install_serves_its_routes_ahead_of_a_catch_all_of_the_host() -> None:
