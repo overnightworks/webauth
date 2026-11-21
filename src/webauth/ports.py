@@ -324,8 +324,8 @@ class SessionRecordStore(SessionRenewalStore, Protocol):
         ...
 
     def delete_for_user(self, user_id: str) -> int:
-        """End every session of the account and return how many ended; a store may
-        also remove the account."""
+        """End every session of the account and return how many ended. The account
+        stays: removing it is the host's own erasure."""
         ...
 
     def prune_overflow(self, user_id: str, keep_newest: int) -> None:

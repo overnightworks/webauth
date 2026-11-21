@@ -263,6 +263,15 @@ def _delete_for_user_returns_how_many_ended(adapter: StoreAdapter) -> None:
     )
 
 
+def _delete_for_user_keeps_the_account(adapter: StoreAdapter) -> None:
+    subject = _an_account(adapter)
+    _a_session(adapter, subject)
+
+    adapter.sessions.delete_for_user(subject)
+
+    _require(adapter.accounts.get(subject) is not None, "delete_for_user removed the account")
+
+
 def _touch_and_replace_refresh_token_answer_a_bool(adapter: StoreAdapter) -> None:
     subject = _an_account(adapter)
     session_id = _a_session(adapter, subject)
@@ -402,6 +411,7 @@ STORE_CHECKS: Final = (
     ),
     StoreCheck("prune_overflow_keeps_the_newest", _prune_overflow_keeps_the_newest),
     StoreCheck("delete_for_user_returns_how_many_ended", _delete_for_user_returns_how_many_ended),
+    StoreCheck("delete_for_user_keeps_the_account", _delete_for_user_keeps_the_account),
     StoreCheck(
         "touch_and_replace_refresh_token_answer_a_bool",
         _touch_and_replace_refresh_token_answer_a_bool,
