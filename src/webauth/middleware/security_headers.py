@@ -75,9 +75,7 @@ class _SecurityHeadersMiddleware:
     One answer keeps its own ``Content-Security-Policy`` and ``Cache-Control``:
     the logout page of the sign-in routes, which carries a
     private marker header that this middleware removes. Every other header,
-    HSTS included, is applied to it as to any answer. Behind a host that does
-    not install this middleware the page still carries its own policy and
-    ``no-store``, and the marker reaches the browser, which ignores it.
+    HSTS included, is applied to it as to any answer.
 
     A path a ``ContentSecurityPolicyRule`` names is answered with that rule's policy
     instead of the default; the sign-out page keeps its own either way.

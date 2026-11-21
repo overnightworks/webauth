@@ -55,13 +55,12 @@ at the issuer ends. The route answers in this order:
    with ``actor_id=None`` is recorded when at least one session ended. A subject without an
    account is accepted and provisions nothing. The route clears no cookie and calls no
    issuer endpoint beyond the key fetch of verification.
-5. Any exception in ``relying_party``, the verification, a store, the audit sink or the exit
-   gets an empty 400 and is then re-raised.
+5. Any exception in the verification, a store, the audit sink or the exit gets an empty 400 and
+   is then re-raised.
 
 The host's transaction rolls back when the block raises, also when the audit sink fails after
 the deletion, and commits only for an accepted token. A per-call host keeps the sessions
-ended before the failure and emits no event again. ``relying_party`` receives the back-channel
-request with the Host the issuer posted to, often an internal alias.
+ended before the failure and emits no event again.
 
 The route is open to anyone who can reach it, and the token is its only control: the host lets
 the issuer reach it over an internal network alone, never the public route (tunnel, CDN,
@@ -227,7 +226,7 @@ def _install_sign_in_routes(
     app: FastAPI,
     *,
     paths: SignInPaths,
-    relying_party: Callable[[Request], OidcRelyingParty],
+    relying_party: OidcRelyingParty,
     admission: AdmissionConfig,
     transaction: SignInTransaction,
     refused: Callable[[Request, SignInRefusal], Response],
@@ -265,7 +264,7 @@ def _install_sign_in_routes(
 
     The module docstring holds the back-channel's answers.
 
-    ``relying_party`` is read per request. ``ui_language`` is called once per start request and
+    ``ui_language`` is called once per start request and
     its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
     ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
     ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number. ``paths.logout`` and
@@ -324,7 +323,7 @@ def _register_routes(
 
 @dataclass(frozen=True)
 class _SignIn:
-    relying_party: Callable[[Request], OidcRelyingParty]
+    relying_party: OidcRelyingParty
     admission: AdmissionConfig
     transaction: SignInTransaction
     refused: Callable[[Request, SignInRefusal], Response]
@@ -335,7 +334,7 @@ class _SignIn:
     def start(self, request: Request, return_to: str | None) -> Response:
         answer = Response(status_code=303)
         answer.headers["location"] = _start_login(
-            self.relying_party(request),
+            self.relying_party,
             request,
             answer,
             web_auth_config(request),
@@ -348,7 +347,7 @@ class _SignIn:
         try:
             text = page_text(request)
             return _log_out(
-                self.relying_party(request),
+                self.relying_party,
                 request,
                 web_auth_config(request),
                 transaction=self.transaction,
@@ -361,11 +360,10 @@ class _SignIn:
     async def backchannel_logout(self, request: Request) -> Response:
         form_body = await request.body()
         try:
-            relying_party = self.relying_party(request)
             result = await anyio.to_thread.run_sync(
                 partial(
                     _receive_backchannel_logout,
-                    relying_party,
+                    self.relying_party,
                     form_body,
                     request.headers.get("content-type"),
                     transaction=self.transaction,
@@ -398,7 +396,7 @@ class _SignIn:
     ) -> Response:
         if pending is None:
             return self._refuse(request, OidcRefusal(OidcRefusalReason.STATE_MISMATCH))
-        identity = self.relying_party(request).complete_login(pending, request.url.query)
+        identity = self.relying_party.complete_login(pending, request.url.query)
         if isinstance(identity, OidcRefusal):
             return self._refuse(request, identity)
         admitted = _decide_admission(identity, admission=self.admission)

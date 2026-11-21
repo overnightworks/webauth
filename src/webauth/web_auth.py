@@ -346,7 +346,7 @@ class WebAuth:
         _install_sign_in_routes(
             app,
             paths=settings.sign_in_paths,
-            relying_party=lambda _request: self._relying_party,
+            relying_party=self._relying_party,
             admission=self._groups,
             transaction=self._stores.sign_in,
             refused=self._pages.refused,
