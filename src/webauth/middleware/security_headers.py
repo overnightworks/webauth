@@ -62,9 +62,10 @@ class SecurityHeadersMiddleware:
     With ``cookie_secure`` off no HSTS leaves, not even one a route set: a
     browser that pinned https could no longer reach the plain-http host.
 
-    The stack's first middleware, it also fails a request the host's ``ClientAddressMiddleware``
-    did not record a client for: an http request with the 500 below, a WebSocket by raising before
-    the app runs, so a missing writer shows on the first request whatever refuses it.
+    The stack's first middleware, it also fails a request the client-address writer did not record
+    a client for (an app built with ``SHARED_FRONT`` and served without ``web_auth_front``): an
+    http request with the 500 below, a WebSocket by raising before the app runs, so a missing
+    writer shows on the first request whatever refuses it.
 
     An exception before the response started is answered with a plain 500
     that carries the policy headers, and the exception still reaches the

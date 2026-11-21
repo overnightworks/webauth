@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -10,6 +11,8 @@ from fastapi import Depends, FastAPI, Request, Response, WebSocket
 from fastapi.testclient import TestClient
 from httpx import Response as HttpxResponse
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import PlainTextResponse
+from starlette.routing import Host, Route, Router
 
 from tests.support.account_arrangement import FakeUser, WriteLockInMemory
 from tests.support.client_address_arrangement import TRUSTED_PROXIES
@@ -40,6 +43,7 @@ from tests.support.session_store_arrangement import (
     SessionsRecordingTheirTransaction,
 )
 from tests.support.webauth_arrangement import (
+    ALLOWED_HOST,
     API_PATH,
     HTTPS_TEST_SERVER,
     SESSION_ID,
@@ -59,16 +63,19 @@ from webauth.proxies import TrustedProxies
 from webauth.sign_in_routes import SignInRefusal
 from webauth.web_auth import (
     IssuerCalls,
+    ServedBehind,
     SignInPages,
     WebAuth,
     WebAuthSettings,
     WebAuthStores,
+    web_auth_front,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
 
     from starlette.middleware import Middleware
+    from starlette.types import ASGIApp
 
     from webauth.config import WebAuthConfig
 
@@ -141,7 +148,7 @@ class Composition:
     stores: WebAuthStores
     groups: AdmissionConfig
     pages: SignInPages
-    front: TrustedProxies
+    front: TrustedProxies | ServedBehind
     issuer_calls: IssuerCalls
     gate: SessionGate | None = None
     outside: tuple[Middleware, ...] = ()
@@ -225,11 +232,13 @@ def the_routes_of(world: HostWorld) -> Callable[[FastAPI, WebAuth], None]:
     return add
 
 
-def a_client_of(app: FastAPI, *, raise_server_exceptions: bool = False) -> TestClient:
+def a_client_of(
+    app: ASGIApp, *, base_url: str = HTTPS_TEST_SERVER, raise_server_exceptions: bool = False
+) -> TestClient:
     """A browser reaching `app` through the trusted proxy over https, following no redirect."""
     return TestClient(
         app,
-        base_url=HTTPS_TEST_SERVER,
+        base_url=base_url,
         client=(TRUSTED_PEER, 55000),
         cookies={},
         follow_redirects=False,
@@ -266,6 +275,64 @@ def a_composed_host(
     if installed:
         auth.install(app, bearer=None if bearer_of is None else bearer_of(auth))
     return ComposedHost(world, auth, app, a_client_of(app))
+
+
+FIRST_HOST = ALLOWED_HOST
+SECOND_HOST = "second.example"
+SHARED_PATH = "/health"
+
+
+def a_second_world(*users: FakeUser, stored_session: FakeSessionRecord | None = None) -> HostWorld:
+    """A host world whose app is served at `SECOND_HOST`, so its origin is the one it admits."""
+    world = a_host_world(*users, stored_session=stored_session)
+    world.config = replace(world.config, allowed_hosts_exact=frozenset({SECOND_HOST}))
+    return world
+
+
+@dataclass
+class SharedFrontHost:
+    """Two apps built with `SHARED_FRONT`, mounted by `Host` in one router inside the front."""
+
+    first: ComposedHost
+    second: ComposedHost
+    front: ASGIApp
+
+    def client_at(self, host: str) -> TestClient:
+        """A browser reaching the front through the trusted proxy for `host`."""
+        return a_client_of(self.front, base_url=f"https://{host}")
+
+
+def a_shared_front_host(
+    first_world: HostWorld,
+    second_world: HostWorld,
+    *,
+    first_composition: Composition | None = None,
+    lifespan_events: list[str] | None = None,
+) -> SharedFrontHost:
+    """Each world's app built and installed once, both served by one `web_auth_front` router."""
+    first = a_composed_host(
+        first_world,
+        first_composition or a_composition(first_world, front=ServedBehind.SHARED_FRONT),
+    )
+    second = a_composed_host(
+        second_world, a_composition(second_world, front=ServedBehind.SHARED_FRONT)
+    )
+
+    @asynccontextmanager
+    async def lifespan(_router: Router) -> AsyncIterator[None]:
+        if lifespan_events is not None:
+            lifespan_events.append("startup")
+        yield
+
+    router = Router(
+        routes=[
+            Route(SHARED_PATH, lambda _request: PlainTextResponse("ok"), methods=["GET"]),
+            Host(FIRST_HOST, app=first.app),
+            Host(SECOND_HOST, app=second.app),
+        ],
+        lifespan=lifespan,
+    )
+    return SharedFrontHost(first, second, web_auth_front(router, trusted_proxies=TRUSTED_PROXIES))
 
 
 def the_app_as_it_stands(app: FastAPI) -> tuple[object, object, object]:

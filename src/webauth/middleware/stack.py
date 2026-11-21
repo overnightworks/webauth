@@ -10,7 +10,7 @@ from starlette.middleware import Middleware
 
 from webauth.middleware.bearer_gate import BearerGate, BearerGateMiddleware
 from webauth.middleware.body_size import BodySizeLimitMiddleware
-from webauth.middleware.client_address import ClientAddressMiddleware
+from webauth.middleware.client_address import _ClientAddressMiddleware
 from webauth.middleware.csrf import CsrfOriginMiddleware
 from webauth.middleware.path_refusal import PathRefusalMiddleware
 from webauth.middleware.rate_limit import IpRateLimitMiddleware
@@ -167,13 +167,12 @@ def _refuse_an_unsound_stack(app: Starlette) -> None:
             "and add no library middleware by hand.",
         )
     if any(
-        isinstance(entry.cls, type) and issubclass(entry.cls, ClientAddressMiddleware)
+        isinstance(entry.cls, type) and issubclass(entry.cls, _ClientAddressMiddleware)
         for entry in app.user_middleware
     ):
         raise RuntimeError(
-            "The app already carries ClientAddressMiddleware; a writer added before the call sits "
-            "inside the stack. Add it after the call, immediately inside logline's "
-            "RequestLineMiddleware.",
+            "The app already carries a client-address writer; a writer added by hand sits inside "
+            "the stack. The composition call places it, and web_auth_front wraps several apps.",
         )
 
 
@@ -192,17 +191,25 @@ def _install_slotted_web_auth_middleware(
     rate_limit: RateLimitPolicy | None,
     bearer_gate: BearerGate | None,
     session_gate: SessionGate | None,
-    front: TrustedProxies,
+    trusted_proxies: TrustedProxies | None,
     outside: Sequence[Middleware],
     inside: Sequence[Middleware],
 ) -> None:
-    """Install what ``WebAuth.install`` places, outermost first: logline's request line, the
-    client-address writer, the host's ``outside`` entries, the library stack, the host's
-    ``inside`` entries. An app that already carries library middleware is refused untouched."""
+    """Install what ``WebAuth.install`` places, outermost first: logline's request line and the
+    client-address writer, only with ``trusted_proxies`` (``None`` for an app a shared front
+    serves), the host's ``outside`` entries, the library stack, the host's ``inside`` entries.
+    An app that already carries library middleware is refused untouched."""
     _refuse_an_unsound_stack(app)
+    front = (
+        []
+        if trusted_proxies is None
+        else [
+            Middleware(RequestLineMiddleware),
+            Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
+        ]
+    )
     entries = [
-        Middleware(RequestLineMiddleware),
-        Middleware(ClientAddressMiddleware, trusted_proxies=front),
+        *front,
         *outside,
         *_library_middleware(
             sign_in_paths=sign_in_paths,
@@ -232,9 +239,9 @@ def install_web_auth_middleware(
     """Install the library's middleware outermost first: security headers, path refusal, body size,
     rate limit, bearer gate, CSRF origin, session gate.
 
-    The client address is not installed here: after this call the host adds
-    ``ClientAddressMiddleware(app, trusted_proxies=...)`` and, outside it, logline's
-    ``RequestLineMiddleware``, or the first request fails (``docs/host-contract.md``).
+    The client address is not installed here: the composition call places the writer and
+    logline's ``RequestLineMiddleware`` around this stack, and without one the first request
+    fails (``docs/host-contract.md``).
 
     ``sign_in_paths`` is the one description of the sign-in routes. From it the installer puts these
     rules ahead of the host's own, so the first match is the derived one (a path the host exempts
@@ -246,7 +253,7 @@ def install_web_auth_middleware(
 
     Security headers sit outside everything so the library's own refusals (the 400 for a path, the
     413s, the 429 and 503 with ``Retry-After``, the CSRF 403s and the 500) carry them; the client
-    address the host's writer recorded reaches every refusal's request line; the path refusal
+    address the writer recorded reaches every refusal's request line; the path refusal
     answers 400 to a route path with a control character (U+0000 to U+001F, U+007F) before a rule
     or route reads it; the body size limit refuses a body declared too large before it costs a
     rate-limit budget or a session lookup; the rate limit sits outside CSRF so a refused forgery

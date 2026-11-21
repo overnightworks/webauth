@@ -355,7 +355,7 @@ def test_an_application_without_the_writer_names_nobody() -> None:
 
     with (
         TestClient(app, client=(_TRUSTED_PEER, 55000)) as client,
-        pytest.raises(RuntimeError, match="ClientAddressMiddleware"),
+        pytest.raises(RuntimeError, match="web_auth_front"),
     ):
         client.get("/client-ip", headers={"x-forwarded-for": _CLIENT})
 

@@ -94,7 +94,7 @@ class WebAuthConfig:
     ``Secure``, when it is set and when it is cleared, and whether
     ``SecurityHeadersMiddleware`` sends HSTS. The request's scheme does not
     decide it, so a deployment behind a TLS proxy the host's
-    ``ClientAddressMiddleware`` does not trust still gets both. A browser does not send a ``Secure``
+    ``TrustedProxies`` does not list still gets both. A browser does not send a ``Secure``
     cookie back over plain http, so a host's own session login over plain http
     works only with ``cookie_secure=False``, which drops ``Secure`` and HSTS
     together. Any value that is not a ``bool`` is refused.

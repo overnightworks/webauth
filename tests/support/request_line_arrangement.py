@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
     import pytest
     from fastapi import FastAPI
-    from starlette.types import ASGIApp
 
 WEBSOCKET_EVENT = "websocket.ended"
 TRUSTED_PEER = "172.16.0.9"
@@ -49,8 +48,3 @@ def request_lines_written(
 def a_client_behind_the_proxy(app: FastAPI, *, peer: str = TRUSTED_PEER) -> TestClient:
     """A client of `app` connecting from `peer`, by default a proxy the configuration trusts."""
     return TestClient(app, base_url=HTTPS_TEST_SERVER, client=(peer, 55000), follow_redirects=False)
-
-
-def request_line_around(app: ASGIApp) -> RequestLineMiddleware:
-    """Logline's middleware wrapped around any ASGI app, as a host with its own router wires it."""
-    return RequestLineMiddleware(app)

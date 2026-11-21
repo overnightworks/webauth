@@ -1,10 +1,10 @@
-"""The writer a host puts around its app, and the proxies it trusts, for the suites."""
+"""The private writer the low-level stack tests put around their app, and the proxies it trusts."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from webauth.middleware import ClientAddressMiddleware
+from webauth.middleware.client_address import _ClientAddressMiddleware
 from webauth.proxies import TrustedProxies
 
 if TYPE_CHECKING:
@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 TRUSTED_PROXIES = TrustedProxies.parse("172.16.0.0/12")
 
 
-def behind_the_client_address_writer(app: ASGIApp) -> ClientAddressMiddleware:
+def behind_the_client_address_writer(app: ASGIApp) -> _ClientAddressMiddleware:
     """`app` wrapped the way a host's wiring does it, trusting the suites' proxy network."""
-    return ClientAddressMiddleware(app, trusted_proxies=TRUSTED_PROXIES)
+    return _ClientAddressMiddleware(app, trusted_proxies=TRUSTED_PROXIES)
 
 
 def add_the_client_address_writer(app: Starlette) -> None:
@@ -24,4 +24,4 @@ def add_the_client_address_writer(app: Starlette) -> None:
 
     Call it after the stack is installed and before logline's middleware, which stays outermost.
     """
-    app.add_middleware(ClientAddressMiddleware, trusted_proxies=TRUSTED_PROXIES)
+    app.add_middleware(_ClientAddressMiddleware, trusted_proxies=TRUSTED_PROXIES)
