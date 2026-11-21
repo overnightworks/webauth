@@ -19,9 +19,7 @@ from webauth.proxies import _budget_address, client_address
 if TYPE_CHECKING:
     from starlette.requests import Request
 
-__all__ = [
-    "IpRateLimitMiddleware",
-]
+__all__: list[str] = []
 
 _log = logging.getLogger(__name__)
 
@@ -35,7 +33,7 @@ def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
     return f"{budget.name}:{budget_identity}"
 
 
-class IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
+class _IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
     """Spend one request of the client's budget for the budget it falls into.
 
     The budget belongs to the client's address, or to its IPv6 /64 -- see

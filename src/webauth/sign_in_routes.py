@@ -1,7 +1,7 @@
 """The start, callback, logout and back-channel logout routes of signing in through an
 OpenID Connect issuer.
 
-``install_sign_in_routes`` registers the routes on the host's ``FastAPI`` app,
+``WebAuth.install`` registers the routes on the host's ``FastAPI`` app,
 and ``SignInPaths`` derives the policies the host's gate, rate limit, body-size, CSRF and
 cache rules need for exactly those paths, so the host lists them once. The start, callback and
 logout routes are synchronous and run in the threadpool; the back-channel route reads its body
@@ -82,7 +82,6 @@ from logline import set_sub
 from starlette.responses import RedirectResponse, Response
 
 from webauth._paths import _has_dot_segment, reads_as_another_host, same_app_path
-from webauth._validation import require_positive_whole_number
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import _take_pending_login, issue_session_cookies
@@ -116,7 +115,6 @@ __all__ = [
     "RefusalPage",
     "SignInPaths",
     "SignInRefusal",
-    "install_sign_in_routes",
 ]
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -173,7 +171,7 @@ class SignInPaths:
     construction, before any route is registered, names the first that is not.
     ``logout`` is ``None`` for a host that serves no logout route, and
     ``backchannel_logout`` for one that serves no back-channel logout route.
-    ``install_web_auth_middleware`` derives the policies for exactly these paths.
+    ``WebAuth.install`` derives the policies for exactly these paths.
     """
 
     start: str
@@ -225,7 +223,7 @@ def _problem_with(path: object) -> str | None:
     return None
 
 
-def install_sign_in_routes(
+def _install_sign_in_routes(
     app: FastAPI,
     *,
     paths: SignInPaths,
@@ -270,14 +268,10 @@ def install_sign_in_routes(
     ``relying_party`` is read per request. ``ui_language`` is called once per start request and
     its tag is sent as ``ui_locales``, ``None`` sends none, a non-tag raises ``ValueError``.
     ``keeps_id_token`` has no default: ``True`` stores the ID token as logout hint, ``False`` none.
-    ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number or ``ValueError``
-    is raised before a route is registered. ``paths.logout`` and ``logout_page_text`` come
-    together: a host without a logout route passes ``None`` for both, and exactly one of them
-    raises ``ValueError`` before a route is registered.
+    ``max_sessions`` is ``None`` for no cap, otherwise a positive whole number. ``paths.logout`` and
+    ``logout_page_text`` come together: a host without a logout route passes ``None`` for both.
+    ``WebAuth.build`` has refused a value that breaks either.
     """
-    if max_sessions is not None:
-        require_positive_whole_number("max_sessions", max_sessions, unit="sessions")
-    _require_logout_path_with_page_text(paths, logout_page_text)
     routes = _SignIn(
         relying_party, admission, transaction, refused, keeps_id_token, max_sessions, ui_language
     )

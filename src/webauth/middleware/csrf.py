@@ -16,9 +16,7 @@ from webauth.policies import CsrfPolicy
 if TYPE_CHECKING:
     from starlette.requests import Request
 
-__all__ = [
-    "CsrfOriginMiddleware",
-]
+__all__: list[str] = []
 
 _MUTATING_METHODS: Final = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -55,7 +53,7 @@ def _origin_check_refusal(request: Request) -> JSONResponse | None:
     return None
 
 
-class CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
+class _CsrfOriginMiddleware(RefusalMiddleware[CsrfPolicy]):
     """Reject a state-changing request that a foreign page originated.
 
     Sec-Fetch-Site is read first: the header overrides the Origin

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from logline import set_client_ip
 from starlette.requests import HTTPConnection
 
-from webauth.middleware.security_headers import SecurityHeadersMiddleware
+from webauth.middleware.security_headers import _SecurityHeadersMiddleware
 from webauth.proxies import _client_is_recorded, _record_client
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ class _FrontRequiredMiddleware:
 
     def __init__(self, app: ASGIApp, *, policy: SecurityHeadersPolicy) -> None:
         self._app = app
-        self._refusal = SecurityHeadersMiddleware(app, policy)
+        self._refusal = _SecurityHeadersMiddleware(app, policy)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in _RECORDED_SCOPES and not _client_is_recorded(HTTPConnection(scope)):

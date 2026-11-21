@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from webauth.policies import BodySizePolicy
 
 __all__ = [
-    "BodySizeLimitMiddleware",
     "RequestBodyTooLarge",
 ]
 
@@ -23,7 +22,7 @@ __all__ = [
 class RequestBodyTooLarge(Exception):
     """A streamed request body passed its limit.
 
-    `BodySizeLimitMiddleware` answers 413 when the response has not started and
+    The body-size middleware answers 413 when the response has not started and
     raises this to the server when it has. It is deliberately not a
     `WebAuthError`: it travels out of the host's route back to the middleware, and
     a host's catch-all for `WebAuthError` must not answer before the middleware does.
@@ -49,7 +48,7 @@ def _declared_length(value: bytes) -> int:
         return 0
 
 
-class BodySizeLimitMiddleware:
+class _BodySizeLimitMiddleware:
     """Stop an oversized body at the door, and again while it streams in.
 
     A body whose Content-Length is over the limit is refused with 413 before

@@ -24,7 +24,6 @@ __all__ = [
     "FRAME_OPTIONS",
     "REFERRER_POLICY",
     "STRICT_TRANSPORT_SECURITY",
-    "SecurityHeadersMiddleware",
 ]
 
 CONTENT_TYPE_OPTIONS: Final = "nosniff"
@@ -53,7 +52,7 @@ def _allows_no_framer(content_security_policy: str) -> bool:
     return True
 
 
-class SecurityHeadersMiddleware:
+class _SecurityHeadersMiddleware:
     """Answer every request with this deployment's policy headers.
 
     HSTS follows the configured ``cookie_secure``, never the request's scheme:
@@ -74,7 +73,7 @@ class SecurityHeadersMiddleware:
     either. After the response started, nothing more is sent.
 
     One answer keeps its own ``Content-Security-Policy`` and ``Cache-Control``:
-    the logout page of ``install_sign_in_routes``, which carries a
+    the logout page of the sign-in routes, which carries a
     private marker header that this middleware removes. Every other header,
     HSTS included, is applied to it as to any answer. Behind a host that does
     not install this middleware the page still carries its own policy and

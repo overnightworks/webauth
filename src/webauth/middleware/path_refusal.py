@@ -14,12 +14,10 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.types import ASGIApp
 
-__all__ = [
-    "PathRefusalMiddleware",
-]
+__all__: list[str] = []
 
 
-class PathRefusalMiddleware(RefusalMiddleware[None]):
+class _PathRefusalMiddleware(RefusalMiddleware[None]):
     """Answer 400 to an http request whose route path carries a control character.
 
     The router and the path rules disagree about such a path: Starlette's route
@@ -27,7 +25,7 @@ class PathRefusalMiddleware(RefusalMiddleware[None]):
     the rules compare a path exactly. Refusing the path ahead of both leaves no
     spelling that reaches a route without its rules. The install order places it
     inside the security headers and ahead of everything else, and
-    ``install_web_auth_middleware`` is the only way to add it.
+    ``WebAuth.install`` is the only way to add it.
     """
 
     def __init__(self, app: ASGIApp) -> None:

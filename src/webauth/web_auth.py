@@ -10,7 +10,7 @@ client-address writer and one request line.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -18,18 +18,18 @@ from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
 from webauth._validation import require_positive_whole_number
-from webauth.config import install_web_auth_config
+from webauth.config import _install_web_auth_config
 from webauth.dependencies import _publish_installed_sessions
 from webauth.https_client import fetch_key_set_over_https
-from webauth.middleware.bearer_gate import BearerGate, install_resource_metadata
+from webauth.middleware.bearer_gate import BearerGate, _install_resource_metadata
 from webauth.middleware.client_address import _ClientAddressMiddleware
-from webauth.middleware.stack import _install_slotted_web_auth_middleware
+from webauth.middleware.stack import _install_web_auth_middleware
 from webauth.oidc import OidcRelyingParty
 from webauth.oidc_transport import post_token_request_over_https
 from webauth.proxies import TrustedProxies
 from webauth.sign_in_routes import (
+    _install_sign_in_routes,
     _require_logout_path_with_page_text,
-    install_sign_in_routes,
 )
 
 if TYPE_CHECKING:
@@ -203,6 +203,13 @@ def _answer_ahead_of_the_routes_of_the_host(app: FastAPI, routes_of_the_host: in
     routes[:0] = own
 
 
+class _Permit:
+    """What only ``WebAuth.build`` holds, so that ``WebAuth(...)`` is no way to make one."""
+
+
+_PERMIT = _Permit()
+
+
 class WebAuth:
     """The built auth of one app: ``build`` it before the routes, ``install`` it after the last.
 
@@ -214,6 +221,7 @@ class WebAuth:
 
     def __init__(
         self,
+        permit: _Permit,
         *,
         settings: WebAuthSettings,
         stores: WebAuthStores,
@@ -225,6 +233,8 @@ class WebAuth:
         inside: Sequence[Middleware],
         relying_party: OidcRelyingParty,
     ) -> None:
+        if permit is not _PERMIT:
+            raise TypeError("WebAuth is made by WebAuth.build, never by its constructor.")
         self._settings = settings
         self._stores = stores
         self._groups = groups
@@ -272,6 +282,7 @@ class WebAuth:
             monotonic_clock=calls.monotonic_clock,
         )
         return cls(
+            _PERMIT,
             settings=settings,
             stores=stores,
             groups=groups,
@@ -315,10 +326,7 @@ class WebAuth:
         self._require_a_bearer_that_fits(bearer)
         settings = self._settings
         resource = None if bearer is None else bearer.resource
-        gate = self._gate
-        if gate is not None and resource is not None:
-            gate = replace(gate, public=(*gate.public, resource.public_rule))
-        _install_slotted_web_auth_middleware(
+        _install_web_auth_middleware(
             app,
             sign_in_paths=settings.sign_in_paths,
             security_headers=settings.security_headers,
@@ -326,16 +334,16 @@ class WebAuth:
             body_size=settings.body_size,
             rate_limit=settings.rate_limit,
             bearer_gate=bearer,
-            session_gate=gate,
+            session_gate=self._gate,
             trusted_proxies=self._front if isinstance(self._front, TrustedProxies) else None,
             outside=self._outside,
             inside=self._inside,
         )
         self._installed = True
-        install_web_auth_config(app, settings.config)
+        _install_web_auth_config(app, settings.config)
         _publish_installed_sessions(app, self._stores.sessions)
         routes_of_the_host = len(app.router.routes)
-        install_sign_in_routes(
+        _install_sign_in_routes(
             app,
             paths=settings.sign_in_paths,
             relying_party=lambda _request: self._relying_party,
@@ -348,7 +356,7 @@ class WebAuth:
             ui_language=self._pages.ui_language,
         )
         if resource is not None:
-            install_resource_metadata(app, resource, issuer=settings.client.issuer)
+            _install_resource_metadata(app, resource, issuer=settings.client.issuer)
         _answer_ahead_of_the_routes_of_the_host(app, routes_of_the_host)
 
     def _require_a_bearer_that_fits(self, bearer: BearerGate | None) -> None:
