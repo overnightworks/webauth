@@ -13,7 +13,7 @@
 
 - Durable state reaches the library only through a Protocol in `webauth.ports`, which the host implements. A new host obligation is a new Protocol there.
 - The library never commits. Durability is the host's: its adapter persists at each store call, or at the exit of a transaction port (`SessionTransaction`, `SignInTransaction`).
-- Deployment facts reach the library as values the host passes in: `WebAuthConfig`, and the `TrustedProxies` it passes to `ClientAddressMiddleware`. Nothing reads an environment variable or a global.
+- Deployment facts reach the library as values the host passes in: `WebAuthConfig`, and the `TrustedProxies` it passes to the composition call or to `web_auth_front`. Nothing reads an environment variable or a global.
 - `redis` is imported only under `TYPE_CHECKING`, so a host without the `redis` extra imports every module.
 - `sqlalchemy` is imported only by `webauth.postgres`, and no module imports that, so a host without the `postgres` extra imports every other module; `.importlinter` and the import tests hold it.
 - Tests of `webauth.postgres` run against a real Postgres: `WEBAUTH_TEST_POSTGRES_URL` names it, CI provides one, and a local run without it skips them.

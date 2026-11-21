@@ -10,9 +10,9 @@ neither an ID nor a label explains.
 
 ## Trusted proxies
 
-`ClientAddressMiddleware(app, trusted_proxies=TrustedProxies.parse("10.0.0.0/8"))` names the
-trusted proxy addresses for the host. It is the one place a host configures them; `WebAuthConfig`
-carries none.
+`TrustedProxies.parse("10.0.0.0/8")` names the trusted proxy addresses for the host, as the `front`
+of the composition call or the `trusted_proxies` of `web_auth_front`. Those are the two places a
+host configures them; `WebAuthConfig` carries none.
 
 - **PROXY-01** A request from a peer that `trusted_proxies` does not list keeps the
   peer's address and the connection's own scheme, whatever forwarded headers it carries.
@@ -34,14 +34,16 @@ carries none.
   `proxy_headers`, on by default: `proxy_headers=False` or `--no-proxy-headers`);
   `trusted_proxies` decides alone only when the server does not rewrite the client
   address or scheme from those headers.
-- **PROXY-07** The host adds the writer itself, as a plain ASGI wrapper around the app it
-  serves and immediately inside logline's `RequestLineMiddleware`:
-  `RequestLineMiddleware(ClientAddressMiddleware(app, trusted_proxies=...))`. `install_web_auth_middleware`
-  installs no writer. On a Starlette app the same line is `app.add_middleware(ClientAddressMiddleware,
-  trusted_proxies=...)` after the installer call and after every host middleware that can answer
-  by itself (a CORS layer answers a preflight), followed by logline's. Everything inside it, a
-  preflight, a router's own 404 and 405 and a WebSocket included, then carries the resolved client
-  as the `ip` of its line (LOG-06). `trusted_proxies` is a required keyword with no default.
+- **PROXY-07** webauth places the client-address writer and logline's `RequestLineMiddleware`
+  itself, and a host adds neither by hand. `install` places them outermost, the request line
+  first, when `front` is `TrustedProxies`. A host that serves several apps behind one router builds
+  each with `front=ServedBehind.SHARED_FRONT`, for which `install` places neither, and serves
+  `web_auth_front(app, trusted_proxies=...)` outside all of them: the request line outermost, the
+  writer inside it, around the router of the apps. Everything inside, a preflight, the router's own
+  404 and 405, a lifespan and a WebSocket of any child, then carries the resolved client as the
+  `ip` of its line (LOG-06), and a child's stack sets the `sub` of that app's account.
+  `trusted_proxies` is a required keyword with no default, and a value that is no `TrustedProxies`
+  raises a `WebAuthSettingError` naming it.
 - **PROXY-08** The writer resolves each http and websocket scope once, records the address and
   whether the connection is HTTPS (`https` or `wss`, or `X-Forwarded-Proto` from a trusted peer),
   and rewrites neither the scope's peer nor its scheme; any other scope passes untouched. A host
@@ -49,30 +51,26 @@ carries none.
   `webauth.proxies.request_is_https(connection)`, which only read: no host resolves a second
   time, and `forwarded_for.ignored` (LOG-04) is written at most once per request. One writer in
   front of several apps that each carry a stack resolves once for all of them.
-- **PROXY-09** Without the writer, the first request fails loud: an http request answers the
-  library 500 with the security headers and its exception reaches the server, a WebSocket
-  raises before the app runs, and `client_address` raises `RuntimeError` naming the writer. webauth
-  never falls back to the socket peer. The installer refuses an app that already carries the
-  writer, since one added before the call sits inside the stack.
-- **Host duty:** put the writer immediately inside logline's `RequestLineMiddleware`. No library
-  check catches a writer placed inside a CORS layer or a router that answers by itself; those
-  answers then name the proxy. A host's own test proves the position, in one of two public ways:
-  - A Starlette host reads `app.user_middleware`, which lists the outermost middleware first
-    (`add_middleware` inserts at the front): it starts with logline's `RequestLineMiddleware`,
-    then `ClientAddressMiddleware`.
-  - Any host, and the only proof for one that wraps by hand, sends a request through a trusted
-    proxy that a self-answering layer answers (an outer router's 404 or 405, a CORS preflight):
-    the `ip` of its request line is the forwarded client, not the proxy.
-
-  Remaining risk: an answering layer the host's test never drives stays unseen.
+- **PROXY-09** An app built with `SHARED_FRONT` and served without `web_auth_front` fails loud on
+  its first request: an http request answers the library 500 with the security headers and its
+  exception reaches the server, a WebSocket raises before the app runs, and `client_address`
+  raises `RuntimeError` naming `web_auth_front`. webauth never falls back to the socket peer. The
+  installer refuses an app that already carries a writer, since one added by hand sits inside
+  the stack.
+- **Host duty:** serve every app built with `SHARED_FRONT` through one `web_auth_front` that stands
+  outside all of them, and an app built with `TrustedProxies` never inside one, which would write
+  a second request line. No library check catches an app served bare; the 500 of PROXY-09 shows
+  it on the first request. A host's own test proves the front by sending a request through a trusted
+  proxy that the router answers itself (an unknown `Host`, a wrong method): the `ip` of its request
+  line is the forwarded client, not the proxy.
 
 ## The composition call
 
-`WebAuth.build(settings, stores=, groups=, pages=, front=, gate=, outside=, inside=, issuer_calls=)` runs before the host's routes and `auth.install(app, bearer=)` after the last one; `auth.relying_party`, `auth.config` and `auth.admission` serve the host's routes. The readers `current_user`, `admin_user` and `authenticate_websocket` are module functions in `webauth.dependencies` over the installed handle. The host fills `WebAuthSettings` from its environment; webauth reads none. `front` is the `TrustedProxies` the client-address writer believes, and `outside` and `inside` are tuples of Starlette `Middleware`, outermost first.
+`WebAuth.build(settings, stores=, groups=, pages=, front=, gate=, outside=, inside=, issuer_calls=)` runs before the host's routes and `auth.install(app, bearer=)` after the last one; `auth.relying_party`, `auth.config` and `auth.admission` serve the host's routes. The readers `current_user`, `admin_user` and `authenticate_websocket` are module functions in `webauth.dependencies` over the installed handle. The host fills `WebAuthSettings` from its environment; webauth reads none. `front` is the `TrustedProxies` the client-address writer believes, or `ServedBehind.SHARED_FRONT` for an app a `web_auth_front` serves (PROXY-07), and `outside` and `inside` are tuples of Starlette `Middleware`, outermost first.
 
 The operator ruled the form of the call as this paragraph states it (option A: build, then install), COMPOSE-05, COMPOSE-06, COMPOSE-08, COMPOSE-12, COMPOSE-14, COMPOSE-15, COMPOSE-16 and COMPOSE-17 (the wording of COMPOSE-17 as ruled on #838 line 1); no other sentence of this section is ruled.
 
-- **COMPOSE-01** The install places logline's `RequestLineMiddleware` outermost and `ClientAddressMiddleware(trusted_proxies=front)` immediately inside it. A request the stack refuses (the 400 for a path, the CSRF 403, the 429) writes exactly one request line whose `ip` is the forwarded client, and carries the security headers.
+- **COMPOSE-01** With `front=TrustedProxies`, the install places logline's `RequestLineMiddleware` outermost and the client-address writer for `front` immediately inside it; with `SHARED_FRONT` it places neither (PROXY-07). A request the stack refuses (the 400 for a path, the CSRF 403, the 429) writes exactly one request line whose `ip` is the forwarded client, and carries the security headers.
 - **COMPOSE-02** The `outside` entries sit between the writer and the library stack. A request an `outside` layer answers itself, such as a CORS preflight, writes one line with the forwarded `ip` and never reaches the stack.
 - **COMPOSE-03** The `inside` entries sit inside the stack, so they see only admitted requests, and a `ContextVar` they set is visible to an `outside` layer after the call returns (STACK-04).
 - **COMPOSE-04** A WebSocket handshake through the proxy with a live session writes one line with the forwarded `ip` and the person as `sub`.
@@ -83,8 +81,8 @@ The operator ruled the form of the call as this paragraph states it (option A: b
 - **COMPOSE-09** `groups` decides who is admitted and who is admin: a member passes `current_user`, a non-member is refused with `RefusalPage.NO_ACCESS`, and only an admin passes `admin_user`.
 - **COMPOSE-10** The host's `outside` and `inside` entries keep the order given, outermost first.
 - **COMPOSE-11** A `bearer` given to `install` after the last route has its resource-metadata route served and its public rule added to `gate.public`, and a token on a person path is admitted. The routes the install adds, the sign-in routes of COMPOSE-05 and the resource metadata, answer ahead of every route the host registered before, a catch-all included.
-- **COMPOSE-12** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `build` for the early values (a `WebAuthSettingError`): `groups.bound_issuer` differing from `settings.client.issuer`, `settings.max_sessions`, `settings.keeps_id_token`, `pages.logout_page_text`, `front`, `outside` and `inside`.
-- **COMPOSE-13** A second `install`, or an app that already carries library middleware, raises `RuntimeError` and leaves the app's routes, middleware and state as they were.
+- **COMPOSE-12** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `build` for the early values (a `WebAuthSettingError`): `groups.bound_issuer` differing from `settings.client.issuer`, `settings.max_sessions`, `settings.keeps_id_token`, `pages.logout_page_text`, `front` (that is no `TrustedProxies` and no `ServedBehind`), `outside` and `inside`.
+- **COMPOSE-13** A second `install` of one handle, on the same app or on another, or an app that already carries library middleware, raises `RuntimeError` and leaves the app's routes, middleware and state as they were. Each app of a shared front is built and installed once.
 - **COMPOSE-14** Every check webauth owns raises a `ValueError` subclass naming the field, never the value, at `install` for the late bearer, before `install` changes the app: a `bearer` that does not fit the early values raises a `WebAuthSettingError` naming `bearer.relying_party` or `bearer.admission`: it must hold `auth.relying_party` and `auth.admission`. `BearerGate` still refuses `NoAdmins` with machine paths and a gate that names no kind when it is constructed.
 - **COMPOSE-15** `admin_user` opens no entry and checks the identity it is given, so `app.dependency_overrides[current_user]` decides both.
 - **COMPOSE-16** `authenticate_websocket(connection)` without `sessions` refuses a missing or foreign `Origin` before it opens any `stores.sessions()` entry (CSRF-15), then opens one.
@@ -205,8 +203,8 @@ for the mechanism and its trust boundaries.
   audit) before the call.
 - **STACK-02** Added after the call, a host middleware sits outside the library stack and
   sees every library refusal with its headers already set; it is the place for access
-  logs and metrics. The client-address writer is the outermost of them but logline's own
-  (PROXY-07).
+  logs and metrics. The request line and the client-address writer are outermost, placed by
+  the install or by `web_auth_front` (PROXY-07).
 - **STACK-03** A response or exception that such a host middleware produces itself does
   not carry the library headers.
 - **STACK-04** The library middleware run the app in the caller's task, so a `ContextVar`
@@ -250,7 +248,7 @@ Every line webauth writes goes through the standard-library logger of its own mo
 - **LOG-03** `key_set_refresh.failed` (WARNING) carries `reason`, the code of why the fetched key set was refused (for example `not-json`, `duplicate-key-id`, `key-too-short`), and no error class. A refresh that failed because the fetch failed writes no such line: the fetch's own `key_set_fetch.ended` line (LOG-05) already records that failure.
 - **LOG-04** `forwarded_for.ignored` (WARNING) carries `reason`: `not-an-address` when the nearest entry of the chain is no address, `too-many-trusted-hops` when more trusted hops follow in a row than the bound. Behind uvicorn's own proxy-header handling (its default `--proxy-headers` with `forwarded-allow-ips`), uvicorn rewrites the peer from `X-Forwarded-For` before webauth sees it, so `TrustedProxies` and this line apply only when the host turns uvicorn's handling off.
 - **LOG-05** The calls to the issuer each write one `.ended` line through logline's `StepTimer`: `key_set_fetch.ended`, `provider_metadata_fetch.ended` and `token_request.ended` carry `duration_ms`, `outcome`, `status` once the origin answered, a `reason` code when the call failed (`unreachable`, `tls-failed`, `timed-out`, `broken-off` or `too-large`) or the origin answered a status it does not accept (`status-not-accepted`, outcome `refused`, at INFO), and `error_type`, the class name of the transport error, when the call failed on one (an answer past the size limit fails as `too-large` with no error). A failed key-set fetch is a WARNING, since the verifier goes on with the key set it holds; a failed provider-metadata fetch is an ERROR, since the host cannot start without it, and so is a failed token request. No line carries the URL, the document or a secret.
-- **LOG-06** The request line, `request.ended`, is written by logline's `RequestLineMiddleware`, which the host still installs after every other middleware and whose `configure` it still calls; webauth installs neither. The host adds `ClientAddressMiddleware(app, trusted_proxies=...)` immediately inside it (PROXY-07). That writer gives the line its `ip`, so the host sets it with no `set_client_ip`; webauth's stack gives it `sub`, so the host sets that with no `set_sub`. `ip` is the client address `TrustedProxies` resolves (the rightmost hop no entry vouches for), set for every http request and every WebSocket the writer wraps, so a proxied preflight, an outer router's own 404 and 405, every refusal of the stack and an exempt path carry it; a WebSocket's line carries it on logline 1.0 and later, since below that a WebSocket has no line. `sub` is the `id` of the account `admitted_user` returns: the session gate sets it for a live session on a gated or optional path, the bearer gate for the account behind a token on a person path or at a protected resource, and the sign-in callback sets it once it has signed a person in, so the callback's own line carries the new person, and `current_user` sets it for the account it resolves, so a route guarded by `current_user_dependency` alone, with no `SessionGate`, carries it too. `authenticate_websocket` sets it for the account it admits, so a WebSocket's line carries the person, and a refused handshake's line has `sub` `null`. `admit_session` takes no connection and sets no `sub`: a host that admits a socket through it calls logline's `set_sub` itself, or uses `authenticate_websocket`. A request with no admitted account, and a machine admitted on a machine path (a `BearerCaller`, no account), has `sub` `null`.
+- **LOG-06** The request line, `request.ended`, is written by logline's `RequestLineMiddleware`, which the install or `web_auth_front` places outermost (PROXY-07) and whose `configure` the host still calls; the host adds no request line and no writer. The writer gives the line its `ip`, so the host sets it with no `set_client_ip`; webauth's stack gives it `sub`, so the host sets that with no `set_sub`. `ip` is the client address `TrustedProxies` resolves (the rightmost hop no entry vouches for), set for every http request and every WebSocket the writer wraps, so a proxied preflight, an outer router's own 404 and 405, every refusal of the stack and an exempt path carry it; a WebSocket's line carries it on logline 1.0 and later, since below that a WebSocket has no line. `sub` is the `id` of the account `admitted_user` returns: the session gate sets it for a live session on a gated or optional path, the bearer gate for the account behind a token on a person path or at a protected resource, and the sign-in callback sets it once it has signed a person in, so the callback's own line carries the new person, and `current_user` sets it for the account it resolves, so a route guarded by `current_user_dependency` alone, with no `SessionGate`, carries it too. `authenticate_websocket` sets it for the account it admits, so a WebSocket's line carries the person, and a refused handshake's line has `sub` `null`. `admit_session` takes no connection and sets no `sub`: a host that admits a socket through it calls logline's `set_sub` itself, or uses `authenticate_websocket`. A request with no admitted account, and a machine admitted on a machine path (a `BearerCaller`, no account), has `sub` `null`.
 - **LOG-07** The sign-in callback writes one line for its outcome through the logger `webauth.sign_in_routes`, both at INFO. `sign_in.refused` carries `reason`, the value of the refusal's `OidcRefusalReason` or `AdmissionRefusal`; `token_rejection` when the verifier rejected a token; and `idp_error` when the issuer named a well-formed one, as the value of the refusal's `idp_error` (REFUSE-29). It carries no identity, token, username or return path (REFUSE-27). `sign_in.completed` carries `sub`, the value `set_sub` gets, and nothing else. Every refusal writes its line once, before the host's `refused` hook runs, also when the hook raises; a failure that becomes the plain 500 writes no sign-in line. Renaming a value of either refusal enum is Breaking through this line too. Logout and back-channel logout write no line of their own.
 
 ## What an issuer call carries
