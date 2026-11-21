@@ -593,6 +593,24 @@ def test_compose_13_an_app_that_carries_library_middleware_is_refused_untouched(
     assert the_app_as_it_stands(app) == before
 
 
+@pytest.mark.parametrize("not_a_gate", ["a secret-looking string", 7, object()])
+def test_compose_14_a_bearer_that_is_no_bearer_gate_is_refused_before_the_app_changes(
+    not_a_gate: object,
+) -> None:
+    """COMPOSE-14"""
+    world = a_host_world()
+    auth = a_composition(world, groups=NO_ADMINS).build()
+    app = FastAPI()
+    the_routes_of(world)(app, auth)
+    before = the_app_as_it_stands(app)
+
+    with pytest.raises(WebAuthSettingError, match=r"bearer") as refusal:
+        auth.install(app, bearer=not_a_gate)  # type: ignore[arg-type]
+
+    assert "secret-looking" not in str(refusal.value)
+    assert the_app_as_it_stands(app) == before
+
+
 def test_compose_14_a_bearer_that_does_not_fit_is_refused_before_the_app_changes() -> None:
     """COMPOSE-14"""
     world = a_host_world()
