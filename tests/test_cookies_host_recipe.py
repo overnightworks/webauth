@@ -44,7 +44,7 @@ def test_a_host_test_signs_a_person_in_without_an_issuer_from_its_own_store() ->
 
 
 def test_a_host_test_drives_the_callback_route_through_its_own_stub_of_the_issuer() -> None:
-    """HOSTTEST-04: a relying party given its own `post_token_request` and `fetch_key_set` signs
+    """HOSTTEST-04: `IssuerCalls` given its own `post_token_request` and `fetch_key_set` sign
     a person in through the callback route, the stub receiving the code exchange."""
     host = after_signing_in(an_oidc_host())
 

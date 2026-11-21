@@ -555,7 +555,7 @@ def test_a_back_channel_failure_is_raised_once_the_400_is_sent(
     raised_type: type[Exception],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SIGNIN-50: an exception in the relying party, verification, store, audit sink or exit gets an
+    """SIGNIN-50: an exception in the verification, store, audit sink or exit gets an
     empty 400, then is raised."""
     host = a_host_with_sessions(subject_sessions=1)
     fail(host, monkeypatch)

@@ -88,6 +88,7 @@ The operator ruled the form of the call as this paragraph states it (option A: b
 - **COMPOSE-15** `admin_user` opens no entry and checks the identity it is given, so `app.dependency_overrides[current_user]` decides both.
 - **COMPOSE-16** `authenticate_websocket(connection)` without `sessions` refuses a missing or foreign `Origin` before it opens any `stores.sessions()` entry (CSRF-15), then opens one.
 - **COMPOSE-17** A host that builds and never installs gets a `RuntimeError` naming the missing `auth.install` on its first request that reads it (`current_user`, `admin_user`, or `authenticate_websocket` without `sessions`), an HTTP request or a WebSocket handshake. A request that reads none of them is served without the library's stack, and the sign-in routes do not exist.
+- **COMPOSE-18** `WebAuth.build` is the only way to make a `WebAuth`: calling the class raises `TypeError`.
 - **Host duty:** `stores.sessions` and `stores.sign_in` address the same session data, and the sign-in transaction is passed again in `PersonPaths` and `ProtectedResource`, and the session transaction again in `SessionGate.session_transaction`.
 
 ## What every app gets
@@ -196,13 +197,14 @@ for the mechanism and its trust boundaries.
 
 ## Where the host's own middleware goes
 
-- **STACK-01** Added before `install_web_auth_middleware`, a host middleware sits inside
-  the library stack, so a request the library refuses early (400 for a malformed path,
+- **STACK-01** Named in `inside`, or added to the app before `auth.install`, a host middleware
+  sits inside the library stack, so a request the library refuses early (400 for a malformed path,
   413 by `Content-Length`, 429, 503, the CSRF 403s, the session gate's 302 and 401) never
   reaches it.
 - **Host duty:** put a middleware that must see only admitted requests (session lookups,
-  audit) before the call.
-- **STACK-02** Added after the call, a host middleware sits outside the library stack and
+  audit) in `inside`.
+- **STACK-02** Named in `outside`, or added to the app after `auth.install`, a host middleware
+  sits outside the library stack and
   sees every library refusal with its headers already set; it is the place for access
   logs and metrics. The request line and the client-address writer are outermost, placed by
   the install or by `web_auth_front` (PROXY-07).
@@ -223,7 +225,7 @@ What the installer refuses before any rule or route:
 - **STACK-08** A request whose route path, the path below `root_path`, carries a control character (U+0000 to U+001F or U+007F) gets 400 with the JSON body `{"detail": "Malformed request path"}` and the security headers. Starlette's route patterns end in `$`, which also matches before a final line feed, so without the refusal a path with a trailing newline reaches a route that the path rules, which compare exactly, do not know.
 - **STACK-09** The refusal sits directly inside the security headers and ahead of every other library middleware: a refused request spends no rate budget, opens no session lookup, and reaches neither a host middleware added before the call nor a route.
 - **STACK-10** The refusal reads the path below `root_path`; a control character in `root_path` itself refuses nothing.
-- **STACK-11** The installer always installs it. It has no policy and no option. `webauth.middleware` exports the class so a host can name it in a stack-order check; `install_web_auth_middleware` stays the only supported way to add it, and an app that already carries it is refused like any library middleware.
+- **STACK-11** The install always places it. It has no policy and no option, and no host names the class: `auth.install` is the only way to add it, and an app that already carries it is refused like any library middleware (COMPOSE-13).
 - **STACK-12** The lifespan scope passes, and a WebSocket scope passes once the security headers have read the recorded client (PROXY-09): no library rule reads a handshake's path, and `authenticate_websocket` decides a handshake.
 - **STACK-13** A path with a space, a `;`, a trailing slash or a non-ASCII character keeps the answer it has without the refusal.
 - **Host duty:** a route takes no control character in its path; free text goes in the query or the body.
@@ -389,7 +391,7 @@ hal is the operator's CLI for calling an app's machine routes with a bearer
 token. It calls them with the access token Keycloak issued it in `Authorization: Bearer`.
 
 **Host duty:** A host declares its machine (admin) paths once. `BearerGate` is passed to
-`install_web_auth_middleware(bearer_gate=...)`; it holds the app's own
+`auth.install(app, bearer=...)`; it holds the app's own
 `OidcRelyingParty`, the app's `AdmissionConfig` and `MachinePaths(paths, authorized_parties)`:
 the paths (`PathRules`) and `AuthorizedParties`, the `azp` values (hal's client ids) the host
 admits on them, read from configuration.
@@ -606,7 +608,7 @@ the app builds once. `account_tag` is the account's tag as the issuer gave it, a
 `accept_language` is the request's `Accept-Language` header as one string: a host with several
 header lines joins them with commas. `account_language_of_session(connection, *, sessions, config)`
 from `webauth.dependencies` answers the account's tag for the request, from the session row.
-`install_sign_in_routes(..., ui_language=...)` names the resolved language to the issuer.
+`SignInPages.ui_language` names the resolved language to the issuer.
 
 **LANGUAGE-01** `AppLanguages` raises `ValueError` when built if an offered tag or the default is not a
 language tag in shape, the shape `SIGNIN-14` gives.
@@ -673,8 +675,8 @@ public page calls it without sliding a session's expiry.
 
 **LANGUAGE-20** A failing store raises.
 
-**LANGUAGE-21** `install_sign_in_routes` requires `ui_language: Callable[[Request], str | None]`, with no
-default: an install without it raises `TypeError` and registers no route.
+**LANGUAGE-21** `SignInPages` requires `ui_language: Callable[[Request], str | None]`, with no
+default: building the pages without it raises `TypeError`.
 
 **LANGUAGE-22** The start route calls it once per request, with that request.
 
@@ -803,14 +805,14 @@ At the entry point, on every method and the exact path only:
 - **RESOURCE-34** A machine path that overlaps the entry point stays a machine path.
 - **RESOURCE-35** An entry point below a person path is decided as the entry point.
 
-`install_resource_metadata(app, resource, issuer=...)`:
+`auth.install(app, bearer=)` with a `BearerGate` that holds a resource:
 
 - **RESOURCE-36** registers `GET` of the metadata path,
 - **RESOURCE-37** answering JSON with `resource`, `authorization_servers` (`[issuer]`) and `scopes_supported`
   (`[scope]`).
-- **Host duty:** Install it ahead of any catch-all route.
-- **Host duty:** List `resource.public_rule` in `SessionGate.public`.
-- **RESOURCE-38** So listed, a client without a session reads the metadata document.
+- The install answers ahead of any catch-all route of the host and lists `resource.public_rule` in
+  `SessionGate.public` itself (COMPOSE-11).
+- **RESOURCE-38** A client without a session reads the metadata document.
 - **Host duty:** A host below a `root_path` names no resource: the entry point is matched on the route path,
   as every policy is, and the `url` is the public identifier, so the route path differs from it.
 
@@ -892,7 +894,7 @@ An app whose protected resource admitted a caller's token acts for that caller a
 - **Host duty:** A held exchanged token is keyed by `resource_person(connection).id` of the same request.
 - **Host duty:** At most one exchange is in flight per principal, and a refusal is not retried on every request; the post runs on the worker threads the gate's verifier uses.
 - **Host duty:** A resource whose token must be exchangeable declares `admits_client_audience=True` (RESOURCE-18).
-- **Host duty:** A host's test passes its own `post_token_request` to the gate's relying party and answers this grant type there (beside HOSTTEST-04).
+- **Host duty:** A host's test passes its own `post_token_request` in `IssuerCalls` and answers this grant type there (beside HOSTTEST-04).
 
 The operator ruled the sentence that says the call exists for every app and names the delegation policy: the issuer grants an exchanged scope only when the realm offers it to the app's client, and the service alone checks that the principal is in its group. No other sentence here is ruled.
 
@@ -1003,7 +1005,7 @@ No sentence of this section is ruled by the operator.
 - **DISCOVERY-11** An `issuer` that `OidcClientConfig` refuses (not an https URL, or with a query or fragment) raises that same `ValueError` naming `issuer`, before any fetch and without repeating the value.
 - **DISCOVERY-12** The document's `authorization_response_iss_parameter_supported` (RFC 9207 section 2.3) becomes the field of the same name: `true` and `false` as given, a missing member `False`; any other value raises `OidcDiscoveryError` naming the member.
 - **DISCOVERY-13** When `authorization_response_iss_parameter_supported` is `True`, the sign-in callback refuses a response without `iss` as `ISSUER_MISMATCH` (RFC 9207 section 2.4), an error response included, and exchanges no code; an `iss` that differs from `issuer` is `ISSUER_MISMATCH` whatever the field says. The callback's other checks keep their order: state, the pending login's age, then `iss`, then the IdP's `error`.
-- **Host duty:** the host calls it once at startup and fails to start when it raises. It cannot start while its issuer is down, and a changed document takes effect at the next start; the host's supervisor restarts it.
+- **Host duty:** the host calls it once at startup, passes the result as `WebAuthSettings.client`, and fails to start when it raises. It cannot start while its issuer is down, and a changed document takes effect at the next start; the host's supervisor restarts it.
 - **Host duty:** `issuer` is the host's own configuration, never a value from a request: the document decides where the client secret, the code and the PKCE verifier are sent, and the library trusts it as it trusts what the issuer signs.
 - **Host duty:** a host's test passes its own `fetch_provider_metadata` that answers the document, beside HOSTTEST-04.
 
@@ -1011,11 +1013,11 @@ No sentence of this section is ruled by the operator.
 
 The operator ruled the host duty that a single-page app logs out by a top-level form POST; SIGNIN-58; the host duty that a host serving no logout route passes `False`; SIGNIN-60; SIGNIN-61; no other sentence of this section is ruled.
 
-- **SIGNIN-01** `install_sign_in_routes` registers the start, callback, logout and back-channel logout routes on the host's
+- **SIGNIN-01** `auth.install` registers the start, callback, logout and back-channel logout routes on the host's
   `FastAPI` app.
-- **SIGNIN-02** Every route reads the host's one `OidcRelyingParty` through `relying_party` per request.
+- **SIGNIN-02** Every route reads the one `auth.relying_party`.
 
-`install_web_auth_middleware` takes the host's `SignInPaths` and applies the policies for exactly those paths:
+`auth.install` takes the host's `settings.sign_in_paths` and applies the policies for exactly those paths:
 
 - **SIGNIN-03** the session gate's public rules, when a session gate is installed (`GET` of start and callback, `POST` of logout and of the back-channel);
 - **SIGNIN-04** the sign-in rate budget on start, callback and logout;
@@ -1028,7 +1030,7 @@ The operator ruled the host duty that a single-page app logs out by a top-level 
 So the host lists the paths once. `login_redirect` is browser-absolute, so it is right for an app at its origin's root.
 
 - **Host duty:** a host below a `root_path` builds its own `LoginRedirect`.
-- **SIGNIN-64** `sign_in_paths` is a required argument of `install_web_auth_middleware`; without it the call raises `TypeError`.
+- **SIGNIN-64** `sign_in_paths` is a required field of `WebAuthSettings`; without it the settings raise `TypeError`.
 - **SIGNIN-65** The derived rules come ahead of the host's own in every policy, so the first match is the derived one (a host exemption wins: SIGNIN-69).
 - **SIGNIN-66** The sign-in budget is `RateLimitPolicy.sign_in`, 40 requests per 600 seconds per address unless the host's policy sets another, and it is the first rate rule.
 - **SIGNIN-67** The name of the `sign_in` budget (`"sign-in"` unless the host renames it) is reserved: a `RateLimitPolicy` whose default or rule carries it raises `ValueError` naming it when it is built.
@@ -1048,7 +1050,7 @@ So the host lists the paths once. `login_redirect` is browser-absolute, so it is
 - **SIGNIN-17** `webauth.cookies` carries the pending login in a signed cookie of its own, one per login.
 
 So the library keeps no server-side store and `WebAuthConfig` knows nothing
-of OpenID Connect. The `webauth.sign_in_routes` module and `install_sign_in_routes` docstrings hold the routes' contract, the
+of OpenID Connect. The `webauth.sign_in_routes` module docstring holds the routes' contract, the
 `webauth.oidc_login` and `webauth.cookies` module docstrings hold the login and its
 cookies, and `build_app` in [`tests/e2e/oidc/host_app.py`](../tests/e2e/oidc/host_app.py)
 is the worked host, type-checked and run against a real issuer.
@@ -1110,7 +1112,7 @@ The answers are, in order:
   non-empty `logout_token`, before any transaction is entered;
 - **SIGNIN-48** an empty 400 for a token that does not verify, before any transaction is entered;
 - **SIGNIN-49** an empty 200 after the clean exit of one `SignInTransaction` entry;
-- **SIGNIN-50** an empty 400, then the failure re-raised, for any exception in `relying_party`, the verification, a store, the audit
+- **SIGNIN-50** an empty 400, then the failure re-raised, for any exception in the verification, a store, the audit
   sink or the exit.
 
 - **SIGNIN-51** A subject without an account is accepted and provisions nothing;
@@ -1118,7 +1120,6 @@ The answers are, in order:
 - **SIGNIN-53** and one `BACKCHANNEL_LOGOUT` event with `actor_id=None` is recorded when at least one session ended.
 - **SIGNIN-54** The route clears no cookie
 - **SIGNIN-55** and calls no issuer endpoint beyond the key fetch of verification.
-- **SIGNIN-56** `relying_party` receives the request with the Host the issuer posted to, often an internal alias.
 
 - **Host duty:** the host's transaction rolls back when the back-channel block raises, also when the audit
   sink fails after the deletion.
@@ -1130,9 +1131,9 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **Host duty:** the host lets the issuer reach it over an internal network alone, never the public route
   (tunnel, CDN, access proxy); its URL may name the public hostname through an internal alias.
 
-- **SIGNIN-58** `install_sign_in_routes` requires the host's explicit `keeps_id_token` choice, with no
+- **SIGNIN-58** `WebAuthSettings` requires the host's explicit `keeps_id_token` choice, with no
   default,
-- **SIGNIN-59** and validates `max_sessions` before it registers a route.
+- **SIGNIN-59** and `WebAuth.build` validates `max_sessions` before the app sees a route (COMPOSE-12).
 - **Host duty:** a host that serves no logout route passes `False`.
 - **SIGNIN-60** With `False`, its session row keeps no ID token, while refresh-token storage is unchanged.
 - **SIGNIN-61** With `True`, the row keeps the login's ID token for logout.
@@ -1230,9 +1231,9 @@ A test that needs a signed-in person needs no issuer:
 - **HOSTTEST-03** A state-changing request is admitted the same way when it also sends `Sec-Fetch-Site: same-origin` ([CSRF origin](#csrf-origin)).
 - **Host duty:** when the client keeps the cookie's attributes and `cookie_secure` is on, it uses an `https` base URL.
 
-A test of a host that installs the sign-in routes:
+A test of a host built with `WebAuth.build`:
 
-- **HOSTTEST-04** `OidcRelyingParty` takes its own `post_token_request` (a `TokenRequestPost`, from
+- **HOSTTEST-04** `IssuerCalls` takes its own `post_token_request` (a `TokenRequestPost`, from
   `webauth.oidc`) and `fetch_key_set` (a `KeySetFetch`, from `webauth.jwt_verification`) instead of the HTTPS ones,
   and the callback route then makes no HTTPS call.
 - **Host duty:** the host owns that stub.

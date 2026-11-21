@@ -718,3 +718,22 @@ def test_compose_17_a_socket_of_a_handle_that_was_never_installed_names_the_miss
         client.websocket_connect(WEBSOCKET_PATH, headers=handshake),
     ):
         pass
+
+
+def test_compose_18_the_class_called_with_every_argument_of_a_build_is_refused() -> None:
+    """COMPOSE-18"""
+    composition = a_composition(a_host_world())
+    built = composition.build()
+
+    with pytest.raises(TypeError):
+        WebAuth(  # type: ignore[call-arg]
+            settings=composition.settings,
+            stores=composition.stores,
+            groups=composition.groups,
+            pages=composition.pages,
+            front=composition.front,
+            gate=None,
+            outside=(),
+            inside=(),
+            relying_party=built.relying_party,
+        )
