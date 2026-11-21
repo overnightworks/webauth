@@ -29,7 +29,7 @@ from webauth._worker import on_worker
 from webauth.admission import (
     AdmissionRefusal,
     AppRole,
-    _require_group_path,
+    GroupPath,
     app_role,
 )
 from webauth.middleware._refusal import RefusalMiddleware
@@ -208,11 +208,10 @@ class ProtectedResource:
     read, a person must have signed in once, admitted with the role ``"user"`` whatever role is
     stored; for one with it the account is created on its first admission and set to the kind
     ``AGENT``, and the agent is admitted with the role ``"user"`` and its ``AgentFacts``.
-    ``TypeError`` for
-    ``authorized_parties`` that is not an ``AuthorizedParties``. ``ValueError`` for a
-    ``required_group`` or ``agent_group`` that is not a group path, and for a ``url`` that is
-    not an endpoint URL with a plain host, an optional port and a path of one or more
-    segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
+    ``TypeError`` for ``authorized_parties`` that is not an ``AuthorizedParties`` and for a
+    ``required_group`` or ``agent_group`` that is not a ``GroupPath``. ``ValueError`` for a
+    ``url`` that is not an endpoint URL with a plain host, an optional port and a path of one
+    or more segments of unreserved characters (RFC 3986), none being ``.`` or ``..``, without a
     trailing slash, and for a ``scope`` that is not one scope token. So the path needs no
     decoding and reads the same in a header, in the ASGI path and in a route.
 
@@ -232,8 +231,8 @@ class ProtectedResource:
 
     url: str
     scope: str
-    required_group: str
-    agent_group: str
+    required_group: GroupPath
+    agent_group: GroupPath
     authorized_parties: AuthorizedParties
     marked_routes: frozenset[MarkedRoute] = frozenset()
     admits_client_audience: bool = False
@@ -246,8 +245,10 @@ class ProtectedResource:
             raise TypeError("ProtectedResource.marked_routes must be a frozenset of MarkedRoute")
         if not isinstance(self.admits_client_audience, bool):
             raise TypeError("ProtectedResource.admits_client_audience must be a bool")
-        _require_group_path("ProtectedResource.required_group", self.required_group)
-        _require_group_path("ProtectedResource.agent_group", self.agent_group)
+        if not isinstance(self.required_group, GroupPath):
+            raise TypeError("ProtectedResource.required_group must be a GroupPath")
+        if not isinstance(self.agent_group, GroupPath):
+            raise TypeError("ProtectedResource.agent_group must be a GroupPath")
         if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
             raise ValueError(
                 "ProtectedResource.url must be an endpoint URL with a plain host and a path"

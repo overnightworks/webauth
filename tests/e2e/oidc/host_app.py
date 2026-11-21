@@ -48,7 +48,7 @@ from pydantic import SecretStr
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
+from webauth.admission import AdmissionConfig, EverySubject, GroupPath, NoAdmins
 from webauth.config import WebAuthConfig
 from webauth.dependencies import (
     admin_user,
@@ -133,7 +133,7 @@ PERSON_ROUTES_PREFIX = "/api/"
 RESOURCE_PATH = "/mcp"
 RESOURCE_SCOPE = "mcp:tools"
 RESOURCE_GROUP_NAME = "mcp"
-AGENT_GROUP = "/agents"
+AGENT_GROUP = GroupPath("/agents")
 MARKED_ROUTES = (
     MarkedRoute("GET", "/notes/{note}"),
     MarkedRoute("POST", "/notes"),
@@ -417,7 +417,7 @@ def _resource_of(settings: HostSettings) -> ProtectedResource:
     return ProtectedResource(
         f"{origin}{RESOURCE_PATH}",
         RESOURCE_SCOPE,
-        f"{settings.login_group}/{RESOURCE_GROUP_NAME}",
+        GroupPath(f"{settings.login_group}/{RESOURCE_GROUP_NAME}"),
         AGENT_GROUP,
         AuthorizedParties(frozenset(settings.bearer_authorized_parties)),
         frozenset(MARKED_ROUTES),
@@ -430,12 +430,12 @@ def _admission_of(settings: HostSettings) -> AdmissionConfig:
         login_group=(
             EverySubject.OF_THE_BOUND_ISSUER
             if settings.login_group == EverySubject.OF_THE_BOUND_ISSUER.value
-            else settings.login_group
+            else GroupPath(settings.login_group)
         ),
         admin_group=(
             NoAdmins.IN_THIS_APP
             if settings.admin_group == NoAdmins.IN_THIS_APP.value
-            else settings.admin_group
+            else GroupPath(settings.admin_group)
         ),
     )
 

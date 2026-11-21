@@ -541,7 +541,7 @@ class Browser:
         self.config = a_web_auth_config()
         clock = FakeClock(float(NOW))
         self.issuer = FakeIssuer(
-            mint_id_token=lambda nonce: an_id_token(nonce, clock, (LOGIN_GROUP,))
+            mint_id_token=lambda nonce: an_id_token(nonce, clock, (str(LOGIN_GROUP),))
         )
         app = FastAPI()
 

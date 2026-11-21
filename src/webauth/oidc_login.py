@@ -95,7 +95,7 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
-    from webauth.admission import AdmissionConfig, AdmissionRefusal
+    from webauth.admission import AdmissionConfig, AdmissionRefusal, GroupPath
     from webauth.config import WebAuthConfig
     from webauth.oidc import OidcIdentity, OidcRelyingParty, VerifiedAccessToken
     from webauth.ports import (
@@ -592,7 +592,7 @@ def _admit_resource_holder(
     transaction: SignInTransaction,
     verified: VerifiedAccessToken,
     *,
-    required_group: str,
+    required_group: GroupPath,
     admission: AdmissionConfig,
 ) -> AuthenticatedUser | AdmissionRefusal | None:
     """The account behind a token presented to a protected resource, always with the role

@@ -48,7 +48,7 @@ from webauth.ports import (
 LENA = OidcIdentity(
     subject=SUBJECT,
     issuer=BOUND_ISSUER,
-    groups=(LOGIN_GROUP,),
+    groups=(str(LOGIN_GROUP),),
     session_id=None,
     preferred_username="lena",
     id_token=a_fake_id_token("lena"),
@@ -57,7 +57,7 @@ LENA = OidcIdentity(
 )
 
 
-LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(ADMIN_GROUP,))
+LENA_IN_THE_ADMIN_GROUP = replace(LENA, groups=(str(ADMIN_GROUP),))
 
 
 @dataclass
@@ -134,19 +134,19 @@ def test_a_new_subject_creates_a_member_account_and_reports_it(
 @pytest.mark.parametrize(
     ("groups", "admitted"),
     [
-        pytest.param((LOGIN_GROUP,), True, id="the group itself"),
+        pytest.param((str(LOGIN_GROUP),), True, id="the group itself"),
         pytest.param((f"{LOGIN_GROUP}/admin",), True, id="a subgroup only"),
         pytest.param((f"{LOGIN_GROUP}/admin/ops",), True, id="a deeper subgroup"),
-        pytest.param(("/other", LOGIN_GROUP), True, id="the group among others"),
+        pytest.param(("/other", str(LOGIN_GROUP)), True, id="the group among others"),
         pytest.param((), False, id="no groups, as a missing or empty claim reads"),
         pytest.param((f"{LOGIN_GROUP}2",), False, id="a group named like it with a suffix"),
         pytest.param(("/apps",), False, id="the parent of the group"),
         pytest.param(("/apps/other",), False, id="another app's group"),
         pytest.param(("lab",), False, id="the bare name"),
-        pytest.param((LOGIN_GROUP.upper(),), False, id="another case"),
+        pytest.param((str(LOGIN_GROUP).upper(),), False, id="another case"),
         pytest.param(tuple(f"/g/{n}" for n in range(1000)), False, id="a thousand foreign groups"),
         pytest.param(
-            (*(f"/g/{n}" for n in range(1000)), LOGIN_GROUP),
+            (*(f"/g/{n}" for n in range(1000)), str(LOGIN_GROUP)),
             True,
             id="the group after a thousand others",
         ),
@@ -277,10 +277,10 @@ class RoleCase:
     "case",
     [
         pytest.param(
-            RoleCase(None, (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, False), id="a new member"
+            RoleCase(None, (str(LOGIN_GROUP),), ADMISSION, MEMBER_ROLE, False), id="a new member"
         ),
         pytest.param(
-            RoleCase(None, (ADMIN_GROUP,), ADMISSION, ADMIN_ROLE, False),
+            RoleCase(None, (str(ADMIN_GROUP),), ADMISSION, ADMIN_ROLE, False),
             id="a new member of the admin group",
         ),
         pytest.param(
@@ -292,31 +292,31 @@ class RoleCase:
             id="a new member of the admin group under every subject",
         ),
         pytest.param(
-            RoleCase(None, (ADMIN_GROUP,), NO_ADMINS, MEMBER_ROLE, False),
+            RoleCase(None, (str(ADMIN_GROUP),), NO_ADMINS, MEMBER_ROLE, False),
             id="a new person in a group named admin where the app has no admins",
         ),
         pytest.param(
-            RoleCase(MEMBER_ROLE, (ADMIN_GROUP,), ADMISSION, ADMIN_ROLE, True),
+            RoleCase(MEMBER_ROLE, (str(ADMIN_GROUP),), ADMISSION, ADMIN_ROLE, True),
             id="a member put into the admin group",
         ),
         pytest.param(
-            RoleCase(ADMIN_ROLE, (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, True),
+            RoleCase(ADMIN_ROLE, (str(LOGIN_GROUP),), ADMISSION, MEMBER_ROLE, True),
             id="an admin taken out of the admin group",
         ),
         pytest.param(
-            RoleCase(ADMIN_ROLE, (ADMIN_GROUP,), ADMISSION, ADMIN_ROLE, False),
+            RoleCase(ADMIN_ROLE, (str(ADMIN_GROUP),), ADMISSION, ADMIN_ROLE, False),
             id="an admin still in the admin group",
         ),
         pytest.param(
-            RoleCase(MEMBER_ROLE, (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, False),
+            RoleCase(MEMBER_ROLE, (str(LOGIN_GROUP),), ADMISSION, MEMBER_ROLE, False),
             id="a member outside the admin group",
         ),
         pytest.param(
-            RoleCase(ADMIN_ROLE, (ADMIN_GROUP,), NO_ADMINS, MEMBER_ROLE, True),
+            RoleCase(ADMIN_ROLE, (str(ADMIN_GROUP),), NO_ADMINS, MEMBER_ROLE, True),
             id="an admin where the app has no admins",
         ),
         pytest.param(
-            RoleCase("owner", (LOGIN_GROUP,), ADMISSION, MEMBER_ROLE, True),
+            RoleCase("owner", (str(LOGIN_GROUP),), ADMISSION, MEMBER_ROLE, True),
             id="a stored role the library does not know",
         ),
         pytest.param(
@@ -325,7 +325,11 @@ class RoleCase:
         ),
         pytest.param(
             RoleCase(
-                MEMBER_ROLE, (LOGIN_GROUP, ADMIN_GROUP.upper()), ADMISSION, MEMBER_ROLE, False
+                MEMBER_ROLE,
+                (str(LOGIN_GROUP), str(ADMIN_GROUP).upper()),
+                ADMISSION,
+                MEMBER_ROLE,
+                False,
             ),
             id="the admin group in another case",
         ),

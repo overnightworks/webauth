@@ -40,7 +40,7 @@ from tests.support.webauth_arrangement import (
     an_auth_app,
     session_cookie_header,
 )
-from webauth.admission import AdmissionConfig
+from webauth.admission import AdmissionConfig, GroupPath
 from webauth.config import web_auth_config
 from webauth.dependencies import (
     account_language_of_session,
@@ -93,14 +93,14 @@ REALM_INVALID_TOKEN = f'{REALM}, error="invalid_token"'
 REALM_INSUFFICIENT_SCOPE = f'{REALM}, error="insufficient_scope"'
 ADMISSION = AdmissionConfig(
     bound_issuer=a_relying_party().issuer,
-    login_group="/apps/x",
-    admin_group="/apps/x/admin",
+    login_group=GroupPath("/apps/x"),
+    admin_group=GroupPath("/apps/x/admin"),
 )
 HAL_ONLY = AuthorizedParties(frozenset({"hal"}))
 RESOURCE_URL = "https://app.example/mcp"
 RESOURCE_SCOPE = "mcp:tools"
-RESOURCE_GROUP = "/apps/x/mcp"
-AGENT_GROUP = "/agents"
+RESOURCE_GROUP = GroupPath("/apps/x/mcp")
+AGENT_GROUP = GroupPath("/agents")
 EVERY_METHOD = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")
 MARKED_NOTE = MarkedRoute("GET", "/notes/{note}")
 MARKED_NEW_NOTE = MarkedRoute("POST", "/notes")
@@ -149,8 +149,8 @@ def a_token(**claims: Any) -> str:
 def a_resource(
     url: str = RESOURCE_URL,
     parties: AuthorizedParties = HAL_ONLY,
-    required_group: str = RESOURCE_GROUP,
-    agent_group: str = AGENT_GROUP,
+    required_group: GroupPath = RESOURCE_GROUP,
+    agent_group: GroupPath = AGENT_GROUP,
     marked_routes: frozenset[MarkedRoute] = frozenset(),
 ) -> ProtectedResource:
     return ProtectedResource(
@@ -176,7 +176,7 @@ def a_resource_token(resource: ProtectedResource | None = None, **claims: Any) -
 
 def an_interactive_agent_token(resource: ProtectedResource, *groups: str, **claims: object) -> str:
     """The token of an interactive agent: hal's `azp`, the resource's group, no agent claims."""
-    return a_resource_token(resource, groups=list(groups) or [RESOURCE_GROUP], **claims)
+    return a_resource_token(resource, groups=list(groups) or [str(RESOURCE_GROUP)], **claims)
 
 
 def bearing(token: str) -> tuple[str, ...]:

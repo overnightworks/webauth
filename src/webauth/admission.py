@@ -21,6 +21,7 @@ __all__ = [
     "AdmissionRefusal",
     "AppRole",
     "EverySubject",
+    "GroupPath",
     "NoAdmins",
     "app_role",
 ]
@@ -43,6 +44,48 @@ class NoAdmins(Enum):
     IN_THIS_APP = "no-admins"
 
 
+_FORBIDDEN_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+@dataclass(frozen=True, slots=True)
+class GroupPath:
+    """A group path of the issuer's realm, such as ``/apps/notes``.
+
+    It starts with ``/`` and has no empty segment (so no trailing ``/``), no whitespace
+    around a segment, and no control, format or line-separator character. A path that
+    breaks a rule raises ``ValueError`` with a text that names the rule and never the
+    value; a non-``str`` raises ``TypeError``. Whether the group exists at the issuer is
+    not checked.
+
+    It is equal by value and never equal to a ``str``, so a configured path and the
+    ``str`` group paths of a token stay apart: ``str(path)`` is the text a token's
+    groups claim holds. ``path.lies_below(other)`` is true only for a path strictly
+    below ``other``, segment by segment."""
+
+    path: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, str):
+            raise TypeError("a group path is a str")
+        segments = self.path.split("/")
+        if segments[0] != "" or len(segments) < 2 or not all(segments[1:]):
+            raise ValueError(
+                "a group path starts with / and has no empty segment, such as /apps/name"
+            )
+        if any(segment != segment.strip() for segment in segments):
+            raise ValueError("a group path has no whitespace around a segment")
+        if any(
+            unicodedata.category(character) in _FORBIDDEN_PATH_CATEGORIES for character in self.path
+        ):
+            raise ValueError("a group path has no control, format or line-separator character")
+
+    def __str__(self) -> str:
+        return self.path
+
+    def lies_below(self, other: GroupPath) -> bool:
+        return _is_below(other.path, self.path)
+
+
 @dataclass(frozen=True, kw_only=True)
 class AdmissionConfig:
     """Who may enter and who is admin: the issuer the host's store is bound to,
@@ -52,51 +95,37 @@ class AdmissionConfig:
     ``bound_issuer`` is the ``issuer`` of the host's ``OidcClientConfig``. Whether
     a group exists at the issuer is not checked.
 
-    ``ValueError`` at construction names a ``login_group`` or ``admin_group``
-    that is not a group path: one that does not start with ``/``, ends with
-    ``/``, has an empty segment, whitespace around a segment, or a control,
-    format or line-separator character. Under a ``login_group`` path, the
-    ``admin_group`` must lie strictly below it, such as ``/apps/notes/admin``."""
+    ``TypeError`` at construction names a ``login_group`` that is neither a
+    ``GroupPath`` nor ``EverySubject``, and an ``admin_group`` that is neither a
+    ``GroupPath`` nor ``NoAdmins``: a plain ``str`` is refused. ``ValueError`` names
+    an ``admin_group`` that does not lie strictly below a ``login_group`` path, such as
+    ``/apps/notes/admin`` below ``/apps/notes``."""
 
     bound_issuer: str
-    login_group: str | EverySubject
-    admin_group: str | NoAdmins
+    login_group: GroupPath | EverySubject
+    admin_group: GroupPath | NoAdmins
 
     def __post_init__(self) -> None:
-        if not isinstance(self.login_group, EverySubject):
-            if not isinstance(self.login_group, str):
-                raise ValueError("login_group must be a group path or EverySubject")
-            _require_group_path("login_group", self.login_group)
-        if isinstance(self.admin_group, NoAdmins):
-            return
-        if not isinstance(self.admin_group, str):
-            raise ValueError("admin_group must be a group path or NoAdmins")
-        _require_group_path("admin_group", self.admin_group)
-        if isinstance(self.login_group, str) and not _is_below(self.login_group, self.admin_group):
+        if not isinstance(self.login_group, GroupPath | EverySubject):
+            raise TypeError("login_group must be a GroupPath or EverySubject")
+        if not isinstance(self.admin_group, GroupPath | NoAdmins):
+            raise TypeError("admin_group must be a GroupPath or NoAdmins")
+        if (
+            isinstance(self.login_group, GroupPath)
+            and isinstance(self.admin_group, GroupPath)
+            and not self.admin_group.lies_below(self.login_group)
+        ):
             raise ValueError(
                 f"admin_group must lie below login_group, such as {self.login_group}/admin"
             )
-
-
-_FORBIDDEN_PATH_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
-
-
-def _require_group_path(field: str, path: str) -> None:
-    segments = path.split("/")
-    if segments[0] != "" or len(segments) < 2 or not all(segments[1:]):
-        raise ValueError(f"{field} must be a group path such as /apps/name")
-    if any(segment != segment.strip() for segment in segments):
-        raise ValueError(f"{field} must not have whitespace around a segment")
-    if any(unicodedata.category(character) in _FORBIDDEN_PATH_CATEGORIES for character in path):
-        raise ValueError(f"{field} must not contain control, format or line-separator characters")
 
 
 def _is_below(group_path: str, group: str) -> bool:
     return group.startswith(group_path + "/")
 
 
-def _is_member_of(group_path: str, groups: Collection[str]) -> bool:
-    return any(group == group_path or _is_below(group_path, group) for group in groups)
+def _is_member_of(group_path: GroupPath, groups: Collection[str]) -> bool:
+    return any(group == group_path.path or _is_below(group_path.path, group) for group in groups)
 
 
 class AppRole(StrEnum):
@@ -123,10 +152,10 @@ def app_role(groups: Collection[str], admission: AdmissionConfig) -> AppRole | N
     the ``frozenset`` that ``SessionGroups`` answers.
     """
     login_group = admission.login_group
-    if isinstance(login_group, str) and not _is_member_of(login_group, groups):
+    if isinstance(login_group, GroupPath) and not _is_member_of(login_group, groups):
         return None
     admin_group = admission.admin_group
-    if isinstance(admin_group, str) and _is_member_of(admin_group, groups):
+    if isinstance(admin_group, GroupPath) and _is_member_of(admin_group, groups):
         return AppRole.ADMIN
     return AppRole.USER
 

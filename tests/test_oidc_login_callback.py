@@ -252,7 +252,7 @@ def test_an_id_token_of_the_verifiers_longest_length_is_stored_and_sent_whole() 
         lambda header_padding, groups_padding: an_id_token(
             nonce,
             host.wall_clock,
-            [LOGIN_GROUP, groups_padding],
+            [str(LOGIN_GROUP), groups_padding],
             header_padding,
         ),
     )
@@ -270,7 +270,7 @@ class RefusedCallback:
     back given the issuer's."""
 
     refusal: str
-    groups_claim: object = (LOGIN_GROUP,)
+    groups_claim: object = (str(LOGIN_GROUP),)
     returned_query: Callable[[OidcHost, str], str] = lambda _host, query: query
 
 
@@ -367,7 +367,7 @@ def test_a_callback_with_an_unreachable_issuer_stops_at_the_refusal() -> None:
 
 def test_an_open_session_keeps_its_access_after_the_person_leaves_the_group() -> None:
     """APP-07: a person removed from the group is refused at login, yet an open session works."""
-    groups = [LOGIN_GROUP]
+    groups = [str(LOGIN_GROUP)]
     host = an_oidc_host(groups_claim=groups)
     host.callback(host.sign_in_at_issuer())
     session_cookie = host.client.cookies[host.config.session_cookie_name]
@@ -439,7 +439,7 @@ def test_a_callback_demotes_a_legacy_admin_without_the_admin_group() -> None:
 
 
 def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
-    host = an_oidc_host(deepcopy(LEGACY_ADMIN), groups_claim=[ADMIN_GROUP])
+    host = an_oidc_host(deepcopy(LEGACY_ADMIN), groups_claim=[str(ADMIN_GROUP)])
 
     response = host.callback(host.sign_in_at_issuer())
 
@@ -451,8 +451,12 @@ def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
 @pytest.mark.parametrize(
     ("before", "after", "status_before", "status_after"),
     [
-        pytest.param([LOGIN_GROUP], [ADMIN_GROUP], 403, 200, id="put into the admin group"),
-        pytest.param([ADMIN_GROUP], [LOGIN_GROUP], 200, 403, id="taken out of the admin group"),
+        pytest.param(
+            [str(LOGIN_GROUP)], [str(ADMIN_GROUP)], 403, 200, id="put into the admin group"
+        ),
+        pytest.param(
+            [str(ADMIN_GROUP)], [str(LOGIN_GROUP)], 200, 403, id="taken out of the admin group"
+        ),
     ],
 )
 def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(

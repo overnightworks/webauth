@@ -13,7 +13,7 @@ from tests.support.oidc_arrangement import (
     a_realm_client_config,
 )
 from tests.support.session_store_arrangement import SessionRecordsInMemory
-from webauth.admission import AdmissionConfig
+from webauth.admission import AdmissionConfig, GroupPath
 from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
 from webauth.sign_in_routes import LogoutPageText, SignInPaths
 from webauth.web_auth import (
@@ -65,7 +65,9 @@ def an_issuer_nobody_calls(fetch_key_set: KeySetFetch | None = None) -> IssuerCa
 
 def _the_admission_of(client: OidcClientConfig) -> AdmissionConfig:
     return AdmissionConfig(
-        bound_issuer=client.issuer, login_group="/apps/x", admin_group="/apps/x/admin"
+        bound_issuer=client.issuer,
+        login_group=GroupPath("/apps/x"),
+        admin_group=GroupPath("/apps/x/admin"),
     )
 
 

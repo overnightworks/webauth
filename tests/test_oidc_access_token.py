@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from tests.support.gate_arrangement import RESOURCE_URL
+from tests.support.gate_arrangement import AGENT_GROUP, RESOURCE_URL
 from tests.support.oidc_arrangement import (
     ABSENT,
     ACCESS_TOKEN_LEEWAY_SECONDS,
@@ -370,7 +370,7 @@ def resource_verified(
         resource_url=RESOURCE_URL,
         scope=scope,
         authorized_parties=HAL,
-        agent_group="/agents",
+        agent_group=AGENT_GROUP,
         admits_client_audience=admits_client_audience,
     )
     return verifier(token)
@@ -522,5 +522,27 @@ def test_a_resource_verifier_for_anything_but_authorized_parties_raises(parties:
             resource_url=RESOURCE_URL,
             scope="mcp:tools",
             authorized_parties=parties,
-            agent_group="/agents",
+            agent_group=AGENT_GROUP,
+        )
+
+
+@pytest.mark.parametrize(
+    "agent_group",
+    [
+        pytest.param("/agents", id="a plain str, well formed"),
+        pytest.param(None, id="none"),
+        pytest.param(7, id="an int"),
+    ],
+)
+def test_a_resource_verifier_for_an_agent_group_that_is_not_a_group_path_raises(
+    agent_group: Any,
+) -> None:
+    relying_party = a_relying_party()
+
+    with pytest.raises(TypeError, match="agent_group must be a GroupPath"):
+        relying_party.resource_token_verifier(
+            resource_url=RESOURCE_URL,
+            scope="mcp:tools",
+            authorized_parties=HAL,
+            agent_group=agent_group,
         )

@@ -57,6 +57,7 @@ from tests.support.oidc_arrangement import (
 )
 from tests.support.oidc_login_host import failing
 from tests.support.webauth_arrangement import ADMIN_ROLE
+from webauth.admission import GroupPath
 from webauth.middleware import MarkedRoute, ProtectedResource
 
 
@@ -157,7 +158,7 @@ def test_a_stored_admin_stays_the_person_role_and_a_marked_admin_route_is_the_pl
     app = a_bearer_app(resource=resource, known_accounts=(a_known_person(ADMIN_ROLE),))
     assert app.accounts is not None
     failing(app.accounts, "set_role", monkeypatch)
-    token = bearing(an_interactive_agent_token(resource, RESOURCE_GROUP, "/apps/x/admin"))
+    token = bearing(an_interactive_agent_token(resource, str(RESOURCE_GROUP), "/apps/x/admin"))
 
     read = app.ask(A_NOTE, authorization=token)
     admin_only = app.ask(MARKED_ADMIN_NOTES.template, authorization=token)
@@ -193,7 +194,7 @@ def test_a_person_without_the_group_gets_the_plain_403_and_the_store_is_untouche
 def test_a_person_outside_the_login_group_gets_the_plain_403_on_a_marked_route() -> None:
     """RESOURCE-59: a token that holds whose person is outside the admission's login group gets
     the plain 403 without `WWW-Authenticate`, and nothing is admitted."""
-    resource = a_resource(required_group="/other/mcp", marked_routes=MARKED_ROUTES)
+    resource = a_resource(required_group=GroupPath("/other/mcp"), marked_routes=MARKED_ROUTES)
     app = a_bearer_app(resource=resource, known_accounts=(a_known_person(),))
 
     response = app.ask(
@@ -318,7 +319,7 @@ def test_an_opted_in_resource_ignores_the_client_id_alone_on_a_marked_route() ->
     """RESOURCE-53, RESOURCE-84: a token naming the client id without the `url` is ignored on a
     marked route and the cookie decides."""
     app, _resource = an_app_whose_resource_admits_the_client_audience()
-    token = a_token(groups=[RESOURCE_GROUP])
+    token = a_token(groups=[str(RESOURCE_GROUP)])
 
     response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
 
@@ -367,7 +368,7 @@ def test_a_token_of_another_audience_gets_todays_401_on_a_person_path_and_is_no_
     """RESOURCE-52, RESOURCE-54: a token of another audience on a marked person path runs the
     person path's complete check, which refuses it with the person path's 401, and is no
     resource admission."""
-    token = a_token(aud="https://other.example/mcp", groups=[RESOURCE_GROUP], **claims)
+    token = a_token(aud="https://other.example/mcp", groups=[str(RESOURCE_GROUP)], **claims)
 
     response = app.ask(A_PERSON_NOTE, authorization=bearing(token), cookie=True)
 
@@ -383,7 +384,7 @@ def test_a_token_of_another_audience_is_ignored_on_any_other_path_and_the_cookie
 ) -> None:
     """RESOURCE-53, RESOURCE-54: a token of another audience is ignored on any other marked
     route, the cookie decides, and it is no resource admission."""
-    token = a_token(aud="https://other.example/mcp", groups=[RESOURCE_GROUP], **claims)
+    token = a_token(aud="https://other.example/mcp", groups=[str(RESOURCE_GROUP)], **claims)
 
     response = app.ask(A_NOTE, authorization=bearing(token), cookie=True)
 

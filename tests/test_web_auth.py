@@ -368,8 +368,8 @@ def test_compose_08_an_endpoint_rollback_keeps_the_renewal() -> None:
 @pytest.mark.parametrize(
     ("groups_claim", "role", "me_status", "admin_status"),
     [
-        pytest.param((LOGIN_GROUP,), "user", 200, 403, id="a-member"),
-        pytest.param((LOGIN_GROUP, ADMIN_GROUP), ADMIN_ROLE, 200, 200, id="an-admin"),
+        pytest.param((str(LOGIN_GROUP),), "user", 200, 403, id="a-member"),
+        pytest.param((str(LOGIN_GROUP), str(ADMIN_GROUP)), ADMIN_ROLE, 200, 200, id="an-admin"),
         pytest.param(("/apps/elsewhere",), None, 401, 401, id="a-non-member"),
     ],
 )
@@ -426,7 +426,7 @@ def a_member_token() -> str:
         key_id="issuer-key",
         key_name="issuer",
         subject=SUBJECT,
-        claims={"groups": [LOGIN_GROUP]},
+        claims={"groups": [str(LOGIN_GROUP)]},
     )
 
 

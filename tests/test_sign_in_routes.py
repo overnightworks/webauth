@@ -626,8 +626,12 @@ def _sign_in_routes_of(app: FastAPI) -> list[str]:
     ("groups_claim", "admission", "returned_query"),
     [
         pytest.param((), ADMISSION, str, id="not a member"),
-        pytest.param((LOGIN_GROUP,), ADMISSION, _with_another_code, id="a code the issuer refuses"),
-        pytest.param((LOGIN_GROUP,), ADMISSION, _without_a_state, id="a callback without a state"),
+        pytest.param(
+            (str(LOGIN_GROUP),), ADMISSION, _with_another_code, id="a code the issuer refuses"
+        ),
+        pytest.param(
+            (str(LOGIN_GROUP),), ADMISSION, _without_a_state, id="a callback without a state"
+        ),
     ],
 )
 def test_a_refusal_before_the_admission_decision_enters_no_transaction(
@@ -646,9 +650,9 @@ def test_a_refusal_before_the_admission_decision_enters_no_transaction(
 @pytest.mark.parametrize(
     ("groups_claim", "hook", "failing_call"),
     [
-        pytest.param((LOGIN_GROUP,), None, None, id="an admitted login"),
+        pytest.param((str(LOGIN_GROUP),), None, None, id="an admitted login"),
         pytest.param((), None, None, id="a refusal"),
-        pytest.param((LOGIN_GROUP,), None, "create_for_subject", id="a failure in the block"),
+        pytest.param((str(LOGIN_GROUP),), None, "create_for_subject", id="a failure in the block"),
         pytest.param((), _raise_in_the_hook, None, id="a hook that raises"),
         pytest.param(
             (), _answer_failing_before_its_start, None, id="an answer that fails before its start"
