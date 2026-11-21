@@ -12,8 +12,8 @@ from tests.support.oidc_arrangement import (
     a_key_set_endpoint,
     a_realm_client_config,
 )
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from webauth.admission import AdmissionConfig
-from webauth.config import _install_web_auth_config
 from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
 from webauth.sign_in_routes import LogoutPageText, SignInPaths
 from webauth.web_auth import (
@@ -43,12 +43,6 @@ GATED_SIGN_IN_PATHS = SignInPaths(start="/sign-in/start", callback="/sign-in/cal
 GATED_APP_LOGOUT_TEXT = LogoutPageText(language="en", button_label="Sign out")
 
 
-def put_only_the_config_on(app: FastAPI, config: WebAuthConfig) -> None:
-    """The config a reader finds on an app, without the stack: for a test of one reader that the
-    stack's refusals would answer before it runs."""
-    _install_web_auth_config(app, config)
-
-
 def a_sign_in_that_never_runs() -> NoReturn:
     """The sign-in transaction of an app whose scenario never signs anyone in."""
     raise AssertionError("this app's scenario does not enter a sign-in transaction")
@@ -73,11 +67,14 @@ def install_the_gated_stack(
     app: FastAPI,
     *,
     config: WebAuthConfig,
-    sessions: SessionTransaction,
+    sessions: SessionTransaction | None = None,
     session_gate: SessionGate | None = None,
     bearer_of: Callable[[WebAuth], BearerGate] | None = None,
     sign_in: SignInTransaction = a_sign_in_that_never_runs,
     sign_in_paths: SignInPaths = GATED_SIGN_IN_PATHS,
+    keeps_id_token: bool = False,
+    max_sessions: int | None = None,
+    pages: SignInPages | None = None,
     security_headers: SecurityHeadersPolicy = GATED_APP_HEADERS_POLICY,
     csrf_origin: CsrfPolicy | None = None,
     body_size: BodySizePolicy | None = None,
@@ -92,8 +89,8 @@ def install_the_gated_stack(
     """Build the app's auth with the composition call and install it on `app`.
 
     The sign-in routes answer for `sign_in_paths`; the relying party reaches a fake issuer and
-    key set unless `issuer_calls` names others. `bearer_of` makes the bearer gate from the
-    relying party the call built.
+    key set unless `issuer_calls` names others, and the app keeps no session unless `sessions`
+    names the store. `bearer_of` makes the bearer gate from the relying party the call built.
     """
     client = client or a_realm_client_config()
     auth = WebAuth.build(
@@ -101,19 +98,22 @@ def install_the_gated_stack(
             config=config,
             client=client,
             sign_in_paths=sign_in_paths,
-            keeps_id_token=False,
-            max_sessions=None,
+            keeps_id_token=keeps_id_token,
+            max_sessions=max_sessions,
             security_headers=security_headers,
             csrf_origin=csrf_origin or CsrfPolicy(),
             body_size=body_size,
             rate_limit=rate_limit,
         ),
-        stores=WebAuthStores(sign_in=sign_in, sessions=sessions),
+        stores=WebAuthStores(
+            sign_in=sign_in, sessions=sessions or SessionRecordsInMemory(None).in_transaction
+        ),
         groups=groups
         or AdmissionConfig(
             bound_issuer=client.issuer, login_group="/apps/x", admin_group="/apps/x/admin"
         ),
-        pages=SignInPages(
+        pages=pages
+        or SignInPages(
             refused=lambda _request, _refusal: Response(status_code=403),
             logout_page_text=(
                 None if sign_in_paths.logout is None else lambda _request: GATED_APP_LOGOUT_TEXT

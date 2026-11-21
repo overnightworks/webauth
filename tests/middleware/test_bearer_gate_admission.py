@@ -38,7 +38,7 @@ from tests.support.gate_arrangement import (
     the_transaction,
     with_admitted_admin_routes,
 )
-from tests.support.gated_stack_arrangement import install_the_gated_stack, put_only_the_config_on
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     ACCESS_TOKEN_LIFETIME_SECONDS,
@@ -63,6 +63,7 @@ from webauth.middleware import SessionGate, bearer_caller
 from webauth.policies import (
     BodySizePolicy,
     CacheControlRule,
+    CsrfPolicy,
     PathRules,
     PublicRule,
     RateLimitBudget,
@@ -245,22 +246,20 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: bool = False) -> Fas
         session_store=lambda: auth.auth.sessions,
         on_authenticated=lambda user: None,
     )
-    if csrf or session_gate:
-        install_the_gated_stack(
-            inner,
-            config=auth.auth.config,
-            sessions=auth.auth.sessions.in_transaction,
-            security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
-            session_gate=SessionGate(
-                session_transaction=auth.auth.sessions.in_transaction,
-                login_redirect=None,
-                public=(),
-            )
-            if session_gate
-            else None,
+    install_the_gated_stack(
+        inner,
+        config=auth.auth.config,
+        sessions=auth.auth.sessions.in_transaction,
+        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+        csrf_origin=CsrfPolicy() if csrf else CsrfPolicy(exempt=PathRules(prefixes=("/",))),
+        session_gate=SessionGate(
+            session_transaction=auth.auth.sessions.in_transaction,
+            login_redirect=None,
+            public=(),
         )
-    else:
-        put_only_the_config_on(inner, auth.auth.config)
+        if session_gate
+        else None,
+    )
 
     @inner.api_route(EXPORT_PATH, methods=["GET", "DELETE"])
     def machine_route(_caller: BearerCaller = Depends(bearer_caller)) -> dict[str, str]:

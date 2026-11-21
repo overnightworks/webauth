@@ -5,7 +5,6 @@ Each case drives a FastAPI host through a `TestClient` over a stateful fake issu
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 
 import pytest
@@ -38,7 +37,7 @@ from webauth.policies import (
     RateLimitRule,
     SecurityHeadersPolicy,
 )
-from webauth.ports import RateLimitBackend, SignInStores
+from webauth.ports import RateLimitBackend
 from webauth.sign_in_routes import (
     SignInPaths,
 )
@@ -85,7 +84,6 @@ def _a_gated_host(
         app,
         config=config,
         sessions=sessions.in_transaction,
-        sign_in=_a_transaction_nobody_enters,
         sign_in_paths=sign_in_paths,
         security_headers=security_headers,
         body_size=body_size,
@@ -105,10 +103,6 @@ def _a_gated_host(
         TestClient(app, base_url=HTTPS_TEST_SERVER, follow_redirects=False),
         issuer,
     )
-
-
-def _a_transaction_nobody_enters() -> AbstractContextManager[SignInStores]:
-    raise AssertionError("the gated host never signs anyone in")
 
 
 def _statuses_of_gets(host: GatedHost, path: str, count: int) -> list[int]:

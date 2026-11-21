@@ -23,7 +23,7 @@ from tests.support.account_arrangement import (
     WriteLockInMemory,
     require_held_lock,
 )
-from tests.support.client_address_arrangement import TRUSTED_PROXIES
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     ABSENT,
     ISSUED_REFRESH_TOKEN,
@@ -61,10 +61,8 @@ from webauth.oidc import (
 )
 from webauth.policies import (
     BodySizePolicy,
-    CsrfPolicy,
     RateLimitBudget,
     RateLimitPolicy,
-    SecurityHeadersPolicy,
 )
 from webauth.ports import (
     AccountKind,
@@ -77,7 +75,7 @@ from webauth.sign_in_routes import (
     SignInPaths,
     SignInRefusal,
 )
-from webauth.web_auth import IssuerCalls, SignInPages, WebAuth, WebAuthSettings, WebAuthStores
+from webauth.web_auth import IssuerCalls, SignInPages, WebAuth
 
 BOUND_ISSUER = "https://id.example/realms/lab"
 LOGIN_GROUP = "/apps/lab"
@@ -498,24 +496,11 @@ def _a_host_app(sessions: SessionRecordsInMemory) -> FastAPI:
     return app
 
 
-def _the_settings_of_a_host(
-    config: WebAuthConfig,
-    keeps_id_token: bool,
-    max_sessions: int | None,
-    address_budget: int | None,
-) -> WebAuthSettings:
-    return WebAuthSettings(
-        config=config,
-        client=a_client_config(),
-        sign_in_paths=SIGN_IN_PATHS,
-        keeps_id_token=keeps_id_token,
-        max_sessions=max_sessions,
-        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
-        csrf_origin=CsrfPolicy(),
-        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
-        rate_limit=None
+def _the_rate_limit_of_a_host(address_budget: int | None) -> RateLimitPolicy | None:
+    return (
+        None
         if address_budget is None
-        else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60)),
+        else RateLimitPolicy(default=RateLimitBudget("host", address_budget, 60))
     )
 
 
@@ -578,19 +563,25 @@ def an_oidc_host(
         holder[0].refusals.append(refusal)
         return holder[0].answer_refusals(request, refusal)
 
-    auth = WebAuth.build(
-        _the_settings_of_a_host(config, keeps_id_token, max_sessions, address_budget),
-        stores=WebAuthStores(sign_in=stores.transaction, sessions=stores.sessions.in_transaction),
+    auth = install_the_gated_stack(
+        app,
+        config=config,
+        sessions=stores.sessions.in_transaction,
+        sign_in=stores.transaction,
+        sign_in_paths=SIGN_IN_PATHS,
+        keeps_id_token=keeps_id_token,
+        max_sessions=max_sessions,
+        client=a_client_config(),
         groups=admission,
         pages=SignInPages(
             refused=refused, logout_page_text=logout_page_text, ui_language=ui_language
         ),
-        front=TRUSTED_PROXIES,
+        body_size=BodySizePolicy(default_max_bytes=DEFAULT_MAX_BODY_BYTES),
+        rate_limit=_the_rate_limit_of_a_host(address_budget),
         issuer_calls=IssuerCalls(
             post_token_request=issuer, fetch_key_set=key_set, monotonic_clock=FakeClock(5_000.0)
         ),
     )
-    auth.install(app, bearer=None)
     if behind_base_http_middleware:
         app.middleware("http")(_pass_through)
     holder.append(

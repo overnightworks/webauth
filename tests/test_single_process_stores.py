@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from tests.support.client_address_arrangement import TRUSTED_PROXIES
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import (
     FakeClock,
     FakeIssuer,
@@ -46,7 +46,7 @@ from tests.support.webauth_arrangement import (
     a_web_auth_config,
 )
 from webauth.dependencies import current_user_dependency
-from webauth.policies import BodySizePolicy, CsrfPolicy, SecurityHeadersPolicy
+from webauth.policies import BodySizePolicy
 from webauth.ports import (
     AccountEvent,
     AccountEventKind,
@@ -63,7 +63,7 @@ from webauth.single_process_stores import (
     SingleProcessStores,
     _Tables,
 )
-from webauth.web_auth import IssuerCalls, SignInPages, WebAuth, WebAuthSettings, WebAuthStores
+from webauth.web_auth import IssuerCalls, SignInPages
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 LATER = START + timedelta(hours=1)
@@ -533,35 +533,6 @@ class Browser:
             mint_id_token=lambda nonce: an_id_token(nonce, clock, (LOGIN_GROUP,))
         )
         app = FastAPI()
-        auth = WebAuth.build(
-            WebAuthSettings(
-                config=dataclasses.replace(self.config, wall_clock=clock),
-                client=a_client_config(),
-                sign_in_paths=SIGN_IN_PATHS,
-                keeps_id_token=True,
-                max_sessions=None,
-                security_headers=SecurityHeadersPolicy(
-                    content_security_policy="default-src 'self'"
-                ),
-                csrf_origin=CsrfPolicy(),
-                body_size=BodySizePolicy(default_max_bytes=1024),
-            ),
-            stores=WebAuthStores(
-                sign_in=stores.transaction, sessions=lambda: nullcontext(stores.sessions)
-            ),
-            groups=ADMISSION,
-            pages=SignInPages(
-                refused=lambda _request, _refusal: pytest.fail("the sign-in was refused"),
-                logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
-                ui_language=lambda _request: None,
-            ),
-            front=TRUSTED_PROXIES,
-            issuer_calls=IssuerCalls(
-                post_token_request=self.issuer,
-                fetch_key_set=a_key_set_endpoint("issuer"),
-                monotonic_clock=FakeClock(5_000.0),
-            ),
-        )
         dependencies = current_user_dependency(
             session_store=lambda: stores.sessions, on_authenticated=lambda _user: None
         )
@@ -570,7 +541,27 @@ class Browser:
         def me(user: AuthenticatedUser = Depends(dependencies.current_user)) -> dict[str, str]:
             return {"username": user.username}
 
-        auth.install(app, bearer=None)
+        install_the_gated_stack(
+            app,
+            config=dataclasses.replace(self.config, wall_clock=clock),
+            sessions=lambda: nullcontext(stores.sessions),
+            sign_in=stores.transaction,
+            sign_in_paths=SIGN_IN_PATHS,
+            keeps_id_token=True,
+            client=a_client_config(),
+            groups=ADMISSION,
+            pages=SignInPages(
+                refused=lambda _request, _refusal: pytest.fail("the sign-in was refused"),
+                logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
+                ui_language=lambda _request: None,
+            ),
+            body_size=BodySizePolicy(default_max_bytes=1024),
+            issuer_calls=IssuerCalls(
+                post_token_request=self.issuer,
+                fetch_key_set=a_key_set_endpoint("issuer"),
+                monotonic_clock=FakeClock(5_000.0),
+            ),
+        )
         self.client = TestClient(
             app,
             base_url=HTTPS_TEST_SERVER,

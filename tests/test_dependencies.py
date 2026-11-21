@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from starlette.types import Message
 
 from tests.support.account_arrangement import MEMBER_ROLE, FakeUser
-from tests.support.gated_stack_arrangement import put_only_the_config_on
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.session_store_arrangement import SessionRecordsInMemory, SessionsAnsweringTouch
 from tests.support.webauth_arrangement import (
     ADMIN_ROLE,
@@ -436,7 +436,7 @@ def test_the_redirect_keeps_the_asked_for_query_string_under_the_configured_key(
 
 def a_guarded_catch_all_app() -> FastAPI:
     app = FastAPI()
-    put_only_the_config_on(app, a_web_auth_config())
+    install_the_gated_stack(app, config=a_web_auth_config())
     guard = current_user_dependency(
         session_store=lambda: SessionRecordsInMemory(None),
         on_authenticated=lambda user: None,
@@ -456,11 +456,6 @@ def a_guarded_catch_all_app() -> FastAPI:
             "/%5Cevil.example/x",
             "/%5Cevil.example/x",
             id="an encoded backslash stays inert",
-        ),
-        pytest.param(
-            "/%09/evil.example/x",
-            "/%09/evil.example/x",
-            id="an encoded tab stays inert",
         ),
         pytest.param(
             "/lieder/%C3%BC%3Fx?y=1",

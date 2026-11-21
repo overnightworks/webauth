@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from tests.support.gated_stack_arrangement import put_only_the_config_on
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.webauth_arrangement import (
     ALLOWED_HOST,
     ALLOWED_ORIGIN,
@@ -22,7 +22,6 @@ from tests.support.webauth_arrangement import (
     session_cookie_header,
 )
 from webauth.config import WebAuthConfig
-from webauth.middleware.csrf import _CsrfOriginMiddleware
 from webauth.policies import CsrfPolicy, PathRules, PathShape, PublicRule
 
 FOREIGN_ORIGIN = "https://evil.test"
@@ -40,11 +39,7 @@ WEBHOOK_SIBLING_PATH = "/webhook/providerx"
 
 def an_origin_guarded_client(config: WebAuthConfig | None = None) -> TestClient:
     app = FastAPI()
-    put_only_the_config_on(app, config or a_web_auth_config())
-    app.add_middleware(
-        _CsrfOriginMiddleware,
-        policy=CsrfPolicy(),
-    )
+    install_the_gated_stack(app, config=config or a_web_auth_config(), csrf_origin=CsrfPolicy())
 
     @app.api_route(API_PATH, methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def ok() -> dict[str, str]:
@@ -56,10 +51,10 @@ def an_origin_guarded_client(config: WebAuthConfig | None = None) -> TestClient:
 def a_protect_everything_client() -> tuple[TestClient, list[str]]:
     """A client over one POST route per path, and the paths whose routes ran."""
     app = FastAPI()
-    put_only_the_config_on(app, a_web_auth_config())
-    app.add_middleware(
-        _CsrfOriginMiddleware,
-        policy=CsrfPolicy(
+    install_the_gated_stack(
+        app,
+        config=a_web_auth_config(),
+        csrf_origin=CsrfPolicy(
             exempt=PathRules(
                 exact=frozenset({WEBHOOK_EXACT_PATH}),
                 prefixes=(WEBHOOK_PREFIX,),
@@ -515,8 +510,7 @@ def test_protect_everything_checks_every_route_but_the_exempt_ones(
 @pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
 def test_a_safe_method_without_provenance_reaches_its_route(method: str) -> None:
     app = FastAPI()
-    put_only_the_config_on(app, a_web_auth_config())
-    app.add_middleware(_CsrfOriginMiddleware, policy=CsrfPolicy())
+    install_the_gated_stack(app, config=a_web_auth_config(), csrf_origin=CsrfPolicy())
     app.add_api_route(API_PATH, lambda: OK, methods=[method])
 
     response = TestClient(app, base_url=ALLOWED_ORIGIN).request(method, API_PATH)

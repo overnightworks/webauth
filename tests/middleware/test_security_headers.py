@@ -18,7 +18,7 @@ from tests.support.client_address_arrangement import (
     add_the_client_address_writer,
     behind_the_client_address_writer,
 )
-from tests.support.gated_stack_arrangement import install_the_gated_stack, put_only_the_config_on
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import LogoutPage
 from tests.support.security_headers_arrangement import (
     a_content_security_policy_rule,
@@ -64,15 +64,20 @@ class RouteFailure(RuntimeError):
 def an_app(
     *,
     cookie_secure: bool = True,
-    configured: bool = True,
     debug: bool = False,
     policy: SecurityHeadersPolicy = POLICY,
 ) -> FastAPI:
     app = FastAPI(debug=debug)
-    app.add_middleware(_SecurityHeadersMiddleware, policy=policy)
+    install_the_gated_stack(
+        app, config=a_web_auth_config(cookie_secure=cookie_secure), security_headers=policy
+    )
+    return app
+
+
+def an_app_without_a_configuration() -> FastAPI:
+    app = FastAPI()
+    app.add_middleware(_SecurityHeadersMiddleware, policy=POLICY)
     add_the_client_address_writer(app)
-    if configured:
-        put_only_the_config_on(app, a_web_auth_config(cookie_secure=cookie_secure))
     return app
 
 
@@ -165,7 +170,7 @@ def test_debug_mode_answers_the_library_500_without_a_traceback_page() -> None:
 
 def test_a_missing_configuration_answers_a_500_without_hsts_before_the_route_runs() -> None:
     route_ran: list[bool] = []
-    app = an_app(configured=False)
+    app = an_app_without_a_configuration()
 
     @app.get("/side-effect")
     def side_effect() -> None:
@@ -330,10 +335,7 @@ def test_a_cache_control_rule_applies_to_a_normal_response_and_to_the_library_50
         default_content_security_policy([]),
         cache_control_rules=(CacheControlRule(PathRules(prefixes=("/boom", "/ok")), cacheable),),
     )
-    app = FastAPI()
-    app.add_middleware(_SecurityHeadersMiddleware, policy=policy)
-    add_the_client_address_writer(app)
-    put_only_the_config_on(app, a_web_auth_config())
+    app = an_app(policy=policy)
     with_failing_route(app, RouteFailure())
 
     @app.get("/ok")

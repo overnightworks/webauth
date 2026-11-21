@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from tests.support.gated_stack_arrangement import put_only_the_config_on
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
     MIN_SESSION_SECRET_CHARS,
@@ -163,7 +163,7 @@ def test_a_role_option_is_refused_because_app_role_alone_names_the_roles(
 def test_a_request_reads_the_configuration_installed_on_its_application() -> None:
     config = a_web_auth_config()
     app = FastAPI()
-    put_only_the_config_on(app, config)
+    install_the_gated_stack(app, config=config)
 
     @app.get("/config-secret-length")
     def config_secret_length(installed: WebAuthConfig = Depends(web_auth_config)) -> dict:

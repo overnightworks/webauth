@@ -12,7 +12,7 @@ from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from tests.support.account_arrangement import MEMBER_ROLE
-from tests.support.gated_stack_arrangement import put_only_the_config_on
+from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.session_store_arrangement import (
     SessionsAnsweringTouch,
     SessionsThatMustNotBeAsked,
@@ -440,7 +440,7 @@ async def discard_message(message: Message) -> None:
 
 def a_connection(connection_type: type[HTTPConnection], scope_type: str) -> HTTPConnection:
     app = FastAPI()
-    put_only_the_config_on(app, CONFIG)
+    install_the_gated_stack(app, config=CONFIG)
     cookie = f"{SESSION_COOKIE_NAME}={sign_session_id(SESSION_ID, SIGNING_KEY)}"
     scope = {
         "type": scope_type,
