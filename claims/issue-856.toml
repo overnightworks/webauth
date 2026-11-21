@@ -1,0 +1,8 @@
+claim_id = "ad3c9377d5374ebfb9e3edd52aaaca26"
+agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
+role = "builder"
+base = "55a1d3b547e19a20b00ec37c13d01268534e09d2"
+branch = "claude/issue-856-the-bearer-admission-gets-one-private-ow"
+scope = [".importlinter", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/_bearer_admission.py", "src/webauth/dependencies.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/middleware/csrf.py", "src/webauth/middleware/session_gate.py", "tests/middleware/test_bearer_gate_admission.py"]
+opened_commit = "c8d40b65d7560635e64ef3fbefa5420c80994099"
+whole_reason = "One move: the record, its writers and readers, and every importer of them change together, or the import graph breaks."
