@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
+from webauth._outage import _tracked_transactions
 from webauth._validation import require_positive_whole_number
 from webauth.admission import NoAdmins
 from webauth.config import _install_web_auth_config
@@ -327,6 +328,7 @@ class WebAuth:
         self._require_a_bearer_that_fits(bearer)
         settings = self._settings
         resource = None if bearer is None else bearer.resource
+        sign_in, sessions = _tracked_transactions(self._stores.sign_in, self._stores.sessions)
         _install_web_auth_middleware(
             app,
             sign_in_paths=settings.sign_in_paths,
@@ -342,20 +344,20 @@ class WebAuth:
             binding=_HandleBinding(
                 relying_party=self._relying_party,
                 admission=self._groups,
-                sign_in=self._stores.sign_in,
-                sessions=self._stores.sessions,
+                sign_in=sign_in,
+                sessions=sessions,
             ),
         )
         self._installed = True
         _install_web_auth_config(app, settings.config)
-        _publish_installed_sessions(app, self._stores.sessions)
+        _publish_installed_sessions(app, sessions)
         routes_of_the_host = len(app.router.routes)
         _install_sign_in_routes(
             app,
             paths=settings.sign_in_paths,
             relying_party=self._relying_party,
             admission=self._groups,
-            transaction=self._stores.sign_in,
+            transaction=sign_in,
             refused=self._pages.refused,
             keeps_id_token=settings.keeps_id_token,
             max_sessions=settings.max_sessions,

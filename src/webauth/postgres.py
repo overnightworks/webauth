@@ -37,11 +37,12 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from webauth import WebAuthError
 from webauth._deferred_audit import DeferredAudit
-from webauth.ports import SignInStores
+from webauth.ports import SignInStores, StoreUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -66,31 +67,76 @@ __all__ = [
 _TABLE_NAME: Final = "sessions"
 
 _STORE_ERROR_MESSAGE: Final = "The session store failed"
-"""The whole text of a `SessionStoreError`: a driver's message names bound parameters, which hold
-session hashes, tokens and subjects."""
+_STORE_UNAVAILABLE_MESSAGE: Final = "The session store cannot be reached"
+"""The whole text of a `StoreUnavailableError` and the start of a `SessionStoreError`'s text: a
+driver's message names bound parameters, which hold session hashes, tokens and subjects."""
+
+_SHUTDOWN_SQLSTATES: Final = frozenset({"57P01", "57P02", "57P03"})
+"""`admin_shutdown`, `crash_shutdown` and `cannot_connect_now`: the server is going or coming up."""
+_CONNECTION_SQLSTATE_CLASS: Final = "08"
 
 
 class SessionStoreError(WebAuthError):
-    """The database failed a session store call, or the host's connection or commit around it.
+    """The database failed a session store call for a reason other than a connection it cannot
+    reach, or failed the host's connection or commit around it.
 
-    It carries no statement, parameter, id, token or subject, and it hides the error it replaces.
-    A host that parks work on a store outage catches it, and may retry in a fresh transaction.
+    Its text names the driver error's class and SQLSTATE and carries no statement, parameter, id,
+    token or subject, and it hides the error it replaces. It reaches the request as an ordinary
+    exception, a loud 500. A host that retries a deadlock or a serialization failure catches it, and
+    retries in a fresh transaction.
     """
+
+
+def _sqlstate_of(driver_error: BaseException | None) -> str | None:
+    return getattr(driver_error, "sqlstate", None)
+
+
+def _cannot_reach_the_database(error: SQLAlchemyError) -> bool:
+    """Whether the structured evidence of `error`, never its text, says the connection is out:
+    a pool timeout, a connection SQLAlchemy invalidated, or a driver `OperationalError` that
+    carries no SQLSTATE (a connection the client could not open or lost) or one of the connection
+    classes and shutdowns. A deadlock (`40P01`) and a serialization failure (`40001`) are
+    `OperationalError`s too, but the server answered and aborted one transaction."""
+    if isinstance(error, PoolTimeoutError):
+        return True
+    if not isinstance(error, DBAPIError):
+        return False
+    if error.connection_invalidated:
+        return True
+    if not isinstance(error, OperationalError):
+        return False
+    sqlstate = _sqlstate_of(error.orig)
+    return (
+        sqlstate is None
+        or sqlstate.startswith(_CONNECTION_SQLSTATE_CLASS)
+        or sqlstate in _SHUTDOWN_SQLSTATES
+    )
+
+
+def _store_error_for(error: SQLAlchemyError) -> SessionStoreError:
+    driver_error = error.orig if isinstance(error, DBAPIError) else error
+    sqlstate = _sqlstate_of(driver_error)
+    detail = [type(driver_error).__name__, *([] if sqlstate is None else [sqlstate])]
+    return SessionStoreError(f"{_STORE_ERROR_MESSAGE} ({', '.join(detail)})")
 
 
 @contextmanager
 def database_errors_as_store_errors() -> Iterator[None]:
-    """Raise `SessionStoreError` for a database error inside the block and pass every other
-    exception unchanged.
+    """Raise `StoreUnavailableError` for a database that cannot be reached and `SessionStoreError`
+    for every other database error inside the block, and pass every other exception unchanged.
 
     The host wraps it around its `engine.begin()`, so a connection that cannot open and a commit
-    that fails, which happen outside every store call, report the same error. The store wraps its
-    own calls the same way.
+    that fails, which happen outside every store call, report the same errors. The store wraps its
+    own calls the same way. A connection is out when SQLAlchemy invalidated it, when its pool timed
+    out, or when the driver's `OperationalError` carries no SQLSTATE or one of class `08` or
+    `57P01` to `57P03`; the driver is read through `sqlstate`, as psycopg 3 sets it.
     """
     try:
         yield
-    except SQLAlchemyError:
-        raise SessionStoreError(_STORE_ERROR_MESSAGE) from None
+    except SQLAlchemyError as error:
+        if _cannot_reach_the_database(error):
+            raise StoreUnavailableError(_STORE_UNAVAILABLE_MESSAGE) from None
+        raise _store_error_for(error) from None
 
 
 def session_table(metadata: MetaData, account_id: Column[str]) -> Table:
@@ -249,7 +295,8 @@ class PostgresSessionStore(_SessionRows):
     """The sessions in the host's table, every call run on the host's `connection`.
 
     Each call is part of whatever transaction the host has open on `connection`; the store commits
-    nothing. A database failure raises `SessionStoreError`. `load` reads the account through the
+    nothing. A database failure raises `StoreUnavailableError` when the database cannot be reached
+    and `SessionStoreError` otherwise. `load` reads the account through the
     host's `accounts` store over the same connection, and returns `None` when the account is gone,
     and an expired row as the port says: the gate refuses it.
     """

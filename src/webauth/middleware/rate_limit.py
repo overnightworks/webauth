@@ -10,6 +10,7 @@ from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
 from starlette.responses import JSONResponse
 
+from webauth._outage import _OutageTracker, _unavailable_answer
 from webauth.config import web_auth_config
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
@@ -18,12 +19,12 @@ from webauth.proxies import _budget_address, client_address
 
 if TYPE_CHECKING:
     from starlette.requests import Request
+    from starlette.types import ASGIApp
 
 __all__: list[str] = []
 
 _log = logging.getLogger(__name__)
 
-_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS: Final = 5
 _OUTAGE_STARTED_EVENT: Final = "rate_limit_outage.started"
 _OUTAGE_ENDED_EVENT: Final = "rate_limit_outage.ended"
 
@@ -51,19 +52,9 @@ class _IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
       before rate admission.
     """
 
-    # Outage state lives on the event loop: it is read and written with no await between.
-    _refused_during_outage: int | None = None
-
-    def _note_limiter_failure(self, failure: Exception) -> None:
-        if self._refused_during_outage is None:
-            self._refused_during_outage = 0
-            _log.error(_OUTAGE_STARTED_EVENT, extra={"error_type": type(failure).__name__})
-        self._refused_during_outage += 1
-
-    def _note_limiter_answered(self) -> None:
-        if self._refused_during_outage is not None:
-            _log.info(_OUTAGE_ENDED_EVENT, extra={"refused_count": self._refused_during_outage})
-            self._refused_during_outage = None
+    def __init__(self, app: ASGIApp, policy: RateLimitPolicy) -> None:
+        super().__init__(app, policy)
+        self._outage = _OutageTracker(_log, _OUTAGE_STARTED_EVENT, _OUTAGE_ENDED_EVENT)
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
         client_ip = client_address(request)
@@ -85,14 +76,10 @@ class _IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
         except Exception as failure:
             # The worker call is shielded: a cancellation arriving during it is delivered only here.
             await checkpoint_if_cancelled()
-            self._note_limiter_failure(failure)
-            return JSONResponse(
-                {"detail": "Rate limiter unavailable"},
-                status_code=503,
-                headers={"Retry-After": str(_LIMITER_UNAVAILABLE_RETRY_AFTER_SECONDS)},
-            )
+            self._outage.note_failure(failure)
+            return _unavailable_answer("Rate limiter unavailable")
         await checkpoint_if_cancelled()
-        self._note_limiter_answered()
+        self._outage.note_answered()
         if not allowed:
             return JSONResponse(
                 {"detail": "Too many requests"},

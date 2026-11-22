@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import time
+import traceback
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -23,10 +24,11 @@ from tests.support.account_arrangement import FakeUser
 from tests.support.current_groups_arrangement import SESSION_ID, Arrangement, an_arrangement
 from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
 from tests.support.webauth_arrangement import RecordingAuditSink, a_web_auth_config
-from webauth.ports import AccountKind, SignInStores, SignInTransaction
+from webauth.ports import AccountKind, SignInStores, SignInTransaction, StoreUnavailableError
 from webauth.postgres import (
     PostgresSessionStore,
     PostgresStoredKeySessions,
+    SessionStoreError,
     database_errors_as_store_errors,
     delete_expired,
     session_table,
@@ -278,6 +280,18 @@ class PostgresHost:
                 > 0
             )
 
+    def terminate_the_backend_of(self, connection: Connection) -> None:
+        """End the server process behind `connection` and return once it is gone, as a failover
+        or an administrator's `pg_terminate_backend` does mid-transaction."""
+        victim = connection.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        with self.engine.connect() as killer:
+            killer.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": victim})
+            deadline = time.monotonic() + BLOCKED_BACKEND_DEADLINE_SECONDS
+            while killer.execute(
+                text("SELECT count(*) FROM pg_stat_activity WHERE pid = :pid"), {"pid": victim}
+            ).scalar_one():
+                assert time.monotonic() < deadline, "the backend is still running"
+
     def count_rows(self, table: Table) -> int:
         with self.engine.connect() as connection:
             return len(connection.execute(select(table)).all())
@@ -386,3 +400,12 @@ def stored_key_reads_of(host: PostgresHost) -> StoredKeyReads:
         HostStoredKeyTransaction(engine, host.tables),
         stored_key(SESSION_ID),
     )
+
+
+def what_a_log_shows_of(error: SessionStoreError | StoreUnavailableError) -> str:
+    """The error as a traceback prints it, without the source lines of the frames: its own text
+    and, unless the error hides it, the error it replaced."""
+    shown = "".join(traceback.format_exception_only(error)) + repr(error)
+    if not error.__suppress_context__ and error.__context__ is not None:
+        shown += "".join(traceback.format_exception_only(error.__context__))
+    return shown

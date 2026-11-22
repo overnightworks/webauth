@@ -25,11 +25,10 @@ import webauth
 from tests.support.account_arrangement import FakeUser
 from tests.support.environment_arrangement import ForbiddenEnvironment
 from tests.support.full_stack_arrangement import HEADERS_POLICY, install_full_stack
-from tests.support.gate_arrangement import HAL_ONLY, PERSON_PATHS, a_resource, bearing
+from tests.support.gate_arrangement import HAL_ONLY, a_resource, bearing
 from tests.support.oidc_arrangement import (
     LogoutPage,
     a_logout_token,
-    an_access_token,
 )
 from tests.support.oidc_login_host import (
     ADMIN_GROUP,
@@ -61,6 +60,8 @@ from tests.support.web_auth_host_arrangement import (
     a_composed_host,
     a_composition,
     a_host_world,
+    a_member_token,
+    a_resource_and_person_paths,
     a_stored_session,
     the_app_as_it_stands,
     the_routes_of,
@@ -72,7 +73,7 @@ from tests.support.webauth_arrangement import (
     WEBSOCKET_PATH,
 )
 from webauth.dependencies import ConnectionRefusal, current_user
-from webauth.middleware import BearerGate, MachinePaths, PersonPaths, SessionGate
+from webauth.middleware import BearerGate, MachinePaths, SessionGate
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 from webauth.ports import AuthenticatedUser
 from webauth.sign_in_routes import LogoutPageText, RefusalPage, SignInPaths
@@ -407,27 +408,6 @@ def test_compose_10_the_hosts_order_of_its_slots_is_kept_outermost_first() -> No
     host.client.get(API_PATH, headers=FORWARDED)
 
     assert [entry.split(" /")[0] for entry in order] == [*names[:2], *names]
-
-
-def a_resource_and_person_paths() -> Callable[[WebAuth], BearerGate]:
-    def bearer_of(_auth: WebAuth) -> BearerGate:
-        return BearerGate(
-            person_paths=PersonPaths(PERSON_PATHS, HAL_ONLY),
-            resource=a_resource(),
-        )
-
-    return bearer_of
-
-
-def a_member_token() -> str:
-    return an_access_token(
-        issuer=BOUND_ISSUER,
-        client_id=CLIENT_ID,
-        key_id="issuer-key",
-        key_name="issuer",
-        subject=SUBJECT,
-        claims={"groups": [str(LOGIN_GROUP)]},
-    )
 
 
 def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> None:

@@ -19,7 +19,7 @@ import webauth
 from webauth import WebAuthError
 from webauth.https_client import ExchangeFailure, KeySetFetchError
 from webauth.oidc import TokenEndpointError
-from webauth.ports import UsernameTakenError
+from webauth.ports import StoreUnavailableError, UsernameTakenError
 
 TESTS = Path(__file__).resolve().parent
 REPOSITORY = TESTS.parent
@@ -527,6 +527,7 @@ def test_the_core_imports_when_the_login_module_is_imported_first() -> None:
     ("error", "failure"),
     [
         pytest.param(UsernameTakenError("taken"), None, id="UsernameTakenError"),
+        pytest.param(StoreUnavailableError("taken"), None, id="StoreUnavailableError"),
         pytest.param(
             KeySetFetchError("taken", ExchangeFailure.TIMED_OUT),
             ExchangeFailure.TIMED_OUT,

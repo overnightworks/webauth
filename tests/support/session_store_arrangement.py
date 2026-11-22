@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -48,6 +48,8 @@ class SessionRecordsInMemory:
         seeded_users = () if record is None else (record.user,)
         self._users = users if users is not None else UsersInMemory(*seeded_users)
         self.commit_failure: Exception | None = None
+        self.load_failure: Exception | None = None
+        self.before_load: Callable[[], object] | None = None
 
     @property
     def record(self) -> FakeSessionRecord | None:
@@ -106,6 +108,10 @@ class SessionRecordsInMemory:
             yield self
 
     def load(self, session_id: str) -> FakeSessionRecord | None:
+        if self.before_load is not None:
+            self.before_load()
+        if self.load_failure is not None:
+            raise self.load_failure
         return self._records.get(session_id)
 
     def touch(self, session_id: str, *, expires_at: datetime) -> bool:

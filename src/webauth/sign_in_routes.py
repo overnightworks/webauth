@@ -35,7 +35,8 @@ the route. The route needs no ``current_user`` dependency, so a request without 
 session still reaches the issuer. It enters one ``SignInTransaction``, only when the
 request's cookie names a session, and never commits. A failure in the route, in the
 transaction or in the host's callables answers the route's plain 500: no page is
-sent and no cookie is cleared. Under a host whose transaction rolls back, the session
+sent and no cookie is cleared; a ``StoreUnavailableError`` answers 503 with ``Retry-After`` instead,
+and is not raised. Under a host whose transaction rolls back, the session
 stands and a retry ends it with its hint; under per-call persistence or an uncertain
 commit, the row and its ID token may already be gone, and a retry still reaches the
 issuer's end-session page, without the hint.
@@ -56,7 +57,7 @@ at the issuer ends. The route answers in this order:
    account is accepted and provisions nothing. The route clears no cookie and calls no
    issuer endpoint beyond the key fetch of verification.
 5. Any exception in the verification, a store, the audit sink or the exit gets an empty 400 and
-   is then re-raised.
+   is then re-raised, except a ``StoreUnavailableError``, which gets the 400 and is not re-raised.
 
 The host's transaction rolls back when the block raises, also when the audit sink fails after
 the deletion, and commits only for an accepted token. A per-call host keeps the sessions
@@ -81,6 +82,7 @@ from logline import set_sub
 from starlette.responses import RedirectResponse, Response
 
 from webauth._account_provisioning import UsernameTakenSignal
+from webauth._outage import _session_store_unavailable_answer
 from webauth._paths import _has_dot_segment, reads_as_another_host, same_app_path
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.config import WebAuthConfig, web_auth_config
@@ -99,6 +101,7 @@ from webauth.oidc_login import (
     _start_login,
     _write_sign_in,
 )
+from webauth.ports import StoreUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -246,7 +249,9 @@ def _install_sign_in_routes(
     ``refused`` hook's, which receives the cause and returns any ``Response``. Every callback answer
     sent after the pending cookie was selected carries its deletion, also the hook's, the 500 of a
     failure in the hook or in the transaction, and an answer that fails before it starts; a failure
-    is then re-raised once that 500 is sent. Nothing is sent after an answer has started.
+    is then re-raised once that 500 is sent. A ``StoreUnavailableError`` is answered 503 with
+    ``Retry-After`` and the same deletion, and is not re-raised. Nothing is sent after an answer
+    has started.
 
     A callback names a usable state when it carries ``state`` exactly once,
     non-empty and decodable. Every refusal below comes before any token
@@ -370,7 +375,7 @@ class _SignIn:
                 )
             )
         except Exception as failure:
-            return _RouteAnswer(Response(), failure, _empty_bad_request)
+            return _RouteAnswer(Response(), failure, _empty_bad_request, _empty_bad_request)
         if result is _BackchannelLogoutResult.ACCEPTED:
             return Response()
         return _empty_bad_request()
@@ -464,23 +469,26 @@ class _RouteAnswer(Response):
     """A route's answer: ``outcome`` carrying the ``Set-Cookie`` headers of ``carrier``.
     A failure as the ``outcome``, or an answer that raises before it starts, is sent as the
     route's ``failure_answer`` with those headers and then raised, so no framework exception
-    handler answers instead."""
+    handler answers instead. A ``StoreUnavailableError`` is sent as the route's ``outage_answer``
+    and not raised: the outage is already counted, and there is no traceback to log."""
 
     def __init__(
         self,
         carrier: Response,
         outcome: Response | Exception,
         failure_answer: Callable[[], Response],
+        outage_answer: Callable[[], Response] = _session_store_unavailable_answer,
     ) -> None:
         super().__init__()
         self._cookies = [header for header in carrier.raw_headers if header[0] == _SET_COOKIE]
         self._outcome = outcome
         self._failure_answer = failure_answer
+        self._outage_answer = outage_answer
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if isinstance(self._outcome, Exception):
-            await self._send_failure_answer(scope, receive, send)
-            raise self._outcome
+            await self._send_failure(self._outcome, scope, receive, send)
+            return
         started = False
 
         async def send_with_cookies(message: Message) -> None:
@@ -492,13 +500,17 @@ class _RouteAnswer(Response):
 
         try:
             await self._outcome(scope, receive, send_with_cookies)
-        except Exception:
+        except Exception as failure:
             if started:
                 raise
-            await self._send_failure_answer(scope, receive, send)
-            raise
+            await self._send_failure(failure, scope, receive, send)
 
-    async def _send_failure_answer(self, scope: Scope, receive: Receive, send: Send) -> None:
-        answer = self._failure_answer()
+    async def _send_failure(
+        self, failure: Exception, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        outage = isinstance(failure, StoreUnavailableError)
+        answer = self._outage_answer() if outage else self._failure_answer()
         answer.raw_headers.extend(self._cookies)
         await answer(scope, receive, send)
+        if not outage:
+            raise failure

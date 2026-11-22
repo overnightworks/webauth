@@ -3,7 +3,6 @@ transaction around it commits or rolls back."""
 
 from __future__ import annotations
 
-import traceback
 import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +10,7 @@ from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from operator import attrgetter
 
+import psycopg.errors
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -29,7 +29,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import ProgrammingError
 
 from tests.support.current_groups_arrangement import GROUPS, SESSION_ENDED, SESSION_ID
 from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
@@ -46,6 +46,7 @@ from tests.support.postgres_arrangement import (
     a_stored_session,
     postgres_url,
     stored_key_reads_of,
+    what_a_log_shows_of,
 )
 from webauth.dependencies import ConnectionRefusal, admit_session
 from webauth.oidc_login import AccessTokenRefusal, current_groups, fresh_access_token
@@ -53,6 +54,7 @@ from webauth.ports import (
     AccountEvent,
     AccountEventKind,
     AccountKind,
+    StoreUnavailableError,
     UsernameTakenError,
 )
 from webauth.postgres import (
@@ -91,7 +93,7 @@ class KnowsNoAccounts(PostgresAccountStore):
 
 class AccountReadFails(PostgresAccountStore):
     def get(self, user_id: str) -> None:
-        raise OperationalError("SELECT 1", {"id": user_id}, Exception("secret detail"))
+        raise ProgrammingError("SELECT 1", {"id": user_id}, Exception("secret detail"))
 
 
 @pytest.fixture
@@ -102,15 +104,6 @@ def host() -> Iterator[PostgresHost]:
             yield arranged
         finally:
             arranged.close()
-
-
-def what_a_log_shows_of(error: SessionStoreError) -> str:
-    """The error as a traceback prints it, without the source lines of the frames: its own text
-    and, unless the error hides it, the error it replaced."""
-    shown = "".join(traceback.format_exception_only(error)) + repr(error)
-    if not error.__suppress_context__ and error.__context__ is not None:
-        shown += "".join(traceback.format_exception_only(error.__context__))
-    return shown
 
 
 def an_account(host: PostgresHost) -> str:
@@ -452,6 +445,8 @@ def test_a_failed_call_raises_the_store_error_with_nothing_of_its_parameters(
     shown = what_a_log_shows_of(raised.value)
     for private in ("abc", ABC_DIGEST, subject, "refresh-secret", "identity-secret"):
         assert private not in shown
+    assert psycopg.errors.UniqueViolation.__name__ in shown
+    assert (psycopg.errors.UniqueViolation.sqlstate or "") in shown
 
 
 AWARENESS = pytest.mark.parametrize(
@@ -559,18 +554,17 @@ def test_a_failed_account_read_raises_the_store_error(
     assert "secret" not in what_a_log_shows_of(raised.value)
 
 
-def test_a_connection_that_cannot_open_raises_the_store_error() -> None:
-    """PGSTORE-07."""
-    unreachable = create_engine("postgresql+psycopg://nobody:secret@127.0.0.1:1/none")
+def test_a_connection_ended_by_the_server_mid_transaction_is_an_outage(host: PostgresHost) -> None:
+    """PGSTORE-07: `pg_terminate_backend` on the host's connection is `StoreUnavailableError`."""
+    with host.engine.connect() as connection:
+        store = PostgresSessionStore(
+            connection, PostgresAccountStore(connection, host.tables.accounts), host.tables.sessions
+        )
+        store.load("abc")
+        host.terminate_the_backend_of(connection)
 
-    with (
-        pytest.raises(SessionStoreError) as raised,
-        database_errors_as_store_errors(),
-        unreachable.begin(),
-    ):
-        pass
-
-    assert "secret" not in what_a_log_shows_of(raised.value)
+        with pytest.raises(StoreUnavailableError):
+            store.load("abc")
 
 
 @pytest.mark.parametrize("error", [UsernameTakenError("taken"), BlockFailed()])
@@ -580,16 +574,6 @@ def test_the_wrapper_passes_every_other_exception_unchanged(error: Exception) ->
         raise error
 
     assert raised.value is error
-
-
-def test_the_wrapper_hides_the_database_error_it_replaces() -> None:
-    """PGSTORE-07."""
-    database_error = OperationalError("SELECT 1", {"token": "secret"}, Exception("secret detail"))
-
-    with pytest.raises(SessionStoreError) as raised, database_errors_as_store_errors():
-        raise database_error
-
-    assert "secret" not in what_a_log_shows_of(raised.value)
 
 
 def apply_the_session_migration(connection: Connection) -> None:
