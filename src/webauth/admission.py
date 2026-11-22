@@ -115,9 +115,7 @@ class AdmissionConfig:
             and isinstance(self.admin_group, GroupPath)
             and not self.admin_group.lies_below(self.login_group)
         ):
-            raise ValueError(
-                f"admin_group must lie below login_group, such as {self.login_group}/admin"
-            )
+            raise ValueError("admin_group must lie below login_group")
 
 
 def _is_below(group_path: str, group: str) -> bool:

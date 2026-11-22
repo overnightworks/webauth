@@ -214,13 +214,14 @@ def test_an_admin_group_that_is_not_a_group_path_is_a_type_error(admin_group: ob
 def test_an_admin_group_outside_the_login_group_fails_at_construction(
     admin_group: GroupPath,
 ) -> None:
-    message = f"admin_group must lie below login_group, such as {LOGIN_GROUP}/admin"
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError) as refused:
         AdmissionConfig(
             bound_issuer=BOUND_ISSUER,
             login_group=LOGIN_GROUP,
             admin_group=admin_group,
         )
+
+    assert str(refused.value) == "admin_group must lie below login_group"
 
 
 @pytest.mark.parametrize(
