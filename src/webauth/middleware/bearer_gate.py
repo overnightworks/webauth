@@ -41,9 +41,9 @@ from webauth.oidc import (
     OidcRefusalReason,
     VerifiedAccessToken,
 )
-from webauth.oidc._client_config import _PLAIN_AUTHORITY, _is_endpoint_url
-from webauth.oidc._relying_party import _names_another_audience
-from webauth.oidc._token_endpoint import _ACCESS_TOKEN
+from webauth.oidc._client_config import PLAIN_AUTHORITY, is_endpoint_url
+from webauth.oidc._relying_party import names_another_audience
+from webauth.oidc._token_endpoint import ACCESS_TOKEN
 from webauth.policies import (
     AuthorizedParties,
     PathRules,
@@ -134,7 +134,7 @@ def _is_resource_url(url: str) -> bool:
     parts = urlsplit(url)
     segments = parts.path.split("/")[1:]
     return (
-        _PLAIN_AUTHORITY.fullmatch(parts.netloc) is not None
+        PLAIN_AUTHORITY.fullmatch(parts.netloc) is not None
         and _RESOURCE_PATH.fullmatch(parts.path) is not None
         and not _DOT_SEGMENTS & set(segments)
     )
@@ -249,7 +249,7 @@ class ProtectedResource:
             raise TypeError("ProtectedResource.required_group must be a GroupPath")
         if not isinstance(self.agent_group, GroupPath):
             raise TypeError("ProtectedResource.agent_group must be a GroupPath")
-        if not _is_endpoint_url(self.url) or not _is_resource_url(self.url):
+        if not is_endpoint_url(self.url) or not _is_resource_url(self.url):
             raise ValueError(
                 "ProtectedResource.url must be an endpoint URL with a plain host and a path"
                 " of unreserved segments"
@@ -486,7 +486,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             return self._refused(credential, challenge=challenge)
         verified = await on_worker(partial(verify, credential))
         if isinstance(verified, OidcRefusal):
-            if on_marked_route and _names_another_audience(verified):
+            if on_marked_route and names_another_audience(verified):
                 return _Continue.AS_UNMARKED
             refusal = (
                 _Refusal.RESOURCE_INSUFFICIENT_SCOPE
@@ -594,7 +594,7 @@ def _credential_of(request: HTTPConnection) -> str | _Refusal:
     credential = _ONE_CREDENTIAL.fullmatch(value, scheme.end())
     if credential is None or _ACCESS_TOKEN_QUERY_PARAMETER in request.query_params:
         return _Refusal.INVALID_REQUEST
-    if _ACCESS_TOKEN.fullmatch(credential.group(1)) is None:
+    if ACCESS_TOKEN.fullmatch(credential.group(1)) is None:
         return _Refusal.INVALID_TOKEN
     return credential.group(1)
 
@@ -610,25 +610,22 @@ def bearer_caller(connection: HTTPConnection) -> BearerCaller:
     reads as a caller.
     """
     admission = bearer_admission(connection)
-    if admission is None or not isinstance(admission.principal, BearerCaller):
+    caller = None if admission is None else admission.machine_caller
+    if caller is None:
         raise RuntimeError(
             "The bearer gate admitted no caller for this request: install it with "
             "WebAuth.install(bearer=...) on the app that serves the "
             "route, and select the route's path as a machine path.",
         )
-    return admission.principal
+    return caller
 
 
 def _resource_person_admitted(connection: HTTPConnection) -> AuthenticatedUser | None:
     """The capped person this request's resource admission holds, or ``None``."""
     admission = bearer_admission(connection)
-    if (
-        admission is None
-        or not admission.is_resource_admission
-        or not isinstance(admission.principal, AuthenticatedUser)
-    ):
+    if admission is None or not admission.is_resource_admission:
         return None
-    return admission.principal
+    return admission.person
 
 
 def resource_person(connection: HTTPConnection) -> AuthenticatedUser:
