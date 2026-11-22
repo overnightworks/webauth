@@ -1,5 +1,5 @@
 claim_id = "5936bee562dd4c198a5b0d464b7bedca"
-agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
+agent = "Claude bfbd143b-e670-47d2-b7e3-6d2579d83b8b"
 role = "builder"
 base = "43cf8d1693a175c0f63b27ec0427e843baa513e9"
 branch = "claude/issue-870-store-outage-answer"
