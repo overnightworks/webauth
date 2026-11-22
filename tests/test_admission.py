@@ -106,29 +106,12 @@ def test_group_paths_are_equal_by_value_and_never_equal_to_a_str() -> None:
 
 @pytest.mark.parametrize(("path", "message"), MALFORMED_GROUP_PATHS)
 def test_a_malformed_group_path_is_refused_with_its_rule(path: str, message: str) -> None:
-    """APP-38: a malformed path is a `ValueError` naming the rule."""
+    """APP-38: a malformed path is a `ValueError` whose text is the rule alone, never the value."""
 
     with pytest.raises(ValueError) as refused:
         GroupPath(path)
 
     assert str(refused.value) == message
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        pytest.param("canary-7f3a/lab", id="the first rule"),
-        pytest.param("/canary-7f3a/ lab", id="the second rule"),
-        pytest.param("/canary-7f3a/l\x00ab", id="the third rule"),
-    ],
-)
-def test_a_refused_group_path_is_not_echoed(path: str) -> None:
-    """APP-38: the refusal never carries the value."""
-
-    with pytest.raises(ValueError) as refused:
-        GroupPath(path)
-
-    assert "canary-7f3a" not in str(refused.value)
 
 
 @pytest.mark.parametrize(

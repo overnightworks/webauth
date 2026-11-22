@@ -67,9 +67,7 @@ from webauth.oidc import (
     PENDING_LOGIN_MAX_AGE_SECONDS,
     TokenEndpointError,
 )
-from webauth.ports import (
-    AccountEventKind,
-)
+from webauth.ports import AccountEventKind
 
 MAX_PENDING_LOGIN_COOKIE_CHARS = 896
 MAX_PENDING_LOGINS = 5
@@ -448,14 +446,15 @@ def test_a_callback_keeps_a_legacy_admin_in_the_admin_group_as_admin() -> None:
     assert host.audit.account_events == []
 
 
-MEMBER, ADMIN = [str(LOGIN_GROUP)], [str(ADMIN_GROUP)]
+MEMBER = [str(LOGIN_GROUP)]
+ADMIN = [str(ADMIN_GROUP)]
 
 
 @pytest.mark.parametrize(
     ("before", "after", "status_before", "status_after"),
     [
-        pytest.param(*(MEMBER, ADMIN), 403, 200, id="put into the admin group"),
-        pytest.param(*(ADMIN, MEMBER), 200, 403, id="taken out of the admin group"),
+        pytest.param(MEMBER, ADMIN, 403, 200, id="put into the admin group"),
+        pytest.param(ADMIN, MEMBER, 200, 403, id="taken out of the admin group"),
     ],
 )
 def test_a_role_changed_at_login_reaches_the_persons_other_open_session_at_once(
