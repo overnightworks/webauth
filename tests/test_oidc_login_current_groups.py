@@ -78,7 +78,7 @@ class TestTheGroupsReturned:
     @pytest.mark.parametrize(
         ("group", "role"),
         [
-            pytest.param(LOGIN_GROUP, AppRole.USER, id="the login group"),
+            pytest.param(str(LOGIN_GROUP), AppRole.USER, id="the login group"),
             pytest.param(f"{LOGIN_GROUP}/staff", AppRole.USER, id="a login subgroup"),
             pytest.param(f"{LOGIN_GROUP}2", None, id="a group named like the login group"),
         ],

@@ -57,6 +57,7 @@ from tests.support.oidc_arrangement import (
 )
 from tests.support.oidc_login_host import StoreDown, TransactionKind, failing
 from tests.support.webauth_arrangement import ADMIN_ROLE
+from webauth.admission import GroupPath
 from webauth.middleware import ProtectedResource
 from webauth.policies import PathRules
 from webauth.ports import AccountEvent, AccountEventKind, AccountKind, AgentFacts, AuthenticatedUser
@@ -127,7 +128,9 @@ def test_a_token_holding_the_agent_group_passes_the_party_check_whatever_its_azp
     as one element passes the party check whatever its `azp`, other groups beside it change
     nothing, and the admitted agent is the person with the role "user" and its facts."""
     app = an_app(resource)
-    token = an_agent_group_token(resource, resource.agent_group, RESOURCE_GROUP, *extra, azp=azp)
+    token = an_agent_group_token(
+        resource, str(resource.agent_group), str(RESOURCE_GROUP), *extra, azp=azp
+    )
 
     status, _, _ = ask(app, resource, surface, token)
 
@@ -210,8 +213,8 @@ def test_an_agent_group_token_without_the_scope_is_an_insufficient_scope_and_cre
 @pytest.mark.parametrize(
     ("groups", "azp"),
     [
-        pytest.param(["/agents/x", RESOURCE_GROUP], "stranger", id="below-the-group"),
-        pytest.param(["/agentsX", RESOURCE_GROUP], "stranger", id="only-starts-with-it"),
+        pytest.param(["/agents/x", str(RESOURCE_GROUP)], "stranger", id="below-the-group"),
+        pytest.param(["/agentsX", str(RESOURCE_GROUP)], "stranger", id="only-starts-with-it"),
         pytest.param("/agents", "stranger", id="one-string-unlisted"),
         pytest.param(["/agents", 7], "stranger", id="a-number-unlisted"),
         pytest.param("/agents", "hal", id="one-string-listed"),
@@ -246,7 +249,7 @@ def test_a_token_with_a_subgroup_of_the_agent_group_and_a_listed_azp_is_a_person
         app,
         resource,
         "entry-point",
-        an_agent_group_token(resource, "/agents/x", RESOURCE_GROUP, azp="hal"),
+        an_agent_group_token(resource, "/agents/x", str(RESOURCE_GROUP), azp="hal"),
     )
 
     assert status == 200
@@ -261,7 +264,7 @@ def test_the_agent_group_widens_no_other_paths_parties() -> None:
     app = a_bearer_app(person_paths=PERSON_PATHS, resource=resource)
     token = a_token(
         azp=AGENT_CLIENT,
-        groups=[resource.agent_group, "/apps/x/admin"],
+        groups=[str(resource.agent_group), "/apps/x/admin"],
         agent_owner=AGENT_OWNER,
         agent_name=AGENT_NAME,
     )
@@ -349,7 +352,7 @@ def test_the_agent_claims_of_a_token_without_the_agent_group_are_ignored(
     app = an_app(resource, a_known_person())
     token = a_resource_token(
         resource,
-        groups=[RESOURCE_GROUP],
+        groups=[str(RESOURCE_GROUP)],
         **{"agent_owner": AGENT_OWNER, "agent_name": AGENT_NAME, **claims},
     )
 
@@ -378,14 +381,16 @@ def test_an_agent_group_token_without_the_required_or_the_login_group_gets_the_p
     `WWW-Authenticate`, and the store is not touched."""
     resource = a_resource(
         marked_routes=MARKED_ROUTES,
-        required_group="/other/mcp" if case == "lacking-the-login-group" else RESOURCE_GROUP,
+        required_group=GroupPath("/other/mcp")
+        if case == "lacking-the-login-group"
+        else RESOURCE_GROUP,
     )
     app = an_app(resource, a_known_person())
     accounts_before = deepcopy(the_accounts(app))
     groups = (
-        [resource.agent_group, "/other/mcp"]
+        [str(resource.agent_group), "/other/mcp"]
         if case == "lacking-the-login-group"
-        else [resource.agent_group, "/apps/x"]
+        else [str(resource.agent_group), "/apps/x"]
     )
 
     status, headers, body = ask(app, resource, surface, an_agent_group_token(resource, *groups))
@@ -515,7 +520,9 @@ def test_a_stored_admin_is_admitted_as_an_agent_with_the_role_user_and_keeps_its
     app = an_app(resource, a_known_person(ADMIN_ROLE))
     assert app.accounts is not None
     failing(app.accounts, "set_role", monkeypatch)
-    token = an_agent_group_token(resource, resource.agent_group, RESOURCE_GROUP, "/apps/x/admin")
+    token = an_agent_group_token(
+        resource, str(resource.agent_group), str(RESOURCE_GROUP), "/apps/x/admin"
+    )
 
     status, _, _ = ask(app, resource, "entry-point", token)
 

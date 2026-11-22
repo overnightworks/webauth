@@ -40,7 +40,7 @@ from tests.support.service_caller_arrangement import (
     on_workload,
     tokens_with,
 )
-from webauth.admission import AdmissionConfig, EverySubject
+from webauth.admission import AdmissionConfig, EverySubject, GroupPath
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import RejectionReason
 from webauth.service_callers import (
@@ -256,7 +256,7 @@ THE_TABLE = [
         REASONS.NOT_A_MEMBER,
         FORBIDDEN,
         [on_person({})],
-        admission=replace(an_app_admission(), login_group="/apps/other"),
+        admission=replace(an_app_admission(), login_group=GroupPath("/apps/other")),
     ),
 ]
 

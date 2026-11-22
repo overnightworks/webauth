@@ -114,7 +114,7 @@ def a_stored_session(user: FakeUser) -> FakeSessionRecord:
 def a_host_world(
     *users: FakeUser,
     stored_session: FakeSessionRecord | None = None,
-    groups_claim: object = (LOGIN_GROUP,),
+    groups_claim: object = (str(LOGIN_GROUP),),
 ) -> HostWorld:
     wall_clock = FakeClock(float(NOW))
     lock = WriteLockInMemory()

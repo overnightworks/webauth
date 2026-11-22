@@ -67,6 +67,7 @@ from tests.support.person_paths_arrangement import (
     the_challenge,
 )
 from tests.support.webauth_arrangement import ADMIN_ROLE, LOGIN_REDIRECT, SAME_ORIGIN_REQUEST
+from webauth.admission import GroupPath
 from webauth.policies import (
     PathRules,
     PublicRule,
@@ -410,15 +411,19 @@ def test_every_reader_returns_the_account_behind_the_token_and_the_route_is_unch
     assert (by_cookie.status_code, by_cookie.json().keys()) == (200, by_token.json().keys())
 
 
-@pytest.mark.parametrize("login_group", ["/apps/x", "/apps/y"])
+@pytest.mark.parametrize(
+    "login_group", [GroupPath("/apps/x"), GroupPath("/apps/y")], ids=["/apps/x", "/apps/y"]
+)
 def test_a_token_issued_to_hal_is_admitted_the_same_way_in_apps_of_another_group(
-    login_group: str,
+    login_group: GroupPath,
 ) -> None:
     """TOKEN-08: a token issued to the hal registration opens the person paths of any app."""
-    admission = replace(ADMISSION, login_group=login_group, admin_group=f"{login_group}/admin")
+    admission = replace(
+        ADMISSION, login_group=login_group, admin_group=GroupPath(f"{login_group}/admin")
+    )
     app = a_person_app(admission=admission)
 
-    response = app.ask(PERSON_ME_PATH, authorization=bearing(a_token(groups=[login_group])))
+    response = app.ask(PERSON_ME_PATH, authorization=bearing(a_token(groups=[str(login_group)])))
 
     assert (response.status_code, response.json()["role"]) == (200, MEMBER_ROLE)
 

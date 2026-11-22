@@ -47,7 +47,7 @@ from tests.support.webauth_arrangement import (
     an_http_scope,
     drive,
 )
-from webauth.admission import AdmissionConfig, EverySubject, NoAdmins
+from webauth.admission import AdmissionConfig, EverySubject, GroupPath, NoAdmins
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.cookies import (
     _pending_login_cookie_name,
@@ -78,8 +78,8 @@ from webauth.sign_in_routes import (
 from webauth.web_auth import IssuerCalls, SignInPages, WebAuth
 
 BOUND_ISSUER = "https://id.example/realms/lab"
-LOGIN_GROUP = "/apps/lab"
-ADMIN_GROUP = f"{LOGIN_GROUP}/admin"
+LOGIN_GROUP = GroupPath("/apps/lab")
+ADMIN_GROUP = GroupPath(f"{LOGIN_GROUP}/admin")
 ADMISSION = AdmissionConfig(
     bound_issuer=BOUND_ISSUER,
     login_group=LOGIN_GROUP,
@@ -87,7 +87,7 @@ ADMISSION = AdmissionConfig(
 )
 EVERYONE = replace(ADMISSION, login_group=EverySubject.OF_THE_BOUND_ISSUER)
 NO_ADMINS = replace(ADMISSION, admin_group=NoAdmins.IN_THIS_APP)
-EVERYONE_WITH_ADMIN_GROUP = replace(EVERYONE, admin_group="/apps/other/admin")
+EVERYONE_WITH_ADMIN_GROUP = replace(EVERYONE, admin_group=GroupPath("/apps/other/admin"))
 SUBJECT = "5f0c2a1e-7d4b-4c55-9a51-2f8e3c6b1d90"
 LEGACY_ADMIN = FakeUser(id=SUBJECT, username="lena.legacy", role=ADMIN_ROLE)
 
@@ -545,7 +545,7 @@ def _the_issuer_calls_of(issuer: FakeIssuer, key_set: FakeKeySetEndpoint) -> Iss
 
 def an_oidc_host(
     *users: FakeUser,
-    groups_claim: object = (LOGIN_GROUP,),
+    groups_claim: object = (str(LOGIN_GROUP),),
     locale_claim: object = ABSENT,
     address_budget: int | None = None,
     max_sessions: int | None = None,

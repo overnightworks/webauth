@@ -366,7 +366,7 @@ def test_a_token_for_the_resource_is_refused_on_a_person_path_and_a_machine_path
         resource=resource,
         known_accounts=(a_known_person(),),
     )
-    token = a_resource_token(resource, groups=[RESOURCE_GROUP])
+    token = a_resource_token(resource, groups=[str(RESOURCE_GROUP)])
 
     on_person_path = app.ask(PERSON_ME_PATH, authorization=bearing(token))
     on_machine_path = app.ask(EXPORT_PATH, authorization=bearing(token))
@@ -388,7 +388,7 @@ def test_a_party_listed_only_on_the_resource_is_refused_on_the_other_kinds() -> 
         resource=resource,
         known_accounts=(a_known_person(),),
     )
-    token = a_resource_token(resource, azp="agent", groups=[RESOURCE_GROUP])
+    token = a_resource_token(resource, azp="agent", groups=[str(RESOURCE_GROUP)])
     app_token = a_token(azp="agent")
 
     assert entry_point_answer(app, resource, token) == (200, "")
@@ -452,7 +452,7 @@ def test_a_resource_that_admits_the_client_audience_admits_the_pair_for_its_grou
         resource=resource,
         known_accounts=(a_known_person(),),
     )
-    token = a_resource_token(resource, **{"groups": [RESOURCE_GROUP], **claims})
+    token = a_resource_token(resource, **{"groups": [str(RESOURCE_GROUP)], **claims})
 
     response = app.ask(resource.entry_point, authorization=bearing(token))
 

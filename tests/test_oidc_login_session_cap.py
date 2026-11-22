@@ -13,7 +13,7 @@ from tests.support.webauth_arrangement import (
 
 def test_a_removed_persons_open_session_works_to_its_cap_and_the_next_sign_in_is_refused() -> None:
     """APP-09: after a login-group removal, an open session is admitted and renewed to its cap."""
-    groups = [LOGIN_GROUP]
+    groups = [str(LOGIN_GROUP)]
     clock = FakeClock(FIXED_INSTANT.timestamp())
     host = an_oidc_host(groups_claim=groups, wall_clock=clock)
     host.callback(host.sign_in_at_issuer())

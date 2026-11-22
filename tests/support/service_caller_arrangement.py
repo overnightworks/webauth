@@ -20,7 +20,7 @@ from tests.support.oidc_arrangement import (
     an_access_token,
     served_key_set,
 )
-from webauth.admission import AdmissionConfig, NoAdmins
+from webauth.admission import AdmissionConfig, GroupPath, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.service_callers import (
     CallerRefusal,
@@ -54,7 +54,7 @@ UNREGISTERED = "unregistered-client"
 def an_app_admission() -> AdmissionConfig:
     return AdmissionConfig(
         bound_issuer=REALM_ISSUER,
-        login_group="/apps/notes",
+        login_group=GroupPath("/apps/notes"),
         admin_group=NoAdmins.IN_THIS_APP,
     )
 

@@ -24,6 +24,7 @@ from webauth.admission import (
     AdmissionRefusal,
     AppRole,
     EverySubject,
+    GroupPath,
     NoAdmins,
     app_role,
 )
@@ -306,8 +307,8 @@ def a_host_composes_its_auth(
         stores=WebAuthStores(sign_in=sign_in, sessions=sessions),
         groups=AdmissionConfig(
             bound_issuer=client.issuer,
-            login_group="/apps/host",
-            admin_group="/apps/host/admin",
+            login_group=GroupPath("/apps/host"),
+            admin_group=GroupPath("/apps/host/admin"),
         ),
         pages=SignInPages(
             refused=a_host_refuses_a_sign_in,
@@ -471,8 +472,8 @@ def a_host_declares_its_resource() -> BearerGate:
         resource=ProtectedResource(
             "https://app.example/mcp",
             "mcp:tools",
-            "/apps/host/mcp",
-            "/agents",
+            GroupPath("/apps/host/mcp"),
+            GroupPath("/agents"),
             AuthorizedParties(frozenset({"agent"})),
             marked_routes=frozenset({MarkedRoute("GET", "/notes/{note}")}),
         ),
@@ -525,8 +526,8 @@ def a_second_service_reads_the_app_role_of_its_token_groups(groups: list[str]) -
         groups,
         AdmissionConfig(
             bound_issuer="https://keycloak.example/realms/host",
-            login_group="/apps/host",
-            admin_group="/apps/host/admin",
+            login_group=GroupPath("/apps/host"),
+            admin_group=GroupPath("/apps/host/admin"),
         ),
     )
 

@@ -59,6 +59,7 @@ from pydantic import SecretStr
 
 from webauth._end_session_page import EndSessionForm
 from webauth._validation import is_scope_token_tuple, is_utf8
+from webauth.admission import GroupPath
 from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.jwt_verification import (
     KeySetFetch,
@@ -528,14 +529,14 @@ class OidcRelyingParty:
         resource_url: str,
         scope: str,
         authorized_parties: AuthorizedParties,
-        agent_group: str,
+        agent_group: GroupPath,
         admits_client_audience: bool = False,
     ) -> Callable[[str], VerifiedAccessToken | OidcRefusal]:
         """A check of an access token presented to the resource at `resource_url`.
 
         The verifier owns a key-set cache, so build it once. The token's only
         audience is `resource_url` and its `azp` one `authorized_parties` admits,
-        unless its `groups` list holds `agent_group` as one element (not a path below it):
+        unless its `groups` list holds `agent_group.path` as one element (not a path below it):
         then any `azp` passes, and the token must carry `agent_owner`, a non-empty string,
         and `agent_name`, a printable string of 1 to 64 characters, which become
         `VerifiedAccessToken.agent`; anything else is `INVALID_ACCESS_CLAIM`, decided before
@@ -543,8 +544,11 @@ class OidcRelyingParty:
         `scope` exactly, or the refusal is `INSUFFICIENT_SCOPE`. The realm alone decides
         which clients can mint a token for `resource_url`. With `admits_client_audience`
         the audiences may also be exactly `resource_url` and this client's ID, in either
-        order. `TypeError` for anything but `AuthorizedParties`."""
+        order. `TypeError` for anything but `AuthorizedParties` and for an `agent_group` that is
+        not a `GroupPath`."""
         _require_authorized_parties(authorized_parties)
+        if not isinstance(agent_group, GroupPath):
+            raise TypeError("agent_group must be a GroupPath")
         jwt_verifier = self._verifier_for(resource_url)
 
         def verify(access_token: str) -> VerifiedAccessToken | OidcRefusal:
@@ -570,7 +574,7 @@ class OidcRelyingParty:
         authorized_parties: AuthorizedParties,
         *,
         audience: str,
-        agent_group: str | None = None,
+        agent_group: GroupPath | None = None,
         admits_client_audience: bool = False,
     ) -> VerifiedAccessToken | OidcRefusal:
         admitted_audiences = {(audience,)}
@@ -582,7 +586,7 @@ class OidcRelyingParty:
         if token.subject is None or token.audiences not in admitted_audiences:
             return OidcRefusal(OidcRefusalReason.INVALID_ACCESS_CLAIM)
         groups = _group_paths(token.claims)
-        is_agent = groups is not None and agent_group in groups
+        is_agent = groups is not None and agent_group is not None and agent_group.path in groups
         if not is_agent and not authorized_parties.admits(token.claims.get("azp")):
             return OidcRefusal(OidcRefusalReason.AUTHORIZED_PARTY_MISMATCH)
         if groups is None:

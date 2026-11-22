@@ -18,7 +18,7 @@ def an_agent_group_claims(resource: ProtectedResource, *groups: str) -> dict[str
         "aud": resource.url,
         "scope": resource.scope,
         "azp": AGENT_CLIENT,
-        "groups": list(groups) or [resource.agent_group, resource.required_group],
+        "groups": list(groups) or [str(resource.agent_group), str(resource.required_group)],
         "agent_owner": AGENT_OWNER,
         "agent_name": AGENT_NAME,
     }

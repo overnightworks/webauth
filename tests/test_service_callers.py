@@ -46,7 +46,7 @@ from tests.support.service_caller_arrangement import (
     assert_message_keeps_identity_private,
     refused,
 )
-from webauth.admission import AdmissionConfig, AppRole, EverySubject, NoAdmins
+from webauth.admission import AdmissionConfig, AppRole, EverySubject, GroupPath, NoAdmins
 from webauth.https_client import KeySetFetchError
 from webauth.jwt_verification import RejectionReason
 from webauth.service_callers import (
@@ -379,7 +379,7 @@ def test_a_person_token_azp_binds_the_client_and_no_exchange_claim_stands_in_for
     ("admission", "person_groups", "role"),
     [
         pytest.param(
-            replace(an_app_admission(), admin_group="/apps/notes/admin"),
+            replace(an_app_admission(), admin_group=GroupPath("/apps/notes/admin")),
             ["/apps/notes/admin"],
             AppRole.ADMIN,
             id="admin-group",

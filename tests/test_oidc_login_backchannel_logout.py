@@ -268,7 +268,7 @@ def test_a_logout_token_that_does_not_hold_is_refused_before_the_transaction_and
 def test_an_id_token_posted_as_a_logout_token_ends_nothing() -> None:
     host = a_host_with_sessions(subject_sessions=1)
 
-    response = post_logout_token(host, an_id_token("nonce", host.wall_clock, [LOGIN_GROUP]))
+    response = post_logout_token(host, an_id_token("nonce", host.wall_clock, [str(LOGIN_GROUP)]))
 
     assert (response.status_code, sessions_of(host, SUBJECT)) == (400, 1)
 

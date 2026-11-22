@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import NoReturn, Required, TypedDict
+from typing import Any, NoReturn, Required, TypedDict
 
 import pytest
 from fastapi import FastAPI, Request, WebSocket
@@ -48,6 +48,7 @@ from tests.support.oidc_arrangement import (
 from tests.support.oidc_login_host import StoreDown, failing
 from tests.support.person_paths_arrangement import DisabledUser
 from tests.support.webauth_arrangement import ADMIN_ROLE
+from webauth.admission import GroupPath
 from webauth.middleware import (
     MarkedRoute,
     ProtectedResource,
@@ -215,7 +216,7 @@ def test_a_stored_admin_is_admitted_as_a_person_and_the_store_changes_nothing(
     )
     assert app.accounts is not None
     failing(app.accounts, "set_role", monkeypatch)
-    token = bearing(an_interactive_agent_token(resource, RESOURCE_GROUP, "/apps/x/admin"))
+    token = bearing(an_interactive_agent_token(resource, str(RESOURCE_GROUP), "/apps/x/admin"))
 
     posted = app.ask(resource.entry_point, method="POST", authorization=token)
     admin_only = app.ask(resource.entry_point, method="DELETE", authorization=token)
@@ -263,7 +264,7 @@ def test_a_person_without_the_required_group_gets_the_plain_403_and_the_store_is
 def test_a_person_outside_the_login_group_gets_the_plain_403_with_the_group_held() -> None:
     """RESOURCE-22: a person outside the admission's login group gets the plain 403 without
     `WWW-Authenticate`, no route runs, and the store and the audit stay as they were."""
-    resource = a_resource(required_group="/other/mcp")
+    resource = a_resource(required_group=GroupPath("/other/mcp"))
     app = a_bearer_app(paths=PathRules(), resource=resource, known_accounts=(a_known_person(),))
 
     response = app.ask(
@@ -518,25 +519,23 @@ def test_the_resource_person_raises_on_a_session_person_and_machine_request(
     assert response.status_code == REFUSED_AS_RUNTIME_ERROR
 
 
+@pytest.mark.parametrize("field", ["required_group", "agent_group"])
 @pytest.mark.parametrize(
     "group",
-    ["", "apps/x/mcp", "/", "/apps//mcp", "/apps/x/mcp ", "/a\u200bb"],
+    [
+        pytest.param("/apps/x/mcp", id="a plain str, well formed"),
+        pytest.param(None, id="none"),
+        pytest.param(7, id="an int"),
+    ],
 )
-def test_a_required_group_that_is_not_a_group_path_is_refused(group: str) -> None:
-    """RESOURCE-05: a `required_group` that is not a group path is a `ValueError`."""
-    with pytest.raises(ValueError, match="required_group"):
-        a_resource(required_group=group)
-
-
-@pytest.mark.parametrize(
-    "group",
-    ["", "agents", "/", "/agents//x", "/agents ", "/a\u200bb"],
-)
-def test_an_agent_group_that_is_not_a_group_path_is_refused(group: str) -> None:
-    """RESOURCE-05: an `agent_group` that is not a group path is a `ValueError`, as a
-    `required_group` is."""
-    with pytest.raises(ValueError, match="agent_group"):
-        a_resource(agent_group=group)
+def test_a_resource_group_that_is_not_a_group_path_is_a_type_error(
+    field: str, group: object
+) -> None:
+    """RESOURCE-05: a `required_group` or `agent_group` that is not a `GroupPath` is a
+    `TypeError`."""
+    changes: dict[str, Any] = {field: group}
+    with pytest.raises(TypeError, match=f"ProtectedResource.{field} must be a GroupPath"):
+        a_resource(**changes)
 
 
 THE_PUBLIC_PROBE = PublicRule(PathRules(exact=frozenset({ADMISSION_PROBE_PATH})))
@@ -601,7 +600,7 @@ def asked_with(path: str, token: str, method: str = "POST") -> Asked:
         pytest.param(
             lambda r: asked_with(
                 MARKED_ADMISSION_PROBE.template,
-                an_agent_group_token(r, r.agent_group, r.required_group),
+                an_agent_group_token(r, str(r.agent_group), str(r.required_group)),
             ),
             True,
             {"owner": AGENT_OWNER, "name": AGENT_NAME},
