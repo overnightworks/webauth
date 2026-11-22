@@ -1,0 +1,8 @@
+claim_id = "97d62121d36344d08e445e51cb049d43"
+agent = "Claude bfbd143b-e670-47d2-b7e3-6d2579d83b8b"
+role = "builder"
+base = "6f20128eb22aa24208b7e5d57d76dee963e9f411"
+branch = "claude/issue-874-bearer-admission-principal"
+scope = ["src/webauth/_bearer_admission.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/middleware/session_gate.py", "src/webauth/oidc/_client_config.py", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc/_token_endpoint.py"]
+opened_commit = "998dd0e858069ff016ed1fc5feac68bfbb10d2f2"
+whole_reason = "The bearer admission record gets the one reading of its principal, and the bearer gate stops importing underscored names from the private oidc modules; the renames and their uses must change together or the tree does not import."
