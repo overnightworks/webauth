@@ -456,7 +456,7 @@ def test_a_failed_call_raises_the_store_error_with_nothing_of_its_parameters(
     for private in ("abc", ABC_DIGEST, subject, "refresh-secret", "identity-secret"):
         assert private not in shown
     assert psycopg.errors.UniqueViolation.__name__ in shown
-    assert psycopg.errors.UniqueViolation.sqlstate in shown
+    assert (psycopg.errors.UniqueViolation.sqlstate or "") in shown
 
 
 AWARENESS = pytest.mark.parametrize(
