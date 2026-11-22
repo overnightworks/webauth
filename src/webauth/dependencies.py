@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Final
+from typing import Final
 from urllib.parse import urlencode
 
 from fastapi import Depends, HTTPException, Request
@@ -38,17 +38,18 @@ from webauth._bearer_admission import (
 from webauth._media_types import prefers_html
 from webauth._origins import OriginVerdict, origin_verdict
 from webauth._paths import reads_as_another_host, requested_address, same_app_path
-from webauth.config import SessionLifetime, WebAuthConfig, web_auth_config
+from webauth.config import (
+    SessionLifetime,
+    WebAuthConfig,
+    _installed_web_auth,
+    web_auth_config,
+)
 from webauth.cookies import (
     MAX_SESSION_COOKIE_CHARS,
     _cookie_values,
     _verify_session_cookie,
 )
-from webauth.ports import SessionRenewalStore, SessionTransaction
-
-if TYPE_CHECKING:
-    from fastapi import FastAPI
-
+from webauth.ports import SessionRenewalStore
 
 __all__ = [
     "LoginRedirect",
@@ -65,7 +66,6 @@ __all__ = [
 _INVALID_SESSION_DETAIL: Final = "Invalid session"
 _SESSION_EXPIRED_DETAIL: Final = "Session expired"
 _EXPIRY_TOLERANCE: Final = timedelta(seconds=60)
-_INSTALLED_SESSIONS_ATTRIBUTE: Final = "web_auth_sessions"
 
 
 @dataclass(frozen=True)
@@ -96,21 +96,6 @@ class LoginRedirect:
             )
 
 
-def _publish_installed_sessions(app: FastAPI, sessions: SessionTransaction) -> None:
-    setattr(app.state, _INSTALLED_SESSIONS_ATTRIBUTE, sessions)
-
-
-def _installed_sessions(connection: HTTPConnection) -> SessionTransaction:
-    """The ``stores.sessions`` ``WebAuth.install`` put on the application serving ``connection``."""
-    sessions = getattr(connection.app.state, _INSTALLED_SESSIONS_ATTRIBUTE, None)
-    if sessions is None:
-        raise RuntimeError(
-            "This application serves auth-protected requests without an installed WebAuth: "
-            "call auth.install(app, bearer=...) after the last route.",
-        )
-    return sessions
-
-
 def current_user(request: Request) -> ports.AuthenticatedUser:
     """The account behind the request, from the handle installed on the serving application.
 
@@ -126,7 +111,7 @@ def current_user(request: Request) -> ports.AuthenticatedUser:
     replaces the identity behind it and behind ``admin_user``. A direct call, as a stream
     makes before it opens its own store, bypasses the overrides.
     """
-    with _installed_sessions(request)() as sessions:
+    with _installed_web_auth(request.app).sessions() as sessions:
         user = _gate_or_own_admission(request, sessions)
     if isinstance(user, ConnectionRefusal):
         raise _http_refusal(request, user, None)
@@ -188,7 +173,7 @@ def authenticate_websocket(
     A host may wrap this function in its own dependency: FastAPI resolves an
     ``HTTPConnection`` parameter on a WebSocket route as well as on an HTTP one.
     """
-    opening = _installed_sessions(connection)
+    opening = _installed_web_auth(connection.app).sessions
     origin_refusal = _origin_refusal(connection)
     if origin_refusal is not None:
         return origin_refusal
