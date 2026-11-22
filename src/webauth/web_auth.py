@@ -20,8 +20,7 @@ from starlette.middleware import Middleware
 from webauth._outage import _tracked_transactions
 from webauth._validation import require_positive_whole_number
 from webauth.admission import NoAdmins
-from webauth.config import _install_web_auth_config
-from webauth.dependencies import _publish_installed_sessions
+from webauth.config import _install_web_auth
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.bearer_gate import BearerGate, _install_resource_metadata
 from webauth.middleware.client_address import _ClientAddressMiddleware
@@ -349,8 +348,7 @@ class WebAuth:
             ),
         )
         self._installed = True
-        _install_web_auth_config(app, settings.config)
-        _publish_installed_sessions(app, sessions)
+        _install_web_auth(app, settings.config, sessions)
         routes_of_the_host = len(app.router.routes)
         _install_sign_in_routes(
             app,

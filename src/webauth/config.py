@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from webauth.ports import (
         RateLimitBackend,
+        SessionTransaction,
         WallClock,
     )
 
@@ -167,9 +168,31 @@ class WebAuthConfig:
         return self.session_secret.get_secret_value().encode()
 
 
-def _install_web_auth_config(app: Starlette, config: WebAuthConfig) -> None:
-    """Publish ``config`` on ``app`` so every request can reach it."""
-    setattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, config)
+@dataclass(frozen=True)
+class _InstalledWebAuth:
+    """What ``WebAuth.install`` puts on the application: its configuration and sessions."""
+
+    config: WebAuthConfig
+    sessions: SessionTransaction
+
+
+def _install_web_auth(
+    app: Starlette,
+    config: WebAuthConfig,
+    sessions: SessionTransaction,
+) -> None:
+    """Publish the installed record on ``app`` so every request can reach it."""
+    setattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, _InstalledWebAuth(config, sessions))
+
+
+def _installed_web_auth(app: Starlette) -> _InstalledWebAuth:
+    installed = getattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, None)
+    if installed is None:
+        raise RuntimeError(
+            "This application serves auth-protected requests without an installed WebAuth: "
+            "call auth.install(app, bearer=...) after the last route.",
+        )
+    return installed
 
 
 def installed_web_auth_config(app: Starlette) -> WebAuthConfig:
@@ -178,13 +201,7 @@ def installed_web_auth_config(app: Starlette) -> WebAuthConfig:
     An application that serves a request without having installed one raises
     ``RuntimeError``.
     """
-    config = getattr(app.state, _WEB_AUTH_STATE_ATTRIBUTE, None)
-    if config is None:
-        raise RuntimeError(
-            "This application serves auth-protected requests without a "
-            "WebAuthConfig: build the app's WebAuth and call its install().",
-        )
-    return config
+    return _installed_web_auth(app).config
 
 
 def web_auth_config(connection: HTTPConnection) -> WebAuthConfig:
