@@ -15,6 +15,7 @@ from logline import set_sub
 from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 
+from webauth._account_provisioning import admit_resource_holder, admit_token_holder
 from webauth._bearer_admission import (
     ADMIN_REQUIRED_DETAIL,
     AUTHENTICATION_REQUIRED_DETAIL,
@@ -43,7 +44,6 @@ from webauth.oidc import (
 from webauth.oidc._client_config import _PLAIN_AUTHORITY, _is_endpoint_url
 from webauth.oidc._relying_party import _names_another_audience
 from webauth.oidc._token_endpoint import _ACCESS_TOKEN
-from webauth.oidc_login import _admit_resource_holder, _admit_token_holder
 from webauth.policies import (
     AuthorizedParties,
     PathRules,
@@ -496,7 +496,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             return self._refused(refusal, verified, challenge=challenge)
         person = await on_worker(
             partial(
-                _admit_resource_holder,
+                admit_resource_holder,
                 self._sign_in,
                 verified,
                 required_group=resource.required_group,
@@ -531,7 +531,7 @@ class _BearerGateMiddleware(RefusalMiddleware[BearerGate]):
             return self._refused(_Refusal.INVALID_TOKEN, verified)
         person = await on_worker(
             partial(
-                _admit_token_holder,
+                admit_token_holder,
                 self._sign_in,
                 verified,
                 admission=self._admission,

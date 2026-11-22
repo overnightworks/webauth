@@ -25,11 +25,11 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 
 ## 2. Building Block View
 
-Module owners in `webauth`: `oidc_login` coordinates admission, sessions, logout and fresh tokens.
+Module owners in `webauth`: `oidc_login` coordinates the sign-in decision, sessions, logout and fresh tokens.
 
 - `web_auth` is the composition call ([host contract](host-contract.md#the-composition-call)): `WebAuth.build` checks the host's settings and builds the relying party, and `install` composes the request line and the client-address writer (only for `front=TrustedProxies`), the host's `outside` and `inside` middleware, the stack and the sign-in routes in one order, and `web_auth_front` puts the request line and the writer around a router of several apps built with `ServedBehind.SHARED_FRONT`; `dependencies` reads the sessions entry the install publishes on the app.
 - `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes, selects `SignInPaths` policies and answers failures.
-- `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `oidc_login` and the bearer gate apply it and services call `app_role`.
+- `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `_account_provisioning` owns finding, creating, re-roling and re-kinding the account a sign-in or a bearer token names, which `oidc_login` and the bearer gate apply, and services call `app_role`.
 - `config` holds deployment facts; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
 - `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users; the private `_bearer_admission` holds what the bearer gate admitted for a request, and the session readers, both gates and the CSRF check read it there.
 - `middleware` enforces the malformed-path refusal, body size, CSRF, rate limits, security headers and bearer/session gates in one installed order. Its client-address writer is private: `install` places it immediately inside logline's request line for `front=TrustedProxies`, and `web_auth_front` places both around a router of several apps built with `ServedBehind.SHARED_FRONT`, so that the request line names the client for every answer, including those given before the stack.

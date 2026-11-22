@@ -80,6 +80,7 @@ from fastapi import FastAPI, Request  # noqa: TC002  # FastAPI reads the annotat
 from logline import set_sub
 from starlette.responses import RedirectResponse, Response
 
+from webauth._account_provisioning import UsernameTakenSignal
 from webauth._paths import _has_dot_segment, reads_as_another_host, same_app_path
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.config import WebAuthConfig, web_auth_config
@@ -96,7 +97,6 @@ from webauth.oidc_login import (
     _receive_backchannel_logout,
     _SignedIn,
     _start_login,
-    _UsernameTakenSignal,
     _write_sign_in,
 )
 
@@ -405,7 +405,7 @@ class _SignIn:
         replaced_session_id = session_id_from_request(request, config)
         try:
             signed_in = self._write(admitted, config, replaced_session_id)
-        except _UsernameTakenSignal:
+        except UsernameTakenSignal:
             return self._refuse(request, AdmissionRefusal.USERNAME_TAKEN)
         set_sub(request.scope, signed_in.person_id)
         _LOGGER.info(_COMPLETED_EVENT, extra={"sub": signed_in.person_id})
