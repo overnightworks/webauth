@@ -61,6 +61,7 @@ from webauth.single_process_stores import (
     SingleProcessSessionStore,
     SingleProcessSignInTransaction,
     SingleProcessStores,
+    SubjectRecords,
     _Tables,
 )
 from webauth.web_auth import IssuerCalls, SignInPages
@@ -377,6 +378,55 @@ class TestRecordsOf:
         assert (records.account, records.sessions) == (None, ())
 
 
+class TestErase:
+    def test_erase_removes_the_subjects_account_and_sessions_and_returns_what_records_of_did(
+        self, stores: SingleProcessStores
+    ) -> None:
+        """MEMSTORE-23: erase removes the account and every session and returns them."""
+        with_account(stores)
+        with_account(stores, SUBJECT_TWO)
+        open_session(stores)
+        open_session(stores, now=START + timedelta(minutes=1), refresh_token=None)
+        other = open_session(stores, SUBJECT_TWO)
+        before = stores.sessions.records_of(SUBJECT_ONE)
+
+        erased = stores.sessions.erase(SUBJECT_ONE)
+
+        assert erased == before
+        assert len(erased.sessions) == 2
+        assert stores.sessions.records_of(SUBJECT_ONE) == SubjectRecords(None, ())
+        assert stores.accounts.get(SUBJECT_ONE) is None
+        assert stores.accounts.get(SUBJECT_TWO) is not None
+        assert stores.sessions.load(other) is not None
+
+    def test_erase_of_an_unknown_subject_returns_nothing_changes_nothing_and_repeats(
+        self, stores: SingleProcessStores
+    ) -> None:
+        """MEMSTORE-23: erase of an unknown subject changes nothing and answers empty again."""
+        with_account(stores, SUBJECT_TWO)
+        kept = open_session(stores, SUBJECT_TWO)
+
+        first = stores.sessions.erase(SUBJECT_ONE)
+        second = stores.sessions.erase(SUBJECT_ONE)
+
+        assert first == second == SubjectRecords(None, ())
+        assert stores.sessions.load(kept) is not None
+
+    def test_erase_inside_an_entry_that_raises_leaves_account_and_sessions_in_place(
+        self, stores: SingleProcessStores
+    ) -> None:
+        """MEMSTORE-23: erase joins the sign-in entry, so a raise restores both tables."""
+        with_account(stores)
+        kept = open_session(stores)
+
+        with pytest.raises(RuntimeError, match="boom"), stores.transaction():
+            stores.sessions.erase(SUBJECT_ONE)
+            raise RuntimeError("boom")
+
+        assert stores.accounts.get(SUBJECT_ONE) is not None
+        assert stores.sessions.load(kept) is not None
+
+
 def enter_and_leave(stores: SingleProcessStores) -> None:
     with stores.transaction():
         pass
@@ -615,6 +665,20 @@ class TestSignInRoutesOverTheStores:
         assert browser.gate_status() == 200
         assert [event.kind for event in audit.account_events] == [AccountEventKind.USER_CREATED]
         assert stores.sessions.records_of(SUBJECT).sessions[0].holds_id_token is True
+
+    def test_the_sign_in_after_an_erasure_creates_the_account_again(
+        self, stores: SingleProcessStores, audit: RecordingAuditSink
+    ) -> None:
+        """MEMSTORE-23: after erase the next sign-in creates the account and writes USER_CREATED."""
+        browser = Browser(stores)
+        browser.sign_in()
+        stores.sessions.erase(SUBJECT)
+
+        assert browser.sign_in() == 303
+
+        assert stores.accounts.get(SUBJECT) is not None
+        created = [e for e in audit.account_events if e.kind is AccountEventKind.USER_CREATED]
+        assert len(created) == 2
 
     def test_logout_ends_the_session_the_gate_then_refuses(
         self, stores: SingleProcessStores
