@@ -59,6 +59,16 @@ class BearerAdmission:
     )
 
     @property
+    def machine_caller(self) -> ports.BearerCaller | None:
+        """The principal on a machine path; ``None`` on a person path."""
+        return self.principal if isinstance(self.principal, ports.BearerCaller) else None
+
+    @property
+    def person(self) -> ports.AuthenticatedUser | None:
+        """The account behind the token on a person path; ``None`` on a machine path."""
+        return self.principal if isinstance(self.principal, ports.AuthenticatedUser) else None
+
+    @property
     def is_resource_admission(self) -> bool:
         return self.resource_method is not None
 
@@ -125,8 +135,8 @@ def admitted_token_person(connection: HTTPConnection) -> ports.AuthenticatedUser
     that does not hold here.
     """
     admission = bearer_admission(connection)
-    if admission is not None and isinstance(admission.principal, ports.AuthenticatedUser):
-        return admission.principal
+    if admission is not None and admission.person is not None:
+        return admission.person
     raise_for_bearer_admission(connection)
     return None
 
@@ -171,7 +181,7 @@ def require_admin(
         is_person_path_token = (
             admission is not None
             and not admission.is_resource_admission
-            and isinstance(admission.principal, ports.AuthenticatedUser)
+            and admission.person is not None
         )
         challenge = PERSON_PATH_INSUFFICIENT_SCOPE if is_person_path_token else None
         raise HTTPException(

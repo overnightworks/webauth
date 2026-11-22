@@ -32,7 +32,7 @@ from webauth.dependencies import (
 from webauth.middleware._refusal import RefusalMiddleware
 from webauth.middleware._route_path import route_path
 from webauth.policies import PathRules, PublicRule
-from webauth.ports import AuthenticatedUser, BearerCaller
+from webauth.ports import AuthenticatedUser
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -157,7 +157,7 @@ def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
     this request's own: a host must not hand it to another request.
     """
     admission = bearer_admission(connection)
-    if admission is not None and isinstance(admission.principal, BearerCaller):
+    if admission is not None and admission.machine_caller is not None:
         return None
     person = admitted_token_person(connection)
     if person is not None:

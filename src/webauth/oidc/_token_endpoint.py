@@ -40,7 +40,7 @@ _IDP_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _REFRESH_TOKEN = re.compile(r"[\x20-\x7e]+")
 # RFC 6750 section 2.1: a bearer token is a b64token, so it can sit in an
 # `Authorization` header without a CR, LF or space.
-_ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
+ACCESS_TOKEN = re.compile(r"[A-Za-z0-9\-._~+/]+=*")
 _BEARER_TOKEN_TYPE = "bearer"  # noqa: S105 - token type not a credential
 _TOKEN_ERROR_STATUSES = frozenset({HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED})
 # Keycloak refuses a token exchange its client may not make with 403 and `access_denied`.
@@ -192,7 +192,7 @@ def _bearer_access_token(document: Mapping[str, object]) -> SecretStr:
         or not token_type.isascii()
         or token_type.lower() != _BEARER_TOKEN_TYPE
         or not isinstance(access_token, str)
-        or not _ACCESS_TOKEN.fullmatch(access_token)
+        or not ACCESS_TOKEN.fullmatch(access_token)
     ):
         raise _RefusalError(OidcRefusal(OidcRefusalReason.TOKEN_ENDPOINT_FAILED))
     return SecretStr(access_token)
