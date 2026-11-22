@@ -509,7 +509,7 @@ checks the browser.
     it differs, exactly as at sign-in.
   - **TOKEN-22** No session is created.
   - **TOKEN-23** Nothing is committed here: durability is the exit of the host's transaction.
-  - **TOKEN-24** A store, audit or exit failure is the library 500.
+  - **TOKEN-24** A store, audit or exit failure is the library 500, except a `StoreUnavailableError`, which is the 503 of STACK-16.
   - **TOKEN-25** No issuer call happens inside the block.
 - **Clients.**
   - **TOKEN-26** Each kind of path names its own `AuthorizedParties`, so a client admitted on the
@@ -805,9 +805,9 @@ At the entry point, on every method and the exact path only:
   - **RESOURCE-27** the person is `AuthenticatedUser(id, username, role, agent)` with the role `"user"` whatever role is stored: a stored admin is admitted as a plain user, and `agent` is `None` without the agent group;
   - **RESOURCE-77** with the agent group the admitted agent is `AuthenticatedUser(id, username, "user", agent=AgentFacts(owner, name))` whatever role is stored and whatever kind the account stores, its `kind` derived from `agent`; CSRF and the session gate step aside as RESOURCE-24 and RESOURCE-25 say, `current_user`, `admitted_user` and `resource_person` return it with its `AgentFacts` (RESOURCE-62, RESOURCE-63, RESOURCE-65), and a changed method or `Authorization` header still ends the admission (RESOURCE-67 to RESOURCE-69);
   - **RESOURCE-28** `admin_user` answers that person 403 without `WWW-Authenticate` (a person path's 403 keeps its `insufficient_scope` challenge);
-  - **RESOURCE-29** a store or exit failure is the library's 500 and records no admission;
+  - **RESOURCE-29** a store or exit failure is the library's 500 and records no admission, except a `StoreUnavailableError`, which is the 503 of STACK-16;
   - **RESOURCE-78** the same for a failed `create_for_subject`, `set_kind`, `USER_CREATED` or `KIND_CHANGED` audit of an agent: the library promises no rollback, so what the failed entry leaves is the host's, as the `SignInTransaction` docstring says: a host whose stores apply each call can keep the `AGENT` account or kind, and a later request then admits it as known with no second event;
-  - **RESOURCE-79** a username already taken at an agent's creation is a plain 403 without `WWW-Authenticate`, after the transaction's cleanup; a failing cleanup stays the 500, as on the person paths;
+  - **RESOURCE-79** a username already taken at an agent's creation is a plain 403 without `WWW-Authenticate`, after the transaction's cleanup; a failing cleanup stays the 500, as on the person paths, except a `StoreUnavailableError`, which is the 503 of STACK-16;
   - **RESOURCE-80** a token without the agent group keeps RESOURCE-23, RESOURCE-26, RESOURCE-27 and RESOURCE-60 unchanged, and a stored `AGENT` account met so is only read: its stored kind stays, `agent` is `None`, and the derived `kind` is `PERSON`.
 - **Host duty:** The store keeps each account's kind, an existing store backfills `person`, and its `SubjectUserStore` implements `set_kind`.
 - **Host duty:** An agent account's username is no display name: show an agent by `AgentFacts.name`.
