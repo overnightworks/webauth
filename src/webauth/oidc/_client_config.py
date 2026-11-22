@@ -25,7 +25,7 @@ _APP_URL_FIELDS = ("redirect_uri", "post_logout_redirect_uri")
 # The logout page posts to `end_session_endpoint`; the issuer then redirects to
 # `post_logout_redirect_uri`; both are `form-action` sources: a plain host and optional port.
 _FORM_TARGET_FIELDS = ("end_session_endpoint", "post_logout_redirect_uri")
-_PLAIN_AUTHORITY = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d+)?", re.ASCII)
+PLAIN_AUTHORITY = re.compile(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d+)?", re.ASCII)
 # RFC 8252 sections 7.3 and 8.3: the loopback literals and localhost.
 # `urlsplit` lowercases the hostname and drops the brackets of an IPv6 literal.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -95,17 +95,17 @@ class OidcClientConfig:
                     f" localhost, 127.0.0.1 or [::1], naming {_URL_RULE}"
                 )
         for name in _FORM_TARGET_FIELDS:
-            if not _PLAIN_AUTHORITY.fullmatch(urllib.parse.urlsplit(getattr(self, name)).netloc):
+            if not PLAIN_AUTHORITY.fullmatch(urllib.parse.urlsplit(getattr(self, name)).netloc):
                 raise ValueError(f"{name} must name a plain host and optional port")
 
 
 def require_endpoint_url(name: str, url: object) -> None:
     """Raises the `ValueError` naming `name`, never `url`, unless `url` is an endpoint URL."""
-    if not _is_endpoint_url(url):
+    if not is_endpoint_url(url):
         raise ValueError(f"{name} must be an https URL naming {_URL_RULE}")
 
 
-def _is_endpoint_url(url: object) -> bool:
+def is_endpoint_url(url: object) -> bool:
     return is_https_url(url) and "?" not in url and "#" not in url
 
 
@@ -114,7 +114,7 @@ def _is_app_url(url: object) -> bool:
 
     The http form is judged by `is_https_url` with its scheme swapped, so the
     control character, space, credential and port guards stay in one place."""
-    if _is_endpoint_url(url):
+    if is_endpoint_url(url):
         return True
     if not isinstance(url, str) or url[:5].lower() != "http:":
         return False
@@ -122,7 +122,7 @@ def _is_app_url(url: object) -> bool:
         host = urllib.parse.urlsplit(url).hostname
     except ValueError:
         return False
-    return host in _LOOPBACK_HOSTS and _is_endpoint_url(f"https:{url[5:]}")
+    return host in _LOOPBACK_HOSTS and is_endpoint_url(f"https:{url[5:]}")
 
 
 def _is_scope_list_with_openid(scopes: object) -> bool:

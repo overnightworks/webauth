@@ -664,7 +664,7 @@ def _is_backchannel_logout_events(events: object) -> bool:
     )
 
 
-def _names_another_audience(refusal: OidcRefusal) -> bool:
+def names_another_audience(refusal: OidcRefusal) -> bool:
     return refusal.token_rejection is RejectionReason.INVALID_AUDIENCE
 
 
