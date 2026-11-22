@@ -278,6 +278,18 @@ class PostgresHost:
                 > 0
             )
 
+    def terminate_the_backend_of(self, connection: Connection) -> None:
+        """End the server process behind `connection` and return once it is gone, as a failover
+        or an administrator's `pg_terminate_backend` does mid-transaction."""
+        victim = connection.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        with self.engine.connect() as killer:
+            killer.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": victim})
+            deadline = time.monotonic() + BLOCKED_BACKEND_DEADLINE_SECONDS
+            while killer.execute(
+                text("SELECT count(*) FROM pg_stat_activity WHERE pid = :pid"), {"pid": victim}
+            ).scalar_one():
+                assert time.monotonic() < deadline, "the backend is still running"
+
     def count_rows(self, table: Table) -> int:
         with self.engine.connect() as connection:
             return len(connection.execute(select(table)).all())

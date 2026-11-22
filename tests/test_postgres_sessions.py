@@ -11,6 +11,7 @@ from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from operator import attrgetter
 
+import psycopg.errors
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -29,7 +30,8 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from tests.support.current_groups_arrangement import GROUPS, SESSION_ENDED, SESSION_ID
 from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
@@ -53,6 +55,7 @@ from webauth.ports import (
     AccountEvent,
     AccountEventKind,
     AccountKind,
+    StoreUnavailableError,
     UsernameTakenError,
 )
 from webauth.postgres import (
@@ -91,7 +94,7 @@ class KnowsNoAccounts(PostgresAccountStore):
 
 class AccountReadFails(PostgresAccountStore):
     def get(self, user_id: str) -> None:
-        raise OperationalError("SELECT 1", {"id": user_id}, Exception("secret detail"))
+        raise ProgrammingError("SELECT 1", {"id": user_id}, Exception("secret detail"))
 
 
 @pytest.fixture
@@ -104,7 +107,7 @@ def host() -> Iterator[PostgresHost]:
             arranged.close()
 
 
-def what_a_log_shows_of(error: SessionStoreError) -> str:
+def what_a_log_shows_of(error: SessionStoreError | StoreUnavailableError) -> str:
     """The error as a traceback prints it, without the source lines of the frames: its own text
     and, unless the error hides it, the error it replaced."""
     shown = "".join(traceback.format_exception_only(error)) + repr(error)
@@ -452,6 +455,8 @@ def test_a_failed_call_raises_the_store_error_with_nothing_of_its_parameters(
     shown = what_a_log_shows_of(raised.value)
     for private in ("abc", ABC_DIGEST, subject, "refresh-secret", "identity-secret"):
         assert private not in shown
+    assert psycopg.errors.UniqueViolation.__name__ in shown
+    assert psycopg.errors.UniqueViolation.sqlstate in shown
 
 
 AWARENESS = pytest.mark.parametrize(
@@ -559,18 +564,31 @@ def test_a_failed_account_read_raises_the_store_error(
     assert "secret" not in what_a_log_shows_of(raised.value)
 
 
-def test_a_connection_that_cannot_open_raises_the_store_error() -> None:
-    """PGSTORE-07."""
+def test_a_connection_that_cannot_open_is_an_outage_that_hides_its_credentials() -> None:
+    """PGSTORE-07: a closed port is `StoreUnavailableError`."""
     unreachable = create_engine("postgresql+psycopg://nobody:secret@127.0.0.1:1/none")
 
     with (
-        pytest.raises(SessionStoreError) as raised,
+        pytest.raises(StoreUnavailableError) as raised,
         database_errors_as_store_errors(),
         unreachable.begin(),
     ):
         pass
 
     assert "secret" not in what_a_log_shows_of(raised.value)
+
+
+def test_a_connection_ended_by_the_server_mid_transaction_is_an_outage(host: PostgresHost) -> None:
+    """PGSTORE-07: `pg_terminate_backend` on the host's connection is `StoreUnavailableError`."""
+    with host.engine.connect() as connection:
+        store = PostgresSessionStore(
+            connection, PostgresAccountStore(connection, host.tables.accounts), host.tables.sessions
+        )
+        store.load("abc")
+        host.terminate_the_backend_of(connection)
+
+        with pytest.raises(StoreUnavailableError):
+            store.load("abc")
 
 
 @pytest.mark.parametrize("error", [UsernameTakenError("taken"), BlockFailed()])
@@ -582,14 +600,64 @@ def test_the_wrapper_passes_every_other_exception_unchanged(error: Exception) ->
     assert raised.value is error
 
 
-def test_the_wrapper_hides_the_database_error_it_replaces() -> None:
+def a_driver_failure(error: Exception, *, connection_invalidated: bool = False) -> DBAPIError:
+    """The error SQLAlchemy raises for `error`, as it wraps the driver's own classes."""
+    wrapper = OperationalError if isinstance(error, psycopg.OperationalError) else ProgrammingError
+    return wrapper(
+        "SELECT 1", {"token": "secret"}, error, connection_invalidated=connection_invalidated
+    )
+
+
+OUTAGES = [
+    pytest.param(a_driver_failure(psycopg.OperationalError("secret")), id="no-sqlstate"),
+    pytest.param(a_driver_failure(psycopg.errors.ConnectionFailure("secret")), id="class-08"),
+    pytest.param(a_driver_failure(psycopg.errors.AdminShutdown("secret")), id="admin-shutdown"),
+    pytest.param(a_driver_failure(psycopg.errors.CrashShutdown("secret")), id="crash-shutdown"),
+    pytest.param(a_driver_failure(psycopg.errors.CannotConnectNow("secret")), id="starting-up"),
+    pytest.param(
+        a_driver_failure(psycopg.errors.SyntaxError("secret"), connection_invalidated=True),
+        id="connection-invalidated",
+    ),
+    pytest.param(PoolTimeoutError("secret"), id="pool-timeout"),
+]
+STORE_ERRORS = [
+    pytest.param(a_driver_failure(psycopg.errors.DeadlockDetected("secret")), id="deadlock"),
+    pytest.param(
+        a_driver_failure(psycopg.errors.SerializationFailure("secret")), id="serialization-failure"
+    ),
+    pytest.param(a_driver_failure(psycopg.errors.QueryCanceled("secret")), id="query-canceled"),
+    pytest.param(a_driver_failure(psycopg.errors.UniqueViolation("secret")), id="unique-violation"),
+    pytest.param(a_driver_failure(psycopg.errors.SyntaxError("secret")), id="syntax-error"),
+    pytest.param(a_driver_failure(psycopg.InterfaceError("secret")), id="interface-error"),
+]
+
+
+@pytest.mark.parametrize("database_error", OUTAGES)
+def test_the_wrapper_raises_an_outage_for_connection_evidence_and_hides_the_error(
+    database_error: Exception,
+) -> None:
     """PGSTORE-07."""
-    database_error = OperationalError("SELECT 1", {"token": "secret"}, Exception("secret detail"))
+    with pytest.raises(StoreUnavailableError) as raised, database_errors_as_store_errors():
+        raise database_error
+
+    assert "secret" not in what_a_log_shows_of(raised.value)
+
+
+@pytest.mark.parametrize("database_error", STORE_ERRORS)
+def test_the_wrapper_raises_the_store_error_for_every_other_database_error_and_hides_it(
+    database_error: DBAPIError,
+) -> None:
+    """PGSTORE-07: the text names the driver error's class and SQLSTATE, and nothing it bound."""
+    driver_error = database_error.orig
+    assert driver_error is not None
 
     with pytest.raises(SessionStoreError) as raised, database_errors_as_store_errors():
         raise database_error
 
-    assert "secret" not in what_a_log_shows_of(raised.value)
+    shown = what_a_log_shows_of(raised.value)
+    assert type(driver_error).__name__ in shown
+    assert (getattr(driver_error, "sqlstate", None) or "") in shown
+    assert "secret" not in shown
 
 
 def apply_the_session_migration(connection: Connection) -> None:
