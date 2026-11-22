@@ -1,0 +1,8 @@
+claim_id = "d65955b4de264d9596474131453692ff"
+agent = "Claude bfbd143b-e670-47d2-b7e3-6d2579d83b8b"
+role = "builder"
+base = "7ab6b9b64591ad4657eacdb310df4650adc9b88f"
+branch = "claude/issue-876-what-webauth-install-publishes-on-the-ap"
+scope = ["docs/ARCHITECTURE.md", "src/webauth/config.py", "src/webauth/dependencies.py", "src/webauth/web_auth.py"]
+opened_commit = "74d8516ed9e34faa596f440879c1760b7d8d7381"
+whole_reason = "The record, its one publisher and its two readers must change together, or a request reads a key nobody publishes."
