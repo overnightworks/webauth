@@ -31,6 +31,7 @@ from tests.support.oidc_login_host import (
     SUBJECT,
 )
 from tests.support.webauth_arrangement import ADMIN_ROLE, RecordingAuditSink
+from webauth._account_provisioning import admit_account
 from webauth.admission import (
     AdmissionConfig,
     AdmissionRefusal,
@@ -38,7 +39,7 @@ from webauth.admission import (
 from webauth.oidc import (
     OidcIdentity,
 )
-from webauth.oidc_login import _admit_account, _decide_admission
+from webauth.oidc_login import _decide_admission
 from webauth.ports import (
     AccountEventKind,
     AccountKind,
@@ -75,7 +76,7 @@ class Host:
         if isinstance(decided, AdmissionRefusal):
             return decided
         with self.lock.hold():
-            return _admit_account(
+            return admit_account(
                 decided.identity,
                 decided.role,
                 accounts=self.accounts,
