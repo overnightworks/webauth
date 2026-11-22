@@ -1,0 +1,8 @@
+claim_id = "3e20b274a7bb497ea136a0934c820782"
+agent = "Claude dbd7a6e2-00db-4c60-91a1-9122cc061be0"
+role = "builder"
+base = "43cf8d1693a175c0f63b27ec0427e843baa513e9"
+branch = "claude/issue-871-account-provisioning-module"
+scope = [".importlinter", "docs/ARCHITECTURE.md", "src/webauth/_account_provisioning.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/oidc_login.py", "src/webauth/sign_in_routes.py", "tests/test_oidc_login_admission.py"]
+opened_commit = "88a623a705e736d009c90fd377e5b9c5d00ba7a7"
+whole_reason = "One move: the new module, its three importers, the contract that holds the cut and the one test import change together, or the tree does not import."
