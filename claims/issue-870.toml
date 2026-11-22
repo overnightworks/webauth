@@ -1,8 +1,0 @@
-claim_id = "5936bee562dd4c198a5b0d464b7bedca"
-agent = "Claude bfbd143b-e670-47d2-b7e3-6d2579d83b8b"
-role = "builder"
-base = "43cf8d1693a175c0f63b27ec0427e843baa513e9"
-branch = "claude/issue-870-store-outage-answer"
-scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/_outage.py", "src/webauth/middleware/rate_limit.py", "src/webauth/middleware/session_gate.py", "src/webauth/middleware/stack.py", "src/webauth/middleware/store_outage.py", "src/webauth/ports.py", "src/webauth/postgres.py", "src/webauth/sign_in_routes.py", "src/webauth/web_auth.py", "tests"]
-opened_commit = "6cbfeef4cc5dc7a8c31834a9babca30d4056a16b"
-whole_reason = "One outage contract: the port error, the extra's classification, the shared tracker, the stack layer and the routes' own answers decide 503 against 500 together, or an entry answers differently from the rest."
