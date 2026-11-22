@@ -44,7 +44,16 @@ def a_driver_failure(error: Exception, *, connection_invalidated: bool = False) 
 
 OUTAGES = [
     pytest.param(a_driver_failure(psycopg.OperationalError("secret")), id="no-sqlstate"),
-    pytest.param(a_driver_failure(psycopg.errors.ConnectionFailure("secret")), id="class-08"),
+    *(
+        pytest.param(a_driver_failure(connection_error("secret")), id=connection_error.__name__)
+        for connection_error in [
+            psycopg.errors.ConnectionException,
+            psycopg.errors.SqlclientUnableToEstablishSqlconnection,
+            psycopg.errors.ConnectionDoesNotExist,
+            psycopg.errors.ConnectionFailure,
+            psycopg.errors.ProtocolViolation,
+        ]
+    ),
     pytest.param(a_driver_failure(psycopg.errors.AdminShutdown("secret")), id="admin-shutdown"),
     pytest.param(a_driver_failure(psycopg.errors.CrashShutdown("secret")), id="crash-shutdown"),
     pytest.param(a_driver_failure(psycopg.errors.CannotConnectNow("secret")), id="starting-up"),

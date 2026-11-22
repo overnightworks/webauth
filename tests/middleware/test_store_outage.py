@@ -406,6 +406,40 @@ def test_log_08_a_bug_opens_no_outage(caplog: pytest.LogCaptureFixture) -> None:
     assert _lines_of(caplog) == []
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [a_bearer_person_path, a_sign_in_callback, a_logout, a_back_channel_logout],
+    ids=["bearer-person-path", "sign-in-callback", "logout", "back-channel-logout"],
+)
+def test_log_08_an_outage_at_the_entry_of_a_transaction_opens_one(
+    entry: Callable[..., tuple[HostWorld, HttpxResponse]], caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    entry(a_store_outage(), raising=True)
+
+    assert [name for name, _fields in _lines_of(caplog)] == [STARTED_EVENT]
+
+
+def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFixture) -> None:
+    world = a_signed_in_world()
+    host = the_host_driven(a_host(world), raising=False)
+    headers = {**FORWARDED, **world.signed_cookie()}
+    caplog.set_level(logging.INFO)
+    world.sessions.load_failure = a_store_outage()
+    host.client.get(ME_PATH, headers=headers)
+    world.sessions.load_failure = a_store_bug()
+
+    bug = host.client.get(ME_PATH, headers=headers)
+    lines_after_the_bug = _lines_of(caplog)
+    world.sessions.load_failure = None
+    host.client.get(ME_PATH, headers=headers)
+
+    assert bug.status_code == 500
+    assert [name for name, _fields in lines_after_the_bug] == [STARTED_EVENT]
+    assert _lines_of(caplog)[1] == (ENDED_EVENT, {"refused_count": 1})
+
+
 @pytest.mark.parametrize("where", ["body", "exit"])
 def test_log_08_an_outage_in_the_body_or_at_the_exit_of_a_transaction_opens_one(
     where: str, caplog: pytest.LogCaptureFixture
