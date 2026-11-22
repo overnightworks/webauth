@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from contextlib import contextmanager
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Final
 
 from starlette.responses import JSONResponse
@@ -16,8 +16,11 @@ from starlette.responses import JSONResponse
 from webauth.ports import StoreUnavailableError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable
     from contextlib import AbstractContextManager
+    from types import TracebackType
+
+    from webauth.ports import SessionTransaction, SignInTransaction
 
 __all__: list[str] = []
 
@@ -70,26 +73,52 @@ class _OutageTracker:
                 self._refused = None
 
 
-def _session_store_outage() -> _OutageTracker:
-    """The tracker one handle's two transactions share."""
-    return _OutageTracker(_log, _SESSION_STORE_STARTED_EVENT, _SESSION_STORE_ENDED_EVENT)
-
-
-def _tracking[StoresT](
-    transaction: Callable[[], AbstractContextManager[StoresT]], tracker: _OutageTracker
-) -> Callable[[], AbstractContextManager[StoresT]]:
+class _TrackedTransaction[StoresT]:
     """The host's transaction, with an outage noted when a ``StoreUnavailableError`` leaves it
     (entry, body or exit), by the class of its cause when it has one, and closed at the next clean
     exit."""
 
-    @contextmanager
-    def tracked() -> Iterator[StoresT]:
-        try:
-            with transaction() as stores:
-                yield stores
-        except StoreUnavailableError as failure:
-            tracker.note_failure(failure.__cause__ or failure)
-            raise
-        tracker.note_answered()
+    def __init__(
+        self, transaction: Callable[[], AbstractContextManager[StoresT]], tracker: _OutageTracker
+    ) -> None:
+        self._transaction = transaction
+        self._tracker = tracker
+        self._entered = ExitStack()
 
-    return tracked
+    def __enter__(self) -> StoresT:
+        try:
+            return self._entered.enter_context(self._transaction())
+        except StoreUnavailableError as failure:
+            self._note(failure)
+            raise
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        try:
+            suppressed = self._entered.__exit__(exc_type, exc, traceback)
+        except StoreUnavailableError as failure:
+            self._note(failure)
+            raise
+        if isinstance(exc, StoreUnavailableError):
+            self._note(exc)
+        elif exc is None:
+            self._tracker.note_answered()
+        return suppressed
+
+    def _note(self, failure: StoreUnavailableError) -> None:
+        self._tracker.note_failure(failure.__cause__ or failure)
+
+
+def _tracked_transactions(
+    sign_in: SignInTransaction, sessions: SessionTransaction
+) -> tuple[SignInTransaction, SessionTransaction]:
+    """The host's two transactions, both noting their outages on one tracker."""
+    tracker = _OutageTracker(_log, _SESSION_STORE_STARTED_EVENT, _SESSION_STORE_ENDED_EVENT)
+    return (
+        lambda: _TrackedTransaction(sign_in, tracker),
+        lambda: _TrackedTransaction(sessions, tracker),
+    )

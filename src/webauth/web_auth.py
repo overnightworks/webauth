@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
-from webauth._outage import _session_store_outage, _tracking
+from webauth._outage import _tracked_transactions
 from webauth._validation import require_positive_whole_number
 from webauth.admission import NoAdmins
 from webauth.config import _install_web_auth_config
@@ -328,9 +328,7 @@ class WebAuth:
         self._require_a_bearer_that_fits(bearer)
         settings = self._settings
         resource = None if bearer is None else bearer.resource
-        outage = _session_store_outage()
-        sign_in = _tracking(self._stores.sign_in, outage)
-        sessions = _tracking(self._stores.sessions, outage)
+        sign_in, sessions = _tracked_transactions(self._stores.sign_in, self._stores.sessions)
         _install_web_auth_middleware(
             app,
             sign_in_paths=settings.sign_in_paths,
