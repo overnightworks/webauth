@@ -65,6 +65,7 @@ from webauth.middleware.path_refusal import _PathRefusalMiddleware
 from webauth.middleware.rate_limit import _IpRateLimitMiddleware
 from webauth.middleware.security_headers import _SecurityHeadersMiddleware
 from webauth.middleware.session_gate import _SessionGateMiddleware
+from webauth.middleware.store_outage import _StoreOutageMiddleware
 from webauth.policies import (
     AuthorizedParties,
     CsrfPolicy,
@@ -378,6 +379,7 @@ class TestRefusedInstallation:
             _PathRefusalMiddleware,
             _BodySizeLimitMiddleware,
             _IpRateLimitMiddleware,
+            _StoreOutageMiddleware,
             _BearerGateMiddleware,
             _CsrfOriginMiddleware,
             _SessionGateMiddleware,

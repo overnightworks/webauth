@@ -17,15 +17,19 @@ from starlette.routing import Host, Route, Router
 from tests.support.account_arrangement import FakeUser, WriteLockInMemory
 from tests.support.client_address_arrangement import TRUSTED_PROXIES
 from tests.support.full_stack_arrangement import HEADERS_POLICY
+from tests.support.gate_arrangement import HAL_ONLY, PERSON_PATHS, a_resource
 from tests.support.oidc_arrangement import (
     FakeClock,
     FakeIssuer,
     FakeKeySetEndpoint,
     a_key_set_endpoint,
+    an_access_token,
 )
 from tests.support.oidc_login_host import (
     ADMISSION,
+    BOUND_ISSUER,
     CALLBACK_PATH,
+    CLIENT_ID,
     LOGIN_GROUP,
     LOGOUT_PAGE_TEXT,
     NOW,
@@ -57,7 +61,7 @@ from tests.support.webauth_arrangement import (
 from webauth.admission import AdmissionConfig
 from webauth.cookies import sign_session_id
 from webauth.dependencies import ConnectionRefusal, admin_user, authenticate_websocket, current_user
-from webauth.middleware import BearerGate, SessionGate
+from webauth.middleware import BearerGate, PersonPaths, SessionGate
 from webauth.policies import CsrfPolicy
 from webauth.ports import AuthenticatedUser
 from webauth.proxies import TrustedProxies
@@ -231,6 +235,27 @@ def the_routes_of(world: HostWorld) -> Callable[[FastAPI, WebAuth], None]:
             await websocket.close()
 
     return add
+
+
+def a_resource_and_person_paths() -> Callable[[WebAuth], BearerGate]:
+    def bearer_of(_auth: WebAuth) -> BearerGate:
+        return BearerGate(
+            person_paths=PersonPaths(PERSON_PATHS, HAL_ONLY),
+            resource=a_resource(),
+        )
+
+    return bearer_of
+
+
+def a_member_token() -> str:
+    return an_access_token(
+        issuer=BOUND_ISSUER,
+        client_id=CLIENT_ID,
+        key_id="issuer-key",
+        key_name="issuer",
+        subject=SUBJECT,
+        claims={"groups": [str(LOGIN_GROUP)]},
+    )
 
 
 def a_client_of(

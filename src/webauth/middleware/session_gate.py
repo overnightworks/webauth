@@ -65,7 +65,8 @@ class SessionGate:
     path and never without such a cookie. The admission (``load``, then
     ``touch``) runs inside it, and the block is left before the route runs, so
     the renewal is durable then. An exception, or a failing exit, answers the
-    library 500 without running the route, on an optional path too.
+    library 500 without running the route, on an optional path too; a ``StoreUnavailableError``
+    answers 503 with ``Retry-After`` instead, never as signed out.
 
     The admission vouches for one request. Host code that carries it into
     another request with the same cookie carries that request's decision along;

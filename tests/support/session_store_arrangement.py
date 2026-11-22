@@ -48,6 +48,7 @@ class SessionRecordsInMemory:
         seeded_users = () if record is None else (record.user,)
         self._users = users if users is not None else UsersInMemory(*seeded_users)
         self.commit_failure: Exception | None = None
+        self.load_failure: Exception | None = None
 
     @property
     def record(self) -> FakeSessionRecord | None:
@@ -106,6 +107,8 @@ class SessionRecordsInMemory:
             yield self
 
     def load(self, session_id: str) -> FakeSessionRecord | None:
+        if self.load_failure is not None:
+            raise self.load_failure
         return self._records.get(session_id)
 
     def touch(self, session_id: str, *, expires_at: datetime) -> bool:

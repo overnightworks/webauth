@@ -6,9 +6,12 @@ library commits nothing: a store either applies each of its calls at once or
 writes into a transaction the host opens and commits, and `SessionTransaction`
 is that transaction when the host hands it to the library, and `SignInTransaction`
 is the serialized one the library's sign-in routes, the bearer gate's person paths and
-the resource's entry point enter. Whether a request that fails leaves the auth machinery's
-writes behind is the host's: a transaction that rolls back on an exception leaves none,
-a store that applies each call keeps them, and the rate-limit budget counts attempts either way.
+the resource's entry point enter. A store, or a transaction's entry or exit, raises
+`StoreUnavailableError` when it cannot reach its backing store; its text names no statement,
+parameter, id, token or subject; every other failure stays as it is. Whether a request that fails
+leaves the auth machinery's writes behind is the host's: a transaction that rolls back on an
+exception leaves none, a store that applies each call keeps them, and the rate-limit budget counts
+attempts either way.
 Behind the session gate, the session renewal is durable before the route runs,
 so a route that fails afterwards leaves it in place.
 
@@ -47,6 +50,7 @@ __all__ = [
     "SessionTransaction",
     "SignInStores",
     "SignInTransaction",
+    "StoreUnavailableError",
     "SubjectUserStore",
     "UserRecord",
     "UsernameTakenError",
@@ -216,6 +220,16 @@ class SubjectUserStore(Protocol):
 
 class UsernameTakenError(WebAuthError):
     """The store could not create an account because its username is taken."""
+
+
+class StoreUnavailableError(WebAuthError):
+    """A store, or a transaction's entry or exit, cannot reach its backing store.
+
+    The library answers it with 503 and ``Retry-After`` and logs one outage, never a traceback
+    per request. Its text names no statement, parameter, id, token or subject; chaining the
+    driver's error with ``from`` is the host's choice, and the library logs only that error's
+    class name. Every other failure of a store stays as it is and answers a loud 500.
+    """
 
 
 class SessionRenewalStore(Protocol):

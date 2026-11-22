@@ -19,6 +19,7 @@ from webauth.middleware.path_refusal import _PathRefusalMiddleware
 from webauth.middleware.rate_limit import _IpRateLimitMiddleware
 from webauth.middleware.security_headers import _SecurityHeadersMiddleware
 from webauth.middleware.session_gate import SessionGate, _SessionGateMiddleware
+from webauth.middleware.store_outage import _StoreOutageMiddleware
 from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
@@ -169,6 +170,7 @@ def _library_middleware(
         Middleware(_PathRefusalMiddleware),
         Middleware(_BodySizeLimitMiddleware, policy=body_size),
         Middleware(_IpRateLimitMiddleware, policy=rate_limit),
+        Middleware(_StoreOutageMiddleware),
     ]
     if bearer_gate is not None:
         entries.append(
@@ -241,15 +243,17 @@ def _install_web_auth_middleware(
     the library stack, the host's ``inside`` entries. An app that already carries a library stack,
     installed by another handle, is refused untouched.
 
-    The library stack is security headers, path refusal, body size, rate limit, bearer gate, CSRF
-    origin, session gate. Security headers sit outside everything so the library's own refusals
-    carry them; the path refusal answers 400 to a control character before a rule or route reads
-    the path; the body size limit refuses a body declared too large before it costs a rate-limit
-    budget or a session lookup; the rate limit sits outside CSRF so a refused forgery spends
-    budget; the bearer gate sits inside the rate limit, so a machine request spends the same
-    budget, and outside CSRF and the session gate, so neither decides a machine path by a cookie;
-    the session gate sits inside all of them, so a request refused before admission never costs a
-    session lookup and a forged state-changing request is refused before it renews a session.
+    The library stack is security headers, path refusal, body size, rate limit, store outage,
+    bearer gate, CSRF origin, session gate. Security headers sit outside everything so the
+    library's own refusals carry them; the path refusal answers 400 to a control character before a
+    rule or route reads the path; the body size limit refuses a body declared too large before it
+    costs a rate-limit budget or a session lookup; the rate limit sits outside CSRF so a refused
+    forgery spends budget; the store outage layer sits inside the rate limit and outside both gates,
+    so a store that cannot be reached answers 503 wherever a gate, a host entry or a route meets it;
+    the bearer gate sits inside the rate limit, so a machine request spends the same budget, and
+    outside CSRF and the session gate, so neither decides a machine path by a cookie; the session
+    gate sits inside all of them, so a request refused before admission never costs a session
+    lookup and a forged state-changing request is refused before it renews a session.
 
     The rules the sign-in paths and the bearer gate's resource derive are put ahead of the host's
     own, so the first match is the derived one.
