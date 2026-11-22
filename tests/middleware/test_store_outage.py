@@ -43,7 +43,6 @@ from tests.support.web_auth_host_arrangement import (
     the_routes_of,
 )
 from tests.support.webauth_arrangement import API_PATH
-from webauth._outage import _OutageTracker
 from webauth.dependencies import current_user
 from webauth.middleware import SessionGate
 from webauth.policies import PathRules
@@ -312,56 +311,70 @@ def test_log_08_an_outage_logs_one_started_and_one_ended_line_with_the_refused_c
     assert SECRET not in caplog.text
 
 
-def a_tracker() -> _OutageTracker:
-    return _OutageTracker(logging.getLogger("tracked"), STARTED_EVENT, ENDED_EVENT)
-
-
 def _lines_of(caplog: pytest.LogCaptureFixture) -> list[tuple[str, dict[str, object]]]:
     return [(record.getMessage(), fields_of(record)) for record in _outage_records(caplog)]
 
 
 def test_log_08_an_answer_without_an_outage_logs_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    world = a_signed_in_world()
+    host = the_host_driven(a_host(world), raising=True)
     caplog.set_level(logging.INFO)
 
-    a_tracker().note_answered()
+    answered = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
 
+    assert answered.status_code == 200
     assert _lines_of(caplog) == []
 
 
-def test_log_08_a_second_outage_logs_again(caplog: pytest.LogCaptureFixture) -> None:
+def test_log_08_a_second_outage_after_a_recovery_logs_started_and_ended_again(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    world = a_signed_in_world()
+    host = the_host_driven(a_host(world), raising=True)
+    headers = {**FORWARDED, **world.signed_cookie()}
     caplog.set_level(logging.INFO)
-    tracker = a_tracker()
 
-    tracker.note_failure(a_store_outage())
-    tracker.note_answered()
-    tracker.note_failure(a_store_outage())
+    for failing in (True, False, True, False):
+        world.sessions.load_failure = a_store_outage() if failing else None
+        host.client.get(ME_PATH, headers=headers)
 
     assert _lines_of(caplog) == [
         (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
         (ENDED_EVENT, {"refused_count": 1}),
         (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (ENDED_EVENT, {"refused_count": 1}),
     ]
 
 
-def test_log_08_concurrent_failures_open_one_outage_and_all_count(
+def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all_count(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    world = a_signed_in_world()
+    host = the_host_driven(a_host(world), raising=True)
+    headers = {**FORWARDED, **world.signed_cookie()}
     caplog.set_level(logging.INFO)
-    tracker = a_tracker()
     workers = 8
-    start_together = Barrier(workers)
+    reach_the_store_together = Barrier(workers)
 
-    def fail() -> None:
-        start_together.wait()
-        tracker.note_failure(a_store_outage())
+    def load_when_all_requests_are_at_the_store(_session_id: str) -> None:
+        reach_the_store_together.wait()
+        raise a_store_outage()
 
-    threads = [Thread(target=fail) for _ in range(workers)]
+    world.sessions.load = load_when_all_requests_are_at_the_store  # type: ignore[method-assign]
+    answers: list[int] = []
+
+    def request() -> None:
+        answers.append(host.client.get(ME_PATH, headers=headers).status_code)
+
+    threads = [Thread(target=request) for _ in range(workers)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-    tracker.note_answered()
+    del world.sessions.load
+    host.client.get(ME_PATH, headers=headers)
 
+    assert answers == [503] * workers
     assert _lines_of(caplog) == [
         (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
         (ENDED_EVENT, {"refused_count": workers}),
