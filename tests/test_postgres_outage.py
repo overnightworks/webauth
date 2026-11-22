@@ -7,7 +7,7 @@ from __future__ import annotations
 import psycopg.errors
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from tests.support.postgres_arrangement import what_a_log_shows_of
@@ -31,10 +31,15 @@ def test_a_connection_that_cannot_open_is_an_outage_that_hides_its_credentials()
 
 def a_driver_failure(error: Exception, *, connection_invalidated: bool = False) -> DBAPIError:
     """The error SQLAlchemy raises for `error`, as it wraps the driver's own classes."""
-    wrapper = OperationalError if isinstance(error, psycopg.OperationalError) else ProgrammingError
-    return wrapper(
-        "SELECT 1", {"token": "secret"}, error, connection_invalidated=connection_invalidated
+    wrapped = DBAPIError.instance(
+        "SELECT 1",
+        {"token": "secret"},
+        error,
+        psycopg.Error,
+        connection_invalidated=connection_invalidated,
     )
+    assert isinstance(wrapped, DBAPIError)
+    return wrapped
 
 
 OUTAGES = [

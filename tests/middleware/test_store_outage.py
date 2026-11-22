@@ -354,13 +354,10 @@ def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all
     headers = {**FORWARDED, **world.signed_cookie()}
     caplog.set_level(logging.INFO)
     workers = 8
-    reach_the_store_together = Barrier(workers)
+    reach_the_store_together = Barrier(workers, timeout=10)
 
-    def load_when_all_requests_are_at_the_store(_session_id: str) -> None:
-        reach_the_store_together.wait()
-        raise a_store_outage()
-
-    world.sessions.load = load_when_all_requests_are_at_the_store  # type: ignore[method-assign]
+    world.sessions.before_load = reach_the_store_together.wait
+    world.sessions.load_failure = a_store_outage()
     answers: list[int] = []
 
     def request() -> None:
@@ -371,7 +368,8 @@ def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all
         thread.start()
     for thread in threads:
         thread.join()
-    del world.sessions.load
+    world.sessions.before_load = None
+    world.sessions.load_failure = None
     host.client.get(ME_PATH, headers=headers)
 
     assert answers == [503] * workers
