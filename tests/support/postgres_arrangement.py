@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import time
+import traceback
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -23,10 +24,11 @@ from tests.support.account_arrangement import FakeUser
 from tests.support.current_groups_arrangement import SESSION_ID, Arrangement, an_arrangement
 from tests.support.oidc_arrangement import ISSUED_REFRESH_TOKEN
 from tests.support.webauth_arrangement import RecordingAuditSink, a_web_auth_config
-from webauth.ports import AccountKind, SignInStores, SignInTransaction
+from webauth.ports import AccountKind, SignInStores, SignInTransaction, StoreUnavailableError
 from webauth.postgres import (
     PostgresSessionStore,
     PostgresStoredKeySessions,
+    SessionStoreError,
     database_errors_as_store_errors,
     delete_expired,
     session_table,
@@ -398,3 +400,12 @@ def stored_key_reads_of(host: PostgresHost) -> StoredKeyReads:
         HostStoredKeyTransaction(engine, host.tables),
         stored_key(SESSION_ID),
     )
+
+
+def what_a_log_shows_of(error: SessionStoreError | StoreUnavailableError) -> str:
+    """The error as a traceback prints it, without the source lines of the frames: its own text
+    and, unless the error hides it, the error it replaced."""
+    shown = "".join(traceback.format_exception_only(error)) + repr(error)
+    if not error.__suppress_context__ and error.__context__ is not None:
+        shown += "".join(traceback.format_exception_only(error.__context__))
+    return shown
