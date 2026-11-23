@@ -7,6 +7,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 
@@ -23,7 +24,8 @@ from tests.support.webauth_arrangement import (
     a_rate_limited_client,
 )
 from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy, RateLimitRule
-from webauth.rate_limit import SingleProcessRateLimitBackend
+from webauth.ports import RateLimitBackend
+from webauth.rate_limit import RedisRateLimitBackend, SingleProcessRateLimitBackend
 
 PRUNE_INTERVAL_SECONDS = 60
 
@@ -191,22 +193,39 @@ def _a_three_budget_policy() -> RateLimitPolicy:
     )
 
 
-class TestMiddlewareOverSingleProcessBackend:
-    def test_allows_within_budget_then_blocks(self) -> None:
-        client = a_rate_limited_client(SingleProcessRateLimitBackend(), max_requests=2)
+@pytest.fixture(
+    params=[
+        pytest.param(SingleProcessRateLimitBackend, id="single-process"),
+        pytest.param(
+            lambda: RedisRateLimitBackend(fakeredis.FakeRedis(decode_responses=True), "host"),
+            id="redis",
+        ),
+    ]
+)
+def a_backend(request) -> RateLimitBackend:
+    return request.param()
+
+
+class TestMiddlewareOverEachBackend:
+    def test_allows_within_budget_then_blocks(self, a_backend: RateLimitBackend) -> None:
+        client = a_rate_limited_client(a_backend, max_requests=2)
         assert client.get(RATE_LIMITED_PATH).status_code == 200
         assert client.get(RATE_LIMITED_PATH).status_code == 200
         blocked = client.get(RATE_LIMITED_PATH)
         assert blocked.status_code == 429
         assert blocked.headers["Retry-After"] == "60"
 
-    def test_two_addresses_in_one_ipv6_network_share_a_budget(self) -> None:
-        client = a_rate_limited_client(SingleProcessRateLimitBackend(), max_requests=2)
+    def test_two_addresses_in_one_ipv6_network_share_a_budget(
+        self, a_backend: RateLimitBackend
+    ) -> None:
+        client = a_rate_limited_client(a_backend, max_requests=2)
         assert _from_peer(client, "2001:db8:1:2::1").get(RATE_LIMITED_PATH).status_code == 200
         assert _from_peer(client, "2001:db8:1:2::2").get(RATE_LIMITED_PATH).status_code == 200
         assert _from_peer(client, "2001:db8:1:2::3").get(RATE_LIMITED_PATH).status_code == 429
         assert _from_peer(client, "2001:db8:1:3::1").get(RATE_LIMITED_PATH).status_code == 200
 
+
+class TestMiddlewareOverSingleProcessBackend:
     def test_two_ipv4_addresses_keep_budgets_of_their_own(self) -> None:
         client = a_rate_limited_client(SingleProcessRateLimitBackend(), max_requests=1)
         assert _from_peer(client, "203.0.113.7").get(RATE_LIMITED_PATH).status_code == 200
