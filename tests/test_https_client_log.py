@@ -45,7 +45,15 @@ def _ended_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
 def _fields_besides_the_duration(line: logging.LogRecord) -> dict[str, object]:
     fields = fields_of(line)
     assert isinstance(fields.pop("duration_ms"), int | float)
+    assert _is_span_id_or_none(fields.pop("span_id"))
+    assert _is_span_id_or_none(fields.pop("parent_span_id"))
     return fields
+
+
+def _is_span_id_or_none(value: object) -> bool:
+    if value is None:
+        return True
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{16}", value) is not None
 
 
 def test_a_token_request_writes_one_ended_line_with_the_status(
