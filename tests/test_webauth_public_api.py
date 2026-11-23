@@ -9,7 +9,7 @@ import pkgutil
 import runpy
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -191,14 +191,45 @@ def _surface_of_source(source: str) -> ModuleSurface:
     )
 
 
-def _is_defined_or_forwarded_from_own_submodule(dotted_name: str, name: str) -> bool:
-    surface = _surface_of(dotted_name)
+def _is_private_module(dotted_name: str) -> bool:
+    return any(part.startswith("_") for part in dotted_name.split("."))
+
+
+def _is_defined_or_forwarded_from_own_submodule(
+    dotted_name: str, name: str, surfaces: Mapping[str, ModuleSurface]
+) -> bool:
+    surface = surfaces[dotted_name]
     source = surface.imported_from.get(name, "")
     return (
         name in surface.defined_callables
         or name in surface.defined_values
-        or (source.startswith(f"{dotted_name}.") and name in _surface_of(source).public)
+        or (source.startswith(f"{dotted_name}.") and name in surfaces[source].public)
+        or _is_the_one_public_forward_of_a_private_definition(dotted_name, name, surfaces)
     )
+
+
+def _is_the_one_public_forward_of_a_private_definition(
+    dotted_name: str, name: str, surfaces: Mapping[str, ModuleSurface]
+) -> bool:
+    source = surfaces[dotted_name].imported_from.get(name, "")
+    if (
+        source not in surfaces
+        or not _is_private_module(source)
+        or name not in surfaces[source].public
+    ):
+        return False
+    return not any(
+        other != dotted_name
+        and not _is_private_module(other)
+        and name in other_surface.public
+        and other_surface.imported_from.get(name) == source
+        for other, other_surface in surfaces.items()
+    )
+
+
+@functools.cache
+def _surfaces_of_every_module() -> Mapping[str, ModuleSurface]:
+    return {module_name: _surface_of(module_name) for module_name in WEBAUTH_MODULES}
 
 
 @pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
@@ -208,7 +239,9 @@ def test_every_name_a_module_lists_in_all_is_defined_there(module_name: str) -> 
     offences = [
         f"{_relative_id(file)}:{line}: {name}: listed in __all__ but not defined here"
         for name, line in _surface_of(module_name).public.items()
-        if not _is_defined_or_forwarded_from_own_submodule(module_name, name)
+        if not _is_defined_or_forwarded_from_own_submodule(
+            module_name, name, _surfaces_of_every_module()
+        )
     ]
 
     assert offences == []
@@ -237,9 +270,7 @@ def _names_bound_outside_the_statements_the_guard_reads(
     return hidden
 
 
-PUBLIC_MODULES = [
-    name for name in WEBAUTH_MODULES if not any(part.startswith("_") for part in name.split("."))
-]
+PUBLIC_MODULES = [name for name in WEBAUTH_MODULES if not _is_private_module(name)]
 
 
 @pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
@@ -332,6 +363,48 @@ def test_only_imports_are_readable_inside_a_type_checking_guard(inner: str) -> N
     source = f"from typing import TYPE_CHECKING\n__all__ = []\nif TYPE_CHECKING:\n    {inner}\n"
 
     assert _surface_of_source(source).unreadable_lines == (4,)
+
+
+@pytest.mark.parametrize(
+    ("sources", "forwarded"),
+    [
+        (
+            {
+                "webauth.front": "from webauth._leaf import Thing\n__all__ = ['Thing']\n",
+                "webauth._leaf": "class Thing: ...\n__all__ = ['Thing']\n",
+            },
+            True,
+        ),
+        (
+            {
+                "webauth.front": "from webauth.sibling import Thing\n__all__ = ['Thing']\n",
+                "webauth.sibling": "class Thing: ...\n__all__ = ['Thing']\n",
+            },
+            False,
+        ),
+        (
+            {
+                "webauth.front": "from webauth._leaf import Thing\n__all__ = ['Thing']\n",
+                "webauth.second": "from webauth._leaf import Thing\n__all__ = ['Thing']\n",
+                "webauth._leaf": "class Thing: ...\n__all__ = ['Thing']\n",
+            },
+            False,
+        ),
+    ],
+    ids=[
+        "a forward from a private module passes",
+        "a forward from a public sibling module fails",
+        "a second public forward of one private definition fails",
+    ],
+)
+def test_the_guard_accepts_one_public_forward_of_a_private_definition(
+    sources: dict[str, str], forwarded: bool
+) -> None:
+    surfaces = {name: _surface_of_source(source) for name, source in sources.items()}
+
+    assert (
+        _is_defined_or_forwarded_from_own_submodule("webauth.front", "Thing", surfaces) is forwarded
+    )
 
 
 def test_a_module_without_all_is_reported_as_declaring_none() -> None:
