@@ -23,3 +23,8 @@ what = 'import contract "webauth.https_client is imported only by jwt_verificati
 item = "#838"
 date = 2026-11-21
 reason = "webauth.web_auth names the HTTPS fetch and post as the defaults of IssuerCalls, so the contract is renamed and allows webauth.web_auth"
+
+[[layout.allow]]
+path = "tests/test_host_contract_ids.py"
+rule = "test-layout"
+reason = "tests the documented host contract against the test suite's docstrings, not a module of src/webauth"
