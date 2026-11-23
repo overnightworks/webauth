@@ -4,7 +4,7 @@ entry; a store that fails otherwise stays a loud 500."""
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from threading import Barrier, Event, Thread
 from typing import TYPE_CHECKING
 
@@ -109,15 +109,23 @@ def _routes_with_a_person_path_and_host_stores(
     return add
 
 
-def a_transaction_that_swallows_an_outage(transaction: SessionTransaction) -> SessionTransaction:
-    """The host's transaction whose exit suppresses a ``StoreUnavailableError``."""
+class _HostTransaction:
+    """The host's session transaction, which can swallow a ``StoreUnavailableError`` at its exit
+    and tells when an exit has finished without raising."""
+
+    def __init__(self, transaction: SessionTransaction) -> None:
+        self._transaction = transaction
+        self.swallowing = False
+        self.exited = Event()
 
     @contextmanager
-    def swallowing() -> Iterator[SessionRenewalStore]:
-        with suppress(StoreUnavailableError), transaction() as store:
+    def __call__(self) -> Iterator[SessionRenewalStore]:
+        with (
+            suppress(StoreUnavailableError) if self.swallowing else nullcontext(),
+            self._transaction() as store,
+        ):
             yield store
-
-    return swallowing
+        self.exited.set()
 
 
 def a_host(
@@ -126,14 +134,12 @@ def a_host(
     gate: SessionGate | None = None,
     sessions: SessionTransaction | None = None,
 ) -> ComposedHost:
-    stores = (
-        {}
-        if sessions is None
-        else {"stores": WebAuthStores(sign_in=world.sign_in, sessions=sessions)}
+    stores = WebAuthStores(
+        sign_in=world.sign_in, sessions=sessions or world.sessions.in_transaction
     )
     return a_composed_host(
         world,
-        a_composition(world, gate=gate, **stores),
+        a_composition(world, gate=gate, stores=stores),
         routes=_routes_with_a_person_path_and_host_stores(world),
         bearer_of=a_resource_and_person_paths(),
     )
@@ -446,19 +452,45 @@ def test_log_08_a_failure_that_is_no_outage_opens_none_and_stays_a_500(
     assert _lines_of(caplog) == []
 
 
-def test_log_08_an_outage_the_exit_of_the_host_suppresses_opens_none(
+@pytest.mark.parametrize(
+    ("opened_first", "lines_at_the_end"),
+    [
+        pytest.param(False, [], id="no-outage-open"),
+        pytest.param(
+            True,
+            [
+                (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+                (RECOVERED_EVENT, {"refused_count": 1}),
+            ],
+            id="an-outage-open",
+        ),
+    ],
+)
+def test_log_08_an_outage_the_exit_of_the_host_suppresses_opens_none_and_closes_none(
+    opened_first: bool,
+    lines_at_the_end: list[tuple[str, dict[str, object]]],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = a_signed_in_world()
-    swallowing = a_transaction_that_swallows_an_outage(world.sessions.in_transaction)
-    host = the_host_driven(a_host(world, sessions=swallowing), raising=False)
+    host_transaction = _HostTransaction(world.sessions.in_transaction)
+    host = the_host_driven(a_host(world, sessions=host_transaction), raising=False)
+    headers = {**FORWARDED, **world.signed_cookie()}
     caplog.set_level(logging.INFO)
     world.sessions.load_failure = a_store_outage()
+    if opened_first:
+        host.client.get(ME_PATH, headers=headers)
+    lines_before = _lines_of(caplog)
 
-    response = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    host_transaction.swallowing = True
+    suppressed = host.client.get(ME_PATH, headers=headers)
+    lines_after_the_suppressed_exit = _lines_of(caplog)
+    host_transaction.swallowing = False
+    world.sessions.load_failure = None
+    host.client.get(ME_PATH, headers=headers)
 
-    assert response.status_code != 503
-    assert _lines_of(caplog) == []
+    assert suppressed.status_code != 503
+    assert lines_after_the_suppressed_exit == lines_before
+    assert _lines_of(caplog) == lines_at_the_end
 
 
 def test_log_08_each_handle_keeps_its_own_outage(caplog: pytest.LogCaptureFixture) -> None:
@@ -561,6 +593,7 @@ class _SlowFailedLine(logging.Handler):
         super().__init__(logging.INFO)
         self.writing_failed = Event()
         self.failed_line_may_finish = Event()
+        self.recovered_written = Event()
         self.finished: list[str] = []
 
     def handle(self, record: logging.LogRecord) -> bool:
@@ -574,11 +607,14 @@ class _SlowFailedLine(logging.Handler):
             self.failed_line_may_finish.wait(timeout=10)
         if name in {FAILED_EVENT, RECOVERED_EVENT}:
             self.finished.append(name)
+        if name == RECOVERED_EVENT:
+            self.recovered_written.set()
 
 
 def test_log_08_a_clean_answer_waits_for_the_failed_line_still_being_written() -> None:
     world = a_signed_in_world()
-    host = the_host_driven(a_host(world), raising=True)
+    host_transaction = _HostTransaction(world.sessions.in_transaction)
+    host = the_host_driven(a_host(world, sessions=host_transaction), raising=True)
     headers = {**FORWARDED, **world.signed_cookie()}
     handler = _SlowFailedLine()
     root = logging.getLogger()
@@ -593,7 +629,8 @@ def test_log_08_a_clean_answer_waits_for_the_failed_line_still_being_written() -
         world.sessions.load_failure = None
         answered = Thread(target=lambda: host.client.get(ME_PATH, headers=headers))
         answered.start()
-        answered.join(timeout=0.5)
+        assert host_transaction.exited.wait(timeout=10)
+        handler.recovered_written.wait(timeout=0.5)
         handler.failed_line_may_finish.set()
         refused.join(timeout=10)
         answered.join(timeout=10)
