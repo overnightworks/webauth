@@ -279,6 +279,41 @@ async def test_a_start_without_headers_gains_them_and_keeps_its_other_fields() -
 
 
 @pytest.mark.anyio
+async def test_an_http_request_without_a_client_answers_500_with_the_policy_headers() -> None:
+    app = an_app()
+    reached: list[str] = []
+
+    async def reached_app(scope: Scope, _receive: Receive, _send: Send) -> None:
+        reached.append(scope["type"])
+
+    sent, raised = await drive(_SecurityHeadersMiddleware(reached_app, POLICY), an_http_scope(app))
+
+    (start,) = starts(sent)
+    assert (start["status"], reached) == (500, [])
+    assert_carries_policy_headers(Headers(raw=start["headers"]), POLICY, hsts=True)
+    assert isinstance(raised, RuntimeError)
+    assert "web_auth_front" in str(raised)
+
+
+@pytest.mark.anyio
+async def test_a_websocket_without_a_client_raises_and_reaches_no_app() -> None:
+    reached: list[str] = []
+
+    async def reached_app(scope: Scope, _receive: Receive, _send: Send) -> None:
+        reached.append(scope["type"])
+
+    async def refusing_send(_message: Message) -> None:
+        raise AssertionError("nothing is sent")
+
+    scope: Scope = {"type": "websocket", "headers": [], "query_string": b"", "app": an_app()}
+
+    with pytest.raises(RuntimeError, match="web_auth_front"):
+        await _SecurityHeadersMiddleware(reached_app, POLICY)(scope, no_receive, refusing_send)
+
+    assert reached == []
+
+
+@pytest.mark.anyio
 async def test_a_downstream_send_that_fails_on_the_start_is_tried_once_and_propagates() -> None:
     app = an_app()
     failure = ConnectionResetError()
