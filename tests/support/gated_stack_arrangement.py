@@ -8,9 +8,9 @@ from fastapi import FastAPI, Response
 
 from tests.support.client_address_arrangement import TRUSTED_PROXIES
 from tests.support.oidc_arrangement import (
-    FakeClock,
     a_key_set_endpoint,
     a_realm_client_config,
+    an_issuer_called_through,
 )
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from webauth.admission import AdmissionConfig, GroupPath
@@ -56,10 +56,8 @@ def a_token_post_nobody_makes(request: TokenRequest) -> NoReturn:
 def an_issuer_nobody_calls(fetch_key_set: KeySetFetch | None = None) -> IssuerCalls:
     """The relying party's calls of an app whose scenario signs nobody in; its key set is
     `fetch_key_set`, else one publishing the "issuer" key."""
-    return IssuerCalls(
-        post_token_request=a_token_post_nobody_makes,
-        fetch_key_set=fetch_key_set or a_key_set_endpoint("issuer"),
-        monotonic_clock=FakeClock(5_000.0),
+    return an_issuer_called_through(
+        a_token_post_nobody_makes, fetch_key_set or a_key_set_endpoint("issuer")
     )
 
 

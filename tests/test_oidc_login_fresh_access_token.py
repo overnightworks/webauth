@@ -33,7 +33,6 @@ from tests.support.session_store_arrangement import (
     SessionRecordsInMemory,
     SessionsAnsweringReplace,
     SessionsEndedBeforeReplacingTheRefreshToken,
-    SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
 )
 from tests.support.webauth_arrangement import (
@@ -484,12 +483,13 @@ class TestAFailingStore:
         provider_of: Callable[[SessionRecordsInMemory], SessionTransaction],
         fails_in_transaction: int,
     ) -> None:
-        arrangement = an_arrangement(SessionsFailingToLoad)
+        arrangement = an_arrangement()
         sessions = arrangement.sessions
-        assert isinstance(sessions, SessionsFailingToLoad)
-        if fails_in_transaction == 2:
-            sessions.failing = False
-            arrangement.issuer.before_exchange = lambda: setattr(sessions, "failing", True)
+        failure = ConnectionError("session store down")
+        if fails_in_transaction == 1:
+            sessions.load_failure = failure
+        else:
+            arrangement.issuer.before_exchange = lambda: setattr(sessions, "load_failure", failure)
 
         provider = provider_of(sessions)
 

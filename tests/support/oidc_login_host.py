@@ -34,6 +34,7 @@ from tests.support.oidc_arrangement import (
     a_key_set_endpoint,
     a_realm_client_config,
     an_id_token_claims,
+    an_issuer_called_through,
     jws,
     rs256,
     rsa_key,
@@ -538,9 +539,7 @@ def _pages_recording_refusals(
 
 
 def _the_issuer_calls_of(issuer: FakeIssuer, key_set: FakeKeySetEndpoint) -> IssuerCalls:
-    return IssuerCalls(
-        post_token_request=issuer, fetch_key_set=key_set, monotonic_clock=FakeClock(5_000.0)
-    )
+    return an_issuer_called_through(issuer, key_set)
 
 
 def an_oidc_host(

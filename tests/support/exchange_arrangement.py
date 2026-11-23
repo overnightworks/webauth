@@ -28,9 +28,9 @@ from tests.support.gate_arrangement import (
 from tests.support.oidc_arrangement import (
     APP_CLIENT_ID,
     REALM_ISSUER,
-    FakeClock,
     FakeTokenEndpoint,
     a_realm_client_config,
+    an_issuer_called_through,
     changed,
     token_endpoint_answer,
 )
@@ -46,7 +46,6 @@ from webauth.oidc import (
     TokenEndpointAnswer,
     TokenRequest,
 )
-from webauth.web_auth import IssuerCalls
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -213,11 +212,7 @@ def an_exchange_app(
             "client": a_realm_client_config(
                 issuer=issuer_url, token_endpoint=_token_endpoint_of(issuer_url)
             ),
-            "issuer_calls": IssuerCalls(
-                post_token_request=issuer,
-                fetch_key_set=key_sets,
-                monotonic_clock=FakeClock(5_000.0),
-            ),
+            "issuer_calls": an_issuer_called_through(issuer, key_sets),
         },
     )
     relying_party = app.auth.web_auth.relying_party
