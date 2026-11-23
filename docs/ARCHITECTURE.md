@@ -133,7 +133,7 @@ The operator's account and environment are trusted. A same-user race between lis
 
 ### Rate limiting, and the optional Redis extra
 
-`WebAuthConfig.rate_limits` supplies `RateLimitBackend`; `RateLimitPolicy` sets budgets. Backend errors fail closed. The private `_outage` owns how a dependency outage opens and closes in the log and the 503 that refuses meanwhile, for the rate limiter and for the host's stores alike. `RedisRateLimitBackend` shares windows across processes and needs `[redis]`; `SingleProcessRateLimitBackend` needs no Redis, for one worker only.
+`WebAuthConfig.rate_limits` supplies `RateLimitBackend`; `RateLimitPolicy` sets budgets. Backend errors fail closed. The private `_outage` owns when a dependency outage opens and closes and the 503 that refuses meanwhile, for the rate limiter and for the host's stores alike; each of the two writes its own failed and recovered lines. `RedisRateLimitBackend` shares windows across processes and needs `[redis]`; `SingleProcessRateLimitBackend` needs no Redis, for one worker only.
 
 ### A store that cannot be reached
 

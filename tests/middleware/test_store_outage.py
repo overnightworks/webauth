@@ -59,8 +59,8 @@ SECRET = "hunter2-session-token"
 PERSON_ME_PATH = "/api/me"
 STREAM_PATH = "/stream-then-fail"
 OWN_STORE_PATH = "/own-store"
-STARTED_EVENT = "session_store_outage.started"
-ENDED_EVENT = "session_store_outage.ended"
+FAILED_EVENT = "session_store_connection.failed"
+RECOVERED_EVENT = "session_store_connection.recovered"
 
 
 def a_store_outage() -> StoreUnavailableError:
@@ -275,11 +275,13 @@ def test_stack_16_an_outage_after_the_response_started_is_not_answered_twice() -
 
 def _outage_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [
-        record for record in caplog.records if record.getMessage() in {STARTED_EVENT, ENDED_EVENT}
+        record
+        for record in caplog.records
+        if record.getMessage() in {FAILED_EVENT, RECOVERED_EVENT}
     ]
 
 
-def test_log_08_an_outage_logs_one_started_and_one_ended_line_with_the_refused_count(
+def test_log_08_an_outage_logs_one_failed_and_one_recovered_line_with_the_refused_count(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = a_signed_in_world()
@@ -297,15 +299,15 @@ def test_log_08_an_outage_logs_one_started_and_one_ended_line_with_the_refused_c
 
     assert [response.status_code for response in refused] == [503, 503, 503]
     assert [(record.levelname, record.getMessage()) for record in lines_during_the_outage] == [
-        ("ERROR", STARTED_EVENT)
+        ("ERROR", FAILED_EVENT)
     ]
     assert recovered.status_code == 200
-    started, ended = lines
-    assert fields_of(started) == {"error_type": "StoreUnavailableError"}
-    assert started.exc_info is None
-    assert (ended.levelname, ended.getMessage(), fields_of(ended)) == (
+    failed_line, recovered_line = lines
+    assert fields_of(failed_line) == {"error_type": "StoreUnavailableError"}
+    assert failed_line.exc_info is None
+    assert (recovered_line.levelname, recovered_line.getMessage(), fields_of(recovered_line)) == (
         "INFO",
-        ENDED_EVENT,
+        RECOVERED_EVENT,
         {"refused_count": 3},
     )
     assert SECRET not in caplog.text
@@ -326,7 +328,7 @@ def test_log_08_an_answer_without_an_outage_logs_nothing(caplog: pytest.LogCaptu
     assert _lines_of(caplog) == []
 
 
-def test_log_08_a_second_outage_after_a_recovery_logs_started_and_ended_again(
+def test_log_08_a_second_outage_after_a_recovery_logs_failed_and_recovered_again(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = a_signed_in_world()
@@ -339,10 +341,10 @@ def test_log_08_a_second_outage_after_a_recovery_logs_started_and_ended_again(
         host.client.get(ME_PATH, headers=headers)
 
     assert _lines_of(caplog) == [
-        (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
-        (ENDED_EVENT, {"refused_count": 1}),
-        (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
-        (ENDED_EVENT, {"refused_count": 1}),
+        (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (RECOVERED_EVENT, {"refused_count": 1}),
+        (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (RECOVERED_EVENT, {"refused_count": 1}),
     ]
 
 
@@ -374,12 +376,12 @@ def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all
 
     assert answers == [503] * workers
     assert _lines_of(caplog) == [
-        (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
-        (ENDED_EVENT, {"refused_count": workers}),
+        (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (RECOVERED_EVENT, {"refused_count": workers}),
     ]
 
 
-def test_log_08_the_started_line_names_the_class_of_the_cause_when_there_is_one(
+def test_log_08_the_failed_line_names_the_class_of_the_cause_when_there_is_one(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = a_signed_in_world()
@@ -391,7 +393,7 @@ def test_log_08_the_started_line_names_the_class_of_the_cause_when_there_is_one(
 
     host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
 
-    assert _lines_of(caplog) == [(STARTED_EVENT, {"error_type": "ConnectionRefusedError"})]
+    assert _lines_of(caplog) == [(FAILED_EVENT, {"error_type": "ConnectionRefusedError"})]
     assert SECRET not in caplog.text
 
 
@@ -418,7 +420,7 @@ def test_log_08_an_outage_at_the_entry_of_a_transaction_opens_one(
 
     entry(a_store_outage(), raising=True)
 
-    assert [name for name, _fields in _lines_of(caplog)] == [STARTED_EVENT]
+    assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT]
 
 
 def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFixture) -> None:
@@ -436,8 +438,8 @@ def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFi
     host.client.get(ME_PATH, headers=headers)
 
     assert bug.status_code == 500
-    assert [name for name, _fields in lines_after_the_bug] == [STARTED_EVENT]
-    assert _lines_of(caplog)[1] == (ENDED_EVENT, {"refused_count": 1})
+    assert [name for name, _fields in lines_after_the_bug] == [FAILED_EVENT]
+    assert _lines_of(caplog)[1] == (RECOVERED_EVENT, {"refused_count": 1})
 
 
 @pytest.mark.parametrize("where", ["body", "exit"])
@@ -455,7 +457,7 @@ def test_log_08_an_outage_in_the_body_or_at_the_exit_of_a_transaction_opens_one(
     response = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
 
     assert response.status_code == 503
-    assert [name for name, _fields in _lines_of(caplog)] == [STARTED_EVENT]
+    assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT]
 
 
 def test_log_08_a_clean_sign_in_transaction_ends_an_outage_the_session_gate_opened(
@@ -473,4 +475,4 @@ def test_log_08_a_clean_sign_in_transaction_ends_an_outage_the_session_gate_open
     callback = host.client.get(f"{CALLBACK_PATH}?{query}", headers=FORWARDED)
 
     assert callback.status_code == 303
-    assert [name for name, _fields in _lines_of(caplog)] == [STARTED_EVENT, ENDED_EVENT]
+    assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT, RECOVERED_EVENT]

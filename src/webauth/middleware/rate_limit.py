@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from functools import partial
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from anyio import to_thread
 from anyio.lowlevel import checkpoint_if_cancelled
@@ -25,8 +25,13 @@ __all__: list[str] = []
 
 _log = logging.getLogger(__name__)
 
-_OUTAGE_STARTED_EVENT: Final = "rate_limit_outage.started"
-_OUTAGE_ENDED_EVENT: Final = "rate_limit_outage.ended"
+
+def _write_failed_line(error_type: str) -> None:
+    _log.error("rate_limit_backend.failed", extra={"error_type": error_type})
+
+
+def _write_recovered_line(refused_count: int) -> None:
+    _log.info("rate_limit_backend.recovered", extra={"refused_count": refused_count})
 
 
 def _rate_limit_key(budget: RateLimitBudget, budget_identity: str) -> str:
@@ -54,7 +59,7 @@ class _IpRateLimitMiddleware(RefusalMiddleware[RateLimitPolicy]):
 
     def __init__(self, app: ASGIApp, policy: RateLimitPolicy) -> None:
         super().__init__(app, policy)
-        self._outage = _OutageTracker(_log, _OUTAGE_STARTED_EVENT, _OUTAGE_ENDED_EVENT)
+        self._outage = _OutageTracker(_write_failed_line, _write_recovered_line)
 
     async def _refusal(self, request: Request) -> JSONResponse | None:
         client_ip = client_address(request)

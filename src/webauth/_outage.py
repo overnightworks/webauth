@@ -1,7 +1,8 @@
-"""One dependency outage: its opening and closing in the log, and the answer that refuses meanwhile.
+"""One dependency outage: when it opens and closes, and the answer that refuses meanwhile.
 
-The rate limiter and the session store each keep one tracker per handle. Both answer an outage with
-the same 503, so a host's monitoring reads one shape.
+The rate limiter and the session store each keep one tracker per handle and write their own failed
+and recovered lines. Both answer an outage with the same 503, so a host's monitoring reads one
+shape.
 """
 
 from __future__ import annotations
@@ -27,8 +28,6 @@ __all__: list[str] = []
 _log = logging.getLogger(__name__)
 
 _RETRY_AFTER_SECONDS: Final = 5
-_SESSION_STORE_STARTED_EVENT: Final = "session_store_outage.started"
-_SESSION_STORE_ENDED_EVENT: Final = "session_store_outage.ended"
 
 
 def _unavailable_answer(detail: str) -> JSONResponse:
@@ -44,18 +43,28 @@ def _session_store_unavailable_answer() -> JSONResponse:
     return _unavailable_answer("Session store unavailable")
 
 
-class _OutageTracker:
-    """Opens an outage on the first failure and closes it on the next answer, one log line each.
+def _write_session_store_failed_line(error_type: str) -> None:
+    _log.error("session_store_connection.failed", extra={"error_type": error_type})
 
-    The started line carries the class name of the failure it is given and the ended line the
-    failures counted in between; no line carries an error text. Calls come from the event loop and
-    from worker threads, so the state sits behind a lock.
+
+def _write_session_store_recovered_line(refused_count: int) -> None:
+    _log.info("session_store_connection.recovered", extra={"refused_count": refused_count})
+
+
+class _OutageTracker:
+    """Opens an outage on the first failure and closes it on the next answer, one line each.
+
+    The owner's failed-line function gets the class name of the failure it is given and its
+    recovered-line function the failures counted in between; no line carries an error text. Calls
+    come from the event loop and from worker threads, so the state sits behind a lock, and both
+    functions run under it: a recovered line never precedes its failed line.
     """
 
-    def __init__(self, log: logging.Logger, started_event: str, ended_event: str) -> None:
-        self._log = log
-        self._started_event = started_event
-        self._ended_event = ended_event
+    def __init__(
+        self, write_failed_line: Callable[[str], None], write_recovered_line: Callable[[int], None]
+    ) -> None:
+        self._write_failed_line = write_failed_line
+        self._write_recovered_line = write_recovered_line
         self._lock = threading.Lock()
         self._refused: int | None = None
 
@@ -63,13 +72,13 @@ class _OutageTracker:
         with self._lock:
             if self._refused is None:
                 self._refused = 0
-                self._log.error(self._started_event, extra={"error_type": type(failure).__name__})
+                self._write_failed_line(type(failure).__name__)
             self._refused += 1
 
     def note_answered(self) -> None:
         with self._lock:
             if self._refused is not None:
-                self._log.info(self._ended_event, extra={"refused_count": self._refused})
+                self._write_recovered_line(self._refused)
                 self._refused = None
 
 
@@ -117,7 +126,7 @@ def _tracked_transactions(
     sign_in: SignInTransaction, sessions: SessionTransaction
 ) -> tuple[SignInTransaction, SessionTransaction]:
     """The host's two transactions, both noting their outages on one tracker."""
-    tracker = _OutageTracker(_log, _SESSION_STORE_STARTED_EVENT, _SESSION_STORE_ENDED_EVENT)
+    tracker = _OutageTracker(_write_session_store_failed_line, _write_session_store_recovered_line)
     return (
         lambda: _TrackedTransaction(sign_in, tracker),
         lambda: _TrackedTransaction(sessions, tracker),
