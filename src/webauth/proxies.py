@@ -252,11 +252,15 @@ def _recorded_client(connection: HTTPConnection) -> _RecordedClient:
     try:
         return connection.scope[_CLIENT_SCOPE_KEY]
     except KeyError:
-        raise RuntimeError(
-            "No client address is recorded for this connection. An app built with "
-            "ServedBehind.SHARED_FRONT is served through webauth.web_auth.web_auth_front(app, "
-            "trusted_proxies=...), and the library never guesses the peer in its place.",
-        ) from None
+        raise _no_client_recorded() from None
+
+
+def _no_client_recorded() -> RuntimeError:
+    return RuntimeError(
+        "No client address is recorded for this connection. An app built with "
+        "ServedBehind.SHARED_FRONT is served through webauth.web_auth.web_auth_front(app, "
+        "trusted_proxies=...), and the library never guesses the peer in its place.",
+    )
 
 
 def _client_is_recorded(connection: HTTPConnection) -> bool:

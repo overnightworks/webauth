@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from logline import set_client_ip
+from logline import RequestLineMiddleware, set_client_ip
+from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
 
-from webauth.middleware.security_headers import _SecurityHeadersMiddleware
+from webauth.middleware.security_headers import _refuse_unrecorded_client
 from webauth.proxies import _client_is_recorded, _record_client
 
 if TYPE_CHECKING:
@@ -44,22 +45,29 @@ class _ClientAddressMiddleware:
         await self._app(scope, receive, send)
 
 
+def _front_entries(trusted_proxies: TrustedProxies) -> list[Middleware]:
+    """The front, outermost first: logline's request line, then the client-address writer."""
+    return [
+        Middleware(RequestLineMiddleware),
+        Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
+    ]
+
+
 class _FrontRequiredMiddleware:
     """Refuse a request no client-address writer stood in front of, before anything answers it.
 
     The composition call places it outermost for an app built with ``SHARED_FRONT``, outside the
     host's ``outside`` entries, so a CORS layer that answers a preflight itself cannot answer for
-    an app served without ``web_auth_front``. The refusal is the security-headers middleware's:
-    an http request answers the library 500 with the headers, a WebSocket raises before the app
-    runs, and the app below is never reached.
+    an app served without ``web_auth_front``. The refusal is ``_refuse_unrecorded_client``'s: an
+    http request answers the library 500 with the headers, a WebSocket raises before the app runs,
+    and the app below is never reached.
     """
 
     def __init__(self, app: ASGIApp, *, policy: SecurityHeadersPolicy) -> None:
         self._app = app
-        self._refusal = _SecurityHeadersMiddleware(app, policy)
+        self._policy = policy
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in _RECORDED_SCOPES and not _client_is_recorded(HTTPConnection(scope)):
-            await self._refusal(scope, receive, send)
-            return
+            await _refuse_unrecorded_client(scope, receive, send, self._policy)
         await self._app(scope, receive, send)

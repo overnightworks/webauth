@@ -18,7 +18,6 @@ from tests.support.client_address_arrangement import (
     behind_the_client_address_writer,
 )
 from tests.support.full_stack_arrangement import (
-    HEADERS_POLICY,
     a_fresh_app,
     install_full_stack,
 )
@@ -27,7 +26,6 @@ from tests.support.request_line_arrangement import (
     TRUSTED_PEER,
     a_client_behind_the_proxy,
 )
-from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.webauth_arrangement import API_PATH, HTTPS_TEST_SERVER
 from webauth import proxies
 from webauth.middleware.rate_limit import _IpRateLimitMiddleware
@@ -39,61 +37,27 @@ FORWARDED = {"x-forwarded-for": FORWARDED_CLIENT}
 NOT_AN_ADDRESS = {"x-forwarded-for": "not-an-address"}
 
 
-def a_host_serving_a_socket() -> FastAPI:
-    """A fresh app with a plain route and a WebSocket route, behind no writer yet."""
-    app = a_fresh_app()
-
-    @app.websocket(SOCKET_PATH)
-    async def socket(websocket: WebSocket) -> None:
-        await websocket.accept()
-        await websocket.close()
-
-    return app
-
-
-class TestAStackWithoutTheWriter:
-    """The stack reads what the writer recorded, so a host without it fails on the first request."""
-
-    @staticmethod
-    def a_host() -> FastAPI:
-        app = a_host_serving_a_socket()
-        install_full_stack(app, front=ServedBehind.SHARED_FRONT)
-        return app
+class TestTheFrontGuardSitsOutsideTheStack:
+    """PROXY-09 itself is proven through the composition call in `tests/test_web_auth_front.py`."""
 
     @pytest.mark.parametrize(
         ("path", "headers"),
         [
-            pytest.param(API_PATH, {}, id="a-plain-request"),
-            pytest.param("/api/thing%0A", {}, id="a-request-the-path-refusal-answers"),
-            pytest.param(API_PATH, {"content-length": "1000000"}, id="a-body-over-the-limit"),
+            pytest.param("/api/thing%0A", {}, id="outside-the-path-refusal"),
+            pytest.param(API_PATH, {"content-length": "1000000"}, id="outside-the-body-limit"),
         ],
     )
-    def test_a_request_fails_loud_naming_the_writer(
+    def test_a_request_the_stack_would_refuse_fails_loud_naming_the_writer(
         self, path: str, headers: dict[str, str]
     ) -> None:
+        app = a_fresh_app()
+        install_full_stack(app, front=ServedBehind.SHARED_FRONT)
+
         with (
-            TestClient(self.a_host(), base_url=HTTPS_TEST_SERVER) as client,
+            TestClient(app, base_url=HTTPS_TEST_SERVER) as client,
             pytest.raises(RuntimeError, match="web_auth_front"),
         ):
             client.get(path, headers=headers)
-
-    def test_the_answer_a_missing_writer_causes_still_carries_the_security_headers(self) -> None:
-        client = TestClient(
-            self.a_host(), base_url=HTTPS_TEST_SERVER, raise_server_exceptions=False
-        )
-
-        response = client.get(API_PATH)
-
-        assert response.status_code == 500
-        assert_carries_policy_headers(response.headers, HEADERS_POLICY, hsts=True)
-
-    def test_a_websocket_fails_loud_naming_the_writer(self) -> None:
-        with (
-            TestClient(self.a_host(), base_url=HTTPS_TEST_SERVER) as client,
-            pytest.raises(RuntimeError, match="web_auth_front"),
-            client.websocket_connect(SOCKET_PATH),
-        ):
-            pass
 
 
 def test_the_accessor_only_reads_what_the_writer_recorded(

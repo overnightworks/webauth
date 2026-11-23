@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
 from webauth._outage import _tracked_transactions
@@ -23,7 +22,7 @@ from webauth.admission import NoAdmins
 from webauth.config import _install_web_auth
 from webauth.https_client import fetch_key_set_over_https
 from webauth.middleware.bearer_gate import BearerGate, _install_resource_metadata
-from webauth.middleware.client_address import _ClientAddressMiddleware
+from webauth.middleware.client_address import _front_entries
 from webauth.middleware.stack import _HandleBinding, _install_web_auth_middleware
 from webauth.oidc import OidcRelyingParty
 from webauth.oidc_transport import post_token_request_over_https
@@ -91,7 +90,9 @@ def web_auth_front(app: ASGIApp, *, trusted_proxies: TrustedProxies) -> ASGIApp:
     """
     if not isinstance(trusted_proxies, TrustedProxies):
         raise _refuse("trusted_proxies", "must be TrustedProxies")
-    return RequestLineMiddleware(_ClientAddressMiddleware(app, trusted_proxies=trusted_proxies))
+    for entry in reversed(_front_entries(trusted_proxies)):
+        app = entry.cls(app, *entry.args, **entry.kwargs)
+    return app
 
 
 @dataclass(frozen=True, kw_only=True)
