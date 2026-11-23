@@ -46,7 +46,9 @@ def test_an_issuer_call_inside_a_trace_carries_traceparent_and_tracestate_only_w
         call(token_server)
 
     [received] = token_server.received
-    assert received.headers["traceparent"] == TRACEPARENT
+    version, trace_id, _span_the_call_runs_in, flags = received.headers["traceparent"].split("-")
+    expected_version, expected_trace_id, _caller_span, expected_flags = TRACEPARENT.split("-")
+    assert (version, trace_id, flags) == (expected_version, expected_trace_id, expected_flags)
     assert received.headers.get("tracestate") == tracestate
 
 
