@@ -1,0 +1,8 @@
+claim_id = "15057864ee9f48608a86133d75e6b243"
+agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
+role = "builder"
+base = "f30388aab1742b58c9718ae8bfa34bf0c0f94949"
+branch = "claude/issue-888-the-outage-lines-are-named-as-a-failure"
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/_outage.py", "src/webauth/middleware/rate_limit.py", "tests/middleware/test_store_outage.py", "tests/test_rate_limit_redis.py"]
+opened_commit = "b713763310aa3f4b2e29db3329c2c00194a0df35"
+whole_reason = "The four names change in the code, the host contract and the tests together, or the contract and the log disagree."
