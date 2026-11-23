@@ -1178,6 +1178,7 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 - **MEMSTORE-16** A sink that fails at the exit rolls the entry back and its exception reaches the route.
 - **MEMSTORE-17** Entering an entry again raises; the transaction hands out a new entry per call.
 - **MEMSTORE-18** `sessions.records_of(subject)` returns the account and, for each session oldest first, its start, its expiry and whether it holds a refresh token and an ID token; it returns no session id and no token.
+- **MEMSTORE-23** `sessions.erase(subject)` removes the account the subject names and every session of it under the adapter's guard, and returns what it removed in `records_of`'s shape; an unknown subject changes nothing and returns no account and no sessions. Inside a sign-in entry a raise restores both tables, and the next sign-in of the subject creates the account and writes `USER_CREATED`. It is the adapter's offer, no port duty: the port leaves erasure to the host.
 - **MEMSTORE-19** `StoredAccount` and `StoredSession` implement `UserRecord` and `SessionRecord`.
 - **MEMSTORE-20** The sign-in routes and the session gate hold over the adapter: callback, gate, logout and back-channel logout.
 - **MEMSTORE-21** `create` keeps the account's language it is given on the session, and `load` returns it.
