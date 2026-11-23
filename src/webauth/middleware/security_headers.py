@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Final, NoReturn
+from typing import TYPE_CHECKING, Final
 
 from starlette.datastructures import MutableHeaders
 from starlette.requests import HTTPConnection
@@ -63,7 +63,7 @@ class _SecurityHeadersMiddleware:
 
     The stack's first middleware, it also refuses a connection the client-address writer did not
     record a client for (an app built with ``SHARED_FRONT`` and served without
-    ``web_auth_front``) through ``_refuse_unrecorded_client``, so a missing writer shows on the
+    ``web_auth_front``) through ``_refuse_unless_recorded``, so a missing writer shows on the
     first request.
 
     An exception before the response started is answered with a plain 500
@@ -93,8 +93,7 @@ class _SecurityHeadersMiddleware:
         self._policy = policy
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] in _CLIENT_SCOPES and not _client_is_recorded(HTTPConnection(scope)):
-            await _refuse_unrecorded_client(scope, receive, send, self._policy)
+        await _refuse_unless_recorded(scope, receive, send, self._policy)
         if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
@@ -104,14 +103,17 @@ class _SecurityHeadersMiddleware:
 _CLIENT_SCOPES: Final = frozenset({"http", "websocket"})
 
 
-async def _refuse_unrecorded_client(
+async def _refuse_unless_recorded(
     scope: Scope, receive: Receive, send: Send, policy: SecurityHeadersPolicy
-) -> NoReturn:
-    """Refuse a connection no client-address writer stood in front of, and reach no app.
+) -> None:
+    """Refuse an http or websocket connection no client-address writer stood in front of.
 
     An http request answers the library 500 with the policy's headers and the error still
-    reaches the server; a WebSocket raises before the handshake is accepted.
+    reaches the server; a WebSocket raises before the handshake is accepted. A recorded
+    connection and any other scope return, and the caller goes on.
     """
+    if scope["type"] not in _CLIENT_SCOPES or _client_is_recorded(HTTPConnection(scope)):
+        return
     if scope["type"] == "http":
         await _answer_under_policy(_raise_no_client_recorded, policy, scope, receive, send)
     raise _no_client_recorded()

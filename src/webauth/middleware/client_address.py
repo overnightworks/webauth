@@ -8,8 +8,8 @@ from logline import RequestLineMiddleware, set_client_ip
 from starlette.middleware import Middleware
 from starlette.requests import HTTPConnection
 
-from webauth.middleware.security_headers import _refuse_unrecorded_client
-from webauth.proxies import _client_is_recorded, _record_client
+from webauth.middleware.security_headers import _CLIENT_SCOPES, _refuse_unless_recorded
+from webauth.proxies import _record_client
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
@@ -18,8 +18,6 @@ if TYPE_CHECKING:
     from webauth.proxies import TrustedProxies
 
 __all__: list[str] = []
-
-_RECORDED_SCOPES = frozenset({"http", "websocket"})
 
 
 class _ClientAddressMiddleware:
@@ -40,7 +38,7 @@ class _ClientAddressMiddleware:
         self._trusted_proxies = trusted_proxies
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] in _RECORDED_SCOPES:
+        if scope["type"] in _CLIENT_SCOPES:
             set_client_ip(scope, _record_client(HTTPConnection(scope), self._trusted_proxies))
         await self._app(scope, receive, send)
 
@@ -58,7 +56,7 @@ class _FrontRequiredMiddleware:
 
     The composition call places it outermost for an app built with ``SHARED_FRONT``, outside the
     host's ``outside`` entries, so a CORS layer that answers a preflight itself cannot answer for
-    an app served without ``web_auth_front``. The refusal is ``_refuse_unrecorded_client``'s: an
+    an app served without ``web_auth_front``. The refusal is ``_refuse_unless_recorded``'s: an
     http request answers the library 500 with the headers, a WebSocket raises before the app runs,
     and the app below is never reached.
     """
@@ -68,6 +66,5 @@ class _FrontRequiredMiddleware:
         self._policy = policy
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] in _RECORDED_SCOPES and not _client_is_recorded(HTTPConnection(scope)):
-            await _refuse_unrecorded_client(scope, receive, send, self._policy)
+        await _refuse_unless_recorded(scope, receive, send, self._policy)
         await self._app(scope, receive, send)
