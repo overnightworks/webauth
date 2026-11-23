@@ -36,11 +36,11 @@ if TYPE_CHECKING:
 
     from starlette.applications import Starlette
 
+    from webauth._sign_in_paths import SignInPaths
     from webauth.admission import AdmissionConfig
     from webauth.oidc import OidcRelyingParty
     from webauth.ports import SessionTransaction, SignInTransaction
     from webauth.proxies import TrustedProxies
-    from webauth.sign_in_routes import SignInPaths
 
 __all__: list[str] = []
 
