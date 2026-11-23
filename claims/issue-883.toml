@@ -1,0 +1,8 @@
+claim_id = "9ed1a44eeb454d89a6d52f018cd43ea2"
+agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
+role = "builder"
+base = "f30388aab1742b58c9718ae8bfa34bf0c0f94949"
+branch = "claude/issue-883-tests-that-prove-one-behaviour-twice"
+scope = ["tests/middleware/test_bearer_gate.py", "tests/middleware/test_bearer_gate_person_paths.py", "tests/test_jwt_verification_https_fetch.py", "tests/test_jwt_verification_key_set.py", "tests/test_jwt_verification_kidless.py", "tests/test_jwt_verification_refresh.py", "tests/test_jwt_verification_token.py", "tests/test_oidc_access_token.py", "tests/test_oidc_discovery.py", "tests/test_rate_limit_redis.py", "tests/test_rate_limit_single_process.py", "tests/test_web_auth.py", "tests/workflows/test_release_workflow.py"]
+opened_commit = "1bff1f174e320cf27f2d79f5875a6ba55fc4db47"
+whole_reason = "Six small test-only cuts of one audit line, about 140 lines in all, read in one sitting; six lanes would cost six reviews for the same diff."
