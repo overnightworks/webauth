@@ -85,7 +85,7 @@ class _OutageTracker:
 class _TrackedTransaction[StoresT]:
     """The host's transaction, with an outage noted when a ``StoreUnavailableError`` leaves it
     (entry, body or exit), by the class of its cause when it has one, and closed at the next clean
-    exit."""
+    exit. An error the host's exit suppresses leaves nothing: it opens no outage and closes none."""
 
     def __init__(
         self, transaction: Callable[[], AbstractContextManager[StoresT]], tracker: _OutageTracker
@@ -112,6 +112,8 @@ class _TrackedTransaction[StoresT]:
         except StoreUnavailableError as failure:
             self._note(failure)
             raise
+        if suppressed:
+            return suppressed
         if isinstance(exc, StoreUnavailableError):
             self._note(exc)
         elif exc is None:
