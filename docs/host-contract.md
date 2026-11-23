@@ -6,8 +6,10 @@ A rule webauth promises opens with its ID, such as **CSRF-01**, and a test that
 proves it names the ID at the start of its docstring. A test under `tests/e2e/`
 runs by hand against a real Keycloak, not in CI. A paragraph or bullet that opens
 with **Host duty:** says what the host must do and prove itself. A sentence with
-neither an ID nor a label explains. **Proven elsewhere:** on a bullet excuses its IDs from
-being named by a test, and its text names what proves them.
+neither an ID nor a label explains.
+
+**Proven elsewhere:** on a bullet excuses its IDs from being named by a test, and its
+text names what proves them.
 
 ## Trusted proxies
 
