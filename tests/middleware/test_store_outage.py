@@ -4,6 +4,7 @@ entry; a store that fails otherwise stays a loud 500."""
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager, nullcontext, suppress
 from threading import Barrier, Thread
 from typing import TYPE_CHECKING
 
@@ -47,11 +48,15 @@ from webauth.dependencies import current_user
 from webauth.middleware import SessionGate
 from webauth.policies import PathRules
 from webauth.ports import AuthenticatedUser, StoreUnavailableError
+from webauth.postgres import SessionStoreError
+from webauth.web_auth import WebAuthStores
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from httpx import Response as HttpxResponse
+
+    from webauth.ports import SessionRenewalStore, SessionTransaction
 
 FORWARDED = {"x-forwarded-for": FORWARDED_CLIENT}
 A_MEMBER = FakeUser(id=SUBJECT, username="lena")
@@ -59,8 +64,8 @@ SECRET = "hunter2-session-token"
 PERSON_ME_PATH = "/api/me"
 STREAM_PATH = "/stream-then-fail"
 OWN_STORE_PATH = "/own-store"
-STARTED_EVENT = "session_store_outage.started"
-ENDED_EVENT = "session_store_outage.ended"
+FAILED_EVENT = "session_store_connection.failed"
+RECOVERED_EVENT = "session_store_connection.recovered"
 
 
 def a_store_outage() -> StoreUnavailableError:
@@ -69,6 +74,10 @@ def a_store_outage() -> StoreUnavailableError:
 
 def a_store_bug() -> Exception:
     return RuntimeError(f"the statement failed for {SECRET}")
+
+
+def a_session_store_error() -> Exception:
+    return SessionStoreError(f"the database failed for {SECRET}")
 
 
 def a_signed_in_world() -> HostWorld:
@@ -100,10 +109,34 @@ def _routes_with_a_person_path_and_host_stores(
     return add
 
 
-def a_host(world: HostWorld, *, gate: SessionGate | None = None) -> ComposedHost:
+class _HostTransaction:
+    """The host's session transaction, which can swallow a ``StoreUnavailableError`` at its exit."""
+
+    def __init__(self, transaction: SessionTransaction) -> None:
+        self._transaction = transaction
+        self.swallowing = False
+
+    @contextmanager
+    def __call__(self) -> Iterator[SessionRenewalStore]:
+        with (
+            suppress(StoreUnavailableError) if self.swallowing else nullcontext(),
+            self._transaction() as store,
+        ):
+            yield store
+
+
+def a_host(
+    world: HostWorld,
+    *,
+    gate: SessionGate | None = None,
+    sessions: SessionTransaction | None = None,
+) -> ComposedHost:
+    stores = WebAuthStores(
+        sign_in=world.sign_in, sessions=sessions or world.sessions.in_transaction
+    )
     return a_composed_host(
         world,
-        a_composition(world, gate=gate),
+        a_composition(world, gate=gate, stores=stores),
         routes=_routes_with_a_person_path_and_host_stores(world),
         bearer_of=a_resource_and_person_paths(),
     )
@@ -275,11 +308,13 @@ def test_stack_16_an_outage_after_the_response_started_is_not_answered_twice() -
 
 def _outage_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [
-        record for record in caplog.records if record.getMessage() in {STARTED_EVENT, ENDED_EVENT}
+        record
+        for record in caplog.records
+        if record.getMessage() in {FAILED_EVENT, RECOVERED_EVENT}
     ]
 
 
-def test_log_08_an_outage_logs_one_started_and_one_ended_line_with_the_refused_count(
+def test_log_08_an_outage_logs_one_failed_and_one_recovered_line_with_the_refused_count(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = a_signed_in_world()
@@ -297,15 +332,15 @@ def test_log_08_an_outage_logs_one_started_and_one_ended_line_with_the_refused_c
 
     assert [response.status_code for response in refused] == [503, 503, 503]
     assert [(record.levelname, record.getMessage()) for record in lines_during_the_outage] == [
-        ("ERROR", STARTED_EVENT)
+        ("ERROR", FAILED_EVENT)
     ]
     assert recovered.status_code == 200
-    started, ended = lines
-    assert fields_of(started) == {"error_type": "StoreUnavailableError"}
-    assert started.exc_info is None
-    assert (ended.levelname, ended.getMessage(), fields_of(ended)) == (
+    failed_line, recovered_line = lines
+    assert fields_of(failed_line) == {"error_type": "StoreUnavailableError"}
+    assert failed_line.exc_info is None
+    assert (recovered_line.levelname, recovered_line.getMessage(), fields_of(recovered_line)) == (
         "INFO",
-        ENDED_EVENT,
+        RECOVERED_EVENT,
         {"refused_count": 3},
     )
     assert SECRET not in caplog.text
@@ -326,7 +361,7 @@ def test_log_08_an_answer_without_an_outage_logs_nothing(caplog: pytest.LogCaptu
     assert _lines_of(caplog) == []
 
 
-def test_log_08_a_second_outage_after_a_recovery_logs_started_and_ended_again(
+def test_log_08_a_second_outage_after_a_recovery_logs_failed_and_recovered_again(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = a_signed_in_world()
@@ -339,10 +374,10 @@ def test_log_08_a_second_outage_after_a_recovery_logs_started_and_ended_again(
         host.client.get(ME_PATH, headers=headers)
 
     assert _lines_of(caplog) == [
-        (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
-        (ENDED_EVENT, {"refused_count": 1}),
-        (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
-        (ENDED_EVENT, {"refused_count": 1}),
+        (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (RECOVERED_EVENT, {"refused_count": 1}),
+        (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (RECOVERED_EVENT, {"refused_count": 1}),
     ]
 
 
@@ -374,12 +409,12 @@ def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all
 
     assert answers == [503] * workers
     assert _lines_of(caplog) == [
-        (STARTED_EVENT, {"error_type": "StoreUnavailableError"}),
-        (ENDED_EVENT, {"refused_count": workers}),
+        (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (RECOVERED_EVENT, {"refused_count": workers}),
     ]
 
 
-def test_log_08_the_started_line_names_the_class_of_the_cause_when_there_is_one(
+def test_log_08_the_failed_line_names_the_class_of_the_cause_when_there_is_one(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = a_signed_in_world()
@@ -391,19 +426,88 @@ def test_log_08_the_started_line_names_the_class_of_the_cause_when_there_is_one(
 
     host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
 
-    assert _lines_of(caplog) == [(STARTED_EVENT, {"error_type": "ConnectionRefusedError"})]
+    assert _lines_of(caplog) == [(FAILED_EVENT, {"error_type": "ConnectionRefusedError"})]
     assert SECRET not in caplog.text
 
 
-def test_log_08_a_bug_opens_no_outage(caplog: pytest.LogCaptureFixture) -> None:
+@pytest.mark.parametrize(
+    "failure",
+    [a_store_bug, a_session_store_error],
+    ids=["a-bug", "a-session-store-error"],
+)
+def test_log_08_a_failure_that_is_no_outage_opens_none_and_stays_a_500(
+    failure: Callable[[], Exception], caplog: pytest.LogCaptureFixture
+) -> None:
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=False)
     caplog.set_level(logging.INFO)
-    world.sessions.load_failure = a_store_bug()
+    world.sessions.load_failure = failure()
 
-    host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    response = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
 
+    assert response.status_code == 500
     assert _lines_of(caplog) == []
+
+
+@pytest.mark.parametrize(
+    ("opened_first", "lines_at_the_end"),
+    [
+        pytest.param(False, [], id="no-outage-open"),
+        pytest.param(
+            True,
+            [
+                (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+                (RECOVERED_EVENT, {"refused_count": 1}),
+            ],
+            id="an-outage-open",
+        ),
+    ],
+)
+def test_log_08_an_outage_the_exit_of_the_host_suppresses_opens_none_and_closes_none(
+    opened_first: bool,
+    lines_at_the_end: list[tuple[str, dict[str, object]]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    world = a_signed_in_world()
+    host_transaction = _HostTransaction(world.sessions.in_transaction)
+    host = the_host_driven(a_host(world, sessions=host_transaction), raising=False)
+    headers = {**FORWARDED, **world.signed_cookie()}
+    caplog.set_level(logging.INFO)
+    world.sessions.load_failure = a_store_outage()
+    if opened_first:
+        host.client.get(ME_PATH, headers=headers)
+    lines_before = _lines_of(caplog)
+
+    host_transaction.swallowing = True
+    suppressed = host.client.get(ME_PATH, headers=headers)
+    lines_after_the_suppressed_exit = _lines_of(caplog)
+    host_transaction.swallowing = False
+    world.sessions.load_failure = None
+    host.client.get(ME_PATH, headers=headers)
+
+    assert suppressed.status_code != 503
+    assert lines_after_the_suppressed_exit == lines_before
+    assert _lines_of(caplog) == lines_at_the_end
+
+
+def test_log_08_each_handle_keeps_its_own_outage(caplog: pytest.LogCaptureFixture) -> None:
+    first_world, second_world = a_signed_in_world(), a_signed_in_world()
+    first = the_host_driven(a_host(first_world), raising=True)
+    second = the_host_driven(a_host(second_world), raising=True)
+    caplog.set_level(logging.INFO)
+    first_world.sessions.load_failure = a_store_outage()
+    first.client.get(ME_PATH, headers={**FORWARDED, **first_world.signed_cookie()})
+
+    second.client.get(ME_PATH, headers={**FORWARDED, **second_world.signed_cookie()})
+    lines_after_the_second_answer = _lines_of(caplog)
+    first_world.sessions.load_failure = None
+    first.client.get(ME_PATH, headers={**FORWARDED, **first_world.signed_cookie()})
+
+    assert [name for name, _fields in lines_after_the_second_answer] == [FAILED_EVENT]
+    assert _lines_of(caplog) == [
+        (FAILED_EVENT, {"error_type": "StoreUnavailableError"}),
+        (RECOVERED_EVENT, {"refused_count": 1}),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -418,7 +522,7 @@ def test_log_08_an_outage_at_the_entry_of_a_transaction_opens_one(
 
     entry(a_store_outage(), raising=True)
 
-    assert [name for name, _fields in _lines_of(caplog)] == [STARTED_EVENT]
+    assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT]
 
 
 def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFixture) -> None:
@@ -436,8 +540,8 @@ def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFi
     host.client.get(ME_PATH, headers=headers)
 
     assert bug.status_code == 500
-    assert [name for name, _fields in lines_after_the_bug] == [STARTED_EVENT]
-    assert _lines_of(caplog)[1] == (ENDED_EVENT, {"refused_count": 1})
+    assert [name for name, _fields in lines_after_the_bug] == [FAILED_EVENT]
+    assert _lines_of(caplog)[1] == (RECOVERED_EVENT, {"refused_count": 1})
 
 
 @pytest.mark.parametrize("where", ["body", "exit"])
@@ -455,7 +559,7 @@ def test_log_08_an_outage_in_the_body_or_at_the_exit_of_a_transaction_opens_one(
     response = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
 
     assert response.status_code == 503
-    assert [name for name, _fields in _lines_of(caplog)] == [STARTED_EVENT]
+    assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT]
 
 
 def test_log_08_a_clean_sign_in_transaction_ends_an_outage_the_session_gate_opened(
@@ -473,4 +577,4 @@ def test_log_08_a_clean_sign_in_transaction_ends_an_outage_the_session_gate_open
     callback = host.client.get(f"{CALLBACK_PATH}?{query}", headers=FORWARDED)
 
     assert callback.status_code == 303
-    assert [name for name, _fields in _lines_of(caplog)] == [STARTED_EVENT, ENDED_EVENT]
+    assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT, RECOVERED_EVENT]
