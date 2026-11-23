@@ -1,0 +1,8 @@
+claim_id = "819cfca0197a4ef5ab4fdaca1cb057d8"
+agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
+role = "builder"
+base = "f30388aab1742b58c9718ae8bfa34bf0c0f94949"
+branch = "claude/issue-882-signinpaths-in-a-private-leaf"
+scope = [".importlinter", "src/webauth/_sign_in_paths.py", "src/webauth/middleware/stack.py", "src/webauth/sign_in_routes.py", "tests/test_webauth_public_api.py"]
+opened_commit = "79b56d0718c4b60b638dfa65f711538987c56998"
+whole_reason = "The class moves to its leaf, its public home re-exports it, the stack imports the leaf, the guard accepts the forward and the contract drops its ignore in one change, or the tree does not import or the contract fails."
