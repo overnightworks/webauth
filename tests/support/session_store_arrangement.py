@@ -206,17 +206,6 @@ class SessionsRecordingTheirTransaction(SessionRecordsInMemory):
         return super().replace_refresh_token(session_id, refresh_token=refresh_token)
 
 
-class SessionsFailingToLoad(SessionRecordsInMemory):
-    """A store whose ``load`` raises while ``failing``, as a database that went away does."""
-
-    failing = True
-
-    def load(self, session_id: str) -> FakeSessionRecord | None:
-        if self.failing:
-            raise ConnectionError("session store down")
-        return super().load(session_id)
-
-
 class SessionsEndedBetweenLoadAndTouch(SessionRecordsInMemory):
     """A store whose session is ended by another request right after ``load`` reads it."""
 

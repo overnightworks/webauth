@@ -22,6 +22,7 @@ from tests.support.oidc_arrangement import (
     FakeIssuer,
     a_key_set_endpoint,
     a_logout_token,
+    an_issuer_called_through,
 )
 from tests.support.oidc_login_host import (
     ADMISSION,
@@ -64,7 +65,7 @@ from webauth.single_process_stores import (
     SubjectRecords,
     _Tables,
 )
-from webauth.web_auth import IssuerCalls, SignInPages
+from webauth.web_auth import SignInPages
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
 LATER = START + timedelta(hours=1)
@@ -619,11 +620,7 @@ class Browser:
                 ui_language=lambda _request: None,
             ),
             body_size=BodySizePolicy(default_max_bytes=1024),
-            issuer_calls=IssuerCalls(
-                post_token_request=self.issuer,
-                fetch_key_set=a_key_set_endpoint("issuer"),
-                monotonic_clock=FakeClock(5_000.0),
-            ),
+            issuer_calls=an_issuer_called_through(self.issuer, a_key_set_endpoint("issuer")),
         )
         self.client = TestClient(
             app,

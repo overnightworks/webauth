@@ -55,6 +55,7 @@ from webauth.oidc import (
     TokenRequestPost,
 )
 from webauth.ports import WallClock
+from webauth.web_auth import IssuerCalls
 
 
 @cache
@@ -334,6 +335,17 @@ def a_relying_party(
         fetch_key_set=fetch_key_set or a_key_set_endpoint(),
         wall_clock=wall_clock or FakeClock(float(ACCESS_TOKEN_NOW)),
         monotonic_clock=monotonic_clock or FakeClock(5_000.0),
+    )
+
+
+def an_issuer_called_through(
+    post_token_request: TokenRequestPost, fetch_key_set: KeySetFetch
+) -> IssuerCalls:
+    """The relying party's calls through the two given fakes, on a fake monotonic clock."""
+    return IssuerCalls(
+        post_token_request=post_token_request,
+        fetch_key_set=fetch_key_set,
+        monotonic_clock=FakeClock(5_000.0),
     )
 
 

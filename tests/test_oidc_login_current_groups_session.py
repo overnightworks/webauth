@@ -25,7 +25,6 @@ from tests.support.oidc_arrangement import (
 from tests.support.session_store_arrangement import (
     SessionsAnsweringReplace,
     SessionsEndedBeforeReplacingTheRefreshToken,
-    SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
 )
 from tests.support.webauth_arrangement import SESSION_IDLE_SECONDS
@@ -181,7 +180,8 @@ class TestTheTransactions:
     def test_a_load_failing_in_the_first_transaction_raises_before_any_grant(self) -> None:
         """GROUPS-10: a failing load raises before any grant."""
 
-        arrangement = an_arrangement(SessionsFailingToLoad)
+        arrangement = an_arrangement()
+        arrangement.sessions.load_failure = ConnectionError("session store down")
 
         with pytest.raises(ConnectionError):
             arrangement.current_groups(arrangement.sessions.in_transaction)
@@ -202,11 +202,11 @@ class TestTheTransactions:
     def test_a_load_failing_in_the_second_transaction_raises_with_the_groups_in_hand(self) -> None:
         """GROUPS-10: a failing load raises and hands out no groups."""
 
-        arrangement = an_arrangement(SessionsFailingToLoad)
+        arrangement = an_arrangement()
         sessions = arrangement.sessions
-        assert isinstance(sessions, SessionsFailingToLoad)
-        sessions.failing = False
-        arrangement.issuer.before_exchange = lambda: setattr(sessions, "failing", True)
+        arrangement.issuer.before_exchange = lambda: setattr(
+            sessions, "load_failure", ConnectionError("session store down")
+        )
 
         with pytest.raises(ConnectionError):
             arrangement.current_groups(sessions.in_transaction)

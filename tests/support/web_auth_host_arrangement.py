@@ -24,6 +24,7 @@ from tests.support.oidc_arrangement import (
     FakeKeySetEndpoint,
     a_key_set_endpoint,
     an_access_token,
+    an_issuer_called_through,
 )
 from tests.support.oidc_login_host import (
     ADMISSION,
@@ -196,11 +197,7 @@ def a_composition(world: HostWorld, **changes: object) -> Composition:
             ui_language=lambda _request: None,
         ),
         front=TRUSTED_PROXIES,
-        issuer_calls=IssuerCalls(
-            post_token_request=world.issuer,
-            fetch_key_set=world.key_set,
-            monotonic_clock=FakeClock(5_000.0),
-        ),
+        issuer_calls=an_issuer_called_through(world.issuer, world.key_set),
     )
     return replace(composition, **changes)
 
