@@ -3,6 +3,6 @@ agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
 role = "builder"
 base = "b70f583c27a7f01b1f471d9dd84dd19d6992ab1d"
 branch = "claude/issue-896-every-host-contract-id-is-named-by-the-t"
-scope = ["README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/sign_in_routes.py", "tests/middleware/test_stack_request_line.py", "tests/test_host_contract_ids.py", "tests/test_https_client_trace_context.py", "tests/test_oidc_callback.py", "tests/test_oidc_grants.py", "tests/test_rate_limit_redis.py", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_log.py", "tests/test_store_contract.py", "tests/test_web_auth.py", "tests/test_webauth_host_contract_ids.py"]
+scope = ["README.md", "docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/sign_in_routes.py", "tests/middleware/test_stack_request_line.py", "tests/test_https_client_trace_context.py", "tests/test_oidc_callback.py", "tests/test_oidc_grants.py", "tests/test_rate_limit_redis.py", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_log.py", "tests/test_store_contract.py", "tests/test_webauth_host_contract_ids.py"]
 opened_commit = "5f846d5e7564b810037b38f5ac4f579afaf9fa86"
 whole_reason = "One rule, held once: the contract's IDs, the tests that name them and the check that ties both, with the overview's four wrong sentences beside them."
