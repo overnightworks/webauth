@@ -1,7 +1,0 @@
-claim_id = "f08cae7d81e04581be0564b613e52436"
-agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
-role = "builder"
-base = "e1480e42d243d8c8c86a2832f1bfd2ad85ea2876"
-branch = "claude/issue-902-webauth-pins-quality-v0-25-0"
-scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", ".github/workflows/release.yml"]
-opened_commit = "8420630c61837b20e221a4ee3247a0ebb4c1a7f3"
