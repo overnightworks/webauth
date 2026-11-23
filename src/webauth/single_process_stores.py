@@ -253,14 +253,7 @@ class SingleProcessSessionStore:
     def delete_for_user(self, user_id: str) -> int:
         """End every session of the account, keep the account, and return how many ended."""
         with self._tables.guard:
-            ended = [
-                session_id
-                for session_id, row in self._tables.rows.items()
-                if row.subject == user_id
-            ]
-            for session_id in ended:
-                del self._tables.rows[session_id]
-        return len(ended)
+            return len(self._remove_sessions_of(user_id))
 
     def prune_overflow(self, user_id: str, keep_newest: int) -> None:
         with self._tables.guard:
@@ -280,23 +273,45 @@ class SingleProcessSessionStore:
     def records_of(self, subject: str) -> SubjectRecords:
         """The account and the sessions of one subject, with no session id and no token."""
         with self._tables.guard:
-            rows = sorted(
-                (row for row in self._tables.rows.values() if row.subject == subject),
-                key=lambda row: row.created_at,
-            )
-            account = self._tables.accounts.get(subject)
-        return SubjectRecords(
-            account=account,
-            sessions=tuple(
-                SessionTimes(
-                    started_at=row.created_at,
-                    expires_at=row.expires_at,
-                    holds_refresh_token=row.refresh_token is not None,
-                    holds_id_token=row.id_token is not None,
-                )
-                for row in rows
-            ),
+            return _subject_records(self._tables.accounts.get(subject), self._sessions_of(subject))
+
+    def erase(self, subject: str) -> SubjectRecords:
+        """Remove the account the subject names and every session of it, and return what went.
+
+        The answer has `records_of`'s shape: the account, and each session's times and token
+        flags with no session id and no token. An unknown subject changes nothing and returns
+        no account and no sessions. Inside a sign-in entry a raise restores both tables.
+        """
+        with self._tables.guard:
+            account = self._tables.accounts.pop(subject, None)
+            return _subject_records(account, self._remove_sessions_of(subject))
+
+    def _sessions_of(self, subject: str) -> list[_SessionRow]:
+        return sorted(
+            (row for row in self._tables.rows.values() if row.subject == subject),
+            key=lambda row: row.created_at,
         )
+
+    def _remove_sessions_of(self, subject: str) -> list[_SessionRow]:
+        rows = self._sessions_of(subject)
+        for row in rows:
+            del self._tables.rows[row.id]
+        return rows
+
+
+def _subject_records(account: StoredAccount | None, rows: list[_SessionRow]) -> SubjectRecords:
+    return SubjectRecords(
+        account=account,
+        sessions=tuple(
+            SessionTimes(
+                started_at=row.created_at,
+                expires_at=row.expires_at,
+                holds_refresh_token=row.refresh_token is not None,
+                holds_id_token=row.id_token is not None,
+            )
+            for row in rows
+        ),
+    )
 
 
 class SingleProcessSignInTransaction:
