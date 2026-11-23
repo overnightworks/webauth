@@ -257,12 +257,7 @@ class SingleProcessSessionStore:
 
     def prune_overflow(self, user_id: str, keep_newest: int) -> None:
         with self._tables.guard:
-            newest_first = sorted(
-                (row for row in self._tables.rows.values() if row.subject == user_id),
-                key=lambda row: row.created_at,
-                reverse=True,
-            )
-            for row in newest_first[keep_newest:]:
+            for row in self._sessions_of(user_id, newest_first=True)[keep_newest:]:
                 del self._tables.rows[row.id]
 
     def delete_expired(self, now: datetime) -> int:
@@ -286,10 +281,11 @@ class SingleProcessSessionStore:
             account = self._tables.accounts.pop(subject, None)
             return _subject_records(account, self._remove_sessions_of(subject))
 
-    def _sessions_of(self, subject: str) -> list[_SessionRow]:
+    def _sessions_of(self, subject: str, *, newest_first: bool = False) -> list[_SessionRow]:
         return sorted(
             (row for row in self._tables.rows.values() if row.subject == subject),
             key=lambda row: row.created_at,
+            reverse=newest_first,
         )
 
     def _remove_sessions_of(self, subject: str) -> list[_SessionRow]:
