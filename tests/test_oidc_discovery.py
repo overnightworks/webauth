@@ -230,24 +230,27 @@ def test_a_malformed_issuer_is_refused_with_the_configurations_error_before_any_
 
 
 @pytest.mark.parametrize(
-    "methods",
+    ("field_name", "value"),
     [
-        pytest.param([], id="empty"),
-        pytest.param(["plain"], id="plain-only"),
-        pytest.param(["s256"], id="another-case"),
-        pytest.param("S256", id="a-string"),
-        pytest.param(None, id="null"),
+        pytest.param("code_challenge_methods_supported", [], id="methods-empty"),
+        pytest.param("code_challenge_methods_supported", ["plain"], id="methods-plain-only"),
+        pytest.param("code_challenge_methods_supported", ["s256"], id="methods-another-case"),
+        pytest.param("code_challenge_methods_supported", "S256", id="methods-a-string"),
+        pytest.param("code_challenge_methods_supported", None, id="methods-null"),
+        pytest.param("authorization_response_iss_parameter_supported", "true", id="iss-text"),
+        pytest.param("authorization_response_iss_parameter_supported", 1, id="iss-number"),
+        pytest.param("authorization_response_iss_parameter_supported", None, id="iss-null"),
+        pytest.param("authorization_response_iss_parameter_supported", ["true"], id="iss-list"),
     ],
 )
-def test_a_document_advertising_code_challenge_methods_without_s256_is_refused(
-    methods: object,
+def test_a_document_member_of_the_wrong_shape_is_refused_naming_it(
+    field_name: str, value: object
 ) -> None:
-    """DISCOVERY-03, DISCOVERY-06."""
-    metadata = FakeKeySetEndpoint(
-        a_provider_metadata(REALM_ISSUER, code_challenge_methods_supported=methods)
-    )
+    """DISCOVERY-03, DISCOVERY-12, DISCOVERY-06: code challenge methods without S256 and an iss
+    support member that is no boolean."""
+    metadata = FakeKeySetEndpoint(a_provider_metadata(REALM_ISSUER, **{field_name: value}))
 
-    with pytest.raises(OidcDiscoveryError, match="code_challenge_methods_supported"):
+    with pytest.raises(OidcDiscoveryError, match=field_name):
         _discover(metadata)
 
 
@@ -270,27 +273,6 @@ def test_the_document_says_whether_the_issuer_sends_iss_and_silence_means_it_doe
     config = _discover(metadata)
 
     assert config.authorization_response_iss_parameter_supported is supported
-
-
-@pytest.mark.parametrize(
-    "member",
-    [
-        pytest.param("true", id="text"),
-        pytest.param(1, id="number"),
-        pytest.param(None, id="null"),
-        pytest.param(["true"], id="list"),
-    ],
-)
-def test_a_document_whose_iss_support_member_is_not_a_boolean_is_refused_naming_it(
-    member: object,
-) -> None:
-    """DISCOVERY-12, DISCOVERY-06."""
-    metadata = FakeKeySetEndpoint(
-        a_provider_metadata(REALM_ISSUER, authorization_response_iss_parameter_supported=member)
-    )
-
-    with pytest.raises(OidcDiscoveryError, match="authorization_response_iss_parameter_supported"):
-        _discover(metadata)
 
 
 def test_a_document_advertising_no_code_challenge_methods_is_accepted() -> None:
