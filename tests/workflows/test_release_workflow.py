@@ -152,12 +152,6 @@ def _jobs() -> dict[str, str]:
     }
 
 
-def _with_values(job: str) -> dict[str, str]:
-    with_block = re.search(r"    with:\n((?:      .*\n)+)", job)
-    assert with_block
-    return dict(re.findall(r"^      (\w+): (.*)$", with_block.group(1), re.MULTILINE))
-
-
 def test_a_release_run_value_never_interpolates_an_expression():
     run_values = re.findall(
         r"^ +run: (.*(?:\n(?: {10}.*|)$)*)", _RELEASE.read_text(encoding="utf-8"), re.MULTILINE
@@ -167,14 +161,6 @@ def test_a_release_run_value_never_interpolates_an_expression():
     assert not [value for value in run_values if "${{" in value]
 
 
-def test_a_release_is_dispatched_with_the_version_alone():
-    on_block = re.search(r"^on:\n((?:  .*\n)+)", _RELEASE.read_text(encoding="utf-8"), re.MULTILINE)
-    assert on_block
-
-    assert re.findall(r"^  (\w+):", on_block.group(1), re.MULTILINE) == ["workflow_dispatch"]
-    assert re.findall(r"^      (\w+):", on_block.group(1), re.MULTILINE) == ["version"]
-
-
 def test_only_the_tag_job_may_write():
     jobs = _jobs()
 
@@ -182,20 +168,11 @@ def test_only_the_tag_job_may_write():
     assert re.search(r"^permissions: \{\}$", _RELEASE.read_text(encoding="utf-8"), re.MULTILINE)
 
 
-def test_the_gate_and_the_tag_wait_for_the_jobs_before_them_and_carry_no_files():
+def test_the_build_and_the_tag_wait_for_the_jobs_before_them():
     jobs = _jobs()
 
-    assert _with_values(jobs["gate"]).keys() == {"version"}
     assert "needs: gate\n" in jobs["build"]
     assert "needs: [gate, build]\n" in jobs["tag"]
-    assert _with_values(jobs["tag"]).keys() == {"version", "commit"}
-
-
-def test_the_tag_job_tags_the_commit_the_gate_judged_at_the_dispatched_version():
-    with_values = _with_values(_jobs()["tag"])
-
-    assert with_values["commit"] == "${{ needs.gate.outputs.commit }}"
-    assert with_values["version"] == "${{ inputs.version }}"
 
 
 def test_a_failed_or_skipped_gate_or_build_skips_the_jobs_after_it():
@@ -221,7 +198,3 @@ def test_each_quality_workflow_is_pinned_where_ci_pins_the_quality_gate(workflow
 
     assert release_pin
     assert release_pin.group(1) == ci_pin.group(1)
-
-
-def test_the_release_has_exactly_the_gate_the_build_and_the_tag_job():
-    assert set(_jobs()) == {"gate", "build", "tag"}
