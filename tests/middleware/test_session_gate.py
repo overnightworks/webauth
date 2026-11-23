@@ -35,7 +35,6 @@ from tests.support.session_gate_arrangement import (
 )
 from tests.support.session_store_arrangement import (
     SessionRecordsInMemory,
-    SessionsFailingToLoad,
     SessionsRecordingTheirTransaction,
     SessionsThatMustNotBeAsked,
 )
@@ -337,11 +336,9 @@ class TestOptionalPaths:
         assert ask(app, "/optional", cookie=signed_in(app)).json() == {"username": None}
 
     def test_a_failing_store_is_the_library_500_never_an_anonymous_pass(self) -> None:
-        app = a_gated_app(
-            a_session(),
-            optional=self.OPTIONAL,
-            sessions=SessionsFailingToLoad(a_session()),
-        )
+        sessions = SessionRecordsInMemory(a_session())
+        sessions.load_failure = ConnectionError("session store down")
+        app = a_gated_app(a_session(), optional=self.OPTIONAL, sessions=sessions)
         response = ask(app, "/optional", cookie=signed_in(app))
         assert response.status_code == 500
         assert_carries_policy_headers(response.headers, GATED_APP_HEADERS_POLICY, hsts=True)
