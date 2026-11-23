@@ -28,7 +28,7 @@ Request boundaries for the changing engineer, from [`middleware`](../src/webauth
 Module owners in `webauth`: `oidc_login` coordinates the sign-in decision, sessions, logout and fresh tokens.
 
 - `web_auth` is the composition call ([host contract](host-contract.md#the-composition-call)): `WebAuth.build` checks the host's settings and builds the relying party, and `install` composes the request line and the client-address writer (only for `front=TrustedProxies`), the host's `outside` and `inside` middleware, the stack and the sign-in routes in one order, and `web_auth_front` puts the request line and the writer around a router of several apps built with `ServedBehind.SHARED_FRONT`; `dependencies` reads the sessions entry the install publishes on the app.
-- `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes, selects `SignInPaths` policies and answers failures.
+- `sign_in_routes` registers the sign-in start, callback, logout and back-channel logout routes and answers failures; `stack._with_sign_in_rules` derives the `SignInPaths` policies.
 - `admission` decides who gets in and as which `AppRole`, from the groups and an `AdmissionConfig`, with no I/O; `_account_provisioning` owns finding, creating, re-roling and re-kinding the account a sign-in or a bearer token names, which `oidc_login` and the bearer gate apply, and services call `app_role`.
 - `config` holds deployment facts and the one record `WebAuth.install` publishes on the app; `policies` selects exemptions, caching, rate limits and admitted `AuthorizedParties`.
 - `cookies` signs, issues and clears session/pending cookies; `dependencies` admits sessions and WebSocket users; the private `_bearer_admission` holds what the bearer gate admitted for a request, and the session readers, both gates and the CSRF check read it there.
@@ -46,7 +46,7 @@ Module owners in `webauth`: `oidc_login` coordinates the sign-in decision, sessi
 The host owns users; webauth owns the role names (`AppRole`), writes the group-derived role and authorizes only the admin check.
 The host owns transactions: rollback removes auth writes, per-call persistence keeps them; rate limits count attempts either way.
 The sign-in callback, the logout route and the back-channel logout route each enter one host-owned `SignInTransaction`, serialized against every other entry over the same stores. Session-gate renewal is durable before route execution. The library never commits or issues access/ID tokens.
-The host owns its routes except the four `auth.install` registers for the sign-in paths; [the library's responses](host-contract.md#signed-out-and-refused) are in the host contract.
+The host owns its routes except those `auth.install` registers for the sign-in paths; [the library's responses](host-contract.md#signed-out-and-refused) are in the host contract.
 
 ## 3. Runtime View
 
@@ -129,7 +129,7 @@ The operator's account and environment are trusted. A same-user race between lis
 
 ### Session lifetime
 
-`SessionLifetime` bounds idle time and total time since creation. Groups are not rechecked during a session; [the host contract](host-contract.md#what-every-app-gets) owns membership/role changes. For `login_group`, both recommended windows are 12 hours.
+`SessionLifetime` bounds idle time and total time since creation. Groups are not rechecked during a session; [the host contract](host-contract.md#what-every-app-gets) owns membership/role changes.
 
 ### Rate limiting, and the optional Redis extra
 
@@ -148,7 +148,7 @@ A host store, or a transaction's entry or exit, that cannot reach its backing st
 CI's `checks` job runs `scripts/run_static_checks.sh` (ruff, format, deptry, pyright, the typing hosts against the built wheel), `pytest tests` with branch coverage and the hash-pinned build;
 both jobs run against a Postgres service, so the tests of the `postgres` extra, the store contract kit among them, run on a real database; `lowest-direct` runs the tests at the lowest declared versions with the `redis` and `postgres` extras; `quality / verdict` takes the coverage artifact, SonarCloud and the import contracts.
 The browser proof (Chromium, Firefox and WebKit against a real Keycloak) and the OIDF conformance suite run by hand through `scripts/run_oidc_proof.sh` and the [runbooks](runbooks/run-the-browser-proof.md); CI only lints `tests/e2e/`.
-The host contract names the test that proves each rule.
+Each test names the rule it proves by its ID at the start of its docstring, and a static test holds that every rule of the host contract is named or marked.
 
 ### Trust
 

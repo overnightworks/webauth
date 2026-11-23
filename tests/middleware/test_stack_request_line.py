@@ -87,6 +87,7 @@ def test_the_request_line_has_the_account_its_session_guard_admitted_as_sub(
     status: int,
     sub: str | None,
 ) -> None:
+    """LOG-06: the account the session gate admitted is the line's `sub`."""
     app = guard(a_session(user=FakeUser(id="user-1", username="alice")))
 
     with request_lines_written(capsys) as lines:
@@ -224,6 +225,7 @@ def test_the_client_address_webauth_resolves_is_the_ip_of_the_request_line(
     peer: str,
     expected: str,
 ) -> None:
+    """LOG-06: the client address `TrustedProxies` resolves is the line's `ip`."""
     app = a_gated_app()
 
     with (

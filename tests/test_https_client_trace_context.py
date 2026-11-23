@@ -42,6 +42,7 @@ def test_an_issuer_call_inside_a_trace_carries_traceparent_and_tracestate_only_w
     tracestate: str | None,
     token_server: LoopbackHttpsServer,
 ) -> None:
+    """TRACE-01: inside a trace the call carries `traceparent`, and `tracestate` if present."""
     with configured("webauth-test"), inside_a_trace(tracestate=tracestate):
         call(token_server)
 
@@ -56,6 +57,7 @@ def test_an_issuer_call_inside_a_trace_carries_traceparent_and_tracestate_only_w
 def test_an_issuer_call_never_carries_the_callers_baggage(
     call: Callable[[LoopbackHttpsServer], object], token_server: LoopbackHttpsServer
 ) -> None:
+    """TRACE-02: logline's propagator leaves the caller's baggage out of the call."""
     with configured("webauth-test"), inside_a_trace(baggage_entry="a-session-id"):
         call(token_server)
 
@@ -68,6 +70,7 @@ def test_an_issuer_call_never_carries_the_callers_baggage(
 def test_an_issuer_call_outside_a_trace_sends_the_request_it_sent_before_propagation(
     call: Callable[[LoopbackHttpsServer], object], token_server: LoopbackHttpsServer
 ) -> None:
+    """TRACE-01: outside a trace the call is the request it was before."""
     with global_propagator_writing({}):
         call(token_server)
     with configured("webauth-test"):
@@ -84,6 +87,7 @@ def test_a_raising_propagator_leaves_the_calls_outcome_and_its_log_unchanged(
     token_server: LoopbackHttpsServer,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """TRACE-04: a propagator that raises changes neither the call's outcome nor its log."""
     with global_propagator_writing({}):
         expected_outcome = call(token_server)
     records_without_failure = [(record.name, record.levelno) for record in caplog.records]
@@ -131,6 +135,7 @@ def _lines_named(received: ReceivedRequest, name: str) -> list[str]:
 def test_the_headers_a_token_post_owns_arrive_once_and_unchanged_whatever_a_propagator_writes(
     written: dict[str, str], token_server: LoopbackHttpsServer
 ) -> None:
+    """TRACE-03: a propagator's header never replaces one webauth fixes."""
     with global_propagator_writing({}):
         _posting_a_token_request(token_server)
     with global_propagator_writing({**written, "traceparent": TRACEPARENT}):
@@ -146,6 +151,7 @@ def test_the_headers_a_token_post_owns_arrive_once_and_unchanged_whatever_a_prop
 def test_a_key_set_fetch_keeps_the_host_of_its_url_whatever_a_propagator_writes(
     token_server: LoopbackHttpsServer,
 ) -> None:
+    """TRACE-03: a propagator's `Host` never replaces the host of the URL."""
     with global_propagator_writing({"Host": "elsewhere.example"}):
         _fetching_the_key_set(token_server)
 

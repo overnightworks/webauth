@@ -115,6 +115,7 @@ def test_a_refresh_answer_without_a_refresh_token_yields_none() -> None:
 def test_a_grant_accepts_a_bearer_token_type_in_any_ascii_case(
     grant: Callable[[OidcRelyingParty], SecretStr | OidcRefusal], token_type: str
 ) -> None:
+    """WORKLOAD-05: a bearer `token_type` is accepted in any ASCII case."""
     outcome = grant(_granting(_grant_answer(token_type=token_type)))
 
     assert outcome == SecretStr("granted-token")
@@ -142,6 +143,7 @@ _NOT_A_BEARER_ACCESS_TOKEN = {
 def test_a_grant_answer_that_is_no_bearer_access_token_is_refused(
     grant: Callable[[OidcRelyingParty], SecretStr | OidcRefusal], changes: dict[str, Any]
 ) -> None:
+    """WORKLOAD-05: an answer that is no bearer `access_token` is `TOKEN_ENDPOINT_FAILED`."""
     assert grant(_granting(_grant_answer(**changes))) == OidcRefusal(
         OidcRefusalReason.TOKEN_ENDPOINT_FAILED
     )
@@ -379,7 +381,7 @@ def _a_relying_party_at(
 def test_a_workload_token_is_reused_strictly_before_30_seconds_short_of_its_lifetime(
     seconds_after_the_post: int, posts: int
 ) -> None:
-    """WORKLOAD-01, WORKLOAD-02: the margin is 30 s; at it the token is replaced."""
+    """WORKLOAD-01, WORKLOAD-02, WORKLOAD-07: the margin is 30 s; at it the token is replaced."""
 
     issuer = _a_reusing_issuer(expires_in=300)
     clock = FakeClock(5_000.0)
@@ -445,7 +447,7 @@ def test_a_wall_clock_jump_changes_nothing_about_how_long_a_workload_token_is_re
 def test_a_workload_token_without_a_usable_lifetime_is_handed_out_and_not_kept(
     lifetime: object,
 ) -> None:
-    """WORKLOAD-04: an answer without a lifetime longer than the margin is not kept."""
+    """WORKLOAD-05, WORKLOAD-04: an answer without a lifetime longer than the margin is not kept."""
 
     issuer = _a_reusing_issuer(expires_in=lifetime)
     relying_party = _a_relying_party_at(issuer)

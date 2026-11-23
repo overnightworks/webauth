@@ -224,6 +224,7 @@ _REFUSALS_WHERE_THE_ISSUER_SENDS_ISS = [
 def test_a_callback_the_issuer_cannot_be_credited_with_is_refused_and_exchanges_no_code(
     login_at_an_issuer_sending_iss: LoginScenario, attempt: Attempt, refusal: OidcRefusal
 ) -> None:
+    """DISCOVERY-13: a callback without `iss`, or with another, is refused and exchanges no code."""
     _pending, outcome = login_at_an_issuer_sending_iss.attempt(attempt)
 
     assert outcome == refusal
@@ -488,6 +489,7 @@ def test_a_login_that_does_not_stand_is_refused_with_its_reason_and_leaks_nothin
     refusal: OidcRefusal,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """REFUSE-29: a refusal carries the issuer's registered `idp_error` code, and leaks nothing."""
     caplog.set_level(logging.DEBUG)
 
     pending, outcome = login.attempt(attempt)
