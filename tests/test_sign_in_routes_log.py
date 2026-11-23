@@ -139,7 +139,7 @@ def test_each_refusal_writes_one_sign_in_refused_line_at_info(
     fields: dict[str, object],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """LOG-07: the event and its fields, at INFO, for every kind of refusal."""
+    """SIGNIN-72, LOG-07: the event and its fields, at INFO, for every kind of refusal."""
     refused_host = host()
     query = returned_query(refused_host, refused_host.sign_in_at_issuer())
     caplog.set_level(logging.DEBUG)
@@ -234,6 +234,7 @@ def test_a_completed_sign_in_writes_one_line_at_info_with_the_sub_alone(
     users: tuple[FakeUser, ...],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """SIGNIN-72, LOG-07: the completed line carries the `sub` and nothing else."""
     host = an_oidc_host(*users)
     query = host.sign_in_at_issuer(return_to="/albums/secret-return-path")
     caplog.set_level(logging.DEBUG)

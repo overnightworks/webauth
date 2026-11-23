@@ -1,9 +1,7 @@
 """The start, callback, logout and back-channel logout routes of signing in through an
 OpenID Connect issuer.
 
-``WebAuth.install`` registers the routes on the host's ``FastAPI`` app,
-and ``SignInPaths`` derives the policies the host's gate, rate limit, body-size, CSRF and
-cache rules need for exactly those paths, so the host lists them once. The start, callback and
+``WebAuth.install`` registers the routes on the host's ``FastAPI`` app. The start, callback and
 logout routes are synchronous and run in the threadpool; the back-channel route reads its body
 on the event loop and then makes one worker-thread call. Configuration comes from the installed
 ``WebAuthConfig``, and the library adds no middleware. The callback writes one line for its

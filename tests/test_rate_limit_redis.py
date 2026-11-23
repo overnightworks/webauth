@@ -168,6 +168,7 @@ class TestHostsWithSkewedClocksSharingOneRedis:
 
 class TestMiddlewareOverRedisBackend:
     def test_rejects_closed_when_the_backend_cannot_answer(self) -> None:
+        """STACK-14: a limiter that raises refuses the request with 503 and `Retry-After: 5`."""
         client = a_rate_limited_client(AlwaysFailingRateLimitBackend(), max_requests=5)
         rejected = client.get(RATE_LIMITED_PATH)
         assert rejected.status_code == 503

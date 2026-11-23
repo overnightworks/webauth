@@ -598,7 +598,7 @@ def test_the_settings_are_refused_without_stating_whether_the_host_keeps_the_id_
 
 
 def test_a_host_without_a_logout_path_and_page_text_registers_no_logout_route() -> None:
-    """SIGNIN-16: a host with neither registers no logout route."""
+    """COMPOSE-07: a host with neither registers no logout route."""
     app = FastAPI()
 
     install_the_gated_stack(
