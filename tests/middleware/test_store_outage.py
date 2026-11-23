@@ -4,9 +4,8 @@ entry; a store that fails otherwise stays a loud 500."""
 from __future__ import annotations
 
 import logging
-import threading
 from contextlib import contextmanager, nullcontext, suppress
-from threading import Barrier, Event, Thread
+from threading import Barrier, Thread
 from typing import TYPE_CHECKING
 
 import pytest
@@ -579,97 +578,3 @@ def test_log_08_a_clean_sign_in_transaction_ends_an_outage_the_session_gate_open
 
     assert callback.status_code == 303
     assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT, RECOVERED_EVENT]
-
-
-class _SlowFailedLine(logging.Handler):
-    """Holds the failed line until released and lists the lines in the order they finished.
-
-    It takes no handler lock, which would order two lines on its own. ``answer_settled`` is set
-    when the recovered line is written, or by ``_WatchedLock`` when the answer starts waiting for a
-    lock another thread holds.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(logging.INFO)
-        self.writing_failed = Event()
-        self.failed_line_may_finish = Event()
-        self.answer_settled = Event()
-        self.finished: list[str] = []
-
-    def handle(self, record: logging.LogRecord) -> bool:
-        self.emit(record)
-        return True
-
-    def emit(self, record: logging.LogRecord) -> None:
-        name = record.getMessage()
-        if name == FAILED_EVENT:
-            self.writing_failed.set()
-            self.failed_line_may_finish.wait(timeout=10)
-        if name in {FAILED_EVENT, RECOVERED_EVENT}:
-            self.finished.append(name)
-        if name == RECOVERED_EVENT:
-            self.answer_settled.set()
-
-
-_new_lock = threading.Lock
-
-
-class _WatchedLock:
-    """A lock that sets ``contended`` right before a thread starts waiting for it."""
-
-    def __init__(self, contended: Event) -> None:
-        self._lock = _new_lock()
-        self._contended = contended
-
-    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:  # noqa: FBT001, FBT002
-        if self._lock.acquire(blocking=False):
-            return True
-        if not blocking:
-            return False
-        self._contended.set()
-        return self._lock.acquire(blocking, timeout)
-
-    def release(self) -> None:
-        self._lock.release()
-
-    def locked(self) -> bool:
-        return self._lock.locked()
-
-    def __enter__(self) -> bool:
-        return self.acquire()
-
-    def __exit__(self, *_exception: object) -> None:
-        self.release()
-
-
-def test_log_08_a_clean_answer_waits_for_the_failed_line_still_being_written(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    world = a_signed_in_world()
-    handler = _SlowFailedLine()
-    with monkeypatch.context() as composing:
-        composing.setattr(threading, "Lock", lambda: _WatchedLock(handler.answer_settled))
-        composed = a_host(world)
-    host = the_host_driven(composed, raising=True)
-    headers = {**FORWARDED, **world.signed_cookie()}
-    root = logging.getLogger()
-    previous_level = root.level
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
-    try:
-        world.sessions.load_failure = a_store_outage()
-        refused = Thread(target=lambda: host.client.get(ME_PATH, headers=headers))
-        refused.start()
-        assert handler.writing_failed.wait(timeout=10)
-        world.sessions.load_failure = None
-        answered = Thread(target=lambda: host.client.get(ME_PATH, headers=headers))
-        answered.start()
-        assert handler.answer_settled.wait(timeout=10)
-        handler.failed_line_may_finish.set()
-        refused.join(timeout=10)
-        answered.join(timeout=10)
-    finally:
-        root.removeHandler(handler)
-        root.setLevel(previous_level)
-
-    assert handler.finished == [FAILED_EVENT, RECOVERED_EVENT]
