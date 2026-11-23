@@ -167,9 +167,8 @@ def test_proxy_07_a_socket_of_each_child_writes_one_line_with_the_client_and_its
 
 def test_proxy_09_an_http_request_to_a_child_without_its_front_answers_the_library_500() -> None:
     """PROXY-09"""
-    host = a_composed_host(
-        a_host_world(), a_composition(a_host_world(), front=ServedBehind.SHARED_FRONT)
-    )
+    world = a_host_world()
+    host = a_composed_host(world, a_composition(world, front=ServedBehind.SHARED_FRONT))
 
     response = host.client.get(API_PATH)
 
@@ -179,9 +178,8 @@ def test_proxy_09_an_http_request_to_a_child_without_its_front_answers_the_libra
 
 def test_proxy_09_the_refusal_of_a_sign_in_path_without_its_front_is_not_stored() -> None:
     """PROXY-09"""
-    host = a_composed_host(
-        a_host_world(), a_composition(a_host_world(), front=ServedBehind.SHARED_FRONT)
-    )
+    world = a_host_world()
+    host = a_composed_host(world, a_composition(world, front=ServedBehind.SHARED_FRONT))
 
     response = host.client.get(SIGN_IN_PATHS.start)
 

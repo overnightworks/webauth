@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from logline import RequestLineMiddleware
 from starlette.middleware import Middleware
 
 from webauth.middleware.bearer_gate import BearerGate, _BearerGateMiddleware
 from webauth.middleware.body_size import _BodySizeLimitMiddleware
 from webauth.middleware.client_address import (
-    _ClientAddressMiddleware,
+    _front_entries,
     _FrontRequiredMiddleware,
 )
 from webauth.middleware.csrf import _CsrfOriginMiddleware
@@ -132,14 +132,12 @@ def _effective_security_headers(
             )
         )
     )
-    return SecurityHeadersPolicy(
-        content_security_policy=security_headers.content_security_policy,
+    return copy.replace(
+        security_headers,
         cache_control_rules=(
             *(CacheControlRule(rules, "no-store") for rules in no_store_paths),
             *security_headers.cache_control_rules,
         ),
-        permissions_policy=security_headers.permissions_policy,
-        content_security_policy_rules=security_headers.content_security_policy_rules,
     )
 
 
@@ -216,10 +214,7 @@ def _front_middleware(
     app a shared front serves (``None``), the guard that refuses a request without that front."""
     if trusted_proxies is None:
         return [Middleware(_FrontRequiredMiddleware, policy=security_headers)]
-    return [
-        Middleware(RequestLineMiddleware),
-        Middleware(_ClientAddressMiddleware, trusted_proxies=trusted_proxies),
-    ]
+    return _front_entries(trusted_proxies)
 
 
 def _install_web_auth_middleware(
