@@ -1,8 +1,0 @@
-claim_id = "ebe9296ef84244fe890014b1933c6467"
-agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
-role = "builder"
-base = "b70f583c27a7f01b1f471d9dd84dd19d6992ab1d"
-branch = "claude/issue-897-the-front-guard-owns-its-refusal"
-scope = ["docs/host-contract.md", "src/webauth/middleware/client_address.py", "src/webauth/middleware/security_headers.py", "src/webauth/middleware/stack.py", "src/webauth/proxies.py", "src/webauth/web_auth.py", "tests/middleware/test_client_address.py", "tests/middleware/test_security_headers.py", "tests/test_web_auth_front.py"]
-opened_commit = "7af691b5e3f6a04a563e47f9ae02c42a9d4a2885"
-whole_reason = "One front composition: the guard's refusal, the order of the front and the headers it answers with change together across the four modules that compose the front."
