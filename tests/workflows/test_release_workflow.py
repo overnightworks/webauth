@@ -168,11 +168,30 @@ def test_only_the_tag_job_may_write():
     assert re.search(r"^permissions: \{\}$", _RELEASE.read_text(encoding="utf-8"), re.MULTILINE)
 
 
+def _needs(job: str) -> set[str]:
+    needs = re.search(r"^    needs: (.*)$", job, re.MULTILINE)
+    assert needs
+    return set(re.findall(r"\w+", needs.group(1)))
+
+
+def _value(job: str, key: str) -> str:
+    value = re.search(rf"^      {key}: (.*)$", job, re.MULTILINE)
+    assert value
+    return value.group(1)
+
+
 def test_the_build_and_the_tag_wait_for_the_jobs_before_them():
     jobs = _jobs()
 
-    assert "needs: gate\n" in jobs["build"]
-    assert "needs: [gate, build]\n" in jobs["tag"]
+    assert _needs(jobs["build"]) == {"gate"}
+    assert _needs(jobs["tag"]) == {"gate", "build"}
+
+
+def test_the_tag_lands_on_the_commit_and_version_the_build_verified():
+    jobs = _jobs()
+
+    assert _value(jobs["tag"], "commit") == _value(jobs["build"], "COMMIT")
+    assert _value(jobs["tag"], "version") == _value(jobs["build"], "VERSION")
 
 
 def test_a_failed_or_skipped_gate_or_build_skips_the_jobs_after_it():

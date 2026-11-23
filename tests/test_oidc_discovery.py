@@ -243,7 +243,7 @@ def test_a_malformed_issuer_is_refused_with_the_configurations_error_before_any_
         pytest.param("authorization_response_iss_parameter_supported", ["true"], id="iss-list"),
     ],
 )
-def test_a_document_member_of_the_wrong_shape_is_refused_naming_it(
+def test_methods_without_s256_and_a_non_boolean_iss_support_are_refused_naming_the_member(
     field_name: str, value: object
 ) -> None:
     """DISCOVERY-03, DISCOVERY-12, DISCOVERY-06: code challenge methods without S256 and an iss
