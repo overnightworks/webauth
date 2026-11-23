@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -131,14 +132,13 @@ def _effective_security_headers(
             )
         )
     )
-    effective: SecurityHeadersPolicy = replace(
+    return copy.replace(
         security_headers,
         cache_control_rules=(
             *(CacheControlRule(rules, "no-store") for rules in no_store_paths),
             *security_headers.cache_control_rules,
         ),
     )
-    return effective
 
 
 def _library_middleware(
