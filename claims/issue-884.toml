@@ -1,8 +1,0 @@
-claim_id = "60b7b208576c4a55b65ed8117e66e662"
-agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
-role = "builder"
-base = "f30388aab1742b58c9718ae8bfa34bf0c0f94949"
-branch = "claude/issue-884-webauth-pins-quality-v0-24-0"
-scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", ".github/workflows/release.yml", "pyproject.toml", "uv.lock"]
-opened_commit = "fb6e8afb3a5a9185a3a08b14ae0d5f8aa465ed3a"
-whole_reason = "The quality pins move in all three workflows together with the pytest-randomly lock and the seeded pytest calls, or the gate judges a tree its pin does not match."
