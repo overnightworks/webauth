@@ -121,7 +121,7 @@ forbidden_modules =
     webauth.oidc_login
 
 # The bearer gate admits accounts through webauth._account_provisioning, so no middleware module
-# reaches into the sign-in steps. The stack names SignInPaths for typing only, under TYPE_CHECKING.
+# reaches into the sign-in steps.
 [importlinter:contract:middleware-imports-no-sign-in-step]
 name = webauth.middleware imports neither webauth.oidc_login nor webauth.sign_in_routes
 type = forbidden
@@ -130,8 +130,6 @@ source_modules =
 forbidden_modules =
     webauth.oidc_login
     webauth.sign_in_routes
-ignore_imports =
-    webauth.middleware.stack -> webauth.sign_in_routes
 
 # The single-process stores are a host's choice for one worker. No webauth
 # module imports them, so the library never falls back to them.
