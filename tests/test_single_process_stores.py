@@ -419,12 +419,17 @@ class TestErase:
         with_account(stores)
         kept = open_session(stores)
 
-        with pytest.raises(RuntimeError, match="boom"), stores.transaction():
-            stores.sessions.erase(SUBJECT_ONE)
-            raise RuntimeError("boom")
+        with pytest.raises(RuntimeError, match="boom"):
+            erase_and_raise_inside_an_entry(stores)
 
         assert stores.accounts.get(SUBJECT_ONE) is not None
         assert stores.sessions.load(kept) is not None
+
+
+def erase_and_raise_inside_an_entry(stores: SingleProcessStores) -> None:
+    with stores.transaction():
+        stores.sessions.erase(SUBJECT_ONE)
+        raise RuntimeError("boom")
 
 
 def enter_and_leave(stores: SingleProcessStores) -> None:
