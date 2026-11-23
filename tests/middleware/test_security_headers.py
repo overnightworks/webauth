@@ -307,8 +307,10 @@ async def test_a_websocket_without_a_client_raises_and_reaches_no_app() -> None:
 
     scope: Scope = {"type": "websocket", "headers": [], "query_string": b"", "app": an_app()}
 
+    middleware = _SecurityHeadersMiddleware(reached_app, POLICY)
+
     with pytest.raises(RuntimeError, match="web_auth_front"):
-        await _SecurityHeadersMiddleware(reached_app, POLICY)(scope, no_receive, refusing_send)
+        await middleware(scope, no_receive, refusing_send)
 
     assert reached == []
 

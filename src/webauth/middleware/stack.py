@@ -131,8 +131,10 @@ def _effective_security_headers(
             )
         )
     )
-    return replace(
-        security_headers,
+    return SecurityHeadersPolicy(
+        content_security_policy=security_headers.content_security_policy,
+        permissions_policy=security_headers.permissions_policy,
+        content_security_policy_rules=security_headers.content_security_policy_rules,
         cache_control_rules=(
             *(CacheControlRule(rules, "no-store") for rules in no_store_paths),
             *security_headers.cache_control_rules,
