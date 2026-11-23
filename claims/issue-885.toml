@@ -3,5 +3,6 @@ agent = "Claude 015f7a9a-42d6-465a-a54b-17076e4d7c04"
 role = "builder"
 base = "f30388aab1742b58c9718ae8bfa34bf0c0f94949"
 branch = "claude/issue-885-take-logline-v1-9-0"
-scope = ["pyproject.toml", "tests/test_https_client_log.py", "uv.lock"]
+scope = ["pyproject.toml", "tests/test_https_client_log.py", "tests/test_https_client_trace_context.py", "uv.lock"]
 opened_commit = "7b77fef061d538b5edd4bb11524f504063281dfa"
+whole_reason = "One dev pin raise and the two tests whose assertions the new span keys reach."
