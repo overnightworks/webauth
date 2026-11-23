@@ -32,6 +32,7 @@ from tests.support.gate_arrangement import (
     PERSON_PREFIX,
     PERSON_REALM,
     REALM_INSUFFICIENT_SCOPE,
+    REALM_INVALID_TOKEN,
     RESOURCE_URL,
     a_key_set_answering,
     a_resource,
@@ -419,17 +420,24 @@ def test_a_person_path_refuses_a_malformed_or_invalid_token_with_a_challenge_wit
     [[RESOURCE_URL, APP_CLIENT_ID], [APP_CLIENT_ID, RESOURCE_URL]],
     ids=["url-first", "client-first"],
 )
-def test_a_person_path_refuses_the_url_and_client_pair_beside_a_resource_that_admits_it(
-    audience: list[str],
+@pytest.mark.parametrize(
+    ("path", "invalid_token_challenge"),
+    [
+        pytest.param(EXPORT_PATH, REALM_INVALID_TOKEN, id="machine-path"),
+        pytest.param(PERSON_ME_PATH, PERSON_INVALID_TOKEN, id="person-path"),
+    ],
+)
+def test_a_path_refuses_the_url_and_client_pair_beside_a_resource_that_admits_it(
+    audience: list[str], path: str, invalid_token_challenge: str
 ) -> None:
-    """RESOURCE-86, RESOURCE-87: a token naming the resource's `url` and the app's client id is
-    a 401 `invalid_token` on a person path of a gate whose resource admits the pair, and
-    admits no one."""
+    """MACHINE-09, RESOURCE-86, RESOURCE-87: a token naming the resource's `url` and the app's
+    client id is a 401 `invalid_token` on a machine or a person path of a gate whose resource
+    admits the pair, and admits no one."""
     app = a_person_app(resource=replace(a_resource(), admits_client_audience=True))
 
-    response = app.ask(PERSON_ME_PATH, authorization=bearing(a_token(aud=audience)))
+    response = app.ask(path, authorization=bearing(a_token(aud=audience)))
 
-    assert (response.status_code, the_challenge(response)) == (401, PERSON_INVALID_TOKEN)
+    assert (response.status_code, the_challenge(response)) == (401, invalid_token_challenge)
     assert (the_account(app), ran(app)) == (None, [])
 
 
