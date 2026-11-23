@@ -35,6 +35,7 @@ postgres = ["sqlalchemy>=2.0.44,<3"]
 dev = [
     "pytest>=7.4,<10",
     "pytest-cov>=7,<8",
+    "pytest-randomly>=4,<5",
     "pytest-xdist>=3.7,<4",
     "fakeredis[lua]>=2.20,<3",
     "psycopg[binary]>=3.2,<4",
