@@ -270,9 +270,7 @@ def _names_bound_outside_the_statements_the_guard_reads(
     return hidden
 
 
-PUBLIC_MODULES = [
-    name for name in WEBAUTH_MODULES if not any(part.startswith("_") for part in name.split("."))
-]
+PUBLIC_MODULES = [name for name in WEBAUTH_MODULES if not _is_private_module(name)]
 
 
 @pytest.mark.parametrize("module_name", WEBAUTH_MODULES)
