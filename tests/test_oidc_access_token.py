@@ -167,6 +167,7 @@ def test_the_verifier_refuses_media_types_it_cannot_compare(keywords: dict[str, 
             rejected(RejectionReason.INVALID_AUDIENCE),
             id="another-client-only",
         ),
+        pytest.param({"aud": ABSENT}, rejected(RejectionReason.INVALID_CLAIM), id="no-audience"),
         pytest.param({"aud": [APP_CLIENT_ID, OTHER_APP]}, INVALID_CLAIM, id="own-and-another-app"),
         pytest.param({"aud": [APP_CLIENT_ID, "account"]}, INVALID_CLAIM, id="own-and-account"),
         pytest.param(
@@ -187,13 +188,6 @@ def test_the_audience_must_be_the_app_alone(
 ) -> None:
     """MACHINE-09: a token passes only if its only `aud` is the app's client."""
     assert verified(an_access_token(claims=claims)) == refusal
-
-
-def test_a_token_without_an_audience_is_refused_as_rejected() -> None:
-    outcome = verified(an_access_token(claims={"aud": ABSENT}))
-
-    assert isinstance(outcome, OidcRefusal)
-    assert outcome.reason is OidcRefusalReason.ACCESS_TOKEN_REJECTED
 
 
 def test_a_singleton_audience_array_of_the_app_is_accepted() -> None:
