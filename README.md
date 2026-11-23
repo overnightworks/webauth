@@ -94,7 +94,7 @@ auth.install(app, bearer=None)
 
 A host with one worker and no database keeps its accounts and sessions in memory with `SingleProcessStores(audit=the_hosts_audit_sink)` from `webauth.single_process_stores`: pass its `transaction` as `stores.sign_in` and `lambda: nullcontext(stores.sessions)` as `stores.sessions`. A restart forgets every account and session ([the single-process stores](docs/host-contract.md#the-single-process-stores)).
 
-`install` derives the policies of the four sign-in routes from `sign_in_paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
+`install` derives the policies of the sign-in routes from `sign_in_paths` and applies them ahead of the host's own, so the host lists them once; it also applies a rate limit and a body limit when the host passes none. The sign-in routes are in the [host contract](docs/host-contract.md#the-sign-in-routes); [`tests/fixtures/typing_hosts/oidc_host.py`](tests/fixtures/typing_hosts/oidc_host.py)
 is a complete host, checked in CI against the built wheel.
 
 ## Documentation
