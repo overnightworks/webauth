@@ -8,9 +8,6 @@ docstring. A test under `tests/e2e/` runs by hand against a real Keycloak, not
 in CI. A paragraph or bullet that opens with **Host duty:** says what the host
 must do and prove itself. A sentence with neither an ID nor a label explains.
 
-**Proven elsewhere:** on a bullet excuses its IDs from being named by a test, and its
-text names what proves them.
-
 ## Trusted proxies
 
 `TrustedProxies.parse("10.0.0.0/8")` names the trusted proxy addresses for the host, as the `front`
@@ -1160,13 +1157,13 @@ The back-channel route is open to anyone who can reach it, and the token is its 
 
 - **Host duty:** one worker only, because a restart forgets every account and session and a second worker sees none of the first's. A host with several workers, or one that keeps sessions across a restart, implements the ports over its database.
 - MEMSTORE-01: `SingleProcessStores(audit=...)` bundles `accounts` (a `SubjectUserStore`), `sessions` (a `SessionRecordStore`) and `transaction` (a `SignInTransaction`) over one set of tables; the host passes its own `AuditSink`, and webauth ships no logging sink.
-- MEMSTORE-02: `create` stores the session under the `session_id` it is given and mints none; `load` finds it under that id. **Proven elsewhere:** STORECHECK-03, which runs against `SingleProcessStores`.
-- MEMSTORE-03: `get` compares the subject character for character: no case, trailing-space or Unicode-normalization folding. **Proven elsewhere:** STORECHECK-03, which runs against `SingleProcessStores`.
+- MEMSTORE-02: `create` stores the session under the `session_id` it is given and mints none; `load` finds it under that id. STORECHECK-03's check, which runs against `SingleProcessStores`, proves it.
+- MEMSTORE-03: `get` compares the subject character for character: no case, trailing-space or Unicode-normalization folding. STORECHECK-03's check, which runs against `SingleProcessStores`, proves it.
 - MEMSTORE-04: `set_role`, `set_kind` and a session `create` for a missing account raise.
-- MEMSTORE-05: `touch` and `replace_refresh_token` on a missing session answer `False` and create no row. **Proven elsewhere:** STORECHECK-03, which runs against `SingleProcessStores`.
+- MEMSTORE-05: `touch` and `replace_refresh_token` on a missing session answer `False` and create no row. STORECHECK-03's check, which runs against `SingleProcessStores`, proves it.
 - MEMSTORE-06: `touch` writes the `expires_at` it is given and keeps both tokens; `replace_refresh_token` keeps the ID token.
 - MEMSTORE-07: `delete` of an unknown id is a no-op.
-- MEMSTORE-08: `prune_overflow` keeps the newest sessions by `created_at`; `0` keeps none. **Proven elsewhere:** STORECHECK-03, which runs against `SingleProcessStores`.
+- MEMSTORE-08: `prune_overflow` keeps the newest sessions by `created_at`; `0` keeps none. STORECHECK-03's check, which runs against `SingleProcessStores`, proves it.
 - MEMSTORE-09: `delete_for_user` ends every session of the account, returns how many ended, and keeps the account, as PGSTORE-06 does: a host's export or erasure after a sign-out needs it, and the next sign-in finds it and writes no `USER_CREATED`.
 - MEMSTORE-10: `create_for_subject` never raises `UsernameTakenError` and has no flag: the username is for display and the issuer decides who a subject is, so a raise would lock a re-created person out until a restart.
 - MEMSTORE-11: `load` returns an expired row, as the port says; the gate decides expiry.
@@ -1215,7 +1212,7 @@ webauth runs the store contract kit against the extra over a real Postgres, the 
 `webauth.store_contract` holds the duties of the account, session and sign-in transaction ports as checks, for a host that implements them over its database. It adds no dependency beyond webauth's own (the ports take pydantic's `SecretStr`) and needs no test framework.
 
 - **Host duty:** a store, or a transaction's entry or exit, raises `webauth.ports.StoreUnavailableError` when it cannot reach its backing store, with a text that names no statement, parameter, id, token or subject, and every other failure stays as it is (STACK-16). No check covers it: a host proves it by stopping its database.
-- **Host duty:** the host builds one `StoreAdapter` in its own fixture, from its `accounts`, `sessions` and `transaction` over its database, and runs every check of `STORE_CHECKS` against it, for example by parametrizing its database test over the tuple.
+- **Host duty:** the host builds one `StoreAdapter` in its own fixture, from its `accounts`, `sessions` and `transaction` over its database, and runs every check of `STORE_CHECKS` against it, for example by parametrizing its database test over the tuple. No check covers `SessionTransaction`: the host proves it itself.
 - STORECHECK-01: A check returns when the adapter keeps its duty and raises `AssertionError` when it breaks it, whatever the interpreter's assert setting.
 - STORECHECK-02: A check mints its own random subjects, usernames and session ids and takes its times from itself, so the checks run in parallel against a shared database and the adapter needs no clock. Its session ids have the form sign-in writes (`new_session_id()` in `webauth.oidc_login`, 43 characters), and its subjects are at most 36 characters, the length of a uuid `sub`.
 - **Host duty:** the host removes the rows the checks leave.
@@ -1233,7 +1230,7 @@ webauth runs the store contract kit against the extra over a real Postgres, the 
 - **Host duty:** for that check the host sets `StoreAdapter.transaction_in_another_process` to a picklable callable without arguments that builds its `SignInTransaction` in the child, for example a frozen dataclass that carries the database location.
 - **Host duty:** a host that runs one worker leaves it unset and skips the checks whose `crosses_processes` is true.
 - STORECHECK-05: A correct adapter always passes the cross-process check. A broken one is caught unless the child is scheduled later than the window the first entry stays open.
-- STORECHECK-06: No check covers `SessionTransaction`. **Proven elsewhere:** no test can show that a check is absent, and the host duty above says what the host proves itself.
+- STORECHECK-06 (retired).
 
 webauth runs the kit against `SingleProcessStores` for every check but the cross-process one, against a file-lock adapter and its lockless twin for the cross-process one, and against a broken adapter for each check. The kit takes over the proof of MEMSTORE-02 (create and load), MEMSTORE-03, the raising of MEMSTORE-04, MEMSTORE-05 and MEMSTORE-08 for any adapter; `SingleProcessStores` keeps its tests for the rest of its rows.
 
