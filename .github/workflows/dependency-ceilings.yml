@@ -41,7 +41,7 @@ jobs:
           declared = [Requirement(text) for text in [*project["dependencies"], *optional]]
           git_sources = {
               canonicalize_name(name): source["git"]
-              for name, source in pyproject["tool"]["uv"]["sources"].items()
+              for name, source in pyproject.get("tool", {}).get("uv", {}).get("sources", {}).items()
               if "git" in source
           }
 
