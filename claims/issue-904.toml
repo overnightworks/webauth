@@ -1,8 +1,0 @@
-claim_id = "09f8d224a83548c5afdc5de0334d3bea"
-agent = "Claude db9ee0f2-5e66-41ce-8a93-01020f64dbba"
-role = "builder"
-base = "810c0dbbb766f4a07528ff1415f1897b84760212"
-branch = "claude/issue-904-webauth-pins-quality-v0-26-0"
-scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", ".github/workflows/release.yml", "docs", "quality/baseline.toml", "quality/config.toml", "tests"]
-opened_commit = "a79c7b66f1100bbba7e6745b352c38062b553154"
-whole_reason = "the pin does not move before the list is recorded, so the pin, the conversion of documents and citations and the recorded list move in one pull request."
