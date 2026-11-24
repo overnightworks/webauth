@@ -50,8 +50,8 @@ def test_every_check_is_paired_with_one_broken_adapter() -> None:
 def test_a_correct_adapter_passes_every_in_process_check(
     check: StoreCheck, build_adapter: Callable[[], StoreAdapter]
 ) -> None:
-    """STORECHECK-01, STORECHECK-02, STORECHECK-03: whatever a correct adapter arranges
-    differently, a check gives each account a unique username and a role webauth writes, mints
+    """STORECHECK-01, STORECHECK-02, STORECHECK-03, MEMSTORE-02, MEMSTORE-03, MEMSTORE-05,
+    MEMSTORE-08: whatever a correct adapter arranges differently, a check gives each account a unique username and a role webauth writes, mints
     subjects of a uuid's length and session ids of sign-in's."""
     check.run(build_adapter())
 
