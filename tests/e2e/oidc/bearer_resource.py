@@ -85,7 +85,7 @@ def agent_post(run: BearerRun, name: str, status: int) -> Any:
     return answer.json() if status == 200 else None
 
 
-def known_agent_is_admitted_as_a_person(run: BearerRun) -> str:
+def test_known_agent_is_admitted_as_a_person(run: BearerRun) -> str:
     """RESOURCE-24, RESOURCE-27: a known member's agent token is admitted with no cookie and no
     Origin as the user role."""
     before = ledger(run)
@@ -95,7 +95,7 @@ def known_agent_is_admitted_as_a_person(run: BearerRun) -> str:
     return f"{USER_NAME}'s agent token, POST, no cookie, no Origin: 200 user; ledger {before}"
 
 
-def stored_admin_is_admitted_with_the_person_role(run: BearerRun) -> str:
+def test_stored_admin_is_admitted_with_the_person_role(run: BearerRun) -> str:
     """RESOURCE-27: a stored admin is admitted with the user role, and the store is unchanged."""
     run.sign_in_after_reset(run.people["admin"])
     before = ledger(run)
@@ -104,7 +104,7 @@ def stored_admin_is_admitted_with_the_person_role(run: BearerRun) -> str:
     return f"{ADMIN_NAME}, a stored admin: 200 with role user; ledger unchanged {before}"
 
 
-def no_group_and_unknown_subject_are_refused_plainly(run: BearerRun) -> str:
+def test_no_group_and_unknown_subject_are_refused_plainly(run: BearerRun) -> str:
     """RESOURCE-21, RESOURCE-23: a member outside the MCP group, an outsider and an unknown subject
     get the plain 403."""
     before = ledger(run)
@@ -123,7 +123,7 @@ def no_group_and_unknown_subject_are_refused_plainly(run: BearerRun) -> str:
     )
 
 
-def the_agent_token_opens_no_other_path(run: BearerRun) -> str:
+def test_the_agent_token_opens_no_other_path(run: BearerRun) -> str:
     """RESOURCE-08, RESOURCE-09: the agent token is refused on a machine path and on an unmarked
     person path."""
     token = run.tokens["agent_user"]
@@ -136,7 +136,7 @@ def the_agent_token_opens_no_other_path(run: BearerRun) -> str:
     return "the agent token on /api/me, E and /admin: 401, 401, the session's 401; accounts 0"
 
 
-def tokens_the_resource_refuses(run: BearerRun) -> str:
+def test_tokens_the_resource_refuses(run: BearerRun) -> str:
     """RESOURCE-10, RESOURCE-15, RESOURCE-18, RESOURCE-20: an app bearer, two audiences and a
     missing scope are refused with the challenge."""
     for name, status, error in (
@@ -150,7 +150,7 @@ def tokens_the_resource_refuses(run: BearerRun) -> str:
     return "app bearer, wrong audience, two audiences: 401; no scope: 403 insufficient_scope"
 
 
-def no_credential_and_a_cookie_get_the_challenge(run: BearerRun) -> str:
+def test_no_credential_and_a_cookie_get_the_challenge(run: BearerRun) -> str:
     """RESOURCE-14, RESOURCE-31: no credential, and a cookie alone, get the challenge and open no
     session transaction."""
     run.host_pages.pop(ADMIN_NAME, None)
@@ -167,7 +167,7 @@ MARKED_PERSON = "/api/notes/7"
 ADMIN_ONLY = "/notes-admin"
 
 
-def marked_route_admits_the_agent_capped(run: BearerRun) -> str:
+def test_marked_route_admits_the_agent_capped(run: BearerRun) -> str:
     """RESOURCE-62: the agent token on a marked route is the capped person."""
     run.host_pages.pop(USER_NAME, None)
     run.host_page(run.people["user"])
@@ -181,7 +181,7 @@ def marked_route_admits_the_agent_capped(run: BearerRun) -> str:
     return f"{USER_NAME}'s agent token, GET and POST on marked routes, no cookie: 200 user"
 
 
-def marked_route_admin_reader_is_the_plain_403(run: BearerRun) -> str:
+def test_marked_route_admin_reader_is_the_plain_403(run: BearerRun) -> str:
     """RESOURCE-61: a stored admin on the marked admin route gets the plain 403."""
     run.sign_in_after_reset(run.people["admin"])
     before = ledger(run)
@@ -193,7 +193,7 @@ def marked_route_admin_reader_is_the_plain_403(run: BearerRun) -> str:
     return f"{ADMIN_NAME}, a stored admin, on the admin_user route: 403 without a challenge"
 
 
-def marked_route_refusals_beside_a_cookie(run: BearerRun) -> str:
+def test_marked_route_refusals_beside_a_cookie(run: BearerRun) -> str:
     """RESOURCE-56, RESOURCE-57: a missing scope and two audiences are refused beside a valid
     cookie."""
     run.host_pages.pop(ADMIN_NAME, None)
@@ -207,7 +207,7 @@ def marked_route_refusals_beside_a_cookie(run: BearerRun) -> str:
     return "no scope: 403 insufficient_scope; two audiences: 401; a valid cookie decides nothing"
 
 
-def a_bearer_on_a_marked_route_is_not_the_resource_admission(run: BearerRun) -> str:
+def test_a_bearer_on_a_marked_route_is_not_the_resource_admission(run: BearerRun) -> str:
     """RESOURCE-52, RESOURCE-53, RESOURCE-54: a token of another audience goes on as unmarked."""
     app_answer = run.send(Call("GET", MARKED_PERSON, run.tokens["user"]))
     assert_person_answer(app_answer, 200)
@@ -224,7 +224,7 @@ def a_bearer_on_a_marked_route_is_not_the_resource_admission(run: BearerRun) -> 
     return "an app bearer admitted as today; another audience: 401 on a person path, else ignored"
 
 
-def a_marked_route_keeps_session_and_csrf_without_a_bearer(run: BearerRun) -> str:
+def test_a_marked_route_keeps_session_and_csrf_without_a_bearer(run: BearerRun) -> str:
     """RESOURCE-49, RESOURCE-50: with no bearer a marked route keeps the session and CSRF."""
     origin = run.settings.app_origins[0]
     cookies = session_cookies(run.host_page(run.people["admin"]), origin)
@@ -241,7 +241,7 @@ def a_marked_route_keeps_session_and_csrf_without_a_bearer(run: BearerRun) -> st
     return "a cookie passes on a marked route; a cross-origin cookie POST: 403"
 
 
-def marked_route_refuses_the_agent_beyond_its_mark(run: BearerRun) -> str:
+def test_marked_route_refuses_the_agent_beyond_its_mark(run: BearerRun) -> str:
     """RESOURCE-45: the agent token is refused where the mark does not match."""
     run.sign_in_after_reset(run.people["user"])
     assert run.state()["accounts"] == 1, run.state()

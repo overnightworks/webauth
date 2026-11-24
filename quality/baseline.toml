@@ -16,16 +16,3 @@
 [clones]
 
 [spec_citations]
-uncited = [
-    "APP-28",
-    "APP-32",
-    "APP-37",
-    "CSRF-16",
-    "CSRF-17",
-    "MACHINE-25",
-    "MEMSTORE-02",
-    "MEMSTORE-03",
-    "MEMSTORE-05",
-    "MEMSTORE-08",
-    "STORECHECK-06",
-]
