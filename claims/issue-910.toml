@@ -1,8 +1,0 @@
-claim_id = "435948f0975e4b62b9f09d3d692dbf04"
-agent = "Claude db9ee0f2-5e66-41ce-8a93-01020f64dbba"
-role = "builder"
-base = "67af2834536831e13717582277418ed14686a4a2"
-branch = "claude/issue-910-no-held-uncited-ids"
-scope = ["docs/host-contract.md", "docs/runbooks", "quality/baseline.toml", "tests/e2e/oidc", "tests/test_store_contract.py", "tests/test_webauth_host_contract_ids.py"]
-opened_commit = "96c7389a581244b3e322f4314018c28d6c527569"
-whole_reason = "the held list only empties once all eleven IDs are cited or retired, and the static test goes in the landing that makes the rule its one owner."
