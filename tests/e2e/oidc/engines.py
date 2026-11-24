@@ -1,6 +1,6 @@
 """Drives the logout page in Chromium without JavaScript, Firefox and WebKit.
 
-``drive_engine_phase`` runs in ``prove.py``'s ``drive_browser`` after the default host's
+``test_drive_engine_phase`` runs in ``prove.py``'s ``drive_browser`` after the default host's
 scenarios and prints ``SCENARIO <number> <width> <origin>`` for scenarios 52 to 54. Each
 signs in at Keycloak, presses the host's button and holds the browser to the standard
 logout: a POST to the bare end-session endpoint whose form body carries ``id_token_hint``,
@@ -42,7 +42,7 @@ class EngineRun:
     confirmation_selector: str
 
 
-def logout_through_the_page(
+def test_logout_through_the_page(
     run: EngineRun,
     browser: Browser,
     width: Width,
@@ -101,7 +101,7 @@ def logout_through_the_page(
     )
 
 
-def other_engine(
+def test_other_engine(
     run: EngineRun,
     engine: BrowserType,
     mapped_hosts: dict[str, int],
@@ -110,7 +110,7 @@ def other_engine(
 ) -> str:
     """CSRF-16, CSRF-17: Firefox or WebKit posts the logout past the app's CSRF check."""
     with launch_behind_host_mapping(engine, mapped_hosts) as browser:
-        scripted = logout_through_the_page(
+        scripted = test_logout_through_the_page(
             run,
             browser,
             width,
@@ -118,7 +118,7 @@ def other_engine(
             javascript=True,
             back_button=True,
         )
-        pressed = logout_through_the_page(
+        pressed = test_logout_through_the_page(
             run,
             browser,
             width,
@@ -128,7 +128,7 @@ def other_engine(
     return f"{scripted}; {pressed}"
 
 
-def drive_engine_phase(
+def test_drive_engine_phase(
     run: EngineRun,
     playwright: Playwright,
     runtime: Path,
@@ -146,7 +146,7 @@ def drive_engine_phase(
         for width in widths:
             run.proof.held_or_failed(
                 f"SCENARIO 52 {width.label} {run.app_origin}",
-                lambda width=width: logout_through_the_page(
+                lambda width=width: test_logout_through_the_page(
                     run,
                     chromium,
                     width,
@@ -162,7 +162,7 @@ def drive_engine_phase(
     for number, engine, width in engines:
         run.proof.held_or_failed(
             f"SCENARIO {number} {width.label} {run.app_origin}",
-            lambda number=number, engine=engine, width=width: other_engine(
+            lambda number=number, engine=engine, width=width: test_other_engine(
                 run, engine, mapped_hosts, width, number
             ),
         )

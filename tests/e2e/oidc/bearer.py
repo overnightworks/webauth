@@ -59,26 +59,26 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bearer_groups import (
-    a_group_removed_between_two_calls_is_gone,
-    an_admin_logout_asks_to_sign_in_again,
-    no_token_shows_in_an_answer_or_the_log,
+    test_a_group_removed_between_two_calls_is_gone,
+    test_an_admin_logout_asks_to_sign_in_again,
+    test_no_token_shows_in_an_answer_or_the_log,
     refreshed_id_token_facts,
-    the_apps_own_logout_ends_the_session,
+    test_the_apps_own_logout_ends_the_session,
 )
 from bearer_resource import (
-    a_bearer_on_a_marked_route_is_not_the_resource_admission,
-    a_marked_route_keeps_session_and_csrf_without_a_bearer,
-    known_agent_is_admitted_as_a_person,
-    marked_route_admin_reader_is_the_plain_403,
-    marked_route_admits_the_agent_capped,
-    marked_route_refusals_beside_a_cookie,
-    marked_route_refuses_the_agent_beyond_its_mark,
+    test_a_bearer_on_a_marked_route_is_not_the_resource_admission,
+    test_a_marked_route_keeps_session_and_csrf_without_a_bearer,
+    test_known_agent_is_admitted_as_a_person,
+    test_marked_route_admin_reader_is_the_plain_403,
+    test_marked_route_admits_the_agent_capped,
+    test_marked_route_refusals_beside_a_cookie,
+    test_marked_route_refuses_the_agent_beyond_its_mark,
     mint_agent_tokens,
-    no_credential_and_a_cookie_get_the_challenge,
-    no_group_and_unknown_subject_are_refused_plainly,
-    stored_admin_is_admitted_with_the_person_role,
-    the_agent_token_opens_no_other_path,
-    tokens_the_resource_refuses,
+    test_no_credential_and_a_cookie_get_the_challenge,
+    test_no_group_and_unknown_subject_are_refused_plainly,
+    test_stored_admin_is_admitted_with_the_person_role,
+    test_the_agent_token_opens_no_other_path,
+    test_tokens_the_resource_refuses,
 )
 from bearer_run import (
     BEARER_CLIENT,
@@ -160,7 +160,7 @@ def header_of(token: str) -> dict[str, Any]:
     return token_part(token, 0)
 
 
-def admin_token_opens_export(run: BearerRun) -> str:
+def test_admin_token_opens_export(run: BearerRun) -> str:
     """MACHINE-01: an admin token opens the export route, whose caller is the token's subject."""
     reset_host(run.host)
     answer = run.send(Call("GET", EXPORT, run.tokens["admin"]))
@@ -169,7 +169,7 @@ def admin_token_opens_export(run: BearerRun) -> str:
     return "E answered 200 with d1-admin's Keycloak id as the caller and no challenge"
 
 
-def admission_leaves_no_trace(run: BearerRun) -> str:
+def test_admission_leaves_no_trace(run: BearerRun) -> str:
     """MACHINE-04, MACHINE-12: an admitted request opens no session and creates no account."""
     held = run.state()
     assert (held["accounts"], held["sessions"], held["session_transactions"]) == (0, 0, 0), held
@@ -293,7 +293,7 @@ def disabled_person_keeps_the_token(run: BearerRun) -> str:
     return "d1-admin disabled in Keycloak: the token still opens E (200) until it expires"
 
 
-def sign_out_leaves_the_token(run: BearerRun) -> str:
+def test_sign_out_leaves_the_token(run: BearerRun) -> str:
     """MACHINE-25: signing out of a browser leaves the token valid on a machine path."""
     page = run.host_page(run.people["admin"])
     run.proof.press(page, "#logout")
@@ -334,7 +334,7 @@ def flipped_signature_is_refused(run: BearerRun) -> str:
     return f"one signature character flipped: 401, log: {run.last_gate_reason()}"
 
 
-def answers_are_not_stored_and_set_no_cookie(run: BearerRun) -> str:
+def test_answers_are_not_stored_and_set_no_cookie(run: BearerRun) -> str:
     """MACHINE-17, MACHINE-18: every machine-route answer is `no-store` and sets no cookie."""
     for answer in run.answers:
         assert answer.headers.get("cache-control") == "no-store", (
@@ -363,7 +363,7 @@ def no_token_is_shown_and_refusals_are_logged(run: BearerRun) -> str:
 # --- the person-path scenarios ---
 
 
-def member_token_creates_the_account(run: BearerRun) -> str:
+def test_member_token_creates_the_account(run: BearerRun) -> str:
     """TOKEN-19, TOKEN-22: a new subject's token creates its account and no session."""
     reset_host(run.host)
     answer = run.send(Call("GET", ME, run.tokens["user"]))
@@ -380,7 +380,7 @@ def member_token_creates_the_account(run: BearerRun) -> str:
     )
 
 
-def token_and_browser_name_the_same_person(run: BearerRun) -> str:
+def test_token_and_browser_name_the_same_person(run: BearerRun) -> str:
     """TOKEN-20: a known subject keeps its account, whichever way it signs in."""
     origin = run.settings.app_origins[0]
     cookies = session_cookies(run.sign_in_after_reset(run.people["user"]), origin)
@@ -394,14 +394,14 @@ def token_and_browser_name_the_same_person(run: BearerRun) -> str:
     return f"the browser's /me and the token's /api/me name {USER_NAME}; accounts 1"
 
 
-def token_post_needs_no_origin_and_no_cookie(run: BearerRun) -> str:
+def test_token_post_needs_no_origin_and_no_cookie(run: BearerRun) -> str:
     """TOKEN-28: a verified token request needs no Origin and no cookie."""
     answer = run.send(Call("POST", ME, run.tokens["user"]))
     assert_person_answer(answer, 200)
     return "POST /api/me with the token, no Origin and no cookie: 200"
 
 
-def outsider_token_is_refused_without_an_account(run: BearerRun) -> str:
+def test_outsider_token_is_refused_without_an_account(run: BearerRun) -> str:
     """TOKEN-18: a person outside the app is refused and no account is created."""
     before = run.state()["accounts"]
     answer = run.send(Call("GET", ME, run.tokens["outsider"]))
@@ -416,7 +416,7 @@ def other_client_token_is_refused_on_the_person_path(run: BearerRun) -> str:
     return f"a token of d1-other on /api/me: 401 invalid_token, log: {run.last_gate_reason()}"
 
 
-def sign_out_leaves_the_token_on_the_person_path(run: BearerRun) -> str:
+def test_sign_out_leaves_the_token_on_the_person_path(run: BearerRun) -> str:
     """TOKEN-34: signing out of a browser leaves the token valid on a person path."""
     page = run.host_page(run.people["user"])
     run.proof.press(page, "#logout")
@@ -428,8 +428,8 @@ def sign_out_leaves_the_token_on_the_person_path(run: BearerRun) -> str:
 
 
 SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
-    (28, admin_token_opens_export),
-    (29, admission_leaves_no_trace),
+    (28, test_admin_token_opens_export),
+    (29, test_admission_leaves_no_trace),
     (30, delete_needs_no_csrf_proof),
     (31, delete_ignores_another_persons_session),
     (32, a_cookie_alone_is_refused("export")),
@@ -459,34 +459,34 @@ SCENARIOS: tuple[tuple[int, Callable[[BearerRun], str]], ...] = (
     ),
     (44, outsider_is_refused_and_recorded),
     (45, disabled_person_keeps_the_token),
-    (46, sign_out_leaves_the_token),
+    (46, test_sign_out_leaves_the_token),
     (47, short_token_works_before_it_expires),
     (48, short_token_fails_after_exp_and_leeway),
     (49, flipped_signature_is_refused),
-    (50, answers_are_not_stored_and_set_no_cookie),
+    (50, test_answers_are_not_stored_and_set_no_cookie),
     (51, no_token_is_shown_and_refusals_are_logged),
-    (55, member_token_creates_the_account),
-    (56, token_and_browser_name_the_same_person),
-    (57, token_post_needs_no_origin_and_no_cookie),
-    (58, outsider_token_is_refused_without_an_account),
+    (55, test_member_token_creates_the_account),
+    (56, test_token_and_browser_name_the_same_person),
+    (57, test_token_post_needs_no_origin_and_no_cookie),
+    (58, test_outsider_token_is_refused_without_an_account),
     (59, other_client_token_is_refused_on_the_person_path),
-    (60, sign_out_leaves_the_token_on_the_person_path),
-    (61, known_agent_is_admitted_as_a_person),
-    (62, stored_admin_is_admitted_with_the_person_role),
-    (63, no_group_and_unknown_subject_are_refused_plainly),
-    (64, the_agent_token_opens_no_other_path),
-    (65, tokens_the_resource_refuses),
-    (66, no_credential_and_a_cookie_get_the_challenge),
-    (67, marked_route_admits_the_agent_capped),
-    (68, marked_route_admin_reader_is_the_plain_403),
-    (69, marked_route_refusals_beside_a_cookie),
-    (70, a_bearer_on_a_marked_route_is_not_the_resource_admission),
-    (71, a_marked_route_keeps_session_and_csrf_without_a_bearer),
-    (72, marked_route_refuses_the_agent_beyond_its_mark),
-    (73, a_group_removed_between_two_calls_is_gone),
-    (74, an_admin_logout_asks_to_sign_in_again),
-    (75, the_apps_own_logout_ends_the_session),
-    (76, no_token_shows_in_an_answer_or_the_log),
+    (60, test_sign_out_leaves_the_token_on_the_person_path),
+    (61, test_known_agent_is_admitted_as_a_person),
+    (62, test_stored_admin_is_admitted_with_the_person_role),
+    (63, test_no_group_and_unknown_subject_are_refused_plainly),
+    (64, test_the_agent_token_opens_no_other_path),
+    (65, test_tokens_the_resource_refuses),
+    (66, test_no_credential_and_a_cookie_get_the_challenge),
+    (67, test_marked_route_admits_the_agent_capped),
+    (68, test_marked_route_admin_reader_is_the_plain_403),
+    (69, test_marked_route_refusals_beside_a_cookie),
+    (70, test_a_bearer_on_a_marked_route_is_not_the_resource_admission),
+    (71, test_a_marked_route_keeps_session_and_csrf_without_a_bearer),
+    (72, test_marked_route_refuses_the_agent_beyond_its_mark),
+    (73, test_a_group_removed_between_two_calls_is_gone),
+    (74, test_an_admin_logout_asks_to_sign_in_again),
+    (75, test_the_apps_own_logout_ends_the_session),
+    (76, test_no_token_shows_in_an_answer_or_the_log),
 )
 
 
@@ -569,7 +569,7 @@ def drive_scenarios(run: BearerRun) -> None:
     ):
         return
     for number, scenario in SCENARIOS:
-        if scenario is known_agent_is_admitted_as_a_person and not proof.held_or_failed(
+        if scenario is test_known_agent_is_admitted_as_a_person and not proof.held_or_failed(
             "CHECK bearer-resource-tokens", lambda: mint_agent_tokens(run)
         ):
             return

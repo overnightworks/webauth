@@ -84,7 +84,7 @@ def groups_answer(run: BearerRun, cookies: dict[str, str]) -> dict[str, Any]:
     return answer.json()
 
 
-def a_group_removed_between_two_calls_is_gone(run: BearerRun) -> str:
+def test_a_group_removed_between_two_calls_is_gone(run: BearerRun) -> str:
     """GROUPS-01, GROUPS-04: the second call answers the groups the issuer holds then."""
     person = run.people["grouped"]
     group_path = f"{USER_GROUP}/{REVOKED_GROUP_NAME}"
@@ -104,7 +104,7 @@ def a_group_removed_between_two_calls_is_gone(run: BearerRun) -> str:
     return "the group removed at Keycloak between two calls is gone from the second; /me 200"
 
 
-def an_admin_logout_asks_to_sign_in_again(run: BearerRun) -> str:
+def test_an_admin_logout_asks_to_sign_in_again(run: BearerRun) -> str:
     """GROUPS-07: a refresh token the issuer refuses as `invalid_grant` signs in again."""
     person = run.people["grouped"]
     cookies = session_cookies(run.sign_in_after_reset(person), run.settings.app_origins[0])
@@ -116,7 +116,7 @@ def an_admin_logout_asks_to_sign_in_again(run: BearerRun) -> str:
     return "after Keycloak's admin logout the call answers sign-in-again while /me answers 200"
 
 
-def the_apps_own_logout_ends_the_session(run: BearerRun) -> str:
+def test_the_apps_own_logout_ends_the_session(run: BearerRun) -> str:
     """GROUPS-06: a session the app ended answers `session-ended`."""
     origin = run.settings.app_origins[0]
     page = run.sign_in_after_reset(run.people["grouped"])
@@ -128,7 +128,7 @@ def the_apps_own_logout_ends_the_session(run: BearerRun) -> str:
     return "after the app's own logout the replayed cookie answers session-ended"
 
 
-def no_token_shows_in_an_answer_or_the_log(run: BearerRun) -> str:
+def test_no_token_shows_in_an_answer_or_the_log(run: BearerRun) -> str:
     """GROUPS-03: no token is in an answer of the route or in the host log."""
     answers = [a for a in run.answers if a.url.path == CURRENT_GROUPS_PATH]
     assert answers, "no answer of the route was recorded"

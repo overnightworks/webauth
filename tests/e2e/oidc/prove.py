@@ -193,7 +193,7 @@ from typing import Any, cast
 import httpx
 from bearer import drive_bearer_phase
 from certificates import ThrowawayTls, issue_throwaway_tls
-from engines import EngineRun, drive_engine_phase
+from engines import EngineRun, test_drive_engine_phase
 from harness import (
     STOP_SIGNALS,
     Finding,
@@ -575,7 +575,7 @@ def disabled_user_is_refused(proof: Proof, width: Width) -> str:
     )
 
 
-def outsider_is_refused(proof: Proof, width: Width) -> str:
+def test_outsider_is_refused(proof: Proof, width: Width) -> str:
     """REFUSE-28: a person outside the app signs in at Keycloak and is refused with no session."""
     scenario = f"7-{width.label}"
     proof.reset_host()
@@ -617,7 +617,7 @@ def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
     )
 
 
-def deep_link_survives_the_login(proof: Proof, width: Width) -> str:
+def test_deep_link_survives_the_login(proof: Proof, width: Width) -> str:
     """REFUSE-01, REFUSE-02: the page asked for without a session is returned to."""
     scenario = f"24-{width.label}"
     deep_link = "/albums/42?page=2"
@@ -718,7 +718,7 @@ def session_cookie_after_redirect(
     return observed
 
 
-def logout(proof: Proof, width: Width) -> str:
+def test_logout(proof: Proof, width: Width) -> str:
     """REFUSE-23, APP-26, APP-28, APP-31, APP-34: logout ends the session and clears cookies."""
     scenario = f"2-{width.label}"
     proof.reset_host()
@@ -758,7 +758,7 @@ def logout(proof: Proof, width: Width) -> str:
     )
 
 
-def logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
+def test_logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
     """APP-36, APP-37: with the app session gone the logout sends no hint and Keycloak asks."""
     scenario = f"9-{width.label}"
     proof.reset_host()
@@ -1014,7 +1014,7 @@ def drive_browser(
             ):
                 return
         default_host = next(h for h in hosts if h.cookie_samesite == SHIPPED_COOKIE_SAMESITE)
-        drive_engine_phase(
+        test_drive_engine_phase(
             EngineRun(proof, APP_ORIGIN, KEYCLOAK_LOGOUT_CONFIRMATION),
             playwright,
             runtime,
@@ -1291,10 +1291,10 @@ def drive_backchannel_phase(
 
 SCENARIOS_PER_WIDTH = (
     (1, login),
-    (2, logout),
+    (2, test_logout),
     (4, disabled_user_is_refused),
     (6, pages_fit_the_window),
-    (7, outsider_is_refused),
+    (7, test_outsider_is_refused),
 )
 
 
@@ -1323,11 +1323,11 @@ def run_default_scenarios(proof: Proof) -> bool:
     )
     proof.held_or_failed(
         f"SCENARIO 9 {DESKTOP.label} {APP_ORIGIN}",
-        lambda: logout_after_the_app_session_ended(proof, DESKTOP),
+        lambda: test_logout_after_the_app_session_ended(proof, DESKTOP),
     )
     proof.held_or_failed(
         f"SCENARIO 24 {DESKTOP.label} {APP_ORIGIN}",
-        lambda: deep_link_survives_the_login(proof, DESKTOP),
+        lambda: test_deep_link_survives_the_login(proof, DESKTOP),
     )
     run_token_scenarios(proof)
     for number, scenario in REFRESH_SCENARIOS:
