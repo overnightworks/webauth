@@ -1,0 +1,7 @@
+claim_id = "7d6ca36248bd437896c2200a62ca7d42"
+agent = "Claude db9ee0f2-5e66-41ce-8a93-01020f64dbba"
+role = "builder"
+base = "810c0dbbb766f4a07528ff1415f1897b84760212"
+branch = "claude/issue-907-ceiling-watcher-git-source"
+scope = [".github/workflows/dependency-ceilings.yml"]
+opened_commit = "ffaef3aef1d32a10f162648285193ea8fe5ad53b"
