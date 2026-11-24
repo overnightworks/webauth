@@ -607,7 +607,7 @@ def test_the_admission_of_an_agent_ends_when_the_method_or_the_header_changes(
     changes: dict[str, object],
 ) -> None:
     """RESOURCE-77: a changed method or `Authorization` header, or a sub-app, ends the
-    admission of an agent as it ends a person's (RESOURCE-67 to RESOURCE-69)."""
+    admission of an agent as it ends a person's (RESOURCE-67, RESOURCE-68 and RESOURCE-69)."""
     app = an_app(resource, inner_middleware=(Middleware(RewritingTheRequest, changes=changes),))
     answering_a_runtime_error_with_418(app)
 

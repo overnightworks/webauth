@@ -244,6 +244,7 @@ def test_stack_16_a_store_outage_answers_503_with_retry_after_and_no_trace_of_th
     outage_status: int,
     _bug_status: int,
 ) -> None:
+    """STACK-16."""
     world, response = entry(a_store_outage(), raising=True)
 
     assert response.status_code == outage_status
@@ -260,6 +261,7 @@ def test_stack_16_a_store_bug_stays_a_loud_failure(
     _outage_status: int,
     bug_status: int,
 ) -> None:
+    """STACK-16."""
     world, response = entry(a_store_bug(), raising=False)
 
     assert response.status_code == bug_status
@@ -269,6 +271,7 @@ def test_stack_16_a_store_bug_stays_a_loud_failure(
 
 
 def test_stack_16_the_callback_clears_the_pending_login_cookie_it_consumed() -> None:
+    """STACK-16."""
     world = a_host_world(A_MEMBER)
     host = a_host(world)
     started = host.client.get(START_PATH, headers=FORWARDED)
@@ -282,6 +285,7 @@ def test_stack_16_the_callback_clears_the_pending_login_cookie_it_consumed() -> 
 
 
 def test_stack_16_the_logout_clears_no_session_cookie_so_it_can_be_retried() -> None:
+    """STACK-16."""
     world, response = a_logout(a_store_outage(), raising=True)
 
     assert (response.status_code, set_cookies(response)) == (503, {})
@@ -289,6 +293,7 @@ def test_stack_16_the_logout_clears_no_session_cookie_so_it_can_be_retried() -> 
 
 
 def test_stack_16_a_host_route_that_cannot_reach_its_own_store_answers_503() -> None:
+    """STACK-16."""
     host = the_host_driven(a_host(a_signed_in_world()), raising=True)
 
     response = host.client.get(OWN_STORE_PATH, headers=FORWARDED)
@@ -300,6 +305,7 @@ def test_stack_16_a_host_route_that_cannot_reach_its_own_store_answers_503() -> 
 
 
 def test_stack_16_an_outage_after_the_response_started_is_not_answered_twice() -> None:
+    """STACK-16."""
     host = the_host_driven(a_host(a_signed_in_world()), raising=True)
 
     with pytest.raises(StoreUnavailableError):
@@ -317,6 +323,7 @@ def _outage_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]
 def test_log_08_an_outage_logs_one_failed_and_one_recovered_line_with_the_refused_count(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
     headers = {**FORWARDED, **world.signed_cookie()}
@@ -351,6 +358,7 @@ def _lines_of(caplog: pytest.LogCaptureFixture) -> list[tuple[str, dict[str, obj
 
 
 def test_log_08_an_answer_without_an_outage_logs_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
     caplog.set_level(logging.INFO)
@@ -364,6 +372,7 @@ def test_log_08_an_answer_without_an_outage_logs_nothing(caplog: pytest.LogCaptu
 def test_log_08_a_second_outage_after_a_recovery_logs_failed_and_recovered_again(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
     headers = {**FORWARDED, **world.signed_cookie()}
@@ -384,6 +393,7 @@ def test_log_08_a_second_outage_after_a_recovery_logs_failed_and_recovered_again
 def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all_count(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
     headers = {**FORWARDED, **world.signed_cookie()}
@@ -417,6 +427,7 @@ def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all
 def test_log_08_the_failed_line_names_the_class_of_the_cause_when_there_is_one(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
     caplog.set_level(logging.INFO)
@@ -438,6 +449,7 @@ def test_log_08_the_failed_line_names_the_class_of_the_cause_when_there_is_one(
 def test_log_08_a_failure_that_is_no_outage_opens_none_and_stays_a_500(
     failure: Callable[[], Exception], caplog: pytest.LogCaptureFixture
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=False)
     caplog.set_level(logging.INFO)
@@ -468,6 +480,7 @@ def test_log_08_an_outage_the_exit_of_the_host_suppresses_opens_none_and_closes_
     lines_at_the_end: list[tuple[str, dict[str, object]]],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host_transaction = _HostTransaction(world.sessions.in_transaction)
     host = the_host_driven(a_host(world, sessions=host_transaction), raising=False)
@@ -491,6 +504,7 @@ def test_log_08_an_outage_the_exit_of_the_host_suppresses_opens_none_and_closes_
 
 
 def test_log_08_each_handle_keeps_its_own_outage(caplog: pytest.LogCaptureFixture) -> None:
+    """LOG-08."""
     first_world, second_world = a_signed_in_world(), a_signed_in_world()
     first = the_host_driven(a_host(first_world), raising=True)
     second = the_host_driven(a_host(second_world), raising=True)
@@ -518,6 +532,7 @@ def test_log_08_each_handle_keeps_its_own_outage(caplog: pytest.LogCaptureFixtur
 def test_log_08_an_outage_at_the_entry_of_a_transaction_opens_one(
     entry: Callable[..., tuple[HostWorld, HttpxResponse]], caplog: pytest.LogCaptureFixture
 ) -> None:
+    """LOG-08."""
     caplog.set_level(logging.INFO)
 
     entry(a_store_outage(), raising=True)
@@ -526,6 +541,7 @@ def test_log_08_an_outage_at_the_entry_of_a_transaction_opens_one(
 
 
 def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFixture) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=False)
     headers = {**FORWARDED, **world.signed_cookie()}
@@ -548,6 +564,7 @@ def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFi
 def test_log_08_an_outage_in_the_body_or_at_the_exit_of_a_transaction_opens_one(
     where: str, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
     caplog.set_level(logging.INFO)
@@ -565,6 +582,7 @@ def test_log_08_an_outage_in_the_body_or_at_the_exit_of_a_transaction_opens_one(
 def test_log_08_a_clean_sign_in_transaction_ends_an_outage_the_session_gate_opened(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
     caplog.set_level(logging.INFO)

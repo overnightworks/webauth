@@ -10,6 +10,7 @@ import pytest
 
 _REPOSITORY = Path(__file__).resolve().parent.parent
 _RULE_ID = r"[A-Z]+-\d+"
+_RULE_DEFINITION = re.compile(rf"^\s*(?:- |\| )({_RULE_ID})(?::| \|)", re.MULTILINE)
 _RULE_IDS_AT_THE_START = re.compile(rf"\s*(?P<ids>{_RULE_ID}(?:\s*(?:,|and)\s*{_RULE_ID})*)")
 _MARK_OF_A_RULE_PROVEN_ELSEWHERE = "**Proven elsewhere:**"
 
@@ -30,7 +31,7 @@ def _rule_ids_of_the_contract(*, marked_proven_elsewhere: bool) -> set[str]:
         rule_id
         for block in _rule_blocks_of_the_contract()
         if (_MARK_OF_A_RULE_PROVEN_ELSEWHERE in block) is marked_proven_elsewhere
-        for rule_id in re.findall(rf"\*\*({_RULE_ID})\*\*", block)
+        for rule_id in _RULE_DEFINITION.findall(block)
     }
 
 
