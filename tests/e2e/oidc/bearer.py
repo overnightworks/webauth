@@ -59,13 +59,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bearer_groups import (
+    refreshed_id_token_facts,
     test_a_group_removed_between_two_calls_is_gone,
     test_an_admin_logout_asks_to_sign_in_again,
     test_no_token_shows_in_an_answer_or_the_log,
-    refreshed_id_token_facts,
     test_the_apps_own_logout_ends_the_session,
 )
 from bearer_resource import (
+    mint_agent_tokens,
     test_a_bearer_on_a_marked_route_is_not_the_resource_admission,
     test_a_marked_route_keeps_session_and_csrf_without_a_bearer,
     test_known_agent_is_admitted_as_a_person,
@@ -73,7 +74,6 @@ from bearer_resource import (
     test_marked_route_admits_the_agent_capped,
     test_marked_route_refusals_beside_a_cookie,
     test_marked_route_refuses_the_agent_beyond_its_mark,
-    mint_agent_tokens,
     test_no_credential_and_a_cookie_get_the_challenge,
     test_no_group_and_unknown_subject_are_refused_plainly,
     test_stored_admin_is_admitted_with_the_person_role,
