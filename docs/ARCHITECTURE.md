@@ -148,7 +148,7 @@ A host store, or a transaction's entry or exit, that cannot reach its backing st
 CI's `checks` job runs `scripts/run_static_checks.sh` (ruff, format, deptry, pyright, the typing hosts against the built wheel), `pytest tests` with branch coverage and the hash-pinned build;
 both jobs run against a Postgres service, so the tests of the `postgres` extra, the store contract kit among them, run on a real database; `lowest-direct` runs the tests at the lowest declared versions with the `redis` and `postgres` extras; `quality / verdict` takes the coverage artifact, SonarCloud and the import contracts.
 The browser proof (Chromium, Firefox and WebKit against a real Keycloak) and the OIDF conformance suite run by hand through `scripts/run_oidc_proof.sh` and the [runbooks](runbooks/run-the-browser-proof.md); CI only lints `tests/e2e/`.
-Each test names the rule it proves by its ID at the start of its docstring, and a static test holds that every rule of the host contract is named or marked.
+Each test names the rule it proves by its ID at the start of its docstring, and quality's `spec-citation` rule holds that every rule of the host contract is cited by a test.
 
 ### Trust
 
