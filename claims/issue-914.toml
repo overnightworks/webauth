@@ -1,7 +1,0 @@
-claim_id = "4f2f2bb6f5024a74a70a5e0f25210abf"
-agent = "Claude c6705d50-e3e0-4921-97d0-31e629a03a2d"
-role = "builder"
-base = "6d7d9b93c78e6ea6dc5763dacffe1d7924e610ab"
-branch = "claude/issue-914-the-architecture-overview-names-quality"
-scope = ["docs/ARCHITECTURE.md", "tests/test_oidc_grants.py", "tests/test_store_contract.py"]
-opened_commit = "cfb884ff10e9692c96d3d6def702038069c3db2a"
