@@ -447,7 +447,7 @@ def test_a_wall_clock_jump_changes_nothing_about_how_long_a_workload_token_is_re
 def test_a_workload_token_without_a_usable_lifetime_is_handed_out_and_not_kept(
     lifetime: object,
 ) -> None:
-    """WORKLOAD-05, WORKLOAD-04: an answer without a lifetime longer than the margin is not kept."""
+    """WORKLOAD-04, WORKLOAD-05: an answer without a lifetime longer than the margin is not kept."""
 
     issuer = _a_reusing_issuer(expires_in=lifetime)
     relying_party = _a_relying_party_at(issuer)
