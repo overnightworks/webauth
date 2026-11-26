@@ -1,8 +1,0 @@
-claim_id = "c006c7cdff1841368523ab7195034f38"
-agent = "Claude afffa21e-0be3-49f6-8a50-b51f72d1708c"
-role = "builder"
-base = "da653012900c0d6a7e89ed7827b8d575e826f01c"
-branch = "claude/issue-916-webauth-carries-the-trace-through-loglin"
-scope = ["AGENTS.md", "README.md", "docs/host-contract.md", "pyproject.toml", "src/webauth/https_client.py", "tests/support/trace_context.py", "tests/test_https_client_trace_context.py", "uv.lock"]
-opened_commit = "fefb4f6692658f4a0b00aab7551ef08f10062f83"
-whole_reason = "One wrapper and its call, the contract section, test and test builder that state it, the pin raise with its lock, and the two documents that name the range or the global it read."
