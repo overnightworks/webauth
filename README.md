@@ -116,7 +116,7 @@ dependencies = [
 
 The host's lock records the commit of the tag. A build needs git and builds webauth from source.
 
-webauth depends on `overnightworks-logline` as a version range by name (`>=0.5,<2`), so the host pins logline's git tag in its own `dependencies`, as [logline's README](https://github.com/overnightworks/logline#install) says, and a tag outside the range is refused:
+webauth depends on `overnightworks-logline` as a version range by name (`>=1.11,<2`), so the host pins logline's git tag in its own `dependencies`, as [logline's README](https://github.com/overnightworks/logline#install) says, and a tag outside the range is refused:
 
 ```toml
 dependencies = [

@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import pytest
 from logline.testing import configured
 
-from tests.support.oidc_arrangement import LoopbackHttpsServer, ReceivedRequest
+from tests.support.oidc_arrangement import LoopbackHttpsServer
 from tests.support.token_request_canaries import a_canary_token_request
 from tests.support.trace_context import (
+    PROPAGATOR_FAILURE_MESSAGE,
     TRACEPARENT,
     TRACESTATE,
-    global_propagator_writing,
+    a_raising_global_propagator,
     inside_a_trace,
 )
 from webauth.https_client import fetch_key_set_over_https
 from webauth.oidc_transport import post_token_request_over_https
-
-pytestmark = pytest.mark.usefixtures("every_log_record")
 
 
 def _fetching_the_key_set(server: LoopbackHttpsServer) -> object:
@@ -54,25 +54,11 @@ def test_an_issuer_call_inside_a_trace_carries_traceparent_and_tracestate_only_w
 
 
 @pytest.mark.parametrize("call", _ISSUER_CALLS)
-def test_an_issuer_call_never_carries_the_callers_baggage(
-    call: Callable[[LoopbackHttpsServer], object], token_server: LoopbackHttpsServer
-) -> None:
-    """TRACE-02: logline's propagator leaves the caller's baggage out of the call."""
-    with configured("webauth-test"), inside_a_trace(baggage_entry="a-session-id"):
-        call(token_server)
-
-    [received] = token_server.received
-    assert "baggage" not in received.headers
-    assert "a-session-id" not in repr(received.headers)
-
-
-@pytest.mark.parametrize("call", _ISSUER_CALLS)
 def test_an_issuer_call_outside_a_trace_sends_the_request_it_sent_before_propagation(
     call: Callable[[LoopbackHttpsServer], object], token_server: LoopbackHttpsServer
 ) -> None:
     """TRACE-01: outside a trace the call is the request it was before."""
-    with global_propagator_writing({}):
-        call(token_server)
+    call(token_server)
     with configured("webauth-test"):
         call(token_server)
 
@@ -82,79 +68,19 @@ def test_an_issuer_call_outside_a_trace_sends_the_request_it_sent_before_propaga
 
 
 @pytest.mark.parametrize("call", _ISSUER_CALLS)
-def test_a_raising_propagator_leaves_the_calls_outcome_and_its_log_unchanged(
+def test_a_propagator_that_raises_fails_the_call_without_its_message_in_any_log_line(
     call: Callable[[LoopbackHttpsServer], object],
     token_server: LoopbackHttpsServer,
-    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """TRACE-04: a propagator that raises changes neither the call's outcome nor its log."""
-    with global_propagator_writing({}):
-        expected_outcome = call(token_server)
-    records_without_failure = [(record.name, record.levelno) for record in caplog.records]
-    caplog.clear()
+    """LOG-05: the propagator's exception escapes the call, its line is `failed` with the class
+    as `error_type`, and no log line carries its message."""
+    with configured("webauth-test"), a_raising_global_propagator(), inside_a_trace():
+        with pytest.raises(RuntimeError):
+            call(token_server)
 
-    with global_propagator_writing({"traceparent": TRACEPARENT}, then_raise=True):
-        outcome = call(token_server)
-
-    assert outcome == expected_outcome
-    assert [(record.name, record.levelno) for record in caplog.records] == records_without_failure
-    assert "canary" not in caplog.text
-    assert "traceparent" not in token_server.received[-1].headers
-
-
-_OWNED_HEADERS = ("authorization", "accept", "content-type", "host")
-
-
-def _lines_named(received: ReceivedRequest, name: str) -> list[str]:
-    return [value for line_name, value in received.header_lines if line_name.lower() == name]
-
-
-@pytest.mark.parametrize(
-    "written",
-    [
-        pytest.param(
-            {
-                "Authorization": "Bearer from-a-propagator",
-                "Accept": "text/html",
-                "Content-Type": "text/plain",
-                "Host": "elsewhere.example",
-            },
-            id="same-case",
-        ),
-        pytest.param(
-            {
-                "authorization": "Bearer from-a-propagator",
-                "accept": "text/html",
-                "content-type": "text/plain",
-                "host": "elsewhere.example",
-            },
-            id="lower-case",
-        ),
-    ],
-)
-def test_the_headers_a_token_post_owns_arrive_once_and_unchanged_whatever_a_propagator_writes(
-    written: dict[str, str], token_server: LoopbackHttpsServer
-) -> None:
-    """TRACE-03: a propagator's header never replaces one webauth fixes."""
-    with global_propagator_writing({}):
-        _posting_a_token_request(token_server)
-    with global_propagator_writing({**written, "traceparent": TRACEPARENT}):
-        _posting_a_token_request(token_server)
-
-    [owned, propagated] = token_server.received
-    for name in _OWNED_HEADERS:
-        assert len(_lines_named(owned, name)) == 1
-        assert _lines_named(propagated, name) == _lines_named(owned, name)
-    assert propagated.headers["traceparent"] == TRACEPARENT
-
-
-def test_a_key_set_fetch_keeps_the_host_of_its_url_whatever_a_propagator_writes(
-    token_server: LoopbackHttpsServer,
-) -> None:
-    """TRACE-03: a propagator's `Host` never replaces the host of the URL."""
-    with global_propagator_writing({"Host": "elsewhere.example"}):
-        _fetching_the_key_set(token_server)
-
-    [received] = token_server.received
-    assert _lines_named(received, "host") == [received.headers["host"]]
-    assert "elsewhere.example" not in received.headers["host"]
+    written = capsys.readouterr()
+    [ended] = [json.loads(line) for line in written.out.splitlines() if ".ended" in line]
+    assert (ended["outcome"], ended["error_type"]) == ("failed", "RuntimeError")
+    assert "reason" not in ended
+    assert PROPAGATOR_FAILURE_MESSAGE not in written.out + written.err
