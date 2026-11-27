@@ -208,6 +208,7 @@ def test_a_tokens_type_header_is_judged_against_the_expected_type_only_when_one_
                 ("nbf", "1799999990"),
                 ("sub", 7),
                 ("sub", ""),
+                ("sub", "\ud800"),
             )
         ),
         # Headers

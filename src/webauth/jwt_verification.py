@@ -64,7 +64,12 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
 
-from webauth._validation import is_whole_number, json_object, require_non_negative_whole_number
+from webauth._validation import (
+    is_utf8,
+    is_whole_number,
+    json_object,
+    require_non_negative_whole_number,
+)
 from webauth.https_client import (
     _MAX_KEY_SET_BYTES,
     KeySetFetchError,
@@ -464,7 +469,7 @@ def _subject(claims: Mapping[str, object]) -> str | None:
     if "sub" not in claims:
         return None
     subject = claims["sub"]
-    if not isinstance(subject, str) or not subject:
+    if not isinstance(subject, str) or not subject or not is_utf8(subject):
         raise _VerificationRefusal(RejectionReason.INVALID_CLAIM)
     return subject
 

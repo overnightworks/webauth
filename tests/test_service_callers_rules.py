@@ -182,6 +182,7 @@ THE_TABLE = [
             ({"iss": "https://other.example.org"}, RejectionReason.INVALID_ISSUER),
             (EXPIRED_TOKEN, RejectionReason.EXPIRED),
             ({"sub": ""}, RejectionReason.INVALID_CLAIM),
+            ({"sub": "\ud800"}, RejectionReason.INVALID_CLAIM),
             (WholeToken.FORGED, RejectionReason.INVALID_SIGNATURE),
             (WholeToken.MALFORMED, RejectionReason.MALFORMED_TOKEN),
             (WholeToken.UNSUPPORTED_ALGORITHM, RejectionReason.UNSUPPORTED_ALGORITHM),
@@ -193,7 +194,7 @@ THE_TABLE = [
     *a_row(
         REASONS.INVALID_SUBJECT,
         UNAUTHENTICATED,
-        both_sides({"sub": ABSENT}, {"sub": "\ud800"}),
+        both_sides({"sub": ABSENT}),
     ),
     *a_row(
         REASONS.MALFORMED_GROUPS,
