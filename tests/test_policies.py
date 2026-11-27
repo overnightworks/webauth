@@ -245,7 +245,7 @@ A_PATH = PathRules(exact=frozenset({"/x"}))
 
 
 @pytest.mark.parametrize("rule", METHOD_RULES)
-class TestAMethodsFieldRefusesASingleString:
+class TestAMethodsField:
     @pytest.mark.parametrize("methods", ["POST", "XPOST"])
     def test_a_single_string_is_refused(self, rule: Callable[..., Any], methods: str) -> None:
         with pytest.raises(ValueError, match="methods"):
