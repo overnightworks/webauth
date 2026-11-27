@@ -51,6 +51,7 @@ from tests.support.oidc_login_host import (
     is_cleared,
     set_cookies,
 )
+from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
@@ -592,7 +593,9 @@ def test_the_settings_are_refused_without_stating_whether_the_host_keeps_the_id_
             client=a_realm_client_config(),
             sign_in_paths=SIGN_IN_PATHS,
             max_sessions=None,
-            security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+            security_headers=SecurityHeadersPolicy(
+                content_security_policy=A_CONTENT_SECURITY_POLICY
+            ),
             csrf_origin=CsrfPolicy(),
         )
 

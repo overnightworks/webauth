@@ -22,7 +22,6 @@ from starlette.responses import StreamingResponse
 from starlette.websockets import WebSocketDisconnect
 
 import webauth
-from tests.support.account_arrangement import FakeUser
 from tests.support.environment_arrangement import ForbiddenEnvironment
 from tests.support.full_stack_arrangement import HEADERS_POLICY, install_full_stack
 from tests.support.gate_arrangement import HAL_ONLY, a_resource, bearing
@@ -52,6 +51,7 @@ from tests.support.request_line_arrangement import (
 )
 from tests.support.security_headers_arrangement import assert_carries_policy_headers
 from tests.support.web_auth_host_arrangement import (
+    A_MEMBER,
     ADMIN_PATH,
     ME_PATH,
     THE_REFUSAL_BODY,
@@ -62,7 +62,8 @@ from tests.support.web_auth_host_arrangement import (
     a_host_world,
     a_member_token,
     a_resource_and_person_paths,
-    a_stored_session,
+    a_signed_in_world,
+    forwarded_by_the_proxy,
     the_app_as_it_stands,
     the_routes_of,
 )
@@ -86,8 +87,6 @@ if TYPE_CHECKING:
 
     from tests.support.web_auth_host_arrangement import HostWorld
 
-FORWARDED = {"x-forwarded-for": FORWARDED_CLIENT}
-A_MEMBER = FakeUser(id=SUBJECT, username="lena")
 THE_MARK: ContextVar[str] = ContextVar("the_mark", default="unset")
 
 
@@ -119,10 +118,6 @@ class _ReadsTheMarkAfterwards:
             self._record.append(THE_MARK.get())
 
 
-def a_signed_in_member() -> HostWorld:
-    return a_host_world(A_MEMBER, stored_session=a_stored_session(A_MEMBER))
-
-
 @pytest.mark.parametrize(
     ("method", "path", "status", "requests_before"),
     [
@@ -142,10 +137,10 @@ def test_compose_01_a_request_the_stack_refuses_writes_one_line_with_the_forward
     )
     host = a_composed_host(world, a_composition(world, settings=settings))
     for _ in range(requests_before):
-        host.client.get(API_PATH, headers=FORWARDED)
+        host.client.get(API_PATH, headers=forwarded_by_the_proxy())
 
     with request_lines_written(capsys) as lines:
-        response = host.client.request(method, path, headers=FORWARDED)
+        response = host.client.request(method, path, headers=forwarded_by_the_proxy())
 
     (line,) = lines
     assert (response.status_code, line["ip"]) == (status, FORWARDED_CLIENT)
@@ -160,7 +155,7 @@ def test_compose_02_a_layer_outside_the_stack_answers_a_preflight_before_the_sta
     cors = Middleware(CORSMiddleware, allow_origins=["https://spa.example"], allow_methods=["GET"])
     host = a_composed_host(world, a_composition(world, outside=(cors,)))
     preflight = {
-        **FORWARDED,
+        **forwarded_by_the_proxy(),
         "origin": "https://spa.example",
         "access-control-request-method": "GET",
     }
@@ -188,8 +183,8 @@ def test_compose_03_an_inside_layer_sees_only_the_admitted_and_its_context_shows
         ),
     )
 
-    host.client.get(f"{API_PATH}%0A", headers=FORWARDED)
-    host.client.get(API_PATH, headers=FORWARDED)
+    host.client.get(f"{API_PATH}%0A", headers=forwarded_by_the_proxy())
+    host.client.get(API_PATH, headers=forwarded_by_the_proxy())
 
     assert saw == [f"inside {API_PATH}"]
     assert marks_afterwards == ["unset", "set by inside"]
@@ -199,9 +194,9 @@ def test_compose_04_a_socket_through_the_proxy_writes_one_line_with_the_client_a
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """COMPOSE-04"""
-    world = a_signed_in_member()
+    world = a_signed_in_world()
     host = a_composed_host(world)
-    handshake = {**FORWARDED, **world.signed_cookie(), "origin": ALLOWED_ORIGIN}
+    handshake = {**forwarded_by_the_proxy(), **world.signed_cookie(), "origin": ALLOWED_ORIGIN}
 
     with (
         request_lines_written(capsys, event=WEBSOCKET_EVENT) as lines,
@@ -229,12 +224,12 @@ def test_compose_05_the_install_serves_the_four_sign_in_routes(
         key_name="issuer",
     )
 
-    started = host.client.get(START_PATH, headers=FORWARDED)
+    started = host.client.get(START_PATH, headers=forwarded_by_the_proxy())
     with request_lines_written(capsys) as lines:
-        callback = host.sign_in(FORWARDED)
-    logout = host.client.post(LOGOUT_PATH, headers={**SAME_ORIGIN_FORM, **FORWARDED})
+        callback = host.sign_in(forwarded_by_the_proxy())
+    logout = host.client.post(LOGOUT_PATH, headers={**SAME_ORIGIN_FORM, **forwarded_by_the_proxy()})
     back_channel = host.client.post(
-        BACKCHANNEL_LOGOUT_PATH, data={"logout_token": token}, headers=FORWARDED
+        BACKCHANNEL_LOGOUT_PATH, data={"logout_token": token}, headers=forwarded_by_the_proxy()
     )
 
     assert started.status_code == 303
@@ -259,7 +254,7 @@ def test_compose_06_build_and_install_make_no_outbound_call_and_the_login_uses_t
 
     assert (world.issuer.requests, world.key_set.fetched_urls) == ([], [])
     host = a_composed_host(world)
-    host.sign_in(FORWARDED)
+    host.sign_in(forwarded_by_the_proxy())
     assert world.issuer.requests
     assert world.key_set.fetched_urls
 
@@ -275,10 +270,12 @@ def test_compose_07_the_pages_are_the_hosts(capsys: pytest.CaptureFixture[str]) 
     )
     host = a_composed_host(world, replace(base, pages=pages))
 
-    start = host.client.get(START_PATH, headers=FORWARDED)
-    refused = host.client.get(f"{CALLBACK_PATH}?state=forged&code=x", headers=FORWARDED)
+    start = host.client.get(START_PATH, headers=forwarded_by_the_proxy())
+    refused = host.client.get(
+        f"{CALLBACK_PATH}?state=forged&code=x", headers=forwarded_by_the_proxy()
+    )
     logout = LogoutPage(
-        host.client.post(LOGOUT_PATH, headers={**SAME_ORIGIN_FORM, **FORWARDED}).text
+        host.client.post(LOGOUT_PATH, headers={**SAME_ORIGIN_FORM, **forwarded_by_the_proxy()}).text
     )
 
     assert "ui_locales=de" in start.headers["location"]
@@ -330,7 +327,7 @@ def test_compose_08_current_user_opens_and_closes_one_entry_before_the_endpoint_
     path: str, seen_by_the_endpoint: list[list[str]]
 ) -> None:
     """COMPOSE-08"""
-    world = a_signed_in_member()
+    world = a_signed_in_world()
     seen: list[list[str]] = []
     host = a_composed_host(world, routes=_a_session_probe(world, seen))
     before = world.sessions.stored_record.expires_at
@@ -345,7 +342,7 @@ def test_compose_08_current_user_opens_and_closes_one_entry_before_the_endpoint_
 
 def test_compose_08_a_failing_exit_runs_no_endpoint() -> None:
     """COMPOSE-08"""
-    world = a_signed_in_member()
+    world = a_signed_in_world()
     world.sessions.commit_failure = RuntimeError("the exit failed")
     host = a_composed_host(world)
 
@@ -356,7 +353,7 @@ def test_compose_08_a_failing_exit_runs_no_endpoint() -> None:
 
 def test_compose_08_an_endpoint_rollback_keeps_the_renewal() -> None:
     """COMPOSE-08"""
-    world = a_signed_in_member()
+    world = a_signed_in_world()
     host = a_composed_host(world, routes=_a_session_probe(world, []))
     before = world.sessions.stored_record.expires_at
 
@@ -381,7 +378,7 @@ def test_compose_09_the_groups_decide_who_is_admitted_and_who_is_admin(
     world = a_host_world(groups_claim=groups_claim)
     host = a_composed_host(world)
 
-    callback = host.sign_in(FORWARDED)
+    callback = host.sign_in(forwarded_by_the_proxy())
 
     assert (host.client.get(ME_PATH).status_code, host.client.get(ADMIN_PATH).status_code) == (
         me_status,
@@ -404,8 +401,8 @@ def test_compose_10_the_hosts_order_of_its_slots_is_kept_outermost_first() -> No
     )
     host = a_composed_host(world, a_composition(world, outside=outside, inside=inside))
 
-    host.client.get(f"{API_PATH}%0A", headers=FORWARDED)
-    host.client.get(API_PATH, headers=FORWARDED)
+    host.client.get(f"{API_PATH}%0A", headers=forwarded_by_the_proxy())
+    host.client.get(API_PATH, headers=forwarded_by_the_proxy())
 
     assert [entry.split(" /")[0] for entry in order] == [*names[:2], *names]
 
@@ -432,9 +429,12 @@ def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> 
     token = a_member_token()
 
     metadata = host.client.get(
-        f"/.well-known/oauth-protected-resource{resource.entry_point}", headers=FORWARDED
+        f"/.well-known/oauth-protected-resource{resource.entry_point}",
+        headers=forwarded_by_the_proxy(),
     )
-    person = host.client.get("/api/me", headers={**FORWARDED, "authorization": bearing(token)[0]})
+    person = host.client.get(
+        "/api/me", headers={**forwarded_by_the_proxy(), "authorization": bearing(token)[0]}
+    )
 
     assert (metadata.status_code, metadata.json()["authorization_servers"]) == (200, [BOUND_ISSUER])
     assert (person.status_code, person.json()) == (200, {"username": "lena"})
@@ -442,7 +442,7 @@ def test_compose_11_a_bearer_given_after_the_routes_is_served_and_admitted() -> 
 
 def test_compose_19_the_stores_given_once_serve_the_gate_and_the_person_paths() -> None:
     """COMPOSE-19"""
-    world = a_host_world(A_MEMBER, stored_session=a_stored_session(A_MEMBER))
+    world = a_signed_in_world()
     gate = SessionGate(login_redirect=None, public=())
 
     def routes(app: FastAPI, auth: WebAuth) -> None:
@@ -459,10 +459,13 @@ def test_compose_19_the_stores_given_once_serve_the_gate_and_the_person_paths() 
         bearer_of=a_resource_and_person_paths(),
     )
 
-    by_session = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    by_session = host.client.get(
+        ME_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()}
+    )
     entries_before_the_token = world.sign_in.entries
     by_token = host.client.get(
-        "/api/me", headers={**FORWARDED, "authorization": bearing(a_member_token())[0]}
+        "/api/me",
+        headers={**forwarded_by_the_proxy(), "authorization": bearing(a_member_token())[0]},
     )
 
     assert (by_session.status_code, by_session.json()) == (200, {"username": "lena"})
@@ -485,11 +488,12 @@ def test_compose_11_the_install_serves_its_routes_ahead_of_a_catch_all_of_the_ho
     host = a_composed_host(world, routes=routes, bearer_of=a_resource_and_person_paths())
     resource = a_resource()
 
-    start = host.client.get(START_PATH, headers=FORWARDED)
+    start = host.client.get(START_PATH, headers=forwarded_by_the_proxy())
     metadata = host.client.get(
-        f"/.well-known/oauth-protected-resource{resource.entry_point}", headers=FORWARDED
+        f"/.well-known/oauth-protected-resource{resource.entry_point}",
+        headers=forwarded_by_the_proxy(),
     )
-    unknown = host.client.get("/nothing-here", headers=FORWARDED)
+    unknown = host.client.get("/nothing-here", headers=forwarded_by_the_proxy())
 
     assert start.status_code == 303
     assert metadata.json()["authorization_servers"] == [BOUND_ISSUER]
@@ -667,9 +671,13 @@ def test_compose_15_admin_user_checks_the_identity_an_override_of_current_user_g
 
 def test_compose_16_a_socket_with_a_foreign_origin_is_refused_before_any_store_is_opened() -> None:
     """COMPOSE-16"""
-    world = a_signed_in_member()
+    world = a_signed_in_world()
     host = a_composed_host(world)
-    handshake = {**FORWARDED, **world.signed_cookie(), "origin": "https://evil.example"}
+    handshake = {
+        **forwarded_by_the_proxy(),
+        **world.signed_cookie(),
+        "origin": "https://evil.example",
+    }
 
     with (
         host.client,
@@ -684,7 +692,7 @@ def test_compose_16_a_socket_with_a_foreign_origin_is_refused_before_any_store_i
 
 def test_compose_17_a_handle_that_was_never_installed_fails_on_its_first_request() -> None:
     """COMPOSE-17"""
-    world = a_signed_in_member()
+    world = a_signed_in_world()
     host = a_composed_host(world, installed=False)
     client = a_client_of(host.app, raise_server_exceptions=True)
     cookie = world.signed_cookie()
@@ -697,10 +705,10 @@ def test_compose_17_a_socket_of_a_handle_that_was_never_installed_names_the_miss
     None
 ):
     """COMPOSE-17"""
-    world = a_signed_in_member()
+    world = a_signed_in_world()
     host = a_composed_host(world, installed=False)
     client = a_client_of(host.app, raise_server_exceptions=True)
-    handshake = {**FORWARDED, **world.signed_cookie(), "origin": ALLOWED_ORIGIN}
+    handshake = {**forwarded_by_the_proxy(), **world.signed_cookie(), "origin": ALLOWED_ORIGIN}
 
     with (
         pytest.raises(RuntimeError, match=r"auth\.install"),

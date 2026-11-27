@@ -12,6 +12,8 @@ from webauth.middleware.security_headers import (
 )
 from webauth.policies import ContentSecurityPolicyRule, PathRules, SecurityHeadersPolicy
 
+A_CONTENT_SECURITY_POLICY = "default-src 'self'"
+
 
 def assert_carries_policy_headers(
     headers: Mapping[str, str],
@@ -47,4 +49,4 @@ def a_content_security_policy_rule(
 def a_policy_with_content_security_policy_rules(
     *rules: ContentSecurityPolicyRule,
 ) -> SecurityHeadersPolicy:
-    return SecurityHeadersPolicy("default-src 'self'", content_security_policy_rules=rules)
+    return SecurityHeadersPolicy(A_CONTENT_SECURITY_POLICY, content_security_policy_rules=rules)

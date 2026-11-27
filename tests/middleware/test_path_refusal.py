@@ -14,7 +14,10 @@ from starlette.responses import JSONResponse
 
 from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.rate_limit_arrangement import RecordingRateLimitBackend
-from tests.support.security_headers_arrangement import assert_carries_policy_headers
+from tests.support.security_headers_arrangement import (
+    A_CONTENT_SECURITY_POLICY,
+    assert_carries_policy_headers,
+)
 from tests.support.session_store_arrangement import (
     SessionRecordsInMemory,
     SessionsRecordingTheirTransaction,
@@ -32,7 +35,7 @@ from webauth.sign_in_routes import SignInPaths
 
 
 def a_headers_policy() -> SecurityHeadersPolicy:
-    return SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+    return SecurityHeadersPolicy(content_security_policy=A_CONTENT_SECURITY_POLICY)
 
 
 def some_sign_in_paths() -> SignInPaths:

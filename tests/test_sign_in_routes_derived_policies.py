@@ -23,6 +23,7 @@ from tests.support.oidc_login_host import (
     START_PATH,
 )
 from tests.support.rate_limit_arrangement import CheckedBudget, RecordingRateLimitBackend
+from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import HTTPS_TEST_SERVER, a_web_auth_config
 from webauth.middleware import SessionGate
@@ -44,7 +45,7 @@ from webauth.sign_in_routes import (
 from webauth.web_auth import IssuerCalls, WebAuthSettings
 
 FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
-HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy=A_CONTENT_SECURITY_POLICY)
 FOUR_KIB = 4 * 1024
 SIGN_IN_BUDGET_NAME = "sign-in"
 
@@ -161,7 +162,7 @@ def test_the_sign_in_paths_answer_no_store_ahead_of_the_hosts_cache_rules(
     """SIGNIN-08: the installer marks the answers of all four routes `no-store`, first."""
     host = _a_gated_host(
         security_headers=SecurityHeadersPolicy(
-            content_security_policy="default-src 'self'",
+            content_security_policy=A_CONTENT_SECURITY_POLICY,
             cache_control_rules=host_cache_rules,
         ),
     )
@@ -181,7 +182,7 @@ def test_the_sign_in_paths_answer_no_store_ahead_of_the_hosts_cache_rules(
 def test_a_host_rule_keeps_deciding_the_paths_the_sign_in_paths_do_not_name() -> None:
     host = _a_gated_host(
         security_headers=SecurityHeadersPolicy(
-            content_security_policy="default-src 'self'",
+            content_security_policy=A_CONTENT_SECURITY_POLICY,
             cache_control_rules=(
                 CacheControlRule(PathRules(prefixes=("/",)), "public, max-age=60"),
             ),

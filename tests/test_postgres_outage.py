@@ -97,6 +97,7 @@ def test_the_wrapper_raises_the_store_error_for_every_other_database_error_and_h
     with pytest.raises(SessionStoreError) as raised, database_errors_as_store_errors():
         raise database_error
 
+    assert not isinstance(raised.value, StoreUnavailableError)
     shown = what_a_log_shows_of(raised.value)
     assert type(driver_error).__name__ in shown
     assert (getattr(driver_error, "sqlstate", None) or "") in shown
