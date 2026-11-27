@@ -197,7 +197,7 @@ _VERDICT_CASES = [
 
 
 @pytest.mark.parametrize(("allowed_hosts", "cookie_secure", "origins", "verdict"), _VERDICT_CASES)
-def test_the_origin_verdict_of_a_request(
+def test_a_request_has_an_allowed_origin_only_when_it_sends_one_exact_allowed_host(
     allowed_hosts: set[str] | frozenset[str] | None,
     cookie_secure: bool | None,
     origins: list[str],
