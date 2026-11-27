@@ -1,4 +1,4 @@
-"""The logout and session scenarios of the browser proof: 2, 9, 10 to 15, 17 and 21 to 23, and
+"""The logout and session scenarios of the browser proof: 2, 5, 9, 10 to 15, 17 and 21 to 23, and
 the logout steps every logout scenario shares (``prove.py`` states each).
 
 Scenario 10 ends every session of one subject, 11 ends the sessions of a second app, 12 is the
