@@ -44,6 +44,7 @@ from tests.support.session_gate_arrangement import (
     ask,
     signed_in,
 )
+from tests.support.web_auth_host_arrangement import an_unparseable_forward, forwarded_by_the_proxy
 from tests.support.webauth_arrangement import (
     ADMITTED_READER_PATH,
     ALLOWED_ORIGIN,
@@ -62,7 +63,6 @@ if TYPE_CHECKING:
 
 UNTRUSTED_PEER = "198.51.100.77"
 EXEMPT_PATH = "/not-limited"
-NOT_AN_ADDRESS = "not-an-address"
 
 
 @pytest.mark.parametrize(
@@ -232,7 +232,7 @@ def test_the_client_address_webauth_resolves_is_the_ip_of_the_request_line(
         request_lines_written(capsys) as lines,
         a_client_behind_the_proxy(app.app, peer=peer) as client,
     ):
-        client.get("/me", headers={"x-forwarded-for": FORWARDED_CLIENT})
+        client.get("/me", headers=forwarded_by_the_proxy())
 
     (line,) = lines
     assert line["ip"] == expected
@@ -245,7 +245,7 @@ def test_a_path_the_rate_limit_exempts_still_carries_the_resolved_ip(
     app = a_gated_app(stack_policies={"rate_limit": exempt})
 
     with request_lines_written(capsys) as lines, a_client_behind_the_proxy(app.app) as client:
-        client.get(EXEMPT_PATH, headers={"x-forwarded-for": FORWARDED_CLIENT})
+        client.get(EXEMPT_PATH, headers=forwarded_by_the_proxy())
 
     (line,) = lines
     assert line["ip"] == FORWARDED_CLIENT
@@ -257,7 +257,7 @@ def test_a_malformed_forwarding_header_leaves_the_peer_as_the_ip(
     app = a_gated_app()
 
     with request_lines_written(capsys) as lines, a_client_behind_the_proxy(app.app) as client:
-        client.get("/me", headers={"x-forwarded-for": NOT_AN_ADDRESS})
+        client.get("/me", headers=an_unparseable_forward())
 
     (line,) = lines
     assert line["ip"] == TRUSTED_PEER
@@ -272,7 +272,7 @@ def test_a_malformed_forwarding_header_is_logged_as_ignored_once(
         caplog.at_level(logging.WARNING, logger="webauth.proxies"),
         a_client_behind_the_proxy(app.app) as client,
     ):
-        client.get("/me", headers={"x-forwarded-for": NOT_AN_ADDRESS})
+        client.get("/me", headers=an_unparseable_forward())
 
     assert [record.getMessage() for record in caplog.records] == ["forwarded_for.ignored"]
 
