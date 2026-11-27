@@ -21,7 +21,7 @@ from typing import Final
 from pydantic import SecretStr
 from starlette.responses import Response
 
-from webauth.policies import _OWN_POLICY_HEADER, _OWN_POLICY_HEADER_VALUE
+from webauth._own_policy import OWN_POLICY_HEADER, OWN_POLICY_HEADER_VALUE
 
 __all__ = ["EndSessionForm", "end_session_page"]
 
@@ -57,7 +57,7 @@ def end_session_page(form: EndSessionForm, *, language: str, button_label: str) 
         headers={
             "Cache-Control": "no-store",
             "Content-Security-Policy": _content_security_policy(form),
-            _OWN_POLICY_HEADER: _OWN_POLICY_HEADER_VALUE,
+            OWN_POLICY_HEADER: OWN_POLICY_HEADER_VALUE,
         },
     )
 

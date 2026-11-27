@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from webauth._paths import _has_dot_segment, reads_as_another_host
+from webauth._paths import has_dot_segment, reads_as_another_host
 from webauth.dependencies import LoginRedirect
 
 __all__ = ["SignInPaths"]
@@ -69,6 +69,6 @@ def _problem_with(path: object) -> str | None:
         return "must not read as another host"
     if "?" in path or "#" in path:
         return "must not hold a query or a fragment"
-    if _has_dot_segment(path):
+    if has_dot_segment(path):
         return "must not hold a dot segment"
     return None
