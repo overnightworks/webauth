@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
+from tests.support.loopback_arrangement import LoopbackHttpsServer
 from tests.support.oidc_arrangement import (
     ACCESS_TOKEN_LEEWAY_SECONDS,
     APP_CLIENT_ID,
@@ -26,7 +27,6 @@ from tests.support.oidc_arrangement import (
     REALM_ISSUER,
     REDIRECT_URI,
     FakeKeySetEndpoint,
-    LoopbackHttpsServer,
     a_realm_client_config,
 )
 from tests.support.provider_metadata import (

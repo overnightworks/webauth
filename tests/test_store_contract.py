@@ -17,6 +17,7 @@ from tests.support.store_contract_arrangement import (
     a_correct_single_process_adapter,
     a_file_locked_adapter,
     a_session_adapter_that_changes_the_row_before_refusing,
+    an_adapter_over_the_suites_doubles,
     an_adapter_with_a_closed_role_type,
     an_adapter_with_columns_that_fit_only_webauths_ids,
     an_adapter_with_other_process,
@@ -44,6 +45,7 @@ def test_every_check_is_paired_with_one_broken_adapter() -> None:
         an_adapter_with_unique_usernames,
         an_adapter_with_a_closed_role_type,
         an_adapter_with_columns_that_fit_only_webauths_ids,
+        pytest.param(an_adapter_over_the_suites_doubles, id="the_suites_in_memory_doubles"),
     ],
 )
 @pytest.mark.parametrize("check", IN_PROCESS_CHECKS, ids=attrgetter("name"))
