@@ -155,7 +155,7 @@ class CallerRefusal:
     @property
     def refusal_class(self) -> CallerRefusalClass:
         """``UNAVAILABLE`` for ``KEY_SET_UNAVAILABLE``; ``UNAUTHENTICATED`` for a missing or
-        unverifiable token or a malformed subject or groups; ``FORBIDDEN`` for every other
+        unverifiable token, an absent subject or malformed groups; ``FORBIDDEN`` for every other
         reason."""
         if self.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE:
             return CallerRefusalClass.UNAVAILABLE
