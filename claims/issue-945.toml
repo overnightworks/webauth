@@ -1,8 +1,0 @@
-claim_id = "3e9a76db230d4703b8b32a1f229d57f6"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "93a2f2dc7e8f20fe5eb0ea7b288514b85bf69ef7"
-branch = "claude/issue-945-verifier-owns-valid-subject"
-scope = ["docs/host-contract.md", "src/webauth/jwt_verification.py", "src/webauth/service_callers.py", "tests/test_jwt_verification_token.py", "tests/test_service_callers.py", "tests/test_service_callers_rules.py"]
-opened_commit = "6b08d5c23065fc0419195fe8802374265f054ab0"
-whole_reason = "One check moves from one module into the verifier, and the contract row and the tests of both follow; split, the subject would have two deciders or none."
