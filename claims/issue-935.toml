@@ -1,8 +1,0 @@
-claim_id = "165e9bed42e94986b72fa80d2c6ac9c6"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "7953e621df54d7db4e18b5e57cc30772e52ba55b"
-branch = "claude/issue-935-webauth-pins-quality-v0-28-0"
-scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", ".github/workflows/release.yml", "pyproject.toml"]
-opened_commit = "ae02c81ec54fc5089fad87ae4da8dd2076773cff"
-whole_reason = "Four quality pins in three workflow files and the coverage floor are one fleet release a reviewer reads at once."
