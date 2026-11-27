@@ -36,13 +36,16 @@ def inside_a_trace(*, tracestate: str | None = None) -> Iterator[None]:
 
 
 class _RaisingPropagator(TextMapPropagator):
+    def __init__(self, error_type: type[Exception]) -> None:
+        self._error_type = error_type
+
     def inject(
         self,
         carrier: CarrierT,
         context: context.Context | None = None,
         setter: Setter[CarrierT] | None = None,
     ) -> None:
-        raise RuntimeError(PROPAGATOR_FAILURE_MESSAGE)
+        raise self._error_type(PROPAGATOR_FAILURE_MESSAGE)
 
     def extract(
         self,
@@ -58,11 +61,11 @@ class _RaisingPropagator(TextMapPropagator):
 
 
 @contextmanager
-def a_raising_global_propagator() -> Iterator[None]:
-    """OpenTelemetry's global propagator raises `RuntimeError(PROPAGATOR_FAILURE_MESSAGE)` on
+def a_raising_global_propagator(error_type: type[Exception] = RuntimeError) -> Iterator[None]:
+    """OpenTelemetry's global propagator raises `error_type(PROPAGATOR_FAILURE_MESSAGE)` on
     every injection; the previous one returns when the block ends."""
     previous = get_global_textmap()
-    set_global_textmap(_RaisingPropagator())
+    set_global_textmap(_RaisingPropagator(error_type))
     try:
         yield
     finally:
