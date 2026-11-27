@@ -1,2 +1,9 @@
 dependency_paths = ["uv.lock", ".github/workflows/", ".github/requirements-build.txt"]
 lane_shared = ["quality/baseline.toml"]
+
+[[audit]]
+name = "tests-and-ownership"
+label = "audit-tests-ownership"
+landings = 50
+days = 7
+run = "Run the atelier audit skill with the tests and ownership lenses."
