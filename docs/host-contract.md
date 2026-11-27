@@ -501,7 +501,8 @@ it as `BearerGate(person_paths=...)`.
   - TOKEN-15: A bearer credential is judged by the token and never falls back to the cookie.
 - **The account.**
   - TOKEN-16: The verified `sub` is admitted by the same `app_role` and the same account step as
-    a browser sign-in.
+    a browser sign-in; a `sub` that is not a non-empty string of valid text never reaches it, the verifier
+    refuses it as CALLER-26 says.
   - TOKEN-17: Every token request enters the host's serialized `SignInTransaction` once.
   - TOKEN-18: A person outside the app's login group is refused before any store is touched.
   - TOKEN-19: An unknown subject gets an account of the kind `PERSON` with the token's `preferred_username` (the
