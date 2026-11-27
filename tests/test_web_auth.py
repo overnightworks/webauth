@@ -259,6 +259,16 @@ def test_compose_06_build_and_install_make_no_outbound_call_and_the_login_uses_t
     assert world.key_set.fetched_urls
 
 
+def test_the_handle_gives_a_host_route_the_config_and_admission_it_was_built_with() -> None:
+    world = a_host_world()
+    composition = a_composition(world)
+
+    auth = composition.build()
+
+    assert auth.config is composition.settings.config
+    assert auth.admission is composition.groups
+
+
 def test_compose_07_the_pages_are_the_hosts(capsys: pytest.CaptureFixture[str]) -> None:
     """COMPOSE-07"""
     world = a_host_world()

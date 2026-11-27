@@ -92,8 +92,7 @@ branch = true
 patch = ["subprocess"]
 
 [tool.coverage.report]
-fail_under = 99.91
-precision = 2
+fail_under = 100
 
 [tool.deptry.per_rule_ignores]
 # rate_limit imports redis only under TYPE_CHECKING, which deptry does not count as use
