@@ -353,12 +353,17 @@ def _unanswering_tls_handshake(server: LoopbackHttpsServer, stack: contextlib.Ex
 
 
 @pytest.mark.parametrize(
-    "target",
+    ("target", "exchange_options"),
     [
-        pytest.param(_unanswering_tls_handshake, id="tls-handshake"),
-        pytest.param(_route("/dripping-status"), id="dripping-status-line"),
-        pytest.param(_route("/dripping-head"), id="dripping-head"),
-        pytest.param(_route("/dripping-body"), id="dripping-body"),
+        pytest.param(_unanswering_tls_handshake, {}, id="tls-handshake"),
+        pytest.param(_route("/dripping-status"), {}, id="dripping-status-line"),
+        pytest.param(_route("/dripping-head"), {}, id="dripping-head"),
+        pytest.param(_route("/dripping-body"), {}, id="dripping-body"),
+        pytest.param(
+            _route("/dripping-body"),
+            {"timeout_seconds": _TEST_DEADLINE_SECONDS * 10},
+            id="timeout-above-the-deadline",
+        ),
     ],
 )
 @_EXCHANGES_UNDER_A_DEADLINE
@@ -367,32 +372,14 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     exchange: Callable[..., object],
     error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
     target: _StalledTarget,
+    exchange_options: dict[str, float],
 ) -> None:
     with contextlib.ExitStack() as stack:
         url = target(token_server, stack)
         started = time.monotonic()
         with pytest.raises(error) as refused:
-            exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
+            exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS, **exchange_options)
         held = time.monotonic() - started
-
-    assert refused.value.failure is ExchangeFailure.TIMED_OUT
-    assert _TEST_DEADLINE_SECONDS <= held
-
-
-@_EXCHANGES_UNDER_A_DEADLINE
-def test_a_timeout_above_the_total_deadline_is_accepted_and_the_deadline_still_ends_the_exchange(
-    token_server: LoopbackHttpsServer,
-    exchange: Callable[..., object],
-    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
-) -> None:
-    started = time.monotonic()
-    with pytest.raises(error) as refused:
-        exchange(
-            f"{token_server.base_url}/dripping-body",
-            timeout_seconds=_TEST_DEADLINE_SECONDS * 10,
-            deadline_seconds=_TEST_DEADLINE_SECONDS,
-        )
-    held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TEST_DEADLINE_SECONDS <= held
