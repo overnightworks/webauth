@@ -1,7 +1,0 @@
-claim_id = "0a448b09957c42ed8c043f02f44a05cd"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "96a5a6a8a743feb7758abc5dc4b0f0d467268db6"
-branch = "claude/issue-957-residues-of-audit-928"
-scope = ["src/webauth/_validation.py", "tests/middleware/test_stack_request_line.py"]
-opened_commit = "b932cb1552cdbcbbe2d91511548fd079a93b701c"
