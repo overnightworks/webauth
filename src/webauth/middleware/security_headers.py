@@ -9,9 +9,9 @@ from starlette.datastructures import MutableHeaders
 from starlette.requests import HTTPConnection
 from starlette.responses import PlainTextResponse
 
+from webauth._own_policy import OWN_POLICY_HEADER
 from webauth.config import installed_web_auth_config
 from webauth.middleware._route_path import route_path
-from webauth.policies import _OWN_POLICY_HEADER
 from webauth.proxies import _client_is_recorded, _no_client_recorded
 
 if TYPE_CHECKING:
@@ -157,8 +157,8 @@ async def _answer_under_policy(
 def _apply_policy(
     policy: SecurityHeadersPolicy, headers: MutableHeaders, path: str, cookie_secure: bool
 ) -> None:
-    if _OWN_POLICY_HEADER in headers:
-        del headers[_OWN_POLICY_HEADER]
+    if OWN_POLICY_HEADER in headers:
+        del headers[OWN_POLICY_HEADER]
     else:
         cache_control = policy.cache_control(path)
         if cache_control is not None:

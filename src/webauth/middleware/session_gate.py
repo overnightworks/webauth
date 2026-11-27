@@ -16,7 +16,7 @@ from webauth._bearer_admission import (
     require_admin,
     unauthenticated_without_redirect,
 )
-from webauth._paths import _has_dot_segment
+from webauth._paths import has_dot_segment
 from webauth._worker import on_worker
 from webauth.config import WebAuthConfig, web_auth_config
 from webauth.dependencies import (
@@ -135,12 +135,12 @@ class _SessionGateMiddleware(RefusalMiddleware[SessionGate]):
             return admit_session(session_id, sessions=sessions, config=config)
 
     def _is_public(self, routed_path: str, method: str) -> bool:
-        return not _has_dot_segment(routed_path) and any(
+        return not has_dot_segment(routed_path) and any(
             rule.applies_to(routed_path, method) for rule in self._policy.public
         )
 
     def _is_optional(self, routed_path: str) -> bool:
-        return not _has_dot_segment(routed_path) and self._policy.optional.matches(routed_path)
+        return not has_dot_segment(routed_path) and self._policy.optional.matches(routed_path)
 
 
 def admitted_user(connection: HTTPConnection) -> AuthenticatedUser | None:
