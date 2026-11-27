@@ -222,7 +222,7 @@ class BodySizeRule:
         require_method_tokens("BodySizeRule.methods", self.methods)
 
     def applies_to(self, path: str, method: str) -> bool:
-        if self.methods is not None and method.upper() not in self.methods:
+        if self.methods is not None and method not in self.methods:
             return False
         return self.paths.matches(path)
 
@@ -239,7 +239,7 @@ class PublicRule:
         require_method_tokens("PublicRule.methods", self.methods)
 
     def applies_to(self, path: str, method: str) -> bool:
-        if self.methods is not None and method.upper() not in self.methods:
+        if self.methods is not None and method not in self.methods:
             return False
         return self.paths.matches(path)
 

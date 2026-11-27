@@ -302,7 +302,7 @@ class TestBodySizePolicy:
         [
             ("/upload", "POST", 50_000),
             ("/cover", "POST", 9_000),
-            ("/cover", "post", 9_000),
+            ("/cover", "post", 1_000),
             ("/cover", "PUT", 1_000),
             ("/songs", "POST", 1_000),
             ("/upload", "", 50_000),

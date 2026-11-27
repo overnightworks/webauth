@@ -48,8 +48,8 @@ def require_non_empty_string(field: str, value: object) -> None:
 def require_method_tokens(field: str, methods: frozenset[str] | None) -> None:
     """Refuse one string or a method that is not an upper-case token, naming the field.
 
-    A rule built with ``"post"`` never matches, because requests are compared
-    upper-cased, and would silently never apply.
+    Requests are compared with the method as the server gives it, so a rule
+    built with ``"post"`` would silently never apply.
     """
     require_collection_not_one_string(field, methods, noun="method")
     if methods is not None and not all(is_method_token(method) for method in methods):
