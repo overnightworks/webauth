@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 from typing import SupportsIndex
 
@@ -18,9 +17,6 @@ from webauth.proxies import (
     _budget_address,
     _get_client_ip,
 )
-
-MAX_ADDRESS_CHARS = 45
-MAX_FORWARDED_FOR_HOPS = 16
 
 # -- Trusted proxies ---------------------------------------------------------
 
@@ -67,12 +63,27 @@ _TRUSTED_PEER = "172.18.0.1"
 _TRUSTED_HOP = "172.18.0.9"
 _CLIENT = "203.0.113.7"
 _UNLISTED_PROXY = "198.51.100.9"
-_CLIENT_AT_THE_HOP_BOUND = ", ".join(
-    [_CLIENT, *[_TRUSTED_HOP] * (MAX_FORWARDED_FOR_HOPS - 1)],
-)
-_CLIENT_BEYOND_THE_HOP_BOUND = ", ".join(
-    [_CLIENT, *[_TRUSTED_HOP] * MAX_FORWARDED_FOR_HOPS],
-)
+_HOPS_BEYOND_ANY_DEPLOYMENT = 10_000
+_HOP_CEILING = 64
+
+
+def _chain_of(trusted_hops: int) -> str:
+    return ", ".join([_CLIENT, *[_TRUSTED_HOP] * trusted_hops])
+
+
+def _trusted_hops_still_resolving_the_client() -> int:
+    """The longest run of trusted hops right of the client that still names it,
+    found by outcome: the library's bound is not restated."""
+    trusted = TrustedProxies.parse(_PROXY_NETWORK)
+    for trusted_hops in range(_HOPS_BEYOND_ANY_DEPLOYMENT):
+        if _get_client_ip(_TRUSTED_PEER, [_chain_of(trusted_hops)], trusted) != _CLIENT:
+            return trusted_hops - 1
+    raise AssertionError("no hop bound: a chain of any length still resolves the client")
+
+
+_TRUSTED_HOPS_AT_THE_BOUND = _trusted_hops_still_resolving_the_client()
+_CLIENT_AT_THE_HOP_BOUND = _chain_of(_TRUSTED_HOPS_AT_THE_BOUND)
+_CLIENT_BEYOND_THE_HOP_BOUND = _chain_of(_TRUSTED_HOPS_AT_THE_BOUND + 1)
 
 
 @pytest.mark.parametrize(
@@ -163,18 +174,43 @@ def test_a_poisoned_prefix_cannot_move_a_client_onto_the_gateway_identity() -> N
     assert _get_client_ip(_TRUSTED_PEER, [f"{_CLIENT}, garbage"], trusted) == _TRUSTED_PEER
 
 
+class _CountedEntry(str):
+    """An entry that records every piece ever cut out of it."""
+
+    pieces: list[str]
+
+    def __new__(cls, value: str, pieces: list[str]) -> _CountedEntry:
+        entry = super().__new__(cls, value)
+        entry.pieces = pieces
+        return entry
+
+    def __str__(self) -> str:
+        return self
+
+    def strip(self, chars: str | None = None) -> _CountedEntry:
+        return _CountedEntry(super().strip(chars), self.pieces)
+
+    def split(self, sep: str | None = None, maxsplit: SupportsIndex = -1) -> list[str]:
+        pieces = super().split(sep, maxsplit)
+        self.pieces.extend(pieces)
+        return pieces
+
+
 class _CountedChain(str):
-    """A header field that records every piece ever cut out of it.
+    """A header field that records every piece ever cut out of it, and every
+    piece cut out of an entry taken from it.
 
     A chain is read from the right and only as far as the answer needs, so the
     pieces it hands out are what a huge header actually costs.
     """
 
     pieces: list[str]
+    entry_pieces: list[str]
 
     def __new__(cls, value: str) -> _CountedChain:
         chain = super().__new__(cls, value)
         chain.pieces = []
+        chain.entry_pieces = []
         return chain
 
     def split(self, sep: str | None = None, maxsplit: SupportsIndex = -1) -> list[str]:
@@ -185,10 +221,7 @@ class _CountedChain(str):
     def __getitem__(self, key: SupportsIndex | slice) -> str:
         piece = super().__getitem__(key)
         self.pieces.append(piece)
-        return piece
-
-
-_HOPS_BEYOND_ANY_DEPLOYMENT = 10_000
+        return _CountedEntry(piece, self.entry_pieces)
 
 
 @pytest.mark.parametrize(
@@ -216,35 +249,19 @@ def test_a_huge_chain_costs_only_the_entries_it_reads(
     header_field = _CountedChain(", ".join(chain))
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
     assert _get_client_ip(_TRUSTED_PEER, [header_field], trusted) == expected
-    assert len(header_field.pieces) <= MAX_FORWARDED_FOR_HOPS + 1
+    assert len(header_field.pieces) <= _TRUSTED_HOPS_AT_THE_BOUND + 2
 
 
-def test_an_entry_too_long_to_be_an_address_is_never_parsed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """No address is written in more than 45 characters, so longer text names
-    nobody either way — but handing it to ipaddress would cut it into thousands
-    of pieces along its dots, the very cost the bounded scan avoids."""
-    parsed_hosts: list[str] = []
-    parse_address = ipaddress.ip_address
-
-    def record_parse(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
-        parsed_hosts.append(host)
-        return parse_address(host)
-
-    monkeypatch.setattr(proxies, "ip_address", record_parse)
+def test_an_entry_too_long_to_be_an_address_is_refused_without_being_cut_into_pieces() -> None:
+    """No address is written in more than a few dozen characters, so longer
+    text names nobody either way — but handing it to ipaddress would cut it
+    into thousands of pieces along its dots, the very cost the bounded scan
+    avoids."""
+    header_field = _CountedChain("1." * _HOPS_BEYOND_ANY_DEPLOYMENT)
     trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    entry_of_nothing_but_separators = "1." * _HOPS_BEYOND_ANY_DEPLOYMENT
 
-    assert (
-        _get_client_ip(
-            _TRUSTED_PEER,
-            [entry_of_nothing_but_separators],
-            trusted,
-        )
-        == _TRUSTED_PEER
-    )
-    assert all(len(host) <= MAX_ADDRESS_CHARS for host in parsed_hosts)
+    assert _get_client_ip(_TRUSTED_PEER, [header_field], trusted) == _TRUSTED_PEER
+    assert header_field.entry_pieces == []
 
 
 @pytest.mark.parametrize(
@@ -255,6 +272,11 @@ def test_an_entry_too_long_to_be_an_address_is_never_parsed(
             [_CLIENT_BEYOND_THE_HOP_BOUND],
             "too-many-trusted-hops",
             id="more trusted hops than the bound",
+        ),
+        pytest.param(
+            [_chain_of(_HOP_CEILING)],
+            "too-many-trusted-hops",
+            id="a chain of the ceiling in trusted hops",
         ),
     ],
 )

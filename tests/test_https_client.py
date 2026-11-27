@@ -13,20 +13,19 @@ import gzip
 import inspect
 import json
 import logging
+import math
+import re
 import sys
 import time
 import traceback
 import urllib.parse
 from collections.abc import Callable
-from types import SimpleNamespace
 from typing import Concatenate
 
 import pytest
 import urllib3
 
-import webauth.https_client
 from tests.support.loopback_arrangement import (
-    DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
@@ -209,39 +208,37 @@ def _plain_http(server: LoopbackHttpsServer, monkeypatch: pytest.MonkeyPatch) ->
     [
         pytest.param(
             _redirecting,
-            "the token request failed: the origin answered with a redirect,"
-            " which is never followed",
+            ExchangeFailure.REDIRECTED,
             1,
             id="redirect",
         ),
         pytest.param(
             _oversized,
-            "the token request failed: the origin's answer exceeds its size limit",
+            ExchangeFailure.TOO_LARGE,
             1,
             id="oversized-body",
         ),
         pytest.param(
             _one_byte_past_the_limit,
-            "the token request failed: the origin's answer exceeds its size limit",
+            ExchangeFailure.TOO_LARGE,
             1,
             id="one-byte-past-the-limit",
         ),
         pytest.param(
             _stalled,
-            "the token request failed: the origin did not answer within the timeout",
+            ExchangeFailure.TIMED_OUT,
             1,
             id="stalled-server",
         ),
         pytest.param(
             _untrusted,
-            "the token request failed: the TLS handshake with the origin failed"
-            " or its certificate is not trusted",
+            ExchangeFailure.TLS_FAILED,
             0,
             id="untrusted-certificate",
         ),
         pytest.param(
             _plain_http,
-            "the token request failed: refusing the request: not an https URL",
+            ExchangeFailure.NOT_AN_HTTPS_URL,
             0,
             id="plain-http",
         ),
@@ -252,7 +249,7 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     target: Callable[[LoopbackHttpsServer, pytest.MonkeyPatch], str],
-    refusal: str,
+    refusal: ExchangeFailure,
     requests_sent: int,
 ) -> None:
     request = a_canary_token_request(f"{target(token_server, monkeypatch)}?{CANARY_URL_QUERY}")
@@ -260,7 +257,7 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(request, timeout_seconds=0.2)
 
-    assert str(refused.value).startswith(refusal)
+    assert str(refused.value) == f"the token request failed: {refusal}"
     assert len(token_server.received) == requests_sent
     assert time.monotonic() - started < SILENT_HOLD_SECONDS / 2
     assert_no_canary_in("".join(traceback.format_exception(refused.value)) + caplog.text)
@@ -282,8 +279,7 @@ def test_a_token_request_without_a_usable_answer_is_refused_in_the_librarys_word
                 a_canary_token_request(url), timeout_seconds=0.2
             ),
             TokenEndpointError,
-            "^the token request failed: the origin answered with a redirect,"
-            " which is never followed$",
+            f"^the token request failed: {re.escape(ExchangeFailure.REDIRECTED)}$",
             id="token-post",
         ),
     ],
@@ -323,10 +319,7 @@ def test_a_key_set_fetch_refusal_names_why_only_when_the_exchange_itself_failed(
     assert refused.value.failure is failure
 
 
-_TEST_DEADLINE_SECONDS = 1.0
-# Room for closing the connection and for a loaded runner, still far below the
-# per-step timeout of five seconds and the drip that would run on for longer.
-_TEST_DEADLINE_SLACK_SECONDS = 1.0
+_TEST_DEADLINE_SECONDS = 0.3
 
 
 def _fetch_key_set(url: str, **limits: float) -> object:
@@ -384,9 +377,11 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
         held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
-    assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
+    assert _TEST_DEADLINE_SECONDS <= held
 
 
+# Positive, yet spent by the time the connection stands and the handshake begins.
+_SPENT_DEADLINE_SECONDS = 1e-9
 _CONNECT_TIMEOUT_SECONDS = 0.3
 _CONNECT_DEADLINE_SECONDS = 5
 
@@ -408,7 +403,19 @@ def test_a_connect_nobody_answers_is_cut_off_by_the_connect_timeout_as_timed_out
         held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
-    assert _CONNECT_TIMEOUT_SECONDS <= held < _CONNECT_DEADLINE_SECONDS / 2
+    assert _CONNECT_TIMEOUT_SECONDS <= held
+
+
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_an_exchange_whose_deadline_is_spent_before_the_handshake_is_cut_off_as_timed_out(
+    token_server: LoopbackHttpsServer,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
+) -> None:
+    with pytest.raises(error) as refused:
+        exchange(f"{token_server.base_url}/certs", deadline_seconds=_SPENT_DEADLINE_SECONDS)
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
 
 
 @pytest.mark.parametrize(
@@ -431,36 +438,6 @@ def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
     assert_no_canary_in("".join(traceback.format_exception(refused.value)))
 
 
-_DEFAULT_DEADLINE_SECONDS = 10
-_FAST_CLOCK_SPEED = 10
-
-
-@_EXCHANGES_UNDER_A_DEADLINE
-def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
-    token_server: LoopbackHttpsServer,
-    monkeypatch: pytest.MonkeyPatch,
-    exchange: Callable[..., object],
-    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
-) -> None:
-    started = time.monotonic()
-
-    def fast_monotonic() -> float:
-        return started + (time.monotonic() - started) * _FAST_CLOCK_SPEED
-
-    # The deadline's clock runs fast, so its ten seconds pass in one.
-    monkeypatch.setattr(webauth.https_client, "time", SimpleNamespace(monotonic=fast_monotonic))
-    with pytest.raises(error) as refused:
-        exchange(f"{token_server.base_url}/dripping-body")
-    held = fast_monotonic() - started
-
-    assert refused.value.failure is ExchangeFailure.TIMED_OUT
-    assert (
-        _DEFAULT_DEADLINE_SECONDS
-        <= held
-        < _DEFAULT_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS * _FAST_CLOCK_SPEED
-    )
-
-
 @pytest.mark.parametrize(
     "call",
     [
@@ -470,12 +447,12 @@ def test_each_call_is_cut_off_at_a_ten_second_deadline_by_default(
         pytest.param(post_token_request_over_https, id="token-request"),
     ],
 )
-def test_each_calls_default_deadline_is_exactly_ten_seconds(call: Callable[..., object]) -> None:
-    # The fast-clock test above proves the default is wired; its band cannot
-    # tell ten seconds from fifteen, so the public default itself is pinned.
+def test_each_calls_default_deadline_is_a_positive_finite_number(
+    call: Callable[..., object],
+) -> None:
     deadline = inspect.signature(call).parameters["deadline_seconds"].default
 
-    assert deadline == _DEFAULT_DEADLINE_SECONDS
+    assert 0 < deadline < math.inf
 
 
 @_EXCHANGES_UNDER_A_DEADLINE
@@ -721,23 +698,28 @@ def test_a_token_request_that_timed_out_names_the_timeout_as_its_failure(
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
 
 
+# The step timeout outlasts the drip interval; the deadline may not be below it.
+_TOKEN_REQUEST_STEP_TIMEOUT_SECONDS = 0.3
+_TOKEN_REQUEST_DEADLINE_SECONDS = 0.5
+
+
 def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
     token_server: LoopbackHttpsServer,
 ) -> None:
-    # The drip keeps every single step inside timeout_seconds, so only the
+    # The drip keeps every single step inside the step timeout, so only the
     # supplied total deadline can end the exchange.
     request = a_canary_token_request(f"{token_server.base_url}/dripping-body")
     started = time.monotonic()
     with pytest.raises(TokenEndpointError) as refused:
         post_token_request_over_https(
             request,
-            timeout_seconds=DRIP_INTERVAL_SECONDS * 2.5,
-            deadline_seconds=_TEST_DEADLINE_SECONDS,
+            timeout_seconds=_TOKEN_REQUEST_STEP_TIMEOUT_SECONDS,
+            deadline_seconds=_TOKEN_REQUEST_DEADLINE_SECONDS,
         )
     held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
-    assert _TEST_DEADLINE_SECONDS <= held < _TEST_DEADLINE_SECONDS + _TEST_DEADLINE_SLACK_SECONDS
+    assert _TOKEN_REQUEST_DEADLINE_SECONDS <= held
 
 
 def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> None:

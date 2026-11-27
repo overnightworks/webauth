@@ -17,7 +17,8 @@ from tests.support.trace_context import (
     a_raising_global_propagator,
     inside_a_trace,
 )
-from webauth.https_client import fetch_key_set_over_https
+from webauth.https_client import ExchangeFailure, KeySetFetchError, fetch_key_set_over_https
+from webauth.oidc import TokenEndpointError
 from webauth.oidc_transport import post_token_request_over_https
 
 
@@ -84,3 +85,22 @@ def test_a_propagator_that_raises_fails_the_call_without_its_message_in_any_log_
     assert (ended["outcome"], ended["error_type"]) == ("failed", "RuntimeError")
     assert "reason" not in ended
     assert PROPAGATOR_FAILURE_MESSAGE not in written.out + written.err
+
+
+@pytest.mark.parametrize("call", _ISSUER_CALLS)
+def test_a_propagator_that_raises_an_os_error_fails_the_call_like_a_transport_error(
+    call: Callable[[LoopbackHttpsServer], object],
+    token_server: LoopbackHttpsServer,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """LOG-05, DISCOVERY-07: an `OSError` the propagator raises breaks the exchange off, and its
+    line is `failed` with that reason."""
+    with configured("webauth-test"), a_raising_global_propagator(OSError), inside_a_trace():
+        with pytest.raises((KeySetFetchError, TokenEndpointError)) as refused:
+            call(token_server)
+
+    [ended] = [
+        json.loads(line) for line in capsys.readouterr().out.splitlines() if ".ended" in line
+    ]
+    assert refused.value.failure is ExchangeFailure.BROKEN_OFF
+    assert (ended["outcome"], ended["reason"]) == ("failed", "broken-off")
