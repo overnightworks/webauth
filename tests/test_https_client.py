@@ -380,6 +380,8 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     assert _TEST_DEADLINE_SECONDS <= held
 
 
+# Positive, yet spent by the time the connection stands and the handshake begins.
+_SPENT_DEADLINE_SECONDS = 1e-9
 _CONNECT_TIMEOUT_SECONDS = 0.3
 _CONNECT_DEADLINE_SECONDS = 5
 
@@ -402,6 +404,18 @@ def test_a_connect_nobody_answers_is_cut_off_by_the_connect_timeout_as_timed_out
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _CONNECT_TIMEOUT_SECONDS <= held
+
+
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_an_exchange_whose_deadline_is_spent_before_the_handshake_is_cut_off_as_timed_out(
+    token_server: LoopbackHttpsServer,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
+) -> None:
+    with pytest.raises(error) as refused:
+        exchange(f"{token_server.base_url}/certs", deadline_seconds=_SPENT_DEADLINE_SECONDS)
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
 
 
 @pytest.mark.parametrize(
