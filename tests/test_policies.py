@@ -245,10 +245,23 @@ A_PATH = PathRules(exact=frozenset({"/x"}))
 
 
 @pytest.mark.parametrize("rule", METHOD_RULES)
-class TestAMethodsFieldRefusesASingleString:
+class TestAMethodsField:
     @pytest.mark.parametrize("methods", ["POST", "XPOST"])
     def test_a_single_string_is_refused(self, rule: Callable[..., Any], methods: str) -> None:
         with pytest.raises(ValueError, match="methods"):
+            rule(A_PATH, methods=methods)
+
+    @pytest.mark.parametrize(
+        "methods",
+        [frozenset({"post"}), frozenset({"GET", "Post"}), frozenset({""}), frozenset({"PO ST"})],
+        ids=["lower-case", "mixed-case", "empty", "space"],
+    )
+    def test_a_method_that_is_not_an_upper_case_token_is_refused(
+        self,
+        rule: Callable[..., Any],
+        methods: frozenset[str],
+    ) -> None:
+        with pytest.raises(ValueError, match=r"methods must hold only upper-case"):
             rule(A_PATH, methods=methods)
 
     @pytest.mark.parametrize(
@@ -265,6 +278,12 @@ class TestAMethodsFieldRefusesASingleString:
 
         assert accepted.applies_to("/x", "POST") is True
         assert accepted.applies_to("/x", "GET") is applies_to_get
+
+    def test_a_lower_case_request_method_matches_no_selected_method(
+        self,
+        rule: Callable[..., Any],
+    ) -> None:
+        assert rule(A_PATH, methods=frozenset({"POST"})).applies_to("/x", "post") is False
 
 
 class TestBodySizePolicy:
@@ -289,7 +308,7 @@ class TestBodySizePolicy:
         [
             ("/upload", "POST", 50_000),
             ("/cover", "POST", 9_000),
-            ("/cover", "post", 9_000),
+            ("/cover", "post", 1_000),
             ("/cover", "PUT", 1_000),
             ("/songs", "POST", 1_000),
             ("/upload", "", 50_000),
