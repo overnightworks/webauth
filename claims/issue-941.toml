@@ -1,0 +1,8 @@
+claim_id = "af4e49e3867d432c8280293592d9d35c"
+agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
+role = "builder"
+base = "de130388a8aa63606050eb20fa723f1d2a22f232"
+branch = "claude/issue-941-loopback-server-module"
+scope = ["quality/baseline.toml", "tests/conftest.py", "tests/support/loopback_arrangement.py", "tests/support/oidc_arrangement.py", "tests/test_jwt_verification_https_fetch.py"]
+opened_commit = "f21ccbbaccf4542341a17dea8c9261f15aa12f0d"
+whole_reason = "One test server moves to its own module and its two users follow; the baseline entry goes with it."
