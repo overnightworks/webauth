@@ -1,0 +1,8 @@
+claim_id = "88b4fb88d2ea451598dfb11bb73fd138"
+agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
+role = "builder"
+base = "6dc2033fbeb7092fd201631b5f4c5014383a8b90"
+branch = "claude/issue-929-deadline-proxy-redis-tests"
+scope = ["tests/support/trace_context.py", "tests/test_https_client.py", "tests/test_https_client_trace_context.py", "tests/test_proxies.py", "tests/test_rate_limit_redis.py"]
+opened_commit = "7d49f470fbeec64bca1b4a57417dda745b3d7f6b"
+whole_reason = "Five test files of the outbound client, the proxies and the rate limit, all test-only fixes of how a test proves its behaviour; one reviewer reads them together."
