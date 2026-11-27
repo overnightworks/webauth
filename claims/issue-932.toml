@@ -1,8 +1,0 @@
-claim_id = "9b1a5723240e46f3b41c2ff1cba393f7"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "6dc2033fbeb7092fd201631b5f4c5014383a8b90"
-branch = "claude/issue-932-own-policy-leaf-dot-segment"
-scope = ["src/webauth/_end_session_page.py", "src/webauth/_own_policy.py", "src/webauth/_paths.py", "src/webauth/_sign_in_paths.py", "src/webauth/middleware/security_headers.py", "src/webauth/middleware/session_gate.py", "src/webauth/policies.py"]
-opened_commit = "1e3b4e75b1dc5832e4da6bfb0c2ffd4c14fa985e"
-whole_reason = "The token move and the rename are two private-name fixes in seven small files that one reviewer reads together; each is a few lines."
