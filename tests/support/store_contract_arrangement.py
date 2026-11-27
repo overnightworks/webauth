@@ -15,6 +15,8 @@ from typing import cast
 
 from pydantic import SecretStr
 
+from tests.support.account_arrangement import UsersInMemory
+from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import RecordingAuditSink
 from webauth.ports import AccountKind, SignInStores, SignInTransaction, UsernameTakenError
 from webauth.single_process_stores import (
@@ -36,6 +38,19 @@ def a_correct_single_process_adapter() -> StoreAdapter:
     return StoreAdapter(
         accounts=stores.accounts, sessions=stores.sessions, transaction=stores.transaction
     )
+
+
+def an_adapter_over_the_suites_doubles() -> StoreAdapter:
+    """The doubles most tests arrange through, without their write lock: with one, every call
+    outside a held lock is refused by design."""
+    users = UsersInMemory()
+    sessions = SessionRecordsInMemory(users=users)
+
+    @contextmanager
+    def transaction() -> Iterator[SignInStores]:
+        yield SignInStores(users, sessions, RecordingAuditSink())
+
+    return StoreAdapter(accounts=users, sessions=sessions, transaction=transaction)
 
 
 def _adapter_over(

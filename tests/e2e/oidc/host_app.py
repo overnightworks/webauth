@@ -1,5 +1,5 @@
 """The host application of the proof: start, callback, logout and back-channel
-logout routes over the library's own in-memory stores, served over TLS.
+logout routes over the test suite's in-memory doubles, served over TLS.
 
 One process serves one cookie configuration on every origin it is told. Beside
 it a plain-http listener on loopback, which no browser is ever pointed at, answers
