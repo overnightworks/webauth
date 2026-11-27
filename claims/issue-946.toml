@@ -1,7 +1,0 @@
-claim_id = "a4a65fa4ab9d4848b3a930acb5883044"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "de130388a8aa63606050eb20fa723f1d2a22f232"
-branch = "claude/issue-946-doubles-pass-store-kit"
-scope = ["tests/e2e/oidc/host_app.py", "tests/support/store_contract_arrangement.py", "tests/test_store_contract.py"]
-opened_commit = "856bd017e32ee161bbeda89ae5375069b0b57429"
