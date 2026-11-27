@@ -45,15 +45,10 @@ def post_token_request_over_https(
     counted from the start of the call, and is owned by ``webauth.https_client``;
     connecting, which urllib3 bounds by the connect timeout once per resolved
     address, and the host name lookup, which the resolver offers no way to
-    bound, run outside it. A ``timeout_seconds`` above ``deadline_seconds``
-    raises ``ValueError`` rather than being silently capped, as does a
-    ``deadline_seconds`` or ``timeout_seconds`` of zero or less.
+    bound, run outside it. A ``timeout_seconds`` above ``deadline_seconds`` is
+    accepted, the deadline ending the exchange; a ``deadline_seconds`` or
+    ``timeout_seconds`` of zero or less raises ``ValueError``.
     ``TokenEndpointError.failure`` names why the request failed."""
-    if timeout_seconds > deadline_seconds > 0:
-        raise ValueError(
-            f"timeout_seconds ({timeout_seconds}) must not exceed"
-            f" deadline_seconds ({deadline_seconds})"
-        )
     try:
         answer = _post_form_over_https(
             request.url,

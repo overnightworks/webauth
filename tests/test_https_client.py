@@ -353,12 +353,17 @@ def _unanswering_tls_handshake(server: LoopbackHttpsServer, stack: contextlib.Ex
 
 
 @pytest.mark.parametrize(
-    "target",
+    ("target", "exchange_options"),
     [
-        pytest.param(_unanswering_tls_handshake, id="tls-handshake"),
-        pytest.param(_route("/dripping-status"), id="dripping-status-line"),
-        pytest.param(_route("/dripping-head"), id="dripping-head"),
-        pytest.param(_route("/dripping-body"), id="dripping-body"),
+        pytest.param(_unanswering_tls_handshake, {}, id="tls-handshake"),
+        pytest.param(_route("/dripping-status"), {}, id="dripping-status-line"),
+        pytest.param(_route("/dripping-head"), {}, id="dripping-head"),
+        pytest.param(_route("/dripping-body"), {}, id="dripping-body"),
+        pytest.param(
+            _route("/dripping-body"),
+            {"timeout_seconds": _TEST_DEADLINE_SECONDS * 10},
+            id="timeout-above-the-deadline",
+        ),
     ],
 )
 @_EXCHANGES_UNDER_A_DEADLINE
@@ -367,12 +372,13 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     exchange: Callable[..., object],
     error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
     target: _StalledTarget,
+    exchange_options: dict[str, float],
 ) -> None:
     with contextlib.ExitStack() as stack:
         url = target(token_server, stack)
         started = time.monotonic()
         with pytest.raises(error) as refused:
-            exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS)
+            exchange(url, deadline_seconds=_TEST_DEADLINE_SECONDS, **exchange_options)
         held = time.monotonic() - started
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
@@ -718,13 +724,6 @@ def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TOKEN_REQUEST_DEADLINE_SECONDS <= held
-
-
-def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> None:
-    request = a_canary_token_request("https://127.0.0.1:1/token")
-
-    with pytest.raises(ValueError, match="timeout_seconds"):
-        post_token_request_over_https(request, timeout_seconds=3, deadline_seconds=2)
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
