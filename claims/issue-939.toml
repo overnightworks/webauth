@@ -1,8 +1,0 @@
-claim_id = "7a0724100a714be4b54b0eef655ad7d4"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "de130388a8aa63606050eb20fa723f1d2a22f232"
-branch = "claude/issue-939-origin-and-path-table-tests"
-scope = ["tests/middleware/test_csrf.py", "tests/test_dependencies.py", "tests/test_origins.py", "tests/test_paths.py", "tests/test_sign_in_routes_derived_policies.py"]
-opened_commit = "5258ca55b3d90527b6006775bb4b3f4c254964d7"
-whole_reason = "Two predicates' proofs move from composed stacks to one table each; the caller files only lose their repeats, which a reviewer checks against the new tables at once."
