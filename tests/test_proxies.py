@@ -64,6 +64,7 @@ _TRUSTED_HOP = "172.18.0.9"
 _CLIENT = "203.0.113.7"
 _UNLISTED_PROXY = "198.51.100.9"
 _HOPS_BEYOND_ANY_DEPLOYMENT = 10_000
+_HOP_CEILING = 64
 
 
 def _chain_of(trusted_hops: int) -> str:
@@ -272,6 +273,11 @@ def test_an_entry_too_long_to_be_an_address_is_refused_without_being_cut_into_pi
             "too-many-trusted-hops",
             id="more trusted hops than the bound",
         ),
+        pytest.param(
+            [_chain_of(_HOP_CEILING)],
+            "too-many-trusted-hops",
+            id="a chain of the ceiling in trusted hops",
+        ),
     ],
 )
 def test_a_chain_that_names_nobody_is_logged(
@@ -287,20 +293,6 @@ def test_a_chain_that_names_nobody_is_logged(
     [record] = caplog.records
     assert (record.levelno, record.getMessage()) == (logging.WARNING, "forwarded_for.ignored")
     assert fields_of(record) == {"reason": reason}
-
-
-_HOP_CEILING = 64
-
-
-def test_a_chain_of_the_ceiling_in_trusted_hops_is_refused(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The hop bound is a protective limit: however it is tuned, a chain of
-    this many trusted hops names nobody."""
-    trusted = TrustedProxies.parse(_PROXY_NETWORK)
-    with caplog.at_level(logging.WARNING, logger="webauth.proxies"):
-        assert _get_client_ip(_TRUSTED_PEER, [_chain_of(_HOP_CEILING)], trusted) == _TRUSTED_PEER
-    assert [fields_of(record) for record in caplog.records] == [{"reason": "too-many-trusted-hops"}]
 
 
 def test_the_warning_for_a_nearest_entry_that_is_not_an_address_quotes_none_of_it(
