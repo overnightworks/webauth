@@ -5,16 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from contextlib import contextmanager
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import fakeredis
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-import webauth.rate_limit
 from tests.support.log_records import fields_of
 from tests.support.rate_limit_arrangement import (
     AlwaysFailingRateLimitBackend,
@@ -35,7 +32,6 @@ from webauth.rate_limit import RedisRateLimitBackend
 
 HOST_PREFIX = "host"
 WINDOW_SECONDS = 60
-ONE_HOUR = 3600
 WORLD_START = 1_800_000_000.0
 
 
@@ -51,16 +47,6 @@ def world_clock(monkeypatch):
     world = WorldClock()
     monkeypatch.setattr(time, "time", world)
     return world
-
-
-@contextmanager
-def host_clock_offset_by(world: WorldClock, offset_seconds: int):
-    skewed_time = SimpleNamespace(
-        time=lambda: world.now + offset_seconds,
-        monotonic=time.monotonic,
-    )
-    with patch.object(webauth.rate_limit, "time", skewed_time):
-        yield
 
 
 @pytest.fixture
@@ -81,15 +67,14 @@ class TestRedisRateLimitBackend:
         backend.is_allowed("rl:test", limit=2, window_seconds=60)
         assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is False
 
-    def test_counts_requests_with_identical_timestamps(self, fake_redis) -> None:
+    def test_counts_requests_with_identical_timestamps(self, fake_redis, world_clock) -> None:
         backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
-        with patch("webauth.rate_limit.time.time", return_value=1234.5):
-            assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is True
-            assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is True
+        assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is True
+        assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is True
+        assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is False
+        for _ in range(1_000):
             assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is False
-            for _ in range(1_000):
-                assert backend.is_allowed("rl:test", limit=2, window_seconds=60) is False
-            assert fake_redis.zcard(f"{HOST_PREFIX}:rl:test") == 2
+        assert fake_redis.zcard(f"{HOST_PREFIX}:rl:test") == 2
 
     def test_different_keys_independent(self, fake_redis) -> None:
         backend = RedisRateLimitBackend(fake_redis, HOST_PREFIX)
@@ -133,37 +118,35 @@ class TestRedisRateLimitBackend:
             backend.is_allowed("rl:test", limit=10, window_seconds=60)
 
 
-@pytest.mark.parametrize("offset_seconds", [ONE_HOUR, -ONE_HOUR], ids=["ahead", "behind"])
-class TestHostsWithSkewedClocksSharingOneRedis:
+class TestHostsSharingOneRedis:
+    """The Redis server's clock decides the window, so the hosts' own clocks
+    take no part: two backends over one Redis share one budget."""
+
     @pytest.fixture
-    def honest_and_skewed_hosts(self, fake_redis, world_clock):
+    def two_hosts(self, fake_redis, world_clock):
         return (
             RedisRateLimitBackend(fake_redis, HOST_PREFIX),
             RedisRateLimitBackend(fake_redis, HOST_PREFIX),
         )
 
-    def test_never_pass_more_than_the_limit(
-        self, honest_and_skewed_hosts, world_clock, offset_seconds
-    ) -> None:
-        honest, skewed = honest_and_skewed_hosts
-        verdicts = [honest.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS)]
-        with host_clock_offset_by(world_clock, offset_seconds):
-            verdicts.append(skewed.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS))
-            verdicts.append(skewed.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS))
-        verdicts.append(honest.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS))
+    def test_never_pass_more_than_the_limit(self, two_hosts) -> None:
+        first, second = two_hosts
+        verdicts = [first.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS)]
+        verdicts.append(second.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS))
+        verdicts.append(second.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS))
+        verdicts.append(first.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS))
         assert verdicts == [True, True, False, False]
 
-    def test_skewed_host_does_not_deny_the_honest_host_after_the_window_slides(
-        self, honest_and_skewed_hosts, world_clock, offset_seconds
+    def test_one_host_does_not_deny_the_other_after_the_window_slides(
+        self, two_hosts, world_clock
     ) -> None:
-        honest, skewed = honest_and_skewed_hosts
-        with host_clock_offset_by(world_clock, offset_seconds):
-            assert skewed.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is True
+        first, second = two_hosts
+        assert second.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is True
         world_clock.now += WINDOW_SECONDS / 2
-        assert honest.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is True
+        assert first.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is True
         world_clock.now += WINDOW_SECONDS / 2 + 1
-        assert honest.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is True
-        assert honest.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is False
+        assert first.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is True
+        assert first.is_allowed("rl:k", limit=2, window_seconds=WINDOW_SECONDS) is False
 
 
 class TestMiddlewareOverRedisBackend:
