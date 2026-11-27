@@ -3,5 +3,6 @@ agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
 role = "builder"
 base = "de130388a8aa63606050eb20fa723f1d2a22f232"
 branch = "claude/issue-947-rule-methods-upper-case"
-scope = ["src/webauth/policies.py", "tests/test_policies.py"]
+scope = ["src/webauth/_validation.py", "src/webauth/middleware/bearer_gate.py", "src/webauth/policies.py", "tests/test_policies.py"]
 opened_commit = "4c4aab32221102f2e9395886075c328df3052d28"
+whole_reason = "One method-token check, its owner in the shared validation module and its three callers; split, the pattern would stay written twice."
