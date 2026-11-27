@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import SecretStr
 
+from webauth._validation import is_whole_number
 from webauth.oidc_login import new_session_id
 from webauth.ports import (
     AccountKind,
@@ -253,7 +254,7 @@ def _delete_for_user_returns_how_many_ended(adapter: StoreAdapter) -> None:
     ended = adapter.sessions.delete_for_user(subject)
 
     _require(
-        isinstance(ended, int) and not isinstance(ended, bool) and ended == len(sessions),
+        is_whole_number(ended) and ended == len(sessions),
         "delete_for_user did not return how many sessions ended",
     )
     _require(_stored_ids(adapter, sessions) == [], "delete_for_user left a session")

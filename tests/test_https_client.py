@@ -2,7 +2,7 @@
 
 `post_token_request_over_https` is the `TokenRequestPost` a host hands its
 `OidcRelyingParty`; its scenarios send a real form POST through
-`webauth.https_client` to the server of `oidc_arrangement`, carrying canary
+`webauth.https_client` to the server of `loopback_arrangement`, carrying canary
 secrets in the client secret, the code and the PKCE verifier.
 """
 
@@ -25,7 +25,7 @@ from typing import Concatenate
 import pytest
 import urllib3
 
-from tests.support.oidc_arrangement import (
+from tests.support.loopback_arrangement import (
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
     SILENT_HOLD_SECONDS,
@@ -47,7 +47,6 @@ from webauth.https_client import (
     KeySetFetchError,
     ProviderMetadataFetchError,
     _HttpsExchangeError,
-    _post_form_over_https,
     fetch_key_set_over_https,
     fetch_provider_metadata_over_https,
 )
@@ -443,7 +442,6 @@ def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
     [
         pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
         pytest.param(fetch_provider_metadata_over_https, id="provider-metadata-fetch"),
-        pytest.param(_post_form_over_https, id="token-post"),
         pytest.param(post_token_request_over_https, id="token-request"),
     ],
 )

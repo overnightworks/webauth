@@ -15,7 +15,7 @@ from collections.abc import Callable
 import pytest
 
 from tests.support.log_records import fields_of
-from tests.support.oidc_arrangement import (
+from tests.support.loopback_arrangement import (
     LoopbackHttpsServer,
 )
 from tests.support.token_request_canaries import (

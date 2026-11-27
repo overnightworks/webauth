@@ -8,10 +8,9 @@ the key-set transport stays there.
 
 from __future__ import annotations
 
-from typing import Final
-
 from webauth.https_client import (
     _TOKEN_EXCHANGE_DEADLINE_SECONDS,
+    _TOKEN_REQUEST_TIMEOUT_SECONDS,
     _HttpsExchangeError,
     _post_form_over_https,
 )
@@ -23,8 +22,6 @@ from webauth.oidc import (
 from webauth.oidc._token_endpoint import _MAX_TOKEN_RESPONSE_BYTES
 
 __all__ = ["post_token_request_over_https"]
-
-_TOKEN_REQUEST_TIMEOUT_SECONDS: Final = 5
 
 
 def post_token_request_over_https(

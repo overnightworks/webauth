@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 
 from pydantic import SecretStr
 
 from webauth import WebAuthError
+from webauth._validation import json_object
 from webauth.oidc._authorization_url import CODE_CHALLENGE_METHOD
 from webauth.oidc._client_config import OPENID_SCOPE, OidcClientConfig, require_endpoint_url
 
@@ -60,9 +60,9 @@ def discover_oidc_client_config(
     `OidcDiscoveryError` when it is not a JSON object or lacks or misstates a
     member, and the `ValueError` of `OidcClientConfig` for a URL or value it refuses."""
     require_endpoint_url("issuer", issuer)
-    metadata = _parsed_object(
-        fetch_provider_metadata(f"{issuer.removesuffix('/')}{_WELL_KNOWN_PATH}")
-    )
+    metadata = json_object(fetch_provider_metadata(f"{issuer.removesuffix('/')}{_WELL_KNOWN_PATH}"))
+    if metadata is None:
+        raise OidcDiscoveryError("the metadata document is not a JSON object")
     if metadata.get("issuer") != issuer:
         raise OidcDiscoveryError("the metadata document's issuer is not the configured issuer")
     _require_pkce_method(metadata)
@@ -81,16 +81,6 @@ def discover_oidc_client_config(
         leeway_seconds=leeway_seconds,
         authorization_response_iss_parameter_supported=_iss_parameter_supported(metadata),
     )
-
-
-def _parsed_object(document: bytes) -> dict[str, object]:
-    try:
-        metadata = json.loads(document)
-    except ValueError, RecursionError:
-        metadata = None
-    if not isinstance(metadata, dict):
-        raise OidcDiscoveryError("the metadata document is not a JSON object") from None
-    return metadata
 
 
 def _string_member(metadata: dict[str, object], member: str) -> str:

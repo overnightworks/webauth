@@ -13,7 +13,7 @@ import pytest
 from tests.support.jwt_issuer import (
     IssuerScenario,
 )
-from tests.support.oidc_arrangement import (
+from tests.support.loopback_arrangement import (
     LoopbackHttpsServer,
     loopback_https_server,
 )

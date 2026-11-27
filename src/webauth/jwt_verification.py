@@ -52,7 +52,6 @@ attempt is refused as `KEY_SET_UNAVAILABLE`.
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
@@ -65,7 +64,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from jwt.types import Options
 
-from webauth._validation import _is_whole_number, require_non_negative_whole_number
+from webauth._validation import is_whole_number, json_object, require_non_negative_whole_number
 from webauth.https_client import (
     _MAX_KEY_SET_BYTES,
     KeySetFetchError,
@@ -456,7 +455,7 @@ def _is_key_id(value: object) -> TypeGuard[str]:
 
 def _integer_claim(claims: Mapping[str, object], name: str) -> int:
     value = claims.get(name)
-    if not _is_whole_number(value):
+    if not is_whole_number(value):
         raise _VerificationRefusal(RejectionReason.INVALID_CLAIM)
     return value
 
@@ -486,23 +485,12 @@ def _base64url_decode(segment: str) -> bytes:
     return decoded
 
 
-def _json_object(document: bytes) -> dict[str, object] | None:
-    """The JSON object `document` holds, or `None` for anything else. The
-    issuer is trusted for what it serves, so the stdlib parser reads it as is:
-    a member named twice keeps its last value."""
-    try:
-        parsed = json.loads(document)
-    except ValueError, RecursionError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
 def _parse_key_set(
     document: bytes,
 ) -> tuple[Mapping[str, RSAPublicKey], RSAPublicKey | None]:
     if len(document) > _MAX_KEY_SET_BYTES:
         raise _InvalidKeySetError(_RefreshFailure.TOO_LARGE)
-    parsed = _json_object(document)
+    parsed = json_object(document)
     if parsed is None:
         raise _InvalidKeySetError(_RefreshFailure.NOT_JSON)
     jwks = parsed.get("keys")
