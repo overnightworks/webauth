@@ -22,7 +22,6 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from webauth._validation import (
-    is_utf8,
     require_non_empty_string,
     require_non_negative_whole_number,
     string_list_claim,
@@ -242,7 +241,7 @@ class ServiceCallerCheck:
 
     def _identified(self, verified: _VerifiedClaims) -> _Identity | CallerRefusal:
         subject = verified.subject
-        if subject is None or not is_utf8(subject):
+        if subject is None:
             return CallerRefusal(CallerRefusalReason.INVALID_SUBJECT, None)
         groups = _groups(verified.claims, self._identity.group_claim)
         if groups is None:

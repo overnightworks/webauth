@@ -408,7 +408,6 @@ def test_the_role_is_the_one_the_registered_admission_gives_the_persons_groups(
     ("workload_changes", "reason"),
     [
         pytest.param({"sub": ABSENT}, CallerRefusalReason.INVALID_SUBJECT, id="subject-absent"),
-        pytest.param({"sub": "\ud800"}, CallerRefusalReason.INVALID_SUBJECT, id="surrogate"),
         pytest.param({"groups": None}, CallerRefusalReason.MALFORMED_GROUPS, id="null-groups"),
         pytest.param({"groups": "/a"}, CallerRefusalReason.MALFORMED_GROUPS, id="string-groups"),
         pytest.param(
@@ -516,7 +515,6 @@ def test_a_key_set_that_is_down_is_refused_at_the_workload_verifier_stage() -> N
     ("changes", "reason"),
     [
         pytest.param({"sub": ABSENT}, CallerRefusalReason.INVALID_SUBJECT, id="subject-absent"),
-        pytest.param({"sub": "\ud800"}, CallerRefusalReason.INVALID_SUBJECT, id="surrogate"),
         pytest.param({"groups": None}, CallerRefusalReason.MALFORMED_GROUPS, id="null-groups"),
         pytest.param({"groups": "/a"}, CallerRefusalReason.MALFORMED_GROUPS, id="string-groups"),
         pytest.param(

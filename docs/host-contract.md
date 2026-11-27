@@ -961,7 +961,7 @@ claim, the clock leeway) and its registered apps (`RegisteredApp`, keyed by the 
   | CALLER-09 | `MISSING_TOKEN` | the workload token, then the person token, is absent or empty | `UNAUTHENTICATED` (401) |
   | CALLER-10 | `KEY_SET_UNAVAILABLE` | the verifier cannot fetch the key set, see below | `UNAVAILABLE` (503) |
   | CALLER-11 | `TOKEN_REJECTED` | the verifier refuses either token, see below | `UNAUTHENTICATED` (401) |
-  | CALLER-12 | `INVALID_SUBJECT` | `sub` absent or not valid text, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
+  | CALLER-12 | `INVALID_SUBJECT` | `sub` absent, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
   | CALLER-13 | `MALFORMED_GROUPS` | the group claim is present and not a list of strings, in the workload token, then in the person token | `UNAUTHENTICATED` (401) |
   | CALLER-14 | `NOT_A_WORKLOAD` | the workload token's `realm_access.roles` lacks the workload role | `FORBIDDEN` (403) |
   | CALLER-15 | `UNBOUND_CLIENT` | the workload token's `azp` is absent or empty, or its `client_id` differs from it | `FORBIDDEN` (403) |
@@ -988,7 +988,7 @@ The verifier stage keeps the verifier's own order:
 - CALLER-34: any token verification, not only a service caller's, that finds no current key set while another
   request refreshes waits for that refresh, at most `KEY_SET_REFRESH_WAIT_SECONDS`, unless the last refresh attempt
   failed; it then uses the key set the refresh left or is refused `KEY_SET_UNAVAILABLE`;
-- CALLER-26: every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`.
+- CALLER-26: every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`; a `sub` that is not a non-empty string of valid text (no lone surrogate, which only a JSON `\ud800` escape carries) is `INVALID_CLAIM` for every token kind, so a bearer gate, a sign-in and a back-channel logout refuse it too.
 
 By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
