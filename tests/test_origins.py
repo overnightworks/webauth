@@ -18,7 +18,13 @@ _LOCALHOST_AND_LOOPBACK = frozenset({"localhost", "127.0.0.1"})
 _VERDICT_CASES = [
     pytest.param(None, None, [], ABSENT, id="no origin"),
     pytest.param(None, None, [ALLOWED_ORIGIN], ALLOWED, id="the allowed origin"),
-    pytest.param(None, None, [f"{ALLOWED_ORIGIN}:8000"], ALLOWED, id="the allowed host with a port"),
+    pytest.param(
+        None,
+        None,
+        [f"{ALLOWED_ORIGIN}:8000"],
+        ALLOWED,
+        id="the allowed host with a port",
+    ),
     pytest.param(None, None, ["https://evil.test"], FOREIGN, id="a foreign origin"),
     pytest.param(
         None,
