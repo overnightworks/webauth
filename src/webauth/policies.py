@@ -216,7 +216,8 @@ class BodySizeRule:
     paths: PathRules
     max_bytes: int
     methods: frozenset[str] | None = None
-    """The methods the larger budget applies to; ``None`` means every method."""
+    """The upper-case HTTP methods the larger budget applies to, compared with the request's
+    method as given; ``None`` means every method."""
 
     def __post_init__(self) -> None:
         require_method_tokens("BodySizeRule.methods", self.methods)
@@ -233,7 +234,8 @@ class PublicRule:
 
     paths: PathRules
     methods: frozenset[str] | None = None
-    """The methods the rule opens; ``None`` means every method."""
+    """The upper-case HTTP methods the rule opens, compared with the request's method as
+    given; ``None`` means every method."""
 
     def __post_init__(self) -> None:
         require_method_tokens("PublicRule.methods", self.methods)

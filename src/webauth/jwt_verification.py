@@ -3,9 +3,9 @@
 `_JwtVerifier.verify` takes a raw compact JWS and answers `_VerifiedClaims` or
 `_Rejected(reason)`. The caller names the issuer, the audiences it accepts, the
 URL of the issuer's key set and the clock leeway; what a protocol demands of
-the claims beyond signature, issuer, audience and time — an ID token's nonce,
-a logout token's events — belongs to the caller, which reads them from
-`_VerifiedClaims.claims`.
+the claims beyond signature, issuer, audience, time and a valid subject — an
+ID token's nonce, a logout token's events — belongs to the caller, which reads
+them from `_VerifiedClaims.claims`.
 
 PyJWT reads the token. This module bounds the token length and the header
 segment before PyJWT parses anything, accepts an RS256-only header whose
@@ -133,8 +133,9 @@ class _VerifiedClaims:
     """A token whose signature, issuer, audience and time claims held.
 
     `subject` is the `sub` claim, absent from some tokens (a logout token may
-    name only a session); `audiences` is `aud` as a tuple whether the token
-    carried one string or a list; `claims` holds every claim as parsed."""
+    name only a session) and a present one is non-empty valid text; `audiences`
+    is `aud` as a tuple whether the token carried one string or a list;
+    `claims` holds every claim as parsed."""
 
     subject: str | None
     issuer: str

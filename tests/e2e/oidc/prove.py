@@ -10,7 +10,7 @@ the one throwaway certificate key the browser is told to accept.
 The host application is ``build_app`` in ``host_app.py``. The sign-in scenarios live in
 ``login.py``, the logout and session scenarios in ``logout.py`` and the token and refresh
 scenarios in ``tokens.py``. The scenarios below
-are registered in ``run_default_scenarios``, ``run_token_scenarios``,
+are registered in ``run_default_scenarios``, ``run_id_token_and_session_scenarios``,
 ``drive_backchannel_phase``, ``drive_bearer_phase`` and ``run_proof``, which print
 ``SCENARIO <number> <width> <origin>`` for each, except that the back-channel scenarios
 (10 to 13, 22 and 23) print both app origins after the width and scenario 5 prints
@@ -548,7 +548,7 @@ def run_default_scenarios(proof: Proof) -> bool:
         f"SCENARIO 24 {DESKTOP.label} {APP_ORIGIN}",
         lambda: test_deep_link_survives_the_login(proof, DESKTOP),
     )
-    run_token_scenarios(proof)
+    run_id_token_and_session_scenarios(proof)
     for number, scenario in REFRESH_SCENARIOS:
         proof.held_or_failed(
             f"SCENARIO {number} {DESKTOP.label} {APP_ORIGIN}",
@@ -557,7 +557,7 @@ def run_default_scenarios(proof: Proof) -> bool:
     return True
 
 
-def run_token_scenarios(proof: Proof) -> None:
+def run_id_token_and_session_scenarios(proof: Proof) -> None:
     for number, origin, scenario in (
         (14, APP_ORIGIN, the_browser_holds_no_id_token),
         (15, APP_ORIGIN, second_login_and_logout_show_no_page),

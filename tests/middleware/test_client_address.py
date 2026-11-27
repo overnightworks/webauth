@@ -25,7 +25,7 @@ from tests.support.request_line_arrangement import (
     TRUSTED_PEER,
     a_client_behind_the_proxy,
 )
-from tests.support.web_auth_host_arrangement import forwarded_by_the_proxy
+from tests.support.web_auth_host_arrangement import an_unparseable_forward, forwarded_by_the_proxy
 from tests.support.webauth_arrangement import API_PATH, HTTPS_TEST_SERVER
 from webauth import proxies
 from webauth.middleware.rate_limit import _IpRateLimitMiddleware
@@ -33,7 +33,6 @@ from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 from webauth.web_auth import ServedBehind
 
 SOCKET_PATH = "/ws"
-NOT_AN_ADDRESS = {"x-forwarded-for": "not-an-address"}
 
 
 class TestTheFrontGuardSitsOutsideTheStack:
@@ -75,7 +74,7 @@ def test_the_accessor_only_reads_what_the_writer_recorded(
         client,
         pytest.raises(RuntimeError, match="web_auth_front"),
     ):
-        client.get("/client", headers=NOT_AN_ADDRESS)
+        client.get("/client", headers=an_unparseable_forward())
 
     assert caplog.records == []
 

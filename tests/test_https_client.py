@@ -732,7 +732,8 @@ def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(
     request = a_canary_token_request(f"https://127.0.0.1:{closed_port}/token?{CANARY_URL_QUERY}")
 
     with pytest.raises(
-        TokenEndpointError, match="^the token request failed: the origin could not be reached$"
+        TokenEndpointError,
+        match=f"^the token request failed: {re.escape(ExchangeFailure.UNREACHABLE)}$",
     ) as refused:
         post_token_request_over_https(request)
 

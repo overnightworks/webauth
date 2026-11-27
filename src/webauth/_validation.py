@@ -35,8 +35,8 @@ def is_method_token(method: object) -> TypeGuard[str]:
 def is_utf8(text: str) -> bool:
     """Whether ``text`` encodes as UTF-8, so it holds no lone surrogate.
 
-    A lone surrogate comes from a byte that failed to decode (``surrogateescape``)
-    or from a JSON ``\\ud800`` escape.
+    Refused, for example: a JSON ``\\ud800`` escape and a byte that failed to
+    decode (``surrogateescape``), each of which leaves a lone surrogate.
     """
     try:
         text.encode()
