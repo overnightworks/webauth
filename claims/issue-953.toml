@@ -1,7 +1,0 @@
-claim_id = "5449635f22fd4a7b95bcd4d390821509"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "93a2f2dc7e8f20fe5eb0ea7b288514b85bf69ef7"
-branch = "claude/issue-953-outbound-timeout-above-deadline"
-scope = ["src/webauth/https_client.py", "src/webauth/oidc_transport.py", "tests/test_https_client.py"]
-opened_commit = "2b1411add73f5f201b98a36c8f59856afae2b8dd"
