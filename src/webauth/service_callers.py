@@ -22,7 +22,6 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from webauth._validation import (
-    is_utf8,
     require_non_empty_string,
     require_non_negative_whole_number,
     string_list_claim,
@@ -156,7 +155,7 @@ class CallerRefusal:
     @property
     def refusal_class(self) -> CallerRefusalClass:
         """``UNAVAILABLE`` for ``KEY_SET_UNAVAILABLE``; ``UNAUTHENTICATED`` for a missing or
-        unverifiable token or a malformed subject or groups; ``FORBIDDEN`` for every other
+        unverifiable token, an absent subject or malformed groups; ``FORBIDDEN`` for every other
         reason."""
         if self.reason is CallerRefusalReason.KEY_SET_UNAVAILABLE:
             return CallerRefusalClass.UNAVAILABLE
@@ -242,7 +241,7 @@ class ServiceCallerCheck:
 
     def _identified(self, verified: _VerifiedClaims) -> _Identity | CallerRefusal:
         subject = verified.subject
-        if subject is None or not is_utf8(subject):
+        if subject is None:
             return CallerRefusal(CallerRefusalReason.INVALID_SUBJECT, None)
         groups = _groups(verified.claims, self._identity.group_claim)
         if groups is None:
