@@ -1,0 +1,8 @@
+claim_id = "2af37c7f987b4bc6a7c3aea78ce2ec6d"
+agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
+role = "builder"
+base = "de130388a8aa63606050eb20fa723f1d2a22f232"
+branch = "claude/issue-937-branch-coverage-100"
+scope = ["pyproject.toml", "src/webauth/oidc/_workload_token_reuse.py", "tests/test_postgres_outage.py", "tests/test_web_auth.py"]
+opened_commit = "039843e1622e33ced2f5589cb3eff41b53739172"
+whole_reason = "Three small gaps and the floor that holds them closed, one coverage concern a reviewer reads at once."
