@@ -19,6 +19,7 @@ from typing import Final
 
 from webauth._validation import (
     require_collection_not_one_string,
+    require_method_tokens,
     require_positive_whole_number,
 )
 
@@ -218,10 +219,10 @@ class BodySizeRule:
     """The methods the larger budget applies to; ``None`` means every method."""
 
     def __post_init__(self) -> None:
-        require_collection_not_one_string("BodySizeRule.methods", self.methods, noun="method")
+        require_method_tokens("BodySizeRule.methods", self.methods)
 
     def applies_to(self, path: str, method: str) -> bool:
-        if self.methods is not None and method.upper() not in self.methods:
+        if self.methods is not None and method not in self.methods:
             return False
         return self.paths.matches(path)
 
@@ -235,10 +236,10 @@ class PublicRule:
     """The methods the rule opens; ``None`` means every method."""
 
     def __post_init__(self) -> None:
-        require_collection_not_one_string("PublicRule.methods", self.methods, noun="method")
+        require_method_tokens("PublicRule.methods", self.methods)
 
     def applies_to(self, path: str, method: str) -> bool:
-        if self.methods is not None and method.upper() not in self.methods:
+        if self.methods is not None and method not in self.methods:
             return False
         return self.paths.matches(path)
 
