@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from playwright.sync_api import Page, Request, Response, Route
+from proof import App, Proof, Width
 from realm import (
     DISABLED_USER_NAME,
     END_SESSION_ENDPOINT,
@@ -23,9 +23,6 @@ from realm import (
     KEYCLOAK_LOGOUT_CONFIRMATION,
     USER_NAME,
 )
-
-if TYPE_CHECKING:
-    from prove import App, Proof, Width
 
 CALLBACK_WAIT_SECONDS = 15
 CALLBACK_POLL_SECONDS = 0.2

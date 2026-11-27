@@ -12,7 +12,7 @@ import ssl
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 from harness import Host, cookie_name_and_value, host_state, reset_host
@@ -20,11 +20,9 @@ from host_app import HostSettings
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from proof import Proof
 
 from webauth.cookies import DEFAULT_SESSION_COOKIE_NAME
-
-if TYPE_CHECKING:
-    from prove import Proof
 
 BEARER_CLIENT = "d1-bearer"
 GATE_EVENT = "bearer.refused"

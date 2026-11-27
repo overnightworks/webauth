@@ -16,15 +16,13 @@ from __future__ import annotations
 import re
 import ssl
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 from bearer_run import BEARER_CLIENT, BearerRun, Call, Person, claims_of, session_cookies
 from host_app import CURRENT_GROUPS_PATH
+from proof import Proof
 from realm import USER_GROUP, add_child_group, remove_from_group, user_id_of
-
-if TYPE_CHECKING:
-    from prove import Proof
 
 CHECK_GROUP_NAME = "d1-check-group"
 REVOKED_GROUP_NAME = "d1-revoked-group"

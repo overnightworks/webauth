@@ -25,12 +25,12 @@ from typing import TYPE_CHECKING
 
 from harness import Finding, Host, launch_behind_host_mapping, launch_pinned_chromium
 from host_app import LOGOUT_PATH
+from proof import Proof, Width
 from realm import END_SESSION_ENDPOINT
 
 if TYPE_CHECKING:
     from certificates import ThrowawayTls
     from playwright.sync_api import Browser, BrowserType, Playwright, Request
-    from prove import Proof, Width
 
 
 @dataclass(frozen=True)

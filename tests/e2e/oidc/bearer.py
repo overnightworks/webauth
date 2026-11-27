@@ -56,7 +56,7 @@ import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from bearer_groups import (
     refreshed_id_token_facts,
@@ -111,6 +111,7 @@ from host_app import (
     HostSettings,
 )
 from playwright.sync_api import Playwright
+from proof import Proof
 from realm import (
     ADMIN_NAME,
     CLIENT_ID,
@@ -127,9 +128,6 @@ from realm import (
     public_client_representation,
     short_lived_tokens,
 )
-
-if TYPE_CHECKING:
-    from prove import Proof
 
 OTHER_BEARER_CLIENT = "d1-other"
 AUDIENCE_APP = "d1-app-c"
