@@ -279,6 +279,12 @@ class TestAMethodsFieldRefusesASingleString:
         assert accepted.applies_to("/x", "POST") is True
         assert accepted.applies_to("/x", "GET") is applies_to_get
 
+    def test_a_lower_case_request_method_matches_no_selected_method(
+        self,
+        rule: Callable[..., Any],
+    ) -> None:
+        assert rule(A_PATH, methods=frozenset({"POST"})).applies_to("/x", "post") is False
+
 
 class TestBodySizePolicy:
     def _policy(self) -> BodySizePolicy:
