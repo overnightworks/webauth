@@ -1,4 +1,4 @@
-"""The well-formedness checks that configuration (scope and method tokens, quantities), documents and claims share."""
+"""The checks that configuration (scope and method tokens, quantities), documents and claims share."""
 
 from __future__ import annotations
 
