@@ -7,7 +7,7 @@ from __future__ import annotations
 import psycopg.errors
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, InvalidRequestError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from tests.support.postgres_arrangement import what_a_log_shows_of
@@ -102,3 +102,12 @@ def test_the_wrapper_raises_the_store_error_for_every_other_database_error_and_h
     assert type(driver_error).__name__ in shown
     assert (getattr(driver_error, "sqlstate", None) or "") in shown
     assert "secret" not in shown
+
+
+def test_a_sqlalchemy_error_that_is_no_pool_timeout_and_no_driver_error_is_no_outage() -> None:
+    """PGSTORE-07: the database answered, so a misuse of the session is a store error."""
+    with pytest.raises(SessionStoreError) as raised, database_errors_as_store_errors():
+        raise InvalidRequestError("secret")
+
+    assert not isinstance(raised.value, StoreUnavailableError)
+    assert "secret" not in what_a_log_shows_of(raised.value)

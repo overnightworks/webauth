@@ -61,7 +61,7 @@ class WorkloadTokenReuse:
                 return held
             case Future() as shared:
                 return shared.result()
-            case _GrantLead() as lead:
+            case lead:
                 return self._lead(scopes, lead)
 
     def _held_or_joined_or_led(
