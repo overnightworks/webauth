@@ -379,6 +379,25 @@ def test_an_exchange_held_past_the_total_deadline_is_cut_off_as_timed_out(
     assert _TEST_DEADLINE_SECONDS <= held
 
 
+@_EXCHANGES_UNDER_A_DEADLINE
+def test_a_timeout_above_the_total_deadline_is_accepted_and_the_deadline_still_ends_the_exchange(
+    token_server: LoopbackHttpsServer,
+    exchange: Callable[..., object],
+    error: type[KeySetFetchError | ProviderMetadataFetchError | _HttpsExchangeError],
+) -> None:
+    started = time.monotonic()
+    with pytest.raises(error) as refused:
+        exchange(
+            f"{token_server.base_url}/dripping-body",
+            timeout_seconds=_TEST_DEADLINE_SECONDS * 10,
+            deadline_seconds=_TEST_DEADLINE_SECONDS,
+        )
+    held = time.monotonic() - started
+
+    assert refused.value.failure is ExchangeFailure.TIMED_OUT
+    assert _TEST_DEADLINE_SECONDS <= held
+
+
 # Positive, yet spent by the time the connection stands and the handshake begins.
 _SPENT_DEADLINE_SECONDS = 1e-9
 _CONNECT_TIMEOUT_SECONDS = 0.3
@@ -718,13 +737,6 @@ def test_a_token_request_cut_off_by_the_total_deadline_names_the_timeout(
 
     assert refused.value.failure is ExchangeFailure.TIMED_OUT
     assert _TOKEN_REQUEST_DEADLINE_SECONDS <= held
-
-
-def test_a_per_step_timeout_above_the_total_deadline_is_refused_not_capped() -> None:
-    request = a_canary_token_request("https://127.0.0.1:1/token")
-
-    with pytest.raises(ValueError, match="timeout_seconds"):
-        post_token_request_over_https(request, timeout_seconds=3, deadline_seconds=2)
 
 
 def test_a_token_endpoint_nobody_listens_on_is_refused_as_unreachable(

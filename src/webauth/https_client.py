@@ -422,12 +422,12 @@ def _exchange(
                         decode_content=False,
                     )
                     return _read_answer(response, step, accepts_status, max_body_bytes)
-            except (urllib3.exceptions.HTTPError, OSError) as error:
+            except urllib3.exceptions.HTTPError as error:
                 failure = _failure_of(error, deadline)
                 step.fail(_log_reason(failure))
                 # The timer writes the error's class name, never its message, as `error_type`.
                 raise
-    except urllib3.exceptions.HTTPError, OSError:
+    except urllib3.exceptions.HTTPError:
         pass
     # Raised outside the handler so urllib3's error is not even its context.
     raise _HttpsExchangeError(failure)
