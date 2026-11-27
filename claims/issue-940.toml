@@ -1,8 +1,0 @@
-claim_id = "1421a4b209c3419f935b6eb494e2e5c8"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "de130388a8aa63606050eb20fa723f1d2a22f232"
-branch = "claude/issue-940-proof-run-state-module"
-scope = ["quality/baseline.toml", "tests/e2e/oidc/bearer.py", "tests/e2e/oidc/bearer_groups.py", "tests/e2e/oidc/bearer_run.py", "tests/e2e/oidc/engines.py", "tests/e2e/oidc/logout.py", "tests/e2e/oidc/proof.py", "tests/e2e/oidc/prove.py"]
-opened_commit = "ab1c719357995d692857107c6d84fafd2b2671bb"
-whole_reason = "One move of the run state out of the entry script and the five imports that follow it; splitting it would leave the cycles half cut."
