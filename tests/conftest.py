@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.support.jwt_issuer import IssuerScenario
-    from tests.support.oidc_arrangement import LoopbackHttpsServer
+    from tests.support.loopback_arrangement import LoopbackHttpsServer
 
 pytest.register_assert_rewrite("tests.support")
 
@@ -38,7 +38,7 @@ def issuer() -> IssuerScenario:
 
 @pytest.fixture
 def token_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[LoopbackHttpsServer]:
-    from tests.support.oidc_arrangement import loopback_https_server
+    from tests.support.loopback_arrangement import loopback_https_server
 
     with loopback_https_server(tmp_path, monkeypatch) as server:
         yield server
@@ -46,7 +46,7 @@ def token_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Lo
 
 @pytest.fixture
 def closed_port() -> Iterator[int]:
-    from tests.support.oidc_arrangement import closed_loopback_port
+    from tests.support.loopback_arrangement import closed_loopback_port
 
     with closed_loopback_port() as port:
         yield port
