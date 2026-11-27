@@ -1,8 +1,0 @@
-claim_id = "c762e35c6c8d4fe3984e61d944898a5e"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "6dc2033fbeb7092fd201631b5f4c5014383a8b90"
-branch = "claude/issue-930-store-outage-builders-policy-literal"
-scope = ["tests/middleware/test_bearer_gate_admission.py", "tests/middleware/test_client_address.py", "tests/middleware/test_path_refusal.py", "tests/middleware/test_route_path.py", "tests/middleware/test_security_headers.py", "tests/middleware/test_store_outage.py", "tests/support/full_stack_arrangement.py", "tests/support/gated_stack_arrangement.py", "tests/support/security_headers_arrangement.py", "tests/support/web_auth_host_arrangement.py", "tests/test_postgres_outage.py", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_derived_policies.py", "tests/test_web_auth.py"]
-opened_commit = "fe1c6b2f0abf5584f9eb5806d3e201949892cdd8"
-whole_reason = "Every path is a test or test-support file that repeats one of two scenario values or builders, changed mechanically to use its owner, so splitting would leave the repeats half-removed."
