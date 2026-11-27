@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from cryptography import x509
@@ -92,7 +92,9 @@ class _RecordingServer(HTTPServer):
 
 
 class _LoopbackHandler(BaseHTTPRequestHandler):
-    server: _RecordingServer
+    @property
+    def recording(self) -> _RecordingServer:
+        return cast("_RecordingServer", self.server)
 
     def do_GET(self) -> None:
         self._receive(b"")
@@ -103,7 +105,7 @@ class _LoopbackHandler(BaseHTTPRequestHandler):
     def _receive(self, body: bytes) -> None:
         headers = {name.lower(): value for name, value in self.headers.items()}
         header_lines = tuple((name, value) for name, value in self.headers.items())
-        self.server.received.append(
+        self.recording.received.append(
             ReceivedRequest(self.command, self.path, headers, body, header_lines)
         )
         route = urllib.parse.urlsplit(self.path).path
@@ -147,13 +149,13 @@ def _serve_compressed(handler: _LoopbackHandler, _body: bytes) -> None:
 
 
 def _serve_discovery_document(handler: _LoopbackHandler, _body: bytes) -> None:
-    issuer = f"https://127.0.0.1:{handler.server.server_port}"
+    issuer = f"https://127.0.0.1:{handler.recording.server_port}"
     handler.answer(200, a_provider_metadata(issuer))
 
 
 def _stay_silent(handler: _LoopbackHandler, _body: bytes) -> None:
-    handler.server.silent_request_arrived.set()
-    handler.server.release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
+    handler.recording.silent_request_arrived.set()
+    handler.recording.release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
 
 
 def _redirect(handler: _LoopbackHandler, _body: bytes) -> None:
@@ -162,7 +164,7 @@ def _redirect(handler: _LoopbackHandler, _body: bytes) -> None:
 
 def _redirect_and_stall(handler: _LoopbackHandler, _body: bytes) -> None:
     handler.send_head(302, {"Location": "/certs", "Content-Length": "1"})
-    handler.server.release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
+    handler.recording.release_silent_request.wait(timeout=SILENT_HOLD_SECONDS)
 
 
 def _dripping(head: bytes) -> _Route:
@@ -170,7 +172,7 @@ def _dripping(head: bytes) -> _Route:
         # Dripping ends with an OSError once the client hangs up, and after
         # SILENT_HOLD_SECONDS at the latest, so a client that never hangs
         # up fails its test instead of holding it for hours.
-        release = handler.server.release_silent_request
+        release = handler.recording.release_silent_request
         dripping_ends = time.monotonic() + SILENT_HOLD_SECONDS
         with contextlib.suppress(OSError):
             handler.wfile.write(head)

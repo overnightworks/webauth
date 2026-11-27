@@ -2,7 +2,7 @@
 
 `post_token_request_over_https` is the `TokenRequestPost` a host hands its
 `OidcRelyingParty`; its scenarios send a real form POST through
-`webauth.https_client` to the server of `oidc_arrangement`, carrying canary
+`webauth.https_client` to the server of `loopback_arrangement`, carrying canary
 secrets in the client secret, the code and the PKCE verifier.
 """
 
