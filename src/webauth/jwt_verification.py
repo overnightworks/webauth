@@ -130,7 +130,8 @@ class RejectionReason(StrEnum):
 
 @dataclass(frozen=True)
 class _VerifiedClaims:
-    """A token whose signature, issuer, audience and time claims held.
+    """A token whose signature, issuer, audience and time claims held, and whose
+    `sub`, if present, is valid text.
 
     `subject` is the `sub` claim, absent from some tokens (a logout token may
     name only a session) and a present one is non-empty valid text; `audiences`
