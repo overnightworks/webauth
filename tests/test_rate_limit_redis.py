@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import fakeredis
+import fakeredis.commands_mixins.server_mixin as fakeredis_server
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -32,6 +34,7 @@ from webauth.rate_limit import RedisRateLimitBackend
 
 HOST_PREFIX = "host"
 WINDOW_SECONDS = 60
+ONE_HOUR = 3600
 WORLD_START = 1_800_000_000.0
 
 
@@ -118,12 +121,17 @@ class TestRedisRateLimitBackend:
             backend.is_allowed("rl:test", limit=10, window_seconds=60)
 
 
-class TestHostsSharingOneRedis:
+@pytest.mark.parametrize("offset_seconds", [ONE_HOUR, -ONE_HOUR], ids=["ahead", "behind"])
+class TestHostsWithSkewedClocksSharingOneRedis:
     """The Redis server's clock decides the window, so the hosts' own clocks
-    take no part: two backends over one Redis share one budget."""
+    take no part: the server clock is the world's, every host reads another."""
 
     @pytest.fixture
-    def two_hosts(self, fake_redis, world_clock):
+    def two_hosts(self, fake_redis, world_clock, monkeypatch, offset_seconds):
+        monkeypatch.setattr(fakeredis_server, "time", SimpleNamespace(time=world_clock))
+        host_clock = WorldClock()
+        host_clock.now = world_clock.now + offset_seconds
+        monkeypatch.setattr(time, "time", host_clock)
         return (
             RedisRateLimitBackend(fake_redis, HOST_PREFIX),
             RedisRateLimitBackend(fake_redis, HOST_PREFIX),
