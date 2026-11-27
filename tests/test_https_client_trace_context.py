@@ -8,7 +8,7 @@ from collections.abc import Callable
 import pytest
 from logline.testing import configured
 
-from tests.support.oidc_arrangement import LoopbackHttpsServer
+from tests.support.loopback_arrangement import LoopbackHttpsServer
 from tests.support.token_request_canaries import a_canary_token_request
 from tests.support.trace_context import (
     PROPAGATOR_FAILURE_MESSAGE,

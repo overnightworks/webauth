@@ -25,7 +25,7 @@ import pytest
 import urllib3
 
 import webauth.https_client
-from tests.support.oidc_arrangement import (
+from tests.support.loopback_arrangement import (
     DRIP_INTERVAL_SECONDS,
     REFUSED_TOKEN_ANSWER,
     SERVED_TOKEN_ANSWER,
