@@ -20,6 +20,16 @@ def is_scope_token_tuple(scopes: object) -> TypeGuard[tuple[str, ...]]:
     )
 
 
+# RFC 9110 section 5.6.2 token characters, with upper-case letters only: the
+# methods the library compares against are the registered upper-case ones.
+_METHOD_TOKEN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Z]+", re.ASCII)
+
+
+def is_method_token(method: object) -> TypeGuard[str]:
+    """Whether ``method`` is one upper-case HTTP method token."""
+    return isinstance(method, str) and _METHOD_TOKEN.fullmatch(method) is not None
+
+
 def is_utf8(text: str) -> bool:
     """Whether ``text`` holds no byte that failed to decode as UTF-8."""
     try:
@@ -33,6 +43,17 @@ def require_non_empty_string(field: str, value: object) -> None:
     """Refuse a non-string or empty value, naming the field and never the value."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be a non-empty string")
+
+
+def require_method_tokens(field: str, methods: frozenset[str] | None) -> None:
+    """Refuse one string or a method that is not an upper-case token, naming the field.
+
+    A rule built with ``"post"`` never matches, because requests are compared
+    upper-cased, and would silently never apply.
+    """
+    require_collection_not_one_string(field, methods, noun="method")
+    if methods is not None and not all(is_method_token(method) for method in methods):
+        raise ValueError(f"{field} must hold only upper-case HTTP method tokens")
 
 
 def _is_whole_number(value: object) -> TypeGuard[int]:

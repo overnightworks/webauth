@@ -252,6 +252,19 @@ class TestAMethodsFieldRefusesASingleString:
             rule(A_PATH, methods=methods)
 
     @pytest.mark.parametrize(
+        "methods",
+        [frozenset({"post"}), frozenset({"GET", "Post"}), frozenset({""}), frozenset({"PO ST"})],
+        ids=["lower-case", "mixed-case", "empty", "space"],
+    )
+    def test_a_method_that_is_not_an_upper_case_token_is_refused(
+        self,
+        rule: Callable[..., Any],
+        methods: frozenset[str],
+    ) -> None:
+        with pytest.raises(ValueError, match=r"methods must hold only upper-case"):
+            rule(A_PATH, methods=methods)
+
+    @pytest.mark.parametrize(
         ("methods", "applies_to_get"),
         [(frozenset({"POST"}), False), (None, True)],
     )

@@ -25,7 +25,7 @@ from webauth._bearer_admission import (
     raise_for_bearer_admission,
     record_bearer_admission,
 )
-from webauth._validation import is_scope_token_tuple
+from webauth._validation import is_method_token, is_scope_token_tuple
 from webauth._worker import on_worker
 from webauth.admission import (
     AdmissionRefusal,
@@ -82,7 +82,6 @@ _MACHINE_CHALLENGE: Final = ('realm="admin"',)
 _METADATA_PREFIX: Final = "/.well-known/oauth-protected-resource"
 _AUTH_SCHEME: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 _RESOURCE_PATH: Final = re.compile(r"(?:/[A-Za-z0-9._~-]+)+", re.ASCII)
-_METHOD_TOKEN: Final = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Z]+", re.ASCII)
 _LITERAL_SEGMENT: Final = re.compile(r"[A-Za-z0-9._~-]+", re.ASCII)
 _PARAMETER_SEGMENT: Final = re.compile(r"\{[A-Za-z_]\w*\}", re.ASCII)
 _DOT_SEGMENTS: Final = frozenset({".", ".."})
@@ -171,7 +170,7 @@ class MarkedRoute:
     template: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.method, str) or _METHOD_TOKEN.fullmatch(self.method) is None:
+        if not is_method_token(self.method):
             raise ValueError("MarkedRoute.method must be one upper-case HTTP method token")
         if not _is_route_template(self.template):
             raise ValueError(
