@@ -51,6 +51,7 @@ from tests.support.person_paths_arrangement import (
     a_lena,
     a_person_app,
 )
+from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionsThatMustNotBeAsked
 from tests.support.webauth_arrangement import (
     ALL_DEPENDENCIES_PATH,
@@ -250,7 +251,7 @@ def a_sub_app(auth: BearerApp, *, csrf: bool, session_gate: SessionGate | None =
         inner,
         config=auth.auth.config,
         sessions=auth.auth.sessions.in_transaction,
-        security_headers=SecurityHeadersPolicy(content_security_policy="default-src 'self'"),
+        security_headers=SecurityHeadersPolicy(content_security_policy=A_CONTENT_SECURITY_POLICY),
         csrf_origin=CsrfPolicy() if csrf else CsrfPolicy(exempt=PathRules(prefixes=("/",))),
         session_gate=session_gate,
     )
@@ -511,7 +512,7 @@ class TestTheGateSitsInsideTheRateLimitAndBodyLimitAndBehindTheHeaders:
         app = a_bearer_app(
             policies={
                 "security_headers": SecurityHeadersPolicy(
-                    content_security_policy="default-src 'self'",
+                    content_security_policy=A_CONTENT_SECURITY_POLICY,
                     cache_control_rules=(CacheControlRule(MACHINE_PATHS, "public, max-age=60"),),
                 )
             }

@@ -12,6 +12,7 @@ from tests.support.oidc_arrangement import (
     a_realm_client_config,
     an_issuer_called_through,
 )
+from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from webauth.admission import AdmissionConfig, GroupPath
 from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from webauth.proxies import TrustedProxies
     from webauth.web_auth import ServedBehind
 
-GATED_APP_HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+GATED_APP_HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy=A_CONTENT_SECURITY_POLICY)
 GATED_SIGN_IN_PATHS = SignInPaths(start="/sign-in/start", callback="/sign-in/callback")
 GATED_APP_LOGOUT_TEXT = LogoutPageText(language="en", button_label="Sign out")
 
