@@ -4,9 +4,6 @@
 "_names_taken_from_webauth" = 16
 "_surface_of_source" = 20
 
-[file_lines]
-"tests/e2e/oidc/prove.py" = 1187
-
 [clones]
 
 [spec_citations]

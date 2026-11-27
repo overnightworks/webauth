@@ -7,7 +7,9 @@ the browser fills Keycloak's own form, the host's library talks to the real
 token and key-set endpoints, and the only seams are the connection routing and
 the one throwaway certificate key the browser is told to accept.
 
-The host application is ``build_app`` in ``host_app.py``. The scenarios below
+The host application is ``build_app`` in ``host_app.py``. The sign-in scenarios live in
+``login.py``, the logout and session scenarios in ``logout.py`` and the token and refresh
+scenarios in ``tokens.py``. The scenarios below
 are registered in ``run_default_scenarios``, ``run_token_scenarios``,
 ``drive_backchannel_phase``, ``drive_bearer_phase`` and ``run_proof``, which print
 ``SCENARIO <number> <width> <origin>`` for each, except that the back-channel scenarios
@@ -175,30 +177,21 @@ proven (scenario 27 proves only the refusal)."""
 from __future__ import annotations
 
 import argparse
-import base64
 import contextlib
-import json
-import re
 import secrets
 import signal
-import ssl
 import sys
-import time
 import urllib.parse
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
-import httpx
 from bearer import drive_bearer_phase
 from certificates import ThrowawayTls, issue_throwaway_tls
 from engines import EngineRun, test_drive_engine_phase
 from harness import (
     STOP_SIGNALS,
-    Finding,
     Host,
     Interrupted,
-    cookie_name_and_value,
     drive_browser_off_the_main_thread,
     keep_results,
     launch_pinned_chromium,
@@ -208,27 +201,34 @@ from harness import (
     stop_host,
     stop_on_first_signal,
 )
-from host_app import (
-    ACCESS_TOKEN_PATH,
-    CALLBACK_PATH,
-    LOGOUT_PATH,
-    WORKLOAD_TOKEN_PATH,
+from login import (
+    disabled_user_is_refused,
+    issuer_document_is_canonical,
+    login,
+    outsiders_groups_claim_is_recorded,
+    pages_fit_the_window,
+    subgroup_member_is_admitted,
+    test_deep_link_survives_the_login,
+    test_outsider_is_refused,
+    untrusted_certificate_is_refused,
 )
 from logout import (
     admin_logout_ends_the_sessions_in_every_app,
-    assert_callbacks,
-    assert_signed_out,
     disabled_account_is_logged_out_everywhere,
-    log_out_through_keycloak,
+    logout_after_the_back_channel_logout_ended_the_row,
+    logout_after_the_id_token_expired,
     logout_ends_every_session_of_the_subject,
+    logout_from_a_page_of_another_site_is_refused,
     logout_in_one_app_ends_the_sessions_of_the_other,
-    wait_for_accepted_callbacks,
+    logout_on_the_cross_site_origin,
+    second_login_and_logout_show_no_page,
+    session_cookie_after_redirect,
+    test_logout,
+    test_logout_after_the_app_session_ended,
+    the_browser_holds_no_id_token,
 )
 from playwright.sync_api import (
-    Cookie,
-    Page,
     Playwright,
-    Request,
     sync_playwright,
 )
 from proof import (
@@ -236,19 +236,14 @@ from proof import (
     APP_ORIGIN,
     BACKCHANNEL_APPS,
     DESKTOP,
-    EXPIRY_MARGIN_SECONDS,
     SAMESITE_VALUES,
     SECOND_APP_HOST,
     SECOND_APP_ORIGIN,
     SHIPPED_COOKIE_SAMESITE,
-    SHORT_TOKEN_LIFESPAN_SECONDS,
     UNTRUSTED_HOST,
     WIDTHS,
     App,
     Proof,
-    Width,
-    app_cookies,
-    jws_cookies,
 )
 from realm import (
     ADMIN_GROUP,
@@ -256,8 +251,6 @@ from realm import (
     CLIENT_ID,
     DISABLED_USER_NAME,
     IDP_HOST,
-    ISSUER,
-    KEYCLOAK_DISABLED_MESSAGE,
     KEYCLOAK_LOGOUT_CONFIRMATION,
     OUTSIDER_NAME,
     REALM,
@@ -266,432 +259,14 @@ from realm import (
     client_representation,
     create_user,
     host_settings,
-    short_lived_tokens,
 )
 from shim import CallbackBridge, TlsShim, relay_name_prefix
 from stack import HOLD_SCRATCH_NAME, Admin, HeldStack, require_pinned_clean_platform
-
-from webauth.cookies import (
-    DEFAULT_SESSION_COOKIE_NAME,
-    CookieSameSite,
-    _is_pending_login_cookie_name,
-    _pending_login_cookie_prefix,
+from tokens import (
+    a_client_without_service_account_is_refused_its_workload_token,
+    a_person_ended_at_the_issuer_signs_in_again,
+    keycloak_rotates_the_refresh_token,
 )
-
-
-def issuer_document_is_canonical(proof: Proof) -> str:
-    with proof.browsing() as page:
-        page.goto(url := f"{ISSUER}/.well-known/openid-configuration")
-        document = json.loads(page.inner_text("body"))
-        assert (page.url, document["issuer"]) == (url, ISSUER), "the URL moved or another issuer"
-        assert document.get("authorization_response_iss_parameter_supported"), "iss unannounced"
-    return f"{ISSUER} answered under its canonical URL, names itself as the issuer, announces iss"
-
-
-def untrusted_certificate_is_refused(proof: Proof) -> str:
-    with proof.browsing() as page:
-        try:
-            page.goto(f"https://{UNTRUSTED_HOST}/")
-        except Exception as error:
-            reason = re.search(r"net::ERR_\w+", str(error))
-            assert reason and "CERT" in reason.group(), f"refused for another reason: {error}"
-            return f"a throwaway key signed by a CA nobody trusts is refused: {reason.group()}"
-    raise AssertionError("the browser accepted a certificate it was not told to trust")
-
-
-def login(proof: Proof, width: Width) -> str:
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        proof.sign_in(page, f"1-{width.label}")
-        page.goto(f"{APP_ORIGIN}/")
-        headline = proof.headline(page)
-        assert headline == f"Signed in as {USER_NAME}", f"the page says {headline!r}"
-        me_status = proof.status_of(page, "/me")
-        assert me_status == 200, f"/me answered {me_status}"
-        admin_status = proof.status_of(page, "/admin")
-        assert admin_status == 403, f"/admin answered {admin_status} to a plain member"
-        proof.shot(page, f"1-{width.label}", "result")
-    held = proof.host_state()
-    assert held["accounts"] == 1 and held["sessions"] == 1, f"the host holds {held}"
-    signed_in = (
-        f"{USER_NAME} signed in at Keycloak's form; '/' says 'Signed in as {USER_NAME}', "
-        "GET /me answered 200 and GET /admin 403"
-    )
-    return f"{signed_in}; {a_wrong_password_stays_at_keycloak(proof, width)}"
-
-
-def a_wrong_password_stays_at_keycloak(proof: Proof, width: Width) -> str:
-    scenario = f"1b-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        wrong_password = secrets.token_urlsafe(12)
-        proof.start_sign_in(page, scenario)
-        proof.fill_keycloak_form(page, scenario, wrong_password)
-        page.get_by_text("Invalid username or password").wait_for()
-        assert urllib.parse.urlsplit(page.url).hostname == IDP_HOST, "left Keycloak's form"
-        proof.shot(page, scenario, "refused-result")
-    held = proof.host_state()
-    assert (held["callbacks_received"], held["accounts"], held["sessions"]) == (0, 0, 0), held
-    return "a wrong password stays on Keycloak's form: callbacks 0, accounts 0, sessions 0"
-
-
-def disabled_user_is_refused(proof: Proof, width: Width) -> str:
-    scenario = f"4-{width.label}"
-    proof.reset_host()
-    proof.set_user_enabled(proof.disabled_user_id, False)
-    with proof.browsing(width) as page:
-        proof.start_sign_in(page, scenario)
-        proof.fill_keycloak_form(page, scenario, proof.disabled_user_password, DISABLED_USER_NAME)
-        page.get_by_text(KEYCLOAK_DISABLED_MESSAGE).wait_for()
-        assert urllib.parse.urlsplit(page.url).hostname == IDP_HOST, "left Keycloak's form"
-        proof.assert_fits(
-            page, "#username", "#password", "#kc-login", f"text={KEYCLOAK_DISABLED_MESSAGE}"
-        )
-        proof.shot(page, scenario, "refused-result")
-    held = proof.host_state()
-    assert held["callbacks_received"] == 0 and held["sessions"] == 0, f"the host holds {held}"
-    proof.set_user_enabled(proof.disabled_user_id, True)
-    with proof.browsing(width) as page:
-        proof.sign_in(
-            page,
-            f"{scenario}-enabled",
-            username=DISABLED_USER_NAME,
-            password=proof.disabled_user_password,
-        )
-        page.goto(f"{APP_ORIGIN}/")
-        assert proof.headline(page) == f"Signed in as {DISABLED_USER_NAME}", (
-            f"the page says {proof.headline(page)!r}"
-        )
-        proof.shot(page, f"{scenario}-enabled", "result")
-    return (
-        f"Keycloak answered {KEYCLOAK_DISABLED_MESSAGE!r} and no callback reached the app "
-        f"(callbacks 0, sessions 0); the same credentials signed in once the user was enabled"
-    )
-
-
-def test_outsider_is_refused(proof: Proof, width: Width) -> str:
-    """REFUSE-28: a person outside the app signs in at Keycloak and is refused with no session."""
-    scenario = f"7-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        proof.sign_in(page, scenario, username=OUTSIDER_NAME, password=proof.outsider_password)
-        assert proof.headline(page) == "Sign-in refused", f"the page says {proof.headline(page)!r}"
-        assert "not-a-member" in page.inner_text("body"), "the page does not name the reason"
-        proof.assert_fits(page, "h1")
-        proof.shot(page, scenario, "result")
-        carried = {cookie_name_and_value(c)[0] for c in app_cookies(page)}
-        assert DEFAULT_SESSION_COOKIE_NAME not in carried, "a session cookie was issued"
-        assert not jws_cookies(page), "a refused sign-in left a cookie shaped like a JWS"
-    held = proof.host_state()
-    assert (held["accounts"], held["sessions"]) == (0, 0), f"the host holds {held}"
-    assert held["last_refusal"] == "not-a-member", f"the host refused {held}"
-    return (
-        f"{OUTSIDER_NAME}, in no group, signed in at Keycloak and the callback was refused with "
-        "'not-a-member': host accounts 0, sessions 0, no session cookie and no cookie shaped "
-        "like a JWS"
-    )
-
-
-def subgroup_member_is_admitted(proof: Proof, width: Width) -> str:
-    scenario = f"8-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        proof.sign_in(page, scenario, username=ADMIN_NAME, password=proof.admin_password)
-        page.goto(f"{APP_ORIGIN}/")
-        headline = proof.headline(page)
-        assert headline == f"Signed in as {ADMIN_NAME}", f"the page says {headline!r}"
-        admin_status = proof.status_of(page, "/admin")
-        assert admin_status == 200, f"/admin answered {admin_status} to a member of {ADMIN_GROUP}"
-        proof.shot(page, scenario, "result")
-    held = proof.host_state()
-    assert (held["accounts"], held["sessions"]) == (1, 1), f"the host holds {held}"
-    return (
-        f"{ADMIN_NAME}, a member of {ADMIN_GROUP} only, was admitted "
-        "and GET /admin answered 200: host accounts 1, sessions 1"
-    )
-
-
-def test_deep_link_survives_the_login(proof: Proof, width: Width) -> str:
-    """REFUSE-01, REFUSE-02: the page asked for without a session is returned to."""
-    scenario = f"24-{width.label}"
-    deep_link = "/albums/42?page=2"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        page.goto(f"{APP_ORIGIN}{deep_link}")
-        page.wait_for_selector("#username")
-        proof.fill_keycloak_form(page, scenario, proof.user_password)
-        page.wait_for_url(re.compile(f"^{re.escape(APP_ORIGIN)}/"))
-        landed = page.url.removeprefix(APP_ORIGIN)
-        assert landed == deep_link, f"the browser landed on {landed!r}"
-        headline = proof.headline(page)
-        assert headline == "Album 42", f"the page says {headline!r}"
-        proof.shot(page, scenario, "result")
-    return (
-        f"a browser without a session opened {deep_link}, signed in at Keycloak "
-        f"and landed on {deep_link}"
-    )
-
-
-def outsiders_groups_claim_is_recorded(proof: Proof) -> str:
-    example = proof.fresh_admin().get(
-        f"/{REALM}/clients/{proof.client_uuid}/evaluate-scopes/generate-example-id-token"
-        f"?userId={proof.outsider_id}&scope=openid%20groups"
-    )
-    if "groups" not in example:
-        return "Keycloak leaves the groups claim out for a person in no group (claim absent)"
-    sent = len(example["groups"])
-    return f"Keycloak sends the groups claim for a person in no group ({sent} entries)"
-
-
-def pages_fit_the_window(proof: Proof, width: Width) -> str:
-    scenario = f"6-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        page.goto(f"{APP_ORIGIN}/")
-        proof.assert_fits(page, "#sign-in")
-        proof.start_sign_in(page, scenario)
-        proof.assert_fits(page, "#username", "#password", "#kc-login")
-        proof.fill_keycloak_form(page, scenario, proof.user_password)
-        page.wait_for_url(f"{APP_ORIGIN}/")
-        page.goto(f"{APP_ORIGIN}/")
-        proof.assert_fits(page, "h1", "#logout")
-        proof.shot(page, scenario, "result")
-    return (
-        f"at {width.label} the app's start page, Keycloak's username and password fields and "
-        f"sign-in button, and the app's signed-in page lie inside the window, "
-        f"without sideways scroll"
-    )
-
-
-def cookie_names(request: Request) -> list[str]:
-    return [
-        pair.split("=", 1)[0].strip()
-        for header in request.headers_array()
-        if header["name"].lower() == "cookie"
-        for pair in header["value"].split(";")
-        if pair.strip()
-    ]
-
-
-def recorded_cookie_name(name: str) -> str:
-    """A pending-login cookie's name ends in a digest of the login's state;
-    the table keeps the shape only."""
-    if _is_pending_login_cookie_name(name, secure=True):
-        return f"{_pending_login_cookie_prefix(secure=True)}*"
-    return name
-
-
-def raw_header(request: Request, name: str) -> str:
-    return next(
-        (h["value"] for h in request.headers_array() if h["name"].lower() == name), "(none)"
-    )
-
-
-def session_cookie_after_redirect(
-    proof: Proof, origin: str, cookie_samesite: CookieSameSite
-) -> str:
-    proof.reset_host()
-    scenario = f"5-{urllib.parse.urlsplit(origin).hostname}-{cookie_samesite}"
-    with proof.browsing() as page:
-        requests: list[Any] = []
-        page.context.on("request", lambda request: requests.append(request))
-        proof.sign_in(page, scenario=None, origin=origin)
-        page.wait_for_url(f"{origin}/")
-        callback = next(r for r in requests if r.url.startswith(f"{origin}{CALLBACK_PATH}"))
-        landing = next(r for r in requests if r.redirected_from is callback)
-        assert any(
-            _is_pending_login_cookie_name(name, secure=True) for name in cookie_names(callback)
-        ), "the callback carried no pending-login cookie; request cookies are not measured"
-        names = [recorded_cookie_name(name) for name in cookie_names(landing)]
-        site = raw_header(landing, "sec-fetch-site")
-        headline = proof.headline(page)
-        proof.shot(page, scenario, "first-page")
-    observed = f"first page showed {headline!r}; cookie names sent {names}; Sec-Fetch-Site {site}"
-    if headline != f"Signed in as {USER_NAME}":
-        raise Finding(observed)
-    return observed
-
-
-def test_logout(proof: Proof, width: Width) -> str:
-    """REFUSE-23, APP-26, APP-28, APP-31, APP-34: logout ends the session and clears cookies."""
-    scenario = f"2-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        signed_in(proof, page, scenario)
-        cookies = app_cookies(page)
-        held_names = {cookie_name_and_value(c)[0] for c in cookies}
-        session = next(
-            c for c in cookies if cookie_name_and_value(c)[0] == DEFAULT_SESSION_COOKIE_NAME
-        )
-
-        def nothing_of_the_app_is_left(_end_session_request: Request) -> None:
-            left = held_names & {cookie_name_and_value(c)[0] for c in app_cookies(page)}
-            assert not left, f"cookies survived: {sorted(left)}"
-            assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-
-        end_session_request = log_out_through_keycloak(
-            proof, page, scenario, APP_ORIGIN, nothing_of_the_app_is_left
-        )
-        assert sent_hint(end_session_request), "the end-session request carried no ID token hint"
-        page.reload()
-        assert proof.headline(page) == "Signed out", "a reload of '/' did not show Sign in"
-        proof.shot(page, scenario, "result")
-        me_status = proof.status_of(page, "/me")
-        assert me_status == 401, f"/me answered {me_status}"
-        back_shows = back_button_shows(proof, page)
-        replay = replayed_session_status(proof, session)
-        assert replay == 401, f"the old session cookie was answered {replay}"
-        again = second_sign_in(proof, page, scenario)
-    return (
-        f"the button led straight back to the app with no confirmation page (the end-session "
-        f"answer was a redirect to '/' and {KEYCLOAK_LOGOUT_CONFIRMATION} never attached), the "
-        f"host already at 0 sessions and no app cookie, and the POST carried an id_token_hint; "
-        f"the app showed Signed out and /me answered 401; "
-        f"the back button shows {back_shows!r} but the old session cookie replayed over HTTPS "
-        f"to /me is refused ({replay}); a second Sign in {again}"
-    )
-
-
-def test_logout_after_the_app_session_ended(proof: Proof, width: Width) -> str:
-    """APP-36, APP-37: with the app session gone the logout sends no hint and Keycloak asks."""
-    scenario = f"9-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        signed_in(proof, page, scenario)
-        proof.reset_host()
-        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-        end_session_request = log_out_through_keycloak(
-            proof, page, scenario, APP_ORIGIN, asks_for_confirmation=True
-        )
-        assert sent_hint(end_session_request) is None, "the end-session request carried a hint"
-        proof.shot(page, scenario, "result")
-        again = second_sign_in(proof, page, scenario)
-    return (
-        "with the app session already gone, the logout sent no hint, Keycloak asked once and, "
-        f"after confirming, led back to the app, signed out; a second Sign in {again}"
-    )
-
-
-def signed_in(proof: Proof, page: Page, scenario: str, origin: str = APP_ORIGIN) -> None:
-    proof.sign_in(page, scenario, origin)
-    page.goto(f"{origin}/")
-    assert proof.headline(page) == f"Signed in as {USER_NAME}"
-
-
-def the_browser_holds_no_id_token(proof: Proof, width: Width) -> str:
-    scenario = f"14-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        signed_in(proof, page, scenario)
-        assert proof.status_of(page, "/me") == 200
-        held = sorted(cookie_name_and_value(cookie)[0] for cookie in app_cookies(page))
-        assert held == [DEFAULT_SESSION_COOKIE_NAME], f"the browser holds {held}"
-        assert not jws_cookies(page), f"cookies shaped like a JWS: {jws_cookies(page)}"
-    return f"after the sign-in the browser holds exactly {held} for the app, none shaped like a JWS"
-
-
-def second_login_and_logout_show_no_page(proof: Proof, width: Width) -> str:
-    scenario = f"15-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        signed_in(proof, page, scenario)
-        first = log_out_through_keycloak(proof, page, f"{scenario}-first", APP_ORIGIN)
-        signed_in(proof, page, f"{scenario}-second")
-        second = log_out_through_keycloak(proof, page, f"{scenario}-second", APP_ORIGIN)
-        assert sent_hint(second), "the second logout carried no ID token hint"
-        assert sent_hint(second) != sent_hint(first), "the second logout sent the first hint"
-    return "after a logout and a second login, the second logout, with a new hint, showed no page"
-
-
-def logout_on_the_cross_site_origin(proof: Proof, width: Width) -> str:
-    scenario = f"17-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        signed_in(proof, page, scenario, SECOND_APP_ORIGIN)
-        log_out_through_keycloak(proof, page, scenario, SECOND_APP_ORIGIN)
-        assert not jws_cookies(page, SECOND_APP_ORIGIN), "a cookie shaped like a JWS remains"
-    return f"at {SECOND_APP_ORIGIN} the logout showed no page"
-
-
-def id_token_expiry(token: str) -> float:
-    payload = token.split(".")[1]
-    return float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
-
-
-def sent_hint(end_session_request: Request) -> str | None:
-    """The `id_token_hint` the end-session POST carried, or None."""
-    form = urllib.parse.parse_qs(end_session_request.post_data or "")
-    hints = form.get("id_token_hint", []) if end_session_request.method == "POST" else []
-    return hints[0] if hints else None
-
-
-def logout_after_the_id_token_expired(proof: Proof, width: Width) -> str:
-    scenario = f"21-{width.label}"
-    proof.reset_host()
-    with (
-        short_lived_tokens(proof.fresh_admin, proof.client_uuid, SHORT_TOKEN_LIFESPAN_SECONDS),
-        proof.browsing(width) as page,
-    ):
-        signed_in(proof, page, scenario)
-        time.sleep(SHORT_TOKEN_LIFESPAN_SECONDS + EXPIRY_MARGIN_SECONDS)
-        margins_at_the_send: list[float] = []
-
-        def record_the_clock_past_the_expiry(end_session_request: Request) -> None:
-            hint = sent_hint(end_session_request)
-            if hint is not None:
-                margins_at_the_send.append(time.time() - id_token_expiry(hint))
-
-        log_out_through_keycloak(
-            proof, page, scenario, APP_ORIGIN, record_the_clock_past_the_expiry
-        )
-        assert margins_at_the_send, "the end-session request carried no ID token hint"
-        [past] = margins_at_the_send
-        assert past >= EXPIRY_MARGIN_SECONDS, f"the clock was only {past:.1f} s past the exp"
-        assert proof.host_state()["sessions"] == 0, "the host still holds a session"
-        again = second_sign_in(proof, page, scenario)
-    return (
-        f"with an ID token {SHORT_TOKEN_LIFESPAN_SECONDS} s long, logged out {past:.1f} s past "
-        f"its exp at the send, the end-session request carried the hint and Keycloak answered "
-        f"with a redirect to the app with no confirmation page; a second Sign in {again}"
-    )
-
-
-def back_button_shows(proof: Proof, page: Page) -> str:
-    page.go_back()
-    page_text = page.inner_text("h1") if page.query_selector("h1") else "no page"
-    if page.query_selector("input[name=id_token_hint]"):
-        raise Finding("the back button restored the hint")
-    return f"{page_text} (the host's last sign-in refusal: {proof.host_state()['last_refusal']})"
-
-
-def host_answer(proof: Proof, path: str, session: Cookie | None = None) -> httpx.Response:
-    """A request to the default host as the app's origin, with the session cookie if given."""
-    assert proof.ca_certificate is not None and proof.host is not None
-    headers = {"Host": APP_HOST}
-    if session is not None:
-        name, value = cookie_name_and_value(session)
-        headers["Cookie"] = f"{name}={value}"
-    return httpx.get(
-        f"https://localhost:{proof.host.app_port}{path}",
-        headers=headers,
-        verify=ssl.create_default_context(cafile=str(proof.ca_certificate)),
-    )
-
-
-def replayed_session_status(proof: Proof, session: Cookie) -> int:
-    return host_answer(proof, "/me", session).status_code
-
-
-def second_sign_in(proof: Proof, page: Page, scenario: str) -> str:
-    page.goto(f"{APP_ORIGIN}/")
-    proof.press(page, "#sign-in")
-    keycloak_form = page.locator("#username")
-    signed_in = page.get_by_role("heading", name=f"Signed in as {USER_NAME}")
-    keycloak_form.or_(signed_in).wait_for()
-    proof.shot(page, scenario, "second-sign-in")
-    if not keycloak_form.is_visible():
-        raise Finding("a second Sign in passed through Keycloak's live SSO session without a form")
-    return "shows Keycloak's form again"
 
 
 def prepare_keycloak(admin: Admin, proof: Proof, client_secret: str) -> None:
@@ -875,76 +450,6 @@ def drive_host_scenarios(
         proof.browser.close()
 
 
-def session_cookie(page: Page) -> Cookie:
-    return next(
-        c for c in app_cookies(page) if cookie_name_and_value(c)[0] == DEFAULT_SESSION_COOKIE_NAME
-    )
-
-
-def access_token_answer(proof: Proof, session: Cookie) -> dict[str, Any]:
-    answer = host_answer(proof, ACCESS_TOKEN_PATH, session)
-    assert answer.status_code == 200, f"{ACCESS_TOKEN_PATH} answered {answer.status_code}"
-    return answer.json()
-
-
-def keycloak_rotates_the_refresh_token(proof: Proof, width: Width) -> str:
-    scenario = f"25-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        proof.sign_in(page, scenario)
-        session = session_cookie(page)
-        first = access_token_answer(proof, session)
-        second = access_token_answer(proof, session)
-        end_session_request = log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
-    assert sent_hint(end_session_request), "the logout after the rotation carried no hint"
-    assert first["outcome"] == "token", f"the first call answered {first}"
-    assert second["outcome"] == "token", f"the second call answered {second}"
-    assert (first["refresh_tokens_stored"], second["refresh_tokens_stored"]) == (1, 2), (
-        f"the stored refresh token did not change between the calls: {first}, {second}"
-    )
-    return (
-        "after a sign-in two calls of fresh_access_token both answered token, and the host "
-        "stored a different refresh token after each: Keycloak rotates the string on every "
-        "refresh; the logout after them sent an id_token_hint and Keycloak redirected to the app"
-    )
-
-
-def a_person_ended_at_the_issuer_signs_in_again(proof: Proof, width: Width) -> str:
-    scenario = f"26-{width.label}"
-    proof.reset_host()
-    with proof.browsing(width) as page:
-        proof.sign_in(page, scenario)
-        session = session_cookie(page)
-        proof.log_out_user_everywhere(proof.user_id)
-        refused = access_token_answer(proof, session)
-        assert refused["outcome"] == "sign-in-again", f"after the admin logout: {refused}"
-        assert refused["refresh_tokens_stored"] == 1, f"no refresh token was stored: {refused}"
-        me_status = proof.status_of(page, "/me")
-        assert me_status == 200, f"/me answered {me_status}, the app session should stand"
-        log_out_through_keycloak(proof, page, scenario, APP_ORIGIN)
-        ended = access_token_answer(proof, session)
-    assert ended["outcome"] == "session-ended", f"after the app logout: {ended}"
-    return (
-        "Keycloak's admin logout of the user's sessions made the next call answer sign-in-again "
-        "(invalid_grant) while /me still answered 200; after the app's own logout, replaying the "
-        "old session cookie made it answer session-ended"
-    )
-
-
-def a_client_without_service_account_is_refused_its_workload_token(
-    proof: Proof, width: Width
-) -> str:
-    refused = host_answer(proof, WORKLOAD_TOKEN_PATH).json()
-    assert refused == {
-        "outcome": "token-request-refused",
-        "issuer_error": "unauthorized_client",
-    }, f"the workload call answered {refused}"
-    return (
-        f"the probe's client, created with serviceAccountsEnabled false, was refused its "
-        f"client_credentials grant: {refused['outcome']} with {refused['issuer_error']}"
-    )
-
-
 REFRESH_SCENARIOS = (
     (25, keycloak_rotates_the_refresh_token),
     (26, a_person_ended_at_the_issuer_signs_in_again),
@@ -958,86 +463,6 @@ BACKCHANNEL_SCENARIOS = (
     (12, admin_logout_ends_the_sessions_in_every_app),
     (13, disabled_account_is_logged_out_everywhere),
 )
-
-
-CROSS_SITE_LOGOUT_PATH = "/cross-site-logout"
-CROSS_ORIGIN_REFUSAL = "Cross-origin request rejected"
-
-
-def cross_site_logout_page(target_origin: str) -> str:
-    return (
-        '<!doctype html><html><head><meta charset="utf-8"><title>another site</title></head>'
-        "<body><h1>Another site</h1>"
-        f'<form method="post" action="{target_origin}{LOGOUT_PATH}">'
-        '<button id="logout" type="submit">Log out</button></form></body></html>'
-    )
-
-
-def logout_from_a_page_of_another_site_is_refused(proof: Proof, width: Width) -> str:
-    scenario = f"22-{width.label}"
-    app_a, app_b = proof.apps
-    app_a.reset()
-    with proof.browsing(width) as page:
-        signed_in(proof, page, scenario, app_a.origin)
-        page.route(
-            f"{app_b.origin}{CROSS_SITE_LOGOUT_PATH}",
-            lambda route: route.fulfill(
-                body=cross_site_logout_page(app_a.origin), content_type="text/html"
-            ),
-        )
-        page.goto(f"{app_b.origin}{CROSS_SITE_LOGOUT_PATH}")
-        page.unroute_all()
-        proof.shot(page, scenario, "cross-site-page")
-        logout_url = f"{app_a.origin}{LOGOUT_PATH}"
-        with page.expect_response(lambda answer: answer.url == logout_url) as answer:
-            proof.press(page, "#logout")
-        page.wait_for_url(logout_url)
-        refusal = page.inner_text("body")
-        proof.shot(page, scenario, "refused-result")
-        assert answer.value.status == 403, f"the logout was answered {answer.value.status}"
-        site = raw_header(answer.value.request, "sec-fetch-site")
-        assert site == "cross-site", f"the logout carried Sec-Fetch-Site {site!r}"
-        assert CROSS_ORIGIN_REFUSAL in refusal, f"the refusal is {refusal!r}"
-        page.goto(f"{app_a.origin}/")
-        assert proof.headline(page) == f"Signed in as {USER_NAME}", "the session did not stand"
-        proof.shot(page, scenario, "result")
-        me_status = proof.status_of(page, "/me")
-        assert me_status == 200, f"/me answered {me_status}"
-        assert_callbacks(app_a, accepted=0, sessions=1)
-        log_out_through_keycloak(proof, page, scenario, app_a.origin)
-        wait_for_accepted_callbacks(app_a, 1)
-    return (
-        f"a form on {app_b.origin} posting to {app_a.origin}{LOGOUT_PATH} was answered 403 "
-        f"({CROSS_ORIGIN_REFUSAL!r}) with Sec-Fetch-Site {site}; the session stood (/me 200, "
-        "host at 1 session), so the person's own logout then showed no page"
-    )
-
-
-def logout_after_the_back_channel_logout_ended_the_row(proof: Proof, width: Width) -> str:
-    scenario = f"23-{width.label}"
-    app_a, app_b = proof.apps
-    proof.log_out_user_everywhere(proof.user_id)
-    app_a.reset()
-    app_b.reset()
-    with proof.browsing(width) as page_a:
-        signed_in(proof, page_a, scenario, app_a.origin)
-        proof.log_out_user_everywhere(proof.user_id)
-        wait_for_accepted_callbacks(app_a, 1)
-        assert_callbacks(app_a, accepted=1, sessions=0)
-        page_b = page_a.context.new_page()
-        signed_in(proof, page_b, f"{scenario}-b", app_b.origin)
-        end_session_request = log_out_through_keycloak(
-            proof, page_a, scenario, app_a.origin, asks_for_confirmation=True
-        )
-        assert sent_hint(end_session_request) is None, "A's logout sent a hint"
-        wait_for_accepted_callbacks(app_b, 1)
-        assert_signed_out(proof, page_b, app_b.origin)
-    return (
-        "A's row was ended by Keycloak's back-channel logout, a sign-in to B opened a second "
-        "Keycloak session, and A's logout sent no hint (asserted in the end-session request) and "
-        "led to Keycloak's confirmation page; after confirming, Keycloak called B back and B "
-        "says Signed out"
-    )
 
 
 BACKCHANNEL_DESKTOP_SCENARIOS = (
