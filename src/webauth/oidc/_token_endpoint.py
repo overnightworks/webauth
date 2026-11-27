@@ -18,8 +18,9 @@ from typing import TypeGuard
 from pydantic import SecretStr
 
 from webauth import WebAuthError
+from webauth._validation import is_whole_number, json_object
 from webauth.https_client import ExchangeFailure
-from webauth.jwt_verification import RejectionReason, _json_object
+from webauth.jwt_verification import RejectionReason
 
 __all__ = [
     "IdpErrorCode",
@@ -168,7 +169,7 @@ def _token_answer_document(body: bytes) -> Mapping[str, object]:
     body."""
     if len(body) > _MAX_TOKEN_RESPONSE_BYTES:
         return {}
-    return _json_object(body) or {}
+    return json_object(body) or {}
 
 
 def _is_refresh_token(value: object) -> TypeGuard[str]:
@@ -202,7 +203,7 @@ def _lifetime_seconds(document: Mapping[str, object]) -> int | None:
     """The `expires_in` of a grant's answer when it is a whole number of seconds of at
     least 1, else `None`."""
     expires_in = document.get("expires_in")
-    if not isinstance(expires_in, int) or isinstance(expires_in, bool) or expires_in < 1:
+    if not is_whole_number(expires_in) or expires_in < 1:
         return None
     return expires_in
 

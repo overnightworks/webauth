@@ -54,6 +54,7 @@ from webauth import WebAuthError
 _DOCUMENT_FETCH_TIMEOUT_SECONDS = 5
 _DOCUMENT_FETCH_DEADLINE_SECONDS = 10
 _TOKEN_EXCHANGE_DEADLINE_SECONDS = 10
+_TOKEN_REQUEST_TIMEOUT_SECONDS = 5
 _MAX_KEY_SET_BYTES = 64 * 1024
 _MAX_PROVIDER_METADATA_BYTES = 64 * 1024
 
@@ -264,7 +265,7 @@ def _post_form_over_https(
     authorization: SecretStr,
     max_body_bytes: int,
     timeout_seconds: float,
-    deadline_seconds: float = _TOKEN_EXCHANGE_DEADLINE_SECONDS,
+    deadline_seconds: float,
 ) -> _HttpsAnswer:
     """POSTs `form` URL-encoded, sending `authorization` as the whole
     `Authorization` header and asking for JSON, and answers the status and
@@ -363,6 +364,14 @@ def _read_answer(
         response.close()
 
 
+def _require_positive_bounds(timeout_seconds: float, deadline_seconds: float) -> None:
+    """Refuses a bound of zero or less, since every exchange would then time out at once."""
+    if timeout_seconds <= 0:
+        raise ValueError(f"timeout_seconds must be positive, not {timeout_seconds}")
+    if deadline_seconds <= 0:
+        raise ValueError(f"deadline_seconds must be positive, not {deadline_seconds}")
+
+
 def _exchange(
     event: str,
     method: str,
@@ -387,10 +396,7 @@ def _exchange(
     Once `deadline_seconds` have passed, the next read, write or handshake
     step raises a timeout, and the exchange fails as
     `TIMED_OUT` whatever error urllib3 made of it."""
-    if timeout_seconds <= 0:
-        raise ValueError(f"timeout_seconds must be positive, not {timeout_seconds}")
-    if deadline_seconds <= 0:
-        raise ValueError(f"deadline_seconds must be positive, not {deadline_seconds}")
+    _require_positive_bounds(timeout_seconds, deadline_seconds)
     deadline = _Deadline.after(deadline_seconds)
     timeout = urllib3.Timeout(connect=timeout_seconds, read=timeout_seconds)
     # Only an error leaves the timer's block without a return; a transport error sets `failure`.

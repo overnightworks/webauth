@@ -7,9 +7,6 @@
 [file_lines]
 "tests/e2e/oidc/prove.py" = 1187
 
-[function_lines."src/webauth/https_client.py"]
-"_exchange" = 62
-
 [function_lines."tests/support/oidc_arrangement.py"]
 "loopback_https_server" = 108
 

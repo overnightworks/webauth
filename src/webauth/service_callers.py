@@ -25,6 +25,7 @@ from webauth._validation import (
     is_utf8,
     require_non_empty_string,
     require_non_negative_whole_number,
+    string_list_claim,
 )
 from webauth.admission import AdmissionConfig, AppRole, app_role
 from webauth.jwt_verification import (
@@ -35,7 +36,6 @@ from webauth.jwt_verification import (
     _Rejected,
     _VerifiedClaims,
 )
-from webauth.oidc._relying_party import _groups_claim
 from webauth.ports import WallClock
 
 __all__ = [
@@ -294,7 +294,7 @@ def _verifier_refusal(reason: RejectionReason) -> CallerRefusal:
 
 
 def _groups(claims: Mapping[str, object], group_claim: str) -> frozenset[str] | None:
-    groups = _groups_claim(claims, group_claim)
+    groups = string_list_claim(claims, group_claim)
     return None if groups is None else frozenset(groups)
 
 
