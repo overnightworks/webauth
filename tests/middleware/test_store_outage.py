@@ -12,7 +12,6 @@ import pytest
 from fastapi import Depends, FastAPI
 from starlette.responses import StreamingResponse
 
-from tests.support.account_arrangement import FakeUser
 from tests.support.gate_arrangement import bearing
 from tests.support.log_records import fields_of
 from tests.support.oidc_arrangement import a_logout_token
@@ -29,8 +28,8 @@ from tests.support.oidc_login_host import (
     is_cleared,
     set_cookies,
 )
-from tests.support.request_line_arrangement import FORWARDED_CLIENT
 from tests.support.web_auth_host_arrangement import (
+    A_MEMBER,
     ME_PATH,
     ComposedHost,
     HostWorld,
@@ -40,15 +39,16 @@ from tests.support.web_auth_host_arrangement import (
     a_host_world,
     a_member_token,
     a_resource_and_person_paths,
-    a_stored_session,
+    a_signed_in_world,
+    forwarded_by_the_proxy,
     the_routes_of,
 )
 from tests.support.webauth_arrangement import API_PATH
+from webauth import WebAuthError
 from webauth.dependencies import current_user
 from webauth.middleware import SessionGate
 from webauth.policies import PathRules
 from webauth.ports import AuthenticatedUser, StoreUnavailableError
-from webauth.postgres import SessionStoreError
 from webauth.web_auth import WebAuthStores
 
 if TYPE_CHECKING:
@@ -58,8 +58,6 @@ if TYPE_CHECKING:
 
     from webauth.ports import SessionRenewalStore, SessionTransaction
 
-FORWARDED = {"x-forwarded-for": FORWARDED_CLIENT}
-A_MEMBER = FakeUser(id=SUBJECT, username="lena")
 SECRET = "hunter2-session-token"
 PERSON_ME_PATH = "/api/me"
 STREAM_PATH = "/stream-then-fail"
@@ -76,12 +74,12 @@ def a_store_bug() -> Exception:
     return RuntimeError(f"the statement failed for {SECRET}")
 
 
+class _ASessionStoreFailure(WebAuthError):
+    """A store failure that is no outage."""
+
+
 def a_session_store_error() -> Exception:
-    return SessionStoreError(f"the database failed for {SECRET}")
-
-
-def a_signed_in_world() -> HostWorld:
-    return a_host_world(A_MEMBER, stored_session=a_stored_session(A_MEMBER))
+    return _ASessionStoreFailure(f"the database failed for {SECRET}")
 
 
 def _routes_with_a_person_path_and_host_stores(
@@ -164,7 +162,9 @@ def a_gated_path(failure: Exception, *, raising: bool) -> tuple[HostWorld, Httpx
     world = a_signed_in_world()
     host = the_host_driven(a_host(world, gate=the_gate()), raising=raising)
     world.sessions.load_failure = failure
-    return world, host.client.get(API_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    return world, host.client.get(
+        API_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()}
+    )
 
 
 def an_optional_session_path(
@@ -173,7 +173,9 @@ def an_optional_session_path(
     world = a_signed_in_world()
     host = the_host_driven(a_host(world, gate=the_optional_gate()), raising=raising)
     world.sessions.load_failure = failure
-    return world, host.client.get(API_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    return world, host.client.get(
+        API_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()}
+    )
 
 
 def current_user_in_a_host_route(
@@ -182,7 +184,9 @@ def current_user_in_a_host_route(
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=raising)
     world.sessions.load_failure = failure
-    return world, host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    return world, host.client.get(
+        ME_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()}
+    )
 
 
 def a_bearer_person_path(failure: Exception, *, raising: bool) -> tuple[HostWorld, HttpxResponse]:
@@ -190,23 +194,25 @@ def a_bearer_person_path(failure: Exception, *, raising: bool) -> tuple[HostWorl
     host = the_host_driven(a_host(world, gate=the_gate()), raising=raising)
     world.sign_in.entry_failure = failure
     token = bearing(a_member_token())[0]
-    return world, host.client.get(PERSON_ME_PATH, headers={**FORWARDED, "authorization": token})
+    return world, host.client.get(
+        PERSON_ME_PATH, headers={**forwarded_by_the_proxy(), "authorization": token}
+    )
 
 
 def a_sign_in_callback(failure: Exception, *, raising: bool) -> tuple[HostWorld, HttpxResponse]:
     world = a_host_world(A_MEMBER)
     host = the_host_driven(a_host(world), raising=raising)
-    started = host.client.get(START_PATH, headers=FORWARDED)
+    started = host.client.get(START_PATH, headers=forwarded_by_the_proxy())
     query = world.issuer.authorize(started.headers["location"])
     world.sign_in.entry_failure = failure
-    return world, host.client.get(f"{CALLBACK_PATH}?{query}", headers=FORWARDED)
+    return world, host.client.get(f"{CALLBACK_PATH}?{query}", headers=forwarded_by_the_proxy())
 
 
 def a_logout(failure: Exception, *, raising: bool) -> tuple[HostWorld, HttpxResponse]:
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=raising)
     world.sign_in.entry_failure = failure
-    headers = {**SAME_ORIGIN_FORM, **FORWARDED, **world.signed_cookie()}
+    headers = {**SAME_ORIGIN_FORM, **forwarded_by_the_proxy(), **world.signed_cookie()}
     return world, host.client.post(LOGOUT_PATH, headers=headers)
 
 
@@ -223,7 +229,7 @@ def a_back_channel_logout(failure: Exception, *, raising: bool) -> tuple[HostWor
         key_name="issuer",
     )
     return world, host.client.post(
-        BACKCHANNEL_LOGOUT_PATH, data={"logout_token": token}, headers=FORWARDED
+        BACKCHANNEL_LOGOUT_PATH, data={"logout_token": token}, headers=forwarded_by_the_proxy()
     )
 
 
@@ -274,12 +280,12 @@ def test_stack_16_the_callback_clears_the_pending_login_cookie_it_consumed() -> 
     """STACK-16."""
     world = a_host_world(A_MEMBER)
     host = a_host(world)
-    started = host.client.get(START_PATH, headers=FORWARDED)
+    started = host.client.get(START_PATH, headers=forwarded_by_the_proxy())
     [pending_cookie] = host.client.cookies
     query = world.issuer.authorize(started.headers["location"])
     world.sign_in.entry_failure = a_store_outage()
 
-    response = host.client.get(f"{CALLBACK_PATH}?{query}", headers=FORWARDED)
+    response = host.client.get(f"{CALLBACK_PATH}?{query}", headers=forwarded_by_the_proxy())
 
     assert (response.status_code, is_cleared(response, pending_cookie)) == (503, True)
 
@@ -296,7 +302,7 @@ def test_stack_16_a_host_route_that_cannot_reach_its_own_store_answers_503() -> 
     """STACK-16."""
     host = the_host_driven(a_host(a_signed_in_world()), raising=True)
 
-    response = host.client.get(OWN_STORE_PATH, headers=FORWARDED)
+    response = host.client.get(OWN_STORE_PATH, headers=forwarded_by_the_proxy())
 
     assert (response.status_code, response.json()) == (
         503,
@@ -309,7 +315,7 @@ def test_stack_16_an_outage_after_the_response_started_is_not_answered_twice() -
     host = the_host_driven(a_host(a_signed_in_world()), raising=True)
 
     with pytest.raises(StoreUnavailableError):
-        host.client.get(STREAM_PATH, headers=FORWARDED)
+        host.client.get(STREAM_PATH, headers=forwarded_by_the_proxy())
 
 
 def _outage_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -326,11 +332,11 @@ def test_log_08_an_outage_logs_one_failed_and_one_recovered_line_with_the_refuse
     """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
-    headers = {**FORWARDED, **world.signed_cookie()}
+    headers = {**forwarded_by_the_proxy(), **world.signed_cookie()}
     caplog.set_level(logging.INFO)
     world.sessions.load_failure = a_store_outage()
     refused = [host.client.get(ME_PATH, headers=headers) for _ in range(3)]
-    host.client.get(API_PATH, headers=FORWARDED)
+    host.client.get(API_PATH, headers=forwarded_by_the_proxy())
     lines_during_the_outage = _outage_records(caplog)
 
     world.sessions.load_failure = None
@@ -363,7 +369,9 @@ def test_log_08_an_answer_without_an_outage_logs_nothing(caplog: pytest.LogCaptu
     host = the_host_driven(a_host(world), raising=True)
     caplog.set_level(logging.INFO)
 
-    answered = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    answered = host.client.get(
+        ME_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()}
+    )
 
     assert answered.status_code == 200
     assert _lines_of(caplog) == []
@@ -375,7 +383,7 @@ def test_log_08_a_second_outage_after_a_recovery_logs_failed_and_recovered_again
     """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
-    headers = {**FORWARDED, **world.signed_cookie()}
+    headers = {**forwarded_by_the_proxy(), **world.signed_cookie()}
     caplog.set_level(logging.INFO)
 
     for failing in (True, False, True, False):
@@ -396,7 +404,7 @@ def test_log_08_concurrent_requests_refused_by_the_store_open_one_outage_and_all
     """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=True)
-    headers = {**FORWARDED, **world.signed_cookie()}
+    headers = {**forwarded_by_the_proxy(), **world.signed_cookie()}
     caplog.set_level(logging.INFO)
     workers = 8
     reach_the_store_together = Barrier(workers, timeout=10)
@@ -435,7 +443,7 @@ def test_log_08_the_failed_line_names_the_class_of_the_cause_when_there_is_one(
     failure.__cause__ = ConnectionRefusedError(SECRET)
     world.sessions.load_failure = failure
 
-    host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    host.client.get(ME_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()})
 
     assert _lines_of(caplog) == [(FAILED_EVENT, {"error_type": "ConnectionRefusedError"})]
     assert SECRET not in caplog.text
@@ -455,7 +463,9 @@ def test_log_08_a_failure_that_is_no_outage_opens_none_and_stays_a_500(
     caplog.set_level(logging.INFO)
     world.sessions.load_failure = failure()
 
-    response = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    response = host.client.get(
+        ME_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()}
+    )
 
     assert response.status_code == 500
     assert _lines_of(caplog) == []
@@ -484,7 +494,7 @@ def test_log_08_an_outage_the_exit_of_the_host_suppresses_opens_none_and_closes_
     world = a_signed_in_world()
     host_transaction = _HostTransaction(world.sessions.in_transaction)
     host = the_host_driven(a_host(world, sessions=host_transaction), raising=False)
-    headers = {**FORWARDED, **world.signed_cookie()}
+    headers = {**forwarded_by_the_proxy(), **world.signed_cookie()}
     caplog.set_level(logging.INFO)
     world.sessions.load_failure = a_store_outage()
     if opened_first:
@@ -510,12 +520,12 @@ def test_log_08_each_handle_keeps_its_own_outage(caplog: pytest.LogCaptureFixtur
     second = the_host_driven(a_host(second_world), raising=True)
     caplog.set_level(logging.INFO)
     first_world.sessions.load_failure = a_store_outage()
-    first.client.get(ME_PATH, headers={**FORWARDED, **first_world.signed_cookie()})
+    first.client.get(ME_PATH, headers={**forwarded_by_the_proxy(), **first_world.signed_cookie()})
 
-    second.client.get(ME_PATH, headers={**FORWARDED, **second_world.signed_cookie()})
+    second.client.get(ME_PATH, headers={**forwarded_by_the_proxy(), **second_world.signed_cookie()})
     lines_after_the_second_answer = _lines_of(caplog)
     first_world.sessions.load_failure = None
-    first.client.get(ME_PATH, headers={**FORWARDED, **first_world.signed_cookie()})
+    first.client.get(ME_PATH, headers={**forwarded_by_the_proxy(), **first_world.signed_cookie()})
 
     assert [name for name, _fields in lines_after_the_second_answer] == [FAILED_EVENT]
     assert _lines_of(caplog) == [
@@ -544,7 +554,7 @@ def test_log_08_a_failing_bug_does_not_end_an_outage(caplog: pytest.LogCaptureFi
     """LOG-08."""
     world = a_signed_in_world()
     host = the_host_driven(a_host(world), raising=False)
-    headers = {**FORWARDED, **world.signed_cookie()}
+    headers = {**forwarded_by_the_proxy(), **world.signed_cookie()}
     caplog.set_level(logging.INFO)
     world.sessions.load_failure = a_store_outage()
     host.client.get(ME_PATH, headers=headers)
@@ -573,7 +583,9 @@ def test_log_08_an_outage_in_the_body_or_at_the_exit_of_a_transaction_opens_one(
     else:
         world.sessions.commit_failure = a_store_outage()
 
-    response = host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    response = host.client.get(
+        ME_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()}
+    )
 
     assert response.status_code == 503
     assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT]
@@ -587,12 +599,12 @@ def test_log_08_a_clean_sign_in_transaction_ends_an_outage_the_session_gate_open
     host = the_host_driven(a_host(world), raising=True)
     caplog.set_level(logging.INFO)
     world.sessions.load_failure = a_store_outage()
-    host.client.get(ME_PATH, headers={**FORWARDED, **world.signed_cookie()})
+    host.client.get(ME_PATH, headers={**forwarded_by_the_proxy(), **world.signed_cookie()})
     world.sessions.load_failure = None
 
-    started = host.client.get(START_PATH, headers=FORWARDED)
+    started = host.client.get(START_PATH, headers=forwarded_by_the_proxy())
     query = world.issuer.authorize(started.headers["location"])
-    callback = host.client.get(f"{CALLBACK_PATH}?{query}", headers=FORWARDED)
+    callback = host.client.get(f"{CALLBACK_PATH}?{query}", headers=forwarded_by_the_proxy())
 
     assert callback.status_code == 303
     assert [name for name, _fields in _lines_of(caplog)] == [FAILED_EVENT, RECOVERED_EVENT]

@@ -13,6 +13,7 @@ from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 
 from tests.support.gated_stack_arrangement import install_the_gated_stack
+from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     HTTPS_TEST_SERVER,
@@ -93,7 +94,7 @@ THE_ROUTED_PATH = PathRules(exact=frozenset({ROUTED_PATH}))
 
 def a_no_store_policy(paths: PathRules) -> SecurityHeadersPolicy:
     return SecurityHeadersPolicy(
-        content_security_policy="default-src 'self'",
+        content_security_policy=A_CONTENT_SECURITY_POLICY,
         cache_control_rules=(CacheControlRule(paths, NO_STORE),),
     )
 

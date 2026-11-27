@@ -325,8 +325,15 @@ class SignedInWorlds:
     second_member: FakeUser
 
 
+A_MEMBER = FakeUser(id=SUBJECT, username="lena")
+
+
+def a_signed_in_world() -> HostWorld:
+    return a_host_world(A_MEMBER, stored_session=a_stored_session(A_MEMBER))
+
+
 def two_signed_in_worlds() -> SignedInWorlds:
-    first_member = FakeUser(id=SUBJECT, username="lena")
+    first_member = A_MEMBER
     second_member = FakeUser(id="a-subject-of-the-second-app", username="mara")
     return SignedInWorlds(
         first=a_host_world(first_member, stored_session=a_stored_session(first_member)),

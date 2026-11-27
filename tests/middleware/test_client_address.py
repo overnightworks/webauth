@@ -22,10 +22,10 @@ from tests.support.full_stack_arrangement import (
     install_full_stack,
 )
 from tests.support.request_line_arrangement import (
-    FORWARDED_CLIENT,
     TRUSTED_PEER,
     a_client_behind_the_proxy,
 )
+from tests.support.web_auth_host_arrangement import forwarded_by_the_proxy
 from tests.support.webauth_arrangement import API_PATH, HTTPS_TEST_SERVER
 from webauth import proxies
 from webauth.middleware.rate_limit import _IpRateLimitMiddleware
@@ -33,7 +33,6 @@ from webauth.policies import PathRules, RateLimitBudget, RateLimitPolicy
 from webauth.web_auth import ServedBehind
 
 SOCKET_PATH = "/ws"
-FORWARDED = {"x-forwarded-for": FORWARDED_CLIENT}
 NOT_AN_ADDRESS = {"x-forwarded-for": "not-an-address"}
 
 
@@ -115,7 +114,9 @@ def test_the_writer_rewrites_neither_the_peer_nor_the_scheme() -> None:
         client=(TRUSTED_PEER, 55000),
     )
 
-    response = client.get("/scope", headers={**FORWARDED, "x-forwarded-proto": "https"})
+    response = client.get(
+        "/scope", headers={**forwarded_by_the_proxy(), "x-forwarded-proto": "https"}
+    )
 
     assert response.json() == {"client": [TRUSTED_PEER, 55000], "scheme": "http"}
 

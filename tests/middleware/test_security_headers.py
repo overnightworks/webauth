@@ -21,6 +21,7 @@ from tests.support.client_address_arrangement import (
 from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import LogoutPage
 from tests.support.security_headers_arrangement import (
+    A_CONTENT_SECURITY_POLICY,
     a_content_security_policy_rule,
     a_policy_with_content_security_policy_rules,
     assert_carries_policy_headers,
@@ -495,7 +496,7 @@ def test_an_answer_with_the_own_policy_marker_keeps_its_policy_and_loses_the_mar
 
 LOGOUT_PATH = "/logout"
 HOST_POLICY = SecurityHeadersPolicy(
-    "default-src 'self'",
+    A_CONTENT_SECURITY_POLICY,
     cache_control_rules=(
         CacheControlRule(PathRules(exact=frozenset({LOGOUT_PATH})), "public, max-age=600"),
     ),

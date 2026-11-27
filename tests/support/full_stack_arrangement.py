@@ -13,6 +13,7 @@ from starlette.responses import StreamingResponse
 
 from tests.support.client_address_arrangement import TRUSTED_PROXIES
 from tests.support.gated_stack_arrangement import GATED_SIGN_IN_PATHS, install_the_gated_stack
+from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import API_PATH, a_web_auth_config
 from webauth.policies import (
@@ -36,7 +37,7 @@ BODY_LIMIT_BYTES = 100
 RAISING_PATH = "/boom"
 WEBHOOK_PREFIX = "/webhook/"
 WEBHOOK_PATH = f"{WEBHOOK_PREFIX}event"
-HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy="default-src 'self'")
+HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy=A_CONTENT_SECURITY_POLICY)
 READING_PATH = "/reads-body"
 TYPED_PATH = "/typed"
 FAILING_STREAM_PATH = "/fails-mid-stream"
