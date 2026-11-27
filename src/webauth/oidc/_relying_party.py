@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING
 from pydantic import SecretStr
 
 from webauth._end_session_page import EndSessionForm
-from webauth._validation import is_scope_token_tuple, is_utf8
+from webauth._validation import is_scope_token_tuple, is_utf8, string_list_claim
 from webauth.admission import GroupPath
 from webauth.cookies import _PENDING_SECRET_BYTES, PendingLogin
 from webauth.jwt_verification import (
@@ -719,16 +719,8 @@ def _identity_of(
 
 
 def _group_paths(claims: Mapping[str, object]) -> tuple[str, ...] | None:
-    groups = _groups_claim(claims, "groups")
+    groups = string_list_claim(claims, "groups")
     return None if groups is None else tuple(groups)
-
-
-def _groups_claim(claims: Mapping[str, object], claim_name: str) -> list[str] | None:
-    """The listed groups; none when the claim is missing, ``None`` when it is no list of strings."""
-    groups = claims.get(claim_name, [])
-    if not isinstance(groups, list) or not all(isinstance(group, str) for group in groups):
-        return None
-    return groups
 
 
 def _verify_access_jwt(verifier: _JwtVerifier, access_token: str) -> _VerifiedClaims | OidcRefusal:

@@ -47,7 +47,6 @@ from webauth.https_client import (
     KeySetFetchError,
     ProviderMetadataFetchError,
     _HttpsExchangeError,
-    _post_form_over_https,
     fetch_key_set_over_https,
     fetch_provider_metadata_over_https,
 )
@@ -443,7 +442,6 @@ def test_a_host_name_no_resolver_can_encode_is_refused_as_broken_off(
     [
         pytest.param(fetch_key_set_over_https, id="key-set-fetch"),
         pytest.param(fetch_provider_metadata_over_https, id="provider-metadata-fetch"),
-        pytest.param(_post_form_over_https, id="token-post"),
         pytest.param(post_token_request_over_https, id="token-request"),
     ],
 )

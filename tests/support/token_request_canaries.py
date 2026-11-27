@@ -44,13 +44,16 @@ def a_canary_token_request(url: str) -> TokenRequest:
     )
 
 
-def post_canary_token_form(url: str, timeout_seconds: float = 5, **limits: float) -> object:
+def post_canary_token_form(
+    url: str, timeout_seconds: float = 5, deadline_seconds: float = 10, **limits: float
+) -> object:
     return _post_form_over_https(
         url,
         CANARY_TOKEN_FORM,
         authorization=SecretStr(CANARY_BASIC_AUTHORIZATION),
         max_body_bytes=64 * 1024,
         timeout_seconds=timeout_seconds,
+        deadline_seconds=deadline_seconds,
         **limits,
     )
 
