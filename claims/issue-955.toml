@@ -1,8 +1,0 @@
-claim_id = "efaaa2fa93244ec0a883c9e7b81ee999"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "fe2cc51dbc5fdeb8887aa67890565b4dcbc9e1e6"
-branch = "claude/issue-955-prove-scenarios-leave-entry"
-scope = ["quality/baseline.toml", "tests/e2e/oidc/login.py", "tests/e2e/oidc/logout.py", "tests/e2e/oidc/proof.py", "tests/e2e/oidc/prove.py", "tests/e2e/oidc/tokens.py"]
-opened_commit = "20565204e8c9041b87a2f8d6b5dab67a1ff3e004"
-whole_reason = "Three moves out of one entry script into its sibling modules; split, the baseline entry stays until the last lands and each move costs its own lane."
