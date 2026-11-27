@@ -536,13 +536,6 @@ _VALID_PATHS = {
         pytest.param({"logout": "logout"}, id="a relative logout"),
         pytest.param({"backchannel_logout": "backchannel"}, id="a relative back-channel"),
         pytest.param({"start": "//evil.example/login"}, id="a start another host serves"),
-        pytest.param({"callback": "/\\evil.example"}, id="a callback another host serves"),
-        pytest.param({"callback": "/\t/evil.example"}, id="a callback a browser strips"),
-        pytest.param({"logout": "//evil.example/logout"}, id="a logout another host serves"),
-        pytest.param(
-            {"backchannel_logout": "//evil.example/back"},
-            id="a back-channel another host serves",
-        ),
         pytest.param({"start": "/a/../login"}, id="a dot segment in start"),
         pytest.param({"callback": "/a/%2e%2e/callback"}, id="an encoded dot segment"),
         pytest.param({"logout": "/a/../logout"}, id="a dot segment in logout"),

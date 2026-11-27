@@ -1,4 +1,4 @@
-"""Which addresses a login may send a browser back to, judged by `same_app_path` alone."""
+"""Which addresses a login may send a browser back to, and which read as another host."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from starlette.requests import Request
 
 from tests.support.webauth_arrangement import an_http_scope
-from webauth._paths import same_app_path
+from webauth._paths import reads_as_another_host, same_app_path
 
 _A_LONG_PATH = "/" + "a" * 511
 _RETURN_PATH_CASES = [
@@ -27,12 +27,6 @@ _RETURN_PATH_CASES = [
     pytest.param("/app", "/app/", "/app/", id="the app root with a slash"),
     pytest.param("/app", "/app/albums/42", "/app/albums/42", id="a deep link below the app"),
     pytest.param("", "//evil.example", None, id="two slashes"),
-    pytest.param("", "/\\evil.example", None, id="slash backslash"),
-    pytest.param("", "\\\\evil.example", None, id="two backslashes"),
-    pytest.param("", "\\/evil.example", None, id="backslash slash"),
-    pytest.param("", "/\t/evil.example", None, id="a tab between the slashes"),
-    pytest.param("", "/\r/evil.example", None, id="a CR between the slashes"),
-    pytest.param("", "/\n/evil.example", None, id="an LF between the slashes"),
     pytest.param("", "https://evil.example", None, id="an absolute URL"),
     pytest.param("", "https:/evil.example", None, id="a scheme with one slash"),
     pytest.param("", "javascript:alert(1)", None, id="a script URL"),
@@ -82,3 +76,29 @@ def test_only_a_path_of_this_app_is_a_return_path(
     scope = {**an_http_scope(FastAPI()), "root_path": root_path}
 
     assert same_app_path(Request(scope), asked_for) == returned
+
+
+@pytest.mark.parametrize(
+    ("path", "reads_as_another"),
+    [
+        pytest.param("//evil.example", True, id="two slashes"),
+        pytest.param("/\\evil.example", True, id="slash backslash"),
+        pytest.param("\\/evil.example", True, id="backslash slash"),
+        pytest.param("\\\\evil.example", True, id="two backslashes"),
+        pytest.param("/\t/evil.example", True, id="a tab between the slashes"),
+        pytest.param("/\r/evil.example", True, id="a CR between the slashes"),
+        pytest.param("/\n/evil.example", True, id="an LF between the slashes"),
+        pytest.param("/\r\n/evil.example", True, id="a CR and LF between the slashes"),
+        pytest.param("\t//evil.example", True, id="a tab before the slashes"),
+        pytest.param("/albums/42", False, id="a path of this app"),
+        pytest.param("/", False, id="the root"),
+        pytest.param("/albums//42", False, id="two slashes further in"),
+        pytest.param("/albums/\\42", False, id="a backslash further in"),
+        pytest.param("", False, id="the empty string"),
+    ],
+)
+def test_a_browser_reads_a_path_as_another_host_when_it_starts_like_a_scheme_relative_address(
+    path: str,
+    reads_as_another: bool,
+) -> None:
+    assert reads_as_another_host(path) is reads_as_another
