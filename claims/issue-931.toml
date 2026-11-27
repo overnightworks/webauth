@@ -1,0 +1,8 @@
+claim_id = "0c1be9fdafe24555a2cf74add63cb818"
+agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
+role = "builder"
+base = "68a6a93651f680c5f54b678fe0b20ce79cf062c3"
+branch = "claude/issue-931-one-owner-json-whole-bounds"
+scope = ["quality/baseline.toml", "src/webauth/_validation.py", "src/webauth/https_client.py", "src/webauth/jwt_verification.py", "src/webauth/oidc/_discovery.py", "src/webauth/oidc/_relying_party.py", "src/webauth/oidc/_token_endpoint.py", "src/webauth/oidc_transport.py", "src/webauth/service_callers.py", "src/webauth/store_contract.py", "tests/support/token_request_canaries.py"]
+opened_commit = "4adf0d260f5d618b475dfeb62aca5e868a2b80f7"
+whole_reason = "The two reuses and the outbound-bounds move touch one private helper module and its callers; each half alone would leave a duplicate or a baseline entry behind, and together they stay under 70 production lines."
