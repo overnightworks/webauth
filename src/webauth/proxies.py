@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from ipaddress import (
     IPv4Address,
     IPv4Network,
@@ -71,11 +71,25 @@ class TrustedProxies:
 
     Every entry is an IP network, so a CIDR block from configuration matches
     each address inside it and a bare address matches only itself. A peer
-    whose address is not an IP at all (a unix socket, a test transport) is
-    never trusted, and no entries means no peer is trusted.
+    whose address is not an IP at all (a test transport) is never trusted, and
+    no entries means no peer is trusted.
+
+    ``unix_socket_peer`` additionally trusts the peer of a connection the
+    server reports as a unix socket, whether or not it reports a client: every
+    process that can open the socket may then name any client, so the flag
+    belongs behind a socket only the proxy and the app can reach. It is off by
+    default and takes only a ``bool``.
     """
 
     networks: tuple[_IpNetwork, ...] = ()
+    unix_socket_peer: bool = field(default=False, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.unix_socket_peer, bool):
+            raise ValueError(
+                "unix_socket_peer must be True or False; it alone decides whether every "
+                "process that can open the unix socket may name any client",
+            )
 
     @classmethod
     def parse(cls, raw: str) -> TrustedProxies:
@@ -195,29 +209,49 @@ def _client_from_chain(
     return None
 
 
-def _get_client_ip(
+def _client_behind_trusted_peer(
     peer: str,
     forwarded_for_fields: Sequence[str],
     trusted_proxies: TrustedProxies,
 ) -> str:
     """The client's identity: the rightmost hop no trusted proxy vouches for.
 
-    Only a request arriving from a trusted peer may name a client other than
-    the peer itself, and the chain is then read from the right, where our own
-    proxies appended. A client cannot change that answer by prepending entries
-    of its own: forged or not, they sit left of the one hop that decides. When
-    no hop names anybody the request keys on the peer -- a truncated or empty
-    header must never become somebody's identity, because that identity only
-    buys a rate-limit budget.
+    The chain is read from the right, where our own proxies appended. A client
+    cannot change that answer by prepending entries of its own: forged or not,
+    they sit left of the one hop that decides. When no hop names anybody the
+    request keys on the peer -- a truncated or empty header must never become
+    somebody's identity, because that identity only buys a rate-limit budget.
     """
-    if peer not in trusted_proxies:
-        return _canonical_host(peer)
     client = _client_from_chain(_forwarded_entries(forwarded_for_fields), trusted_proxies)
     return _canonical_host(peer) if client is None else str(client)
 
 
+def _get_client_ip(
+    peer: str,
+    forwarded_for_fields: Sequence[str],
+    trusted_proxies: TrustedProxies,
+) -> str:
+    """The identity of a TCP ``peer``: only a trusted one may name another client."""
+    if peer not in trusted_proxies:
+        return _canonical_host(peer)
+    return _client_behind_trusted_peer(peer, forwarded_for_fields, trusted_proxies)
+
+
 def _peer_host(connection: HTTPConnection) -> str:
     return connection.client.host if connection.client else _UNKNOWN_CLIENT_IP
+
+
+def _server_is_a_unix_socket(connection: HTTPConnection) -> bool:
+    """Whether the server reports the ASGI form of a unix socket: a path and no port.
+
+    A server that reports no ``server`` at all is not read as one, and a TCP server's port is an
+    integer.
+    """
+    match connection.scope.get("server"):
+        case (str(), None):
+            return True
+        case _:
+            return False
 
 
 @dataclass(frozen=True)
@@ -232,16 +266,20 @@ def _record_client(connection: HTTPConnection, trusted_proxies: TrustedProxies) 
     Only a trusted peer may name another client, and a forwarded protocol counts under the same
     rule and only in its rightmost value -- the one the closest proxy appended, cut out the same
     bounded way -- so a client that prepends its own ``X-Forwarded-Proto`` cannot outvote it. The
-    scope's own peer and scheme stay as the server set them.
+    scope's own peer and scheme stay as the server set them. A unix-socket peer is trusted when
+    the configuration says so, and without a forwarded address it reads as unknown, never as a
+    client the server happened to report.
     """
-    peer = _peer_host(connection)
-    address = _get_client_ip(
-        peer,
-        connection.headers.getlist(_FORWARDED_FOR_HEADER),
-        trusted_proxies,
-    )
+    forwarded_for = connection.headers.getlist(_FORWARDED_FOR_HEADER)
+    if trusted_proxies.unix_socket_peer and _server_is_a_unix_socket(connection):
+        peer_is_trusted = True
+        address = _client_behind_trusted_peer(_UNKNOWN_CLIENT_IP, forwarded_for, trusted_proxies)
+    else:
+        peer = _peer_host(connection)
+        peer_is_trusted = peer in trusted_proxies
+        address = _get_client_ip(peer, forwarded_for, trusted_proxies)
     https = connection.scope.get("scheme") in _HTTPS_SCHEMES
-    if not https and peer in trusted_proxies:
+    if not https and peer_is_trusted:
         newest = next(_forwarded_entries(connection.headers.getlist(_FORWARDED_PROTO_HEADER)), "")
         https = newest.lower() == _FORWARDED_HTTPS_PROTO
     connection.scope[_CLIENT_SCOPE_KEY] = _RecordedClient(address, https)

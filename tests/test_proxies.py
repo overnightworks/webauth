@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import logging
-from typing import SupportsIndex
+from typing import Literal, SupportsIndex
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from tests.support.client_address_arrangement import add_the_client_address_writer
+from tests.support.client_address_arrangement import (
+    UNIX_SOCKET_PATH,
+    a_connection_scope,
+    add_the_client_address_writer,
+    recorded_by_the_writer,
+)
 from tests.support.log_records import fields_of
 from webauth import proxies
 from webauth.proxies import (
@@ -491,3 +496,163 @@ def test_an_rfc_7239_forwarded_header_moves_neither_the_client_address_nor_the_s
 
     assert client_ip.json() == {"ip": _TRUSTED_PEER}
     assert is_https.json() == {"https": False}
+
+
+# -- Unix-socket peer --------------------------------------------------------
+
+_UNKNOWN = "unknown"
+_UNIX_PEER_ON = TrustedProxies(unix_socket_peer=True)
+_CONNECTION_KINDS = pytest.mark.parametrize("kind", ["http", "websocket"])
+
+
+def _forwarded(chain: str | None) -> dict[str, str]:
+    return {} if chain is None else {"x-forwarded-for": chain}
+
+
+@_CONNECTION_KINDS
+@pytest.mark.parametrize(
+    ("chain", "client", "expected"),
+    [
+        pytest.param(_CLIENT, None, _CLIENT, id="the forwarded address names the client"),
+        pytest.param(
+            f"198.51.100.1, {_CLIENT}", None, _CLIENT, id="a forged entry left of the proxy's own"
+        ),
+        pytest.param(None, None, _UNKNOWN, id="no forwarded address reads as unknown"),
+        pytest.param("garbage", None, _UNKNOWN, id="an unusable forwarded address reads unknown"),
+        pytest.param(
+            _CLIENT, ("127.0.0.1", 55000), _CLIENT, id="a client the server reports is not trusted"
+        ),
+        pytest.param(
+            None, ("127.0.0.1", 55000), _UNKNOWN, id="a reported client is not the fallback"
+        ),
+    ],
+)
+def test_a_trusted_unix_socket_peer_names_the_forwarded_client(
+    kind: Literal["http", "websocket"],
+    chain: str | None,
+    client: tuple[str, int] | None,
+    expected: str,
+) -> None:
+    """PROXY-10: with `unix_socket_peer`, a unix-socket peer is trusted, client or not."""
+    scope = a_connection_scope(kind=kind, client=client, headers=_forwarded(chain))
+
+    assert recorded_by_the_writer(_UNIX_PEER_ON, scope).address == expected
+
+
+@_CONNECTION_KINDS
+@pytest.mark.parametrize(
+    ("trusted_proxies", "server", "client", "expected"),
+    [
+        pytest.param(
+            TrustedProxies(), (UNIX_SOCKET_PATH, None), None, _UNKNOWN, id="unix peer, flag off"
+        ),
+        pytest.param(
+            TrustedProxies(),
+            (UNIX_SOCKET_PATH, None),
+            ("127.0.0.1", 55000),
+            "127.0.0.1",
+            id="unix peer with a client, flag off",
+        ),
+        pytest.param(
+            _UNIX_PEER_ON, None, None, _UNKNOWN, id="server of None is no unix peer, flag on"
+        ),
+        pytest.param(
+            _UNIX_PEER_ON,
+            ("172.16.0.1", 8000),
+            ("203.0.113.50", 55000),
+            "203.0.113.50",
+            id="TCP scope of an unlisted peer, flag on",
+        ),
+    ],
+)
+def test_a_peer_that_is_not_a_trusted_unix_socket_keeps_what_the_server_reports(
+    kind: Literal["http", "websocket"],
+    trusted_proxies: TrustedProxies,
+    server: object,
+    client: tuple[str, int] | None,
+    expected: str,
+) -> None:
+    """PROXY-10: off, a unix-socket peer is never trusted, and neither is a scope that is no
+    unix socket's: a forwarded address stays unread."""
+    scope = a_connection_scope(kind=kind, server=server, client=client, headers=_forwarded(_CLIENT))
+
+    assert recorded_by_the_writer(trusted_proxies, scope).address == expected
+
+
+@_CONNECTION_KINDS
+def test_a_tcp_scope_is_judged_by_the_networks_alone_with_the_flag_on(
+    kind: Literal["http", "websocket"],
+) -> None:
+    """PROXY-10: a TCP scope (an integer port) trusts its listed peer, with the flag on or off."""
+    scope = a_connection_scope(
+        kind=kind,
+        server=("172.16.0.1", 8000),
+        client=(_TRUSTED_PEER, 55000),
+        headers=_forwarded(_CLIENT),
+    )
+    listed = TrustedProxies.parse(_PROXY_NETWORK)
+    listed_with_unix_peer = TrustedProxies(listed.networks, unix_socket_peer=True)
+
+    assert (
+        recorded_by_the_writer(listed, scope).address
+        == recorded_by_the_writer(listed_with_unix_peer, scope).address
+        == _CLIENT
+    )
+
+
+@pytest.mark.parametrize(
+    ("trusted_proxies", "server", "forwarded_proto", "https"),
+    [
+        pytest.param(_UNIX_PEER_ON, (UNIX_SOCKET_PATH, None), "https", True, id="believed"),
+        pytest.param(
+            _UNIX_PEER_ON, (UNIX_SOCKET_PATH, None), "https, http", False, id="rightmost counts"
+        ),
+        pytest.param(TrustedProxies(), (UNIX_SOCKET_PATH, None), "https", False, id="flag off"),
+        pytest.param(_UNIX_PEER_ON, None, "https", False, id="server of None"),
+    ],
+)
+def test_a_trusted_unix_socket_peer_is_believed_about_the_scheme(
+    trusted_proxies: TrustedProxies,
+    server: object,
+    forwarded_proto: str,
+    https: bool,
+) -> None:
+    """PROXY-10: `X-Forwarded-Proto` counts from a trusted unix-socket peer, as from a TCP one."""
+    scope = a_connection_scope(server=server, headers={"x-forwarded-proto": forwarded_proto})
+
+    assert recorded_by_the_writer(trusted_proxies, scope).https is https
+
+
+@pytest.mark.parametrize(
+    ("trusted_proxies", "budgets"),
+    [
+        pytest.param(_UNIX_PEER_ON, 2, id="each forwarded address holds a budget"),
+        pytest.param(TrustedProxies(), 1, id="flag off, everyone behind the socket shares one"),
+    ],
+)
+def test_forwarded_addresses_behind_a_unix_socket_hold_budgets_of_their_own(
+    trusted_proxies: TrustedProxies, budgets: int
+) -> None:
+    """PROXY-10: the rate-limit budget carries the forwarded address."""
+    scopes = [
+        a_connection_scope(headers=_forwarded(visitor)) for visitor in (_CLIENT, "203.0.113.8")
+    ]
+
+    held = {
+        _budget_address(recorded_by_the_writer(trusted_proxies, scope).address) for scope in scopes
+    }
+
+    assert len(held) == budgets
+
+
+@pytest.mark.parametrize("flag", [1, "yes", None])
+def test_a_flag_that_is_not_a_bool_is_refused_naming_it(flag: object) -> None:
+    """PROXY-10: a wrong type would pass silently, so construction refuses it."""
+    with pytest.raises(ValueError, match="unix_socket_peer"):
+        TrustedProxies(unix_socket_peer=flag)  # type: ignore[arg-type]
+
+
+def test_the_flag_is_keyword_only() -> None:
+    """PROXY-10: it is never the second positional argument next to the networks."""
+    with pytest.raises(TypeError):
+        TrustedProxies((), True)  # type: ignore[misc]  # noqa: FBT003
