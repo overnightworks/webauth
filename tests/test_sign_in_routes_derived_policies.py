@@ -10,10 +10,12 @@ from dataclasses import dataclass
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.responses import Response
 
 from tests.support.gated_stack_arrangement import install_the_gated_stack
 from tests.support.oidc_arrangement import FakeIssuer, a_key_set_endpoint, a_realm_client_config
 from tests.support.oidc_login_host import (
+    ADMISSION,
     BACKCHANNEL_LOGOUT_MAX_BODY_BYTES,
     BACKCHANNEL_LOGOUT_PATH,
     CALLBACK_PATH,
@@ -31,7 +33,6 @@ from webauth.policies import (
     BodySizePolicy,
     BodySizeRule,
     CacheControlRule,
-    CsrfPolicy,
     PathRules,
     RateLimitBudget,
     RateLimitPolicy,
@@ -42,7 +43,7 @@ from webauth.ports import RateLimitBackend
 from webauth.sign_in_routes import (
     SignInPaths,
 )
-from webauth.web_auth import IssuerCalls, WebAuthSettings
+from webauth.web_auth import IssuerCalls, OidcSignIn, SignInPages
 
 FORM_HEADER = {"content-type": SAME_ORIGIN_FORM["content-type"]}
 HEADERS_POLICY = SecurityHeadersPolicy(content_security_policy=A_CONTENT_SECURITY_POLICY)
@@ -111,16 +112,18 @@ def _backchannel_post(host: GatedHost, size: int = 0) -> int:
     return host.client.post(BACKCHANNEL_LOGOUT_PATH, content=body, headers=FORM_HEADER).status_code
 
 
-def test_the_settings_are_refused_without_sign_in_paths() -> None:
-    """SIGNIN-64: the settings of the composition call require `sign_in_paths`."""
+def test_the_oidc_block_is_refused_without_sign_in_paths() -> None:
+    """SIGNIN-64: an `OidcSignIn` requires `sign_in_paths`."""
     with pytest.raises(TypeError, match="sign_in_paths"):
-        WebAuthSettings(  # type: ignore[call-arg]
-            config=a_web_auth_config(),
+        OidcSignIn(  # type: ignore[call-arg]
             client=a_realm_client_config(),
             keeps_id_token=True,
-            max_sessions=None,
-            security_headers=HEADERS_POLICY,
-            csrf_origin=CsrfPolicy(),
+            groups=ADMISSION,
+            pages=SignInPages(
+                refused=lambda _request, _refusal: Response(status_code=403),
+                logout_page_text=None,
+                ui_language=lambda _request: None,
+            ),
         )
 
 

@@ -162,8 +162,9 @@ class SessionRecord(Protocol):
         The host writes it with ``get_secret_value()`` and returns it wrapped in
         ``SecretStr``; it is at most 8192 ASCII characters,
         the verifier's bound, so the column takes no less. ``None``
-        for a row stored before the host held ID tokens, or for a session
-        the callback route opened for a host that keeps none (``keeps_id_token=False``)."""
+        for a row stored before the host held ID tokens, for a session
+        the callback route opened for a host that keeps none (``keeps_id_token=False``), or for
+        a session ``open_session`` opened."""
         ...
 
     @property
@@ -297,10 +298,10 @@ class SessionRenewalStore(Protocol):
 class SessionRecordStore(SessionRenewalStore, Protocol):
     """The host's sessions, which the library creates and ends as well as renews.
 
-    The library ends a session in three places only, by calling ``delete``,
-    ``delete_for_user`` or ``prune_overflow``: the logout route, the callback route (the
-    session an incoming cookie replaced, and all but the newest ones under the
-    cap) and the back-channel logout route.
+    The library ends a session in these places only, by calling ``delete``,
+    ``delete_for_user`` or ``prune_overflow``: the logout route and ``end_session``, the callback
+    route and ``open_session`` (the session an incoming cookie replaced, and all but the newest
+    ones under the cap) and the back-channel logout route.
     """
 
     def create(
@@ -385,9 +386,10 @@ class SignInStores:
 
 class SignInTransaction(Protocol):
     """The host's serialized context around one sign-in, entered by the callback, logout and
-    back-channel logout routes, once per token request on the bearer gate's person paths, and
-    once per admitted-group request at a ProtectedResource's entry point, where a token holding the
-    resource's agent group also registers its account on the first request and has its kind set.
+    back-channel logout routes and by ``open_session`` and ``end_session``, once per token request
+    on the bearer gate's person paths, and once per admitted-group request at a ProtectedResource's
+    entry point, where a token holding the resource's agent group also registers its account on the
+    first request and has its kind set.
 
     Creating it, entering the context manager, every store call inside the block
     and leaving it all run on one worker thread, never on the event loop. Entries

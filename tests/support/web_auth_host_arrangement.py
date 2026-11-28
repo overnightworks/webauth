@@ -59,16 +59,16 @@ from tests.support.webauth_arrangement import (
     a_web_auth_config,
     session_cookie_header,
 )
-from webauth.admission import AdmissionConfig
 from webauth.cookies import sign_session_id
 from webauth.dependencies import ConnectionRefusal, admin_user, authenticate_websocket, current_user
 from webauth.middleware import BearerGate, PersonPaths, SessionGate
 from webauth.policies import CsrfPolicy
 from webauth.ports import AuthenticatedUser
 from webauth.proxies import TrustedProxies
+from webauth.sessions import end_session, open_session
 from webauth.sign_in_routes import SignInRefusal
 from webauth.web_auth import (
-    IssuerCalls,
+    OidcSignIn,
     ServedBehind,
     SignInPages,
     WebAuth,
@@ -104,6 +104,7 @@ class HostWorld:
     refusals: list[SignInRefusal] = field(default_factory=list)
     routes_ran: list[str] = field(default_factory=list)
     socket_outcomes: list[AuthenticatedUser | ConnectionRefusal] = field(default_factory=list)
+    session_ids: list[str | None] = field(default_factory=list)
 
     def signed_cookie(self) -> dict[str, str]:
         """The Cookie header of the stored session `a_stored_session` seeds."""
@@ -151,11 +152,9 @@ class Composition:
     """Every argument of `WebAuth.build`, so a scenario changes the one it is about."""
 
     settings: WebAuthSettings
+    oidc: OidcSignIn | None
     stores: WebAuthStores
-    groups: AdmissionConfig
-    pages: SignInPages
     front: TrustedProxies | ServedBehind
-    issuer_calls: IssuerCalls
     gate: SessionGate | None = None
     outside: tuple[Middleware, ...] = ()
     inside: tuple[Middleware, ...] = ()
@@ -163,41 +162,49 @@ class Composition:
     def build(self) -> WebAuth:
         return WebAuth.build(
             self.settings,
+            oidc=self.oidc,
             stores=self.stores,
-            groups=self.groups,
-            pages=self.pages,
             front=self.front,
             gate=self.gate,
             outside=self.outside,
             inside=self.inside,
-            issuer_calls=self.issuer_calls,
         )
 
 
-def a_composition(world: HostWorld, **changes: object) -> Composition:
+def an_oidc_sign_in(world: HostWorld, **changes: object) -> OidcSignIn:
+    """The OpenID Connect block of the host `a_composition` builds; a keyword replaces its field."""
+
     def refused(_request: Request, refusal: SignInRefusal) -> Response:
         world.refusals.append(refusal)
         return Response(THE_REFUSAL_BODY, status_code=403)
 
-    composition = Composition(
-        settings=WebAuthSettings(
-            config=world.config,
-            client=a_client_config(),
-            sign_in_paths=SIGN_IN_PATHS,
-            keeps_id_token=True,
-            max_sessions=None,
-            security_headers=HEADERS_POLICY,
-            csrf_origin=CsrfPolicy(),
-        ),
-        stores=WebAuthStores(sign_in=world.sign_in, sessions=world.sessions.in_transaction),
+    oidc = OidcSignIn(
+        client=a_client_config(),
+        sign_in_paths=SIGN_IN_PATHS,
+        keeps_id_token=True,
         groups=ADMISSION,
         pages=SignInPages(
             refused=refused,
             logout_page_text=lambda _request: LOGOUT_PAGE_TEXT,
             ui_language=lambda _request: None,
         ),
-        front=TRUSTED_PROXIES,
         issuer_calls=an_issuer_called_through(world.issuer, world.key_set),
+    )
+    return replace(oidc, **changes)
+
+
+def a_composition(world: HostWorld, **changes: object) -> Composition:
+    """The composition of a host on the provider; `oidc=None` makes the host that proves its own."""
+    composition = Composition(
+        settings=WebAuthSettings(
+            config=world.config,
+            max_sessions=None,
+            security_headers=HEADERS_POLICY,
+            csrf_origin=CsrfPolicy(),
+        ),
+        oidc=an_oidc_sign_in(world),
+        stores=WebAuthStores(sign_in=world.sign_in, sessions=world.sessions.in_transaction),
+        front=TRUSTED_PROXIES,
     )
     return replace(composition, **changes)
 
@@ -230,6 +237,36 @@ def the_routes_of(world: HostWorld) -> Callable[[FastAPI, WebAuth], None]:
                 return
             await websocket.accept()
             await websocket.close()
+
+    return add
+
+
+PROOF_SIGN_IN_PATH = "/proof/sign-in"
+PROOF_SIGN_OUT_PATH = "/proof/sign-out"
+
+
+def the_routes_of_a_host_that_proves_its_own(
+    world: HostWorld,
+) -> Callable[[FastAPI, WebAuth], None]:
+    """`the_routes_of`, and a stand-in proof: a POST that opens a session of the account its
+    `account` query names, and one that ends the session of the request's cookie. Each records
+    the id the library returned in `world.session_ids` and answers on the response it passed."""
+
+    def add(app: FastAPI, auth: WebAuth) -> None:
+        the_routes_of(world)(app, auth)
+
+        @app.post(PROOF_SIGN_IN_PATH)
+        def prove(request: Request) -> Response:
+            answer = Response(status_code=204)
+            account_id = request.query_params.get("account", A_MEMBER.id)
+            world.session_ids.append(open_session(request, answer, account_id))
+            return answer
+
+        @app.post(PROOF_SIGN_OUT_PATH)
+        def leave(request: Request) -> Response:
+            answer = Response(status_code=204)
+            world.session_ids.append(end_session(request, answer))
+            return answer
 
     return add
 
@@ -298,6 +335,16 @@ def a_composed_host(
     if installed:
         auth.install(app, bearer=None if bearer_of is None else bearer_of(auth))
     return ComposedHost(world, auth, app, a_client_of(app))
+
+
+def a_host_that_proves_its_own(world: HostWorld, **changes: object) -> ComposedHost:
+    """A host built without OpenID Connect, with the stand-in proof routes; a keyword replaces
+    the composition's field it names."""
+    return a_composed_host(
+        world,
+        a_composition(world, oidc=None, **changes),
+        routes=the_routes_of_a_host_that_proves_its_own(world),
+    )
 
 
 FIRST_HOST = ALLOWED_HOST

@@ -63,6 +63,7 @@ from tests.support.web_auth_host_arrangement import (
     a_member_token,
     a_resource_and_person_paths,
     a_signed_in_world,
+    an_oidc_sign_in,
     forwarded_by_the_proxy,
     the_app_as_it_stands,
     the_routes_of,
@@ -261,24 +262,25 @@ def test_compose_06_build_and_install_make_no_outbound_call_and_the_login_uses_t
 
 def test_the_handle_gives_a_host_route_the_config_and_admission_it_was_built_with() -> None:
     world = a_host_world()
-    composition = a_composition(world)
+    oidc = an_oidc_sign_in(world)
+    composition = a_composition(world, oidc=oidc)
 
     auth = composition.build()
 
     assert auth.config is composition.settings.config
-    assert auth.admission is composition.groups
+    assert auth.admission is oidc.groups
 
 
 def test_compose_07_the_pages_are_the_hosts(capsys: pytest.CaptureFixture[str]) -> None:
     """COMPOSE-07"""
     world = a_host_world()
-    base = a_composition(world)
+    base = an_oidc_sign_in(world)
     pages = replace(
         base.pages,
         logout_page_text=lambda _request: LogoutPageText(language="de", button_label="Abmelden"),
         ui_language=lambda _request: "de",
     )
-    host = a_composed_host(world, replace(base, pages=pages))
+    host = a_composed_host(world, a_composition(world, oidc=replace(base, pages=pages)))
 
     start = host.client.get(START_PATH, headers=forwarded_by_the_proxy())
     refused = host.client.get(
@@ -515,14 +517,22 @@ def _settings_with(world: HostWorld, **changes: object) -> Composition:
     return replace(base, settings=replace(base.settings, **changes))
 
 
+def _oidc_with(world: HostWorld, **changes: object) -> Composition:
+    return a_composition(world, oidc=an_oidc_sign_in(world, **changes))
+
+
 @pytest.mark.parametrize(
     ("field", "composition_of", "value"),
     [
         pytest.param(
-            "groups.bound_issuer",
-            lambda world, value: a_composition(
-                world, groups=replace(ADMISSION, bound_issuer=value)
-            ),
+            "oidc",
+            lambda world, value: a_composition(world, oidc=value),
+            "not-an-oidc-sign-in-sentinel",
+            id="an-oidc-that-is-neither-an-oidc-sign-in-nor-none",
+        ),
+        pytest.param(
+            "oidc.groups.bound_issuer",
+            lambda world, value: _oidc_with(world, groups=replace(ADMISSION, bound_issuer=value)),
             "https://elsewhere.example/realms/other",
             id="a-bound-issuer-that-is-not-the-clients",
         ),
@@ -533,22 +543,21 @@ def _settings_with(world: HostWorld, **changes: object) -> Composition:
             id="a-session-cap-below-one",
         ),
         pytest.param(
-            "settings.keeps_id_token",
-            lambda world, value: _settings_with(world, keeps_id_token=value),
+            "oidc.keeps_id_token",
+            lambda world, value: _oidc_with(world, keeps_id_token=value),
             "maybe-sentinel",
             id="a-keeps-id-token-that-is-no-bool",
         ),
         pytest.param(
-            "pages.logout_page_text",
+            "oidc.pages.logout_page_text",
             lambda world, value: _without_a_logout_path(world),
             None,
             id="a-logout-page-text-without-a-logout-path",
         ),
         pytest.param(
-            "pages.logout_page_text",
-            lambda world, value: replace(
-                a_composition(world),
-                pages=replace(a_composition(world).pages, logout_page_text=value),
+            "oidc.pages.logout_page_text",
+            lambda world, value: _oidc_with(
+                world, pages=replace(an_oidc_sign_in(world).pages, logout_page_text=value)
             ),
             None,
             id="a-logout-path-without-a-logout-page-text",
@@ -589,7 +598,7 @@ def test_compose_12_an_early_value_is_refused_at_build_naming_the_field_never_th
 
 def _without_a_logout_path(world: HostWorld) -> Composition:
     paths = SignInPaths(start=SIGN_IN_PATHS.start, callback=SIGN_IN_PATHS.callback)
-    return _settings_with(world, sign_in_paths=paths)
+    return _oidc_with(world, sign_in_paths=paths)
 
 
 def test_compose_13_a_second_install_is_refused_and_leaves_the_app_as_it_was() -> None:
@@ -632,7 +641,7 @@ def test_compose_13_an_app_that_carries_the_stack_of_another_handle_is_refused_u
 def test_compose_14_a_bearer_that_is_no_bearer_gate_is_refused_before_the_app_changes() -> None:
     """COMPOSE-14"""
     world = a_host_world()
-    auth = a_composition(world, groups=NO_ADMINS).build()
+    auth = _oidc_with(world, groups=NO_ADMINS).build()
     app = FastAPI()
     the_routes_of(world)(app, auth)
     before = the_app_as_it_stands(app)
@@ -647,7 +656,7 @@ def test_compose_14_a_bearer_that_is_no_bearer_gate_is_refused_before_the_app_ch
 def test_compose_14_machine_paths_without_admins_are_refused_before_the_app_changes() -> None:
     """COMPOSE-14"""
     world = a_host_world()
-    auth = a_composition(world, groups=NO_ADMINS).build()
+    auth = _oidc_with(world, groups=NO_ADMINS).build()
     app = FastAPI()
     the_routes_of(world)(app, auth)
     before = the_app_as_it_stands(app)
@@ -739,18 +748,15 @@ def test_compose_18_the_class_called_with_every_argument_of_a_build_is_refused(
 ) -> None:
     """COMPOSE-18"""
     composition = a_composition(a_host_world())
-    built = composition.build()
 
     with pytest.raises(TypeError):
         WebAuth(  # type: ignore[call-arg]
             *positional,  # type: ignore[arg-type]
             settings=composition.settings,
             stores=composition.stores,
-            groups=composition.groups,
-            pages=composition.pages,
             front=composition.front,
             gate=None,
             outside=(),
             inside=(),
-            relying_party=built.relying_party,
+            oidc=None,
         )

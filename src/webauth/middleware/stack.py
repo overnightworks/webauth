@@ -48,14 +48,25 @@ _BACKCHANNEL_MAX_BODY_BYTES = 32 * 1024
 
 
 @dataclass(frozen=True, kw_only=True)
-class _HandleBinding:
-    """What one ``WebAuth`` binds its middleware to: its relying party, its admission and the two
-    transactions."""
+class _OidcBinding:
+    """What the OpenID Connect half of one ``WebAuth`` binds its middleware to: the sign-in paths,
+    the relying party, the admission, the sign-in transaction and the bearer gate, which verifies
+    with the relying party and so exists only here."""
 
+    sign_in_paths: SignInPaths
     relying_party: OidcRelyingParty
     admission: AdmissionConfig
     sign_in: SignInTransaction
+    bearer_gate: BearerGate | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class _HandleBinding:
+    """What one ``WebAuth`` binds its middleware to: the sessions entry, and the OpenID Connect
+    half unless the host built it with ``oidc=None``."""
+
     sessions: SessionTransaction
+    oidc: _OidcBinding | None
 
 
 def _with_sign_in_rules(
@@ -111,13 +122,15 @@ def _with_sign_in_rules(
 
 
 def _effective_security_headers(
-    sign_in_paths: SignInPaths,
-    security_headers: SecurityHeadersPolicy,
-    bearer_gate: BearerGate | None,
+    security_headers: SecurityHeadersPolicy, oidc: _OidcBinding | None
 ) -> SecurityHeadersPolicy:
-    """The host's policy with the ``no-store`` rules the paths derive put ahead of the host's own:
-    the machine paths' and the resource's first, then every sign-in route's."""
-    paths = sign_in_paths
+    """The host's policy, with the ``no-store`` rules the paths derive put ahead of the host's own:
+    the machine paths' and the resource's first, then every sign-in route's. Without OpenID Connect
+    the host's policy stands."""
+    if oidc is None:
+        return security_headers
+    paths = oidc.sign_in_paths
+    bearer_gate = oidc.bearer_gate
     no_store_paths = []
     if bearer_gate is not None and bearer_gate.machine_paths is not None:
         no_store_paths.append(bearer_gate.machine_paths.paths)
@@ -143,26 +156,29 @@ def _effective_security_headers(
 
 def _library_middleware(
     *,
-    sign_in_paths: SignInPaths,
     security_headers: SecurityHeadersPolicy,
     body_size: BodySizePolicy | None,
     rate_limit: RateLimitPolicy | None,
-    bearer_gate: BearerGate | None,
     csrf_origin: CsrfPolicy,
     session_gate: SessionGate | None,
     binding: _HandleBinding,
 ) -> list[Middleware]:
     """The middleware to install, outermost first, for the policies the host named, bound to the
-    relying party, the admission and the transactions of its ``WebAuth``; ``security_headers`` is
-    the effective policy ``_effective_security_headers`` derives."""
-    body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
-        sign_in_paths,
-        body_size=body_size or BodySizePolicy(),
-        rate_limit=rate_limit or RateLimitPolicy(),
-        csrf_origin=csrf_origin,
-        session_gate=session_gate,
-        bearer_gate=bearer_gate,
-    )
+    sessions entry and, with OpenID Connect, to the relying party, the admission and the sign-in
+    transaction of its ``WebAuth``; ``security_headers`` is the effective policy
+    ``_effective_security_headers`` derives."""
+    body_size = body_size or BodySizePolicy()
+    rate_limit = rate_limit or RateLimitPolicy()
+    oidc = binding.oidc
+    if oidc is not None:
+        body_size, rate_limit, csrf_origin, session_gate = _with_sign_in_rules(
+            oidc.sign_in_paths,
+            body_size=body_size,
+            rate_limit=rate_limit,
+            csrf_origin=csrf_origin,
+            session_gate=session_gate,
+            bearer_gate=oidc.bearer_gate,
+        )
     entries = [
         Middleware(_SecurityHeadersMiddleware, policy=security_headers),
         Middleware(_PathRefusalMiddleware),
@@ -170,14 +186,14 @@ def _library_middleware(
         Middleware(_IpRateLimitMiddleware, policy=rate_limit),
         Middleware(_StoreOutageMiddleware),
     ]
-    if bearer_gate is not None:
+    if oidc is not None and oidc.bearer_gate is not None:
         entries.append(
             Middleware(
                 _BearerGateMiddleware,
-                policy=bearer_gate,
-                relying_party=binding.relying_party,
-                admission=binding.admission,
-                sign_in=binding.sign_in,
+                policy=oidc.bearer_gate,
+                relying_party=oidc.relying_party,
+                admission=oidc.admission,
+                sign_in=oidc.sign_in,
             )
         )
     entries.append(Middleware(_CsrfOriginMiddleware, policy=csrf_origin))
@@ -220,12 +236,10 @@ def _front_middleware(
 def _install_web_auth_middleware(
     app: Starlette,
     *,
-    sign_in_paths: SignInPaths,
     security_headers: SecurityHeadersPolicy,
     csrf_origin: CsrfPolicy,
     body_size: BodySizePolicy | None,
     rate_limit: RateLimitPolicy | None,
-    bearer_gate: BearerGate | None,
     session_gate: SessionGate | None,
     trusted_proxies: TrustedProxies | None,
     outside: Sequence[Middleware],
@@ -251,21 +265,18 @@ def _install_web_auth_middleware(
     lookup and a forged state-changing request is refused before it renews a session.
 
     The rules the sign-in paths and the bearer gate's resource derive are put ahead of the host's
-    own, so the first match is the derived one.
+    own, so the first match is the derived one. Without OpenID Connect nothing derives a rule and
+    the stack holds no bearer gate: the host's policies are exactly the host's.
     """
     _refuse_an_app_that_has_a_stack(app)
-    effective_security_headers = _effective_security_headers(
-        sign_in_paths, security_headers, bearer_gate
-    )
+    effective_security_headers = _effective_security_headers(security_headers, binding.oidc)
     entries = [
         *_front_middleware(trusted_proxies, effective_security_headers),
         *outside,
         *_library_middleware(
-            sign_in_paths=sign_in_paths,
             security_headers=effective_security_headers,
             body_size=body_size,
             rate_limit=rate_limit,
-            bearer_gate=bearer_gate,
             csrf_origin=csrf_origin,
             session_gate=session_gate,
             binding=binding,

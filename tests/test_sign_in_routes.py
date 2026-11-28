@@ -51,7 +51,6 @@ from tests.support.oidc_login_host import (
     is_cleared,
     set_cookies,
 )
-from tests.support.security_headers_arrangement import A_CONTENT_SECURITY_POLICY
 from tests.support.session_store_arrangement import SessionRecordsInMemory
 from tests.support.webauth_arrangement import (
     FIXED_INSTANT,
@@ -66,14 +65,14 @@ from tests.support.webauth_arrangement import (
 from webauth.admission import AdmissionConfig, AdmissionRefusal
 from webauth.cookies import sign_session_id
 from webauth.oidc import IdpErrorCode, OidcIdentity, OidcRefusal, OidcRefusalReason
-from webauth.policies import CsrfPolicy, SecurityHeadersPolicy
 from webauth.ports import AccountEventKind, AccountKind
 from webauth.sign_in_routes import (
+    LogoutPageText,
     RefusalPage,
     SignInPaths,
     SignInRefusal,
 )
-from webauth.web_auth import WebAuthSettings
+from webauth.web_auth import OidcSignIn, SignInPages
 
 BYSTANDER = FakeUser(id=OTHER_SUBJECT, username="omar")
 BOTH_KINDS = [
@@ -585,18 +584,18 @@ def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_ex
     assert (response.status_code, host.transaction.entries) == (303, 1)
 
 
-def test_the_settings_are_refused_without_stating_whether_the_host_keeps_the_id_token() -> None:
-    """SIGNIN-58: settings without `keeps_id_token` raise `TypeError`."""
+def test_the_oidc_block_is_refused_without_stating_whether_the_host_keeps_the_id_token() -> None:
+    """SIGNIN-58: an `OidcSignIn` without `keeps_id_token` raises `TypeError`."""
     with pytest.raises(TypeError, match="keeps_id_token"):
-        WebAuthSettings(  # type: ignore[call-arg]
-            config=a_web_auth_config(),
+        OidcSignIn(  # type: ignore[call-arg]
             client=a_realm_client_config(),
             sign_in_paths=SIGN_IN_PATHS,
-            max_sessions=None,
-            security_headers=SecurityHeadersPolicy(
-                content_security_policy=A_CONTENT_SECURITY_POLICY
+            groups=ADMISSION,
+            pages=SignInPages(
+                refused=lambda _request, _refusal: Response(status_code=403),
+                logout_page_text=lambda _request: LogoutPageText(language="en", button_label="Out"),
+                ui_language=lambda _request: None,
             ),
-            csrf_origin=CsrfPolicy(),
         )
 
 
