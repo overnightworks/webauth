@@ -11,7 +11,7 @@ The library persists nothing itself: its core holds no schema and no ORM, and th
 `.importlinter` contracts confine SQLAlchemy to the optional `webauth.postgres`.
 """
 
-__version__ = "0.46.0"
+__version__ = "0.47.0"
 
 __all__ = ["WebAuthError", "__version__"]
 
