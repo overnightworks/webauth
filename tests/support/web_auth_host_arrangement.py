@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -345,6 +346,19 @@ def a_host_that_proves_its_own(world: HostWorld, **changes: object) -> ComposedH
         a_composition(world, oidc=None, **changes),
         routes=the_routes_of_a_host_that_proves_its_own(world),
     )
+
+
+def an_own_proof_app() -> FastAPI:
+    """The app of `a_host_that_proves_its_own` for a server on a loopback port (uvicorn's
+    `--factory`): plain http, the real clock and the member `A_MEMBER` in its store."""
+    world = a_host_world(A_MEMBER)
+    world.config = replace(
+        world.config,
+        cookie_secure=False,
+        allowed_hosts_exact=frozenset({"127.0.0.1", "localhost"}),
+        wall_clock=time.time,
+    )
+    return a_host_that_proves_its_own(world).app
 
 
 FIRST_HOST = ALLOWED_HOST
