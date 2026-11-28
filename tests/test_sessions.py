@@ -198,6 +198,23 @@ def test_ownproof_04_a_failure_in_the_entry_or_at_its_exit_sets_no_cookie_and_re
     assert world.session_ids == []
 
 
+@pytest.mark.parametrize(("failing", "failure", "_status"), FAILURES_OF_THE_ENTRY_OR_ITS_EXIT)
+def test_ownproof_04_the_response_a_host_returns_after_a_failure_carries_no_session_cookie(
+    failing: str, failure: Exception, _status: int
+) -> None:
+    """OWNPROOF-04"""
+    world = a_host_world(A_MEMBER)
+    caught: list[Exception] = []
+    host = a_host_that_proves_its_own(world, caught_failures=caught)
+    setattr(world.sign_in, failing, failure)
+
+    response = _sign_in(host)
+
+    assert caught == [failure]
+    assert SESSION_COOKIE_NAME not in set_cookies(response)
+    assert "cache-control" not in response.headers
+
+
 def test_ownproof_05_the_sign_out_ends_the_session_clears_the_cookie_and_returns_its_id() -> None:
     """OWNPROOF-05"""
     world = _world_with_a_stored_session(A_MEMBER)
@@ -259,6 +276,23 @@ def test_ownproof_07_a_failure_in_the_sign_outs_entry_or_exit_clears_nothing_and
     assert response.status_code == status
     assert SESSION_COOKIE_NAME not in set_cookies(response)
     assert world.session_ids == []
+
+
+@pytest.mark.parametrize(("failing", "failure", "_status"), FAILURES_OF_THE_ENTRY_OR_ITS_EXIT)
+def test_ownproof_07_the_response_a_host_returns_after_a_failure_clears_no_cookie(
+    failing: str, failure: Exception, _status: int
+) -> None:
+    """OWNPROOF-07"""
+    world = _world_with_a_stored_session(A_MEMBER)
+    caught: list[Exception] = []
+    host = a_host_that_proves_its_own(world, caught_failures=caught)
+    setattr(world.sign_in, failing, failure)
+
+    response = _sign_out(host, cookie=_the_valid_cookie(world))
+
+    assert caught == [failure]
+    assert SESSION_COOKIE_NAME not in set_cookies(response)
+    assert "cache-control" not in response.headers
 
 
 @pytest.mark.parametrize("path", [PROOF_SIGN_IN_PATH, PROOF_SIGN_OUT_PATH])

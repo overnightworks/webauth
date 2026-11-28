@@ -247,27 +247,35 @@ PROOF_SIGN_OUT_PATH = "/proof/sign-out"
 
 
 def the_routes_of_a_host_that_proves_its_own(
-    world: HostWorld,
+    world: HostWorld, *, caught_failures: list[Exception] | None = None
 ) -> Callable[[FastAPI, WebAuth], None]:
-    """`the_routes_of`, and a stand-in proof: a POST that opens a session of the account its
-    `account` query names, and one that ends the session of the request's cookie. Each records
-    the id the library returned in `world.session_ids` and answers on the response it passed."""
+    """`the_routes_of`, and a stand-in proof: a POST that opens a session of `A_MEMBER`, and one
+    that ends the session of the request's cookie. Each records the id the library returned in
+    `world.session_ids` and answers on the response it passed. A failure reaches the framework,
+    unless `caught_failures` is given: then the route records it there and still answers on the
+    response it passed, as a host that handles the failure itself would."""
 
     def add(app: FastAPI, auth: WebAuth) -> None:
         the_routes_of(world)(app, auth)
 
+        def answer_after(function: Callable[[], str | None], answer: Response) -> Response:
+            try:
+                world.session_ids.append(function())
+            except Exception as failure:
+                if caught_failures is None:
+                    raise
+                caught_failures.append(failure)
+            return answer
+
         @app.post(PROOF_SIGN_IN_PATH)
         def prove(request: Request) -> Response:
             answer = Response(status_code=204)
-            account_id = request.query_params.get("account", A_MEMBER.id)
-            world.session_ids.append(open_session(request, answer, account_id))
-            return answer
+            return answer_after(lambda: open_session(request, answer, A_MEMBER.id), answer)
 
         @app.post(PROOF_SIGN_OUT_PATH)
         def leave(request: Request) -> Response:
             answer = Response(status_code=204)
-            world.session_ids.append(end_session(request, answer))
-            return answer
+            return answer_after(lambda: end_session(request, answer), answer)
 
     return add
 
@@ -338,13 +346,16 @@ def a_composed_host(
     return ComposedHost(world, auth, app, a_client_of(app))
 
 
-def a_host_that_proves_its_own(world: HostWorld, **changes: object) -> ComposedHost:
-    """A host built without OpenID Connect, with the stand-in proof routes; a keyword replaces
-    the composition's field it names."""
+def a_host_that_proves_its_own(
+    world: HostWorld, *, caught_failures: list[Exception] | None = None, **changes: object
+) -> ComposedHost:
+    """A host built without OpenID Connect, with the stand-in proof routes (see
+    `the_routes_of_a_host_that_proves_its_own` for `caught_failures`); a keyword replaces the
+    composition's field it names."""
     return a_composed_host(
         world,
         a_composition(world, oidc=None, **changes),
-        routes=the_routes_of_a_host_that_proves_its_own(world),
+        routes=the_routes_of_a_host_that_proves_its_own(world, caught_failures=caught_failures),
     )
 
 
