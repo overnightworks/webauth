@@ -989,7 +989,7 @@ The verifier stage keeps the verifier's own order:
 - CALLER-34: any token verification, not only a service caller's, that finds no current key set while another
   request refreshes waits for that refresh, at most `KEY_SET_REFRESH_WAIT_SECONDS`, unless the last refresh attempt
   failed; it then uses the key set the refresh left or is refused `KEY_SET_UNAVAILABLE`;
-- CALLER-26: every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`; a `sub` that is not a non-empty string of valid text (no lone surrogate, which only a JSON `\ud800` escape carries) is `INVALID_CLAIM` for every token kind, so a bearer gate, a sign-in and a back-channel logout refuse it too.
+- CALLER-26: every other verifier refusal is `TOKEN_REJECTED` (401) with its `token_rejection`; a `sub` that is not a non-empty string of valid text (no lone surrogate, which a JSON `\ud800` escape or a surrogate encoded in the payload bytes, `ED A0 80`, carries) is `INVALID_CLAIM` for every token kind, so a bearer gate, a sign-in and a back-channel logout refuse it too.
 
 By class: `UNAVAILABLE` (503) is `KEY_SET_UNAVAILABLE`; `UNAUTHENTICATED` (401) is `MISSING_TOKEN`, `TOKEN_REJECTED`,
 `INVALID_SUBJECT` and `MALFORMED_GROUPS`; `FORBIDDEN` (403) is `NOT_A_WORKLOAD`, `UNBOUND_CLIENT`,
