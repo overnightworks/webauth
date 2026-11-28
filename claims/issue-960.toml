@@ -1,8 +1,0 @@
-claim_id = "a99f21701a9e4f3ca5feffed439edd6b"
-agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
-role = "builder"
-base = "84aa7ac9f227ab810b68008e3a373d8f9460ed73"
-branch = "claude/issue-960-say-what-landings-made-true"
-scope = ["docs/host-contract.md", "src/webauth/_validation.py", "src/webauth/jwt_verification.py", "src/webauth/policies.py", "tests/e2e/oidc/prove.py", "tests/middleware/test_client_address.py", "tests/test_https_client.py"]
-opened_commit = "6e073ea2bd297eca77f426e19233fa9b1de2b18f"
-whole_reason = "Five residues of one audit, a few lines each, none changing behaviour; split, each would cost a lane for a sentence."
