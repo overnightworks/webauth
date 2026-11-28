@@ -1,0 +1,8 @@
+claim_id = "0f45e354af4a45ae948dac0aba6b5a59"
+agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
+role = "builder"
+base = "774f5bce2feb89e993ac1c688ebdbfa9ab3dabcf"
+branch = "claude/issue-962-trusted-unix-socket-peer"
+scope = ["docs/ARCHITECTURE.md", "docs/host-contract.md", "src/webauth/proxies.py", "tests/middleware/test_client_address.py", "tests/support/client_address_arrangement.py", "tests/test_proxies.py"]
+opened_commit = "fad724961a8d6f5ca8b038de00ee0a4faaf87eef"
+whole_reason = "One trust decision: the flag, its proof through the client-address writer, and the host duties and trust boundary that make it safe to turn on."
