@@ -1,0 +1,8 @@
+claim_id = "88dc7e90986a4d76a437dcf779b45a57"
+agent = "Claude 44640098-242d-49e7-9cee-12252f9b4fb7"
+role = "builder"
+base = "796e7ccdf25e1cfa9c17d25d2b77476f79ccd6c6"
+branch = "claude/issue-919-own-proof-session"
+scope = ["README.md", "docs/ARCHITECTURE.md", "docs/VISION.md", "docs/host-contract.md", "src/webauth/config.py", "src/webauth/middleware/stack.py", "src/webauth/oidc_login.py", "src/webauth/ports.py", "src/webauth/sessions.py", "src/webauth/sign_in_routes.py", "src/webauth/store_contract.py", "src/webauth/web_auth.py", "tests/e2e/oidc/host_app.py", "tests/fixtures/typing_hosts/oidc_host.py", "tests/fixtures/typing_hosts/own_proof_host.py", "tests/middleware/test_stack.py", "tests/support/gated_stack_arrangement.py", "tests/support/web_auth_host_arrangement.py", "tests/test_sessions.py", "tests/test_sign_in_routes.py", "tests/test_sign_in_routes_derived_policies.py", "tests/test_web_auth.py", "tests/test_web_auth_without_oidc.py"]
+opened_commit = "956449bfe75ad9d76890caef07a661164318428a"
+whole_reason = "One Breaking cut of the composition call and the session mint that the door calls together and the hosts migrate to once; an optional OIDC block without the opener would ship a composition no host can sign anyone in to, and the opener without it would have no legal caller."
