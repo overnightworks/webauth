@@ -102,9 +102,10 @@ def test_compose_22_a_bearer_is_refused_before_the_app_changes_naming_bearer() -
     world = a_host_world()
     host = a_composed_host(world, a_composition(world, oidc=None), installed=False)
     before = the_app_as_it_stands(host.app)
+    bearer = a_resource_and_person_paths()(host.auth)
 
     with pytest.raises(WebAuthSettingError, match="bearer"):
-        host.auth.install(host.app, bearer=a_resource_and_person_paths()(host.auth))
+        host.auth.install(host.app, bearer=bearer)
 
     assert the_app_as_it_stands(host.app) == before
 

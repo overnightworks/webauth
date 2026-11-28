@@ -303,8 +303,9 @@ def test_ownproof_08_both_functions_are_refused_on_a_handle_with_oidc_before_any
     world = a_host_world(A_MEMBER, stored_session=a_stored_session(A_MEMBER))
     host = a_composed_host(world, routes=the_routes_of_a_host_that_proves_its_own(world))
     client = a_client_of(host.app, raise_server_exceptions=True)
+    headers = _proof_headers(_the_valid_cookie(world))
 
     with pytest.raises(RuntimeError, match="oidc"):
-        client.post(path, headers=_proof_headers(_the_valid_cookie(world)))
+        client.post(path, headers=headers)
 
     assert (world.sign_in.entries, world.sessions.events) == (0, [])
