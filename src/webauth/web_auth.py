@@ -131,7 +131,7 @@ class SignInPages:
     """What the host shows around the sign-in routes.
 
     ``refused`` answers a callback that ended without a session. ``logout_page_text`` is
-    ``None`` exactly when ``settings.sign_in_paths.logout`` is. ``ui_language`` names the
+    ``None`` exactly when ``oidc.sign_in_paths.logout`` is. ``ui_language`` names the
     language tag sent as ``ui_locales`` to the issuer, ``None`` sends none.
     """
 
