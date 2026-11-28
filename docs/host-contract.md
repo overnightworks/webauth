@@ -34,6 +34,27 @@ host configures them; `WebAuthConfig` carries none.
   `proxy_headers`, on by default: `proxy_headers=False` or `--no-proxy-headers`);
   `trusted_proxies` decides alone only when the server does not rewrite the client
   address or scheme from those headers.
+- PROXY-10: `TrustedProxies(unix_socket_peer=True)` also trusts the peer of a connection whose
+  ASGI `server` is a path and `None`, the form uvicorn reports for a unix socket, whether or not
+  the scope carries a client: `X-Forwarded-For` is read from the right and `X-Forwarded-Proto` is
+  believed, as for a trusted TCP peer, so `client_address`, the request line's `ip` and the
+  rate-limit budget carry the forwarded address, for HTTP and WebSocket alike. The flag is off by
+  default, and a unix-socket peer is then never trusted. A TCP scope is judged by `networks` alone,
+  and a scope whose `server` is `None` (the form hypercorn and daphne give a unix socket) is never
+  trusted as a unix peer and reads `unknown`. A trusted unix-socket peer that sends no usable
+  `X-Forwarded-For` reads `unknown`. The flag is keyword-only, `TrustedProxies.parse` has no token
+  for it, and a value that is not a `bool` raises `ValueError` naming it.
+- **Host duty:** every process that can open the socket may name any client. Under uvicorn's `--uds`
+  the socket itself is world-writable (mode `0o666`), so the boundary is its directory, which only
+  the app's user and the proxy can enter, or a pre-bound `0600` socket handed to uvicorn with
+  `--fd`.
+- **Host duty:** keep uvicorn's `proxy_headers` off on the socket and never set
+  `--forwarded-allow-ips` to `*`, which takes the leftmost entry, the one the client wrote.
+- **Host duty:** turn the flag on only behind a proxy that sets or appends `X-Forwarded-For` (HTTP
+  mode, as `tailscale serve`'s HTTP proxy does), never behind a TCP pass-through
+  (`tailscale serve --tcp` or `--tls-terminated-tcp`), where the client writes the header itself.
+- **Host duty:** prove the forwarded address once on the host's own server and proxy: a request
+  through the proxy shows its client in the request line's `ip`.
 - PROXY-07: webauth places the client-address writer and logline's `RequestLineMiddleware`
   itself, and a host adds neither by hand. `install` places them outermost, the request line
   first, when `front` is `TrustedProxies`. A host that serves several apps behind one router builds
