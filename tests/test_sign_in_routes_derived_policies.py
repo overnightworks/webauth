@@ -114,12 +114,15 @@ def _backchannel_post(host: GatedHost, size: int = 0) -> int:
 
 def test_the_oidc_block_is_refused_without_sign_in_paths() -> None:
     """SIGNIN-64: an `OidcSignIn` requires `sign_in_paths`."""
+    client = a_realm_client_config()
+    pages = an_oidc_sign_in(a_host_world()).pages
+
     with pytest.raises(TypeError, match="sign_in_paths"):
         OidcSignIn(  # type: ignore[call-arg]
-            client=a_realm_client_config(),
+            client=client,
             keeps_id_token=True,
             groups=ADMISSION,
-            pages=an_oidc_sign_in(a_host_world()).pages,
+            pages=pages,
         )
 
 

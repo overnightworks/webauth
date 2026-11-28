@@ -586,12 +586,15 @@ def test_a_callback_enters_the_transaction_once_and_reads_no_record_after_its_ex
 
 def test_the_oidc_block_is_refused_without_stating_whether_the_host_keeps_the_id_token() -> None:
     """SIGNIN-58: an `OidcSignIn` without `keeps_id_token` raises `TypeError`."""
+    client = a_realm_client_config()
+    pages = an_oidc_sign_in(a_host_world()).pages
+
     with pytest.raises(TypeError, match="keeps_id_token"):
         OidcSignIn(  # type: ignore[call-arg]
-            client=a_realm_client_config(),
+            client=client,
             sign_in_paths=SIGN_IN_PATHS,
             groups=ADMISSION,
-            pages=an_oidc_sign_in(a_host_world()).pages,
+            pages=pages,
         )
 
 
